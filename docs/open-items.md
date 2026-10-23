@@ -1,51 +1,65 @@
-# Open items — everything not finished (kept current; last update 2026-10-21)
+# Open items — everything not finished (kept current; last update 2026-10-23)
 
-Map: [#1](https://github.com/chiyanram/agent-factory/issues/1). Design: `docs/design.md` and
-[the design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3).
+Map: [#1](https://github.com/chiyanram/agent-factory/issues/1). Design: `docs/ARCHITECTURE.md`, `docs/design.md` and
+[the design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3). High-level design approved 2026-10-22.
 
-## A · Design (track 1, agent-factory map #1)
+```
+approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 … ─▶ L4 ✓ ─▶ L5 … ─▶ L6 … ─▶ L7 …
+                       #21     #22     #23      #24     #25      #26      #27
+```
 
-| # | item | state | where it belongs | next step |
-|---|---|---|---|---|
-| A1 | Gate speed — why the Verifier takes ~1 h | **researched, not decided** (#15, research/17) | design §6 gate | new ticket: pick the fix (below) |
-| A2 | #19 other developers' flow | Q1 + Q2 recorded; Q3 dropped | design §2 | close #19 |
-| A3 | Design approval | page + docs/design.md ready | map #1 | operator: approve or name a § |
-| A4 | Thin items: daily digest, glossary | decided, 1 source each | §2, §3 | watch in use; no action |
-| A5 | Stacked work (change built on an unmerged change) | parked 2026-10-18 | fog on map #1 | after approval |
-| A6 | Transition: old 4-agent fleet, Verifier, frozen work | out of design | first ticket after approval | — |
-| A7 | Old fleet bugs (audit 10-18): post-status missing in worker image, tokens as env vars, budget pause off, fleet-watch unscheduled | evidence only | A6 transition | — |
-| A8 | Graphify trial (code graph) | optional, later | research/26 | only if wanted: code-only, no hooks, 15–20 questions with/without |
-| A9 | Office work, other projects | follow-up | out of this map | — |
-| A10 | Uncommitted: docs/design.md, docs/open-items.md, research/21–26 | waiting | agent-factory | operator "commit" |
+## A · Track 1 — design (map #1)
 
-### A1 detail — where the gate hour goes (research/17 §1a, VM run R29, 60m45s)
+### Open tickets
 
-| phase | VM | laptop | cause |
+| # | ticket | state | next step |
 |---|---|---|---|
-| smoke FULL (~795 tests, 2 workers) | 24.5 min (40 %) | ~8.5 min | `@llm` tests on 1 worker with CPU Ollama; host strain keeps workers at 2 |
-| Gradle check (units + ITs + Checkstyle + JaCoCo) | 21.7 min (36 %) | unmeasured | aruvii-api ITs alone 18.8 min: ITs serial (`maxParallelForks = 1`) |
-| deploy → healthy | ~10 min (16 %) | unmeasured | ~6.5 min health-check waits |
-| UI build + unit | 2.5 min | — | — |
+| [#23](https://github.com/chiyanram/agent-factory/issues/23) | L3 · coordinator playbook | Q2 trigger list decided; Q1 superseded by #1 CORRECTION 2026-10-23 | write the playbook text: how it starts writer and reviewer, copies answers, recovers |
+| [#25](https://github.com/chiyanram/agent-factory/issues/25) | L5 · gate pipeline by kind | not started | `.gitlab-ci.yml` shape: jobs per kind, ITs beside deploy + smoke, single-job retry (input: research/17, 30) |
+| [#26](https://github.com/chiyanram/agent-factory/issues/26) | L6 · identity setup | not started | checklist: service account, role, tokens, trailer, seat tag, team rule (input: research/24) |
+| [#27](https://github.com/chiyanram/agent-factory/issues/27) | L7 · agent-platform adoption + transition | not started | AGENTS.md split, retire the old fleet and the Verifier, frozen work, interim !281 |
 
-- The VM is ~2.7× slower per test than the laptop. Memory is not the cause.
-- Target: ≤ ~25 min, from 6 merges/day × 1.5 runs with fast-forward merge (research/17 §4).
-- Every option that reaches the target needs **faster cores than this VM** and **ITs running beside smoke, not before it**.
-- Options: (b) GitLab runner on the VM with parallel jobs, about 35 min · (b)+#609 cut the `@llm` smoke cost, about 30 min · (c) laptop as a runner, about 25 min, only while the laptop is on · (d) a bigger box, 12–18 min · single-job retry for flakes.
-- Unmeasured: Gradle total + cache (M2/M3), deploy (M5), CPU steal (M7), VM `@llm` share (M8).
+### Closed since the last update
 
-## B · Agent-platform temp changes (track 2, operator's call)
+| # | ticket | closed with |
+|---|---|---|
+| [#19](https://github.com/chiyanram/agent-factory/issues/19) | other developers' flow | same pipeline; reviewer assignment on undraft; daily digest (thin) |
+| [#20](https://github.com/chiyanram/agent-factory/issues/20) | gate speed | keep the VM runner; speed via agent-platform #738 → #748 → smoke diet (research/30) |
+| [#21](https://github.com/chiyanram/agent-factory/issues/21) | L1 · rulebook files | file plan approved (research/34; page https://claude.ai/artifact/Pqxf9rebUf7NJb1Zpk3vAr) |
+| [#22](https://github.com/chiyanram/agent-factory/issues/22) | L2 · reviewer | find + verify passes, context pack from master, models per step (research/35) |
+| [#24](https://github.com/chiyanram/agent-factory/issues/24) | L4 · `/crq` router | phase → skill table; coordinator owns intake to design and retro (correction 2026-10-23) |
 
-| # | item | state | next step |
-|---|---|---|---|
-| B1 | #642 interim, draft !281: one reviewer, findings-only, review packet, 3 rounds | 19b4fe1d on origin; 48035c0d local (writer session) | review 48035c0d, then operator "push" |
-| B2 | #659 PIT on every module | precondition for test-first-only-for-bugs (G12) | separate ticket in agent-platform |
-| B3 | #679 seam rules S-1..S-7 into the repo | needed by other developers | separate ticket |
-| B4 | !244 design doc + local WIP af68fb15 (skills tree move) | parked as evidence | redone from the approved design |
-| B5 | `~/.claude/settings.json` hook points at missing `block-dangerous-git.sh` | live on the operator's laptop | operator fixes or removes the hook |
+### Other open items
 
-## C · Done this round (for the record)
+| item | state | where |
+|---|---|---|
+| writing the L1 rules | after L1: one MR per target file; each rule cites its ledger row; any rule can be vetoed in its MR | #21 RESOLUTION |
+| TR4a (OpenTelemetry tracing rule) | on hold until agent-platform #55 decides tracing | #21 fit scan |
+| stacked work (a change built on an unmerged change) | parked as fog | map #1 "Not yet specified" |
+| thin items: daily digest, glossary per project | decided, one source each; watch in use | #19, #1 "Shared language" |
+| measurement: tokens/$ per review, rounds per MR, bucket counts, escaped bugs | decided; transcripts kept 365 days | map #1 "How we'll know it's better" |
+| Graphify trial (code graph) | optional, later | research/26 |
+| office work, other projects | follow-up, out of this map | — |
 
-Rulebook restored to old G1/G1b/G5/G20/G21/G23 + `npx skills add` · six seats + intake · seat runtime · coordinator
-(laptop and VM, no bypass) · identity: service account per developer · review reads rules from master · glossary ·
-G12 + PIT precondition · /dod gone · no unix-zone walls · Claude-only extras · placements for code graph,
-verification skill, prompt trimming · transcript retention 365 days.
+## B · Track 2 — agent-platform temporary changes (operator's call)
+
+State as of 2026-10-21 unless a date is given. Not re-checked for this update.
+
+| item | state | next step |
+|---|---|---|
+| #642 interim, draft !281: one reviewer, findings-only, review packet, 3 rounds | 19b4fe1d on origin; 48035c0d local | review 48035c0d, then operator "push" |
+| #738 IT pre-setup standard (incl. `fsync=off` in IT Postgres) | gate-speed step 1 (#20, 2026-10-22) | re-measure on the VM with `docs/briefs/vm-gate-diagnose.md` |
+| #748 parallel IT forks, a template DB per fork | gate-speed step 2 (#20) | after #738 |
+| #746, #607, #609 smoke diet | gate-speed step 3 (#20) | after #748 |
+| #659 PIT on every module | precondition for test-first for bugs only (ADR-0007) | separate ticket |
+| #679 seam rules S-1..S-7 into the repo | needed by other developers (#19 Q1) | separate ticket |
+| #662 errors as ProblemDetail | the rule changes in the same MR as the code (#21 Q6) | separate ticket |
+| !244 design doc + local WIP af68fb15 (skills tree move) | parked as evidence | redone from L1 |
+| temporary `/dod` | stays until the gate runs (ADR-0008) | removed in L7 #27 |
+| `~/.claude/settings.json` hook points at missing `block-dangerous-git.sh` | live on the operator's laptop | operator fixes or removes the hook |
+
+## C · Transition evidence (goes to L7 #27)
+
+Old 4-agent fleet and Verifier still live · agent-fleet PR #84/#85 frozen · agent-platform !263 !269 #713 frozen · VM
+zone users from `fleet-zones apply` · old fleet bugs from the 2026-10-18 audit: post-status missing in the worker image,
+tokens as env vars, budget pause off, fleet-watch unscheduled (`docs/handoff-2026-10-18.md`).
