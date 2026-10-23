@@ -1,8 +1,8 @@
 # agent-factory
 
-Planning repo for the agent factory: a lead + workers fleet and one rulebook of small markdown instruction files.
+Planning repo for the agent factory: one coordinator AI that starts fresh workers and one rulebook of small markdown instruction files.
 The map is issue #1 (wayfinder). Plan, don't do — nothing is built until the design is approved.
-Start any session with `docs/handoff-2026-10-18.md`; research lives in numbered files under `research/`.
+Start any session with `README.md`, then `docs/ARCHITECTURE.md` and `docs/open-items.md`; research lives in numbered files under `research/`.
 
 ## Agent skills
 
