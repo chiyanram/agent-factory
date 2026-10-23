@@ -1,0 +1,1485 @@
+{
+ "files": [
+  {
+   "path": "AGENTS.md «Java»",
+   "repo": "agent-platform",
+   "layer": "root block",
+   "rules": [],
+   "musts": [
+    {
+     "id": "TY2",
+     "text": "Return a sealed result and switch over it exhaustively with no `default` arm, because a `default` arm lets a new case compile and be silently mishandled."
+    },
+    {
+     "id": "TY1",
+     "text": "Never let `null` decide a case; use `Optional`, a sealed result or an enum, because a nullable field lets contradictory combinations compile and a caller forget the check."
+    },
+    {
+     "id": "SEAM1",
+     "text": "Keep each method at cyclomatic complexity 5 or less, using a rule list instead of an if-ladder, because a branching method hides paths no test reaches."
+    }
+   ],
+   "notes": "Q3+Q5. Bodies: SK code/references/types.md (TY1, TY2), design.md (SEAM1). Cyclomatic <=5 unmeasured until a gate lands (L5/L7). LY4 (ND-2) not picked: ArchUnit blocks it."
+  },
+  {
+   "path": "AGENTS.md «tests»",
+   "repo": "agent-platform",
+   "layer": "root block",
+   "rules": [],
+   "musts": [
+    {
+     "id": "S2+V3",
+     "text": "Assert observable behaviour, never a field default, a hand-copied enum list or the input you passed in, because such a test cannot fail for a real defect."
+    },
+    {
+     "id": "IT-placement",
+     "text": "Put every IT under `src/integrationTest`, never `src/test`, because a misplaced IT compiles, runs class-parallel without the Testcontainers tuning, and still reports green."
+    },
+    {
+     "id": "K1",
+     "text": "In a Spock argument closure, write each check as its own top-level line, never inside `every{}`, because nested checks are never asserted and the test passes anyway."
+    }
+   ],
+   "notes": "Q5 picks. IT-placement has no ledger row (AGENTS.md / ADR-0009). Bodies: SK testing/references/strategy.md (S2), value-bar.md (V3), spock.md (K1)."
+  },
+  {
+   "path": "AGENTS.md «dependencies»",
+   "repo": "agent-platform",
+   "layer": "root block",
+   "rules": [],
+   "musts": [
+    {
+     "id": "DEP-1",
+     "text": "Never override a version the Spring Boot BOM manages; read the BOM first, because all three past overrides were wrong, two pinned backwards."
+    },
+    {
+     "id": "DEP-2",
+     "text": "Read a library's BOM before importing it, because an imported BOM wins over Boot's and can silently downgrade a shared library."
+    },
+    {
+     "id": "DEP-3",
+     "text": "Check a new test dependency's stdout before adopting it, because agents read build logs, and jqwik prints an instruction telling agents to ignore its results."
+    }
+   ],
+   "notes": "Q5 picks. DEP-1..3 are research/32 ids, not ledger rows (FL17 is a file fate); text from origin/master .claude/rules/dependencies.md. No reference body exists."
+  },
+  {
+   "path": "AGENTS.md «observability»",
+   "repo": "agent-platform",
+   "layer": "root block",
+   "rules": [],
+   "musts": [
+    {
+     "id": "LG4",
+     "text": "Never log PII, prompts, tool arguments, secrets or tokens at INFO or above, because logs are a common data-leak path on a customer's system."
+    },
+    {
+     "id": "LG2",
+     "text": "Log a failure once, where it is handled; do not log before rethrowing with the cause, because each layer then writes the same failure twice."
+    },
+    {
+     "id": "LG3",
+     "text": "Log WARN with class and message only, and ERROR with the throwable last, because a placeholder throwable prints no stack for the operator."
+    }
+   ],
+   "notes": "Q5 picks. Bodies: SK obs/references/logging.md."
+  },
+  {
+   "path": "AGENTS.md «credentials»",
+   "repo": "agent-platform",
+   "layer": "root block",
+   "rules": [],
+   "musts": [
+    {
+     "id": "SE7",
+     "text": "Encrypt every credential with `CredentialEncryptor` before storing it and mask it in every response, because a plain credential leaks to every database reader and API caller."
+    }
+   ],
+   "notes": "Q5: one MUST. Body: SK code/references/security.md (SE7 written neutral; CredentialEncryptor value in docs/agents/code.md)."
+  },
+  {
+   "path": "AGENTS.md «schema change»",
+   "repo": "agent-platform",
+   "layer": "root block",
+   "rules": [],
+   "musts": [
+    {
+     "id": "G9c-MG-F4",
+     "text": "Before creating a `V*.sql`, read `aruvii-infra/src/main/resources/db/migration/AGENTS.md` and use the `flyway-migration` skill."
+    }
+   ],
+   "notes": "Q5: one pointer line. G9c-MG-F4 is a build instruction row; its pointer text is the block. Also fix the API line \"errors are ProblemDetail\" elsewhere in AGENTS.md (Q6, ER9)."
+  },
+  {
+   "path": "aruvii-ui/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "NGB5",
+    "NGC2",
+    "NGC4",
+    "NGE1",
+    "NGE2",
+    "NGE3",
+    "NGE4"
+   ],
+   "musts": [
+    {
+     "id": "NGD2",
+     "text": "Make anything clickable a `<button type=\"button\">` or an `<a>`, never a clickable `div`, `span` or `tr`, because keyboard and screen-reader users cannot reach it."
+    },
+    {
+     "id": "NGC4",
+     "text": "In every error branch call `toast.error(...)` or set an error state, never `error: () => {}`, because a swallowed error shows the user nothing."
+    },
+    {
+     "id": "NGA3",
+     "text": "Do not silence the compiler with `!` or `as`; add a check or fix the type, because each one hides a runtime crash the compiler could catch."
+    }
+   ],
+   "notes": "Q1: Aruvii-only NG rows (bold in research/29). Then pointer to SK code/references/angular-ui.md. NGD2/NGA3 bodies stay in SK angular-ui.md."
+  },
+  {
+   "path": "aruvii-ui/playwright/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "EB1",
+    "EC6",
+    "ED2",
+    "ED4",
+    "ED5"
+   ],
+   "musts": [],
+   "notes": "NEW file. Q1: Aruvii-only smoke rows nearest their code (fixtures.ts, check-flaky.mjs, playwright.core.config.ts); path is research/29 Q5 proposal. ED5 reworded (research/33): writer runs Testcontainers targets, smoke only in the gate. No MUSTs picked for this file. Points to SK testing/references/smoke-specs.md."
+  },
+  {
+   "path": "aruvii-api/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "CV5",
+    "SS13",
+    "SS14",
+    "SS15",
+    "SS18",
+    "MX8"
+   ],
+   "musts": [
+    {
+     "id": "AP1",
+     "text": "Return every error as `ApiResponse` with `success=false` and an `ErrorCode`, never a bare `ResponseEntity.status(...)`, because a bare error loses the `traceId` operators paste into tickets."
+    },
+    {
+     "id": "AP3a",
+     "text": "Prove every role rule with an IT matrix — anonymous, each role, other-workspace member, API key — because a test of one wrong role let another workspace's editor get 200."
+    },
+    {
+     "id": "AP4a",
+     "text": "Add a `PUBLIC_PATHS` entry only with an IT proving its replacement check refuses a bad caller, because one public path let an anonymous call complete setup."
+    }
+   ],
+   "notes": "Q1: CV5 (SetupControllerIT exception), SS13-15/SS18 (guards, PlatformRole, 401/403 body), MX8 (no scrape endpoint; actuator config in aruvii-api application.yml). AP1/AP3a/AP4a bodies in AP .agents/skills/code/references/api.md. Error shape = ApiResponse success=false (Q6) until #662."
+  },
+  {
+   "path": "aruvii-tools/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [],
+   "musts": [
+    {
+     "id": "TT1",
+     "text": "Ship every new tool type with `outputSchemaJson`, a `sampleResponseJson` and a dry-run smoke test, because without them the dry-run gate returns nothing."
+    },
+    {
+     "id": "TT2",
+     "text": "Read a tool's required arguments off its handler; never declare a schema stricter than the handler, because a stricter schema stops a working tool on upgrade."
+    }
+   ],
+   "notes": "Q7. Bodies in AP .agents/skills/code/references/tool-types.md."
+  },
+  {
+   "path": "aruvii-worker/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "MS1",
+    "MS2",
+    "MS3",
+    "MS5"
+   ],
+   "musts": [],
+   "notes": "NEW file. Q1: Aruvii-only messaging rows; stream consumers + Kafka trigger live in aruvii-worker. MS5 also covers XADD publishers in aruvii-api (ArchUnit bounded-XADD rule exists). No MUSTs picked. Points to SK code/references/messaging.md."
+  },
+  {
+   "path": "aruvii-guardrails/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "M7",
+    "P5",
+    "CV4"
+   ],
+   "musts": [],
+   "notes": "NEW file. Q1: PIT is wired only here; Property.java lives in aruvii-guardrails/src/test. M7 reworded (research/33): PIT where wired, else test-first until #659; no wiring in a feature MR. No MUSTs picked."
+  },
+  {
+   "path": "aruvii-infra/src/main/resources/db/migration/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "MG1",
+    "MG2",
+    "MG4",
+    "MG3"
+   ],
+   "musts": [
+    {
+     "id": "MG2",
+     "text": "Take max-across-all-branches + 1 for a new version, never `ls` of your tree, because two branches with one number fail at container start."
+    },
+    {
+     "id": "MG1",
+     "text": "Never edit an applied `V*.sql`; fix it with a new version, because Flyway checksums then fail startup on every installed system."
+    },
+    {
+     "id": "MG4",
+     "text": "Start every migration with a header naming each data change and lock and why, matching the statements, because an \"expand-only\" header once hid a rewrite of every row."
+    }
+   ],
+   "notes": "Q2. Primary home of MG1-MG4. Then pointers to AP who-migrates.md, flyway-migration skill, SK migrations references. MG1/MG2 hooks are Claude-only; CI twins (MG70-72) are L5/L7."
+  },
+  {
+   "path": "docs/AGENTS.md",
+   "repo": "agent-platform",
+   "layer": "nested AGENTS.md",
+   "rules": [
+    "WD3",
+    "WD6"
+   ],
+   "musts": [],
+   "notes": "NEW file. Q1: Aruvii-only doc rows (ARCHITECTURE.md §9 Doc drift; REQ-<issue>-slug, ADR numbering per docs/adr/README.md). No MUSTs picked. Points to SK planning/references/writing-docs.md."
+  },
+  {
+   "path": ".agents/skills/code/references/api.md",
+   "repo": "agent-platform",
+   "layer": "reference",
+   "rules": [
+    "AP1",
+    "AP2",
+    "AP3",
+    "AP4",
+    "AP5",
+    "AP3a",
+    "AP4a"
+   ],
+   "musts": [],
+   "notes": "ND-3: whole file Aruvii. AP3a/AP4a sharpen AP3/AP4. Error shape = master today (Q6, ER9/AP1/SS18); #662 changes rule + code together."
+  },
+  {
+   "path": ".agents/skills/code/references/tool-types.md",
+   "repo": "agent-platform",
+   "layer": "reference",
+   "rules": [
+    "TT1",
+    "TT2"
+   ],
+   "musts": [],
+   "notes": "ND-3 / FL11. MUSTs in aruvii-tools/AGENTS.md (Q7)."
+  },
+  {
+   "path": ".agents/skills/code/references/layering.md",
+   "repo": "agent-platform",
+   "layer": "reference",
+   "rules": [
+    "LY4",
+    "JV10"
+   ],
+   "musts": [],
+   "notes": "ND-2 / FL11. LY4 gated by ArchUnit (no Review check, OQ3). JV10 (no JPMS; Gradle modules + module_dependency_allowlist) is repo-wide with no nearer nested file, so it joins the module-boundary reference. Edit LY5 applied here."
+  },
+  {
+   "path": ".agents/skills/migrations/references/who-migrates.md",
+   "repo": "agent-platform",
+   "layer": "reference",
+   "rules": [
+    "MG50",
+    "MG51",
+    "MG53",
+    "MG54",
+    "MG55"
+   ],
+   "musts": [],
+   "notes": "Aruvii process facts. MG53 reworded (research/33): writer stops and reports; volume reset belongs to the human/gate owner. Edit MG56 applied here."
+  },
+  {
+   "path": ".agents/skills/flyway-migration/SKILL.md",
+   "repo": "agent-platform",
+   "layer": "reference",
+   "rules": [
+    "MG60",
+    "MG61",
+    "MG62"
+   ],
+   "musts": [],
+   "notes": "Flat workflow skill (G9c-MG-F3). MG60 reworded (writer stops and reports). MG61 reworded: version -> file -> header -> SQL (MG30-38, MG42) -> IT; deferred MG19/MG41+ out."
+  },
+  {
+   "path": "docs/agents/testing.md",
+   "repo": "agent-platform",
+   "layer": "docs/agents answers",
+   "rules": [
+    "S3",
+    "TM2",
+    "TM3",
+    "IT2",
+    "TM4",
+    "SP3",
+    "K14",
+    "K19",
+    "P7",
+    "EB4"
+   ],
+   "musts": [],
+   "notes": "Q1+Q10: Aruvii values (make targets, @EnableAruviiIT/@EnableAruviiSpec, fake-llm, Ollama, AruviiException, Toxiproxy BOM check) for generic SK rules. Secondary: ids also counted in their SK file."
+  },
+  {
+   "path": "docs/agents/planning.md",
+   "repo": "agent-platform",
+   "layer": "docs/agents answers",
+   "rules": [
+    "GA1",
+    "GA2",
+    "AC9",
+    "SR2",
+    "SR3",
+    "SR4",
+    "SR6",
+    "PD6",
+    "DG6",
+    "WD5"
+   ],
+   "musts": [],
+   "notes": "Q1+Q10: Aruvii values (REQ, /approved, docs/CONTEXT.md glossary, docs/design/). Secondary."
+  },
+  {
+   "path": "docs/agents/code.md",
+   "repo": "agent-platform",
+   "layer": "docs/agents answers",
+   "rules": [
+    "SEAM1",
+    "CV3",
+    "ER2",
+    "ER10",
+    "ER11",
+    "SC1",
+    "SC10",
+    "SC13",
+    "X6 / SP23",
+    "SE1",
+    "SE7",
+    "SS1",
+    "SS12",
+    "SS22",
+    "SS25",
+    "SE7a",
+    "SS26"
+   ],
+   "musts": [],
+   "notes": "Q1+Q10: Aruvii values (aruvii. key prefix, AruviiException, GlobalExceptionHandler, CredentialEncryptor, PUBLIC_PATHS, checked-fetch #527, line lengths 120/110). Secondary."
+  },
+  {
+   "path": "docs/agents/obs.md",
+   "repo": "agent-platform",
+   "layer": "docs/agents answers",
+   "rules": [
+    "LG1",
+    "LG4"
+   ],
+   "musts": [],
+   "notes": "Q1+Q10: Aruvii values (id names in action= lines, PiiRedactor). Secondary."
+  },
+  {
+   "path": "docs/agents/meta.md",
+   "repo": "agent-platform",
+   "layer": "docs/agents answers",
+   "rules": [
+    "SRC1"
+   ],
+   "musts": [],
+   "notes": "Q1+Q10: SRC1 names CLAUDE.md / \"our docs\"; the repo answer is its own instruction files. Secondary. Could fold into another answers file — operator call."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/strategy.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "AT1",
+    "TM1",
+    "TM2",
+    "TM3"
+   ],
+   "musts": [],
+   "notes": "AT1 was \"testing (tiers)\". S3/TM2/TM3 written neutral (values in docs/agents/testing.md)."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/coverage-design.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "C1",
+    "C2",
+    "C3",
+    "C4"
+   ],
+   "musts": [],
+   "notes": ""
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/boundaries.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "B1",
+    "B2",
+    "B3"
+   ],
+   "musts": [],
+   "notes": ""
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/value-bar.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "V1",
+    "V2",
+    "V3",
+    "V4",
+    "V5"
+   ],
+   "musts": [],
+   "notes": ""
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/unit-tests.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "U1",
+    "U3",
+    "U2"
+   ],
+   "musts": [],
+   "notes": "U2a DROPPED (operator 2026-10-23). U2 restored in full (labelled blocks + feature name = plain behaviour sentence); ledger status of U2 still reads SUPERSEDED and needs flipping. U4 body lives in code/java.md, pointed at from here."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/integration-tests.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "IT1",
+    "IT2",
+    "IT3",
+    "IT4",
+    "TM4",
+    "IT5",
+    "SP1",
+    "SP2",
+    "SP3",
+    "SP4",
+    "SP5",
+    "SP6",
+    "SP7",
+    "SP8",
+    "SP9",
+    "SP10",
+    "SP11"
+   ],
+   "musts": [],
+   "notes": "IT4b merged detail = Decided edge of IT4. SP3 reworded (research/33): isolation from the reset @EnableAruviiIT/@EnableAruviiSpec installs. CV5 moved to aruvii-api/AGENTS.md (Q1)."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/spock.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "K1",
+    "K2",
+    "K2b",
+    "K3",
+    "K4",
+    "K5",
+    "K6",
+    "K7",
+    "K8",
+    "K9",
+    "K10",
+    "K11",
+    "K12",
+    "K13",
+    "K14",
+    "K15",
+    "K16",
+    "K17",
+    "K18",
+    "K19",
+    "K20"
+   ],
+   "musts": [],
+   "notes": "K1 also a root «tests» MUST. K14 \"correction owed to CLAUDE.md\" -> AGENTS.md (CLAUDE.md = @AGENTS.md)."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/scenario-to-tests.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "GT1",
+    "GT2",
+    "GT3",
+    "GT4",
+    "GT5",
+    "GT6",
+    "CV2"
+   ],
+   "musts": [],
+   "notes": "Q4: was testing/workflows/; gherkin-to-test workflow skill points here and carries no rules. GT4 reworded: AC id goes in @Issue([...]) only (CV2)."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/mutation.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M6",
+    "M8",
+    "M9",
+    "M10"
+   ],
+   "musts": [],
+   "notes": "M10 reworded (research/33): prove a mutation-kill test with a temporary hand mutation. M7 moved to aruvii-guardrails/AGENTS.md. research/29 §2 M1 vs #68 (report -> blocking) not decided in #21: written as ledger."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/property-based.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "P6",
+    "P7",
+    "P8",
+    "P10"
+   ],
+   "musts": [],
+   "notes": "P5, CV4 moved to aruvii-guardrails/AGENTS.md (Q1). P7 neutral."
+  },
+  {
+   "path": "plugins/rulebook/skills/testing/references/smoke-specs.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "EA1",
+    "EA2",
+    "EA3",
+    "EA4",
+    "EA5",
+    "EA6",
+    "EB2",
+    "EB3",
+    "EB4",
+    "EC1",
+    "EC2",
+    "EC3",
+    "EC4",
+    "EC5",
+    "ED3"
+   ],
+   "musts": [],
+   "notes": "EB1, EC6, ED2, ED4, ED5 moved to aruvii-ui/playwright/AGENTS.md (Q1). EC1 count (\"147 networkidle uses\") goes to the follow-up issue (WD2)."
+  },
+  {
+   "path": "plugins/rulebook/skills/planning/references/acceptance-criteria.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "GA1",
+    "GA2",
+    "GA3",
+    "GA4",
+    "GA5",
+    "GA6",
+    "CV1",
+    "AC7",
+    "AC8",
+    "AC9",
+    "AC10"
+   ],
+   "musts": [],
+   "notes": "GA1 reworded: one AC home = REQ, quoted verbatim in the MR; \"discovery\". GA2/GA3: analyst -> discovery, developer -> writer. GA6 reworded: scenario title = plain behaviour sentence (U2a drop)."
+  },
+  {
+   "path": "plugins/rulebook/skills/planning/references/spec-review.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "SR1",
+    "SR2",
+    "SR3",
+    "SR4",
+    "SR6",
+    "SR7"
+   ],
+   "musts": [],
+   "notes": "Edit SR8 applied here (architecture-review A-E merged; F-01 -> Spec verdict). Stage numbers -> phase names (design §4)."
+  },
+  {
+   "path": "plugins/rulebook/skills/planning/references/program-design.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "PD1",
+    "PD2",
+    "PD3",
+    "PD4",
+    "PD5",
+    "PD6",
+    "PD7"
+   ],
+   "musts": [],
+   "notes": "PD7 \"stage 6\" -> phase name (build) per design §4."
+  },
+  {
+   "path": "plugins/rulebook/skills/planning/references/diagrams.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "DG1",
+    "DG2",
+    "DG3",
+    "DG4",
+    "DG5",
+    "DG6"
+   ],
+   "musts": [],
+   "notes": ""
+  },
+  {
+   "path": "plugins/rulebook/skills/planning/references/writing-docs.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "WD1",
+    "WD2",
+    "WD4",
+    "WD5",
+    "WD7"
+   ],
+   "musts": [],
+   "notes": "WD3, WD6 moved to docs/AGENTS.md (Q1)."
+  },
+  {
+   "path": "plugins/rulebook/skills/meta/references/writing-references.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "SRC1"
+   ],
+   "musts": [],
+   "notes": "Meta rule. GB2 not placed (see unplaced)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/java.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "U4",
+    "JV1",
+    "JV2",
+    "JV3",
+    "JV4",
+    "JV5",
+    "JV6",
+    "JV7",
+    "JV8",
+    "JV9",
+    "CV3"
+   ],
+   "musts": [],
+   "notes": "JV12 DROPPED; JV10 -> AP layering.md. CV3 reworded: line length only (ST2 dropped); X1 decided edge loses its ST1 clause. JV2/JV6/JV9 gate-twinned: no Review check (OQ3)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/design.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "SEAM1"
+   ],
+   "musts": [],
+   "notes": "Q3: generic seam principle (one job, record in / sealed out, pure decisions, I/O decides nothing, no null, rule lists, cyclomatic <=5, smell baseline). Precedence clause dropped (OQ1). S-1..S-7 Java text -> agent-platform #679 (FW7, SP13 unplaced)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/types.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "TY1",
+    "TY2",
+    "TY3",
+    "TY7",
+    "TY9",
+    "TY12",
+    "TY8",
+    "TY4",
+    "TY5",
+    "TY6",
+    "TY11",
+    "TY10",
+    "TY13"
+   ],
+   "musts": [],
+   "notes": "X2/TY13a DROPPED, so TY13 (no builder classes) stands unamended. TY1/TY2 also root «Java» MUSTs."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/errors.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "ER1",
+    "ER2",
+    "ER7",
+    "ER10",
+    "ER11",
+    "ER3",
+    "ER4",
+    "ER5",
+    "ER6",
+    "ER8"
+   ],
+   "musts": [],
+   "notes": "ER9 is an edit (applied in AGENTS.md / aruvii-api, Q6)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/comments.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "CM1",
+    "CM2",
+    "CM3",
+    "CM4",
+    "CM5",
+    "CM7",
+    "CM6"
+   ],
+   "musts": [],
+   "notes": ""
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/smells.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "NM1",
+    "NM2",
+    "NM3",
+    "NM4",
+    "DS1",
+    "DS2",
+    "DS3",
+    "DS4",
+    "DS6",
+    "DS11",
+    "DS12",
+    "DS14",
+    "FW1",
+    "FW2",
+    "FW5",
+    "FW6",
+    "FW8",
+    "FW9",
+    "FW3",
+    "SM1",
+    "SM2",
+    "SM3",
+    "SM5"
+   ],
+   "musts": [],
+   "notes": "DS11 KEPT with no source (operator). FW9: drop the \"12-smell subset\" note (SM1 + R37-D8)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/services.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "LY1",
+    "LY2",
+    "LY3"
+   ],
+   "musts": [],
+   "notes": "LY6/LY7 written once, in spring.md (OQ-SC2)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/spring.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "LY6",
+    "LY7",
+    "SC1",
+    "SC4",
+    "SC2",
+    "SC3",
+    "SC5",
+    "SC6",
+    "SC8",
+    "SC10",
+    "SC11",
+    "SC12",
+    "SC13",
+    "SC14",
+    "SC15",
+    "SC16",
+    "SC17",
+    "SC19",
+    "SC20",
+    "SC21",
+    "SC22",
+    "SC7",
+    "SC9",
+    "X6 / SP23",
+    "SX18 (R36 SP18)",
+    "SX19 (R36 SP19)",
+    "SX14 (R36 SP14)"
+   ],
+   "musts": [],
+   "notes": "SC18 DROPPED (X6/SP23 + Checkstyle win). SX20 DROPPED. LY6/LY7 = sharpened rows (ledger lists each id twice; Q11 qualify)."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/concurrency.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "CC1",
+    "CC2",
+    "CC3",
+    "CC9",
+    "CC8",
+    "CC4",
+    "CC5",
+    "CC6",
+    "CC7",
+    "CC10"
+   ],
+   "musts": [],
+   "notes": ""
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/security.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "SE1",
+    "SE2",
+    "SE3",
+    "SE4",
+    "SE5",
+    "SE6",
+    "SE10",
+    "SE7",
+    "SE8",
+    "SS1",
+    "SS2",
+    "SS3",
+    "SS4",
+    "SS5",
+    "SS6",
+    "SS7",
+    "SS8",
+    "SS9",
+    "SS10",
+    "SS11",
+    "SS12",
+    "SS16",
+    "SS17",
+    "SS19",
+    "SS20",
+    "SS21",
+    "SS22",
+    "SS23",
+    "SS24",
+    "SS25",
+    "SE7a",
+    "SS26"
+   ],
+   "musts": [],
+   "notes": "SS13-15, SS18 moved to aruvii-api/AGENTS.md (Q1). SE7 also root «credentials» MUST."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/messaging.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "MS6",
+    "MS4"
+   ],
+   "musts": [],
+   "notes": "MS1-3, MS5 -> aruvii-worker/AGENTS.md (Q1). Edit MS7 is for the old AP file; moot once neutral."
+  },
+  {
+   "path": "plugins/rulebook/skills/code/references/angular-ui.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "NGA1",
+    "NGA2",
+    "NGA3",
+    "NGA5",
+    "NGA6",
+    "NGA7",
+    "NGB1",
+    "NGB2",
+    "NGB3",
+    "NGC1",
+    "NGC3",
+    "NGD1",
+    "NGD2",
+    "NGD3"
+   ],
+   "musts": [],
+   "notes": "NGA4, NGB4 DROPPED. Aruvii-only NG rows -> aruvii-ui/AGENTS.md."
+  },
+  {
+   "path": "plugins/rulebook/skills/deslop/SKILL.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "DS13",
+    "DS5",
+    "DS7",
+    "DS8",
+    "DS9"
+   ],
+   "musts": [],
+   "notes": "Flat workflow skill (FL26). Edit DS15 applied: cite U2 only (research/33)."
+  },
+  {
+   "path": "plugins/rulebook/skills/obs/references/logging.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "LG1",
+    "LG2",
+    "LG3",
+    "LG4",
+    "LG5",
+    "LG6",
+    "LG7",
+    "LG8",
+    "LG9",
+    "LG10"
+   ],
+   "musts": [],
+   "notes": "LG2/LG3/LG4 also root «observability» MUSTs."
+  },
+  {
+   "path": "plugins/rulebook/skills/obs/references/levels.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [],
+   "musts": [],
+   "notes": "No APPROVED rows: holds the OQ4 DECIDED level table (FL25)."
+  },
+  {
+   "path": "plugins/rulebook/skills/obs/references/metrics.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "MX7",
+    "MX1",
+    "MX2",
+    "MX3",
+    "MX4",
+    "MX5",
+    "MX6"
+   ],
+   "musts": [],
+   "notes": "MX6 reworded (research/33): find the failure by trace id in logs (and traces) inside an IT. MX8 -> aruvii-api/AGENTS.md. Edit MX9 applied."
+  },
+  {
+   "path": "plugins/rulebook/skills/obs/references/tracing.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "TR1",
+    "TR2",
+    "TR3",
+    "TR4",
+    "TR5"
+   ],
+   "musts": [],
+   "notes": "TR4 (Brave) kept; TR4a on HOLD until #55."
+  },
+  {
+   "path": "plugins/rulebook/skills/migrations/references/review.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "MG17",
+    "MG18",
+    "MG21",
+    "MG20"
+   ],
+   "musts": [],
+   "notes": "MG20 \"the lead\" persona -> L2 #22 (Q8)."
+  },
+  {
+   "path": "plugins/rulebook/skills/migrations/references/postgres-design.md",
+   "repo": "chiyanram/skills",
+   "layer": "reference",
+   "rules": [
+    "MG30",
+    "MG31",
+    "MG32",
+    "MG33",
+    "MG34",
+    "MG35",
+    "MG36",
+    "MG37",
+    "MG38",
+    "MG42"
+   ],
+   "musts": [],
+   "notes": ""
+  }
+ ],
+ "unplaced": [
+  {
+   "id": "SP22",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-SP22",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-SP22.2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-DS9",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-JV9",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-OQ2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-X6",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-SC1",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-UnusedImports",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-CK1",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-DS2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-FW1",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-CK4",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-ER3",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-ER4",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-JV6",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-JV2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-SP19",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-SP18",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-LG6",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-CK3",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-CK2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G-CK2.2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK2",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK3",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK4",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK5",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12); KEPT by the operator despite no source (ledger also names smells.md)"
+  },
+  {
+   "id": "CK1",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK6",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK7",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK8",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "CK9",
+   "reason": "gate: Checkstyle / build-logic -> L5/L7 (Q12)"
+  },
+  {
+   "id": "NGF1",
+   "reason": "gate: aruvii-ui/eslint.config.js -> L5/L7 (Q12)"
+  },
+  {
+   "id": "NGF2",
+   "reason": "gate: aruvii-ui/eslint.config.js -> L5/L7 (Q12)"
+  },
+  {
+   "id": "NGF3",
+   "reason": "gate: aruvii-ui/eslint.config.js -> L5/L7 (Q12)"
+  },
+  {
+   "id": "NGF4",
+   "reason": "gate: aruvii-ui/eslint.config.js -> L5/L7 (Q12)"
+  },
+  {
+   "id": "MG70",
+   "reason": "gate: migration checks / CI twins of the hooks -> L5/L7 (Q12, Q13). MG70 reworded: new .conf sidecar only, V92 exempt"
+  },
+  {
+   "id": "MG71",
+   "reason": "gate: migration checks / CI twins of the hooks -> L5/L7 (Q12, Q13). MG70 reworded: new .conf sidecar only, V92 exempt"
+  },
+  {
+   "id": "MG72",
+   "reason": "gate: migration checks / CI twins of the hooks -> L5/L7 (Q12, Q13). MG70 reworded: new .conf sidecar only, V92 exempt"
+  },
+  {
+   "id": "WIRE-smoke",
+   "reason": "gate wiring work item -> L5/L7; retarget make test-scripts -> make test-doctor or a named target (research/33)"
+  },
+  {
+   "id": "FL1",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL2",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL3",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL4",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL5",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL6",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL7",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL8",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL9",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL10",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL11",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL12",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL13",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL14",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL15",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL16",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL17",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL18",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL19",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL20",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL21",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL22",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL23",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL24",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL25",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL26",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "FL27",
+   "reason": "build instruction (file fate) -> L5/L7 (Q12); FL13/14/16/17/19/20/21 retargeted to root or <dir>/AGENTS.md; FL19/OQ-NG7 -> reviewer Spec verdict"
+  },
+  {
+   "id": "G9c-MG-F1",
+   "reason": "build instruction (migration file fates) -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G9c-MG-F2",
+   "reason": "build instruction (migration file fates) -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G9c-MG-F3",
+   "reason": "build instruction (migration file fates) -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G9c-MG-F5",
+   "reason": "build instruction (migration file fates) -> L5/L7 (Q12)"
+  },
+  {
+   "id": "G9c-MG-F4",
+   "reason": "build instruction -> L5/L7 (Q12); its one pointer line is written as the root «schema change» block"
+  },
+  {
+   "id": "CUT-smoke",
+   "reason": "build instruction (deletion list) -> L5/L7 (Q12)"
+  },
+  {
+   "id": "LY5",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "ER9",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "MX9",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "MS7",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "DS15",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "SR8",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "MG56",
+   "reason": "edit instruction, not rule text: applied inside the L1 MR of its target file (LY5 layering.md/AGENTS.md, ER9 AGENTS.md+aruvii-api (Q6), MX9 metrics.md, MS7 messaging.md, DS15 deslop, SR8 spec-review.md, MG56 who-migrates.md)"
+  },
+  {
+   "id": "G-CK5",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "ST1",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "ST2",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "JV12",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "NGA4",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "NGB4",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "X2 / TY13a",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "SX20 (R36 SP20)",
+   "reason": "DROPPED (no source; research/31, operator 2026-10-23)"
+  },
+  {
+   "id": "U2a",
+   "reason": "DROPPED (operator 2026-10-23: does not fit Spock); U2 restored"
+  },
+  {
+   "id": "SC18",
+   "reason": "DROPPED (research/33: contradicts X6/SP23 + G-X6)"
+  },
+  {
+   "id": "TR4a",
+   "reason": "HOLD until agent-platform #55 decides tracing (research/33, #21)"
+  },
+  {
+   "id": "FW7",
+   "reason": "Q3: S-1..S-7 Java seam text lands in agent-platform via #679; #679 owns the path, so no L1 file"
+  },
+  {
+   "id": "SP13",
+   "reason": "Q3: S-1..S-7 Java seam text lands in agent-platform via #679; #679 owns the path, so no L1 file"
+  },
+  {
+   "id": "GB2",
+   "reason": "meta rule superseded in effect by G23 #93 Q3 (neutral Good/Bad pairs; research/29 §2); no explicit drop in #21 — operator to confirm"
+  }
+ ],
+ "totals": {
+  "chiyanram/skills": {
+   "files": 36,
+   "primary_rules": 331,
+   "musts": 0,
+   "by_layer": {
+    "reference": 36
+   },
+   "secondary_values": 0
+  },
+  "agent-platform": {
+   "files": 19,
+   "primary_rules": 50,
+   "musts": 25,
+   "by_layer": {
+    "root block": 6,
+    "nested AGENTS.md": 8,
+    "reference": 5,
+    "docs/agents answers": 5
+   },
+   "secondary_values": 40
+  },
+  "files_total": 55,
+  "rules_placed": 381,
+  "approved_rows": 476,
+  "approved_unique_ids": 474,
+  "restored_non_approved": [
+   "U2"
+  ],
+  "unplaced": 94,
+  "unplaced_by_kind": {
+   "gate": 40,
+   "build": 33,
+   "edit": 7,
+   "dropped": 10,
+   "hold": 1,
+   "other": 3
+  },
+  "check": "placed + unplaced = 474 unique approved ids + U2 (LY6, LY7 appear twice in the ledger, written once)"
+ }
+}
