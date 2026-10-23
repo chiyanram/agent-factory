@@ -7,26 +7,29 @@ do not are marked **thin**.
 ## The flow
 
 ```
- human ⇄ DISCOVERY ─/approved─▶ WRITER ─▶ REVIEWER ─▶ GATE ─▶ a maintainer approves ─▶ merge
-   │      intake → issue →        fresh,     fresh,      GitLab CI,
-   │      REQ → draft MR          own        2 verdicts  by kind
-   │                              worktree
-   └──── COORDINATOR starts each seat and routes; owns nothing; state = GitLab
+ human ⇄ COORDINATOR ─/approved─▶ WRITER ─▶ REVIEWER ─▶ GATE ─▶ a maintainer approves ─▶ merge
+          talks, grills,           fresh per   fresh per   GitLab CI,
+          specs, starts workers,   ticket,     round,      by kind
+          retro; memory = GitLab   own folder  find+verify
 ```
+
+Every story's thread is its GitLab issue + MR. Workers do one job and go away.
 
 ## 1 · Seats — who does what ([#1](https://github.com/chiyanram/agent-factory/issues/1), research/23)
 
 | seat | owns | runs as |
 |---|---|---|
 | human | approve, merge | — |
-| coordinator | routing only | one playbook session (claude or codex); laptop or VM, same command, no bypass (research/24) |
-| discovery | intake → issue or map → grill → REQ → draft MR, until `/approved` | interactive session, one per issue |
+| coordinator | talking with the human: intake → issue or map → grill → REQ → draft MR → retro; starting workers per ticket | one AI session (claude or codex) in CLI/tmux on laptop or VM; Discord optional; no bypass; memory in GitLab, so a restart loses nothing (research/24, 37; #23) |
 | writer | the branch | `claude --bg` in its own worktree (fallback `claude -p`); never talks to the human |
 | reviewer | a verdict only | `claude -p`, one shot, fresh per round |
 | gate | the CI result | GitLab CI job |
 
 Intake: small → issue (`/issue`); foggy → map + work items (`/refine`); ready → grill. Helpers (security auditor,
 architect, scout) are called by a seat and own nothing. Other tools: `codex exec` is the headless equivalent.
+
+All optional for a developer: **with the fleet** — a coordinator session in the CLI or tmux, Discord if wanted; **without
+the fleet** — run Claude in the project and use `/crq`, `/refine` etc.; the same rulebook and router apply the workflow.
 
 ## 2 · The record and the channel ([#4](https://github.com/chiyanram/agent-factory/issues/4) Q1)
 
@@ -50,7 +53,7 @@ generic rules: chiyanram/skills → Claude plugin + `npx skills add` for other t
   imperative + because + the failure it prevents, ≤35 words (G21). One file serves writer and reviewer.
 - Mechanical rules go to `make lint` or CI. `make lint` checks <200 lines and the root→leaf chain <32 KiB; a sentinel
   probe proves each tool loads the rules (G20).
-- One glossary per project (Aruvii: `docs/CONTEXT.md`); discovery adds settled terms; the reviewer flags new terms. **Thin**.
+- One glossary per project (Aruvii: `docs/CONTEXT.md`); the coordinator adds settled terms; the reviewer flags new terms. **Thin**.
 - The 476 approved rules are written after approval, one MR per target file; each rule cites its ledger row; the
   reviewer checks both directions.
 
@@ -58,16 +61,16 @@ generic rules: chiyanram/skills → Claude plugin + `npx skills add` for other t
 
 | phase | seat | skill |
 |---|---|---|
-| intake, grill | discovery | `/issue`, `/refine`, grilling + domain-modeling |
-| spec | discovery | to-spec; intent + ACs in the MR |
-| design | discovery | codebase-design, prototype |
+| intake, grill | coordinator | `/issue`, `/refine`, grilling + domain-modeling |
+| spec | coordinator | to-spec; intent + ACs in the MR |
+| design | coordinator | codebase-design, prototype |
 | spec/design review | reviewer | one reviewer: spec-review + architecture A–E merged + the Aruvii decision guide (facts corrected) |
 | build | writer | test-first for bugs only; features any order, PIT on touched classes with decisions, every surviving mutant listed. Modules without PIT stay test-first until agent-platform #659 |
 | cleanup | writer | deslop, trimmed |
 | code review | reviewer | §5 |
 | gate | gate | §6 |
 | done | writer | MR body: summary diagram · Evidence · Merge Danger · untouched-and-risk |
-| retro | discovery | mattpocock retro + pstack correct ladder (strongest fix first) |
+| retro | coordinator | mattpocock retro + pstack correct ladder (strongest fix first) |
 
 ## 5 · Review ([#18](https://github.com/chiyanram/agent-factory/issues/18), research/19, 20, 25)
 
