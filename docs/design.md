@@ -77,7 +77,7 @@ generic rules: chiyanram/skills → Claude plugin + `npx skills add` for other t
 - One fresh reviewer, two verdicts kept apart: **Standards** (matching rules + smell baseline + a correctness lens:
   every finding names input, state, wrong result) and **Spec** (each AC cited at `file:line` both ways + F-01), at stage 7.
 - Findings only (id · `file:line` · severity · fix); a spec/design review gives ALIGNED / CONFLICT / OPEN per decision.
-- The lead verifies each finding into Act on · Consider · Noted · Dismissed (why).
+- A verify pass inside the reviewer seat (a second fresh run) checks each finding and sorts it into Act on · Consider · Noted · Dismissed (why) ([#22](https://github.com/chiyanram/agent-factory/issues/22) Q1).
 - Each verdict names head SHA + patch-id: same patch-id → reuse; changed → review the delta only; after 3 rounds → human.
 - Rules are read from **master**; an MR's own rule edits are reviewed as diff and flagged for the human.
 - One context pack per head.
@@ -87,7 +87,7 @@ generic rules: chiyanram/skills → Claude plugin + `npx skills add` for other t
 - Gate: GitLab CI on the VM runner, done by kind of work ([#4](https://github.com/chiyanram/agent-factory/issues/4) Q4, Q5a). `/dod` is gone; its checks belong to the gate or the reviewer. Until the runner exists, the writer runs the same `make` target and records SHA + result on the MR. Speed ([#20](https://github.com/chiyanram/agent-factory/issues/20), research/30): the VM is not overloaded, the gate is serial; agent-platform #738 → #748 (parallel IT forks) → smoke diet, and ITs run beside smoke.
 - Approval: any maintainer, once reviewer and gate are green.
 - Isolation: writers never deploy the shared stack (Testcontainers only) · own worktree · harness sandbox, no permission bypass · cannot merge master. No unix-zone walls.
-- Measurement: tokens/$ per review (transcripts, kept 365 days) and output (rounds per MR, lead's bucket counts).
+- Measurement: tokens/$ per review (transcripts, kept 365 days) and output (rounds per MR, verify-pass bucket counts).
 - Claude-only extras (hooks, subagents) are convenience; every hard rule is also in `make lint` or CI.
 
 ## Not in this design
