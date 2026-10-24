@@ -38,6 +38,8 @@ Then:
 - Can each acceptance criterion be decided by a test or a command, without judgement? Mark which are automated and
   which a human checks.
 - Does every domain term already have a name in the glossary? Take every name from the specs; flag a new one.
+- Does the spec contradict itself anywhere?
+- Does it fit the roadmap order, with every item it depends on already done or planned first?
 
 ## 3 · Stage 2 — each decision
 
@@ -69,6 +71,8 @@ Review through whichever lenses are relevant. Not every lens applies to every de
   give-up?
 - What happens if this runs twice, or if a previous run crashed halfway?
 - What does a partial failure leave behind?
+- Is every state and every transition between states named?
+- Is each acquire released by the same identity that took it?
 
 **Root cause.** Does the design fix the actual problem, or paper over a symptom?
 
@@ -76,6 +80,7 @@ Review through whichever lenses are relevant. Not every lens applies to every de
 - Does each new piece land in a module that exists, behind a port, in the right layer?
 - Does it introduce a dependency that will make the next change harder?
 - If the requirement had been known from the start, would the design look like this?
+- Is each choice that varies between customers a setting, not a hard-coded value?
 - Is there one path, or does an old path stay beside the new one?
 
 **Verification.** Can a reader tell from the design how it will be proved? Does it check the real thing, not a

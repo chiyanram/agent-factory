@@ -21,7 +21,7 @@ Three rules carry the rest.
 - **Coordinator (you).** Talks with the human. Does intake, grilling, spec, design and retro. Starts workers. Reads and
   writes GitLab through the scripts in [Scripts](#scripts). Never edits code.
 - **Writer.** Owns the branch of one MR, in its own worktree. Builds, cleans up, fixes review findings, writes the MR
-  body. Never talks to the human.
+  body. Rebases its own branch and pushes with `--force-with-lease` (agent-fleet #92). Never talks to the human.
 - **Reviewer.** A find run and a verify run, each fresh. Posts a verdict only (`docs/adr/0004`).
 - **Gate.** GitLab CI on the VM runner, by kind of work (`docs/adr/0005`).
 - **Human.** Answers your questions, posts `/approved`, merges.
@@ -45,7 +45,8 @@ Three rules carry the rest.
 ## Triggers
 
 Poll GitLab about every 5 minutes with `poll`. React to each change below. Limits: one run per MR, at most two runs at
-once; the rest wait in the queue.
+once, and at most **one heavy run per machine** (a build, an IT suite or a deploy) — two at once ran a 9 GB machine out
+of memory (agent-fleet #91). The rest wait in the queue.
 
 | when GitLab shows | do |
 |---|---|

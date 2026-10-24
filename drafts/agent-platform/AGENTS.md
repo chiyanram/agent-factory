@@ -3,8 +3,8 @@
 Aruvii is a self-hosted AI agent platform. Java 25 · Spring Boot 4.1 · Spring AI 2.0 · PostgreSQL 18 · Redis 7 ·
 Angular 21 · Gradle · Spock 2 for new tests.
 
-This file holds the MUSTs every change follows. A nested `AGENTS.md` adds the MUSTs of its folder: read the nearest one
-before you change a file there. The detail behind each rule lives in the file named under
+This file holds the MUSTs every change follows. A nested `AGENTS.md` or `CLAUDE.md` adds the MUSTs of its folder: read
+the nearest one before you change a file there. The detail behind each rule lives in the file named under
 [Read when relevant](#read-when-relevant). When two instructions disagree, the narrower file wins; update the owner
 instead of adding a competing rule here.
 
@@ -71,8 +71,7 @@ Read the matching file in full before you act. Each one owns its topic; this fil
 - **Building, testing, the gate, the shared stack:** [`docs/guides/DEVELOPING.md`](docs/guides/DEVELOPING.md). `make` is
   the only front door; `make help` lists every target.
 - **Branches, commits, MR titles, worktrees:** the [`aruvii-git`](.claude/skills/aruvii-git/SKILL.md) skill.
-- **The change pipeline:** [`/crq`](.claude/commands/crq.md). Bug fixes start with a failing test; features take code
-  and tests in any order, with mutation testing where it runs.
+- **The change pipeline, and when tests come first:** [`/crq`](.claude/commands/crq.md).
 - **Java code:** [`java-standards`](.claude/rules/java-standards.md) and the
   [`aruvii-standards`](.claude/skills/aruvii-standards/SKILL.md) examples.
 - **Integration tests:** [`it-testing`](.claude/rules/it-testing.md) and the [`it-testing`](.claude/skills/it-testing/SKILL.md)
@@ -84,5 +83,6 @@ Read the matching file in full before you act. Each one owns its topic; this fil
 - **Logging and failure paths:** [`observability`](.claude/rules/observability.md).
 - **Dependencies:** [`dependencies`](.claude/rules/dependencies.md).
 - **A module's own rules:** that module's `AGENTS.md` or `CLAUDE.md`.
+- **Writing docs or a REQ:** [`DEVELOPING.md`](docs/guides/DEVELOPING.md) §Writing documentation.
 - **Decisions and specs:** [`docs/adr/`](docs/adr/README.md) and `docs/spec/`. Take every name from the specs.
 - **Issues and labels:** [`docs/agents/`](docs/agents/issue-tracker.md).
