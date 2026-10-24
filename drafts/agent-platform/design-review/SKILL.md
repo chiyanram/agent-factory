@@ -14,7 +14,7 @@ with no design skips it.
 
 ## 1 · Inputs
 
-Read these, and only these, from the context pack built from `master`:
+Read these from the context pack built from `master`, and check every code fact in the `master` checkout it names:
 
 - the **intent**, in the human's words, and the acceptance criteria — from the MR description;
 - the REQ and the design the MR links;
@@ -133,8 +133,8 @@ the state now, with numbers · the options · what changes with each · your rec
 ## Receipts        every file you read, by path
 ```
 
-Post it as one `[reviewer]` note on the MR with the head SHA and patch-id. The verify pass then sorts every finding
-into Act on · Consider · Noted · Dismissed.
+Return this report; the coordinator posts it and runs the verify pass, which sorts every finding into Act on ·
+Consider · Noted · Dismissed.
 
 ## Checklist
 
