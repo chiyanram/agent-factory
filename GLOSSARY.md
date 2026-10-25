@@ -46,6 +46,10 @@ The 4 always-on persona agents (aruvii-analyst, Spec Reviewer, Agent Developer, 
 The old fleet's gate queue: one slot, about an hour, full rerun only; replaced by the GitLab CI gate (#4 Q5a; research/17).
 _Avoid_: using "verify" for it — that word now means the verify pass
 
+**Cutover**:
+The point where the old fleet and the Verifier retire: after 3 tickets (docs, bug, feature) have gone end to end on the new setup with no manual rescue (L7 #27 Q1).
+_Avoid_: "migration" (that word means a Flyway schema change)
+
 **Discovery** (retired term):
 A separate seat for intent → issue → REQ → draft MR; withdrawn 2026-10-23, its jobs belong to the coordinator (#1 CORRECTION).
 
