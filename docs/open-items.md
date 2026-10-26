@@ -1,25 +1,23 @@
-# Open items — everything not finished (kept current; last update 2026-10-23)
+# Open items — everything not finished (kept current; last update 2026-10-26)
 
-Map: [#1](https://github.com/chiyanram/agent-factory/issues/1). Design: `docs/ARCHITECTURE.md`, `docs/design.md` and
-[the design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3). High-level design approved 2026-10-22.
+Map [#1](https://github.com/chiyanram/agent-factory/issues/1) closed 2026-10-25. Design: `docs/ARCHITECTURE.md`,
+`docs/design.md` and [the design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3).
 
 ```
-approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 … ─▶ L4 ✓ ─▶ L5 … ─▶ L6 … ─▶ L7 …
-                       #21     #22     #23      #24     #25      #26      #27
+approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 ✓ ─▶ L4 ✓ ─▶ L5 ✓ ─▶ L6 ✓ ─▶ L7 ✓ ─▶ map #1 closed 2026-10-25 ─▶ build
+                       #21     #22     #23     #24     #25     #26     #27
 ```
 
-## A · Track 1 — design (map #1)
+## A · Track 1 — build
 
-### Open tickets
+### Build tickets
 
-| # | ticket | state | next step |
-|---|---|---|---|
-| [#23](https://github.com/chiyanram/agent-factory/issues/23) | L3 · coordinator playbook | Q2 trigger list decided; Q1 superseded by #1 CORRECTION 2026-10-23 | write the playbook text: how it starts writer and reviewer, copies answers, recovers |
-| [#25](https://github.com/chiyanram/agent-factory/issues/25) | L5 · gate pipeline by kind | not started | `.gitlab-ci.yml` shape: jobs per kind, ITs beside deploy + smoke, single-job retry (input: research/17, 30) |
-| [#26](https://github.com/chiyanram/agent-factory/issues/26) | L6 · identity setup | not started | checklist: service account, role, tokens, trailer, seat tag, team rule (input: research/24) |
-| [#27](https://github.com/chiyanram/agent-factory/issues/27) | L7 · agent-platform adoption + transition | not started | AGENTS.md split, retire the old fleet and the Verifier, frozen work, interim !281 |
+| # | ticket | state |
+|---|---|---|
+| [#28](https://github.com/chiyanram/agent-factory/issues/28) | step 0: this repo becomes a build repo (instructions, `make lint` / `make test`, script tests, CI) | open |
+| [chiyanram/skills#111](https://github.com/chiyanram/skills/issues/111) | step 0: a buildable rulebook plugin repo | open |
 
-### Closed since the last update
+### Design tickets closed (L1–L7)
 
 | # | ticket | closed with |
 |---|---|---|
@@ -27,7 +25,11 @@ approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 … ─▶ L4 ✓ ─�
 | [#20](https://github.com/chiyanram/agent-factory/issues/20) | gate speed | keep the VM runner; speed via agent-platform #738 → #748 → smoke diet (research/30) |
 | [#21](https://github.com/chiyanram/agent-factory/issues/21) | L1 · rulebook files | file plan approved (research/34; page https://claude.ai/artifact/Pqxf9rebUf7NJb1Zpk3vAr) |
 | [#22](https://github.com/chiyanram/agent-factory/issues/22) | L2 · reviewer | find + verify passes, context pack from master, models per step (research/35) |
+| [#23](https://github.com/chiyanram/agent-factory/issues/23) | L3 · coordinator playbook | `docs/playbooks/coordinator.md`; loop scripts are built in this repo |
 | [#24](https://github.com/chiyanram/agent-factory/issues/24) | L4 · `/crq` router | phase → skill table; coordinator owns intake to design and retro (correction 2026-10-23) |
+| [#25](https://github.com/chiyanram/agent-factory/issues/25) | L5 · gate pipeline by kind | stages and kinds of work decided, generic and per project (#25 RESOLUTION 2026-10-24) |
+| [#26](https://github.com/chiyanram/agent-factory/issues/26) | L6 · identity setup | 9-step checklist in `docs/setup/identity.md` |
+| [#27](https://github.com/chiyanram/agent-factory/issues/27) | L7 · agent-platform adoption + transition | order of steps to cutover; old fleet retires after 3 tickets run end to end |
 
 ### Other open items
 
@@ -43,11 +45,14 @@ approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 … ─▶ L4 ✓ ─�
 
 ## B · Track 2 — agent-platform temporary changes (operator's call)
 
-State as of 2026-10-21 unless a date is given. Not re-checked for this update.
+MR rows checked 2026-10-26. Other rows: state as of 2026-10-21 unless a date is given.
 
 | item | state | next step |
 |---|---|---|
-| #642 interim, draft !281: one reviewer, findings-only, review packet, 3 rounds | 19b4fe1d on origin; 48035c0d local | review 48035c0d, then operator "push" |
+| #807 one stage-5 design reviewer, !316 | merged | — |
+| #783 root AGENTS.md as blocks of MUSTs and pointers, !318 | merged | — |
+| #642 one stage-7 reviewer with two verdicts, draft !281 | in review | operator review |
+| #814 one heavy run per machine, force-with-lease for writers, draft !323 | in review | operator review |
 | #738 IT pre-setup standard (incl. `fsync=off` in IT Postgres) | gate-speed step 1 (#20, 2026-10-22) | re-measure on the VM with `docs/briefs/vm-gate-diagnose.md` |
 | #748 parallel IT forks, a template DB per fork | gate-speed step 2 (#20) | after #738 |
 | #746, #607, #609 smoke diet | gate-speed step 3 (#20) | after #748 |

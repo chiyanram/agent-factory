@@ -1,6 +1,30 @@
 # Development — how to work in this repo
 
-This repo plans. It does not build. No code, no merges, no VM changes come from here (map #1 Notes: "Plan, don't do").
+This repo builds the factory: the coordinator scripts and their tests (ADR-0009). Map #1 closed 2026-10-25; its
+decisions are the design.
+
+## 0 · Build
+
+```
+issue #NNN ──▶ branch <type>/NNN-slug ──▶ make lint + make test ──▶ PR (one per issue) ──▶ operator merges
+```
+
+1. Start from one issue. Make one branch and one PR for it.
+2. Put a script in `scripts/`. Put its test in `tests/<script>.test.sh`.
+3. Write a test as plain bash. It exits non-zero on a failed assertion. Use no test framework. Shared helpers are in
+   `tests/lib.sh`.
+4. Put bad input that a test needs in `tests/fixtures/<case>/`. `make lint` skips that folder.
+5. Write scripts for bash 3.2 (stock macOS) and Ubuntu: POSIX tools only, no GNU-only flags.
+6. Run `make lint` and `make test`. Both must exit 0. CI (`.github/workflows/ci.yml`) runs the same two targets on
+   every pull request and on every push to `main`.
+7. Pin every action in a workflow to a full commit SHA. Dependabot (`.github/dependabot.yml`) proposes the updates.
+
+`make lint` runs two checks:
+
+| check | fails when |
+|---|---|
+| `scripts/check-links.sh` | a relative link in a tracked `.md` file names no file. It skips web links, `#anchor` links and code. It skips `tests/fixtures/` and `drafts/agent-platform/`, whose links resolve in agent-platform. |
+| `scripts/check-size.sh` | the root `AGENTS.md` has 200 lines or more (ADR-0003 Decision: "root, <200 lines") |
 
 ## 1 · The map and its tickets
 
@@ -64,7 +88,7 @@ ticket comment with the page link.
 
 ## 5 · Commits
 
-- Commit and push only when the operator says "commit" in this session.
+- The operator approves every commit and every push. Commit only when the operator says "commit" in this session.
 - Subject: `type: subject`, lower case, no period. Types in use: `docs`, `research`.
 - Every commit has a body that says why.
 - This repo uses the trailer `Co-Authored-By: Claude <model> <noreply@anthropic.com>`. agent-platform does not.

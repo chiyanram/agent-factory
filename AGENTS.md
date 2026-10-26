@@ -1,8 +1,13 @@
 # agent-factory
 
-Planning repo for the agent factory: one coordinator AI that starts fresh workers and one rulebook of small markdown instruction files.
-The map is issue #1 (wayfinder). Plan, don't do — nothing is built until the design is approved.
+Build repo for the agent factory: one coordinator AI that starts fresh workers. The rulebook lives in chiyanram/skills (ADR-0009).
 Start any session with `README.md`, then `docs/ARCHITECTURE.md` and `docs/open-items.md`; research lives in numbered files under `research/`.
+
+## Build
+
+- Coordinator scripts live in `scripts/`. Each script has a plain-bash test `tests/<script>.test.sh` that exits non-zero on a failed assertion.
+- Run `make lint` and `make test` before you hand over a change. CI runs the same two targets on every pull request.
+- A change lands as one issue → one branch → one PR. The operator approves every commit and every push.
 
 ## Agent skills
 

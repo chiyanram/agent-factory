@@ -1,6 +1,7 @@
 # agent-factory
 
-The planning repo for the agent factory. It holds the design, the decisions and the research. It holds no code.
+The build repo for the agent factory. It holds the coordinator scripts, their tests, the design, the decisions and the
+research.
 
 ```
             human
@@ -24,8 +25,8 @@ CORRECTION 2026-10-23.
 |---|---|---|
 | high-level design | **approved 2026-10-22** | #1 "HIGH-LEVEL DESIGN APPROVED" · [design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3) · `docs/design.md` |
 | one coordinator, no discovery seat | corrected 2026-10-23 | #1 CORRECTION · research/38 |
-| low-level design L1–L7 | in progress | tickets #21–#27 on map #1 · `docs/open-items.md` |
-| build | not started | plan, don't do: nothing is built before its low-level ticket closes |
+| low-level design L1–L7 | **closed** | tickets #21–#27; map #1 closed 2026-10-25 |
+| build | in progress | step 0 #28 and chiyanram/skills#111 · `docs/open-items.md` |
 
 ## Where to start reading
 
@@ -35,6 +36,15 @@ CORRECTION 2026-10-23.
 4. `docs/open-items.md` — what is still open.
 5. Map [#1](https://github.com/chiyanram/agent-factory/issues/1) — the live decision log.
 6. `docs/DEVELOPMENT.md` — how to work in this repo.
+
+## Build and test
+
+```
+make lint    relative links in every tracked .md resolve; root AGENTS.md under 200 lines (ADR-0003)
+make test    runs every tests/*.test.sh; fails if any one fails
+```
+
+CI (`.github/workflows/ci.yml`) runs both on every pull request and on every push to `main`.
 
 ## Repo layout
 
@@ -52,6 +62,10 @@ agent-factory/
 │  ├─ handoff-*.md         session handoffs
 │  ├─ briefs/              briefs for agents that run elsewhere (e.g. the VM gate diagnosis)
 │  └─ agents/              answers for the mattpocock skills: issue tracker, labels, domain docs
+├─ scripts/                coordinator scripts and the lint checks (ADR-0009)
+├─ tests/                  one plain-bash test per script (<script>.test.sh); fixtures/ holds planted bad input
+├─ Makefile                the front door: make lint, make test
+├─ .github/                the CI workflow and Dependabot for its actions
 ├─ research/               one numbered file per research ticket (NN-slug.md)
 └─ review/                 builders for review pages
 ```
