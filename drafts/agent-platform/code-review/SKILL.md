@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Stage-7 review of an implemented diff — one fresh reviewer, two verdicts kept apart (Standards: is it built right? Spec: is it the right thing?), findings only, then a verify pass. Use when the writer marks an MR ready for review.
+description: Stage-7 review of an implemented diff — one fresh reviewer, two verdicts kept apart (Standards: is it built right? Spec: is it the right thing?), findings only, then a verify pass. Use at /crq stage 7, over the context pack for the MR head.
 ---
 
 # Code review
@@ -18,7 +18,7 @@ one from masking the other.
 
 ## 1 · Pin the range
 
-Read the context pack the coordinator built for this head (`docs/adr/0004`): the head SHA, the patch-id, the
+Read the context pack the coordinator built for this head: the head SHA, the patch-id, the
 merge-base and the diff. Round 2 and later get the interdiff since the last verdict only. A bad ref or an empty diff
 fails here.
 
@@ -150,7 +150,7 @@ A second fresh run reads every finding against the code. It drops what does not 
 | **Noted** | real, out of scope; it becomes a follow-up issue |
 | **Dismissed** | does not hold; one line why, kept visible |
 
-Rule findings are verified on Sonnet; correctness findings on Opus (`docs/adr/0004`). The coordinator posts one
+Rule findings are verified on Sonnet; correctness findings on Opus. The coordinator posts one
 summary note and one resolvable thread per Act on and Consider finding.
 
 ## 10 · Verdict rules
