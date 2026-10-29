@@ -22,7 +22,7 @@ Suggestion `git -c core.quotePath=false ls-files`, or fail when awk fails.
 ### 3. [warning] Fence tracking ignores fence char and length        Standards
 Location   scripts/check-links.sh:14
 Finding    Any ``` or ~~~ line toggles. A ```` block containing ``` , or ~~~ containing ``` , flips state; code is then linted as prose.
-Evidence   `~~~ / ``` / [nested](sub/nestfence.md) / ~~~` → "broken link ... sub/nestfence.md"; ```` ```` ```` block with inner ``` → "sub/four.md" flagged. Docs that show markdown examples will fail lint spuriously. Indented code blocks flagged too (`    [x](sub/indented.md)`).
+Evidence   a `~~~` fence holding a ``` line and then a link to `sub/nestfence.md` → "broken link ... sub/nestfence.md"; ```` ```` ```` block with inner ``` → "sub/four.md" flagged. Docs that show markdown examples will fail lint spuriously. Indented code blocks flagged too (`    [x](sub/indented.md)`).
 Suggestion Remember opener char+length; close only on same char, >= length.
 
 ### 4. [warning] Link-target parsing mis-handles valid forms        Standards
