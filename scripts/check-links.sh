@@ -29,10 +29,14 @@ links() {
   ' "$1"
 }
 
-files=$(git -C "$root" ls-files -- '*.md' ':(exclude)tests/fixtures/' ':(exclude)drafts/agent-platform/')
+files=$(git -c core.quotePath=false -C "$root" ls-files -- '*.md' ':(exclude)tests/fixtures/' ':(exclude)drafts/agent-platform/')
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   dir=$(dirname "$file")
+  if ! found=$(links "$root/$file"); then
+    echo "check-links: cannot read $file"
+    exit 1
+  fi
   while IFS="$(printf '\t')" read -r lineno target; do
     target=${target#<}
     target=${target%%>*}
@@ -52,7 +56,7 @@ while IFS= read -r file; do
       broken=$((broken + 1))
     fi
   done <<LINKS
-$(links "$root/$file")
+$found
 LINKS
 done <<FILES
 $files

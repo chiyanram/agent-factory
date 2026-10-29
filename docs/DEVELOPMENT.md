@@ -89,7 +89,7 @@ ticket comment with the page link.
 ## 5 · Commits
 
 - The operator approves every commit and every push. Commit only when the operator says "commit" in this session.
-- Subject: `type: subject`, lower case, no period. Types in use: `docs`, `research`.
+- Subject: `type(area): subject`, lower case, no period. Types in use: `docs`, `research`, `chore`, `fix`, `feat`.
 - Every commit has a body that says why.
 - This repo uses the trailer `Co-Authored-By: Claude <model> <noreply@anthropic.com>`. agent-platform does not.
 
