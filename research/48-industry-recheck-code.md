@@ -34,6 +34,8 @@ Approvals:
   may rest on that vendor's official docs alone, when the docs state it as guidance; every other rule needs ≥2
   independent sources. Rescued: SC3, SC6, SC20, SS2 (reworded to Spring's example), SS17, JV4, SC7's core. Still
   dropped: SC19 (a reference project contradicts it), SC10 and SC13's prefix (project choices).
+- **SC22** (operator, 2026-10-31): reword approved — `@Retryable` on the `@Transactional` method or on a caller with no
+  open transaction, never inside an outer transaction (Spring Framework 7 resilience docs).
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
