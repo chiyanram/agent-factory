@@ -675,13 +675,14 @@ Why: "keep sampling at 1.0" has no external support. Sources treat the ratio as 
 
 ### 6 · Good/Bad pairs (misreadable rules)
 
-#### LG1 — context as fields, not text
+#### LG1 — Ids as fields, not in the text
+**Bad**
 ```java
-// Bad: ids baked into text; no trace id; not queryable
-log.info("Order " + orderId + " placed by customer " + customerId);
+log.info("order {} placed by customer {}", orderId, customerId);
 ```
+**Good**
 ```java
-// Good: constant message, ids as fields; trace id comes from MDC
+// the trace id comes from the MDC
 log.atInfo()
     .setMessage("order placed")
     .addKeyValue("orderId", orderId)
@@ -689,18 +690,18 @@ log.atInfo()
     .log();
 ```
 
-#### LG2 — log once, where handled
+#### LG2 — Log once, where the failure is handled
+**Bad**
 ```java
-// Bad: logged here and again by the top-level handler
 try {
     paymentGateway.charge(invoice);
 } catch (GatewayException e) {
-    log.error("charge failed for invoice {}", invoice.id(), e);
+    log.error("charge failed", e);
     throw new PaymentFailedException(invoice.id(), e);
 }
 ```
+**Good**
 ```java
-// Good: wrap with the cause; the handler that decides the response logs it once
 try {
     paymentGateway.charge(invoice);
 } catch (GatewayException e) {
@@ -708,15 +709,19 @@ try {
 }
 ```
 
-#### LG3 — throwable last
+#### LG3 — The exception as the last argument
+**Bad**
 ```java
-// Bad: message only, type and stack lost
-log.warn("refund failed for payment {}: {}", paymentId, e.getMessage());
+log.warn("refund failed: {}", e.getMessage());
 ```
+**Good**
 ```java
-// Good: throwable as the last argument prints type and stack
-log.warn("refund failed for payment {}", paymentId, e);
+// the payment id is in the MDC (LG1)
+log.warn("refund failed", e);
 ```
+
+Audit 2026-10-31: ids leave the message text in every pair (LG1), so the LG2 and LG3 pairs break only their own
+rule; the LG1 Bad uses `{}` placeholders so it breaks only LG1, not LG6. The skills reference copies these blocks.
 
 #### MX1 — bounded tags
 ```java
