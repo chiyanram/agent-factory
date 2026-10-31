@@ -12,7 +12,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-The repo is `chiyanram/agent-factory`; `gh` infers it when run inside a clone. The wayfinder map is issue #1.
+The repo is `chiyanram/agent-factory`; `gh` infers it when run inside a clone. The current wayfinder map is issue #30 (build to cutover); map #1 (the design) is closed.
 
 ## Pull requests as a triage surface
 
