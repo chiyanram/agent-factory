@@ -271,6 +271,7 @@ CREATE TABLE customers (
 #### MG35 · UNIQUE on a nullable column
 **Bad**: two payments for one customer with `external_ref` NULL both pass.
 ```sql
+SET LOCAL lock_timeout = '2s';
 CREATE TABLE payments (
   id           bigint GENERATED ALWAYS AS IDENTITY,
   customer_id  bigint NOT NULL,
@@ -283,6 +284,7 @@ CREATE TABLE payments (
 ```
 **Good**. When one NULL per customer is meant, keep it nullable and write `UNIQUE NULLS NOT DISTINCT` (PG 15+).
 ```sql
+SET LOCAL lock_timeout = '2s';
 CREATE TABLE payments (
   id           bigint GENERATED ALWAYS AS IDENTITY,
   customer_id  bigint NOT NULL,
@@ -293,9 +295,7 @@ CREATE TABLE payments (
   CONSTRAINT uq_payments_customer_ref UNIQUE (customer_id, external_ref)
 );
 ```
-
-Audit 2026-10-31: both pairs rewritten as `CREATE TABLE`, so each Bad breaks only its own rule and each Good obeys
-MG30–MG38 and the review rules (named `pk_`, no `ALTER … SET NOT NULL` or non-concurrent index on an existing table).
+Audit: both pairs are `CREATE TABLE`; MG35's add `lock_timeout` because the foreign key locks `customers` (MG5).
 
 #### MG5 · A lock timeout before a lock on a live table
 **Bad**
