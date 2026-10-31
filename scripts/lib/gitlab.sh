@@ -13,7 +13,10 @@ gl_api() {
   max=${FACTORY_MAX_TRIES:-4}
   while :; do
     tries=$((tries + 1))
-    answer=$("${FACTORY_GLAB:-glab}" api --include "$@" 2>&1)
+    # stderr stays out of the answer: glab prints an update notice there once a day (GLAB_CHECK_UPDATE)
+    errors=$(mktemp "${TMPDIR:-/tmp}/gl_api.XXXXXX")
+    answer=$(GLAB_CHECK_UPDATE=false "${FACTORY_GLAB:-glab}" api --include "$@" 2>"$errors")
+    said=$(head -n 1 "$errors"); rm -f "$errors"
     code=$(printf '%s\n' "$answer" | head -n 1 | tr -d '\r' | sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p')
     body=$(printf '%s\n' "$answer" | tr -d '\r' | sed '1,/^$/d')
     case $code in
@@ -28,7 +31,7 @@ gl_api() {
         ${FACTORY_SLEEP:-sleep} "${wait:-60}"
         ;;
       "")
-        echo "gitlab: no HTTP status from glab: $(printf '%s\n' "$answer" | head -n 1)" >&2
+        echo "gitlab: no HTTP status from glab: ${said:-$(printf '%s\n' "$answer" | head -n 1)}" >&2
         return 1
         ;;
       *)

@@ -58,6 +58,7 @@ n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$dir/n"
 printf '%s\n' "$*" | tr '\n' ' ' >> "$dir/calls.log"
 echo >> "$dir/calls.log"
+[ -f "$dir/e$n" ] && cat "$dir/e$n" >&2
 [ -f "$dir/r$n" ] || { echo "glab stub: no response for call $n: $*" >&2; exit 3; }
 cat "$dir/r$n"
 STUB

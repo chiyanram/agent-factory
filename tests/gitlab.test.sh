@@ -27,7 +27,13 @@ respond "$FACTORY_GLAB" 1 404 '{"message":"404 Not Found"}'
 expect_fail "a 404 fails and names the status" "HTTP 404" gl_api projects/1/merge_requests/99
 
 FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
-printf 'glab: not logged in\n' > "$(dirname "$FACTORY_GLAB")/r1"
+respond "$FACTORY_GLAB" 1 200 '{"iid":12}'
+printf '[glab] Update available: 1.80.0 -> 1.81.0\n' > "$(dirname "$FACTORY_GLAB")/e1"
+expect_eq "glab's update notice on stderr stays out of the body" '{"iid":12}' "$(gl_api projects/1/merge_requests/12)"
+
+FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
+printf 'glab: not logged in\n' > "$(dirname "$FACTORY_GLAB")/e1"
+: > "$(dirname "$FACTORY_GLAB")/r1"
 expect_fail "output with no HTTP status fails" "no HTTP status" gl_api projects/1/merge_requests/12
 
 finish
