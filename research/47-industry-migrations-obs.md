@@ -297,97 +297,110 @@ CREATE TABLE payments (
 Audit 2026-10-31: both pairs rewritten as `CREATE TABLE`, so each Bad breaks only its own rule and each Good obeys
 MG30–MG38 and the review rules (named `pk_`, no `ALTER … SET NOT NULL` or non-concurrent index on an existing table).
 
-#### MG5 · lock_timeout
+#### MG5 · A lock timeout before a lock on a live table
+**Bad**
 ```sql
--- Bad: waits forever for the lock; every query on orders queues behind it
 ALTER TABLE orders ADD COLUMN note text;
 ```
+**Good**
 ```sql
--- Good: transactional migration
 SET LOCAL lock_timeout = '2s';
 ALTER TABLE orders ADD COLUMN note text;
--- on "canceling statement due to lock timeout": rerun the migration
 ```
 
-#### MG41 · concurrent index
+#### MG10 · Rename through expand and contract
+**Bad**
 ```sql
--- Bad: blocks writes; IF NOT EXISTS skips a leftover INVALID index
-CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders (customer_id);
-ALTER TABLE orders ADD COLUMN note text;
-```
-```sql
--- Good: its own migration, run outside a transaction
--- (Flyway: flyway.postgresql.transactional.lock=false)
-SET lock_timeout = '2s';
-DROP INDEX CONCURRENTLY IF EXISTS idx_orders_customer_id;
-CREATE INDEX CONCURRENTLY idx_orders_customer_id ON orders (customer_id);
-```
-(Strictly, "one statement per file" is satisfied when the `DROP … IF EXISTS` lives in the same non-transactional file as the `CREATE`. Neither may share a file with transactional DDL.)
-
-#### MG45 · NOT VALID then VALIDATE
-```sql
--- Bad: scans invoices while blocking writes on both tables
-ALTER TABLE invoices
-  ADD CONSTRAINT fk_invoices_order_id FOREIGN KEY (order_id)
-  REFERENCES orders (id) ON DELETE RESTRICT;
-ALTER TABLE invoices ALTER COLUMN order_id SET NOT NULL;
-```
-```sql
--- Good: V20
-ALTER TABLE invoices
-  ADD CONSTRAINT fk_invoices_order_id FOREIGN KEY (order_id)
-  REFERENCES orders (id) ON DELETE RESTRICT NOT VALID;
-ALTER TABLE invoices
-  ADD CONSTRAINT ck_invoices_order_id_nn CHECK (order_id IS NOT NULL) NOT VALID;
--- Good: V21 (later migration)
-ALTER TABLE invoices VALIDATE CONSTRAINT fk_invoices_order_id;
-ALTER TABLE invoices VALIDATE CONSTRAINT ck_invoices_order_id_nn;
-ALTER TABLE invoices ALTER COLUMN order_id SET NOT NULL;   -- no scan: valid CHECK proves it
-ALTER TABLE invoices DROP CONSTRAINT ck_invoices_order_id_nn;
-```
-
-#### MG44 · adding a column
-```sql
--- Bad
-ALTER TABLE payments ADD COLUMN currency text NOT NULL;                    -- fails / breaks old INSERTs
-ALTER TABLE payments ADD COLUMN token uuid NOT NULL DEFAULT gen_random_uuid(); -- volatile: rewrite
-```
-```sql
--- Good
-ALTER TABLE payments ADD COLUMN currency text NOT NULL DEFAULT 'EUR';  -- constant: metadata only
-ALTER TABLE payments ADD COLUMN captured_at timestamptz;              -- nullable; backfill later (MG22)
-```
-
-#### MG10 · rename via expand/contract
-```sql
--- Bad: running app still selects customers.name
+SET LOCAL lock_timeout = '2s';
 ALTER TABLE customers RENAME COLUMN name TO full_name;
 ```
+**Good**
 ```sql
--- Good
 -- Release N   (V30): expand
+SET LOCAL lock_timeout = '2s';
 ALTER TABLE customers ADD COLUMN full_name text;
 -- Release N   app: writes name and full_name, reads full_name, falls back to name
 -- Release N   (V31, data job): batched backfill full_name from name (MG22)
 -- Release N+1 app: reads and writes full_name only
 -- Release N+2 (V40): contract
+SET LOCAL lock_timeout = '2s';
 ALTER TABLE customers DROP COLUMN name;
 ```
 
-#### MG22 · batched backfill, separate from DDL
+#### MG41 · A concurrent index in its own migration
+**Bad**
 ```sql
--- Bad: DDL and whole-table UPDATE in one transaction
+SET LOCAL lock_timeout = '2s';
+CREATE INDEX idx_orders_customer_id ON orders (customer_id);
+```
+**Good**
+```sql
+-- its own migration, run outside a transaction
+-- (Flyway: flyway.postgresql.transactional.lock=false)
+SET lock_timeout = '2s';
+DROP INDEX CONCURRENTLY IF EXISTS idx_orders_customer_id;
+CREATE INDEX CONCURRENTLY idx_orders_customer_id ON orders (customer_id);
+```
+
+#### MG45 · `NOT VALID`, then validate in a later migration
+**Bad**
+```sql
+SET LOCAL lock_timeout = '2s';
+ALTER TABLE invoices
+  ADD CONSTRAINT fk_invoices_order_id FOREIGN KEY (order_id)
+  REFERENCES orders (id) ON DELETE RESTRICT;
+ALTER TABLE invoices ALTER COLUMN order_id SET NOT NULL;
+```
+**Good**
+```sql
+-- V20
+SET LOCAL lock_timeout = '2s';
+ALTER TABLE invoices
+  ADD CONSTRAINT fk_invoices_order_id FOREIGN KEY (order_id)
+  REFERENCES orders (id) ON DELETE RESTRICT NOT VALID;
+ALTER TABLE invoices
+  ADD CONSTRAINT ck_invoices_order_id_nn CHECK (order_id IS NOT NULL) NOT VALID;
+-- V21 (later migration)
+SET LOCAL lock_timeout = '2s';
+ALTER TABLE invoices VALIDATE CONSTRAINT fk_invoices_order_id;
+ALTER TABLE invoices VALIDATE CONSTRAINT ck_invoices_order_id_nn;
+ALTER TABLE invoices ALTER COLUMN order_id SET NOT NULL;
+ALTER TABLE invoices DROP CONSTRAINT ck_invoices_order_id_nn;
+```
+
+#### MG44 · A new column on a populated table
+**Bad**
+```sql
+SET LOCAL lock_timeout = '2s';
+ALTER TABLE payments ADD COLUMN currency text NOT NULL;
+ALTER TABLE payments ADD COLUMN token uuid NOT NULL DEFAULT gen_random_uuid();
+```
+**Good**
+```sql
+SET LOCAL lock_timeout = '2s';
+ALTER TABLE payments ADD COLUMN currency text NOT NULL DEFAULT 'EUR';
+ALTER TABLE payments ADD COLUMN captured_at timestamptz;
+```
+
+#### MG22 · A batched backfill, apart from the DDL
+**Bad**
+```sql
+SET LOCAL lock_timeout = '2s';
 ALTER TABLE orders ADD COLUMN total_cents bigint;
 UPDATE orders SET total_cents = (total * 100)::bigint;
 ```
+**Good**
 ```sql
--- Good: DDL in V50; this file only DML, one committed batch per key range,
--- repeated by the job/runner until 0 rows are updated
+-- DDL in V50; this file only DML, one committed batch per key range,
+-- repeated by the job or runner until 0 rows are updated
 UPDATE orders
 SET    total_cents = (total * 100)::bigint
 WHERE  id >= :from_id AND id < :from_id + 10000
   AND  total_cents IS NULL;
 ```
+
+Audit 2026-10-31: every statement on an existing table now starts with `lock_timeout` (MG5), so each Bad breaks only
+its own rule; the MG41 Bad is a plain index build only. The skills reference copies these blocks.
 
 ## 3 · Observability: sources, quotes and pairs
 
