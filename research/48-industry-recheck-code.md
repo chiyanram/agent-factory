@@ -28,7 +28,12 @@ records the operator's yes.
 | angular-ui.md | 14 | 6 | 8 | 0 | 1 |
 | **total** | **157** | **50** | **79** | **28** | **17** |
 
-Approvals: pending.
+Approvals:
+
+- **V · vendor exception** (operator, 2026-10-31, option a): a rule about one framework's or library's own behaviour
+  may rest on that vendor's official docs alone, when the docs state it as guidance; every other rule needs ≥2
+  independent sources. Rescued: SC3, SC6, SC20, SS2 (reworded to Spring's example), SS17, JV4, SC7's core. Still
+  dropped: SC19 (a reference project contradicts it), SC10 and SC13's prefix (project choices).
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
