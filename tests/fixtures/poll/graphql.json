@@ -1,0 +1,32 @@
+{"data":{"project":{
+ "members":{"nodes":[
+  {"user":{"username":"ann"},"accessLevel":{"integerValue":40}},
+  {"user":{"username":"dev"},"accessLevel":{"integerValue":30}},
+  {"user":{"username":"agent-writer"},"accessLevel":{"integerValue":40}}]},
+ "open":{"nodes":[
+  {"iid":"1","draft":true,"diffHeadSha":"aaaa1111aaaa1111","lastEditedAt":"2026-10-30T10:00:00Z",
+   "labels":{"nodes":[]},"headPipeline":{"status":"SUCCESS","sha":"aaaa1111aaaa1111"},
+   "notes":{"nodes":[{"body":"/approved","createdAt":"2026-10-30T11:00:00Z","system":false,"author":{"username":"ann","bot":false}}]}},
+  {"iid":"2","draft":true,"diffHeadSha":"bbbb2222bbbb2222","lastEditedAt":"2026-10-30T12:00:00Z",
+   "labels":{"nodes":[]},"headPipeline":null,
+   "notes":{"nodes":[{"body":"/approved","createdAt":"2026-10-30T11:00:00Z","system":false,"author":{"username":"ann","bot":false}}]}},
+  {"iid":"3","draft":true,"diffHeadSha":"cccc3333cccc3333","lastEditedAt":null,
+   "labels":{"nodes":[]},"headPipeline":null,
+   "notes":{"nodes":[
+    {"body":"/approved","createdAt":"2026-10-30T11:00:00Z","system":false,"author":{"username":"agent-writer","bot":true}},
+    {"body":"/approved","createdAt":"2026-10-30T11:05:00Z","system":false,"author":{"username":"dev","bot":false}},
+    {"body":"please /approved this","createdAt":"2026-10-30T11:06:00Z","system":false,"author":{"username":"ann","bot":false}}]}},
+  {"iid":"4","draft":false,"diffHeadSha":"dddd4444dddd4444","lastEditedAt":null,
+   "labels":{"nodes":[{"title":"agent::claimed"},{"title":"needs-human"}]},"headPipeline":{"status":"FAILED","sha":"0000old0000old00"},
+   "notes":{"nodes":[
+    {"body":"/approved","createdAt":"2026-10-30T09:00:00Z","system":false,"author":{"username":"ann","bot":false}},
+    {"body":"[coordinator] OPEN: keep the old column? A or B","createdAt":"2026-10-30T10:00:00Z","system":false,"author":{"username":"agent-coordinator","bot":true}},
+    {"body":"[coordinator] OPEN: which error text?","createdAt":"2026-10-30T10:01:00Z","system":false,"author":{"username":"agent-coordinator","bot":true}}]}},
+  {"iid":"5","draft":true,"diffHeadSha":"eeee5555eeee5555","lastEditedAt":null,
+   "labels":{"nodes":[]},"headPipeline":{"status":"RUNNING","sha":"eeee5555eeee5555"},
+   "notes":{"nodes":[
+    {"body":"[coordinator] OPEN: A or B?","createdAt":"2026-10-30T08:00:00Z","system":false,"author":{"username":"agent-coordinator","bot":true}},
+    {"body":"A","createdAt":"2026-10-30T08:30:00Z","system":false,"author":{"username":"dev","bot":false}},
+    {"body":"/approved","createdAt":"2026-10-30T09:00:00Z","system":false,"author":{"username":"ann","bot":false}},
+    {"body":"/stop","createdAt":"2026-10-30T09:30:00Z","system":false,"author":{"username":"ann","bot":false}}]}}]},
+ "merged":{"nodes":[{"iid":"9"}]}}}}
