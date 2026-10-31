@@ -23,7 +23,9 @@ expect_eq "a full activity window that starts after the /approved counts as stal
 expect_eq "a merged MR that still carries the claim is listed for the sweep" "!9 merged claimed=yes" "$(line 9)"
 expect_eq "one call per poll" 1 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
 expect_pass "the project and the label go in as GraphQL variables, not into the query text" \
-  grep -qF -- '-f project=aruvii/agent-platform -f labels[]=agent::claimed' "$(dirname "$FACTORY_GLAB")/calls.log"
+  grep -qF -- '-f project=aruvii/agent-platform -f label=agent::claimed' "$(dirname "$FACTORY_GLAB")/calls.log"
+expect_fail "no -f field name carries a bracket, which glab rejects in a GraphQL body" "no bracket" \
+  sh -c 'grep -Eo -- "-f [A-Za-z_]+\[" "$1" && exit 0; echo "no bracket"; exit 1' _ "$(dirname "$FACTORY_GLAB")/calls.log"
 
 FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
 respond "$FACTORY_GLAB" 1 200 '{"errors":[{"message":"Field must have selections"}]}'

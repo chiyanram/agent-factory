@@ -24,7 +24,8 @@ label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 [ -n "$project" ] || { echo "FACTORY_PROJECT is not set (for example aruvii/agent-platform)" >&2; exit 1; }
 
 # Values go in as GraphQL variables, never into the query text, so no project path or label can change the query.
-query='query($project: ID!, $labels: [String!]) { project(fullPath: $project) {
+# Each is one plain string: glab rejects a bracketed field name (labels[]) in a GraphQL body.
+query='query($project: ID!, $label: String!) { project(fullPath: $project) {
   members: projectMembers(relations: [DIRECT, INHERITED], first: 100) {
     nodes { user { username } accessLevel { integerValue } } }
   open: mergeRequests(state: opened, first: 50) { nodes {
@@ -33,9 +34,9 @@ query='query($project: ID!, $labels: [String!]) { project(fullPath: $project) {
     headPipeline { status }
     comments: notes(filter: ONLY_COMMENTS, last: 100) { nodes { body createdAt author { username bot } } }
     activity: notes(filter: ONLY_ACTIVITY, last: 100) { nodes { createdAt systemNoteMetadata { action } } } } }
-  merged: mergeRequests(state: merged, labels: $labels, first: 20) { nodes { iid } } } }'
+  merged: mergeRequests(state: merged, labels: [$label], first: 20) { nodes { iid } } } }'
 
-answer=$(gl_api graphql -f query="$query" -f project="$project" -f "labels[]=$label") || exit 1
+answer=$(gl_api graphql -f query="$query" -f project="$project" -f label="$label") || exit 1
 problem=$(printf '%s' "$answer" | jq -r '(.errors // [])[0].message // empty')
 [ -z "$problem" ] || { echo "GraphQL: $problem" >&2; exit 1; }
 [ "$(printf '%s' "$answer" | jq '.data.project == null')" = false ] \
