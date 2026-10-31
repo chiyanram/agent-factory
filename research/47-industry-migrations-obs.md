@@ -723,104 +723,119 @@ log.warn("refund failed", e);
 Audit 2026-10-31: ids leave the message text in every pair (LG1), so the LG2 and LG3 pairs break only their own
 rule; the LG1 Bad uses `{}` placeholders so it breaks only LG1, not LG6. The skills reference copies these blocks.
 
-#### MX1 — bounded tags
+#### MX1 — Bounded tag values only
+**Bad**
 ```java
-// Bad: one time series per customer and per raw path
-meterRegistry.counter("invoices.sent",
-    "customerId", customer.id().toString(),
-    "path", request.getRequestURI()).increment();
+meterRegistry.counter(
+        "invoices.sent",
+        "customerId", customer.id().toString(),
+        "path", request.getRequestURI())
+    .increment();
 ```
+**Good**
 ```java
-// Good: closed sets only; the id goes in a log field or span attribute
-meterRegistry.counter("invoices.sent",
-    "channel", invoice.channel().name(),
-    "outcome", outcome.name()).increment();
+meterRegistry.counter(
+        "invoices.sent",
+        "channel", invoice.channel().name(),
+        "outcome", outcome.name())
+    .increment();
 ```
 
-#### MXN1 — aggregable histogram
+#### MXN1 — An aggregable histogram
+**Bad**
 ```java
-// Bad: client-side percentiles cannot be combined across instances
 final var timer = Timer.builder("payments.authorize")
     .publishPercentiles(0.5, 0.95, 0.99)
     .register(meterRegistry);
 ```
+**Good**
 ```java
-// Good: buckets the backend can aggregate into any percentile
 final var timer = Timer.builder("payments.authorize")
     .publishPercentileHistogram()
     .register(meterRegistry);
 ```
 
-#### MX3 — outcome as a tag on one meter
+#### MX3 — The outcome as a tag on one meter
+**Bad**
 ```java
-// Bad: two meters, so the error ratio needs a join
 meterRegistry.counter("orders.placed.success").increment();
 meterRegistry.counter("orders.placed.failed").increment();
 ```
+**Good**
 ```java
-// Good: one meter; the error ratio is a filter on the tag
-meterRegistry.counter("orders.placed",
-    "outcome", failed ? "failure" : "success").increment();
+meterRegistry.counter(
+        "orders.placed",
+        "outcome", failed ? "failure" : "success")
+    .increment();
 ```
 
-#### TR1 — propagate context, not a copied field
+#### TR1 — Propagate the context, not a copied field
+**Bad**
 ```java
-// Bad: a hand-made field; the consumer starts an unrelated trace
-final var message = new OrderPlaced(order.id(),
+final var message = new OrderPlaced(
+    order.id(),
     MDC.get("traceId"));
-kafkaTemplate.send("orders", message);
+kafkaTemplate.send(
+    "orders",
+    message);
 ```
+**Good**
 ```java
-// Good: tracing-instrumented template injects traceparent into the headers
-kafkaTemplate.setObservationEnabled(true);
-kafkaTemplate.send("orders",
+// the template is built with observation enabled, so it writes the trace headers
+kafkaTemplate.send(
+    "orders",
     new OrderPlaced(order.id()));
 ```
 
-#### TR2 — facade, no null checks
+#### TR2 — The facade, with no null check
+**Bad**
 ```java
-// Bad: SDK type in business code, plus a null branch
-private final io.opentelemetry.sdk.trace.SdkTracerProvider provider;
-if (provider != null) {
-    provider.get("orders").spanBuilder("orders.place").startSpan();
+private final SdkTracerProvider tracerProvider;
+
+if (tracerProvider != null) {
+    final var span = tracerProvider.get("orders").spanBuilder("orders.place").startSpan();
+    try {
+        orderService.place(command);
+    } finally {
+        span.end();
+    }
 }
 ```
+**Good**
 ```java
-// Good: facade; a no-op registry when tracing is off
 Observation.createNotStarted("orders.place", observationRegistry)
     .observe(() -> orderService.place(command));
 ```
 
-#### TRN1 — class-level span name
+#### TRN1 — A span name for a class of operation
+**Bad**
 ```java
-// Bad: one span name per customer
-Observation.createNotStarted("customers.load." + customerId,
-    observationRegistry).observe(() -> repository.load(customerId));
+Observation.createNotStarted("customers.load." + customerId, observationRegistry)
+    .observe(() -> repository.load(customerId));
 ```
+**Good**
 ```java
-// Good: stable name; the id is a high-cardinality attribute (spans only)
 Observation.createNotStarted("customers.load", observationRegistry)
     .highCardinalityKeyValue("customer.id", customerId.toString())
     .observe(() -> repository.load(customerId));
 ```
 
-#### TRN2 — always end
+#### TRN2 — End every span
+**Bad**
 ```java
-// Bad: an exception skips stop(); the span leaks and is never exported
-final var observation = Observation.start("invoices.render",
-    observationRegistry);
+final var observation = Observation.start("invoices.render", observationRegistry);
 renderer.render(invoice);
 observation.stop();
 ```
+**Good**
 ```java
-// Good: start, scope, error and stop handled in one call
 Observation.createNotStarted("invoices.render", observationRegistry)
     .observe(() -> renderer.render(invoice));
 ```
 
-#### TRN3 — error only when the operation failed
+#### TRN3 — An error status only for a failed operation
+**Bad**
 ```java
-// Bad: a handled cache miss marked as an error on the span
 try {
     return cache.get(orderId);
 } catch (CacheMissException e) {
@@ -828,8 +843,8 @@ try {
     return repository.load(orderId);
 }
 ```
+**Good**
 ```java
-// Good: a handled miss is not an error; it can be recorded as an event
 try {
     return cache.get(orderId);
 } catch (CacheMissException e) {
@@ -837,3 +852,6 @@ try {
     return repository.load(orderId);
 }
 ```
+
+Audit 2026-10-31: multi-line calls put one argument per line (house style), and the TR2 Bad ends its span so it
+breaks only TR2, not TRN2. The skills references copy these blocks.
