@@ -250,35 +250,52 @@ Independence: FW-* count as one vendor, as do GL-* and SQ-*. Every rule below ha
 ### 5 · Good / Bad pairs (misreadable rules)
 
 #### MG31 · text + CHECK
+**Bad**
 ```sql
--- Bad
 CREATE TABLE customers (
-  id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  email varchar(120) NOT NULL
+  id    bigint GENERATED ALWAYS AS IDENTITY,
+  email varchar(120) NOT NULL,
+  CONSTRAINT pk_customers PRIMARY KEY (id)
 );
 ```
+**Good**
 ```sql
--- Good
 CREATE TABLE customers (
-  id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  id    bigint GENERATED ALWAYS AS IDENTITY,
   email text NOT NULL,
+  CONSTRAINT pk_customers PRIMARY KEY (id),
   CONSTRAINT ck_customers_email_length CHECK (char_length(email) <= 120)
 );
 ```
 
 #### MG35 · UNIQUE on a nullable column
+**Bad**: two payments for one customer with `external_ref` NULL both pass.
 ```sql
--- Bad: two rows with external_ref NULL for the same customer both pass
-CREATE UNIQUE INDEX uq_payments_customer_ref
-  ON payments (customer_id, external_ref);   -- external_ref is nullable
+CREATE TABLE payments (
+  id           bigint GENERATED ALWAYS AS IDENTITY,
+  customer_id  bigint NOT NULL,
+  external_ref text,
+  CONSTRAINT pk_payments PRIMARY KEY (id),
+  CONSTRAINT fk_payments_customer FOREIGN KEY (customer_id)
+    REFERENCES customers (id) ON DELETE RESTRICT,
+  CONSTRAINT uq_payments_customer_ref UNIQUE (customer_id, external_ref)
+);
 ```
+**Good**. When one NULL per customer is meant, keep it nullable and write `UNIQUE NULLS NOT DISTINCT` (PG 15+).
 ```sql
--- Good (either form)
-ALTER TABLE payments ALTER COLUMN external_ref SET NOT NULL;  -- if no NULLs are meant
--- or, PostgreSQL 15+:
-CREATE UNIQUE INDEX uq_payments_customer_ref
-  ON payments (customer_id, external_ref) NULLS NOT DISTINCT;
+CREATE TABLE payments (
+  id           bigint GENERATED ALWAYS AS IDENTITY,
+  customer_id  bigint NOT NULL,
+  external_ref text NOT NULL,
+  CONSTRAINT pk_payments PRIMARY KEY (id),
+  CONSTRAINT fk_payments_customer FOREIGN KEY (customer_id)
+    REFERENCES customers (id) ON DELETE RESTRICT,
+  CONSTRAINT uq_payments_customer_ref UNIQUE (customer_id, external_ref)
+);
 ```
+
+Audit 2026-10-31: both pairs rewritten as `CREATE TABLE`, so each Bad breaks only its own rule and each Good obeys
+MG30–MG38 and the review rules (named `pk_`, no `ALTER … SET NOT NULL` or non-concurrent index on an existing table).
 
 #### MG5 · lock_timeout
 ```sql
