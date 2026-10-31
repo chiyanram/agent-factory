@@ -36,6 +36,9 @@ Approvals:
   dropped: SC19 (a reference project contradicts it), SC10 and SC13's prefix (project choices).
 - **SC22** (operator, 2026-10-31): reword approved — `@Retryable` on the `@Transactional` method or on a caller with no
   open transaction, never inside an outer transaction (Spring Framework 7 resilience docs).
+- **TY4** (operator, 2026-10-31): narrowed to fields — every field `final` unless reassigned after construction.
+  `final` locals and parameters leave the generic rulebook; a project that wants them keeps its own gate and docs.
+  Supersedes OQ2 / G-OQ2 for the rulebook.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
