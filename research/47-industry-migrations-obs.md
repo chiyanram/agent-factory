@@ -335,8 +335,8 @@ CREATE INDEX idx_orders_customer_id ON orders (customer_id);
 ```
 **Good**
 ```sql
--- its own migration, run outside a transaction
--- (Flyway: flyway.postgresql.transactional.lock=false)
+-- its own migration; Flyway runs a CONCURRENTLY script outside a transaction
+-- (set flyway.postgresql.transactional.lock=false once, in the Flyway config)
 SET lock_timeout = '2s';
 DROP INDEX CONCURRENTLY IF EXISTS idx_orders_customer_id;
 CREATE INDEX CONCURRENTLY idx_orders_customer_id ON orders (customer_id);
@@ -345,6 +345,7 @@ CREATE INDEX CONCURRENTLY idx_orders_customer_id ON orders (customer_id);
 #### MG45 · `NOT VALID`, then validate in a later migration
 **Bad**
 ```sql
+-- V19, its own migration: CREATE INDEX CONCURRENTLY idx_invoices_order_id ON invoices (order_id)
 SET LOCAL lock_timeout = '2s';
 ALTER TABLE invoices
   ADD CONSTRAINT fk_invoices_order_id FOREIGN KEY (order_id)
@@ -353,6 +354,7 @@ ALTER TABLE invoices ALTER COLUMN order_id SET NOT NULL;
 ```
 **Good**
 ```sql
+-- V19, its own migration: CREATE INDEX CONCURRENTLY idx_invoices_order_id ON invoices (order_id)
 -- V20
 SET LOCAL lock_timeout = '2s';
 ALTER TABLE invoices
@@ -367,7 +369,6 @@ ALTER TABLE invoices VALIDATE CONSTRAINT ck_invoices_order_id_nn;
 ALTER TABLE invoices ALTER COLUMN order_id SET NOT NULL;
 ALTER TABLE invoices DROP CONSTRAINT ck_invoices_order_id_nn;
 ```
-
 #### MG44 · A new column on a populated table
 **Bad**
 ```sql
@@ -381,7 +382,6 @@ SET LOCAL lock_timeout = '2s';
 ALTER TABLE payments ADD COLUMN currency text NOT NULL DEFAULT 'EUR';
 ALTER TABLE payments ADD COLUMN captured_at timestamptz;
 ```
-
 #### MG22 · A batched backfill, apart from the DDL
 **Bad**
 ```sql
@@ -391,16 +391,16 @@ UPDATE orders SET total_cents = (total * 100)::bigint;
 ```
 **Good**
 ```sql
--- DDL in V50; this file only DML, one committed batch per key range,
--- repeated by the job or runner until 0 rows are updated
+-- DDL in V50; this file only DML. The job runs it once per key range, commits each,
+-- and advances :from_id by 10000 until :from_id > max(id)
 UPDATE orders
 SET    total_cents = (total * 100)::bigint
 WHERE  id >= :from_id AND id < :from_id + 10000
   AND  total_cents IS NULL;
 ```
 
-Audit 2026-10-31: every statement on an existing table now starts with `lock_timeout` (MG5), so each Bad breaks only
-its own rule; the MG41 Bad is a plain index build only. The skills reference copies these blocks.
+Audit 2026-10-31: every statement on an existing table starts with `lock_timeout` (MG5); MG45 pairs index the FK
+first (MG33); MG41 and MG22 comments corrected in review round 1. The skills reference copies these blocks.
 
 ## 3 · Observability: sources, quotes and pairs
 
@@ -855,3 +855,14 @@ try {
 
 Audit 2026-10-31: multi-line calls put one argument per line (house style), and the TR2 Bad ends its span so it
 breaks only TR2, not TRN2. The skills references copy these blocks.
+
+## 4 · Quotes added in review round 1 (2026-10-31)
+
+Fetched from postgres/postgres `doc/src/sgml/` (the source of the PostgreSQL docs pages).
+
+- PG-SET (`ref/set.sgml:113-117`, https://www.postgresql.org/docs/current/sql-set.html): `LOCAL` "Specifies that the
+  command takes effect for only the current transaction. … Issuing this outside of a transaction block emits a warning
+  and otherwise has no effect."
+- PG-LOCK (`mvcc.sgml:1096-1099`, https://www.postgresql.org/docs/current/explicit-locking.html): `ACCESS EXCLUSIVE`
+  is "Acquired by the DROP TABLE, TRUNCATE, REINDEX, CLUSTER, VACUUM FULL, and REFRESH MATERIALIZED VIEW (without
+  CONCURRENTLY) commands. … Many forms of ALTER INDEX and ALTER TABLE also acquire" it.
