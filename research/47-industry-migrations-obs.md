@@ -866,3 +866,10 @@ Fetched from postgres/postgres `doc/src/sgml/` (the source of the PostgreSQL doc
 - PG-LOCK (`mvcc.sgml:1096-1099`, https://www.postgresql.org/docs/current/explicit-locking.html): `ACCESS EXCLUSIVE`
   is "Acquired by the DROP TABLE, TRUNCATE, REINDEX, CLUSTER, VACUUM FULL, and REFRESH MATERIALIZED VIEW (without
   CONCURRENTLY) commands. … Many forms of ALTER INDEX and ALTER TABLE also acquire" it.
+- SLF4J-FLUENT (qos-ch/slf4j-site `src/site/pages/manual.html:128-197`, https://www.slf4j.org/manual.html#fluent):
+  "The idea is to build a logging event piece by piece with a LoggingEventBuilder and to log once the event is fully
+  built." Example: `logger.atDebug().setMessage("Temperature set to {}. Old value was {}.").addArgument(() -> t16())
+  .addArgument(oldT).log();` — "It is now possible to … pass arguments with a Supplier".
+- SLF4J-LEB (qos-ch/slf4j `slf4j-api/src/main/java/org/slf4j/spi/LoggingEventBuilder.java:49-55, :89-97`):
+  `setCause(Throwable cause)` — "Set the cause for the logging event being built."; `addArgument(Supplier<?>
+  objectSupplier)` — "Add an argument supplier to the event being built."
