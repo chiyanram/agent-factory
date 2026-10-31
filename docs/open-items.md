@@ -1,5 +1,6 @@
-# Open items — everything not finished (kept current; last update 2026-10-26)
+# Open items — everything not finished (kept current; last update 2026-10-31)
 
+Build map: [#30](https://github.com/chiyanram/agent-factory/issues/30) (open; its sub-issues are the live build list).
 Map [#1](https://github.com/chiyanram/agent-factory/issues/1) closed 2026-10-25. Design: `docs/ARCHITECTURE.md`,
 `docs/design.md` and [the design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3).
 
@@ -14,7 +15,10 @@ approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 ✓ ─▶ L4 ✓ ─�
 
 | # | ticket | state |
 |---|---|---|
-| [#28](https://github.com/chiyanram/agent-factory/issues/28) | step 0: this repo becomes a build repo (instructions, `make lint` / `make test`, script tests, CI) | open |
+| [#28](https://github.com/chiyanram/agent-factory/issues/28) | step 0: this repo becomes a build repo (instructions, `make lint` / `make test`, script tests, CI) | closed (#29) |
+| [#31](https://github.com/chiyanram/agent-factory/issues/31) | T1: skills testing/ rule files | closed |
+| [#34](https://github.com/chiyanram/agent-factory/issues/34) | T4: skills migrations/ and obs/ rule files, re-sourced from industry (research/47) | closed |
+| T2–T3, T5–T16 | the rest of map #30 | see map #30 |
 | [chiyanram/skills#111](https://github.com/chiyanram/skills/issues/111) | step 0: a buildable rulebook plugin repo | open |
 
 ### Design tickets closed (L1–L7)
