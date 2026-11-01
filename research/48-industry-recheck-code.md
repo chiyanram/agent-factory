@@ -76,6 +76,12 @@ Approvals:
 - **comments.md** (operator, 2026-11-01): KEEP CM1, CM2 (wording); REWORD CM3, CM4, CM5, CM7; NEW NEW-CM-a (delete
   commented-out code).
 
+- **concurrency.md** (operator, 2026-11-01): KEEP CC2, CC3, CC4, CC8; REWORD CC1 (Java-25 clauses to a Decided edge
+  until JEP 491 is read; reverses D6's "avoid" exclusion), CC5, CC6 (event-loop and common-pool threads), CC7 (new
+  reason), CC9, CC10 as in §5; NEW CC11 (circuit breaker).
+- **angular-ui.md** (operator, 2026-11-01): KEEP NGA3, NGA5, NGA7, NGB3, NGD1, NGD2; REWORD NGA1, NGA2 (approved above),
+  NGA6, NGB1 (v20+), NGB2 (D10 kept), NGC1, NGC3, NGD3 as in §5; NEW NGB4 (signal APIs; already in the ledger).
+
 All 13 files approved. Next: one skills PR per file, with the cross-rule examples audit.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
