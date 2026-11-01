@@ -74,15 +74,27 @@ loops drift; scripts do not.
 |---|---|
 | `poll` | one line of facts per open MR, read from GitLab as it is now: head, draft, claimed, `approved=yes\|stale\|no`, pipeline at the head, `needs-human`, `/stop`, open asks; plus each merged MR that still carries the claim |
 | `claim <mr>` / `release <mr>` | adds or removes the claim label; refuses an MR that is already claimed |
-| `start writer <mr>` | starts a fresh writer in its own worktree (`claude --bg`; fallback `claude -p`) |
+| `start writer <mr>` | starts a fresh writer for a claimed MR in its own worktree at the MR's head (`claude --bg -n writer-<mr>`; fallback `FACTORY_RUN_MODE=print`, a foreground `claude -p`); refuses an MR with a live run, and a machine at its run limit |
 | `start reviewer <mr>` | builds the context pack from master, then runs find and verify |
 | `status <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>`, the head the run started at |
-| `reconcile` | matches claim labels against live runs |
+| `reconcile` | removes each claim and run worktree that has no live run, and each claim left on a merged MR |
 
-`poll`, `claim`, `release` and `status` are in `scripts/` (#36); `start writer`, `start reviewer` and `reconcile` come
-with #39. They run as the coordinator's service account and refuse a human login (ADR-0006). Settings:
-`FACTORY_PROJECT` (the GitLab project path), `FACTORY_CLAIM_LABEL` (default `agent::claimed`) and
-`FACTORY_AGENT_PREFIX` (default `agent-`, the names of agent accounts).
+`poll`, `claim`, `release` and `status` are in `scripts/` (#36), and `start-writer.sh` and `reconcile.sh` (#39);
+`start reviewer` follows in two more PRs (#39 Q1). The scripts that write to GitLab run as the coordinator's service
+account and refuse a human login (ADR-0006). Settings:
+
+| setting | meaning |
+|---|---|
+| `FACTORY_PROJECT` | the GitLab project path, for example `aruvii/agent-platform` |
+| `FACTORY_REPO` | the local clone of that project; runs get worktrees in `.claude/worktrees/` inside it |
+| `FACTORY_CLAIM_LABEL` | the claim label (default `agent::claimed`) |
+| `FACTORY_AGENT_PREFIX` | the start of every agent account's name (default `agent-`) |
+| `FACTORY_MAX_RUNS` | live runs at once on this machine (default 2) |
+| `FACTORY_WRITER_MODEL` | the writer's model, when not the default |
+
+A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`). Before the first
+run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt: `claude --bg` refuses an
+untrusted workspace. Add `.claude/worktrees/` to the project's `.gitignore`.
 
 `poll` keeps no state between runs, so a restart re-reads everything. It counts:
 

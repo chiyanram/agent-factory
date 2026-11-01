@@ -92,3 +92,48 @@ expect_eq() {
     FAILURES=$((FAILURES + 1))
   fi
 }
+
+# claude_stub : print the path of a fake claude. Each call appends "cwd | args" to calls.log in its folder.
+# `agents --json` prints agents.json (default []). Any other call prints bg.out (default "started abc123")
+# and exits with the code in bg.rc (default 0).
+claude_stub() {
+  dir=$(mktemp -d "$TMP_BASE/claude.XXXXXX")
+  echo '[]' > "$dir/agents.json"
+  cat > "$dir/claude" <<'STUB'
+#!/usr/bin/env bash
+dir=$(cd "$(dirname "$0")" && pwd)
+printf '%s | %s\n' "$PWD" "$*" | tr '\n' ' ' >> "$dir/calls.log"
+echo >> "$dir/calls.log"
+if [ "${1:-}" = agents ]; then cat "$dir/agents.json"; exit 0; fi
+cat "$dir/bg.out" 2>/dev/null || echo "started abc123"
+exit "$(cat "$dir/bg.rc" 2>/dev/null || echo 0)"
+STUB
+  chmod +x "$dir/claude"
+  echo "$dir/claude"
+}
+
+# live STUB NAME... : make the fake claude list a live session for each NAME.
+live() {
+  stub=$1; shift
+  printf '%s\n' "$@" | jq -R '{name: ., kind: "background", status: "busy"}' | jq -s . > "$(dirname "$stub")/agents.json"
+}
+
+# project_clone BRANCH : a bare origin with BRANCH pushed, and a clone of it; prints the clone's path.
+# The tip of BRANCH is in the file head next to the clone.
+project_clone() {
+  base=$(mktemp -d "$TMP_BASE/project.XXXXXX")
+  git init -q --bare "$base/origin.git"
+  git clone -q "$base/origin.git" "$base/clone" 2> /dev/null
+  (
+    cd "$base/clone" || exit 1
+    git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+    git push -q origin HEAD:refs/heads/main 2> /dev/null
+    git checkout -q -b "$1"
+    echo change > change.txt && git add change.txt
+    git -c user.name=t -c user.email=t@t commit -q -m change
+    git push -q origin "$1" 2> /dev/null
+    git rev-parse HEAD > "$base/head"
+    git checkout -q main 2> /dev/null || git checkout -q -b main origin/main
+  )
+  echo "$base/clone"
+}
