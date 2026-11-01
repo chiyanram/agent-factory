@@ -76,6 +76,7 @@ loops drift; scripts do not.
 | `claim <mr>` / `release <mr>` | adds or removes the claim label; refuses an MR that is already claimed |
 | `start writer <mr>` | starts a fresh writer in its own worktree (`claude --bg`; fallback `claude -p`) |
 | `start reviewer <mr>` | builds the context pack from master, then runs find and verify |
+| `pack <mr> [<previous-head>]` | builds the reviewer's context pack for the MR's head, rules from master (#22 Q3), in `FACTORY_REPO/.claude/packs/`; `FACTORY_RULEBOOK` names the rulebook plugin folder; a rule pointer the rulebook cannot resolve stops it |
 | `status <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>`, the head the run started at |
 | `reconcile` | matches claim labels against live runs |
 

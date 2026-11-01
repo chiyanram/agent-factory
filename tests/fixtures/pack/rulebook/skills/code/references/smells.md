@@ -1,0 +1,3 @@
+# Smells
+
+SMELLS-BASELINE
