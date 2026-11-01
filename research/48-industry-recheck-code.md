@@ -48,6 +48,9 @@ Approvals:
 - **SEAM1** (operator, 2026-11-01): split approved — SEAM1 = decisions do no I/O; I/O chooses no outcome. "Record in,
   sealed out", rule lists, complexity ≤5 and "one job" leave the generic rulebook (agent-platform's own seam rules,
   T8). Narrows D9 / agent-factory#21 Q3.
+- **security.md** (operator, 2026-11-01): KEEP SE10, SE3, SE6, SS21, SS1, SS3–SS11, SS19, SS22, SS24, SS17 (vendor
+  exception); REWORD SE1, SE4, SE5, SE7, SE7a, SE8, SS16, SS20 as in §4, SS2 to Spring's own example; DROP SE2, SS12,
+  SS26, SS23, SS25; NEW login rate limit and secrets-from-environment (§4.3 items 1 and 3; item 2 points to LG4).
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
