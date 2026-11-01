@@ -47,18 +47,27 @@ count=$(printf '%s\n' "$runs" | grep -c . || true)
   || { echo "this machine is at its run limit: $count live runs (FACTORY_MAX_RUNS=${FACTORY_MAX_RUNS:-2})" >&2; exit 1; }
 
 # 1 · rounds so far: only this account's notes count
-notes=$(gl_api "projects/$ref/merge_requests/$iid/notes?sort=asc&order_by=created_at&per_page=100") || exit 1
+notes='[]' page=1
+while :; do   # every page: an MR with many notes must not push the round notes out of view
+  batch=$(gl_api "projects/$ref/merge_requests/$iid/notes?sort=asc&order_by=created_at&per_page=100&page=$page") || exit 1
+  notes=$(printf '%s %s' "$notes" "$batch" | jq -cs '.[0] + .[1]')
+  [ "$(printf '%s' "$batch" | jq length)" -eq 100 ] || break
+  page=$((page + 1))
+done
 mine=$(printf '%s' "$notes" | jq -r --arg me "$reviewer" '.[] | select(.author.username == $me) | .body | split("\n")[0]
   | select(startswith("[reviewer] round "))')
 rounds=$(printf '%s\n' "$mine" | grep -Ec '^\[reviewer\] round [0-9]+ · head' || true)
-[ "$rounds" -lt 3 ] || { echo "!$iid has had 3 review rounds; it goes to the human (label needs-human)" >&2; exit 1; }
 round=$((rounds + 1))
 last=$(printf '%s\n' "$mine" | grep -E '^\[reviewer\] round [0-9]+( reused)? · head [0-9a-f]{40} · patch-id [0-9a-f]+' | tail -n 1)
 last_round=$(printf '%s' "$last" | sed -n 's/^\[reviewer\] round \([0-9]*\).*/\1/p')
 last_head=$(printf '%s' "$last" | sed -n 's/.* · head \([0-9a-f]\{40\}\) · .*/\1/p')
 last_pid=$(printf '%s' "$last" | sed -n 's/.* · patch-id \([0-9a-f]*\).*/\1/p')
 
-# 2 · the pack, and verdict reuse
+# 2 · nothing new, the same change again, or the round cap
+if [ -n "$last_head" ] && [ "$last_head" = "$sha" ]; then
+  echo "!$iid was already reviewed at ${sha:0:8}; nothing to do"
+  exit 0
+fi
 packed=$("$here/pack.sh" "$iid" ${last_head:+"$last_head"}) || exit 1
 pack=${packed##*: }; pack=${pack% (reused)}
 pid=$(sed -n 's/^- patch-id: \([0-9a-f]*\)$/\1/p' "$pack")
@@ -82,6 +91,7 @@ if [ -n "$last_pid" ] && [ "$last_pid" = "$pid" ]; then
   echo "review !$iid at ${sha:0:8}: verdict of round $last_round reused"
   exit 0
 fi
+[ "$rounds" -lt 3 ] || { echo "!$iid has had 3 review rounds; it goes to the human (label needs-human)" >&2; exit 1; }
 
 # 3 · find and verify, in a folder the MR's rules cannot reach
 name=reviewer-$iid
@@ -89,10 +99,15 @@ pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
 run=$(mktemp -d "${TMPDIR:-/tmp}/factory-review.XXXXXX")
 mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"
 trap 'rm -rf "$run"; rm -f "$pidfile"' EXIT
-mkdir "$run/code"
-git -C "$FACTORY_REPO" archive "$sha" | tar -x -C "$run/code" || { echo "cannot copy the code at ${sha:0:8}" >&2; exit 1; }
-find "$run/code" \( -name CLAUDE.md -o -name CLAUDE.local.md -o -name AGENTS.md \) -type f -exec rm -f {} +
-find "$run/code" \( -name .claude -o -name .agents \) -type d -prune -exec rm -rf {} +
+# read-tree + checkout-index, not git archive: the MR's .gitattributes could hide files (export-ignore) or rewrite
+# them (export-subst). Then every symlink goes (a link to a rule file or out of the folder), then every rule file.
+GIT_INDEX_FILE="$run/index" git -C "$FACTORY_REPO" read-tree "$sha" \
+  && GIT_INDEX_FILE="$run/index" git -C "$FACTORY_REPO" checkout-index -a --prefix="$run/code/" \
+  || { echo "cannot copy the code at ${sha:0:8}" >&2; exit 1; }
+rm -f "$run/index"
+find "$run/code" -type l -exec rm -f {} +
+find "$run/code" \( -name CLAUDE.md -o -name CLAUDE.local.md -o -name AGENTS.md \) -exec rm -f {} +
+find "$run/code" \( -name .claude -o -name .agents \) -prune -exec rm -rf {} +
 cp "$pack" "$run/pack.md"
 
 finding='{"type":"object","required":["id","axis","kind","file","line","rule","severity","finding","fix"],"properties":{
@@ -105,7 +120,9 @@ verify_schema='{"type":"object","required":["verdicts"],"properties":{"verdicts"
   "bucket":{"enum":["act_on","consider","noted","dismissed"]},"why":{"type":"string"}}}}}}'
 echo 0 > "$run/cost"   # a file, because each review runs in a subshell
 review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; prints its structured output
-  answer=$(cd "$run" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" --model "$1" --tools Read,Grep,Glob \
+  # --restricted: no command or web tools, no settings files, file tools held to this folder; no MCP servers
+  answer=$(cd "$run" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" --model "$1" --restricted --strict-mcp-config \
+    --tools Read,Grep,Glob \
     --output-format json --json-schema "$2" "$(cat "$3")") \
     && [ "$(printf '%s' "$answer" | jq -r '.is_error')" = false ] \
     && printf '%s' "$answer" | jq -e '.structured_output' > /dev/null \
@@ -116,6 +133,14 @@ review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; pr
 }
 
 found=$(review "${FACTORY_FIND_MODEL:-sonnet}" "$find_schema" "$find_prompt" find) || exit 1
+# Model text goes into notes, so every string is put on one line: a line that starts with "/" would be a GitLab
+# quick action (/approve, /merge) run as this account. Paths lose a "code/" prefix; ids are renumbered F1…Fn, so
+# a verdict can never match two findings.
+flat='def flat: if type == "string" then gsub("[\r\n]+"; " ") elif type == "object" then map_values(flat)
+  elif type == "array" then map(flat) else . end;'
+found=$(printf '%s' "$found" | jq -c "$flat"' flat | .findings |= (to_entries
+  | map(.value + {id: "F\(.key + 1)", file: (.value.file | sub("^(\\./)?code/"; ""))}))') \
+  && [ -n "$found" ] || { echo "!$iid: cannot read the find pass's findings" >&2; exit 1; }
 verdicts='[]'
 for kind in rule logic; do
   subset=$(printf '%s' "$found" | jq -c --arg k "$kind" '[.findings[] | select(.kind == $k)]')
@@ -123,7 +148,8 @@ for kind in rule logic; do
   printf '%s' "$subset" > "$run/findings.json"
   model=${FACTORY_RULE_MODEL:-sonnet}; [ "$kind" = rule ] || model=${FACTORY_LOGIC_MODEL:-opus}
   checked=$(review "$model" "$verify_schema" "$verify_prompt" "verify ($kind)") || exit 1
-  verdicts=$(printf '%s %s' "$verdicts" "$checked" | jq -cs '.[0] + .[1].verdicts')
+  verdicts=$(printf '%s %s' "$verdicts" "$checked" | jq -cs "$flat"' .[0] + (.[1].verdicts | flat)') \
+    && [ -n "$verdicts" ] || { echo "!$iid: cannot read the verify pass's verdicts" >&2; exit 1; }
 done
 # every finding gets a bucket: one the verify pass skipped is kept as Consider, never dropped
 sorted=$(jq -cn --argjson f "$found" --argjson v "$verdicts" '[$f.findings[] | . as $x

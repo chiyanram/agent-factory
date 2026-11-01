@@ -112,6 +112,7 @@ n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$dir/n"
 if [ -f "$dir/p$n" ]; then
   find . \( -name CLAUDE.md -o -name AGENTS.md -o -name .claude -o -name .agents \) >> "$dir/rules-seen.log"
   [ -f pack.md ] && echo pack >> "$dir/pack-seen.log"
+  [ -d code ] && find code -type f | sort >> "$dir/files-seen.log"
   cat "$dir/p$n"; exit 0
 fi
 cat "$dir/bg.out" 2>/dev/null || echo "started abc123"

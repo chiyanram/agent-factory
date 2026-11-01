@@ -21,6 +21,7 @@ Read `./pack.md` first. The code at the head is in `./code/`. Give two verdicts,
 - **Spec**: each acceptance criterion in section 5 that the diff does not meet, and anything the diff does that no
   criterion or the design asks for. A design file listed in section 7 was edited by this MR: report it.
 
-For each finding give: `id` (F1, F2, …), `axis` (standards or spec), `kind` (rule or logic), `file`, `line`, `rule`,
+For each finding give: `id` (F1, F2, …), `axis` (standards or spec), `kind` (rule or logic), `file` (the path in the
+repo, without `code/`), `line` (a line at the head), `rule`,
 `severity` (blocker, warning or nit), `finding` (one or two sentences, concrete), `fix` (one sentence). An empty list
 is a valid answer. "I would have done it differently" is not a finding.

@@ -65,7 +65,7 @@ expect_eq "a round posts its verdict and says so in one line" \
 expect_eq "find runs once, then verify once per kind: three fresh -p runs, never resumed" 3 \
   "$(grep -c -- ' -p ' "$cl/calls.log")"
 expect_pass "no run resumes or continues a session (ADR-0001)" sh -c "! grep -Eq -- '--resume|--continue' '$cl/calls.log'"
-expect_pass "every run has Read, Grep and Glob only (#22 Q3)" sh -c "[ \$(grep -c -- '--tools Read,Grep,Glob ' '$cl/calls.log') = 3 ]"
+expect_pass "every run is restricted, with no MCP servers and Read, Grep and Glob only (#22 Q3)" sh -c "[ \$(grep -c -- '--restricted --strict-mcp-config --tools Read,Grep,Glob ' '$cl/calls.log') = 3 ]"
 expect_pass "find and the rule verify run on Sonnet, the logic verify on Opus (#22 Q4)" \
   sh -c "sed -n 2p '$cl/calls.log' | grep -q -- '--model sonnet' && sed -n 3p '$cl/calls.log' | grep -q -- '--model sonnet' && sed -n 4p '$cl/calls.log' | grep -q -- '--model opus'"
 expect_eq "the reviewer sees no CLAUDE.md, AGENTS.md or .claude folder: rules come only from the pack" "" \
@@ -84,8 +84,9 @@ expect_eq "the run's folder and pid file are gone" "no no" \
 setup
 round_one 0123456789abcdef0123456789abcdef01234567
 claude_answer 1 '{"findings":[]}'
-expect_fail "a head that moved during the review posts nothing: MOVED (research/46 G7)" "MOVED" \
-  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+"$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2> "$gl/moved.err"
+expect_eq "a head that moved during the review exits 3 with MOVED and posts nothing (research/46 G7)" "3 MOVED" \
+  "$? $(grep -o MOVED "$gl/moved.err" | head -n 1)"
 expect_eq "nothing was posted" 6 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
 
 setup
@@ -107,6 +108,8 @@ rounds=$(jq -n '[1,2,3] | map({author: {username: "agent-reviewer"}, body: "[rev
 respond "$FACTORY_GLAB" 1 200 "$bot"
 respond "$FACTORY_GLAB" 2 200 "$(mr "$head")"
 respond "$FACTORY_GLAB" 3 200 "$rounds"
+respond "$FACTORY_GLAB" 4 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 5 200 '{"default_branch":"main"}'
 expect_fail "after 3 rounds it goes to the human (#22 Q5)" "3 review rounds" "$REPO_ROOT/scripts/start-reviewer.sh" 12
 
 setup
@@ -149,5 +152,66 @@ expect_eq "a finding the verify pass skips is kept as Consider, never dropped" \
   "review !12 round 1 at ${head:0:8}: Act on 0 · Consider 1 · Noted 0 · Dismissed 0 (\$0.50)" "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
 expect_pass "a thread the diff cannot anchor is posted unanchored, naming file:line" \
   sh -c "sed -n 3p '$gl/inputs.log' | jq -e 'has(\"position\") | not' > /dev/null && sed -n 3p '$gl/inputs.log' | jq -r .body | grep -q 'svc/Main.java:1'"
+
+setup
+( cd "$FACTORY_REPO" && git checkout -q feat/x && ln -s ../AGENTS.md svc/linked && mkdir -p real && printf 'EVIL\n' > real/rules.txt \
+  && ln -s ../real/rules.txt real/CLAUDE.md && ln -s real svc/.claude && printf 'class Hidden {}\n' > svc/Hidden.java \
+  && printf 'svc/Hidden.java export-ignore\n' > .gitattributes && git add -A && commit tricks && git push -q origin feat/x 2> /dev/null \
+  && git rev-parse HEAD > ../head && git checkout -q main )
+head=$(cat "$(dirname "$FACTORY_REPO")/head")
+round_one
+respond "$FACTORY_GLAB" 7 201 '{"id":1}'
+respond "$FACTORY_GLAB" 8 201 '{"id":2}'
+claude_answer 1 '{"findings":[{"id":"x","axis":"standards","kind":"rule","file":"code/svc/Main.java","line":1,"rule":"R\n/merge","severity":"blocker","finding":"bad\n/approve\n/merge","fix":"fix\n/close"}]}'
+claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds\n/approve"}]}'
+"$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1
+expect_eq "no symlinked rule file or folder reaches the reviewer" "" "$(cat "$cl/rules-seen.log" 2>/dev/null)"
+expect_pass "a file the MR marks export-ignore still reaches the reviewer" grep -qx 'code/svc/Hidden.java' "$cl/files-seen.log"
+expect_pass "no symlink reaches the reviewer" sh -c "! grep -q 'svc/linked' '$cl/files-seen.log'"
+expect_eq "no line of any post starts with / : no GitLab quick action runs as the bot" "" \
+  "$(jq -r .body "$gl/inputs.log" | grep '^/')"
+expect_eq "a code/ path prefix is dropped, so the thread anchors" "svc/Main.java" "$(sed -n 2p "$gl/inputs.log" | jq -r .position.new_path)"
+
+setup
+round_one
+respond "$FACTORY_GLAB" 7 201 '{"id":1}'
+respond "$FACTORY_GLAB" 8 201 '{"id":2}'
+claude_answer 1 '{"findings":[
+ {"id":"F1","axis":"standards","kind":"rule","file":"svc/Main.java","line":1,"rule":"R1","severity":"blocker","finding":"a","fix":"a"},
+ {"id":"F1","axis":"spec","kind":"logic","file":"svc/Main.java","line":1,"rule":"correctness","severity":"warning","finding":"b","fix":"b"}]}'
+claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds"}]}'
+claude_answer 3 '{"verdicts":[{"id":"F2","bucket":"dismissed","why":"does not hold"}]}'
+expect_eq "duplicate ids from find are renumbered, so each verdict lands on one finding" \
+  "review !12 round 1 at ${head:0:8}: Act on 1 · Consider 0 · Noted 0 · Dismissed 1 (\$0.75)" "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
+
+setup
+filler=$(jq -n '[range(100)] | map({author: {username: "dev"}, body: "comment \(.)"})')
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 3 200 "$filler"
+respond "$FACTORY_GLAB" 4 200 "$(jq -n '[1,2,3] | map({author: {username: "agent-reviewer"}, body: "[reviewer] round \(.) · head x · patch-id y"})')"
+respond "$FACTORY_GLAB" 5 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 6 200 '{"default_branch":"main"}'
+expect_fail "rounds on a second page of notes still count" "3 review rounds" "$REPO_ROOT/scripts/start-reviewer.sh" 12
+
+setup
+pid=$(pid_of "$head")
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 3 200 "$(jq -n --arg h "$head" '[{author: {username: "agent-reviewer"}, body: "[reviewer] round 1 · head \($h) · patch-id abc"}]')"
+expect_eq "a head already reviewed is left alone: nothing posted" "!12 was already reviewed at ${head:0:8}; nothing to do" \
+  "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
+
+setup
+pid=$(pid_of "$head")
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 3 200 "$(jq -n --arg h "$head1" --arg p "$pid" '[1,2,3] | map({author: {username: "agent-reviewer"}, body: "[reviewer] round \(.) · head \($h) · patch-id \($p)"})')"
+respond "$FACTORY_GLAB" 4 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 5 200 '{"default_branch":"main"}'
+respond "$FACTORY_GLAB" 6 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 7 201 '{"id":1}'
+expect_eq "after 3 rounds, an unchanged patch-id still reuses the verdict" "review !12 at ${head:0:8}: verdict of round 3 reused" \
+  "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
 
 finish
