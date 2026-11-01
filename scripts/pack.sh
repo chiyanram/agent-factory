@@ -74,7 +74,12 @@ links="" pointers=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   # fenced code blocks are examples, not rules; the rest goes on one line, so a pointer that wraps still parses
-  text=$(g show "$master:$f" | awk '/^ ? ? ?(```|~~~)/ {code = !code; next} !code' | tr '\n' ' ') || exit 1
+  # A fence closes only on the same marker, at least as long (CommonMark), so a short fence inside a long one stays code.
+  text=$(g show "$master:$f" | awk '{
+      if (match($0, /^ ? ? ?(`+|~+)/)) { s = substr($0, RSTART, RLENGTH); sub(/^ +/, "", s); c = substr(s, 1, 1); n = length(s)
+        if (!code && n >= 3) { code = 1; fc = c; fn = n; next }
+        if (code && c == fc && n >= fn && $0 ~ /^ ? ? ?[`~]+ *$/) { code = 0; next } }
+      if (!code) print }' | tr '\n' ' ') || exit 1
   from=$(dirname "$f")
   found=$(printf '%s\n' "$text" | grep -o '`[A-Za-z0-9_-]*` skill (rulebook plugin)[^`]*`[A-Za-z0-9_-]*` reference' \
     | sed 's/^`\([A-Za-z0-9_-]*\)`.*`\([A-Za-z0-9_-]*\)` reference$/\1\/\2/' || true)
@@ -84,19 +89,20 @@ while IFS= read -r f; do
     || { echo "$f: a rulebook pointer this pack cannot read; write each as: use the \`<domain>\` skill (rulebook plugin) and read its \`<reference>\` reference" >&2; exit 1; }
   pointers="$pointers
 $found"
-  # links outside inline code and images: ](<path with spaces>) or ](path), anchor dropped, %20 read as a space
+  # links outside inline code and images: ](<path with spaces>) or ](path), anchor dropped, %20 read as a space; a "title" after the path is ignored
   prose=$(printf '%s\n' "$text" | sed 's/`[^`]*`//g; s/!\[[^]]*\]([^)]*)//g')
   while IFS= read -r link; do
     case $link in *:* | '#'* | '') continue ;; esac
     link=$(printf '%s' "${link%%#*}" | sed 's/%20/ /g')
     path=$(join "$from" "$link")
     at_master "$path" || { echo "$f: the link $link names no file on $master_name" >&2; exit 1; }
-    g show "$master:$path" | grep -Iq . || continue   # a binary or empty file is no rule text
+    # grep -c reads to the end: grep -q would stop early, and under pipefail the SIGPIPE would skip a large file
+    [ "$(g show "$master:$path" | grep -Ic . || true)" -gt 0 ] || continue   # a binary or empty file is no rule text
     links="$links
 $path"
   done <<LINKS
 $( { printf '%s\n' "$prose" | grep -o '](<[^>]*>)' | sed 's/^](<//; s/>)$//'
-     printf '%s\n' "$prose" | grep -o '](\([^<)][^) ]*\))' | sed 's/^](//; s/)$//'; } || true)
+     printf '%s\n' "$prose" | grep -o '](\([^<) ][^) ]*\)' | sed 's/^](//'; } || true)
 LINKS
 done <<EOF
 $agents

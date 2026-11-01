@@ -151,6 +151,23 @@ check "a link with a space, an example in code, an image and a fenced example ne
 check "and no binary file is pasted into the rules" "" sh -c '! grep -q "binary" "$1"' _ "$pack"
 
 setup
+( cd "$FACTORY_REPO" && { printf 'BIGSTART\n'; i=0; while [ $i -lt 4000 ]; do printf 'line %s of a long rule file\n' $i; i=$((i + 1)); done; } > docs/agents/big.md \
+  && printf 'TITLED-RULES\n' > docs/agents/titled.md \
+  && printf -- '- Big: [big](docs/agents/big.md)\n- Titled: [t](docs/agents/titled.md "Titled")\n' >> AGENTS.md \
+  && git add -A && commit more-links && git push -q origin main 2> /dev/null )
+answer 1 "$head2"
+pack_of "$("$REPO_ROOT/scripts/pack.sh" 12 2>&1)"
+rules=$(section 3)
+check "a large linked file reaches the rules" "" has "$rules" "BIGSTART"
+check "a link with a title reaches the rules" "" has "$rules" "TITLED-RULES"
+
+setup
+( cd "$FACTORY_REPO" && printf -- '\n````markdown\nOpen a fence with:\n```\n````\n\n- More: use the `testing` skill (rulebook plugin) and read its `no-such` reference.\n' >> AGENTS.md \
+  && git add -A && commit nested && git push -q origin main 2> /dev/null )
+answer 1 "$head2"
+expect_fail "a short fence inside a long one does not hide the pointers after it" "no-such" "$REPO_ROOT/scripts/pack.sh" 12
+
+setup
 answer 1 "$head2"
 expect_fail "FACTORY_RULEBOOK must hold the rulebook" "FACTORY_RULEBOOK" \
   env FACTORY_RULEBOOK=/nonexistent "$REPO_ROOT/scripts/pack.sh" 12
