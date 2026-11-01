@@ -94,7 +94,7 @@ account and refuse a human login (ADR-0006). Settings:
 
 A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`). Before the first
 run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt: `claude --bg` refuses an
-untrusted workspace. Add `.claude/worktrees/` to the project's `.gitignore`.
+untrusted workspace. Add `.claude/worktrees/` and `.claude/runs/` to the project's `.gitignore`.
 
 `poll` keeps no state between runs, so a restart re-reads everything. It counts:
 
