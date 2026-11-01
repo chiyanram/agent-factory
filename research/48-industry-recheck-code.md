@@ -42,6 +42,9 @@ Approvals:
 - **CM3** (operator, 2026-10-31): reword approved — try a rename, extracted method or type first; keep a comment only
   for what code cannot say (non-obvious reason, outside constraint, contract, license, link). Supersedes X1 and the D1
   closed keep-list.
+- **CM7, NGA2** (operator, 2026-11-01): rewords approved — fix first; a proven-safe suppression is scoped to one
+  declaration with a comment saying why; NGA2 = `unknown` and narrow, never `any`. Supersedes the X6 "never suppress,
+  even with a reason" edge.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
