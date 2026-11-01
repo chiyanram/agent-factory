@@ -51,6 +51,14 @@ Approvals:
 - **security.md** (operator, 2026-11-01): KEEP SE10, SE3, SE6, SS21, SS1, SS3–SS11, SS19, SS22, SS24, SS17 (vendor
   exception); REWORD SE1, SE4, SE5, SE7, SE7a, SE8, SS16, SS20 as in §4, SS2 to Spring's own example; DROP SE2, SS12,
   SS26, SS23, SS25; NEW login rate limit and secrets-from-environment (§4.3 items 1 and 3; item 2 points to LG4).
+- **spring.md** (operator, 2026-11-01): KEEP SC8, SC14, SC21, SX18, SX19, SC6 and SC20 (vendor exception); REWORD LY6,
+  SC1, SC2, SC5, LY7, SC11, SC15, SC16, SC17, X6, SC22 as in §3, SC3 to "never global lazy init" and SC7 to its core
+  (bean conditions only on auto-configuration classes), both under V; DROP SC4, SC9, SC12, SC13, SC10, SC19, SX14; NEW
+  SC-N1 (no shorter-lived scope injected into a singleton). LY6 Bad note made neutral.
+- **services.md** (operator, 2026-11-01): KEEP LY1; REWORD LY2 (no `Default<Name>`/package-private/`*Impl` naming), LY3;
+  NEW LY-N1 (controllers return DTOs, never entities).
+- **messaging.md** (operator, 2026-11-01): REWORD MS6 (keeps D8's row lock), MS4; NEW MS-N1 (ack after commit), MS-N2
+  (transactional outbox).
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
