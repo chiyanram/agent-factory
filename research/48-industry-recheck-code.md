@@ -45,6 +45,9 @@ Approvals:
 - **CM7, NGA2** (operator, 2026-11-01): rewords approved — fix first; a proven-safe suppression is scoped to one
   declaration with a comment saying why; NGA2 = `unknown` and narrow, never `any`. Supersedes the X6 "never suppress,
   even with a reason" edge.
+- **SEAM1** (operator, 2026-11-01): split approved — SEAM1 = decisions do no I/O; I/O chooses no outcome. "Record in,
+  sealed out", rule lists, complexity ≤5 and "one job" leave the generic rulebook (agent-platform's own seam rules,
+  T8). Narrows D9 / agent-factory#21 Q3.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
