@@ -71,13 +71,13 @@ expect_pass "find and the rule verify run on Sonnet, the logic verify on Opus (#
 expect_eq "the reviewer sees no CLAUDE.md, AGENTS.md or .claude folder: rules come only from the pack" "" \
   "$(cat "$cl/rules-seen.log" 2>/dev/null)"
 expect_eq "every run reads the pack" "pack pack pack" "$(tr '\n' ' ' < "$cl/pack-seen.log" | sed 's/ $//')"
-summary=$(sed -n 1p "$gl/inputs.log")
+summary=$(tail -n 1 "$gl/inputs.log")   # the summary goes last: it marks the round done
 expect_pass "the summary note names round, head and patch-id, then the counts (#22 Q2)" sh -c \
   "printf '%s' '$summary' | jq -r .body | head -n 1 | grep -q '^\[reviewer\] round 1 · head $head · patch-id $(pid_of "$head") · Act on 1 · Consider 1 · Noted 1 · Dismissed 0$'"
 expect_pass "Standards and Spec are two lists in the summary" sh -c \
   "printf '%s' '$summary' | jq -r .body | grep -q '^Standards' && printf '%s' '$summary' | jq -r .body | grep -q '^Spec'"
 expect_eq "one diff thread per Act on and Consider finding, at its file:line" "svc/Main.java:1 svc/Main.java:1" \
-  "$(sed -n '2,3p' "$gl/inputs.log" | jq -r '"\(.position.new_path):\(.position.new_line)"' | tr '\n' ' ' | sed 's/ $//')"
+  "$(sed -n '1,2p' "$gl/inputs.log" | jq -r '"\(.position.new_path):\(.position.new_line)"' | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "the run's folder and pid file are gone" "no no" \
   "$(ls -d "${TMPDIR:-/tmp}"/factory-review.* 2>/dev/null | grep -c . | sed 's/^0$/no/;s/^[1-9].*/yes/') $([ -f "$FACTORY_REPO/.claude/runs/reviewer-12.pid" ] && echo yes || echo no)"
 
@@ -143,21 +143,23 @@ expect_eq "and leaves no pid file" no "$([ -f "$FACTORY_REPO/.claude/runs/review
 
 setup
 round_one
-respond "$FACTORY_GLAB" 7 201 '{"id":1}'
-respond "$FACTORY_GLAB" 8 400 '{"message":"line_code can not be blank"}'
+respond "$FACTORY_GLAB" 7 400 '{"message":"line_code can not be blank"}'
+respond "$FACTORY_GLAB" 8 201 '{"id":1}'
 respond "$FACTORY_GLAB" 9 201 '{"id":2}'
 claude_answer 1 "$(printf '%s' "$findings" | jq '.findings |= [.[0]]')"
 claude_answer 2 '{"verdicts":[]}'
 expect_eq "a finding the verify pass skips is kept as Consider, never dropped" \
   "review !12 round 1 at ${head:0:8}: Act on 0 · Consider 1 · Noted 0 · Dismissed 0 (\$0.50)" "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
 expect_pass "a thread the diff cannot anchor is posted unanchored, naming file:line" \
-  sh -c "sed -n 3p '$gl/inputs.log' | jq -e 'has(\"position\") | not' > /dev/null && sed -n 3p '$gl/inputs.log' | jq -r .body | grep -q 'svc/Main.java:1'"
+  sh -c "sed -n 2p '$gl/inputs.log' | jq -e 'has(\"position\") | not' > /dev/null && sed -n 2p '$gl/inputs.log' | jq -r .body | grep -q 'svc/Main.java:1'"
 
 setup
 ( cd "$FACTORY_REPO" && git checkout -q feat/x && ln -s ../AGENTS.md svc/linked && mkdir -p real && printf 'EVIL\n' > real/rules.txt \
   && ln -s ../real/rules.txt real/CLAUDE.md && ln -s real svc/.claude && printf 'class Hidden {}\n' > svc/Hidden.java \
-  && printf 'svc/Hidden.java export-ignore\n' > .gitattributes && git add -A && commit tricks && git push -q origin feat/x 2> /dev/null \
-  && git rev-parse HEAD > ../head && git checkout -q main )
+  && printf 'class Bad { String s = "TOKEN"; }\n' > svc/Bad.java && git add -A && commit tricks \
+  && printf 'svc/Hidden.java export-ignore\nsvc/Bad.java working-tree-encoding=UTF-16LE\n' > .gitattributes \
+  && git add .gitattributes && commit attributes && git push -q origin feat/x 2> /dev/null \
+  && git rev-parse HEAD > ../head && git checkout -q -f main )
 head=$(cat "$(dirname "$FACTORY_REPO")/head")
 round_one
 respond "$FACTORY_GLAB" 7 201 '{"id":1}'
@@ -167,10 +169,11 @@ claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds\n/approv
 "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1
 expect_eq "no symlinked rule file or folder reaches the reviewer" "" "$(cat "$cl/rules-seen.log" 2>/dev/null)"
 expect_pass "a file the MR marks export-ignore still reaches the reviewer" grep -qx 'code/svc/Hidden.java' "$cl/files-seen.log"
+expect_pass "no .gitattributes rule re-encodes what the reviewer reads" grep -q TOKEN "$cl/code-seen/svc/Bad.java"
 expect_pass "no symlink reaches the reviewer" sh -c "! grep -q 'svc/linked' '$cl/files-seen.log'"
 expect_eq "no line of any post starts with / : no GitLab quick action runs as the bot" "" \
   "$(jq -r .body "$gl/inputs.log" | grep '^/')"
-expect_eq "a code/ path prefix is dropped, so the thread anchors" "svc/Main.java" "$(sed -n 2p "$gl/inputs.log" | jq -r .position.new_path)"
+expect_eq "a code/ path prefix is dropped, so the thread anchors" "svc/Main.java" "$(sed -n 1p "$gl/inputs.log" | jq -r .position.new_path)"
 
 setup
 round_one
@@ -213,5 +216,15 @@ respond "$FACTORY_GLAB" 6 200 "$(mr "$head")"
 respond "$FACTORY_GLAB" 7 201 '{"id":1}'
 expect_eq "after 3 rounds, an unchanged patch-id still reuses the verdict" "review !12 at ${head:0:8}: verdict of round 3 reused" \
   "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
+
+setup
+round_one
+respond "$FACTORY_GLAB" 7 500 '{"message":"boom"}'
+respond "$FACTORY_GLAB" 8 500 '{"message":"boom"}'
+claude_answer 1 "$(printf '%s' "$findings" | jq '.findings |= [.[0]]')"
+claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds"}]}'
+expect_fail "a thread that cannot be posted fails the round" "HTTP 500" "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_eq "and no summary note marks it done, so the next run reviews again" "" \
+  "$(jq -r .body "$gl/inputs.log" | grep '^\[reviewer\] round 1 ·')"
 
 finish

@@ -99,10 +99,18 @@ pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
 run=$(mktemp -d "${TMPDIR:-/tmp}/factory-review.XXXXXX")
 mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"
 trap 'rm -rf "$run"; rm -f "$pidfile"' EXIT
-# read-tree + checkout-index, not git archive: the MR's .gitattributes could hide files (export-ignore) or rewrite
-# them (export-subst). Then every symlink goes (a link to a rule file or out of the folder), then every rule file.
-GIT_INDEX_FILE="$run/index" git -C "$FACTORY_REPO" read-tree "$sha" \
-  && GIT_INDEX_FILE="$run/index" git -C "$FACTORY_REPO" checkout-index -a --prefix="$run/code/" \
+# The files exactly as committed. Not git archive, whose .gitattributes could hide files (export-ignore) or rewrite
+# them (export-subst); and no .gitattributes at all, from the MR or this machine, so no encoding, eol, ident or
+# filter rule can change what the reviewer reads. Then every symlink goes (a link to a rule file or out of the
+# folder), then every rule file.
+# The work tree is the empty copy folder, so not even the clone's own .gitattributes applies.
+gi() { GIT_INDEX_FILE="$run/index" git -C "$FACTORY_REPO" --work-tree="$run/code" -c core.attributesFile=/dev/null \
+  -c core.autocrlf=false "$@"; }
+mkdir "$run/code"
+gi read-tree "$sha" \
+  && { gi ls-files -z | tr '\0' '\n' | { grep -E '(^|/)\.gitattributes$' || true; } \
+       | while IFS= read -r a; do gi update-index --force-remove -- "$a" || exit 1; done; } \
+  && gi checkout-index -a \
   || { echo "cannot copy the code at ${sha:0:8}" >&2; exit 1; }
 rm -f "$run/index"
 find "$run/code" -type l -exec rm -f {} +
@@ -159,7 +167,7 @@ sorted=$(jq -cn --argjson f "$found" --argjson v "$verdicts" '[$f.findings[] | .
 # 4 · never post against a head that moved
 moved
 
-# 5 · one summary note, one thread per Act on and Consider
+# 5 · one thread per Act on and Consider, then the summary note
 n() { printf '%s' "$sorted" | jq --arg b "$1" '[.[] | select(.bucket == $b)] | length'; }
 counts="Act on $(n act_on) · Consider $(n consider) · Noted $(n noted) · Dismissed $(n dismissed)"
 lists=$(printf '%s' "$sorted" | jq -r '
@@ -167,10 +175,6 @@ lists=$(printf '%s' "$sorted" | jq -r '
   def line: "- \(bucket_name) \(.id) `\(.file):\(.line)` \(.rule): \(.finding) (\(.why))";
   "Standards", ([.[] | select(.axis == "standards") | line] | if length == 0 then ["- none"] else . end | .[]),
   "", "Spec", ([.[] | select(.axis == "spec") | line] | if length == 0 then ["- none"] else . end | .[])')
-post_note "[reviewer] round $round · head $sha · patch-id $pid · $counts
-
-$lists" || exit 1
-
 refs=$(printf '%s' "$mr" | jq -c .diff_refs)
 printf '%s' "$sorted" | jq -c '.[] | select(.bucket == "act_on" or .bucket == "consider")' | while IFS= read -r f; do
   text=$(printf '%s' "$f" | jq -r '"[reviewer] \(if .bucket == "act_on" then "Act on" else "Consider" end) \(.id) (\(.severity), \(.rule)): \(.finding)\n\nFix: \(.fix)"')
@@ -184,5 +188,10 @@ printf '%s' "$sorted" | jq -c '.[] | select(.bucket == "act_on" or .bucket == "c
   fi
   rm -f "$thread"
 done || exit 1
+
+# the summary note goes last: it marks the round done, so a round that failed halfway runs again
+post_note "[reviewer] round $round · head $sha · patch-id $pid · $counts
+
+$lists" || exit 1
 
 echo "review !$iid round $round at ${sha:0:8}: $counts (\$$(cat "$run/cost"))"
