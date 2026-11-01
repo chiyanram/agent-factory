@@ -66,6 +66,17 @@ Approvals:
   DS12, DS14, NM4, FW1 (7, sourced), DS2 (1000 kept, single-lineage caveat noted), FW3, FW8; DROP DS11, NM2, SM2, FW9,
   SM3, SM5 (moves to CONTRIBUTING.md). SM1's Conditional Complexity credit left as is, unresolved.
 - **deslop** (operator, 2026-11-01): KEEP DS7, DS8, DS9; REWORD DS13, DS5.
+- **types.md** (operator, 2026-11-01): KEEP TY3, TY8 (wording); REWORD TY1, TY2 (arrow-form), TY4 (fields), TY5, TY6,
+  TY7, TY10, TY11, TY12, TY13 as in §1; DROP TY9 (its pair moves to TY12); NEW NEW-TY-a (no null `Optional`). E2 moot.
+- **java.md** (operator, 2026-11-01): KEEP JV7, JV8 (wording), JV4 (vendor exception); REWORD U4, JV1, JV2 (weak), JV3,
+  JV5, JV6, JV9; DROP CV3 (moves to agent-platform config); NEW NEW-JV-a (`BigDecimal.compareTo`). NEW-JV-b not added
+  (ER3 owns it).
+- **design.md** (operator, 2026-11-01): SEAM1 as split; NEW NEW-DS-a (complexity gate, cyclomatic 10 if none set).
+  NEW-DS-b not added (LY2 owns it).
+- **comments.md** (operator, 2026-11-01): KEEP CM1, CM2 (wording); REWORD CM3, CM4, CM5, CM7; NEW NEW-CM-a (delete
+  commented-out code).
+
+All 13 files approved. Next: one skills PR per file, with the cross-rule examples audit.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
