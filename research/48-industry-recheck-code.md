@@ -1408,3 +1408,13 @@ Independence: each bullet group is one organisation. Two pages from one group co
 - D7 unaffected.
 - X6 (19:377) is contradicted by Google's TS style guide (NGA2).
 
+## 6 · Quotes added while drafting
+
+Read 2026-11-01 from GitHub raw files, for the spring.md rules kept under V and one sourced edge. BOOT =
+spring-projects/spring-boot @bcd4641 `documentation/spring-boot-docs/src/docs/antora/modules/reference/pages/`; FW =
+spring-projects/spring-framework @2ed3a55 `framework-docs/modules/ROOT/pages/`.
+
+- SC3 · BOOT `features/spring-application.adoc:71-72` §Lazy Initialization: "A downside of lazy initialization is that it can delay the discovery of a problem with the application. If a misconfigured bean is initialized lazily, a failure will no longer occur during startup and the problem will only become apparent when the bean is initialized."
+- SC3 · BOOT `features/spring-application.adoc:74`: "For these reasons, lazy initialization is not enabled by default"; `:77` "it can be enabled using the configprop:spring.main.lazy-initialization[] property".
+- SC7 · BOOT `features/developing-auto-configuration.adoc:126-127` §Bean Conditions: "You need to be very careful about the order in which bean definitions are added, as these conditions are evaluated based on what has been processed so far. For this reason, we recommend using only `@ConditionalOnBean` and `@ConditionalOnMissingBean` annotations on auto-configuration classes (since these are guaranteed to load after any user-defined bean definitions have been added)."
+- SX18 edge · FW `core/aop/proxying.adoc:17`: "`final` classes cannot be proxied, because they cannot be extended." FW `core/beans/java/basic-concepts.adoc:66-70`: a `@Bean` method in a class without `@Configuration`, or with `proxyBeanMethods=false`, is processed "without generating a CGLIB subclass for it" (so a full `@Configuration` class, such as `@SpringBootApplication`, gets one).
