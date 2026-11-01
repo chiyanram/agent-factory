@@ -72,14 +72,24 @@ loops drift; scripts do not.
 
 | script | does |
 |---|---|
-| `poll` | lists what changed in GitLab since the last poll |
-| `claim <mr>` / `release <mr>` | adds or removes the claim label |
+| `poll` | one line of facts per open MR, read from GitLab as it is now: head, draft, claimed, `approved=yes\|stale\|no`, pipeline at the head, `needs-human`, `/stop`, open asks; plus each merged MR that still carries the claim |
+| `claim <mr>` / `release <mr>` | adds or removes the claim label; refuses an MR that is already claimed |
 | `start writer <mr>` | starts a fresh writer in its own worktree (`claude --bg`; fallback `claude -p`) |
 | `start reviewer <mr>` | builds the context pack from master, then runs find and verify |
-| `status <mr> "<line>"` | posts one `[coordinator]` note |
+| `status <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>`, the head the run started at |
 | `reconcile` | matches claim labels against live runs |
 
-The script set is part of L3 (`#23`); their code is built after the design closes.
+`poll`, `claim`, `release` and `status` are in `scripts/` (#36); `start writer`, `start reviewer` and `reconcile` come
+with #39. They run as the coordinator's service account and refuse a human login (ADR-0006). Settings:
+`FACTORY_PROJECT` (the GitLab project path), `FACTORY_CLAIM_LABEL` (default `agent::claimed`) and
+`FACTORY_AGENT_PREFIX` (default `agent-`, the names of agent accounts).
+
+`poll` keeps no state between runs, so a restart re-reads everything. It counts:
+
+- **`/approved`** only from a human maintainer, as the first line of a note, and only when it is newer than the last
+  edit of the description (GitLab's `description` activity note). An older one shows as `approved=stale` and needs a fresh `/approved` (research/46 G3).
+- **An open ask** as a note that starts `[coordinator] OPEN:` with no note from a human project member after it. Ask the human that way, so
+  every poll lists the asks still open (research/46 G6).
 
 ## Escalation
 

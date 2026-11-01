@@ -46,3 +46,49 @@ expect_pass() {
 finish() {
   [ "$FAILURES" -eq 0 ]
 }
+
+# glab_stub : print the path of a fake glab. Each call appends its arguments to calls.log in the same folder and
+# answers with the next file r1, r2, … (see respond). A call with no file left fails, so an extra call is caught.
+glab_stub() {
+  dir=$(mktemp -d "$TMP_BASE/glab.XXXXXX")
+  cat > "$dir/glab" <<'STUB'
+#!/usr/bin/env bash
+dir=$(cd "$(dirname "$0")" && pwd)
+n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$dir/n"
+printf '%s\n' "$*" | tr '\n' ' ' >> "$dir/calls.log"
+echo >> "$dir/calls.log"
+[ -f "$dir/e$n" ] && cat "$dir/e$n" >&2
+[ -f "$dir/r$n" ] || { echo "glab stub: no response for call $n: $*" >&2; exit 3; }
+cat "$dir/r$n"
+STUB
+  chmod +x "$dir/glab"
+  echo "$dir/glab"
+}
+
+# respond STUB N STATUS [BODY] [HEADER...] : write the stub's answer to call N as an HTTP response (glab api --include).
+respond() {
+  stub=$1 n=$2 code=$3 body=${4:-'{}'}
+  shift 3; [ $# -gt 0 ] && shift
+  {
+    printf 'HTTP/2.0 %s\r\n' "$code"
+    printf 'Content-Type: application/json\r\n'
+    for header in "$@"; do printf '%s\r\n' "$header"; done
+    printf '\r\n%s\n' "$body"
+  } > "$(dirname "$stub")/r$n"
+}
+
+# calls STUB : the arguments of every call the stub received, one line each.
+calls() {
+  cat "$(dirname "$1")/calls.log" 2>/dev/null
+}
+
+# expect_eq NAME EXPECTED ACTUAL
+expect_eq() {
+  if [ "$2" = "$3" ]; then
+    echo "ok   $1"
+  else
+    printf 'FAIL %s:\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
