@@ -37,6 +37,20 @@ respond "$FACTORY_GLAB" 3 200 '[]'
 expect_eq "nothing to do says so" "nothing to reconcile" "$("$REPO_ROOT/scripts/reconcile.sh")"
 
 setup
+echo '{"error":"not a list"}' > "$(dirname "$FACTORY_CLAUDE")/agents.json"
+respond "$FACTORY_GLAB" 1 200 "$bot"
+expect_fail "unreadable claude agents output releases nothing" "cannot list live runs" "$REPO_ROOT/scripts/reconcile.sh"
+expect_eq "no GitLab write happened" 1 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
+
+setup
+mkdir -p "$FACTORY_REPO/.claude/runs" && echo $$ > "$FACTORY_REPO/.claude/runs/writer-12.pid"
+worktree writer-12
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 '[{"iid":12}]'
+respond "$FACTORY_GLAB" 3 200 '[]'
+expect_eq "a live -p run keeps its claim and worktree" "nothing to reconcile" "$("$REPO_ROOT/scripts/reconcile.sh")"
+
+setup
 respond "$FACTORY_GLAB" 1 200 '{"username":"ann","bot":false}'
 expect_fail "a human login is refused before any write (ADR-0006)" "a human account" "$REPO_ROOT/scripts/reconcile.sh"
 

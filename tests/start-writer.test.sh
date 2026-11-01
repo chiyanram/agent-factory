@@ -69,8 +69,38 @@ setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
 expect_eq "the -p fallback runs in the foreground and says so" "writer finished !12 at ${head:0:8}" \
   "$(FACTORY_RUN_MODE=print "$REPO_ROOT/scripts/start-writer.sh" 12 2>/dev/null)"
+expect_pass "the fallback uses claude -p under the run's name" sh -c "grep -q -- ' -p -n writer-12 ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_eq "the fallback removes its pid file when it exits" no "$([ -f "$FACTORY_REPO/.claude/runs/writer-12.pid" ] && echo yes || echo no)"
 expect_pass "the fallback uses claude -p" sh -c "grep -q -- ' -p ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_eq "the fallback removes its worktree when it exits" no "$([ -d "$worktree" ] && echo yes || echo no)"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+expect_eq "the writer's branch tracks origin, so git push and --force-with-lease work" "origin/feat/x" \
+  "$(git -C "$worktree" rev-parse --abbrev-ref '@{u}' 2>&1)"
+
+setup
+mkdir -p "$FACTORY_REPO/.claude/runs" && echo $$ > "$FACTORY_REPO/.claude/runs/writer-12.pid"
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+expect_fail "a live -p run (pid file) counts as a live run" "already has a live run" "$REPO_ROOT/scripts/start-writer.sh" 12
+
+setup
+echo 'Error: unknown option --json' > "$(dirname "$FACTORY_CLAUDE")/agents.json"
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+expect_fail "unreadable claude agents output stops the start, never reads as no runs" "cannot list live runs" \
+  "$REPO_ROOT/scripts/start-writer.sh" 12
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+expect_pass "a relative FACTORY_REPO works" sh -c "cd '$(dirname "$FACTORY_REPO")' && FACTORY_REPO=clone '$REPO_ROOT/scripts/start-writer.sh' 12"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+FACTORY_WRITER_MODEL='opus[1m]' "$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+touch "$worktree/opus1"
+expect_pass "the model name is passed as it is, never glob-expanded" \
+  grep -qF -- '--model opus[1m]' "$(dirname "$FACTORY_CLAUDE")/calls.log"
 
 expect_fail "FACTORY_REPO must be a git clone" "FACTORY_REPO" env FACTORY_REPO=/nonexistent "$REPO_ROOT/scripts/start-writer.sh" 12
 

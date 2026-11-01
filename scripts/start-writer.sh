@@ -32,31 +32,35 @@ count=$(printf '%s\n' "$runs" | grep -c . || true)
 [ "$count" -lt "${FACTORY_MAX_RUNS:-2}" ] \
   || { echo "this machine is at its run limit: $count live runs (FACTORY_MAX_RUNS=${FACTORY_MAX_RUNS:-2})" >&2; exit 1; }
 
-git -C "$FACTORY_REPO" fetch -q origin "$branch" || { echo "cannot fetch $branch" >&2; exit 1; }
-tip=$(git -C "$FACTORY_REPO" rev-parse FETCH_HEAD)
+git -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch" \
+  || { echo "cannot fetch $branch" >&2; exit 1; }
+tip=$(git -C "$FACTORY_REPO" rev-parse "origin/$branch")
 [ "$tip" = "$sha" ] || { echo "!$iid: the tip of $branch is ${tip:0:8}, but the MR's head is ${sha:0:8}; not started" >&2; exit 1; }
 
 name=writer-$iid
 path=$(worktree_path "$name")
 [ ! -e "$path" ] || remove_worktree "$path"   # left by a dead run: never reuse it
 mkdir -p "$(dirname "$path")"
-git -C "$FACTORY_REPO" worktree add -q -B "$branch" "$path" "$tip" \
+git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$branch" \
   || { echo "cannot make the worktree $path" >&2; exit 1; }
 
 prompt="You are the writer for merge request !$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
 Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
 and the design link. You never talk to the human. Push only this branch; after a rebase use --force-with-lease."
-model=${FACTORY_WRITER_MODEL:+--model $FACTORY_WRITER_MODEL}
+set --
+[ -z "${FACTORY_WRITER_MODEL:-}" ] || set -- --model "$FACTORY_WRITER_MODEL"
 
 if [ "${FACTORY_RUN_MODE:-bg}" = print ]; then
-  trap 'remove_worktree "$path"' EXIT
-  (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p $model "$prompt") >&2
+  pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
+  mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"   # a -p run is not in claude agents: this marks it live
+  trap 'rm -f "$pidfile"; remove_worktree "$path"' EXIT
+  (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" "$@" "$prompt") >&2
   status=$?
   echo "writer finished !$iid at ${sha:0:8}"
   exit "$status"
 fi
 
-if ! started=$(cd "$path" && "${FACTORY_CLAUDE:-claude}" --bg -n "$name" $model "$prompt" 2>&1); then
+if ! started=$(cd "$path" && "${FACTORY_CLAUDE:-claude}" --bg -n "$name" "$@" "$prompt" 2>&1); then
   remove_worktree "$path"
   echo "the writer for !$iid did not start: $started" >&2
   exit 1
