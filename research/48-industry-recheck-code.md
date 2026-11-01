@@ -59,6 +59,13 @@ Approvals:
   NEW LY-N1 (controllers return DTOs, never entities).
 - **messaging.md** (operator, 2026-11-01): REWORD MS6 (keeps D8's row lock), MS4; NEW MS-N1 (ack after commit), MS-N2
   (transactional outbox).
+- **errors.md** (operator, 2026-11-01): KEEP ER4, ER6; REWORD ER1, ER2, ER10, ER11, ER5, ER8 as in §2, ER3 allowing an
+  empty catch that carries an explaining comment (Google style, Checkstyle); DROP ER7; NEW 4xx vs generic 500, and
+  failure atomicity.
+- **smells.md** (operator, 2026-11-01): KEEP DS4, FW2, FW5, FW6, NM1, NM3; REWORD SM1 (absorbs SM2, FW9), DS1, DS3, DS6,
+  DS12, DS14, NM4, FW1 (7, sourced), DS2 (1000 kept, single-lineage caveat noted), FW3, FW8; DROP DS11, NM2, SM2, FW9,
+  SM3, SM5 (moves to CONTRIBUTING.md). SM1's Conditional Complexity credit left as is, unresolved.
+- **deslop** (operator, 2026-11-01): KEEP DS7, DS8, DS9; REWORD DS13, DS5.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
