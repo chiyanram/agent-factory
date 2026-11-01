@@ -73,7 +73,8 @@ agents=$(printf '%s\n' "$touched" | awk -F/ 'NF {print "AGENTS.md"; p = ""; for 
 links="" pointers=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  text=$(g show "$master:$f" | tr '\n' ' ') || exit 1   # one line, so a pointer that wraps still parses
+  # fenced code blocks are examples, not rules; the rest goes on one line, so a pointer that wraps still parses
+  text=$(g show "$master:$f" | awk '/^ ? ? ?(```|~~~)/ {code = !code; next} !code' | tr '\n' ' ') || exit 1
   from=$(dirname "$f")
   found=$(printf '%s\n' "$text" | grep -o '`[A-Za-z0-9_-]*` skill (rulebook plugin)[^`]*`[A-Za-z0-9_-]*` reference' \
     | sed 's/^`\([A-Za-z0-9_-]*\)`.*`\([A-Za-z0-9_-]*\)` reference$/\1\/\2/' || true)
@@ -83,13 +84,20 @@ while IFS= read -r f; do
     || { echo "$f: a rulebook pointer this pack cannot read; write each as: use the \`<domain>\` skill (rulebook plugin) and read its \`<reference>\` reference" >&2; exit 1; }
   pointers="$pointers
 $found"
-  for link in $(printf '%s\n' "$text" | grep -o '](<\{0,1\}[^)> ]*' | sed 's/^](<\{0,1\}//'); do
+  # links outside inline code and images: ](<path with spaces>) or ](path), anchor dropped, %20 read as a space
+  prose=$(printf '%s\n' "$text" | sed 's/`[^`]*`//g; s/!\[[^]]*\]([^)]*)//g')
+  while IFS= read -r link; do
     case $link in *:* | '#'* | '') continue ;; esac
-    path=$(join "$from" "${link%%#*}")
+    link=$(printf '%s' "${link%%#*}" | sed 's/%20/ /g')
+    path=$(join "$from" "$link")
     at_master "$path" || { echo "$f: the link $link names no file on $master_name" >&2; exit 1; }
+    g show "$master:$path" | grep -Iq . || continue   # a binary or empty file is no rule text
     links="$links
 $path"
-  done
+  done <<LINKS
+$( { printf '%s\n' "$prose" | grep -o '](<[^>]*>)' | sed 's/^](<//; s/>)$//'
+     printf '%s\n' "$prose" | grep -o '](\([^<)][^) ]*\))' | sed 's/^](//; s/)$//'; } || true)
+LINKS
 done <<EOF
 $agents
 EOF

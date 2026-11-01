@@ -141,6 +141,16 @@ answer 1 "$head2"
 expect_fail "a rule link to a missing file stops the pack" "names no file" "$REPO_ROOT/scripts/pack.sh" 12
 
 setup
+( cd "$FACTORY_REPO" && printf 'binary\0data' > docs/agents/diagram.png \
+  && printf -- '- Spaced: [s](<sp ace/AGENTS.md>) and [e](sp%%20ace/AGENTS.md)\n- Example: write links as `[name](path/to/file.md)`.\n- Picture: ![d](docs/agents/diagram.png)\n\n```markdown\n[x](not/here.md)\n```\n' >> AGENTS.md \
+  && git add -A && commit links && git push -q origin main 2> /dev/null )
+answer 1 "$head2"
+out_line=$("$REPO_ROOT/scripts/pack.sh" 12 2>&1); pack_of "$out_line"
+check "a link with a space, an example in code, an image and a fenced example never stop the pack" "$out_line" \
+  test -f "$pack"
+check "and no binary file is pasted into the rules" "" sh -c '! grep -q "binary" "$1"' _ "$pack"
+
+setup
 answer 1 "$head2"
 expect_fail "FACTORY_RULEBOOK must hold the rulebook" "FACTORY_RULEBOOK" \
   env FACTORY_RULEBOOK=/nonexistent "$REPO_ROOT/scripts/pack.sh" 12
