@@ -59,6 +59,8 @@ echo "$n" > "$dir/n"
 printf '%s\n' "$*" | tr '\n' ' ' >> "$dir/calls.log"
 echo >> "$dir/calls.log"
 [ -f "$dir/e$n" ] && cat "$dir/e$n" >&2
+prev=""
+for arg in "$@"; do [ "$prev" = --input ] && jq -c . "$arg" >> "$dir/inputs.log"; prev=$arg; done
 [ -f "$dir/r$n" ] || { echo "glab stub: no response for call $n: $*" >&2; exit 3; }
 cat "$dir/r$n"
 STUB
@@ -94,8 +96,9 @@ expect_eq() {
 }
 
 # claude_stub : print the path of a fake claude. Each call appends "cwd | args" to calls.log in its folder.
-# `agents --json` prints agents.json (default []). Any other call prints bg.out (default "started abc123")
-# and exits with the code in bg.rc (default 0).
+# `agents --json` prints agents.json (default []). The Nth other call prints pN when it exists (a -p answer), else
+# bg.out (default "started abc123") and exits with the code in bg.rc (default 0). Each -p call also logs any rule
+# file it can see under its working folder to rules-seen.log, and "pack" to pack-seen.log when ./pack.md is there.
 claude_stub() {
   dir=$(mktemp -d "$TMP_BASE/claude.XXXXXX")
   echo '[]' > "$dir/agents.json"
@@ -105,6 +108,12 @@ dir=$(cd "$(dirname "$0")" && pwd)
 printf '%s | %s\n' "$PWD" "$*" | tr '\n' ' ' >> "$dir/calls.log"
 echo >> "$dir/calls.log"
 if [ "${1:-}" = agents ]; then cat "$dir/agents.json"; exit 0; fi
+n=$(( $(cat "$dir/n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$dir/n"
+if [ -f "$dir/p$n" ]; then
+  find . \( -name CLAUDE.md -o -name AGENTS.md -o -name .claude -o -name .agents \) >> "$dir/rules-seen.log"
+  [ -f pack.md ] && echo pack >> "$dir/pack-seen.log"
+  cat "$dir/p$n"; exit 0
+fi
 cat "$dir/bg.out" 2>/dev/null || echo "started abc123"
 exit "$(cat "$dir/bg.rc" 2>/dev/null || echo 0)"
 STUB

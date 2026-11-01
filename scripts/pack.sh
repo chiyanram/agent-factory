@@ -170,10 +170,17 @@ build() {
 
   printf '\n## 7 · Rule files this MR edits\n\n'
   edits=$(printf '%s\n' "$touched" | grep -E '(^|/)(AGENTS|CLAUDE)\.md$|^\.agents/|^\.claude/|^docs/agents/' || true)
+  # the design this MR links, when the change in section 2 touches it (#39 Q3): the code must not be matched to the
+  # design by editing the design
+  if [ -n "$previous" ]; then shown=$(g diff --name-only --no-renames "$previous" "$head"); else shown=$touched; fi
+  edited_designs=$(printf '%s\n' "$designs" | while IFS= read -r d; do
+    [ -n "$d" ] && printf '%s\n' "$shown" | grep -qxF -- "$d" && printf '%s (the design this MR links)\n' "$d"; done || true)
+  edits=$(printf '%s\n%s\n' "$edits" "$edited_designs" | awk 'NF')
   if [ -z "$edits" ]; then
     printf 'None.\n'
   else
-    printf 'Review these as diff only and flag each for the human; the %s versions above are the rules.\n\n' "$master_name"
+    printf 'Review these as diff only and flag each for the human; the %s versions above are the rules, and the\n' "$master_name"
+    printf 'approved design is the one the human approved, not an edit made after it.\n\n'
     printf '%s\n' "$edits" | sed 's/^/- /'
   fi
 }
