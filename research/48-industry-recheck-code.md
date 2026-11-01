@@ -1418,3 +1418,9 @@ spring-projects/spring-framework @2ed3a55 `framework-docs/modules/ROOT/pages/`.
 - SC3 · BOOT `features/spring-application.adoc:74`: "For these reasons, lazy initialization is not enabled by default"; `:77` "it can be enabled using the configprop:spring.main.lazy-initialization[] property".
 - SC7 · BOOT `features/developing-auto-configuration.adoc:126-127` §Bean Conditions: "You need to be very careful about the order in which bean definitions are added, as these conditions are evaluated based on what has been processed so far. For this reason, we recommend using only `@ConditionalOnBean` and `@ConditionalOnMissingBean` annotations on auto-configuration classes (since these are guaranteed to load after any user-defined bean definitions have been added)."
 - SX18 edge · FW `core/aop/proxying.adoc:17`: "`final` classes cannot be proxied, because they cannot be extended." FW `core/beans/java/basic-concepts.adoc:66-70`: a `@Bean` method in a class without `@Configuration`, or with `proxyBeanMethods=false`, is processed "without generating a CGLIB subclass for it" (so a full `@Configuration` class, such as `@SpringBootApplication`, gets one).
+- SSR-DISPATCH (spring-projects/spring-security `docs/modules/ROOT/pages/servlet/authorization/authorize-http-requests.adoc:90-91, :545-548`):
+  "The `AuthorizationFilter` runs not just on every request, but on every dispatch. This means that the `REQUEST`
+  dispatch needs authorization, but also ``FORWARD``s, ``ERROR``s, and ``INCLUDE``s." · "Spring Security authorizes
+  all dispatcher types by default. … subtle mismatches can sometimes cause an unexpected `AccessDeniedException`. To
+  address that, you can configure Spring Security Java configuration to allow dispatcher types like `FORWARD` and
+  `ERROR`".
