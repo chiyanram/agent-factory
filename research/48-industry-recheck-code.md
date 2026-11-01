@@ -39,6 +39,9 @@ Approvals:
 - **TY4** (operator, 2026-10-31): narrowed to fields — every field `final` unless reassigned after construction.
   `final` locals and parameters leave the generic rulebook; a project that wants them keeps its own gate and docs.
   Supersedes OQ2 / G-OQ2 for the rulebook.
+- **CM3** (operator, 2026-10-31): reword approved — try a rename, extracted method or type first; keep a comment only
+  for what code cannot say (non-obvious reason, outside constraint, contract, license, link). Supersedes X1 and the D1
+  closed keep-list.
 
 ## 1 · 48a — Industry re-check: types.md, java.md, design.md, comments.md (T2, agent-factory#32)
 
