@@ -7,8 +7,8 @@
 # The coordinator decides; poll only reports. It keeps no state between runs, so a restart or a compaction loses
 # nothing (ADR-0002; research/37 P3). One GraphQL query per poll, because single calls ran into 429 (research/46 G8).
 #
-#   approved  yes: the last /approved from a human maintainer is newer than the last description edit (the
-#             activity note GitLab writes with action "description")
+#   approved  yes: the last /approved from a human maintainer is newer than the last description edit by a human
+#             (the activity note GitLab writes with action "description"; the writer's own edits do not count, #56)
 #             stale: it is older than that edit (research/46 G3)    no: there is none
 #             Only a note whose first line is exactly /approved counts, from an account that is not a bot, not
 #             named FACTORY_AGENT_PREFIX* (default agent-), and at least Maintainer on the project.
@@ -33,7 +33,7 @@ query='query($project: ID!, $label: String!) { project(fullPath: $project) {
     labels { nodes { title } }
     headPipeline { status }
     comments: notes(filter: ONLY_COMMENTS, last: 100) { nodes { body createdAt author { username bot } } }
-    activity: notes(filter: ONLY_ACTIVITY, last: 100) { nodes { createdAt systemNoteMetadata { action } } } } }
+    activity: notes(filter: ONLY_ACTIVITY, last: 100) { nodes { createdAt author { username bot } systemNoteMetadata { action } } } } }
   merged: mergeRequests(state: merged, labels: [$label], first: 20) { nodes { iid } } } }'
 
 answer=$(gl_api graphql -f query="$query" -f project="$project" -f label="$label") || exit 1
@@ -57,7 +57,9 @@ printf '%s' "$answer" | jq -r --arg label "$label" --arg prefix "${FACTORY_AGENT
     | ([$notes[] | select(maintainer and command == "/approved")] | last) as $approved
     | ([$notes[] | select(maintainer and command == "/stop")] | last) as $stop
     | ([$notes[] | select(member)] | last | .createdAt // "") as $lastMember
-    | ([$activity[] | select(.systemNoteMetadata.action == "description")] | last | .createdAt // "") as $edited
+    # an edit makes an /approved stale unless it is provably by the writer (a bot or agent- account), since the
+    # writer rewrites the body in its done phase (#56 A); an edit with no author counts
+    | ([$activity[] | select(.systemNoteMetadata.action == "description" and (.author == null or human))] | last | .createdAt // "") as $edited
     # a full activity window that starts after the approval may hide an edit: count that as stale, never as fresh
     | (($activity | length) >= 100 and $approved != null and $approved.createdAt < $activity[0].createdAt) as $unknown
     | [.labels.nodes[].title] as $labels
