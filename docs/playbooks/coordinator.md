@@ -31,8 +31,12 @@ Three rules carry the rest.
 1. **Intake.** Sort what the human asks for. Small and clear: open an issue (`/issue`). Foggy or big: open a map and its
    tickets (`/refine`). Ready: go to step 2. Done when the work has an issue, or a map with tickets.
 2. **Grill.** Ask in small rounds, one decision each, with your recommendation first, worded so "yes" accepts it. When a
-   quick prototype would settle a question, build it and show it instead of asking. Write every answer to the issue as
-   you go, and every settled term to the glossary. Done when the human has answered every open question.
+   quick prototype would settle a question, build it and show it instead of asking. Every ask restates what is already
+   decided, the live state of each option, and one concrete example from the product. Post it as a
+   `[coordinator] OPEN: …` note, so `poll` lists it until a human answers. A two-option ask accepts only "A" or "B";
+   any other reply gets one re-ask. Twelve asks went unanswered in one week, and "ok keep" was read as an answer to an
+   A/B question (research/46 G5). Write every answer to the issue as you go, and every settled term to the glossary.
+   Done when the human has answered every open question.
 3. **Write the contract.** Open the draft MR. Its description holds the intent in the human's words, the acceptance
    criteria and the design link (`/to-spec`, `codebase-design`). Done when a stranger with no chat access could build
    the change from the MR alone.
@@ -60,6 +64,7 @@ of memory (agent-fleet #91). The rest wait in the queue.
 | you restart | `reconcile`: every claim label without a live run goes back to the queue |
 | a human posts `/stop`, or pushes to the branch | stand off that MR |
 | a merge conflict | `start writer` to rebase; if that fails, `needs-human` |
+| the MR waits on a human: `approved=stale`, `asks` above 0, or `needs-human` | `release` it and take the next approved MR; it re-enters the queue when the human answers. A finished MR once held its run for about 40 hours waiting on a re-approval (research/46 G4) |
 | the usage limit is near | pause every run |
 | once a day | one Discord line: MRs green and waiting, oldest first; skip when nothing changed |
 
@@ -110,7 +115,7 @@ untrusted workspace. Add `.claude/worktrees/` and `.claude/runs/` to the project
 ## Escalation
 
 Reaches the human: every OPEN design question, `needs-human` after 3 rounds, a merge conflict a writer could not
-rebase, a standing rule that contradicts what you observe, anything irreversible.
+rebase, a standing rule that contradicts what you observe, anything irreversible. Each ask takes the form in step 2.
 
 Stays with you: polling, claims, retries of flaky jobs, starting and restarting workers, the daily digest.
 
