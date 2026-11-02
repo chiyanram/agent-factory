@@ -109,7 +109,8 @@ untrusted workspace. Add `.claude/worktrees/` and `.claude/runs/` to the project
 `poll` keeps no state between runs, so a restart re-reads everything. It counts:
 
 - **`/approved`** only from a human maintainer, as the first line of a note, and only when it is newer than the last
-  edit of the description (GitLab's `description` activity note). An older one shows as `approved=stale` and needs a fresh `/approved` (research/46 G3).
+  edit of the description by a human (GitLab's `description` activity note; the writer's own edits to the MR body do
+  not count, #56). An older one shows as `approved=stale` and needs a fresh `/approved` (research/46 G3).
 - **An open ask** as a note that starts `[coordinator] OPEN:` with no note from a human project member after it. Ask the human that way, so
   every poll lists the asks still open (research/46 G6).
 
