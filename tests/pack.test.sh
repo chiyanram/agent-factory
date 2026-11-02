@@ -75,6 +75,8 @@ check "§5 holds the MR description verbatim" "" has "$(section 5)" "AC1: total(
 check "§6 holds the design the MR links" "" has "$(section 6)" "DESIGN-BODY"
 check "§7 flags the rule files this MR edits, a non-ASCII path included" "" \
   sh -c 'printf "%s" "$1" | grep -qF "svc/AGENTS.md" && printf "%s" "$1" | grep -qF "naïve/AGENTS.md"' _ "$(section 7)"
+check "§7 flags the linked design when the change touches it (#39 Q3)" "" \
+  has "$(section 7)" "docs/design/order.md (the design this MR links)"
 answer 3 "$head2"
 expect_eq "a second call for the same head reuses the pack: one pack per head" "$first (reused)" \
   "$("$REPO_ROOT/scripts/pack.sh" 12)"
@@ -85,6 +87,8 @@ pack_of "$("$REPO_ROOT/scripts/pack.sh" 12 "$head1")"
 check "round 2 names the previous head in the pack's file" "$pack" sh -c "case '$pack' in *12-$head2-since-${head1:0:8}.md) exit 0;; *) exit 1;; esac"
 check "round 2's §2 is the interdiff: the old head's line goes, the new one comes" "" sh -c \
   'printf "%s" "$1" | grep -q "^-class Main { int total() { return 1; } }" && printf "%s" "$1" | grep -q "^+class Main { int total() { return 2; } }"' _ "$(section 2)"
+check "round 2 does not flag a design the interdiff leaves alone" "" \
+  sh -c '! printf "%s" "$1" | grep -q "the design this MR links"' _ "$(section 7)"
 
 setup
 ( cd "$FACTORY_REPO" && git checkout -q main && printf 'more\n' > more.txt && git add -A && commit more && git push -q origin main 2> /dev/null \
