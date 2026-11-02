@@ -35,8 +35,9 @@ Three rules carry the rest.
    decided, the live state of each option, and one concrete example from the product. Once the draft MR exists, post it
    on the MR as a `[coordinator] OPEN: …` note, so `poll` lists it until a human answers; before that it goes on the
    issue, where `poll` does not look. A two-option ask accepts only "A" or "B"; any other reply gets one re-ask. Twelve
-   asks were not understood in one week, and "ok keep" was read as an answer to an A/B question (research/46 G5). Write every answer to the issue as you go, and every settled term to the glossary.
-   Done when the human has answered every open question.
+   asks were not understood in one week, and "ok keep" was read as an answer to an A/B question (research/46 G5). Write
+   every answer to the issue as you go, and every settled term to the glossary. Done when the human has answered every
+   open question.
 3. **Write the contract.** Open the draft MR. Its description holds the intent in the human's words, the acceptance
    criteria and the design link (`/to-spec`, `codebase-design`). Done when a stranger with no chat access could build
    the change from the MR alone.
@@ -64,7 +65,7 @@ of memory (agent-fleet #91). The rest wait in the queue.
 | you restart | `reconcile`: every claim label without a live run goes back to the queue |
 | a human posts `/stop`, or pushes to the branch | stand off that MR |
 | a merge conflict | `start writer` to rebase; if that fails, `needs-human` |
-| a claimed MR with no live run waits on a human: `approved=stale` or `asks` above 0 | `release` it and take the next approved MR. When the human re-approves or answers, the `/approved` row claims it again. A finished MR once held its slot for about 40 hours waiting on a re-approval (research/46 G4) |
+| a claimed MR with no live run waits on a human: `approved=stale` or `asks` above 0 | `release` it and take the next approved MR. When the human re-approves or answers, `claim` it again; start a writer only if the gate is red or an Act on thread is open, otherwise go on to the row that matches its state. A finished MR once held its slot for about 40 hours waiting on a re-approval (research/46 G4) |
 | the usage limit is near | pause every run |
 | once a day | one Discord line: MRs green and waiting, oldest first; skip when nothing changed |
 
