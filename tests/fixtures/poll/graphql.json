@@ -1331,6 +1331,38 @@
         }
        ]
       }
+     },
+     {
+      "iid": "8",
+      "draft": false,
+      "diffHeadSha": "8888aaaa8888aaaa",
+      "labels": {
+       "nodes": []
+      },
+      "headPipeline": null,
+      "comments": {
+       "nodes": [
+        {
+         "body": "/approved",
+         "createdAt": "2026-10-30T11:00:00Z",
+         "author": {
+          "username": "ann",
+          "bot": false
+         }
+        }
+       ]
+      },
+      "activity": {
+       "nodes": [
+        {
+         "createdAt": "2026-10-30T12:00:00Z",
+         "author": null,
+         "systemNoteMetadata": {
+          "action": "description"
+         }
+        }
+       ]
+      }
      }
     ]
    },

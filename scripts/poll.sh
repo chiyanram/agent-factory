@@ -57,8 +57,9 @@ printf '%s' "$answer" | jq -r --arg label "$label" --arg prefix "${FACTORY_AGENT
     | ([$notes[] | select(maintainer and command == "/approved")] | last) as $approved
     | ([$notes[] | select(maintainer and command == "/stop")] | last) as $stop
     | ([$notes[] | select(member)] | last | .createdAt // "") as $lastMember
-    # only an edit by a human makes an /approved stale: the writer rewrites the body in its done phase (#56 A)
-    | ([$activity[] | select(.systemNoteMetadata.action == "description" and human)] | last | .createdAt // "") as $edited
+    # an edit makes an /approved stale unless it is provably the writer's (a bot or agent- account), since the
+    # writer rewrites the body in its done phase (#56 A); an edit with no author counts
+    | ([$activity[] | select(.systemNoteMetadata.action == "description" and (.author == null or human))] | last | .createdAt // "") as $edited
     # a full activity window that starts after the approval may hide an edit: count that as stale, never as fresh
     | (($activity | length) >= 100 and $approved != null and $approved.createdAt < $activity[0].createdAt) as $unknown
     | [.labels.nodes[].title] as $labels

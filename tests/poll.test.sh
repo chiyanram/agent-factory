@@ -22,6 +22,8 @@ expect_eq "a full activity window that starts after the /approved counts as stal
   "!6 head=ffff6666 draft=yes claimed=no approved=stale pipeline=success needs_human=no stop=no asks=0" "$(line 6)"
 expect_eq "a description edit by the writer (a bot or agent- account) leaves /approved fresh (#56 A)" \
   "!7 head=7777aaaa draft=no claimed=no approved=yes pipeline=success needs_human=no stop=no asks=0" "$(line 7)"
+expect_eq "a description edit with no author still makes /approved stale: never fails open" \
+  "!8 head=8888aaaa draft=no claimed=no approved=stale pipeline=none needs_human=no stop=no asks=0" "$(line 8)"
 expect_eq "a merged MR that still carries the claim is listed for the sweep" "!9 merged claimed=yes" "$(line 9)"
 expect_eq "one call per poll" 1 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
 expect_pass "the project and the label go in as GraphQL variables, not into the query text" \
