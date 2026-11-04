@@ -14,7 +14,10 @@ issue #NNN ──▶ branch <type>/NNN-slug ──▶ make lint + make test ─�
 3. Write a test as plain bash. It exits non-zero on a failed assertion. Use no test framework. Shared helpers are in
    `tests/lib.sh`.
 4. Put bad input that a test needs in `tests/fixtures/<case>/`. `make lint` skips that folder.
-5. Write scripts for bash 3.2 (stock macOS) and Ubuntu: POSIX tools only, no GNU-only flags.
+5. Write scripts for bash 3.2 (stock macOS) and Ubuntu: POSIX tools only, no GNU-only flags. The coordinator scripts
+   also need `glab` and `jq`. Every GitLab call goes through `gl_api` in `scripts/lib/gitlab.sh`; a test points
+   `FACTORY_GLAB` at the stub from `glab_stub` in `tests/lib.sh`, so it needs no network. `claude_stub` does the same for `FACTORY_CLAUDE`, and `project_clone` makes a throwaway
+   clone with a bare origin for scripts that need git.
 6. Run `make lint` and `make test`. Both must exit 0. CI (`.github/workflows/ci.yml`) runs the same two targets on
    every pull request and on every push to `main`.
 7. Pin every action in a workflow to a full commit SHA. Dependabot (`.github/dependabot.yml`) proposes the updates.
