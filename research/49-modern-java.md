@@ -11,7 +11,13 @@ merges into §1 MJ2.
 
 ## 0 · Summary and approvals
 
-Approvals: pending.
+Approvals:
+
+- **Batch 1, language** (operator, 2026-11-04): MJ1, MJ2 (merged with §2 MJ2: "In a record or class holding a
+  collection, store `List.copyOf`/`Set.copyOf`/`Map.copyOf` of the argument, never the argument, a view or an array,
+  because the caller keeps the original and can change the object later"), MJ3, MJ4, MJ5, MJ6, MJ8, MJ9 as in §1, and
+  the JV5 decided edge (record pattern: component type or `_`, not `var`). Not added: MJ7 (`import module`, one
+  source); flexible constructor bodies stay rejected (JV11, 2026-10-02).
 
 ## 1 · Language features
 
