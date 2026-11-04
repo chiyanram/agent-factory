@@ -129,7 +129,7 @@ setup
 ( cd "$FACTORY_REPO" && printf -- '- More: use the `testing` skill (rulebook plugin) and read\n  its `no-such` reference.\n' >> AGENTS.md \
   && git add -A && commit pointer && git push -q origin main 2> /dev/null )
 answer 1 "$head2"
-expect_fail "a wrapped pointer to a reference the rulebook lacks stops the pack (research/46 G9)" "no-such" \
+expect_fail "a wrapped pointer to a reference the rulebook lacks stops the pack (docs/archive/research/46 G9)" "no-such" \
   "$REPO_ROOT/scripts/pack.sh" 12
 
 setup

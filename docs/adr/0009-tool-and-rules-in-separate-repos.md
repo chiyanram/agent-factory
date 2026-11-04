@@ -6,7 +6,7 @@ Status: accepted 2026-10-26 (operator, step-0 decision D2)
 
 The design is approved and map #1 is closed. The coordinator (L3, #23) needs its first code: `poll`, `claim` /
 `release`, `start writer`, `start reviewer`, `status` and `reconcile`. No ADR said where that code lives
-(research/45). ADR-0003 already gives chiyanram/skills one job: the generic rulebook plugin.
+(docs/archive/research/45). ADR-0003 already gives chiyanram/skills one job: the generic rulebook plugin.
 
 ## Decision
 
@@ -34,5 +34,5 @@ changes the factory.
 
 ## Sources
 
-Step-0 decision D2 (operator, 2026-10-26) · ADR-0003 · research/44, 45 · rameezk/forge set aside as an example only
+Step-0 decision D2 (operator, 2026-10-26) · ADR-0003 · docs/archive/research/44, 45 · rameezk/forge set aside as an example only
 (operator, 2026-10-26)

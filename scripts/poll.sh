@@ -5,16 +5,16 @@
 #   !9 merged claimed=yes
 #
 # The coordinator decides; poll only reports. It keeps no state between runs, so a restart or a compaction loses
-# nothing (ADR-0002; research/37 P3). One GraphQL query per poll, because single calls ran into 429 (research/46 G8).
+# nothing (ADR-0002; docs/archive/research/37 P3). One GraphQL query per poll, because single calls ran into 429 (docs/archive/research/46 G8).
 #
 #   approved  yes: the last /approved from a human maintainer is newer than the last description edit by a human
 #             (the activity note GitLab writes with action "description"; the writer's own edits do not count, #56)
-#             stale: it is older than that edit (research/46 G3)    no: there is none
+#             stale: it is older than that edit (docs/archive/research/46 G3)    no: there is none
 #             Only a note whose first line is exactly /approved counts, from an account that is not a bot, not
 #             named FACTORY_AGENT_PREFIX* (default agent-), and at least Maintainer on the project.
 #   stop      yes: that maintainer's last /stop is newer than the last /approved
 #   pipeline  the status of the pipeline for the current head; GitLab returns none for an older head ("none")
-#   asks      [coordinator] OPEN: notes with no note from a human project member after them (research/46 G6)
+#   asks      [coordinator] OPEN: notes with no note from a human project member after them (docs/archive/research/46 G6)
 #   claimed   the MR carries FACTORY_CLAIM_LABEL (default agent::claimed)
 set -u
 . "$(dirname "$0")/lib/gitlab.sh"

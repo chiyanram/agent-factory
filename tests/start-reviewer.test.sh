@@ -85,7 +85,7 @@ setup
 round_one 0123456789abcdef0123456789abcdef01234567
 claude_answer 1 '{"findings":[]}'
 "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2> "$gl/moved.err"
-expect_eq "a head that moved during the review exits 3 with MOVED and posts nothing (research/46 G7)" "3 MOVED" \
+expect_eq "a head that moved during the review exits 3 with MOVED and posts nothing (docs/archive/research/46 G7)" "3 MOVED" \
   "$? $(grep -o MOVED "$gl/moved.err" | head -n 1)"
 expect_eq "nothing was posted" 6 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
 

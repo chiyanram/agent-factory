@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claim <mr> — adds the claim label, so the MR gets one run at a time (playbook §Triggers; ADR-0002; research/37 P1).
+# claim <mr> — adds the claim label, so the MR gets one run at a time (playbook §Triggers; ADR-0002; docs/archive/research/37 P1).
 # Refuses an MR that is already claimed or not open. Prints one line: "claimed !12".
 set -u
 . "$(dirname "$0")/lib/gitlab.sh"

@@ -2,7 +2,7 @@
 # reconcile — after a coordinator restart, puts claims and worktrees back in line with the live runs (#39).
 #
 # A claim label on an open MR with no live run is removed, so the MR goes back to the queue; a claim left on a merged
-# MR is removed too. A run's worktree with no live run is removed (research/37: "restart must be a non-event").
+# MR is removed too. A run's worktree with no live run is removed (docs/archive/research/37: "restart must be a non-event").
 # Prints one line per action, or "nothing to reconcile". Run it only when no claim is between `claim` and `start`.
 set -u
 . "$(dirname "$0")/lib/gitlab.sh"

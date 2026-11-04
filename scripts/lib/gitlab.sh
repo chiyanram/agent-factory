@@ -7,7 +7,7 @@
 #   FACTORY_SLEEP       the command that waits between tries (default: sleep)
 
 # gl_api ARGS... : one `glab api` request. Prints the body of a 2xx answer. On 429 it waits the Retry-After seconds
-# and tries again, because 43 single-issue calls in a week ran into 429 (research/46 G8). Any other status fails.
+# and tries again, because 43 single-issue calls in a week ran into 429 (docs/archive/research/46 G8). Any other status fails.
 gl_api() {
   tries=0
   max=${FACTORY_MAX_TRIES:-4}

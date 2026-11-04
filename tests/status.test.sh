@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/status.sh: one [coordinator] note, never against a head that moved since the run started (research/46 G7).
+# scripts/status.sh: one [coordinator] note, never against a head that moved since the run started (docs/archive/research/46 G7).
 . "$(dirname "$0")/lib.sh"
 export FACTORY_PROJECT=aruvii/agent-platform FACTORY_SLEEP=true
 bot='{"username":"agent-coordinator","bot":true}'

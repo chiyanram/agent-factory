@@ -5,7 +5,7 @@ Status: accepted 2026-10-18 (#4 Q1), extended 2026-10-20 (#1 "Box 2")
 ## Context
 
 Decisions lived in chat and were written down later (#4 area 2, item 2.5). The old fleet kept state in Discord and in
-tmux, and a dead session went unnoticed for about 20 hours (research/11). Several hosts, people and agent tools must
+tmux, and a dead session went unnoticed for about 20 hours (docs/archive/research/11). Several hosts, people and agent tools must
 see the same state (goals O6, O9).
 
 ## Decision
@@ -22,8 +22,8 @@ into the MR.
 ## Why
 
 - It is the only record already shared by every person, host and agent tool (#4 Q1).
-- Products and references keep the claim and state on the ticket or PR (forge, ClawSweeper, Copilot; research/37 P1).
-- "Truth outside chat memory" is shared by Pocock, firstmate, pstack and Anthropic (research/38 §2).
+- Products and references keep the claim and state on the ticket or PR (forge, ClawSweeper, Copilot; docs/archive/research/37 P1).
+- "Truth outside chat memory" is shared by Pocock, firstmate, pstack and Anthropic (docs/archive/research/38 §2).
 
 ## Alternatives rejected
 
@@ -35,4 +35,4 @@ into the MR.
 
 ## Sources
 
-#4 Q1 · #1 "Box 2 coordinator DECIDED" · #23 Q2 · research/24, 37, 38
+#4 Q1 · #1 "Box 2 coordinator DECIDED" · #23 Q2 · docs/archive/research/24, 37, 38

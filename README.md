@@ -1,78 +1,80 @@
 # agent-factory
 
-The build repo for the agent factory. It holds the coordinator scripts, their tests, the design, the decisions and the
-research.
+One coordinator AI that takes an approved merge request and gets it written, reviewed and gate-green by fresh AI
+workers, ready for a human to merge. The coordinator runs a small set of bash scripts; the forge (today GitLab) holds
+every piece of state, so nothing is lost on a restart.
 
-```
-            human
-              ⇅  talks (CLI, tmux, Discord optional)
-        ┌─────────────┐   starts, per ticket   ┌────────┐   ┌──────────┐   ┌──────┐
-        │ COORDINATOR │ ─────────────────────▶ │ WRITER │ ─▶│ REVIEWER │ ─▶│ GATE │ ─▶ a maintainer merges
-        │ one AI      │                        │ fresh  │   │ fresh    │   │ CI   │
-        └─────────────┘                        └────────┘   └──────────┘   └──────┘
-              all state lives in GitLab: one issue + one MR per story
-        ─────────────────────────────────────────────────────────────────────────────
-        ONE RULEBOOK: small markdown files that every writer and reviewer loads
-```
+It is for teams that want AI writers and reviewers on their merge requests while humans keep approval and merge.
 
-The factory has three parts. One coordinator AI talks with the human. Fresh workers do one job each and go away.
-One rulebook tells every worker how to write and how to review. Source: map [#1](https://github.com/chiyanram/agent-factory/issues/1),
-CORRECTION 2026-10-23.
+## Quick start
 
-## Status
+You need bash, git and jq. To run the scripts' tests:
 
-| part | state | where decided |
-|---|---|---|
-| high-level design | **approved 2026-10-22** | #1 "HIGH-LEVEL DESIGN APPROVED" · [design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3) · `docs/design.md` |
-| one coordinator, no discovery seat | corrected 2026-10-23 | #1 CORRECTION · research/38 |
-| low-level design L1–L7 | **closed** | tickets #21–#27; map #1 closed 2026-10-25 |
-| build | in progress | step 0 #28 and chiyanram/skills#111 · `docs/open-items.md` |
-
-## Where to start reading
-
-1. `docs/ARCHITECTURE.md` — the factory as decided, in diagrams.
-2. `GLOSSARY.md` — the words we use, and the words we avoid.
-3. `docs/adr/` — one record per big decision, with its why and the rejected options.
-4. `docs/open-items.md` — what is still open.
-5. Map [#1](https://github.com/chiyanram/agent-factory/issues/1) — the live decision log.
-6. `docs/DEVELOPMENT.md` — how to work in this repo.
-
-## Build and test
-
-```
-make lint    relative links in every tracked .md resolve; root AGENTS.md under 200 lines (ADR-0003)
-make test    runs every tests/*.test.sh; fails if any one fails
+```bash
+git clone https://github.com/chiyanram/agent-factory.git
+cd agent-factory
+make lint && make test
 ```
 
-CI (`.github/workflows/ci.yml`) runs both on every pull request and on every push to `main`.
+To point the coordinator at a project, log `glab` in as an agent service account
+([docs/setup/identity.md](docs/setup/identity.md)), then:
 
-## Repo layout
+```bash
+export FACTORY_PROJECT=group/project     # the GitLab project path
+export FACTORY_REPO=~/src/project        # a local clone of it
+scripts/poll.sh                          # one line of facts per open MR
+```
+
+The coordinator session follows [docs/playbooks/coordinator.md](docs/playbooks/coordinator.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+    H([human]) -- "/approved" --> C{{coordinator}}
+    C -- start --> W[writer<br/>fresh]
+    W -- ready --> R[reviewer<br/>find + verify]
+    R -- "Act on" --> W
+    R -- clean --> G[gate<br/>project CI]
+    G -- red --> W
+    G -- green --> H2([human merges])
+```
+
+1. A human posts `/approved` on a draft MR whose description holds the intent and the acceptance criteria.
+2. The coordinator claims the MR and starts a fresh **writer** in its own worktree.
+3. A fresh **reviewer** checks the change against the rules and posts a verdict on the MR.
+4. The writer fixes what the reviewer marks **Act on**. After three rounds, a human decides.
+5. When the gate is green and nothing is open, a human maintainer merges.
+
+The rules every worker follows come from the `rulebook` plugin in
+[chiyanram/skills](https://github.com/chiyanram/skills) and from the project's own `AGENTS.md` files.
+
+## Repo map
 
 ```
 agent-factory/
-├─ README.md               this page
-├─ AGENTS.md               instructions for an agent session in this repo (CLAUDE.md = @AGENTS.md)
-├─ GLOSSARY.md             terms, and the words we avoid
+├─ scripts/          the coordinator's loop scripts and the lint checks
+│  └─ lib/           the forge seam (gitlab.sh) and run tracking (runs.sh)
+├─ prompts/          default instructions for the reviewer's find and verify passes
+├─ tests/            one plain-bash test per script, with fixtures
 ├─ docs/
-│  ├─ ARCHITECTURE.md      the factory as built from the decisions
-│  ├─ DEVELOPMENT.md       how to work here
-│  ├─ adr/                 decision records 0001…
-│  ├─ design.md            the approved high-level design text (2026-10-22)
-│  ├─ open-items.md        everything not finished
-│  ├─ handoff-*.md         session handoffs
-│  ├─ briefs/              briefs for agents that run elsewhere (e.g. the VM gate diagnosis)
-│  └─ agents/              answers for the mattpocock skills: issue tracker, labels, domain docs
-├─ scripts/                coordinator scripts and the lint checks (ADR-0009)
-├─ tests/                  one plain-bash test per script (<script>.test.sh); fixtures/ holds planted bad input
-├─ Makefile                the front door: make lint, make test
-├─ .github/                the CI workflow and Dependabot for its actions
-├─ research/               one numbered file per research ticket (NN-slug.md)
-└─ review/                 builders for review pages
+│  ├─ adr/           architecture decision records
+│  ├─ playbooks/     the coordinator's instructions
+│  ├─ setup/         one-time setup (agent identity)
+│  ├─ agents/        settings for the agent skills used in this repo
+│  └─ archive/       frozen design history
+├─ research/         sources the rulebook's rules cite
+├─ GLOSSARY.md       the words we use
+└─ Makefile          make lint, make test
 ```
 
-## Related
+## Read next
 
-- Design page (approved version): https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3
-- Generic rulebook plugin and the old ledger of approved rules: [chiyanram/skills](https://github.com/chiyanram/skills)
-  (old map #9 and its research).
-- First project that uses the factory: agent-platform (Aruvii), on GitLab.
+- [ARCHITECTURE.md](ARCHITECTURE.md): the moving parts, the loop and the key decisions.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a change.
+- [DEVELOPMENT.md](DEVELOPMENT.md): setup, make targets, tests and layout.
+- [GLOSSARY.md](GLOSSARY.md): the terms, and the words we avoid.
+
+## Licence
+
+No licence has been chosen yet. Until one is added, all rights are reserved by the repository owner.

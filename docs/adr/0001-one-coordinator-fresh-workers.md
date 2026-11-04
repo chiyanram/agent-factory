@@ -5,7 +5,7 @@ Status: accepted 2026-10-23 (supersedes the discovery seat of 2026-10-20 and #23
 ## Context
 
 The old fleet ran 4 always-on persona agents. They produced 9 of 78 merged MRs and drifted over long sessions
-(research/08, 10, 23). Two later ideas were tried on map #1: a separate discovery seat that talks to the human
+(docs/archive/research/08, 10, 23). Two later ideas were tried on map #1: a separate discovery seat that talks to the human
 (#1 "Roles DECIDED", 2026-10-20), and a coordinator that is stateless plumbing or a script on a timer (#23 Q1, Q3).
 
 ## Decision
@@ -23,25 +23,25 @@ and a fresh reviewer per ticket. Workers do one job and go away. Workers never t
 - One point of contact for the human (firstmate, openclaw, Pocock chief-of-staff, Factory).
 - A fresh worker avoids drift and context rot; never resume one (pstack, Factory, Cognition 2026, HumanLayer).
 - Workers cannot ask questions, so human contact belongs to the coordinator (pstack, Claude Code subagents, firstmate).
-- No source puts the human-facing planner in a separate agent (research/38 §4).
-- The human agrees the design before any build (HumanLayer RPI; Factory Missions; research/38, 2026-10-23 section).
+- No source puts the human-facing planner in a separate agent (docs/archive/research/38 §4).
+- The human agrees the design before any build (HumanLayer RPI; Factory Missions; docs/archive/research/38, 2026-10-23 section).
 
 ## Consequences
 
 - For a small fix the full fleet costs more than it gives: pstack v1 landed 1 of 12 units against 12 for a plain agent
-  (research/38). A developer can skip the fleet and run `/crq` in one session.
+  (docs/archive/research/38). A developer can skip the fleet and run `/crq` in one session.
 - Loop mechanics (poll GitLab, add a label, start a worker) stay small deterministic scripts that the coordinator calls,
-  because long-running agent loops drift (Cursor orchestrate; HumanLayer "own your control flow"; research/38).
+  because long-running agent loops drift (Cursor orchestrate; HumanLayer "own your control flow"; docs/archive/research/38).
 
 ## Alternatives rejected
 
 | option | why rejected |
 |---|---|
-| separate discovery seat | no source splits it out; research/23 left it "unverified" (#1 CORRECTION) |
-| coordinator as stateless plumbing / script on a timer | withdrawn 2026-10-23: the human needs one AI to talk to; loop mechanics stay deterministic inside it (research/38 §4) |
+| separate discovery seat | no source splits it out; docs/archive/research/23 left it "unverified" (#1 CORRECTION) |
+| coordinator as stateless plumbing / script on a timer | withdrawn 2026-10-23: the human needs one AI to talk to; loop mechanics stay deterministic inside it (docs/archive/research/38 §4) |
 | 4 always-on persona agents | 9 of 78 MRs, role confusion, drift (#4 Q2) |
-| always-on daemon (old G6 + G30) | ≈2,400 lines around a 66-line prompt (#4 Q3a; research/05) |
+| always-on daemon (old G6 + G30) | ≈2,400 lines around a 66-line prompt (#4 Q3a; docs/archive/research/05) |
 
 ## Sources
 
-#1 CORRECTION 2026-10-23 · #4 Q2, Q3a · #23 Q1 SUPERSEDED · research/23, 24, 36, 38
+#1 CORRECTION 2026-10-23 · #4 Q2, Q3a · #23 Q1 SUPERSEDED · docs/archive/research/23, 24, 36, 38
