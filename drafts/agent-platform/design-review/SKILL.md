@@ -21,10 +21,11 @@ Read these from the context pack built from `master`, and check every code fact 
 - the principles: [`AGENT-PRINCIPLES.md`](../../../docs/design/AGENT-PRINCIPLES.md) §1–15 and
   [`PRODUCT-DESIGN.md`](../../../docs/design/PRODUCT-DESIGN.md) §10;
 - the ADRs and the REQs the design names;
-- the generic checks: the `spec-review` reference of the `planning` skill (rulebook plugin). Every rule in it applies;
-  this skill adds only Aruvii's walk, the verdict words and the output. The pack carries the reference in its rules
-  section, because the `AGENTS.md` over the REQ and design folder points at it. If the pack has no `spec-review`
-  block, stop and say so: the review would run without its rules.
+- the generic checks: the `spec-review` reference of the `planning` skill (rulebook plugin). Every rule in it applies,
+  and this skill adds Aruvii's walk, its own lenses, the verdict words and the output. The pack carries it as the
+  block `rulebook planning/spec-review`, because the root `AGENTS.md` points at it. You cannot run commands, so for
+  SR3 open each cite by hand. If the pack has no such block, report one critical finding, "the pack has no
+  spec-review rules", and review nothing else.
 
 State the intent in one paragraph before you judge anything. If you cannot state it, stop and ask.
 
@@ -38,8 +39,9 @@ Check the spec against the intent in three parts:
 
 Then:
 
-- SR6: actor, action and benefit, scenarios a test can check, and an out-of-scope list. Mark which criteria are
-  automated and which a human checks.
+- Does each story pass SR6: actor, action and benefit, scenarios a test can check, and an out-of-scope list?
+- Can each acceptance criterion be decided by a test or a command, without judgement? Mark which are automated and
+  which a human checks.
 - Does every domain term already have a name in the glossary? Take every name from the specs; flag a new one.
 - Does the spec contradict itself anywhere?
 - Does it fit the roadmap order, with every item it depends on already done or planned first?
@@ -49,7 +51,8 @@ Then:
 For each decision the design makes, walk four steps and give one verdict.
 
 1. **Our rules.** Which principle (by §), ADR or REQ does it touch? Apply SR9: a reversal or narrowing must be
-   named and decided by a human; report a conflict, do not resolve it. Check every code fact by SR2.
+   named and decided by a human. A design that breaks a rule is CONFLICT; two documents that disagree are OPEN,
+   because the human resolves them, not you. Check every code fact by SR2.
 2. **Others.** How do the agent SDKs and 12-factor solve this? What is best in theirs, and what hole do they leave?
    Where theirs leaves a hole our principles cover, ours wins; say why.
 3. **Aruvii's cases.** Run the decision through each case that applies, with one real example:
@@ -62,7 +65,7 @@ For each decision the design makes, walk four steps and give one verdict.
 |---|---|
 | **ALIGNED** | honours every principle and rule it touches |
 | **CONFLICT** | breaks one; cite which (§ or ADR) and how |
-| **OPEN** | only the human can decide; phrase it as a question with your recommendation |
+| **OPEN** | only the human can decide, including two documents that disagree; a question shaped by SR4 (§6) |
 
 ## 4 · Stage 3 — the whole design
 
@@ -70,7 +73,8 @@ Review through whichever lenses are relevant. Not every lens applies to every de
 
 **Correctness.** Does the design do what it claims in every case?
 - Edge cases: empty, absent, expired, zero, boundary values, concurrent access.
-- Failure, rerun and crash halfway: SR11. Also: does each external call state timeout, retry and give-up?
+- Failure, rerun and crash halfway: SR11. Also: is any failure, on a read path too, silently swallowed? Does each
+  external call state timeout, retry and give-up?
 - Is every state and every transition between states named?
 - Is each acquire released by the same identity that took it?
 
@@ -122,8 +126,9 @@ An empty review is a valid outcome. If you find nothing wrong, say "no findings"
 ## 6 · Open questions
 
 Put each OPEN verdict and each question you cannot answer from the code to the human, by SR4: look facts up first,
-and give each question a decider, its options with a recommendation, and why it does not block building. Phrase each
-as a question, not an assertion, with the state now, in numbers, and what changes with each option.
+and give each question what is being decided, its decider, its options with a recommendation, and whether it blocks.
+An OPEN decision usually blocks `/approved` until decided; say so. Phrase each as a question, not an assertion, with
+the state now, in numbers, and what changes with each option.
 
 ## 7 · Output
 
@@ -131,7 +136,7 @@ as a question, not an assertion, with the state now, in numbers, and what change
 ## Intent          one paragraph, in the human's words
 ## Decisions       | decision | touches (§ / ADR / REQ) | verdict | why, one line |
 ## Findings        by severity, critical first
-## Open questions  each with a recommendation
+## Open questions  each with its decider, options, a recommendation and whether it blocks
 ## Receipts        every file you read, by path
 ```
 
@@ -144,7 +149,7 @@ Consider · Noted · Dismissed.
 - [ ] The spec is checked for missing, not asked for and misread.
 - [ ] Every decision has a verdict, and every CONFLICT cites what it breaks.
 - [ ] Every finding has a location and evidence.
-- [ ] Every OPEN is a question with a recommendation.
+- [ ] Every OPEN is a question with its decider, options, a recommendation and whether it blocks.
 - [ ] Every file read is listed.
 
 Sources: wording and order from pstack `interrogate` (rubric, reviewer prompt, lead judgment) and `architect`;
