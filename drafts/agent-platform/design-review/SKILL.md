@@ -21,8 +21,10 @@ Read these from the context pack built from `master`, and check every code fact 
 - the principles: [`AGENT-PRINCIPLES.md`](../../../docs/design/AGENT-PRINCIPLES.md) §1–15 and
   [`PRODUCT-DESIGN.md`](../../../docs/design/PRODUCT-DESIGN.md) §10;
 - the ADRs and the REQs the design names;
-- the generic checks: use the `planning` skill (rulebook plugin) and read its `spec-review` reference. Rules SR1–SR15
-  there apply in full; this skill adds only Aruvii's walk, the verdict words and the output.
+- the generic checks: the `spec-review` reference of the `planning` skill (rulebook plugin). Every rule in it applies;
+  this skill adds only Aruvii's walk, the verdict words and the output. The pack carries the reference in its rules
+  section, because the `AGENTS.md` over the REQ and design folder points at it. If the pack has no `spec-review`
+  block, stop and say so: the review would run without its rules.
 
 State the intent in one paragraph before you judge anything. If you cannot state it, stop and ask.
 
