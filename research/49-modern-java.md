@@ -21,6 +21,10 @@ Approvals:
 - **Batch 2, libraries and runtime** (operator, 2026-11-04): MJ10 (§2 MJ1), MJ12 (§2 MJ3), MJ13 (§2 MJ4), MJ14 (§2 MJ5),
   MJ15 (§2 MJ6), MJ16 (§2 MJ7), MJ17 (§2 MJ8, decision V) as in §2; MJ11 (§2 MJ2) merged into MJ2. CC7's edge reworded:
   a `ScopedValue` reaches no other thread without `--enable-preview` (`StructuredTaskScope` is preview in JDK 25).
+- **Target JDK 27** (operator, 2026-11-04; replaces "target Java 25"): our projects use JDK 27; a project on an
+  older JDK writes the form its JDK offers (a decided edge in modern-java.md). Checked against openjdk/jdk `jdk-27-ga`
+  (`Preview.java`, `PreviewFeature.java`): every approved MJ feature is final in 25 and 27; still preview in 27:
+  primitive patterns, `STRUCTURED_CONCURRENCY`, `LAZY_CONSTANTS`, `PEM_API`.
 
 ## 1 · Language features
 
