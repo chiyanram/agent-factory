@@ -31,7 +31,7 @@ On a GitHub project the account is a machine user, an ordinary GitHub account (#
 | 1 | developer | Create the GitHub account `agent-<name>` with its own email. | GitHub has no service accounts; the `agent-` name is how the scripts tell it from a human. |
 | 2 | repo owner | Invite it as a collaborator with **Write**. | It can push branches, open pull requests and comment. |
 | 3 | repo owner | Add a ruleset on `main`: require a pull request, block force pushes, and allow merge only to the owner. | An agent cannot merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
-| 4 | developer | As the machine user, create a fine-grained token for this repository only: Contents, Pull requests and Issues read and write, Metadata read. Log `gh` in with it under its own config folder (`GH_CONFIG_DIR=~/.config/gh-agent gh auth login`), and point `FACTORY_GH` at a wrapper that sets that folder. Never put the token in an environment variable. | The operator's own `gh` login is never used by an agent. |
+| 4 | developer | As the machine user, create a classic token with the `repo` scope, expiry 365 days. Log `gh` in with it under its own config folder (`GH_CONFIG_DIR=~/.config/gh-agent gh auth login`), and point `FACTORY_GH` at a wrapper that sets that folder. Never put the token in an environment variable. | A fine-grained token reaches only repositories its owner owns, not one it is a collaborator on. The operator's own `gh` login is never used by an agent. |
 
 Steps 5 to 9 above apply as they are.
 

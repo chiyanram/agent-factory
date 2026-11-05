@@ -6,6 +6,7 @@
 # http_wait HEADERS : the seconds to wait before the next try. Retry-After wins; else GitHub's rate-limit reset
 # time; else 60.
 http_wait() {
+  local after reset
   after=$(printf '%s\n' "$1" | sed -n 's/^[Rr]etry-[Aa]fter: *\([0-9][0-9]*\).*/\1/p')
   reset=$(printf '%s\n' "$1" | sed -n 's/^[Xx]-[Rr]ate[Ll]imit-[Rr]eset: *\([0-9][0-9]*\).*/\1/p')
   if [ -n "$after" ]; then echo "$after"
@@ -27,8 +28,8 @@ http_limited() {
 # limit it waits and tries again, because 43 single-issue calls in a week ran into 429 (research/46 G8). Any other
 # status fails, and the message starts with NAME.
 http_api() {
-  name=$1 bin=$2; shift 2
-  tries=0
+  local name=$1 bin=$2 tries=0 max errors answer said code headers body wait
+  shift 2
   max=${FACTORY_MAX_TRIES:-4}
   while :; do
     tries=$((tries + 1))

@@ -30,12 +30,13 @@ gh_post() {
   rm -f "$input"; return "$status"
 }
 
-# A machine user is an ordinary GitHub account (type User), so the agent- name marks it; an App's bot is type Bot.
+# A machine user is an ordinary GitHub account (type User), so the agent- name marks it. An App's installation token
+# cannot read /user, so an App is never the bot here (#64 Q1).
 forge_require_bot() {
   me=$(gh_api user) || return 1
   me_name=$(printf '%s' "$me" | jq -r .login)
   prefix=${FACTORY_AGENT_PREFIX:-agent-}
-  if [ "$(printf '%s' "$me" | jq -r .type)" != Bot ] && [ "${me_name#"$prefix"}" = "$me_name" ]; then
+  if [ "${me_name#"$prefix"}" = "$me_name" ]; then
     echo "refused: gh is logged in as $me_name, a human account;" \
       "log it in as the coordinator's machine user $prefix<dev> (ADR-0006)" >&2
     return 1
@@ -44,14 +45,16 @@ forge_require_bot() {
 
 forge_pr() {
   r=$(repo) || return 1
-  gh_api "repos/$r/pulls/$1" | jq -c '{
+  pr=$(gh_api "repos/$r/pulls/$1") || return 1
+  printf '%s' "$pr" | jq -c '{
     state: (if .merged then "merged" elif .state == "open" then "opened" else "closed" end),
     sha: .head.sha, source_branch: .head.ref, target_branch: .base.ref, labels: [.labels[].name]}'
 }
 
 forge_default_branch() {
   r=$(repo) || return 1
-  gh_api "repos/$r" | jq -r .default_branch
+  project=$(gh_api "repos/$r") || return 1
+  printf '%s' "$project" | jq -r .default_branch
 }
 
 forge_label_add() {
@@ -61,9 +64,13 @@ forge_label_add() {
     || { echo "#$1: GitHub did not keep the label $2" >&2; return 1; }
 }
 
+# GitHub answers 404 when the label is already gone (a human removed it after the caller looked). That is a release,
+# so a failed DELETE counts only when the label is still on the pull request.
 forge_label_remove() {
   r=$(repo) || return 1
-  gh_api "repos/$r/issues/$1/labels/$(printf '%s' "$2" | jq -sRr @uri)" -X DELETE > /dev/null
+  gh_api "repos/$r/issues/$1/labels/$(printf '%s' "$2" | jq -sRr @uri)" -X DELETE > /dev/null 2>&1 && return 0
+  after=$(forge_pr "$1") || return 1
+  ! has_label "$after" "$2" || { echo "#$1: GitHub did not remove the label $2" >&2; return 1; }
 }
 
 forge_note() {
@@ -114,14 +121,15 @@ forge_claimed() {
   esac
   query='query($owner: String!, $name: String!, $label: String!) { repository(owner: $owner, name: $name) {
   pullRequests(states: ['"$state"'], labels: [$label], first: 100) { nodes { number } } } }'
-  gh_graphql "$query" "$2" | jq -r '.pullRequests.nodes[].number'
+  repository=$(gh_graphql "$query" "$2") || return 1
+  printf '%s' "$repository" | jq -r '.pullRequests.nodes[].number'
 }
 
 # forge_changes LABEL : the open PRs and the merged PRs that carry LABEL, in the shape scripts/poll.sh decides on.
 # One GraphQL query. Values go in as GraphQL variables, never into the query text.
 #
 #   members   {login: "maintainer" (write access or more) | "member" (any other collaborator)}
-#   edits     the PR body's edit history (userContentEdits)
+#   edits     the PR body's newest 100 edits (userContentEdits lists the newest first)
 #   pipeline  the head commit's checks (statusCheckRollup), in poll's words: success, failed, running or none
 #   window    the oldest edit when the last-100 window is full, so an older edit may be out of view; else null
 forge_changes() {
@@ -132,7 +140,7 @@ forge_changes() {
     labels(first: 50) { nodes { name } }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     comments(last: 100) { nodes { body createdAt author { login __typename } } }
-    userContentEdits(last: 100) { nodes { editedAt editor { login __typename } } } } }
+    userContentEdits(first: 100) { nodes { editedAt editor { login __typename } } } } }
   merged: pullRequests(states: [MERGED], labels: [$label], first: 20) { nodes { number } } } }'
   repository=$(gh_graphql "$query" "$1") || return 1
   printf '%s' "$repository" | jq -c '

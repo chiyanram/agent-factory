@@ -23,9 +23,9 @@ expect_fail "a human login is refused before any write (ADR-0006)" "a human acco
 expect_eq "the refusal writes nothing" 1 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '{"login":"factory[bot]","type":"Bot"}'
+respond "$FACTORY_GH" 1 200 "$bot"
 respond "$FACTORY_GH" 2 200 "$(pr closed true '[]')"
-expect_fail "a merged pull request is not claimed, and an App's bot passes the bot check" "#12 is merged" \
+expect_fail "a merged pull request is not claimed" "#12 is merged" \
   "$REPO_ROOT/scripts/claim.sh" 12
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
@@ -35,6 +35,22 @@ respond "$FACTORY_GH" 3 200 '[]'
 expect_eq "release removes the label from a closed pull request" "released #12" "$("$REPO_ROOT/scripts/release.sh" 12)"
 expect_pass "the label is URL-encoded in the DELETE path" \
   grep -q '^api --include repos/chiyanram/ledger/issues/12/labels/agent%3A%3Aclaimed -X DELETE' "$(log)/calls.log"
+
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 "$bot"
+respond "$FACTORY_GH" 2 200 "$(pr open false '[{"name":"agent::claimed"}]')"
+respond "$FACTORY_GH" 3 404 '{"message":"Label does not exist"}'
+respond "$FACTORY_GH" 4 200 "$(pr open false '[]')"
+expect_eq "a label a human removed meanwhile (404) still counts as released" "released #12" \
+  "$("$REPO_ROOT/scripts/release.sh" 12)"
+
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 "$bot"
+respond "$FACTORY_GH" 2 200 "$(pr open false '[{"name":"agent::claimed"}]')"
+respond "$FACTORY_GH" 3 500 '{"message":"Server Error"}'
+respond "$FACTORY_GH" 4 200 "$(pr open false '[{"name":"agent::claimed"}]')"
+expect_fail "a failed DELETE with the label still there fails" "did not remove the label" \
+  "$REPO_ROOT/scripts/release.sh" 12
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
 respond "$FACTORY_GH" 1 200 "$bot"
@@ -56,6 +72,18 @@ respond "$FACTORY_GH" 1 403 '{"message":"Resource not accessible by integration"
 expect_fail "a 403 that is not a rate limit fails at once" "github: HTTP 403" "$REPO_ROOT/scripts/claim.sh" 12
 expect_eq "and is not retried" 1 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
 
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 "$bot"
+respond "$FACTORY_GH" 2 502 '{"message":"Bad Gateway"}'
+expect_fail "a failed read of the pull request fails release, never reads as not claimed" "github: HTTP 502" \
+  "$REPO_ROOT/scripts/release.sh" 12
+
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 "$bot"
+respond "$FACTORY_GH" 2 502 '{"message":"Bad Gateway"}'
+expect_fail "a failed list of claims fails reconcile, never reads as nothing to reconcile" "github: HTTP 502" \
+  env FACTORY_REPO="$(fixture_repo poll)" FACTORY_CLAUDE="$(claude_stub)" "$REPO_ROOT/scripts/reconcile.sh"
+
 # poll: the same decisions as on GitLab, from GitHub's own data
 c() { printf '{"body":"%s","createdAt":"%s","author":{"login":"%s","__typename":"%s"}}' "$1" "$2" "$3" "${4:-User}"; }
 e() { printf '{"editedAt":"%s","editor":{"login":"%s","__typename":"User"}}' "$1" "$2"; }
@@ -72,7 +100,8 @@ graphql=$(cat <<JSON
   $(p 2 true '{"state":"FAILURE"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram)" "$(e 2026-11-03T10:00:00Z chiyanram)"),
   $(p 3 true null '[]' "$(c /approved 2026-11-02T10:00:00Z ann),$(c /approved 2026-11-02T11:00:00Z factory Bot)" ""),
   $(p 4 false '{"state":"PENDING"}' '[{"name":"agent::claimed"},{"name":"needs-human"}]' "$(c /approved 2026-11-02T10:00:00Z chiyanram),$(c '[coordinator] OPEN: which port?' 2026-11-02T12:00:00Z agent-chiyanram)" "$(e 2026-11-03T10:00:00Z agent-chiyanram)"),
-  $(p 5 true '{"state":"SUCCESS"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram),$(c /stop 2026-11-02T11:00:00Z chiyanram)" "")
+  $(p 5 true '{"state":"SUCCESS"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram),$(c /stop 2026-11-02T11:00:00Z chiyanram)" ""),
+  $(p 6 true '{"state":"SUCCESS"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram)" "$(e 2026-11-03T10:00:00Z chiyanram)$(for i in $(seq 1 99); do printf ',%s' "$(e 2026-11-02T09:00:00Z agent-chiyanram)"; done)")
  ]},
  "merged":{"nodes":[{"number":9}]}}}}
 JSON
@@ -91,8 +120,12 @@ expect_eq "the writer's own body edit leaves /approved fresh; an open ask is cou
   "#4 head=4444abcd draft=no claimed=yes approved=yes pipeline=running needs_human=yes stop=no asks=1" "$(line 4)"
 expect_eq "a /stop after /approved stops" \
   "#5 head=5555abcd draft=yes claimed=no approved=yes pipeline=success needs_human=no stop=yes asks=0" "$(line 5)"
+expect_eq "with 100 edits in view, the newest human edit still makes /approved stale" \
+  "#6 head=6666abcd draft=yes claimed=no approved=stale pipeline=success needs_human=no stop=no asks=0" "$(line 6)"
 expect_eq "a merged pull request that still carries the claim is listed" "#9 merged claimed=yes" "$(line 9)"
 expect_eq "one call per poll" 1 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
+expect_pass "the query asks for the newest 100 edits (GitHub lists edits newest first)" \
+  grep -q 'userContentEdits(first: 100)' "$(log)/calls.log"
 expect_pass "owner, name and label go in as GraphQL variables" \
   grep -qF -- '-f owner=chiyanram -f name=ledger -f label=agent::claimed' "$(log)/calls.log"
 

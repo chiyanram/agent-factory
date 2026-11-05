@@ -35,7 +35,8 @@ forge_pr() {
 }
 
 forge_default_branch() {
-  gl_api "projects/$(project_ref)" | jq -r .default_branch
+  project=$(gl_api "projects/$(project_ref)") || return 1
+  printf '%s' "$project" | jq -r .default_branch
 }
 
 forge_label_add() {

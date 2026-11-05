@@ -9,8 +9,9 @@
 #   forge_label_remove N LABEL
 #   forge_note N BODY           one comment on the change
 #   forge_notes N               every comment, oldest first: [{body, author: {username}}]
-#   forge_line_finding N SHA FINDING TEXT
-#                               one comment at FINDING's file:line ({file, line}) on head SHA; unanchored, naming
+#   forge_line_finding N CHANGE FINDING TEXT
+#                               one comment at FINDING's file:line ({file, line}) on the head of CHANGE, the forge_pr
+#                               answer; unanchored, naming
 #                               file:line, when the forge refuses that line
 #   forge_claimed STATE LABEL   the numbers of the changes in STATE (opened or merged) that carry LABEL, one per line
 #   forge_poll LABEL            poll's lines, one per open change (scripts/poll.sh)
