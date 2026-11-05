@@ -49,7 +49,8 @@ An agent's commit names the human it worked for in a `Co-Authored-By:` trailer.
 
 1. Write the test first: `tests/<script>.test.sh`, plain bash, using the helpers in `tests/lib.sh`. Watch it fail.
 2. Add `scripts/<script>.sh`. Start it with a header comment: usage, what it prints, the settings it reads.
-3. Call the forge only through `gl_api` in `scripts/lib/gitlab.sh`, so the test can stub it.
+3. Call the forge only through a `forge_*` call (`scripts/lib/forge.sh`), and add it to both adapters, so the test can
+   stub it.
 4. Print one line on success. Write errors to stderr and exit non-zero.
 5. Add the script to the table in [docs/playbooks/coordinator.md](docs/playbooks/coordinator.md#scripts) and to
    [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -10,10 +10,10 @@ How to set up, check and test this repo. For how a change gets in, see [CONTRIBU
 | git | the tests make throwaway clones |
 | jq | the scripts parse every forge answer with it |
 | make | the `lint` and `test` targets |
-| `glab` | running the scripts against GitLab; the tests stub it |
+| `glab` or `gh` | running the scripts against GitLab or GitHub; the tests stub both |
 | `claude` (Claude Code CLI) | running writers and reviewers; the tests stub it |
 
-The tests need no network, no `glab` and no `claude`.
+The tests need no network, no `glab`, no `gh` and no `claude`.
 
 ## Setup
 
@@ -69,7 +69,8 @@ The scripts read their settings from the environment.
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | `prompts/review-find.md`, `prompts/review-verify.md` |
-| `FACTORY_GLAB`, `FACTORY_CLAUDE` | the `glab` and `claude` binaries | `glab`, `claude` |
+| `FACTORY_FORGE` | which forge adapter to use | `gitlab` (or `github`) |
+| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_MAX_TRIES`, `FACTORY_SLEEP` | tries per request on HTTP 429, and the wait command | `4`, `sleep` |
 
 Before the first run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt, and add
@@ -85,7 +86,9 @@ scripts/
 ├─ reconcile.sh                               clean up after a restart
 ├─ check-links.sh, check-size.sh              the lint checks
 └─ lib/
-   ├─ gitlab.sh                               the forge seam: gl_api, project_ref, require_bot, mr_get
+   ├─ forge.sh                                the forge seam: picks the adapter, shared helpers
+   ├─ gitlab.sh, github.sh                    the two adapters: the same forge_* calls
+   ├─ http.sh                                 one HTTP helper: retry on 429, fail on other errors
    └─ runs.sh                                 live runs and worktrees on this machine
 prompts/       default find and verify instructions for the reviewer
 tests/         <script>.test.sh per script, lib.sh, fixtures/
@@ -101,7 +104,7 @@ research/      sources the rulebook's rules cite by path
 
 - Write for bash 3.2 and POSIX tools: no GNU-only flags, no associative arrays.
 - Library files in `scripts/lib/` are sourced, never run.
-- Every forge call goes through `gl_api`. Every `claude` call goes through `${FACTORY_CLAUDE:-claude}`.
+- Every forge call goes through a `forge_*` call in `scripts/lib/forge.sh`. Every `claude` call goes through `${FACTORY_CLAUDE:-claude}`.
 - A script prints one line on success and writes errors to stderr.
 
 ## Troubleshooting
@@ -110,7 +113,7 @@ research/      sources the rulebook's rules cite by path
 |---|---|
 | `broken link: <file>:<line>: <target>` from `make lint` | a relative link points at a missing file; fix the path, or link to the file's new place |
 | `too long: AGENTS.md` | the root `AGENTS.md` reached 200 lines; move detail into `docs/` and link it |
-| `refused: glab is logged in as <name>, a human account` | log `glab` in as the agent service account ([docs/setup/identity.md](docs/setup/identity.md)) |
+| `refused: glab is logged in as <name>, a human account` (or `gh`) | log the CLI in as the agent account ([docs/setup/identity.md](docs/setup/identity.md)) |
 | `FACTORY_PROJECT is not set` | export the GitLab project path |
 | `FACTORY_REPO must be a local clone of the project` | point `FACTORY_REPO` at a git clone |
 | `cannot list live runs: claude agents --json failed` | the `claude` CLI is missing or too old to list background sessions |

@@ -20,7 +20,7 @@
 # Prints one line: "pack !12 at 1a2b3c4d patch-id 9f8e7d6c: <path>", with " (reused)" when the pack already exists.
 set -u
 set -o pipefail
-. "$(dirname "$0")/lib/gitlab.sh"
+. "$(dirname "$0")/lib/forge.sh"
 iid=${1:-} previous=${2:-}
 valid_iid "$iid" || exit 1
 git -C "${FACTORY_REPO:-}" rev-parse --git-dir > /dev/null 2>&1 \
@@ -33,18 +33,18 @@ rulebook=${FACTORY_RULEBOOK:-}
   || { echo "the previous head must be a full 40-character SHA, got '$previous'" >&2; exit 1; }
 g() { git -C "$FACTORY_REPO" -c core.quotePath=false "$@"; }
 
-mr=$(mr_get "$iid") || exit 1
-master_name=$(gl_api "projects/$(project_ref)" | jq -r .default_branch) || exit 1
+mr=$(forge_pr "$iid") || exit 1
+master_name=$(forge_default_branch) || exit 1
 branch=$(printf '%s' "$mr" | jq -r .source_branch)
 target=$(printf '%s' "$mr" | jq -r .target_branch)
 sha=$(printf '%s' "$mr" | jq -r .sha)
 [ "$target" = "$master_name" ] \
-  || { echo "!$iid targets $target, not the default branch $master_name; rules come only from $master_name" >&2; exit 1; }
+  || { echo "$mark$iid targets $target, not the default branch $master_name; rules come only from $master_name" >&2; exit 1; }
 
 g fetch -q origin "+refs/heads/$master_name:refs/factory/target" "+refs/heads/$branch:refs/factory/mr-$iid" \
   || { echo "cannot fetch $master_name and $branch" >&2; exit 1; }
 head=$(g rev-parse "refs/factory/mr-$iid")
-[ "$head" = "$sha" ] || { echo "!$iid: the tip of $branch is ${head:0:8}, but the MR's head is ${sha:0:8}; no pack" >&2; exit 1; }
+[ "$head" = "$sha" ] || { echo "$mark$iid: the tip of $branch is ${head:0:8}, but the MR's head is ${sha:0:8}; no pack" >&2; exit 1; }
 [ -z "$previous" ] || g cat-file -e "$previous^{commit}" 2> /dev/null \
   || { echo "the previous head ${previous:0:8} is not in FACTORY_REPO; fetch it or build a round-1 pack" >&2; exit 1; }
 master=$(g rev-parse refs/factory/target)
@@ -55,7 +55,7 @@ patch_id=$(diff "$base" "$head" | git patch-id --stable | cut -d' ' -f1)
 
 dir="$FACTORY_REPO/.claude/packs"
 pack="$dir/$iid-$head${previous:+-since-${previous:0:8}}.md"
-line="pack !$iid at ${head:0:8} patch-id ${patch_id:0:8}: $pack"
+line="pack $mark$iid at ${head:0:8} patch-id ${patch_id:0:8}: $pack"
 if [ -s "$pack" ]; then echo "$line (reused)"; exit 0; fi
 mkdir -p "$dir"
 
@@ -188,6 +188,6 @@ build() {
 # Any failed step fails the pack and leaves no file behind, so a broken pack is never reused.
 (set -e; build) > "$pack.tmp"
 status=$?
-if [ "$status" -ne 0 ]; then rm -f "$pack.tmp"; echo "!$iid: building the pack failed; no pack" >&2; exit 1; fi
+if [ "$status" -ne 0 ]; then rm -f "$pack.tmp"; echo "$mark$iid: building the pack failed; no pack" >&2; exit 1; fi
 mv "$pack.tmp" "$pack"
 echo "$line"

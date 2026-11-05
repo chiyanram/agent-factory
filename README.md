@@ -1,7 +1,7 @@
 # agent-factory
 
 One coordinator AI that takes an approved merge request and gets it written, reviewed and gate-green by fresh AI
-workers, ready for a human to merge. The coordinator runs a small set of bash scripts; the forge (today GitLab) holds
+workers, ready for a human to merge. The coordinator runs a small set of bash scripts; the forge (GitLab or GitHub) holds
 every piece of state, so nothing is lost on a restart.
 
 It is for teams that want AI writers and reviewers on their merge requests while humans keep approval and merge.
@@ -16,11 +16,12 @@ cd agent-factory
 make lint && make test
 ```
 
-To point the coordinator at a project, log `glab` in as an agent service account
+To point the coordinator at a project, log `glab` (GitLab) or `gh` (GitHub) in as the agent account
 ([docs/setup/identity.md](docs/setup/identity.md)), then:
 
 ```bash
-export FACTORY_PROJECT=group/project     # the GitLab project path
+export FACTORY_FORGE=gitlab              # or github
+export FACTORY_PROJECT=group/project     # the GitLab project path, or owner/repo on GitHub
 export FACTORY_REPO=~/src/project        # a local clone of it
 scripts/poll.sh                          # one line of facts per open MR
 ```
@@ -54,7 +55,7 @@ The rules every worker follows come from the `rulebook` plugin in
 ```
 agent-factory/
 ├─ scripts/          the coordinator's loop scripts and the lint checks
-│  └─ lib/           the forge seam (gitlab.sh) and run tracking (runs.sh)
+│  └─ lib/           the forge seam (forge.sh, gitlab.sh, github.sh) and run tracking (runs.sh)
 ├─ prompts/          default instructions for the reviewer's find and verify passes
 ├─ tests/            one plain-bash test per script, with fixtures
 ├─ docs/

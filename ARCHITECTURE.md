@@ -13,7 +13,7 @@ state. Words in **bold** are defined in [GLOSSARY.md](GLOSSARY.md).
 | **Writer** | a fresh Claude session that owns the branch of one MR, in its own worktree | [scripts/start-writer.sh](scripts/start-writer.sh) |
 | **Reviewer** | a fresh find run and a fresh verify run per round; it posts a verdict only | [scripts/start-reviewer.sh](scripts/start-reviewer.sh), [prompts/](prompts/) |
 | **Context pack** | one markdown file per MR head: the diff, the rules from the default branch, the intent | [scripts/pack.sh](scripts/pack.sh) |
-| forge seam | the one place that talks to the forge's API | [scripts/lib/gitlab.sh](scripts/lib/gitlab.sh) |
+| forge seam | the one place that talks to the forge's API, GitLab or GitHub | [scripts/lib/forge.sh](scripts/lib/forge.sh) |
 | run tracking | which writer and reviewer sessions are live on this machine | [scripts/lib/runs.sh](scripts/lib/runs.sh) |
 | **Gate** | the project's own CI pipeline at the MR head | the project's CI, not this repo |
 | **Rulebook** | the rules every worker writes and reviews against | the `rulebook` plugin in [chiyanram/skills](https://github.com/chiyanram/skills) |
@@ -140,8 +140,10 @@ fence longer than any backtick run inside it, so MR text cannot forge a section.
 
 ## The forge seam
 
-Every call to the forge goes through one function, `gl_api` in [scripts/lib/gitlab.sh](scripts/lib/gitlab.sh). It
-wraps the forge CLI, retries on HTTP 429 and fails on any other non-2xx answer. The scripts above it speak in MRs,
+Every call to the forge goes through the seam in [scripts/lib/forge.sh](scripts/lib/forge.sh). `FACTORY_FORGE` picks
+the adapter per project: `gitlab` (the default, through `glab`) or `github` (through `gh`). Both adapters define the
+same `forge_*` calls with the same answers, and both go through one HTTP helper that retries on HTTP 429 and fails
+on any other non-2xx answer. The scripts above it speak in MRs,
 labels, notes and pipelines; only the seam knows the API.
 
 ```mermaid
@@ -149,11 +151,11 @@ flowchart LR
     S["loop scripts<br/>poll · claim · release · status<br/>start-writer · start-reviewer · pack · reconcile"]
     S --> SEAM["forge seam<br/>scripts/lib/"]
     SEAM --> GL["GitLab adapter<br/>gitlab.sh → glab api"]
-    SEAM -.-> GH["other adapters<br/>(GitHub planned)"]
-    T["tests/*.test.sh"] -- "FACTORY_GLAB=stub" --> GL
+    SEAM --> GH["GitHub adapter<br/>github.sh → gh api"]
+    T["tests/*.test.sh"] -- "FACTORY_GLAB / FACTORY_GH = stub" --> GL & GH
 ```
 
-The seam is also the test boundary. A test points `FACTORY_GLAB` at a stub that replays canned answers, and
+The seam is also the test boundary. A test points `FACTORY_GLAB` or `FACTORY_GH` at a stub that replays canned answers, and
 `FACTORY_CLAUDE` at a stub for the `claude` CLI, so no test needs a network. A new forge adapter implements the same
 functions behind the seam; the loop scripts do not change.
 
@@ -191,3 +193,4 @@ flowchart LR
 | [0007](docs/adr/0007-test-first-for-bugs-only-plus-pit.md) | Test-first for bugs; mutation testing for features |
 | [0008](docs/adr/0008-dod-removed.md) | No separate definition-of-done step; the gate and the reviewer own its checks |
 | [0009](docs/adr/0009-tool-and-rules-in-separate-repos.md) | The factory and the rulebook live in separate repos |
+| [0010](docs/adr/0010-one-forge-seam-two-adapters.md) | One forge seam, two adapters: GitLab and GitHub, chosen per project |
