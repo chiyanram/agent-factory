@@ -62,7 +62,10 @@ agent-factory/
 │  ├─ playbooks/     the coordinator's instructions
 │  ├─ setup/         one-time setup (agent identity)
 │  ├─ agents/        settings for the agent skills used in this repo
+│  ├─ open-items.md  what is not finished yet, beside the map
 │  └─ archive/       frozen design history
+├─ drafts/
+│  └─ agent-platform/ drafts of agent-platform's agent files, before they land there
 ├─ research/         sources the rulebook's rules cite
 ├─ GLOSSARY.md       the words we use
 └─ Makefile          make lint, make test
