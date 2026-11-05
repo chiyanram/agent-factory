@@ -26,12 +26,13 @@ repository, so the scripts must work on GitHub as well, chosen per project.
 
 | | GitLab | GitHub |
 |---|---|---|
-| the bot | a service account, `bot: true` (ADR-0006) | a machine user `agent-<dev>` with write access and its own `GH_CONFIG_DIR`; refused unless its login starts with `FACTORY_AGENT_PREFIX` or it is an App's bot |
+| the bot | a service account, `bot: true` (ADR-0006) | a machine user `agent-<dev>` with write access and its own `GH_CONFIG_DIR`; refused unless its login starts with `FACTORY_AGENT_PREFIX` |
 | who may `/approved` | Maintainer or higher | a collaborator with write access or more |
 | a body edit that makes `/approved` stale | the activity note with action `description` | `userContentEdits` |
 | the gate | the head pipeline | the head commit's `statusCheckRollup`, mapped to `success`, `failed`, `running`, `none` |
 | a finding at file:line | a diff discussion | a pull request review comment; a plain comment naming file:line when the line is not in the diff |
 | a rate limit | 429 | 429, or 403 with `retry-after` or `x-ratelimit-remaining: 0` |
+| removing a label that is already gone | no error | a 404, counted as removed once a re-read shows the label gone |
 
 Only branches in the repository itself are supported on GitHub; a fork's branch cannot be fetched from origin.
 
