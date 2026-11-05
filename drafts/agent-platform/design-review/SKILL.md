@@ -20,7 +20,12 @@ Read these from the context pack built from `master`, and check every code fact 
 - the REQ and the design the MR links;
 - the principles: [`AGENT-PRINCIPLES.md`](../../../docs/design/AGENT-PRINCIPLES.md) §1–15 and
   [`PRODUCT-DESIGN.md`](../../../docs/design/PRODUCT-DESIGN.md) §10;
-- the ADRs and the REQs the design names.
+- the ADRs and the REQs the design names;
+- the generic checks: the `spec-review` reference of the `planning` skill (rulebook plugin). Every rule in it applies,
+  and this skill adds Aruvii's walk, its own lenses, the verdict words and the output. The pack carries it as the
+  block `rulebook planning/spec-review`, because the root `AGENTS.md` points at it. You cannot run commands, so for
+  SR3 open each cite by hand. If the pack has no such block, report one critical finding, "the pack has no
+  spec-review rules", and review nothing else.
 
 State the intent in one paragraph before you judge anything. If you cannot state it, stop and ask.
 
@@ -34,7 +39,7 @@ Check the spec against the intent in three parts:
 
 Then:
 
-- Is the scope boundary stated, with what this change does *not* do?
+- Does each story pass SR6: actor, action and benefit, scenarios a test can check, and an out-of-scope list?
 - Can each acceptance criterion be decided by a test or a command, without judgement? Mark which are automated and
   which a human checks.
 - Does every domain term already have a name in the glossary? Take every name from the specs; flag a new one.
@@ -45,8 +50,9 @@ Then:
 
 For each decision the design makes, walk four steps and give one verdict.
 
-1. **Our rules.** Which principle (by §), ADR or REQ does it touch? Does it reverse or narrow one? If so, is the
-   reversal named and decided by a human? Check every code fact it states at `file:line` on `master`.
+1. **Our rules.** Which principle (by §), ADR or REQ does it touch? Apply SR9: a reversal or narrowing must be
+   named and decided by a human. A design that breaks a rule is CONFLICT; two documents that disagree are OPEN,
+   because the human resolves them, not you. Check every code fact by SR2.
 2. **Others.** How do the agent SDKs and 12-factor solve this? What is best in theirs, and what hole do they leave?
    Where theirs leaves a hole our principles cover, ours wins; say why.
 3. **Aruvii's cases.** Run the decision through each case that applies, with one real example:
@@ -59,7 +65,7 @@ For each decision the design makes, walk four steps and give one verdict.
 |---|---|
 | **ALIGNED** | honours every principle and rule it touches |
 | **CONFLICT** | breaks one; cite which (§ or ADR) and how |
-| **OPEN** | only the human can decide; phrase it as a question with your recommendation |
+| **OPEN** | only the human can decide, including two documents that disagree; a question shaped by SR4 (§6) |
 
 ## 4 · Stage 3 — the whole design
 
@@ -67,10 +73,8 @@ Review through whichever lenses are relevant. Not every lens applies to every de
 
 **Correctness.** Does the design do what it claims in every case?
 - Edge cases: empty, absent, expired, zero, boundary values, concurrent access.
-- Failure: is each failure caught, shown, or silently swallowed? Does each external call state timeout, retry and
-  give-up?
-- What happens if this runs twice, or if a previous run crashed halfway?
-- What does a partial failure leave behind?
+- Failure, rerun and crash halfway: SR11. Also: is any failure, on a read path too, silently swallowed? Does each
+  external call state timeout, retry and give-up?
 - Is every state and every transition between states named?
 - Is each acquire released by the same identity that took it?
 
@@ -82,18 +86,20 @@ Review through whichever lenses are relevant. Not every lens applies to every de
 - If the requirement had been known from the start, would the design look like this?
 - Is each choice that varies between customers a setting, not a hard-coded value?
 - Is there one path, or does an old path stay beside the new one?
+- Stored data, a public contract or a deploy changes: SR12 (migration, rollback, irreversible steps).
 
 **Verification.** Can a reader tell from the design how it will be proved? Does it check the real thing, not a
 proxy? Is the failure triageable from the logs alone?
 
 **Complexity budget.** Simpler is better unless simpler is wrong.
-- Is there configuration or abstraction for a case that does not exist yet?
+- Configuration or abstraction for a case that does not exist yet: SR14.
 - Could a rule be a type, a lint rule or a runtime check instead of a convention?
 
-**Security.** Name the control for each new surface. For each concern, trace the input path and show it.
+**Security.** SR13: the trust boundary and its control for each new input, endpoint or permission. For each concern,
+trace the input path and show it.
 
-**Record.** Does the design name at least one alternative and why it lost? Does it state its trade-offs as "we accept
-X in exchange for Y"? Is the decision written where a reader will look?
+**Record.** SR10 (a rejected alternative, tradeoffs as "we accept X for Y") and SR15 (an ADR when a decision is
+hard to reverse, surprising and a real tradeoff).
 
 ## 5 · Findings
 
@@ -119,9 +125,10 @@ An empty review is a valid outcome. If you find nothing wrong, say "no findings"
 
 ## 6 · Open questions
 
-Put each OPEN verdict and each question you cannot answer from the code to the human. Facts are your job: look them
-up. Decisions are the human's. Phrase each as a question, not an assertion, with five parts: what is being decided ·
-the state now, with numbers · the options · what changes with each · your recommendation.
+Put each OPEN verdict and each question you cannot answer from the code to the human, by SR4: look facts up first,
+and give each question what is being decided, its decider, its options with a recommendation, and whether it blocks.
+An OPEN decision usually blocks `/approved` until decided; say so. Phrase each as a question, not an assertion, with
+the state now, in numbers, and what changes with each option.
 
 ## 7 · Output
 
@@ -129,7 +136,7 @@ the state now, with numbers · the options · what changes with each · your rec
 ## Intent          one paragraph, in the human's words
 ## Decisions       | decision | touches (§ / ADR / REQ) | verdict | why, one line |
 ## Findings        by severity, critical first
-## Open questions  each with a recommendation
+## Open questions  each with its decider, options, a recommendation and whether it blocks
 ## Receipts        every file you read, by path
 ```
 
@@ -142,7 +149,7 @@ Consider · Noted · Dismissed.
 - [ ] The spec is checked for missing, not asked for and misread.
 - [ ] Every decision has a verdict, and every CONFLICT cites what it breaks.
 - [ ] Every finding has a location and evidence.
-- [ ] Every OPEN is a question with a recommendation.
+- [ ] Every OPEN is a question with its decider, options, a recommendation and whether it blocks.
 - [ ] Every file read is listed.
 
 Sources: wording and order from pstack `interrogate` (rubric, reviewer prompt, lead judgment) and `architect`;
