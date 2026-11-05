@@ -1,4 +1,4 @@
-# Open items — everything not finished (kept current; last update 2026-10-31)
+# Open items — everything not finished (kept current; last update 2026-11-04)
 
 Build map: [#30](https://github.com/chiyanram/agent-factory/issues/30) (open; its sub-issues are the live build list).
 Map [#1](https://github.com/chiyanram/agent-factory/issues/1) closed 2026-10-25. Design: `docs/ARCHITECTURE.md`,
@@ -13,13 +13,46 @@ approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 ✓ ─▶ L4 ✓ ─�
 
 ### Build tickets
 
+Route (operator, 2026-11-04, map #30): the rulebook first, then a laptop pilot on a small new project, then
+agent-platform, then cutover.
+
 | # | ticket | state |
 |---|---|---|
-| [#28](https://github.com/chiyanram/agent-factory/issues/28) | step 0: this repo becomes a build repo (instructions, `make lint` / `make test`, script tests, CI) | closed (#29) |
-| [#31](https://github.com/chiyanram/agent-factory/issues/31) | T1: skills testing/ rule files | closed |
-| [#34](https://github.com/chiyanram/agent-factory/issues/34) | T4: skills migrations/ and obs/ rule files, re-sourced from industry (research/47) | closed |
-| T2–T3, T5–T16 | the rest of map #30 | see map #30 |
-| [chiyanram/skills#111](https://github.com/chiyanram/skills/issues/111) | step 0: a buildable rulebook plugin repo | open |
+| [#64](https://github.com/chiyanram/agent-factory/issues/64) | T20: forge seam, a GitHub adapter beside GitLab, chosen per project | in progress (another session); Q1–Q3 decided on the ticket |
+| [#62](https://github.com/chiyanram/agent-factory/issues/62) | T19: laptop pilot on the factory ledger, on GitHub | blocked by T20; then the operator creates the repo and the bot account |
+| [#35](https://github.com/chiyanram/agent-factory/issues/35) | T5: agent-platform #713 worktree-setup and one mise pin | open, needs GitLab |
+| [#38](https://github.com/chiyanram/agent-factory/issues/38) | T8: agent-platform nested `AGENTS.md` and `docs/agents/<domain>.md` | open, needs GitLab |
+| [#40](https://github.com/chiyanram/agent-factory/issues/40) | T10: agent-platform `/crq` router and the one reviewer | parked until a session on the operator's machine (2026-11-02) |
+| [#41](https://github.com/chiyanram/agent-factory/issues/41) | T11: agent-platform L5 gate, `/dod` removed | open, needs GitLab |
+| [#42](https://github.com/chiyanram/agent-factory/issues/42) | T12: identity setup checklist | operator |
+| [#43](https://github.com/chiyanram/agent-factory/issues/43) | T13: agent-platform pilot, three tickets | after T19 |
+| [#44](https://github.com/chiyanram/agent-factory/issues/44) | T14: cutover, retire the old fleet and the Verifier | operator, last |
+
+Closed:
+
+| # | ticket | closed with |
+|---|---|---|
+| [#28](https://github.com/chiyanram/agent-factory/issues/28) · [skills#111](https://github.com/chiyanram/skills/issues/111) | step 0: build repos with `make lint`, `make test` and CI | #29 · skills#112 |
+| [#31](https://github.com/chiyanram/agent-factory/issues/31) · [#32](https://github.com/chiyanram/agent-factory/issues/32) · [#33](https://github.com/chiyanram/agent-factory/issues/33) · [#34](https://github.com/chiyanram/agent-factory/issues/34) | T1–T4: the testing, code, planning, meta, migrations and obs rule files | skills main |
+| [#36](https://github.com/chiyanram/agent-factory/issues/36) · [#39](https://github.com/chiyanram/agent-factory/issues/39) | T6, T9: coordinator scripts poll, claim, release, status, start writer, start reviewer, reconcile | `scripts/` |
+| [#37](https://github.com/chiyanram/agent-factory/issues/37) | T7: agent-platform #811 stale `CLAUDE.md §` refs | agent-platform !354 |
+| [#45](https://github.com/chiyanram/agent-factory/issues/45) | T15: how an `AGENTS.md` pointer reaches a rulebook reference | one `SKILL.md` router per domain (skills#169) |
+| [#46](https://github.com/chiyanram/agent-factory/issues/46) | T16: router index that parallel PRs cannot conflict on | `make index` (skills#199) |
+| [#47](https://github.com/chiyanram/agent-factory/issues/47) · [#49](https://github.com/chiyanram/agent-factory/issues/49) · [#56](https://github.com/chiyanram/agent-factory/issues/56) | old-fleet retro week 43, and its playbook and poll fixes | research/46 · #57 · #58 |
+| [#59](https://github.com/chiyanram/agent-factory/issues/59) | T17: rule files hold only rules; the T2 industry re-check | skills#200–#204, #206 |
+| [#60](https://github.com/chiyanram/agent-factory/issues/60) | T18: modern Java rules, JDK 27 target | skills#208 |
+| [skills#152](https://github.com/chiyanram/skills/issues/152) | testing S6: a bug fix's failing test runs locally first (retro G10) | skills#205 |
+| SR8 (from T3) | design-review rules SR9–SR15 in spec-review; SR4 asks for options and a recommendation | skills#207 |
+
+### Asks open for the operator
+
+| ask | where |
+|---|---|
+| may the verify pass run one named test at the head (a yes changes `scripts/start-reviewer.sh`) | #40 |
+| one Codex sentinel run on the laptop | #45, research/48 §3 |
+| delete the 13 stale `fix/32-*` branches in chiyanram/skills | #59 |
+| SR5 stays on HOLD, now that SR9 covers part of it | chiyanram/skills `research/19-approved-rules.md` |
+| what a failed pilot ticket feeds back into, and how many failed pilots stop the cutover | map #30 "Not yet specified" |
 
 ### Design tickets closed (L1–L7)
 
@@ -39,7 +72,6 @@ approved 2026-10-22 ─▶ L1 ✓ ─▶ L2 ✓ ─▶ L3 ✓ ─▶ L4 ✓ ─�
 
 | item | state | where |
 |---|---|---|
-| writing the L1 rules | after L1: one MR per target file; each rule cites its ledger row; any rule can be vetoed in its MR | #21 RESOLUTION |
 | TR4a (OpenTelemetry tracing rule) | on hold until agent-platform #55 decides tracing | #21 fit scan |
 | stacked work (a change built on an unmerged change) | parked as fog | map #1 "Not yet specified" |
 | thin items: daily digest, glossary per project | decided, one source each; watch in use | #19, #1 "Shared language" |

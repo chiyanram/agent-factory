@@ -85,4 +85,6 @@ Read the matching file in full before you act. Each one owns its topic; this fil
 - **A module's own rules:** that module's `AGENTS.md` or `CLAUDE.md`.
 - **Writing docs or a REQ:** [`DEVELOPING.md`](docs/guides/DEVELOPING.md) §Writing documentation.
 - **Decisions and specs:** [`docs/adr/`](docs/adr/README.md) and `docs/spec/`. Take every name from the specs.
+- **Writing or reviewing a spec or a design:** use the `planning` skill (rulebook plugin) and read its
+  `spec-review` reference.
 - **Issues and labels:** [`docs/agents/`](docs/agents/issue-tracker.md).
