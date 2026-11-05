@@ -1,0 +1,36 @@
+# The forge seam for the coordinator scripts (ADR-0010). Source it; do not run it.
+# FACTORY_FORGE picks the adapter for the project: gitlab (default, lib/gitlab.sh) or github (lib/github.sh).
+# Every adapter defines the same calls, and each call answers in the same shape:
+#
+#   forge_require_bot           fails unless the CLI acts as the coordinator's bot; sets me_name (ADR-0006)
+#   forge_pr N                  {state: opened|merged|closed, sha, source_branch, target_branch, labels: [name]}
+#   forge_default_branch        the project's default branch
+#   forge_label_add N LABEL     fails unless the forge kept the label
+#   forge_label_remove N LABEL
+#   forge_note N BODY           one comment on the change
+#   forge_notes N               every comment, oldest first: [{body, author: {username}}]
+#   forge_line_finding N SHA FINDING TEXT
+#                               one comment at FINDING's file:line ({file, line}) on head SHA; unanchored, naming
+#                               file:line, when the forge refuses that line
+#   forge_claimed STATE LABEL   the numbers of the changes in STATE (opened or merged) that carry LABEL, one per line
+#   forge_poll LABEL            poll's lines, one per open change (scripts/poll.sh)
+#
+# mark is the change's prefix in every line a script prints: ! on GitLab, # on GitHub.
+
+case ${FACTORY_FORGE:-gitlab} in
+  gitlab) . "$(dirname "${BASH_SOURCE[0]}")/gitlab.sh"; mark='!' ;;
+  github) . "$(dirname "${BASH_SOURCE[0]}")/github.sh"; mark='#' ;;
+  *) echo "FACTORY_FORGE must be gitlab or github, got '$FACTORY_FORGE'" >&2; exit 1 ;;
+esac
+
+# valid_iid VALUE : fails unless VALUE is a change number.
+valid_iid() {
+  case $1 in
+    '' | *[!0-9]*) echo "not a merge request number: '$1'" >&2; return 1 ;;
+  esac
+}
+
+# has_label CHANGE LABEL : succeeds when the forge_pr answer CHANGE carries LABEL.
+has_label() {
+  [ "$(printf '%s' "$1" | jq --arg l "$2" '.labels | index($l) != null')" = true ]
+}

@@ -36,3 +36,6 @@ changes the factory.
 
 Step-0 decision D2 (operator, 2026-10-26) · ADR-0003 · research/44, 45 · rameezk/forge set aside as an example only
 (operator, 2026-10-26)
+
+Amended by [ADR-0010](0010-one-forge-seam-two-adapters.md): the coordinator scripts reach GitLab or GitHub through
+one forge seam.
