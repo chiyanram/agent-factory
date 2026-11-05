@@ -35,7 +35,7 @@ Three rules carry the rest.
    decided, the live state of each option, and one concrete example from the product. Once the draft MR exists, post it
    on the MR as a `[coordinator] OPEN: …` note, so `poll` lists it until a human answers; before that it goes on the
    issue, where `poll` does not look. A two-option ask accepts only "A" or "B"; any other reply gets one re-ask. Twelve
-   asks were not understood in one week, and "ok keep" was read as an answer to an A/B question (research/46 G5). Write
+   asks were not understood in one week, and "ok keep" was read as an answer to an A/B question (docs/archive/research/46 G5). Write
    every answer to the issue as you go, and every settled term to the glossary. Done when the human has answered every
    open question.
 3. **Write the contract.** Open the draft MR. Its description holds the intent in the human's words, the acceptance
@@ -65,7 +65,7 @@ of memory (agent-fleet #91). The rest wait in the queue.
 | you restart | `reconcile`: every claim label without a live run goes back to the queue |
 | a human posts `/stop`, or pushes to the branch | stand off that MR |
 | a merge conflict | `start writer` to rebase; if that fails, `needs-human` |
-| a claimed MR with no live run waits on a human: `approved=stale` or `asks` above 0 | `release` it and take the next approved MR. When the human re-approves or answers, `claim` it again; start a writer only if the gate is red or an Act on thread is open, otherwise go on to the row that matches its state. A finished MR once held its slot for about 40 hours waiting on a re-approval (research/46 G4) |
+| a claimed MR with no live run waits on a human: `approved=stale` or `asks` above 0 | `release` it and take the next approved MR. When the human re-approves or answers, `claim` it again; start a writer only if the gate is red or an Act on thread is open, otherwise go on to the row that matches its state. A finished MR once held its slot for about 40 hours waiting on a re-approval (docs/archive/research/46 G4) |
 | the usage limit is near | pause every run |
 | once a day | one Discord line: MRs green and waiting, oldest first; skip when nothing changed |
 
@@ -113,9 +113,9 @@ untrusted workspace. Add `.claude/worktrees/` and `.claude/runs/` to the project
 
 - **`/approved`** only from a human maintainer, as the first line of a note, and only when it is newer than the last
   edit of the description by a human (GitLab's `description` activity note; the writer's own edits to the MR body do
-  not count, #56). An older one shows as `approved=stale` and needs a fresh `/approved` (research/46 G3).
+  not count, #56). An older one shows as `approved=stale` and needs a fresh `/approved` (docs/archive/research/46 G3).
 - **An open ask** as a note that starts `[coordinator] OPEN:` with no note from a human project member after it. Ask the human that way, so
-  every poll lists the asks still open (research/46 G6).
+  every poll lists the asks still open (docs/archive/research/46 G6).
 
 ## Escalation
 
@@ -133,5 +133,5 @@ You talk, plan and route; the writer writes code, the reviewer judges it and the
 - Permissions stay as configured; run in the harness sandbox.
 - State goes to GitLab, never to a file only you can read.
 
-Sources: `docs/adr/0001`–`0008`; #23 Q2; research/24, 37, 38. Wording follows pstack `orchestrate.md` and mattpocock
+Sources: `docs/adr/0001`–`0008`; #23 Q2; docs/archive/research/24, 37, 38. Wording follows pstack `orchestrate.md` and mattpocock
 `writing-for-agents`.

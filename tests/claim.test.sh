@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/claim.sh and scripts/release.sh: the claim label on the MR is the claim (ADR-0002; research/37 P1).
+# scripts/claim.sh and scripts/release.sh: the claim label on the MR is the claim (ADR-0002; docs/archive/research/37 P1).
 . "$(dirname "$0")/lib.sh"
 export FACTORY_PROJECT=aruvii/agent-platform FACTORY_SLEEP=true
 bot='{"username":"agent-coordinator","bot":true}'

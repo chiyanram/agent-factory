@@ -24,7 +24,7 @@ http_limited() {
 }
 
 # http_api NAME BINARY ARGS... : one `BINARY api --include ARGS` request. Prints the body of a 2xx answer. On a rate
-# limit it waits and tries again, because 43 single-issue calls in a week ran into 429 (research/46 G8). Any other
+# limit it waits and tries again, because 43 single-issue calls in a week ran into 429 (docs/archive/research/46 G8). Any other
 # status fails, and the message starts with NAME.
 http_api() {
   name=$1 bin=$2; shift 2

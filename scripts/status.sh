@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # status <mr> <sha> "<line>" — posts one "[coordinator] <line>" note on the MR (playbook §Scripts; ADR-0006 seat).
 # <sha> is the head the run started at. When the MR's head has moved since, the note is refused: a note about an
-# old head once went out in public (research/46 G7: !303). Prints one line: "posted !12 at 1a2b3c4d".
+# old head once went out in public (docs/archive/research/46 G7: !303). Prints one line: "posted !12 at 1a2b3c4d".
 set -u
 . "$(dirname "$0")/lib/forge.sh"
 iid=${1:-} sha=${2:-} line=${3:-}

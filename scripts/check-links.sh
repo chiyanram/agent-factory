@@ -3,7 +3,8 @@
 # Fails when a relative link in a tracked .md file under ROOT points at no file.
 # Skips http(s), mailto and pure #anchor links; checks only the path of path#anchor.
 # Skips links inside code fences and inline code.
-# Skips tests/fixtures/ (bad input on purpose) and drafts/agent-platform/ (its links resolve in agent-platform).
+# Skips tests/fixtures/ (bad input on purpose), drafts/agent-platform/ (its links resolve in agent-platform) and
+# docs/archive/ (frozen history whose links point at old paths).
 set -eu
 
 root=${1:-.}
@@ -29,7 +30,7 @@ links() {
   ' "$1"
 }
 
-files=$(git -c core.quotePath=false -C "$root" ls-files -- '*.md' ':(exclude)tests/fixtures/' ':(exclude)drafts/agent-platform/')
+files=$(git -c core.quotePath=false -C "$root" ls-files -- '*.md' ':(exclude)tests/fixtures/' ':(exclude)drafts/agent-platform/' ':(exclude)docs/archive/')
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   dir=$(dirname "$file")

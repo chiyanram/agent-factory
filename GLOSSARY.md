@@ -12,7 +12,7 @@ A job one party owns for one story: human, coordinator, writer, reviewer or gate
 _Avoid_: role, persona, agent (for the job)
 
 **Coordinator**:
-The one AI session that talks with the human, does intake, grilling, spec, design and retro, and starts workers (#1 CORRECTION 2026-10-23; research/38).
+The one AI session that talks with the human, does intake, grilling, spec, design and retro, and starts workers (#1 CORRECTION 2026-10-23; docs/archive/research/38).
 _Avoid_: lead, orchestrator, discovery, analyst
 
 **Worker**:
@@ -40,10 +40,10 @@ The coordinator plus the workers it starts; optional for every developer (#1 COR
 _Avoid_: old fleet (that is the retired 4-agent setup)
 
 **Old fleet**:
-The 4 always-on persona agents (aruvii-analyst, Spec Reviewer, Agent Developer, aruvii-qa) and the Verifier; retired by the design, removed in L7 #27 (research/23).
+The 4 always-on persona agents (aruvii-analyst, Spec Reviewer, Agent Developer, aruvii-qa) and the Verifier; retired by the design, removed in L7 #27 (docs/archive/research/23).
 
 **Verifier**:
-The old fleet's gate queue: one slot, about an hour, full rerun only; replaced by the GitLab CI gate (#4 Q5a; research/17).
+The old fleet's gate queue: one slot, about an hour, full rerun only; replaced by the GitLab CI gate (#4 Q5a; docs/archive/research/17).
 _Avoid_: using "verify" for it — that word now means the verify pass
 
 **Cutover**:
@@ -54,7 +54,7 @@ _Avoid_: "migration" (that word means a Flyway schema change)
 A separate seat for intent → issue → REQ → draft MR; withdrawn 2026-10-23, its jobs belong to the coordinator (#1 CORRECTION).
 
 **Chief of staff**:
-Not a seat: a map plus a planning session the human starts when a goal is big, as map #1 is run (#23 Q1; research/36).
+Not a seat: a map plus a planning session the human starts when a goal is big, as map #1 is run (#23 Q1; docs/archive/research/36).
 
 **Helper**:
 An agent a seat calls for one question (security auditor, architect, scout); it owns nothing (#1 "Intake DECIDED").
@@ -128,7 +128,7 @@ The question inside the Standards verdict: which real input, state or failure ma
 ### Rulebook
 
 **Rulebook**:
-The small markdown files every writer and reviewer loads: root AGENTS.md, nested AGENTS.md, references and the generic plugin (#1 "Box 5"; research/22).
+The small markdown files every writer and reviewer loads: root AGENTS.md, nested AGENTS.md, references and the generic plugin (#1 "Box 5"; docs/archive/research/22).
 _Avoid_: rubric, `.claude/rules`, area file
 
 **Root block**:

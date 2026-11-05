@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/poll.sh: one batched query (G8) → one line of facts per open MR, from current state only (research/37 P3).
+# scripts/poll.sh: one batched query (G8) → one line of facts per open MR, from current state only (docs/archive/research/37 P3).
 . "$(dirname "$0")/lib.sh"
 export FACTORY_PROJECT=aruvii/agent-platform FACTORY_SLEEP=true
 

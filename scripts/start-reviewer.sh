@@ -8,7 +8,7 @@
 #     logic findings on Opus (#22 Q4). Every run has Read, Grep and Glob only, in a folder that holds the pack and a
 #     copy of the code at the head with every CLAUDE.md, AGENTS.md, .claude/ and .agents/ removed: Claude loads a
 #     CLAUDE.md from any folder it can read, and the MR must not choose its own rules (ADR-0004).
-#   4 Before posting, the MR's head must still be the reviewed head; else MOVED, nothing posted (research/46 G7).
+#   4 Before posting, the MR's head must still be the reviewed head; else MOVED, nothing posted (docs/archive/research/46 G7).
 #   5 One summary note, then one diff thread per Act on and Consider finding at its file:line (#22 Q2).
 #
 #   FACTORY_REVIEW_FIND / FACTORY_REVIEW_VERIFY   the instructions (default prompts/review-*.md, #39 Q4)

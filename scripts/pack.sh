@@ -11,7 +11,7 @@
 # Section 3 holds the root AGENTS.md, every nested AGENTS.md on the path of a touched file, the project files they
 # link to, and each rulebook reference they point at ("use the `<domain>` skill (rulebook plugin) and read its
 # `<reference>` reference"). A pointer or link the pack cannot resolve stops it: a rule that named a missing skill
-# was once skipped in silence (research/46 G9). Every block sits in a fence longer than any backtick run inside it,
+# was once skipped in silence (docs/archive/research/46 G9). Every block sits in a fence longer than any backtick run inside it,
 # so no MR text can close a fence and forge a section.
 #
 #   FACTORY_REPO       the local clone of the project; packs go to $FACTORY_REPO/.claude/packs/

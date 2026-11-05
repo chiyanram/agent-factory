@@ -89,7 +89,7 @@ forge_claimed() {
 }
 
 # forge_changes LABEL : the open MRs and the merged MRs that carry LABEL, in the shape scripts/poll.sh decides on.
-# One GraphQL query, because single calls ran into 429 (research/46 G8). Values go in as GraphQL variables, never
+# One GraphQL query, because single calls ran into 429 (docs/archive/research/46 G8). Values go in as GraphQL variables, never
 # into the query text, so no project path or label can change the query. Each is one plain string: glab rejects a
 # bracketed field name (labels[]) in a GraphQL body.
 #
