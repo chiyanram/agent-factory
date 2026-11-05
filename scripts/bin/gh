@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# gh as the factory's GitHub App. Point FACTORY_GH here, or put this folder first on a writer's PATH.
+exec "$(cd "$(dirname "$0")/.." && pwd)/github-app.sh" gh "$@"

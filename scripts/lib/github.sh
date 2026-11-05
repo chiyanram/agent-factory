@@ -1,9 +1,10 @@
 # The GitHub adapter of the forge seam (ADR-0010). Source lib/forge.sh, not this file.
 # Every GitHub call goes through gh_api, so a test swaps gh for a stub with FACTORY_GH and needs no network.
 #
-#   FACTORY_GH        the gh binary (default: gh), logged in as the coordinator's machine user agent-<dev>; give that
-#                     user its own GH_CONFIG_DIR, so the operator's own login is never used (ADR-0006)
-#   FACTORY_PROJECT   the repository, owner/name, for example chiyanram/ledger
+#   FACTORY_GH           the gh binary that acts as the factory's GitHub App (default: scripts/bin/gh, which mints the
+#                        App's token with scripts/github-app.sh); the operator's own gh login is never used (ADR-0006)
+#   FACTORY_GH_APP_SLUG  the App's name in its URL (github.com/apps/<slug>); it posts as <slug>[bot]
+#   FACTORY_PROJECT      the repository, owner/name, for example chiyanram/ledger
 #
 # Only branches in the repository itself are supported: the writer pushes there, and a fork's branch cannot be
 # fetched from origin.
@@ -12,7 +13,7 @@ export GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1
 
 # gh_api ARGS... : one `gh api` request (lib/http.sh).
 gh_api() {
-  http_api github "${FACTORY_GH:-gh}" "$@"
+  http_api github "${FACTORY_GH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh}" "$@"
 }
 
 repo() {
@@ -30,17 +31,17 @@ gh_post() {
   rm -f "$input"; return "$status"
 }
 
-# A machine user is an ordinary GitHub account (type User), so the agent- name marks it. An App's installation token
-# cannot read /user, so an App is never the bot here (#64 Q1).
+# The bot is a GitHub App that the developer's account owns (#64 Q1, amended 2026-11-05). Only an App's installation
+# token can list its installation's repositories; a person's token gets 403 there, so it is refused before any write.
 forge_require_bot() {
-  me=$(gh_api user) || return 1
-  me_name=$(printf '%s' "$me" | jq -r .login)
-  prefix=${FACTORY_AGENT_PREFIX:-agent-}
-  if [ "${me_name#"$prefix"}" = "$me_name" ]; then
-    echo "refused: gh is logged in as $me_name, a human account;" \
-      "log it in as the coordinator's machine user $prefix<dev> (ADR-0006)" >&2
+  [ -n "${FACTORY_GH_APP_SLUG:-}" ] \
+    || { echo "FACTORY_GH_APP_SLUG is not set (the App's name in github.com/apps/<slug>)" >&2; return 1; }
+  if ! gh_api 'installation/repositories?per_page=1' > /dev/null 2>&1; then
+    echo "refused: gh is not acting as the factory's GitHub App, so it may be a human account;" \
+      "point FACTORY_GH at scripts/bin/gh with the App configured (ADR-0006, ADR-0010)" >&2
     return 1
   fi
+  me_name="$FACTORY_GH_APP_SLUG[bot]"
 }
 
 forge_pr() {
@@ -100,6 +101,17 @@ forge_line_finding() {
   gh_post "repos/$r/pulls/$1/comments" "$comment" > /dev/null 2>&1 && return 0
   gh_post "repos/$r/issues/$1/comments" "$(printf '%s' "$3" | jq -c --arg b "$4" '{body: ("`\(.file):\(.line)` " + $b)}')" \
     > /dev/null
+}
+
+# A writer pushes from a worktree of FACTORY_REPO, so that clone's git config makes git push and scripts/bin/gh act as
+# the App. A clone without it would push as the person logged in on this machine.
+forge_writer_note() {
+  case $(git -C "$FACTORY_REPO" config --get credential.https://github.com.helper) in
+    *github-app.sh*) ;;
+    *) echo "FACTORY_REPO would push to GitHub as a person: set its credential helper to scripts/github-app.sh" \
+         "(docs/setup/identity.md, GitHub)" >&2; return 1 ;;
+  esac
+  echo "For every GitHub call use $(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh, never plain gh: it acts as the factory's GitHub App."
 }
 
 # gh_graphql QUERY LABEL : the query's data.repository, or a failure that names the GraphQL error.

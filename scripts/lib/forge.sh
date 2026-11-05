@@ -14,7 +14,9 @@
 #                               answer; unanchored, naming
 #                               file:line, when the forge refuses that line
 #   forge_claimed STATE LABEL   the numbers of the changes in STATE (opened or merged) that carry LABEL, one per line
-#   forge_poll LABEL            poll's lines, one per open change (scripts/poll.sh)
+#   forge_changes LABEL         the open and merged changes, in the shape scripts/poll.sh decides on
+#   forge_writer_note           fails unless a writer in FACTORY_REPO would push as the bot; prints any extra line
+#                               the writer's prompt needs
 #
 # mark is the change's prefix in every line a script prints: ! on GitLab, # on GitHub.
 

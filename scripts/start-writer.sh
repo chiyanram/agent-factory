@@ -14,6 +14,7 @@ iid=${1:-}
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 valid_iid "$iid" || exit 1
 require_repo || exit 1
+note=$(forge_writer_note) || exit 1
 
 mr=$(forge_pr "$iid") || exit 1
 state=$(printf '%s' "$mr" | jq -r .state)
@@ -46,7 +47,8 @@ git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$bra
 
 prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
 Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
-and the design link. You never talk to the human. Push only this branch; after a rebase use --force-with-lease."
+and the design link. You never talk to the human. Push only this branch; after a rebase use --force-with-lease.${note:+
+$note}"
 set --
 [ -z "${FACTORY_WRITER_MODEL:-}" ] || set -- --model "$FACTORY_WRITER_MODEL"
 

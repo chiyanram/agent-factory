@@ -24,16 +24,20 @@ developer ──▶ own account: /approved and merge only
 
 ## GitHub (ADR-0010)
 
-On a GitHub project the account is a machine user, an ordinary GitHub account (#64 Q1).
+On a GitHub project the bot is a **GitHub App** that the developer's own account owns. It posts as `<slug>[bot]`,
+and it has no login, no email and no password (#64 Q1, amended 2026-11-05). This is GitHub's service account.
 
 | # | who | step | why |
 |---|---|---|---|
-| 1 | developer | Create the GitHub account `agent-<name>` with its own email. | GitHub has no service accounts; the `agent-` name is how the scripts tell it from a human. |
-| 2 | repo owner | Invite it as a collaborator with **Write**. | It can push branches, open pull requests and comment. |
-| 3 | repo owner | Add a ruleset on `main`: require a pull request, block force pushes, and allow merge only to the owner. | An agent cannot merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
-| 4 | developer | As the machine user, create a classic token with the `repo` scope, expiry 365 days. Log `gh` in with it under its own config folder (`GH_CONFIG_DIR=~/.config/gh-agent gh auth login`), and point `FACTORY_GH` at a wrapper that sets that folder. Never put the token in an environment variable. | A fine-grained token reaches only repositories its owner owns, not one it is a collaborator on. The operator's own `gh` login is never used by an agent. |
+| 1 | developer | Create the App: Settings → Developer settings → GitHub Apps → New. Name it, for example `ledger-factory`; its URL slug is `FACTORY_GH_APP_SLUG`. Turn the webhook off. Repository permissions: Contents, Issues and Pull requests read and write; Checks, Commit statuses and Metadata read. Install it on: only this account. | One App per developer, as one service account per developer on GitLab. |
+| 2 | developer | Note the App ID. Generate a private key, move the `.pem` to `~/.config/agent-factory/`, and run `chmod 600` on it. | The key mints a one-hour token on demand (`scripts/github-app.sh`); no token is ever stored in a config file or an environment variable. |
+| 3 | developer | Install the App on the project's repository only. | It can push branches, open pull requests and comment there, and nowhere else. |
+| 4 | repo owner | Add a ruleset on `main`: require a pull request with one approval, block force pushes, and allow merge only to the owner. | An App cannot approve its own pull request, so an agent cannot merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
+| 5 | developer | In the factory's clone (`FACTORY_REPO`), set `git config factory.ghAppId <id>`, `factory.ghAppKey <pem path>`, `factory.project <owner/name>`, and `credential.https://github.com.helper "!<agent-factory>/scripts/github-app.sh git-credential"`. Set `user.name` to `<slug>[bot]`. | A writer pushes and runs `scripts/bin/gh` as the App with nothing in its environment; `start-writer` refuses a clone without the helper. |
+| 6 | developer | For the coordinator scripts set `FACTORY_FORGE=github` and `FACTORY_GH_APP_SLUG`, plus `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` and `FACTORY_PROJECT`. `FACTORY_GH` defaults to `scripts/bin/gh`. | The scripts refuse any token that is not the App's (`forge_require_bot`). |
 
-Steps 5 to 9 above apply as they are.
+Steps 5 to 7 above apply as they are. Step 8: when a developer leaves, delete the App's private key, or the App.
+Step 9 does not apply: the key does not expire, and each token lasts one hour and is minted again on demand.
 
 ## Known gap
 

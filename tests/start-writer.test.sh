@@ -104,4 +104,17 @@ expect_pass "the model name is passed as it is, never glob-expanded" \
 
 expect_fail "FACTORY_REPO must be a git clone" "FACTORY_REPO" env FACTORY_REPO=/nonexistent "$REPO_ROOT/scripts/start-writer.sh" 12
 
+# GitHub: the writer must push and call gh as the factory's App, never as the person on this machine (ADR-0010)
+setup
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 '{"number":12,"state":"open","merged":false,"head":{"sha":"'"$head"'","ref":"feat/x"},"base":{"ref":"main"},"labels":[{"name":"agent::claimed"}]}'
+expect_fail "a clone that would push as a person is refused" "would push to GitHub as a person" \
+  env FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger "$REPO_ROOT/scripts/start-writer.sh" 12
+expect_eq "and nothing started" "" "$(bg_calls)"
+git -C "$FACTORY_REPO" config credential.https://github.com.helper "!$REPO_ROOT/scripts/github-app.sh git-credential"
+expect_eq "a clone set up as the App starts the writer" "writer started #12 at ${head:0:8}: started abc123" \
+  "$(FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger "$REPO_ROOT/scripts/start-writer.sh" 12)"
+expect_pass "the prompt sends every GitHub call through the App's gh" \
+  grep -q "use $REPO_ROOT/scripts/bin/gh, never plain gh" "$(dirname "$FACTORY_CLAUDE")/calls.log"
+
 finish
