@@ -26,7 +26,7 @@ CORRECTION 2026-10-23.
 | high-level design | **approved 2026-10-22** | #1 "HIGH-LEVEL DESIGN APPROVED" · [design page](https://claude.ai/artifact/XwqdmZw23eSWjCkF9DHzC3) · `docs/design.md` |
 | one coordinator, no discovery seat | corrected 2026-10-23 | #1 CORRECTION · research/38 |
 | low-level design L1–L7 | **closed** | tickets #21–#27; map #1 closed 2026-10-25 |
-| build | in progress | step 0 #28 and chiyanram/skills#111 · `docs/open-items.md` |
+| build | in progress: rulebook done; T20 forge seam, then the laptop pilot T19, then agent-platform | map [#30](https://github.com/chiyanram/agent-factory/issues/30) · `docs/open-items.md` |
 
 ## Where to start reading
 
