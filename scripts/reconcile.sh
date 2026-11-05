@@ -5,28 +5,26 @@
 # MR is removed too. A run's worktree with no live run is removed (research/37: "restart must be a non-event").
 # Prints one line per action, or "nothing to reconcile". Run it only when no claim is between `claim` and `start`.
 set -u
-. "$(dirname "$0")/lib/gitlab.sh"
+. "$(dirname "$0")/lib/forge.sh"
 . "$(dirname "$0")/lib/runs.sh"
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 require_repo || exit 1
-require_bot || exit 1
+forge_require_bot || exit 1
 runs=$(live_runs) || exit 1
 live() { printf '%s\n' "$runs" | grep -Eqx "(writer|reviewer)-$1"; }
 
-ref=$(project_ref) || exit 1
-by_label=$(printf '%s' "$label" | jq -sRr @uri)
-open=$(gl_api "projects/$ref/merge_requests?state=opened&labels=$by_label&per_page=100") || exit 1
-merged=$(gl_api "projects/$ref/merge_requests?state=merged&labels=$by_label&per_page=100") || exit 1
+open=$(forge_claimed opened "$label") || exit 1
+merged=$(forge_claimed merged "$label") || exit 1
 release() {
-  gl_api "projects/$ref/merge_requests/$1" -X PUT -f remove_labels="$label" > /dev/null || exit 1
-  echo "released !$1 ($2)"
+  forge_label_remove "$1" "$label" || exit 1
+  echo "released $mark$1 ($2)"
 }
 
 done=0
-for iid in $(printf '%s' "$open" | jq -r '.[].iid'); do
+for iid in $open; do
   live "$iid" || { release "$iid" "no live run"; done=1; }
 done
-for iid in $(printf '%s' "$merged" | jq -r '.[].iid'); do
+for iid in $merged; do
   release "$iid" merged; done=1
 done
 for path in "$FACTORY_REPO"/.claude/worktrees/*; do

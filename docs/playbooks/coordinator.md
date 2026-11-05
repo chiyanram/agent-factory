@@ -87,12 +87,15 @@ loops drift; scripts do not.
 | `reconcile` | removes each claim and run worktree that has no live run, and each claim left on a merged MR |
 
 `poll`, `claim`, `release` and `status` are in `scripts/` (#36), and `start-writer.sh` and `reconcile.sh` (#39);
-`pack.sh` and `start-reviewer.sh` (#39 PR 2, 3). The scripts that write to GitLab run as the coordinator's service
-account and refuse a human login (ADR-0006). Settings:
+`pack.sh` and `start-reviewer.sh` (#39 PR 2, 3). They reach GitLab or GitHub through one forge seam,
+`scripts/lib/forge.sh` (ADR-0010); on GitHub, read "pull request" for "MR" and `#12` for `!12`. The scripts that write
+run as the coordinator's bot account and refuse a human login (ADR-0006). Settings:
 
 | setting | meaning |
 |---|---|
-| `FACTORY_PROJECT` | the GitLab project path, for example `aruvii/agent-platform` |
+| `FACTORY_FORGE` | `gitlab` (default) or `github` (ADR-0010) |
+| `FACTORY_PROJECT` | the GitLab project path, for example `aruvii/agent-platform`, or the GitHub `owner/name` |
+| `FACTORY_GLAB`, `FACTORY_GH` | the `glab` or `gh` binary, logged in as the bot (default `glab`, `gh`) |
 | `FACTORY_REPO` | the local clone of that project; runs get worktrees in `.claude/worktrees/` inside it |
 | `FACTORY_CLAIM_LABEL` | the claim label (default `agent::claimed`) |
 | `FACTORY_AGENT_PREFIX` | the start of every agent account's name (default `agent-`) |

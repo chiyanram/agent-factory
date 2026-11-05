@@ -5,7 +5,8 @@
 #   !9 merged claimed=yes
 #
 # The coordinator decides; poll only reports. It keeps no state between runs, so a restart or a compaction loses
-# nothing (ADR-0002; research/37 P3). One GraphQL query per poll, because single calls ran into 429 (research/46 G8).
+# nothing (ADR-0002; research/37 P3). The forge adapter reads (forge_changes, one query); this file decides, the same
+# way on every forge (ADR-0010). On GitHub the lines start with # and a maintainer is a collaborator with write access.
 #
 #   approved  yes: the last /approved from a human maintainer is newer than the last description edit by a human
 #             (the activity note GitLab writes with action "description"; the writer's own edits do not count, #56)
@@ -17,63 +18,38 @@
 #   asks      [coordinator] OPEN: notes with no note from a human project member after them (research/46 G6)
 #   claimed   the MR carries FACTORY_CLAIM_LABEL (default agent::claimed)
 set -u
-. "$(dirname "$0")/lib/gitlab.sh"
-
-project=${FACTORY_PROJECT:-}
+. "$(dirname "$0")/lib/forge.sh"
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
-[ -n "$project" ] || { echo "FACTORY_PROJECT is not set (for example aruvii/agent-platform)" >&2; exit 1; }
+changes=$(forge_changes "$label") || exit 1
 
-# Values go in as GraphQL variables, never into the query text, so no project path or label can change the query.
-# Each is one plain string: glab rejects a bracketed field name (labels[]) in a GraphQL body.
-query='query($project: ID!, $label: String!) { project(fullPath: $project) {
-  members: projectMembers(relations: [DIRECT, INHERITED], first: 100) {
-    nodes { user { username } accessLevel { integerValue } } }
-  open: mergeRequests(state: opened, first: 50) { nodes {
-    iid draft diffHeadSha
-    labels { nodes { title } }
-    headPipeline { status }
-    comments: notes(filter: ONLY_COMMENTS, last: 100) { nodes { body createdAt author { username bot } } }
-    activity: notes(filter: ONLY_ACTIVITY, last: 100) { nodes { createdAt author { username bot } systemNoteMetadata { action } } } } }
-  merged: mergeRequests(state: merged, labels: [$label], first: 20) { nodes { iid } } } }'
-
-answer=$(gl_api graphql -f query="$query" -f project="$project" -f label="$label") || exit 1
-problem=$(printf '%s' "$answer" | jq -r '(.errors // [])[0].message // empty')
-[ -z "$problem" ] || { echo "GraphQL: $problem" >&2; exit 1; }
-[ "$(printf '%s' "$answer" | jq '.data.project == null')" = false ] \
-  || { echo "no project $project, or glab cannot see it" >&2; exit 1; }
-
-printf '%s' "$answer" | jq -r --arg label "$label" --arg prefix "${FACTORY_AGENT_PREFIX:-agent-}" '
-  .data.project as $p
-  | ($p.members.nodes | map(select(.user != null) | {key: .user.username, value: .accessLevel.integerValue})
-     | from_entries) as $level
+printf '%s' "$changes" | jq -r --arg mark "$mark" --arg label "$label" --arg prefix "${FACTORY_AGENT_PREFIX:-agent-}" '
+  .members as $level
   | def yn: if . then "yes" else "no" end;
     def command: .body | split("\n")[0] | gsub("^\\s+|\\s+$"; "");
-    def human: .author.bot == false and (.author.username | startswith($prefix) | not);
-    def member: human and ($level[.author.username] // 0) > 0;
-    def maintainer: human and ($level[.author.username] // 0) >= 40;
-  [ ( $p.open.nodes[]
-    | (.comments.nodes | sort_by(.createdAt)) as $notes
-    | (.activity.nodes | sort_by(.createdAt)) as $activity
+    def human: . != null and .bot == false and (.name | startswith($prefix) | not);
+    def member: (.author | human) and $level[.author.name] != null;
+    def maintainer: (.author | human) and $level[.author.name] == "maintainer";
+  [ ( .open[]
+    | (.comments | sort_by(.at)) as $notes
     | ([$notes[] | select(maintainer and command == "/approved")] | last) as $approved
     | ([$notes[] | select(maintainer and command == "/stop")] | last) as $stop
-    | ([$notes[] | select(member)] | last | .createdAt // "") as $lastMember
+    | ([$notes[] | select(member)] | last | .at // "") as $lastMember
     # an edit makes an /approved stale unless it is provably by the writer (a bot or agent- account), since the
     # writer rewrites the body in its done phase (#56 A); an edit with no author counts
-    | ([$activity[] | select(.systemNoteMetadata.action == "description" and (.author == null or human))] | last | .createdAt // "") as $edited
-    # a full activity window that starts after the approval may hide an edit: count that as stale, never as fresh
-    | (($activity | length) >= 100 and $approved != null and $approved.createdAt < $activity[0].createdAt) as $unknown
-    | [.labels.nodes[].title] as $labels
-    | { iid: (.iid | tonumber),
-        line: ("!\(.iid) head=\(.diffHeadSha[0:8]) draft=\(.draft | yn)"
-          + " claimed=\($labels | index($label) != null | yn)"
+    | ([.edits | sort_by(.at)[] | select(.author == null or (.author | human))] | last | .at // "") as $edited
+    # a full edit window that starts after the approval may hide an edit: count that as stale, never as fresh
+    | (.window != null and $approved != null and $approved.at < .window) as $unknown
+    | { number,
+        line: ("\($mark)\(.number) head=\(.head[0:8]) draft=\(.draft | yn)"
+          + " claimed=\(.labels | index($label) != null | yn)"
           + " approved=\(if $approved == null then "no"
-                         elif $unknown or ($edited != "" and $approved.createdAt <= $edited) then "stale"
+                         elif $unknown or ($edited != "" and $approved.at <= $edited) then "stale"
                          else "yes" end)"
-          + " pipeline=\(.headPipeline.status // "none" | ascii_downcase)"
-          + " needs_human=\($labels | index("needs-human") != null | yn)"
-          + " stop=\($stop != null and ($approved == null or $stop.createdAt > $approved.createdAt) | yn)"
-          + " asks=\([$notes[] | select((human | not) and (.body | startswith("[coordinator] OPEN:"))
-                                       and .createdAt > $lastMember)] | length)") } ),
-    ( $p.merged.nodes[] | {iid: (.iid | tonumber), line: "!\(.iid) merged claimed=yes"} ) ]
-  | sort_by(.iid)[].line
+          + " pipeline=\(.pipeline)"
+          + " needs_human=\(.labels | index("needs-human") != null | yn)"
+          + " stop=\($stop != null and ($approved == null or $stop.at > $approved.at) | yn)"
+          + " asks=\([$notes[] | select((.author | human | not) and (.body | startswith("[coordinator] OPEN:"))
+                                       and .at > $lastMember)] | length)") } ),
+    ( .merged[] | {number: ., line: "\($mark)\(.) merged claimed=yes"} ) ]
+  | sort_by(.number)[].line
 '

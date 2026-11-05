@@ -12,7 +12,7 @@ respond "$FACTORY_GLAB" 3 201 '{"id":7}'
 expect_eq "a note at the run's head is posted" "posted !12 at aaaa1111" \
   "$("$REPO_ROOT/scripts/status.sh" 12 aaaa1111 "writer started")"
 expect_pass "the note body starts with the seat" \
-  grep -q 'merge_requests/12/notes -X POST -f body=\[coordinator\] writer started' "$(dirname "$FACTORY_GLAB")/calls.log"
+  sh -c "jq -r .body '$(dirname "$FACTORY_GLAB")/inputs.log' | grep -qx '\[coordinator\] writer started'"
 
 FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
 respond "$FACTORY_GLAB" 1 200 "$bot"
