@@ -112,7 +112,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | `/approved` from a human maintainer, with `asks=0` and `needs_human=no` | `claim`, `start-writer`, `status "writer started"` |
 | the writer marks the MR ready, with `asks=0` | `start-reviewer` at the head SHA |
-| an open Act on thread, or the gate is red | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
+| an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the gate is green and no Act on is open | undraft, assign a maintainer, `status "ready"` |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, or hits its time cap | mark it interrupted, `release` the claim |
@@ -134,7 +134,7 @@ and `#12` for `!12`.
 | `poll.sh` | one line per open MR: head, draft, claimed, `approved=yes\|stale\|no`, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim |
 | `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
 | `start-writer.sh <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit |
-| `start-reviewer.sh <mr>` | one review round: the pack, a find run, a verify run, then one summary note and one thread per Act on or Consider; reuses the last verdict when the patch-id is unchanged; refuses a 4th round; exits 3 with `MOVED` when the head moved |
+| `start-reviewer.sh <mr>` | one review round: the pack, a find run, a verify run, then one summary note and one thread per Act on or Consider; reuses the last verdict when the patch-id is unchanged, or labels `needs-human` when that verdict still has Act on findings; labels `needs-human` when protected files changed; refuses a 4th round; exits 3 with `MOVED` when the head moved |
 | `pack.sh <mr> [<previous-head>]` | builds the reviewer's context pack, with rules from the default branch; an unresolved rule pointer stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>` |
@@ -164,6 +164,11 @@ The scripts enforce these; prompts alone do not.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
   rules it is judged by. It has Read, Grep and Glob only.
 - **Rules come from the default branch**, never from the MR. An MR that edits a rule file is flagged for the human.
+- **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent
+  instruction files lists them in its summary and labels the MR `needs-human`, once per file. Build files are left
+  to the reviewer.
+- **No progress stops the loop.** When a writer round leaves the change empty, or the patch unchanged while its last
+  verdict still has Act on findings, `start-reviewer` reuses the verdict and labels the MR `needs-human`.
 - **State goes to the forge**, never to a file only one session can read.
 
 ## Terms
