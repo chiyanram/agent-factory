@@ -3,7 +3,8 @@
 # Every adapter defines the same calls, and each call answers in the same shape:
 #
 #   forge_require_bot           fails unless the CLI acts as the coordinator's bot; sets me_name (ADR-0006)
-#   forge_pr N                  {state: opened|merged|closed, sha, source_branch, target_branch, labels: [name]}
+#   forge_pr N                  {state: opened|merged|closed, sha, source_branch, target_branch, labels: [name],
+#                                description}
 #   forge_default_branch        the project's default branch
 #   forge_label_add N LABEL     fails unless the forge kept the label
 #   forge_label_remove N LABEL

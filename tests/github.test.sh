@@ -187,4 +187,11 @@ respond "$FACTORY_GH" 1 200 '[{"body":"a","user":{"login":"ledger-factory[bot]"}
 expect_eq "forge_notes gives every comment in the seam's shape" '[{"body":"a","author":{"username":"ledger-factory[bot]"}}]' \
   "$(forge_notes 12)"
 
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 '{"number":12,"state":"open","merged":false,"head":{"sha":"aaaa1111","ref":"feat/1-x"},"base":{"ref":"main"},"labels":[],"body":"AC1: it works."}'
+expect_eq "a pull request's body is its description, which the pack and the ready check read" "AC1: it works." \
+  "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .description)"
+respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
+expect_eq "an empty body is an empty description" "" "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .description)"
+
 finish

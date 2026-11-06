@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start-writer <mr> — starts a fresh writer for a claimed MR, in its own worktree at the MR's head (#39).
+# start-writer [--test-first] <mr> — starts a fresh writer for a claimed MR, in its own worktree at the MR's head (#39).
 #
 # Every run is fresh: it never resumes or continues a session, because a resumed worker drops instructions and its
 # context rots (ADR-0001). The writer runs in the background as `claude --bg -n writer-<mr>`; FACTORY_RUN_MODE=print
@@ -7,10 +7,17 @@
 # already has a live run, and refuses when this machine is at FACTORY_MAX_RUNS. Prints one line.
 #
 # The prompt only points at /crq: how to build lives in the project's /crq, not here (#39 Q2).
+#
+# --test-first, for a bug: a separate run that writes only the failing test from the bug spec, commits and pushes it,
+# and stops. The fix writer starts after that commit, so the test and the fix never share one misreading (ADR-0011
+# D12; rulebook crq VB7).
 set -u
 . "$(dirname "$0")/lib/forge.sh"
 . "$(dirname "$0")/lib/runs.sh"
+mode=build
+[ "${1:-}" != --test-first ] || { mode=test-first; shift; }
 iid=${1:-}
+[ $# -le 1 ] || { echo "usage: start-writer.sh [--test-first] <mr>" >&2; exit 1; }
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 valid_iid "$iid" || exit 1
 [ "${FACTORY_DRY_RUN:-}" != 1 ] || { echo "refused: FACTORY_DRY_RUN is set, and a writer pushes to the MR branch; run it without the dry run" >&2; exit 1; }
@@ -53,14 +60,31 @@ absolute() { case $1 in */*) (cd "$(dirname "$1")" && printf '%s/%s' "$(pwd)" "$
 [ -z "${FACTORY_GLAB:-}" ] || ask="$ask FACTORY_GLAB=$(printf '%q' "$(absolute "$FACTORY_GLAB")")"
 [ -z "${FACTORY_GH:-}" ] || ask="$ask FACTORY_GH=$(printf '%q' "$(absolute "$FACTORY_GH")")"
 ask="$ask $(printf '%q' "$(cd "$(dirname "$0")" && pwd)/ask.sh") $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
-prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
-Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
-and the design link. When the contract does not settle a question, never guess: push your commits, then run
+asking="When the contract does not settle a question, never guess: push your commits, then run
 $ask
 with the question in single quotes (write each ' inside it as '\\''), and stop without marking the MR ready.
-If you cannot finish, push what you have and ask the same way, saying what blocks you.
+If you cannot finish, push what you have and ask the same way, saying what blocks you."
+if [ "$mode" = test-first ]; then
+  prompt="You are the test writer for the bug in merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at
+head $sha. Write only the test that reproduces the bug as the MR description states it: its inputs and the result it
+expects (rulebook crq VB7). Change no production code. Run the test and see it fail for the reason the bug states.
+Commit only the test, with a message that starts \"test: failing test for\" and a line \"Written by a separate
+test-first run (VB7).\", push it, and stop. Never fix the bug and never mark the MR ready.
+$asking If the description names no inputs and expected result a test can check, ask the same way.
+Push only this branch.${note:+
+$note}"
+else
+  prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
+Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
+and the design link. If a separate run committed a failing test for this bug, make it pass without changing it.
+$asking
+Before you mark the MR ready, put the evidence in its description (rulebook crq VB5): a line \"Evidence at <your
+pushed head>\", then a table | criterion | command | result |. The review starts only after a script runs each
+command again at the head; it runs only commands that start with one of: ${FACTORY_READY_COMMANDS:-make ./gradlew ./mvnw}.
 Push only this branch; after a rebase use --force-with-lease.${note:+
 $note}"
+fi
+who=writer; [ "$mode" = build ] || who="test writer"
 set --
 [ -z "${FACTORY_WRITER_MODEL:-}" ] || set -- --model "$FACTORY_WRITER_MODEL"
 
@@ -72,14 +96,14 @@ if [ "${FACTORY_RUN_MODE:-bg}" = print ]; then
   (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} "$@" \
     "$prompt") >&2
   status=$?
-  if [ "$status" -eq 0 ]; then echo "writer finished $mark$iid at ${sha:0:8}"
-  else echo "writer failed $mark$iid at ${sha:0:8} (exit $status)"; fi
+  if [ "$status" -eq 0 ]; then echo "$who finished $mark$iid at ${sha:0:8}"
+  else echo "$who failed $mark$iid at ${sha:0:8} (exit $status)"; fi
   exit "$status"
 fi
 
 if ! started=$(cd "$path" && "${FACTORY_CLAUDE:-claude}" --bg -n "$name" "$@" "$prompt" 2>&1); then
   remove_worktree "$path"
-  echo "the writer for $mark$iid did not start: $started" >&2
+  echo "the $who for $mark$iid did not start: $started" >&2
   exit 1
 fi
-echo "writer started $mark$iid at ${sha:0:8}: $(printf '%s\n' "$started" | head -n 1)"
+echo "$who started $mark$iid at ${sha:0:8}: $(printf '%s\n' "$started" | head -n 1)"
