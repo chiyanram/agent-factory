@@ -29,6 +29,20 @@ require_repo() {
   FACTORY_REPO=$(cd "$FACTORY_REPO" && pwd)   # absolute, so git -C and cd read a run's path the same way
 }
 
+# writer_settings DIR JSON : merges JSON into the run's .claude/settings.local.json in the worktree DIR. The file is
+# excluded from git, so it is never committed; a project that tracks it is refused, since the run would overwrite it.
+writer_settings() {
+  git -C "$1" ls-files --error-unmatch .claude/settings.local.json > /dev/null 2>&1 \
+    && { echo "refused: the project tracks .claude/settings.local.json, which the writer's settings would overwrite" >&2; return 1; }
+  ws_file="$1/.claude/settings.local.json"
+  mkdir -p "$1/.claude" || return 1
+  [ -f "$ws_file" ] || echo '{}' > "$ws_file"
+  jq --argjson add "$2" '. * $add' "$ws_file" > "$ws_file.new" && mv "$ws_file.new" "$ws_file" || return 1
+  ws_exclude="$(git -C "$FACTORY_REPO" rev-parse --absolute-git-dir)/info/exclude"
+  mkdir -p "$(dirname "$ws_exclude")"
+  grep -qxF /.claude/settings.local.json "$ws_exclude" 2> /dev/null || echo /.claude/settings.local.json >> "$ws_exclude"
+}
+
 # worktree_path NAME : where the run NAME gets its worktree.
 worktree_path() {
   printf '%s/.claude/worktrees/%s' "$FACTORY_REPO" "$1"

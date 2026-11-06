@@ -12,7 +12,9 @@ exactly one bucket, with a one-line `why`:
 
 - `act_on`: real, and the change must fix it before merge;
 - `consider`: real, but a judgment call for the human;
-- `noted`: true, but too small to act on;
-- `dismissed`: it does not hold at that `file:line`, the rule does not say that, or it is outside the diff.
+- `noted`: true, but too small to act on, or true of code this change neither edits nor breaks (a follow-up issue);
+- `dismissed`: it does not hold at that `file:line`, or the rule does not say that.
+
+A finding on code the diff does not touch holds only when the changed line it names really breaks that code.
 
 Give every finding id exactly one verdict.

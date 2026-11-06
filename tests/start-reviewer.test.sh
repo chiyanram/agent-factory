@@ -15,6 +15,7 @@ setup() {
     cd "$base/clone" || exit 1
     git checkout -q -b main
     mkdir -p svc && printf 'ROOT-RULES\n' > AGENTS.md && printf 'class Main {}\n' > svc/Main.java
+    printf 'class Caller { int use() { return new Main().total(); } }\n' > svc/Caller.java
     git add -A && commit main && git push -q origin main 2> /dev/null
     git checkout -q -b feat/x
     printf 'class Main { int total() { return 1; } }\n' > svc/Main.java
@@ -73,6 +74,12 @@ expect_pass "find and the rule verify run on Sonnet, the logic verify on Opus (#
   sh -c "sed -n 2p '$cl/calls.log' | grep -q -- '--model sonnet' && sed -n 3p '$cl/calls.log' | grep -q -- '--model sonnet' && sed -n 4p '$cl/calls.log' | grep -q -- '--model opus'"
 expect_eq "the reviewer sees no CLAUDE.md, AGENTS.md or .claude folder: rules come only from the pack" "" \
   "$(cat "$cl/rules-seen.log" 2>/dev/null)"
+expect_pass "the find pass gets the whole head, files the change does not touch too (ADR-0011 D15)" \
+  grep -qx 'code/svc/Caller.java' "$cl/files-seen.log"
+expect_pass "and its instructions let it report unchanged code that this change breaks, at the broken line" \
+  sh -c "sed -n 2p '$cl/calls.log' | grep -q 'Code the diff does not touch is a finding only when this change breaks it'"
+expect_pass "the verify pass keeps such a finding only when the changed line it names breaks that code" \
+  sh -c "sed -n 3p '$cl/calls.log' | grep -q 'holds only when the changed line it names really breaks that code'"
 expect_eq "every run reads the pack" "pack pack pack" "$(tr '\n' ' ' < "$cl/pack-seen.log" | sed 's/ $//')"
 summary=$(tail -n 1 "$gl/inputs.log")   # the summary goes last: it marks the round done
 expect_pass "the summary note names round, head and patch-id, then the counts (#22 Q2)" sh -c \

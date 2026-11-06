@@ -47,6 +47,9 @@ login, email or password.
 - When a developer leaves, revoke the GitLab token and block the account, or delete the App's key or the App.
 - Before the first run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt. Add
   `.claude/worktrees/`, `.claude/runs/` and `.claude/packs/` to the project's `.gitignore`.
+- Give the writer its quick tools in the project's `docs/agents/commands.md`, one per line: `lint-file: <command>`
+  runs on each file the writer edits, with the file as its last word, and `test-touched: <command>` runs the tests it
+  touched. Either line may be left out.
 
 **Known gap.** Agents run as the developer's OS user, so they can read the token in glab's config or the App's key.
 The Developer role and the App's permissions limit what a stolen credential can do. It is not a wall.
@@ -146,6 +149,7 @@ and `#12` for `!12`.
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>` |
 | `block.sh <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason> · log: <log>` note, then releases the claim; the label goes first |
+| `lint-edit.sh '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed |
 | `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR |
 
 `poll` keeps no state, so a restart re-reads everything. It counts `/approved` only from a human maintainer, as the
@@ -170,7 +174,8 @@ The scripts enforce these; prompts alone do not.
   person.
 - **Ready is checked, not reported.** No review starts until a script has run the MR's evidence commands again at
   its head, with no shell.
-- **The reviewer reads, and the script posts.** It runs in a throwaway folder with the pack and a copy of the code.
+- **The reviewer reads, and the script posts.** It runs in a throwaway folder with the pack and a copy of the whole
+  code at the head. It may report code the diff does not touch only when this change breaks it.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
   rules it is judged by. It has Read, Grep and Glob only.
 - **Rules come from the default branch**, never from the MR. An MR that edits a rule file is flagged for the human.

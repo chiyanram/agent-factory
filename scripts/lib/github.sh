@@ -128,16 +128,12 @@ forge_writer_ready() {
   esac
 }
 
+# forge_writer_setup DIR : needs writer_settings from lib/runs.sh.
 forge_writer_setup() {
-  git -C "$1" ls-files --error-unmatch .claude/settings.local.json > /dev/null 2>&1 \
-    && { echo "refused: the project tracks .claude/settings.local.json, which the writer's settings would overwrite" >&2; return 1; }
   empty="$FACTORY_REPO/.claude/runs/gh-no-login"
-  mkdir -p "$empty" "$1/.claude" || return 1
-  jq -n --arg gh "$empty" '{env: {GH_CONFIG_DIR: $gh, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null"}}' \
-    > "$1/.claude/settings.local.json" || return 1
-  exclude="$(git -C "$FACTORY_REPO" rev-parse --absolute-git-dir)/info/exclude"
-  mkdir -p "$(dirname "$exclude")"
-  grep -qxF /.claude/settings.local.json "$exclude" 2> /dev/null || echo /.claude/settings.local.json >> "$exclude"
+  mkdir -p "$empty" || return 1
+  writer_settings "$1" "$(jq -cn --arg gh "$empty" '{env: {GH_CONFIG_DIR: $gh, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null"}}')" \
+    || return 1
   echo "For every GitHub call use $(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh: it acts as the factory's GitHub App. Plain gh has no login in this session."
 }
 

@@ -165,4 +165,28 @@ expect_pass "the fix writer keeps a committed failing test as it is" grep -q 'ma
 expect_pass "the writer puts the evidence table in the description and learns which commands the ready check runs" \
   sh -c "grep -q 'Evidence at <your' '$log' && grep -q 'one of: make npm\.' '$log'"
 
+# The project's writer tools from docs/agents/commands.md (ADR-0011 D17)
+setup
+(cd "$FACTORY_REPO" && git checkout -q feat/x && mkdir -p docs/agents \
+  && printf '# Commands\n\n```text\nlint-file: npx eslint --max-warnings 0\ntest-touched: npm test -- --findRelatedTests\n```\n' > docs/agents/commands.md \
+  && git add -A && git -c user.name=t -c user.email=t@t commit -q -m tools && git push -q origin feat/x 2> /dev/null \
+  && git checkout -q main)
+head=$(git -C "$FACTORY_REPO" rev-parse origin/feat/x)
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+settings="$worktree/.claude/settings.local.json"
+expect_eq "the writer's session lints each Edit, MultiEdit and Write with the project's lint" \
+  "Edit|MultiEdit|Write $REPO_ROOT/scripts/lint-edit.sh npx\\ eslint\\ --max-warnings\\ 0" \
+  "$(jq -r '.hooks.PostToolUse[0] | "\(.matcher) \(.hooks[0].command)"' "$settings")"
+expect_eq "so the hook settings are never committed" "" "$(git -C "$worktree" status --porcelain)"
+log="$(dirname "$FACTORY_CLAUDE")/calls.log"
+expect_pass "the prompt names the lint and the quick touched-test command" \
+  sh -c "grep -q 'linted at once with: npx eslint --max-warnings 0' '$log' && grep -q 'Run the tests you touched with: npm test -- --findRelatedTests' '$log'"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+expect_eq "with no commands file, no hook and no settings file" no "$([ -e "$worktree/.claude/settings.local.json" ] && echo yes || echo no)"
+expect_fail "and no tool line in the prompt" "none" sh -c "grep -q 'linted at once' '$(dirname "$FACTORY_CLAUDE")/calls.log' && exit 0; echo none; exit 1"
+
 finish

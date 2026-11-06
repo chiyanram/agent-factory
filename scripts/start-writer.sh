@@ -54,6 +54,22 @@ git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$bra
   || { echo "cannot make the worktree $path" >&2; exit 1; }
 note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 
+# the project's writer tools (ADR-0011 D17): docs/agents/commands.md holds "lint-file: <command>", run on each file
+# the writer edits, and "test-touched: <command>", its quick command for the tests it touched
+commands="$path/docs/agents/commands.md"
+lint=$(sed -n 's/^lint-file:[[:space:]]*//p' "$commands" 2> /dev/null | head -n 1)
+quick=$(sed -n 's/^test-touched:[[:space:]]*//p' "$commands" 2> /dev/null | head -n 1)
+if [ -n "$lint" ]; then
+  hook="$(printf '%q' "$(cd "$(dirname "$0")" && pwd)/lint-edit.sh") $(printf '%q' "$lint")"
+  writer_settings "$path" "$(jq -cn --arg c "$hook" \
+    '{hooks: {PostToolUse: [{matcher: "Edit|MultiEdit|Write", hooks: [{type: "command", command: $c}]}]}}')" \
+    || { remove_worktree "$path"; exit 1; }
+fi
+tools=''
+[ -z "$lint" ] || tools="Each file you edit is linted at once with: $lint. Fix what it reports before you go on."
+[ -z "$quick" ] || tools="${tools:+$tools
+}Run the tests you touched with: $quick. Run the full check only before you push."
+
 # the ask command carries its own settings, so it works whatever the writer's session inherits (ADR-0011 D10)
 ask="FACTORY_FORGE=${FACTORY_FORGE:-gitlab} FACTORY_PROJECT=$(printf '%q' "$FACTORY_PROJECT")"
 absolute() { case $1 in */*) (cd "$(dirname "$1")" && printf '%s/%s' "$(pwd)" "$(basename "$1")") ;; *) printf '%s' "$1" ;; esac; }
@@ -71,7 +87,8 @@ expects (rulebook crq VB7). Change no production code. Run the test and see it f
 Commit only the test, with a message that starts \"test: failing test for\" and a line \"Written by a separate
 test-first run (VB7).\", push it, and stop. Never fix the bug and never mark the MR ready.
 $asking If the description names no inputs and expected result a test can check, ask the same way.
-Push only this branch.${note:+
+Push only this branch.${tools:+
+$tools}${note:+
 $note}"
 else
   prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
@@ -81,7 +98,8 @@ $asking
 Before you mark the MR ready, put the evidence in its description (rulebook crq VB5): a line \"Evidence at <your
 pushed head>\", then a table | criterion | command | result |. The review starts only after a script runs each
 command again at the head; it runs only commands that start with one of: ${FACTORY_READY_COMMANDS:-make ./gradlew ./mvnw}.
-Push only this branch; after a rebase use --force-with-lease.${note:+
+Push only this branch; after a rebase use --force-with-lease.${tools:+
+$tools}${note:+
 $note}"
 fi
 who=writer; [ "$mode" = build ] || who="test writer"
