@@ -26,6 +26,8 @@ expect_fail "it never resumes or continues a session (ADR-0001)" "fresh" \
   sh -c "grep -Eq -- '--resume|--continue| -c ' '$(dirname "$FACTORY_CLAUDE")/calls.log' && exit 0; echo fresh; exit 1"
 expect_pass "the prompt names the MR, its branch and /crq" \
   sh -c "grep -q '!12' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'feat/x' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q '/crq' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_pass "the prompt tells the writer to ask with ask.sh at its head and stop, never guess (ADR-0011 D10)" \
+  sh -c "grep -q 'scripts/ask.sh 12 ' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'never guess' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'then stop' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '[]')"

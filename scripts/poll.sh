@@ -15,7 +15,8 @@
 #             named FACTORY_AGENT_PREFIX* (default agent-), and at least Maintainer on the project.
 #   stop      yes: that maintainer's last /stop is newer than the last /approved
 #   pipeline  the status of the pipeline for the current head; GitLab returns none for an older head ("none")
-#   asks      [coordinator] OPEN: notes with no note from a human project member after them (docs/archive/research/46 G6)
+#   asks      [coordinator] OPEN: and [writer] OPEN: notes with no note from a human project member after them
+#             (docs/archive/research/46 G6; ADR-0011 D10)
 #   claimed   the MR carries FACTORY_CLAIM_LABEL (default agent::claimed)
 set -u
 . "$(dirname "$0")/lib/forge.sh"
@@ -48,7 +49,7 @@ printf '%s' "$changes" | jq -r --arg mark "$mark" --arg label "$label" --arg pre
           + " pipeline=\(.pipeline)"
           + " needs_human=\(.labels | index("needs-human") != null | yn)"
           + " stop=\($stop != null and ($approved == null or $stop.at > $approved.at) | yn)"
-          + " asks=\([$notes[] | select((.author | human | not) and (.body | startswith("[coordinator] OPEN:"))
+          + " asks=\([$notes[] | select((.author | human | not) and (.body | startswith("[coordinator] OPEN:") or startswith("[writer] OPEN:"))
                                        and .at > $lastMember)] | length)") } ),
     ( .merged[] | {number: ., line: "\($mark)\(.) merged claimed=yes"} ) ]
   | sort_by(.number)[].line

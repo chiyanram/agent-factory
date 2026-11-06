@@ -46,9 +46,12 @@ git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$bra
   || { echo "cannot make the worktree $path" >&2; exit 1; }
 note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 
+scripts=$(cd "$(dirname "$0")" && pwd)
 prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
 Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
-and the design link. You never talk to the human. Push only this branch; after a rebase use --force-with-lease.${note:+
+and the design link. When the contract does not settle a question, never guess: run
+$scripts/ask.sh $iid $sha \"<the question in one line>\", then stop without marking the MR
+ready. That note is your only way to reach the human. Push only this branch; after a rebase use --force-with-lease.${note:+
 $note}"
 set --
 [ -z "${FACTORY_WRITER_MODEL:-}" ] || set -- --model "$FACTORY_WRITER_MODEL"

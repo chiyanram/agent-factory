@@ -187,7 +187,7 @@
          }
         },
         {
-         "body": "[coordinator] OPEN: which error text?",
+         "body": "[writer] OPEN: which error text?",
          "createdAt": "2026-10-30T10:01:00Z",
          "author": {
           "username": "agent-coordinator",
@@ -221,7 +221,7 @@
       "comments": {
        "nodes": [
         {
-         "body": "[coordinator] OPEN: A or B?",
+         "body": "[writer] OPEN: A or B?",
          "createdAt": "2026-10-30T08:00:00Z",
          "author": {
           "username": "agent-coordinator",
