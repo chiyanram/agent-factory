@@ -17,6 +17,7 @@ set -u
 mode=build
 [ "${1:-}" != --test-first ] || { mode=test-first; shift; }
 iid=${1:-}
+[ $# -le 1 ] || { echo "usage: start-writer.sh [--test-first] <mr>" >&2; exit 1; }
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 valid_iid "$iid" || exit 1
 [ "${FACTORY_DRY_RUN:-}" != 1 ] || { echo "refused: FACTORY_DRY_RUN is set, and a writer pushes to the MR branch; run it without the dry run" >&2; exit 1; }

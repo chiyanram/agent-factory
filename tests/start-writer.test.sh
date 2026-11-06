@@ -155,6 +155,7 @@ expect_pass "its commit says a separate run wrote it, so the reviewer can check 
   grep -q 'Written by a separate test-first run (VB7)' "$log"
 expect_pass "with no testable inputs and result, it asks instead" grep -q 'scripts/ask.sh 12' "$log"
 expect_fail "it is not the fix writer's prompt" "none" sh -c "grep -q 'Run /crq from the build phase' '$log' && exit 0; echo none; exit 1"
+expect_fail "a flag after the MR is refused, never ignored" "usage" "$REPO_ROOT/scripts/start-writer.sh" 12 --test-first
 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"

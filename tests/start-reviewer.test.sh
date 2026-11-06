@@ -306,19 +306,60 @@ expect_fail "an evidence command that fails at the head refuses the review" "not
 expect_eq "with exit 4, so the coordinator sends it back to the writer" 4 \
   "$(rm -f "$gl/n" "$gl/inputs.log" "$gl/calls.log"; "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1; echo $?)"
 expect_pass "one [coordinator] note names the command that failed and the log" sh -c \
-  "printf '%s' \"\$1\" | head -n 1 | grep -q '^\[coordinator\] not ready at $head: ' && printf '%s' \"\$1\" | grep -q \"^- \\\`grep -q 'return 1' svc/Main.java\\\` exited 1\$\" && printf '%s' \"\$1\" | grep -q '^- log: '" sh "$(note)"
+  "printf '%s' \"\$1\" | head -n 1 | grep -q '^\[coordinator\] not ready at $head · description [0-9a-f]*: ' && printf '%s' \"\$1\" | grep -q \"^- \\\`grep -q 'return 1' svc/Main.java\\\` exited 1\$\" && printf '%s' \"\$1\" | grep -q '^- log: '" sh "$(note)"
 expect_eq "no model runs" "" "$(grep -- ' -p ' "$cl/calls.log" 2>/dev/null)"
 expect_eq "the check's worktree is removed" no "$([ -d "$FACTORY_REPO/.claude/worktrees/ready-12" ] && echo yes || echo no)"
 expect_pass "the log holds what each command printed" grep -q '^\$ test -f svc/Main.java$' "$FACTORY_REPO/.claude/ready/12-${head:0:8}.log"
 
+hash_of() { printf '%s' "$1" | git hash-object --stdin | cut -c1-12; }
+told() {  # told DESCRIPTION-AT-NOTE : notes holding one not-ready note at the head for that description
+  jq -n --arg h "$head" --arg d "$(hash_of "$1")" '[{author: {username: "agent-reviewer"}, body: "[coordinator] not ready at \($h) · description \($d): x"}]'
+}
 setup
+desc=$(evidence "$head" "grep -q 'return 1' svc/Main.java")
 respond "$FACTORY_GLAB" 1 200 "$bot"
-respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]' "$(evidence "$head" "grep -q 'return 1' svc/Main.java")")"
-respond "$FACTORY_GLAB" 3 200 "$(jq -n --arg h "$head" '[{author: {username: "agent-reviewer"}, body: "[coordinator] not ready at \($h): x"}]')"
-expect_fail "a head already found not ready is refused again with no run and no second note" "the writer was told" \
-  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]' "$desc")"
+respond "$FACTORY_GLAB" 3 200 "$(told "$desc")"
+expect_fail "a head already found not ready, with the same description, is refused with no run and no second note" \
+  "the writer was told" "$REPO_ROOT/scripts/start-reviewer.sh" 12
 expect_eq "nothing was posted" "" "$(cat "$gl/inputs.log" 2>/dev/null)"
 expect_eq "nothing ran" no "$([ -f "$FACTORY_REPO/.claude/ready/12-${head:0:8}.log" ] && echo yes || echo no)"
+expect_pass "the note carries the description's hash" sh -c "printf '%s' \"\$1\" | grep -q ' · description $(hash_of "$desc"): '" sh \
+  "$(setup; not_ready "$desc"; "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1; note)"
+
+setup
+fixed=$(evidence "$head" "test -f svc/Main.java")
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]' "$fixed")"
+respond "$FACTORY_GLAB" 3 200 "$(told "AC1: total() returns the sum.")"
+respond "$FACTORY_GLAB" 4 200 "$(mr "$head" '["agent::claimed"]' "$fixed")"
+respond "$FACTORY_GLAB" 5 200 '{"default_branch":"main"}'
+respond "$FACTORY_GLAB" 6 200 "$(mr "$head" '["agent::claimed"]' "$fixed")"
+respond "$FACTORY_GLAB" 7 200 "$(mr "$head" '["agent::claimed","needs-human"]' "$fixed")"   # svc/CLAUDE.md is protected
+respond "$FACTORY_GLAB" 8 201 '{"id":1}'
+claude_answer 1 '{"findings":[]}'
+expect_eq "a description fixed after the note, with no new commit, is checked again and passes" \
+  "review !12 round 1 at ${head:0:8}: Act on 0 · Consider 0 · Noted 0 · Dismissed 0 (\$0.25)" \
+  "$("$REPO_ROOT/scripts/start-reviewer.sh" 12 2> /dev/null)"
+
+setup
+not_ready "$(evidence "$head" "grep -q 'it's' svc/Main.java")"
+expect_fail "a command with an unmatched quote cannot be read and refuses the review" "an unmatched quote" \
+  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+
+setup
+probe='sh -c '"'"'test -z "$GITLAB_TOKEN" && test ! -e "$GH_CONFIG_DIR/hosts.yml" && test "$HOME" != "'"$HOME"'"'"'"
+not_ready "$(evidence "$head" "$probe")"
+mkdir -p "$TMP_BASE/ghc" && touch "$TMP_BASE/ghc/hosts.yml"
+expect_eq "a command gets none of this machine's logins: no token, no gh config, a fresh HOME" 0 \
+  "$(FACTORY_READY_COMMANDS='test grep sh' GITLAB_TOKEN=secret GH_CONFIG_DIR="$TMP_BASE/ghc" "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1; grep -c 'exited' "$gl/inputs.log" 2>/dev/null || echo 0)"
+
+setup
+not_ready "$(evidence "$head" "sleep 30")"
+start=$(date +%s)
+expect_fail "a command that runs past FACTORY_READY_TIMEOUT is stopped and refuses the review" "exited" \
+  env FACTORY_READY_COMMANDS=sleep FACTORY_READY_TIMEOUT=1 "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_pass "well before the command would have ended" test $(($(date +%s) - start)) -lt 10
 
 setup
 not_ready "AC1: total() returns the sum."
