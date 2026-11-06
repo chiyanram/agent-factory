@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# gh as the factory's GitHub App: FACTORY_GH points here by default. It may sit first on PATH; github-app.sh skips this
+# folder when it looks for the real gh.
+exec "$(cd "$(dirname "$0")/.." && pwd)/github-app.sh" gh "$@"

@@ -5,6 +5,7 @@
 # MR is removed too. A run's worktree with no live run is removed (docs/archive/research/37: "restart must be a non-event").
 # Prints one line per action, or "nothing to reconcile". Run it only when no claim is between `claim` and `start`.
 set -u
+set -o pipefail
 . "$(dirname "$0")/lib/forge.sh"
 . "$(dirname "$0")/lib/runs.sh"
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}

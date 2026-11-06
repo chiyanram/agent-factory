@@ -2,6 +2,7 @@
 # claim <mr> — adds the claim label, so the MR gets one run at a time (playbook §Triggers; ADR-0002; docs/archive/research/37 P1).
 # Refuses an MR that is already claimed or not open. Prints one line: "claimed !12".
 set -u
+set -o pipefail
 . "$(dirname "$0")/lib/forge.sh"
 iid=${1:-}
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}

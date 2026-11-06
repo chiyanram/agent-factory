@@ -1,9 +1,10 @@
 # The GitHub adapter of the forge seam (ADR-0010). Source lib/forge.sh, not this file.
 # Every GitHub call goes through gh_api, so a test swaps gh for a stub with FACTORY_GH and needs no network.
 #
-#   FACTORY_GH        the gh binary (default: gh), logged in as the coordinator's machine user agent-<dev>; give that
-#                     user its own GH_CONFIG_DIR, so the operator's own login is never used (ADR-0006)
-#   FACTORY_PROJECT   the repository, owner/name, for example chiyanram/ledger
+#   FACTORY_GH           the gh binary that acts as the factory's GitHub App (default: scripts/bin/gh, which mints the
+#                        App's token with scripts/github-app.sh); the operator's own gh login is never used (ADR-0006)
+#   FACTORY_GH_APP       scripts/github-app.sh (default); a test points it at a stub
+#   FACTORY_PROJECT      the repository, owner/name, for example chiyanram/ledger
 #
 # Only branches in the repository itself are supported: the writer pushes there, and a fork's branch cannot be
 # fetched from origin.
@@ -12,7 +13,7 @@ export GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1
 
 # gh_api ARGS... : one `gh api` request (lib/http.sh).
 gh_api() {
-  http_api github "${FACTORY_GH:-gh}" "$@"
+  http_api github "${FACTORY_GH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh}" "$@"
 }
 
 repo() {
@@ -30,28 +31,33 @@ gh_post() {
   rm -f "$input"; return "$status"
 }
 
-# A machine user is an ordinary GitHub account (type User), so the agent- name marks it; an App's bot is type Bot.
+# The bot is a GitHub App that the developer's account owns (#64 Q1, amended 2026-11-05). Only an App's installation
+# token can list its installation's repositories; a person's token gets 403 there, so it is refused before any write.
+# The App's name comes from GitHub (github-app.sh slug), never from a setting: the reviewer counts its rounds by it.
 forge_require_bot() {
-  me=$(gh_api user) || return 1
-  me_name=$(printf '%s' "$me" | jq -r .login)
-  prefix=${FACTORY_AGENT_PREFIX:-agent-}
-  if [ "$(printf '%s' "$me" | jq -r .type)" != Bot ] && [ "${me_name#"$prefix"}" = "$me_name" ]; then
-    echo "refused: gh is logged in as $me_name, a human account;" \
-      "log it in as the coordinator's machine user $prefix<dev> (ADR-0006)" >&2
+  if ! installed=$(gh_api 'installation/repositories?per_page=100'); then
+    echo "refused: gh is not acting as the factory's GitHub App, so it may be a person's login;" \
+      "point FACTORY_GH at scripts/bin/gh with the App configured (ADR-0006, ADR-0010)" >&2
     return 1
   fi
+  [ "$(printf '%s' "$installed" | jq --arg p "${FACTORY_PROJECT:-}" 'any(.repositories[]; .full_name == $p)')" = true ] \
+    || { echo "refused: the factory's GitHub App is not installed on ${FACTORY_PROJECT:-}" >&2; return 1; }
+  slug=$("${FACTORY_GH_APP:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/github-app.sh}" slug) || return 1
+  me_name="$slug[bot]"
 }
 
 forge_pr() {
   r=$(repo) || return 1
-  gh_api "repos/$r/pulls/$1" | jq -c '{
+  pr=$(gh_api "repos/$r/pulls/$1") || return 1
+  printf '%s' "$pr" | jq -c '{
     state: (if .merged then "merged" elif .state == "open" then "opened" else "closed" end),
     sha: .head.sha, source_branch: .head.ref, target_branch: .base.ref, labels: [.labels[].name]}'
 }
 
 forge_default_branch() {
   r=$(repo) || return 1
-  gh_api "repos/$r" | jq -r .default_branch
+  project=$(gh_api "repos/$r") || return 1
+  printf '%s' "$project" | jq -r .default_branch
 }
 
 forge_label_add() {
@@ -61,9 +67,13 @@ forge_label_add() {
     || { echo "#$1: GitHub did not keep the label $2" >&2; return 1; }
 }
 
+# GitHub answers 404 when the label is already gone (a human removed it after the caller looked). That is a release,
+# so a failed DELETE counts only when the label is still on the pull request.
 forge_label_remove() {
   r=$(repo) || return 1
-  gh_api "repos/$r/issues/$1/labels/$(printf '%s' "$2" | jq -sRr @uri)" -X DELETE > /dev/null
+  gh_api "repos/$r/issues/$1/labels/$(printf '%s' "$2" | jq -sRr @uri)" -X DELETE > /dev/null 2>&1 && return 0
+  after=$(forge_pr "$1") || return 1
+  ! has_label "$after" "$2" || { echo "#$1: GitHub did not remove the label $2" >&2; return 1; }
 }
 
 forge_note() {
@@ -95,6 +105,41 @@ forge_line_finding() {
     > /dev/null
 }
 
+# A writer runs as the person's OS user, so its session could reach the person's own gh and git logins. Two calls keep
+# it to the App's identity (ADR-0010):
+#   forge_writer_ready       the clone pushes over https, with the App's credential helper first and alone, and
+#                            commits under the bot's email
+#   forge_writer_setup PATH  the worktree's .claude/settings.local.json gives the session an empty GH_CONFIG_DIR and no
+#                            system or global git config, so plain gh has no login and git asks only the App's helper
+forge_writer_ready() {
+  refuse() { echo "refused: FACTORY_REPO $*; see docs/setup/identity.md, GitHub step 5" >&2; return 1; }
+  case $(git -C "$FACTORY_REPO" remote get-url --push origin 2> /dev/null) in
+    https://github.com/*) ;;
+    *) refuse "does not push to https://github.com/, so git would not ask the App's credential helper"; return 1 ;;
+  esac
+  helpers=$(git -C "$FACTORY_REPO" config --get-all credential.https://github.com.helper)
+  [ "$(printf '%s\n' "$helpers" | sed -n 1p)" = "" ] && [ "$(printf '%s\n' "$helpers" | wc -l | tr -d ' ')" = 2 ] \
+    && case $(printf '%s\n' "$helpers" | sed -n 2p) in *github-app.sh*git-credential*) true ;; *) false ;; esac \
+    || { refuse "would let another credential helper answer before the App's: set an empty helper, then the App's"; return 1; }
+  case $(git -C "$FACTORY_REPO" config --local --get user.email) in
+    *'[bot]@users.noreply.github.com') ;;
+    *) refuse "would commit under a person's email: set user.email to the bot's noreply address"; return 1 ;;
+  esac
+}
+
+forge_writer_setup() {
+  git -C "$1" ls-files --error-unmatch .claude/settings.local.json > /dev/null 2>&1 \
+    && { echo "refused: the project tracks .claude/settings.local.json, which the writer's settings would overwrite" >&2; return 1; }
+  empty="$FACTORY_REPO/.claude/runs/gh-no-login"
+  mkdir -p "$empty" "$1/.claude" || return 1
+  jq -n --arg gh "$empty" '{env: {GH_CONFIG_DIR: $gh, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null"}}' \
+    > "$1/.claude/settings.local.json" || return 1
+  exclude="$(git -C "$FACTORY_REPO" rev-parse --absolute-git-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"
+  grep -qxF /.claude/settings.local.json "$exclude" 2> /dev/null || echo /.claude/settings.local.json >> "$exclude"
+  echo "For every GitHub call use $(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh: it acts as the factory's GitHub App. Plain gh has no login in this session."
+}
+
 # gh_graphql QUERY LABEL : the query's data.repository, or a failure that names the GraphQL error.
 gh_graphql() {
   r=$(repo) || return 1
@@ -114,14 +159,15 @@ forge_claimed() {
   esac
   query='query($owner: String!, $name: String!, $label: String!) { repository(owner: $owner, name: $name) {
   pullRequests(states: ['"$state"'], labels: [$label], first: 100) { nodes { number } } } }'
-  gh_graphql "$query" "$2" | jq -r '.pullRequests.nodes[].number'
+  repository=$(gh_graphql "$query" "$2") || return 1
+  printf '%s' "$repository" | jq -r '.pullRequests.nodes[].number'
 }
 
 # forge_changes LABEL : the open PRs and the merged PRs that carry LABEL, in the shape scripts/poll.sh decides on.
 # One GraphQL query. Values go in as GraphQL variables, never into the query text.
 #
 #   members   {login: "maintainer" (write access or more) | "member" (any other collaborator)}
-#   edits     the PR body's edit history (userContentEdits)
+#   edits     the PR body's newest 100 edits (userContentEdits lists the newest first)
 #   pipeline  the head commit's checks (statusCheckRollup), in poll's words: success, failed, running or none
 #   window    the oldest edit when the last-100 window is full, so an older edit may be out of view; else null
 forge_changes() {
@@ -132,7 +178,7 @@ forge_changes() {
     labels(first: 50) { nodes { name } }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     comments(last: 100) { nodes { body createdAt author { login __typename } } }
-    userContentEdits(last: 100) { nodes { editedAt editor { login __typename } } } } }
+    userContentEdits(first: 100) { nodes { editedAt editor { login __typename } } } } }
   merged: pullRequests(states: [MERGED], labels: [$label], first: 20) { nodes { number } } } }'
   repository=$(gh_graphql "$query" "$1") || return 1
   printf '%s' "$repository" | jq -c '

@@ -1,6 +1,6 @@
 # 0010 · One forge seam, two adapters
 
-Status: accepted 2026-11-04 (operator, #64 Q1–Q3). Amends ADR-0009.
+Status: accepted 2026-11-04 (operator, #64 Q1–Q3); the bot amended to a GitHub App on 2026-11-05. Amends ADR-0009.
 
 ## Context
 
@@ -26,12 +26,13 @@ repository, so the scripts must work on GitHub as well, chosen per project.
 
 | | GitLab | GitHub |
 |---|---|---|
-| the bot | a service account, `bot: true` (ADR-0006) | a machine user `agent-<dev>` with write access and its own `GH_CONFIG_DIR`; refused unless its login starts with `FACTORY_AGENT_PREFIX` or it is an App's bot |
+| the bot | a service account, `bot: true` (ADR-0006) | a GitHub App the developer's account owns, posting as `<slug>[bot]`; `scripts/github-app.sh` mints its one-hour token from the App's key; a token that cannot list the App's installation repositories, or an App not installed on the project, is refused; a writer's session gets no gh login and no system or global git config, so it can act only as the App |
 | who may `/approved` | Maintainer or higher | a collaborator with write access or more |
 | a body edit that makes `/approved` stale | the activity note with action `description` | `userContentEdits` |
 | the gate | the head pipeline | the head commit's `statusCheckRollup`, mapped to `success`, `failed`, `running`, `none` |
 | a finding at file:line | a diff discussion | a pull request review comment; a plain comment naming file:line when the line is not in the diff |
 | a rate limit | 429 | 429, or 403 with `retry-after` or `x-ratelimit-remaining: 0` |
+| removing a label that is already gone | no error | a 404, counted as removed once a re-read shows the label gone |
 
 Only branches in the repository itself are supported on GitHub; a fork's branch cannot be fetched from origin.
 
@@ -46,7 +47,7 @@ Only branches in the repository itself are supported on GitHub; a fork's branch 
 
 | option | why rejected |
 |---|---|
-| a GitHub App as the bot | needs an app, a private key and token minting on every machine; a machine user matches ADR-0006's one account per developer (#64 Q1) |
+| a machine user `agent-<dev>` as the bot | a second personal account with its own email and password, and a long-lived token; the operator rejected it on 2026-11-05 (#64 Q1, amended): GitHub's service account is an App |
 | `/approved` as a GitHub review approval | the factory's gate is a literal comment on both forges, so one rule covers both (#64 Q2) |
 | a second copy of the scripts for GitHub | the decisions would drift between the copies |
 

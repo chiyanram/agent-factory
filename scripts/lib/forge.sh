@@ -9,11 +9,15 @@
 #   forge_label_remove N LABEL
 #   forge_note N BODY           one comment on the change
 #   forge_notes N               every comment, oldest first: [{body, author: {username}}]
-#   forge_line_finding N SHA FINDING TEXT
-#                               one comment at FINDING's file:line ({file, line}) on head SHA; unanchored, naming
+#   forge_line_finding N CHANGE FINDING TEXT
+#                               one comment at FINDING's file:line ({file, line}) on the head of CHANGE, the forge_pr
+#                               answer; unanchored, naming
 #                               file:line, when the forge refuses that line
 #   forge_claimed STATE LABEL   the numbers of the changes in STATE (opened or merged) that carry LABEL, one per line
-#   forge_poll LABEL            poll's lines, one per open change (scripts/poll.sh)
+#   forge_changes LABEL         the open and merged changes, in the shape scripts/poll.sh decides on
+#   forge_writer_ready          fails unless a writer in FACTORY_REPO would push and commit as the bot
+#   forge_writer_setup PATH     keeps the writer's session in worktree PATH to the bot's identity; prints any extra
+#                               line the writer's prompt needs
 #
 # mark is the change's prefix in every line a script prints: ! on GitLab, # on GitHub.
 

@@ -48,7 +48,7 @@ plain bash with no framework. The shared helpers in [tests/lib.sh](tests/lib.sh)
 |---|---|
 | `expect_pass`, `expect_fail`, `expect_eq` | assert on a command's exit code and output |
 | `fixture_repo <case>` | copies `tests/fixtures/<case>/` into a fresh git repo |
-| `glab_stub` / `respond` / `calls` | a fake `glab` for `FACTORY_GLAB`: replays canned answers and logs every call |
+| `glab_stub` / `respond` / `calls` | a fake `glab` for `FACTORY_GLAB`, or a fake `gh` for `FACTORY_GH`: replays canned answers and logs every call |
 | `claude_stub` / `live` | a fake `claude` for `FACTORY_CLAUDE`, with a settable list of live sessions |
 | `project_clone` | a throwaway clone with a bare origin, for scripts that need git |
 | `finish` | ends the file with the right exit code |
@@ -70,7 +70,8 @@ The scripts read their settings from the environment.
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_FORGE` | which forge adapter to use | `gitlab` (or `github`) |
-| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
+| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `scripts/bin/gh`, `claude` |
+| `FACTORY_CURL` | the `curl` that `scripts/github-app.sh` mints the App's token with; a test points it at a stub | `curl` |
 | `FACTORY_MAX_TRIES`, `FACTORY_SLEEP` | tries per request on HTTP 429, and the wait command | `4`, `sleep` |
 
 Before the first run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt, and add
