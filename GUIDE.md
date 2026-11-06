@@ -130,6 +130,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
 | you restart | `reconcile`: every claim without a live run, on an MR quiet for `FACTORY_QUIET_MINUTES`, goes back to the queue |
+| `reconcile` printed a `kept` line | run `reconcile` again at each poll until it prints none |
 | a human posts `/stop`, or pushes to the branch | stand off that MR |
 | a merge conflict | `start-writer` to rebase; if that fails, `needs-human` |
 | a claimed MR with no live run shows `approved=stale` or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved MR; `claim` it again when the human answers |

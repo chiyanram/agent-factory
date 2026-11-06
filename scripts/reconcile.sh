@@ -6,6 +6,7 @@
 # Liveness is checked twice (ADR-0011 D14): an open MR keeps its claim, and its worktrees, while it changed (a push,
 # a note or a label) in the last FACTORY_QUIET_MINUTES (default 30), even when `claude agents` does not list its run,
 # so a run that list misses is never released under it.
+# A "kept" line means: run it again at the next poll, until it prints none, or the claim is never freed.
 # Prints one line per action, or "nothing to reconcile". Run it only when no claim is between `claim` and `start`.
 set -u
 set -o pipefail
@@ -24,7 +25,7 @@ open=$(forge_claimed opened "$label") || exit 1
 merged=$(forge_claimed merged "$label") || exit 1
 release() {
   forge_label_remove "$1" "$label" || exit 1
-  echo "released $mark$1 ($2)"
+  echo "released $mark$1 ($2)$dry"
 }
 
 # idle MR-ANSWER : whole minutes since the MR last changed, or nothing when the forge gave no time it can read
@@ -55,7 +56,7 @@ for path in "$FACTORY_REPO"/.claude/worktrees/*; do
   case $name in writer-[0-9]* | reviewer-[0-9]*) ;; *) continue ;; esac
   printf '%s\n' "$runs" | grep -qx "$name" && continue
   case " $kept " in *" ${name#*-} "*) continue ;; esac   # its MR is still changing: the run may be alive
-  remove_worktree "$path"
-  echo "removed worktree $name (no live run)"; done=1
+  [ -n "$dry" ] || remove_worktree "$path"   # a dry run changes nothing, on this machine either
+  echo "removed worktree $name (no live run)$dry"; done=1
 done
 [ "$done" = 1 ] || echo "nothing to reconcile"

@@ -92,6 +92,28 @@ expect_fail "a quiet time that is not a number is refused" "whole number of minu
   env FACTORY_QUIET_MINUTES=soon "$REPO_ROOT/scripts/reconcile.sh"
 
 setup
+worktree writer-12; worktree writer-13
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 '[{"iid":12},{"iid":13}]'
+respond "$FACTORY_GLAB" 3 200 '[]'
+respond "$FACTORY_GLAB" 4 200 "$(mr_at 12 "$(ago 3 | sed 's/Z$/.481Z/')")"   # GitLab gives milliseconds
+respond "$FACTORY_GLAB" 5 200 "$(mr_at 13 "$(ago 60)")"
+respond "$FACTORY_GLAB" 6 200 '{"iid":13,"labels":[]}'
+expect_eq "a busy MR keeps its worktree while a quiet one loses its own" "kept !12 (no live run, but it changed 3 min ago; quiet after 30)
+released !13 (no live run, quiet for 60 min)
+removed worktree writer-13 (no live run)" "$("$REPO_ROOT/scripts/reconcile.sh")"
+
+setup
+worktree writer-12
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 '[{"iid":12}]'
+respond "$FACTORY_GLAB" 3 200 '[]'
+respond "$FACTORY_GLAB" 4 200 "$(mr_at 12 "$(ago 60)")"
+expect_eq "a dry run says so on every line" "released !12 (no live run, quiet for 60 min) (dry run)
+removed worktree writer-12 (no live run) (dry run)" "$(FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/reconcile.sh" 2> /dev/null)"
+expect_eq "and removes no worktree" yes "$([ -d "$FACTORY_REPO/.claude/worktrees/writer-12" ] && echo yes || echo no)"
+
+setup
 respond "$FACTORY_GLAB" 1 200 '{"username":"ann","bot":false}'
 expect_fail "a human login is refused before any write (ADR-0006)" "a human account" "$REPO_ROOT/scripts/reconcile.sh"
 
