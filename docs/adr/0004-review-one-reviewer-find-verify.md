@@ -39,3 +39,6 @@ Sonnet; logic findings are verified on Opus.
 ## Sources
 
 #18 Q1, Q4, Q6 CORRECTED, Q7 CORRECTED, Q8, Q9 · #22 Q1–Q5 · docs/archive/research/19, 20, 25, 35
+
+Amended by [ADR-0011](0011-crq-pipeline-in-the-factory.md): the find pass reads the whole head copy, not only the
+diff.
