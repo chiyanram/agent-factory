@@ -20,9 +20,9 @@
 #                      repo helper kept is this factory's own App helper (GUIDE §Set up identity, GitHub step 5).
 # hgit refuses, and runs nothing, when the repo sets a key that has no safe neutral value and no trusted one:
 # diff.external, diff.<n>.command and merge.<n>.driver (git dies on an empty one); url.<x>.insteadof and
-# url.<x>.pushinsteadof (they send a fetch or a push elsewhere); and http.[<url>.]proxy, sslverify, sslcainfo,
-# sslcapath and curloptresolve (they let a man in the middle answer). Other http keys, such as the extraheader
-# GitHub's checkout writes, are left alone.
+# url.<x>.pushinsteadof (they send a fetch or a push elsewhere); and http.[<url>.]proxy, sslverify and
+# curloptresolve (they send traffic through, or let answer, a host the operator did not choose). Other http keys,
+# such as the extraheader GitHub's checkout writes or a corporate sslcainfo, cannot redirect and are left alone.
 # git and every program it starts are found only on the trusted PATH (absolute entries outside FACTORY_REPO), and git
 # runs with GIT_TERMINAL_PROMPT=0, so a planted `git`, `ssh` or helper in the worktree never runs and a missing login
 # fails instead of asking. The repo's remote URL itself is the box's to protect: .git/config is read-only there (#110).
@@ -106,8 +106,7 @@ hg_overrides() {
       remote.*.uploadpack) hg_set "$hg_key" git-upload-pack ;;
       remote.*.receivepack) hg_set "$hg_key" git-receive-pack ;;
       diff.external | diff.*.command | merge.*.driver | url.*.insteadof | url.*.pushinsteadof | \
-      http.proxy | http.*.proxy | http.sslverify | http.*.sslverify | http.sslcainfo | http.*.sslcainfo | \
-      http.sslcapath | http.*.sslcapath | http.curloptresolve | http.*.curloptresolve)
+      http.proxy | http.*.proxy | http.sslverify | http.*.sslverify | http.curloptresolve | http.*.curloptresolve)
         hg_refuse "$hg_key" || return 1 ;;
       credential.helper | credential.*.helper)
         hg_pair "$hg_key" ''                                         # an empty helper clears the list so far
