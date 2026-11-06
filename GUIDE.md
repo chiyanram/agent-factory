@@ -111,7 +111,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | `/approved` from a human maintainer, with `asks=0` and `needs_human=no` | `claim`, `start-writer`, `status "writer started"` |
 | the writer marks the MR ready | `start-reviewer` at the head SHA |
-| an open Act on thread, or the gate is red | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
+| an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the gate is green and no Act on is open | undraft, assign a maintainer, `status "ready"` |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, or hits its time cap | mark it interrupted, `release` the claim |
@@ -163,9 +163,10 @@ The scripts enforce these; prompts alone do not.
   rules it is judged by. It has Read, Grep and Glob only.
 - **Rules come from the default branch**, never from the MR. An MR that edits a rule file is flagged for the human.
 - **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent
-  instruction files lists them in its summary and labels the MR `needs-human`.
-- **No progress stops the loop.** When a writer round leaves the patch unchanged and its last verdict still has Act
-  on findings, `start-reviewer` labels the MR `needs-human` instead of reusing the verdict for another round.
+  instruction files lists them in its summary and labels the MR `needs-human`, once per file. Build files are left
+  to the reviewer.
+- **No progress stops the loop.** When a writer round leaves the change empty, or the patch unchanged while its last
+  verdict still has Act on findings, `start-reviewer` reuses the verdict and labels the MR `needs-human`.
 - **State goes to the forge**, never to a file only one session can read.
 
 ## Terms

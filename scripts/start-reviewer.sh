@@ -74,19 +74,26 @@ moved() {  # fails, with MOVED, when the MR's head is no longer the reviewed one
 }
 post_note() { forge_note "$iid" "$1"; }
 
+# no-progress breaker (ADR-0011 D14): an empty change, or an unchanged patch whose verdict still has Act on findings,
+# would loop without ever counting toward the 3 rounds; the human decides instead. The label goes before any note,
+# because a note at this head marks the head done and a failed label would never be retried.
+if [ -z "$pid" ]; then
+  moved
+  forge_label_add "$iid" needs-human || exit 1
+  echo "review $mark$iid at ${sha:0:8}: no progress, the change is empty; labelled needs-human"
+  exit 0
+fi
 if [ -n "$last_pid" ] && [ "$last_pid" = "$pid" ]; then
   moved
-  post_note "[reviewer] round $last_round reused · head $sha · patch-id $pid" || exit 1
-  # no-progress breaker (ADR-0011 D14): the verdict this patch got still has Act on findings, so another writer round
-  # on the same patch would loop without ever counting toward the 3 rounds; the human decides instead
   act=$(printf '%s\n' "$mine" | grep -E "^\[reviewer\] round [0-9]+ · head [0-9a-f]{40} · patch-id $pid · Act on [0-9]+" \
     | tail -n 1 | sed -n 's/.* · Act on \([0-9]*\).*/\1/p')
+  [ "${act:-0}" -eq 0 ] || forge_label_add "$iid" needs-human || exit 1
+  post_note "[reviewer] round $last_round reused · head $sha · patch-id $pid" || exit 1
   if [ "${act:-0}" -gt 0 ]; then
-    forge_label_add "$iid" needs-human || exit 1
     echo "review $mark$iid at ${sha:0:8}: no progress, the patch is unchanged since round $last_round with $act Act on open; labelled needs-human"
-    exit 0
+  else
+    echo "review $mark$iid at ${sha:0:8}: verdict of round $last_round reused"
   fi
-  echo "review $mark$iid at ${sha:0:8}: verdict of round $last_round reused"
   exit 0
 fi
 [ "$rounds" -lt 3 ] || { echo "$mark$iid has had 3 review rounds; it goes to the human (label needs-human)" >&2; exit 1; }
@@ -180,18 +187,29 @@ done || exit 1
 
 # protected files (ADR-0011 D14; rulebook crq CR3): a change to CI config, code owners or agent instruction files
 # changes how the MR is judged, so the human reviews it before the gate
+# Build files are left to the reviewer (rulebook crq CR3 lets a patch-level version bump through).
 base=$(sed -n 's/^- merge-base: \([0-9a-f]*\).*/\1/p' "$pack")
-protected=$(git -C "$FACTORY_REPO" diff --name-only --no-renames "$base" "$sha" \
-  | grep -E '^\.github/workflows/|^\.gitlab-ci\.yml$|(^|/)CODEOWNERS$|(^|/)(AGENTS|CLAUDE)\.md$|^\.claude/|^\.agents/' || true)
+[ -n "$base" ] || { echo "$mark$iid: no merge-base in the pack $pack" >&2; exit 1; }
+changed=$(git -C "$FACTORY_REPO" diff --name-only --no-renames "$base" "$sha") || exit 1
+protected=$(printf '%s\n' "$changed" | { grep -E \
+  '^\.github/workflows/|^\.gitlab-ci\.yml$|(^|/)CODEOWNERS$|(^|/)(AGENTS|CLAUDE|CLAUDE\.local)\.md$|(^|/)\.claude/|(^|/)\.agents/' \
+  || true; })
+# a path an earlier round already sent to the human is listed again but does not relabel the MR, so a human who
+# cleared needs-human is not stopped again for the same file
+listed=$(printf '%s' "$notes" | jq -r --arg me "$reviewer" '.[] | select(.author.username == $me) | .body' \
+  | sed -n '/^Protected files:/,/^$/p' | sed -n 's/^- //p')
+fresh=$(printf '%s\n' "$protected" | while IFS= read -r f; do
+  [ -n "$f" ] && ! printf '%s\n' "$listed" | grep -qxF -- "$f" && printf '%s\n' "$f"; done || true)
 [ -z "$protected" ] || lists="$lists
 
 Protected files: the human reviews these before the gate (needs-human)
 $(printf '%s\n' "$protected" | sed 's/^/- /')"
 
-# the summary note goes last: it marks the round done, so a round that failed halfway runs again
+# the label goes before the summary, and the summary goes last: it marks the round done, so a round that failed
+# halfway runs again
+[ -z "$fresh" ] || forge_label_add "$iid" needs-human || exit 1
 post_note "[reviewer] round $round · head $sha · patch-id $pid · $counts
 
 $lists" || exit 1
-[ -z "$protected" ] || forge_label_add "$iid" needs-human || exit 1
 
 echo "review $mark$iid round $round at ${sha:0:8}: $counts (\$$(cat "$run/cost"))"
