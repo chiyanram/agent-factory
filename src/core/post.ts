@@ -16,7 +16,8 @@
 //     code span forms
 //   - a field never starts with "/", and it is capped in length after all of this, with "…" when cut
 // The template writes the seat prefix ("[writer] " and so on) and the labels, so a field never starts a line. A label
-// must be the factory's own plain words: renderPost refuses any other.
+// must be the factory's own plain words: renderPost refuses any other, as a result, never by throwing, so a caller
+// such as the dispatcher handles the refusal instead of stopping mid-run.
 
 export type Seat = "writer" | "reviewer" | "coordinator";
 
@@ -25,9 +26,13 @@ export type PostField = { readonly label: string; readonly value: string };
 export type Post = {
   readonly seat: Seat;
   readonly title: string;
-  readonly fields?: readonly PostField[];
-  readonly items?: readonly string[];
+  readonly fields: readonly PostField[];
+  readonly items: readonly string[];
 };
+
+export type RenderResult =
+  | { readonly kind: "ok"; readonly text: string }
+  | { readonly kind: "refused"; readonly reason: string };
 
 export const DEFAULT_FIELD_LIMIT = 500;
 
@@ -68,19 +73,15 @@ export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): 
 
 // renderPost : the full text of one post. The first line is "[seat] title"; each field is "- label: value"; each item
 // is "- value". A label outside the factory's own plain words is refused, so no caller can pass outside text as one.
-export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): string {
-  const lines = [`[${post.seat}] ${cleanField(post.title, limit)}`];
-  const fields = post.fields ?? [];
-  const items = post.items ?? [];
-  if (fields.length + items.length > 0) {
-    lines.push("");
+export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): RenderResult {
+  const bad = post.fields.find((f) => !LABEL.test(f.label));
+  if (bad !== undefined) {
+    return { kind: "refused", reason: `post label must be the factory's own plain words, got ${JSON.stringify(bad.label)}` };
   }
-  for (const f of fields) {
-    if (!LABEL.test(f.label)) {
-      throw new Error(`post label must be the factory's own plain words, got ${JSON.stringify(f.label)}`);
-    }
-    lines.push(`- ${f.label}: ${cleanField(f.value, limit)}`);
-  }
-  items.forEach((item) => lines.push(`- ${cleanField(item, limit)}`));
-  return lines.join("\n");
+  const head = [`[${post.seat}] ${cleanField(post.title, limit)}`];
+  const body = [
+    ...post.fields.map((f) => `- ${f.label}: ${cleanField(f.value, limit)}`),
+    ...post.items.map((item) => `- ${cleanField(item, limit)}`),
+  ];
+  return { kind: "ok", text: [...head, ...(body.length > 0 ? ["", ...body] : [])].join("\n") };
 }

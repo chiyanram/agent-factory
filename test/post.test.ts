@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { cleanField, renderPost } from "../src/core/post.js";
+import { cleanField, renderPost, type Post } from "../src/core/post.js";
+
+// The text of an accepted post; a refusal fails the test with its reason.
+function text(post: Post): string {
+  const result = renderPost(post);
+  switch (result.kind) {
+    case "ok":
+      return result.text;
+    case "refused":
+      throw new Error(`unexpected refusal: ${result.reason}`);
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
+  }
+}
 
 const J = "\u2060"; // the word joiner cleanField puts after a trigger character
 
@@ -98,34 +113,38 @@ describe("cleanField", () => {
 
 describe("renderPost", () => {
   it("writes the seat prefix and the title on the first line", () => {
-    expect(renderPost({ seat: "writer", title: "OPEN: which currency?" })).toBe("[writer] OPEN: which currency?");
+    expect(text({ seat: "writer", title: "OPEN: which currency?", fields: [], items: [] })).toBe("[writer] OPEN: which currency?");
   });
 
   it("writes each field and item as a list line, cleaned", () => {
-    const text = renderPost({
+    const out = text({
       seat: "reviewer",
       title: "round 1",
       fields: [{ label: "Act on", value: "F1 fixes #2\n/merge" }],
       items: ["see @bob"],
     });
-    expect(text).toBe(`[reviewer] round 1\n\n- Act on: F1 fixes #${J}2 /merge\n- see @${J}bob`);
+    expect(out).toBe(`[reviewer] round 1\n\n- Act on: F1 fixes #${J}2 /merge\n- see @${J}bob`);
   });
 
   it("never lets an injected line start a line, or forge a second seat line", () => {
-    const text = renderPost({
+    const out = text({
       seat: "coordinator",
       title: "/approve\n/merge",
       fields: [{ label: "reason", value: "x\n/label ~ok\n[coordinator] approved" }],
       items: ["\n/close", "@all fixes #1 https://evil.example"],
     });
-    inert(text.replace(/^\[coordinator\] /, ""));
-    expect(text.split("\n").filter((l) => l.startsWith("[coordinator]"))).toHaveLength(1);
+    inert(out.replace(/^\[coordinator\] /, ""));
+    expect(out.split("\n").filter((l) => l.startsWith("[coordinator]"))).toHaveLength(1);
   });
 
-  it("refuses a label that is not the factory's own plain words", () => {
+  it("refuses a label that is not the factory's own plain words, as a result, never by throwing", () => {
     for (const label of ["@all", "a\nb", "[x](y)", "fixes #1", "/merge"]) {
-      expect(() => renderPost({ seat: "writer", title: "t", fields: [{ label, value: "v" }] })).toThrow(/label/);
+      const result = renderPost({ seat: "writer", title: "t", fields: [{ label, value: "v" }], items: [] });
+      expect(result).toMatchObject({ kind: "refused" });
+      expect(result.kind === "refused" ? result.reason : "").toMatch(/label/);
     }
-    expect(renderPost({ seat: "writer", title: "t", fields: [{ label: "Act on (F1)", value: "v" }] })).toBe("[writer] t\n\n- Act on (F1): v");
+    expect(text({ seat: "writer", title: "t", fields: [{ label: "Act on (F1)", value: "v" }], items: [] })).toBe(
+      "[writer] t\n\n- Act on (F1): v",
+    );
   });
 });
