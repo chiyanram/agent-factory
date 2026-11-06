@@ -55,10 +55,15 @@ git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$bra
 note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 
 # the project's writer tools (ADR-0011 D17): docs/agents/commands.md holds "lint-file: <command>", run on each file
-# the writer edits, and "test-touched: <command>", its quick command for the tests it touched
-commands="$path/docs/agents/commands.md"
-lint=$(sed -n 's/^lint-file:[[:space:]]*//p' "$commands" 2> /dev/null | head -n 1)
-quick=$(sed -n 's/^test-touched:[[:space:]]*//p' "$commands" 2> /dev/null | head -n 1)
+# the writer edits, and "test-touched: <command>", its quick command for the tests it touched. It is read from the
+# MR's target branch, never from the MR, because a hook runs with no permission prompt (ADR-0004).
+target=$(printf '%s' "$mr" | jq -r '.target_branch // empty')
+commands=''
+[ -z "$target" ] || ! git -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$target:refs/factory/target" 2> /dev/null \
+  || commands=$(git -C "$FACTORY_REPO" show refs/factory/target:docs/agents/commands.md 2> /dev/null | tr -d '\r')
+tool() { printf '%s\n' "$commands" | sed -n "s/^$1:[[:space:]]*//p" | head -n 1 | sed 's/^`\(.*\)`[[:space:]]*$/\1/; s/[[:space:]]*$//'; }
+lint=$(tool lint-file)
+quick=$(tool test-touched)
 if [ -n "$lint" ]; then
   hook="$(printf '%q' "$(cd "$(dirname "$0")" && pwd)/lint-edit.sh") $(printf '%q' "$lint")"
   writer_settings "$path" "$(jq -cn --arg c "$hook" \

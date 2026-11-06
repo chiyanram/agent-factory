@@ -47,9 +47,10 @@ login, email or password.
 - When a developer leaves, revoke the GitLab token and block the account, or delete the App's key or the App.
 - Before the first run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt. Add
   `.claude/worktrees/`, `.claude/runs/` and `.claude/packs/` to the project's `.gitignore`.
-- Give the writer its quick tools in the project's `docs/agents/commands.md`, one per line: `lint-file: <command>`
-  runs on each file the writer edits, with the file as its last word, and `test-touched: <command>` runs the tests it
-  touched. Either line may be left out.
+- Give the writer its quick tools in `docs/agents/commands.md` on the default branch, one plain line each (a fence
+  around them is fine): `lint-file: <command>` runs on each file the writer edits, with the file as its last word,
+  and `test-touched: <command>` runs the tests it touched. Either may be left out. The file is read from the MR's
+  target branch, never from the MR, because the lint runs as a hook with no permission prompt.
 
 **Known gap.** Agents run as the developer's OS user, so they can read the token in glab's config or the App's key.
 The Developer role and the App's permissions limit what a stolen credential can do. It is not a wall.

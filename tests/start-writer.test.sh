@@ -13,6 +13,13 @@ setup() {
 }
 claude_calls() { cat "$(dirname "$FACTORY_CLAUDE")/calls.log" 2>/dev/null; }
 bg_calls() { claude_calls | grep -v ' | agents '; }
+tools_on() {  # tools_on BRANCH TEXT : commits docs/agents/commands.md with TEXT on BRANCH of the project
+  (cd "$FACTORY_REPO" && git checkout -q "$1" && mkdir -p docs/agents && printf '%b' "$2" > docs/agents/commands.md \
+    && git add -A && git -c user.name=t -c user.email=t@t commit -q -m tools \
+    && git push -q "$(git config remote.origin.url)" "$1" 2> /dev/null \
+    && git checkout -q main)
+}
+mr_to_main() { printf '{"iid":12,"state":"opened","source_branch":"feat/x","target_branch":"main","sha":"%s","labels":["agent::claimed"]}' "$1"; }
 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
@@ -129,10 +136,13 @@ git -C "$FACTORY_REPO" config --add credential.https://github.com.helper "$helpe
 expect_fail "a clone that would commit under a person's email is refused" "commit under a person's email" writer
 expect_eq "and nothing started" "" "$(bg_calls)"
 git -C "$FACTORY_REPO" config user.email '1+ledger-factory[bot]@users.noreply.github.com'
+tools_on main 'lint-file: ./lint\n'
 expect_eq "a clone set up as the App starts the writer" "writer started #12 at ${head:0:8}: started abc123" "$(writer)"
 expect_eq "the writer's session has no gh login and no system or global git config" \
   "$FACTORY_REPO/.claude/runs/gh-no-login 1 /dev/null" \
   "$(jq -r '.env | "\(.GH_CONFIG_DIR) \(.GIT_CONFIG_NOSYSTEM) \(.GIT_CONFIG_GLOBAL)"' "$worktree/.claude/settings.local.json")"
+expect_eq "and the lint hook sits beside those settings in the same file" "$REPO_ROOT/scripts/lint-edit.sh ./lint" \
+  "$(jq -r '.hooks.PostToolUse[0].hooks[0].command' "$worktree/.claude/settings.local.json")"
 expect_eq "so those settings are never committed" "" "$(git -C "$worktree" status --porcelain)"
 expect_pass "the prompt sends every GitHub call through the App's gh" \
   grep -q "use $REPO_ROOT/scripts/bin/gh: it acts as the factory's GitHub App" "$(dirname "$FACTORY_CLAUDE")/calls.log"
@@ -167,12 +177,8 @@ expect_pass "the writer puts the evidence table in the description and learns wh
 
 # The project's writer tools from docs/agents/commands.md (ADR-0011 D17)
 setup
-(cd "$FACTORY_REPO" && git checkout -q feat/x && mkdir -p docs/agents \
-  && printf '# Commands\n\n```text\nlint-file: npx eslint --max-warnings 0\ntest-touched: npm test -- --findRelatedTests\n```\n' > docs/agents/commands.md \
-  && git add -A && git -c user.name=t -c user.email=t@t commit -q -m tools && git push -q origin feat/x 2> /dev/null \
-  && git checkout -q main)
-head=$(git -C "$FACTORY_REPO" rev-parse origin/feat/x)
-respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+tools_on main '# Commands\n\n```text\nlint-file: npx eslint --max-warnings 0\ntest-touched: `npm test -- --findRelatedTests`\r\n```\n'
+respond "$FACTORY_GLAB" 1 200 "$(mr_to_main "$head")"
 "$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
 settings="$worktree/.claude/settings.local.json"
 expect_eq "the writer's session lints each Edit, MultiEdit and Write with the project's lint" \
@@ -183,8 +189,19 @@ log="$(dirname "$FACTORY_CLAUDE")/calls.log"
 expect_pass "the prompt names the lint and the quick touched-test command" \
   sh -c "grep -q 'linted at once with: npx eslint --max-warnings 0' '$log' && grep -q 'Run the tests you touched with: npm test -- --findRelatedTests' '$log'"
 
+expect_pass "a CRLF line and backticks around a command are stripped" \
+  sh -c "grep -q 'touched with: npm test -- --findRelatedTests\. Run' '$log'"
+
 setup
-respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+tools_on feat/x 'lint-file: touch /tmp/pwned-by-the-mr\n'
+head=$(git -C "$FACTORY_REPO" rev-parse origin/feat/x)
+respond "$FACTORY_GLAB" 1 200 "$(mr_to_main "$head")"
+"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+expect_eq "the MR's own commands file is never read: a hook runs with no permission prompt" no \
+  "$([ -e "$worktree/.claude/settings.local.json" ] && echo yes || echo no)"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr_to_main "$head")"
 "$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
 expect_eq "with no commands file, no hook and no settings file" no "$([ -e "$worktree/.claude/settings.local.json" ] && echo yes || echo no)"
 expect_fail "and no tool line in the prompt" "none" sh -c "grep -q 'linted at once' '$(dirname "$FACTORY_CLAUDE")/calls.log' && exit 0; echo none; exit 1"
