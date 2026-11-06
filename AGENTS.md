@@ -1,27 +1,41 @@
 # agent-factory
 
-The agent factory: one coordinator AI that starts fresh writer and reviewer workers on a project's merge requests.
-The rules those workers follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
-Start with `README.md`, then `ARCHITECTURE.md`; setup and commands are in `DEVELOPMENT.md`, the change flow in `CONTRIBUTING.md`.
+One coordinator AI that starts fresh writer and reviewer workers on a project's merge requests. The rules those
+workers follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
+People start at `README.md`; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
 
-## Build
+## Check
 
-- Coordinator scripts live in `scripts/`; the forge seam in `scripts/lib/`. Each script has a plain-bash test `tests/<script>.test.sh` that exits non-zero on a failed assertion.
-- The coordinator's instructions are `docs/playbooks/coordinator.md`; keep them in step with the scripts.
-- Run `make lint` and `make test` before you hand over a change. CI runs the same two targets on every pull request.
-- A change lands as one issue → one branch → one PR. The operator approves every commit and every push.
-- `docs/archive/` is frozen history: read it for context, never edit it, never link to it from live docs as a source of truth.
+```bash
+make lint   # every relative link resolves; the root AGENTS.md is under 200 lines
+make test   # every tests/*.test.sh; no network, glab, gh or claude needed
+```
 
-## Agent skills
+CI runs both on every pull request and on push to `main`.
 
-### Issue tracker
+## MUSTs
 
-Issues, the wayfinder map and its tickets live in GitHub issues on chiyanram/agent-factory. See `docs/agents/issue-tracker.md`.
+- Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, added to both adapters, because a direct
+  `glab` or `gh` call breaks the other forge and cannot be stubbed in a test.
+- Write each script and its test `tests/<script>.test.sh` together, for bash 3.2 and POSIX tools, because the scripts
+  run on stock macOS and on Linux.
+- Keep `GUIDE.md` in step with the scripts, because the coordinator session follows it as its instructions.
+- Commit and push only with the operator's yes; one issue → one branch → one PR. The human merges.
 
-### Triage labels
+## Where things go
 
-The five default triage labels (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix); map tickets use only `wayfinder:*` labels. See `docs/agents/triage-labels.md`.
+```text
+scripts/              the loop scripts and the lint checks
+scripts/lib/          the forge seam (forge.sh, gitlab.sh, github.sh, http.sh) and run tracking (runs.sh)
+prompts/              the reviewer's default find and verify instructions
+tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
+docs/adr/             decision records
+docs/agents/          issue tracker, triage labels, domain-doc conventions
+```
 
-### Domain docs
+## Pointers
 
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the root, created only when a term or decision is resolved. See `docs/agents/domain.md`.
+- Issues, the wayfinder map and its tickets: GitHub issues on chiyanram/agent-factory. See
+  `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
+- Terms: `GUIDE.md#terms`. Decisions: `docs/adr/`. See `docs/agents/domain.md`.
+- A cite `docs/archive/…` or `research/NN` means that file at git tag `docs-archive-2026-11`.

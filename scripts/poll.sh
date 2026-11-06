@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# poll — one line of facts per open MR, read from GitLab as it is now (docs/playbooks/coordinator.md §Scripts, #36).
+# poll — one line of facts per open MR, read from GitLab as it is now (GUIDE.md §Scripts, #36).
 #
 #   !12 head=1a2b3c4d draft=yes claimed=no approved=yes pipeline=success needs_human=no stop=no asks=0
 #   !9 merged claimed=yes

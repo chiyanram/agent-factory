@@ -14,7 +14,7 @@
 #   FACTORY_CURL         the curl binary (default: curl); a test points it at a stub
 #
 # The git config fallback lets a writer, inside a worktree of the factory's clone, run scripts/bin/gh and git push as
-# the App with nothing in its environment (docs/setup/identity.md).
+# the App with nothing in its environment (GUIDE.md, Set up the bot).
 #
 # An installation token lasts one hour. It is cached per App and project in ~/.cache/agent-factory (mode 600) and
 # minted again 5 minutes before it ends, so no token is ever stored in an environment variable or a config file of gh.

@@ -112,7 +112,7 @@ forge_line_finding() {
 #   forge_writer_setup PATH  the worktree's .claude/settings.local.json gives the session an empty GH_CONFIG_DIR and no
 #                            system or global git config, so plain gh has no login and git asks only the App's helper
 forge_writer_ready() {
-  refuse() { echo "refused: FACTORY_REPO $*; see docs/setup/identity.md, GitHub step 5" >&2; return 1; }
+  refuse() { echo "refused: FACTORY_REPO $*; see GUIDE.md, Set up the bot, GitHub step 5" >&2; return 1; }
   case $(git -C "$FACTORY_REPO" remote get-url --push origin 2> /dev/null) in
     https://github.com/*) ;;
     *) refuse "does not push to https://github.com/, so git would not ask the App's credential helper"; return 1 ;;
