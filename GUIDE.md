@@ -82,7 +82,8 @@ is your only memory.
 - **The forge is the record.** Every answer, verdict and state lives on the story's issue or MR. What is only in
   this chat was never decided.
 - **The MR is the contract.** It holds the intent in the human's words, the acceptance criteria and the design link,
-  so a writer seldom needs to ask. When it must, it posts a `[writer] OPEN:` note with `ask.sh` and stops.
+  so a writer seldom needs to ask. When it must, its prompt tells it to push, post a `[writer] OPEN:` note with
+  `ask.sh` and stop; that is an instruction, not a guardrail the scripts enforce.
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
 
 A developer without the fleet runs `/crq` in one session and takes these steps itself. A small fix costs less that way.
@@ -110,7 +111,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | when the forge shows | do |
 |---|---|
 | `/approved` from a human maintainer, with `asks=0` and `needs_human=no` | `claim`, `start-writer`, `status "writer started"` |
-| the writer marks the MR ready | `start-reviewer` at the head SHA |
+| the writer marks the MR ready, with `asks=0` | `start-reviewer` at the head SHA |
 | an open Act on thread, or the gate is red | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the gate is green and no Act on is open | undraft, assign a maintainer, `status "ready"` |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
@@ -156,8 +157,7 @@ The scripts enforce these; prompts alone do not.
 
 - **Code goes to a writer, always.** The coordinator never edits code.
 - **Approval and merge are the human's, always.** The bot cannot merge the protected branch.
-- **The writer pushes only its own branch**, with `--force-with-lease` after a rebase. It reaches the human only
-  through a `[writer] OPEN:` note posted with `ask.sh`, then stops.
+- **The writer pushes only its own branch**, with `--force-with-lease` after a rebase.
   On GitHub its session gets an empty `GH_CONFIG_DIR` and no system or global git config, so it cannot act as the
   person.
 - **The reviewer reads, and the script posts.** It runs in a throwaway folder with the pack and a copy of the code.

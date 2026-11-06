@@ -46,12 +46,17 @@ git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$bra
   || { echo "cannot make the worktree $path" >&2; exit 1; }
 note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 
-scripts=$(cd "$(dirname "$0")" && pwd)
+# the ask command carries its own settings, so it works whatever the writer's session inherits (ADR-0011 D10)
+ask="FACTORY_FORGE=${FACTORY_FORGE:-gitlab} FACTORY_PROJECT=$(printf '%q' "$FACTORY_PROJECT")"
+[ -z "${FACTORY_GLAB:-}" ] || ask="$ask FACTORY_GLAB=$(printf '%q' "$FACTORY_GLAB")"
+[ -z "${FACTORY_GH:-}" ] || ask="$ask FACTORY_GH=$(printf '%q' "$FACTORY_GH")"
+ask="$ask $(printf '%q' "$(cd "$(dirname "$0")" && pwd)/ask.sh") $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
 prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
 Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
-and the design link. When the contract does not settle a question, never guess: run
-$scripts/ask.sh $iid $sha \"<the question in one line>\", then stop without marking the MR
-ready. That note is your only way to reach the human. Push only this branch; after a rebase use --force-with-lease.${note:+
+and the design link. When the contract does not settle a question, never guess: push your commits, then run
+$ask
+with the question in single quotes, and stop without marking the MR ready. Push only this branch; after a rebase use
+--force-with-lease.${note:+
 $note}"
 set --
 [ -z "${FACTORY_WRITER_MODEL:-}" ] || set -- --model "$FACTORY_WRITER_MODEL"

@@ -76,6 +76,15 @@ expect_eq "status posts a comment at the run's head" "posted #12 at aaaa1111" \
 expect_eq "the comment is the seat and the line" "[coordinator] writer started" "$(jq -r .body "$(log)/inputs.log")"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 "$bot"
+respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
+respond "$FACTORY_GH" 3 201 '{"id":2}'
+expect_eq "ask posts the writer's question at its head on GitHub" "asked #12 at aaaa1111" \
+  "$("$REPO_ROOT/scripts/ask.sh" 12 aaaa1111 'is $PATH a "literal" here?')"
+expect_eq "the question arrives as written, quotes and dollar sign kept" '[writer] OPEN: is $PATH a "literal" here?' \
+  "$(jq -r .body "$(log)/inputs.log")"
+
+FACTORY_GH=$(glab_stub); export FACTORY_GH
 respond "$FACTORY_GH" 1 403 '{"message":"API rate limit exceeded"}' 'x-ratelimit-remaining: 0' 'x-ratelimit-reset: 1'
 respond "$FACTORY_GH" 2 200 "$bot"
 respond "$FACTORY_GH" 3 200 "$(pr open false '[{"name":"agent::claimed"}]')"
