@@ -21,9 +21,10 @@
 set -u
 set -o pipefail
 . "$(dirname "$0")/lib/forge.sh"
+. "$(dirname "$0")/lib/git.sh"
 iid=${1:-} previous=${2:-}
 valid_iid "$iid" || exit 1
-git -C "${FACTORY_REPO:-}" rev-parse --git-dir > /dev/null 2>&1 \
+hgit -C "${FACTORY_REPO:-}" rev-parse --git-dir > /dev/null 2>&1 \
   || { echo "FACTORY_REPO must be a local clone of the project, got '${FACTORY_REPO:-}'" >&2; exit 1; }
 FACTORY_REPO=$(cd "$FACTORY_REPO" && pwd)
 rulebook=${FACTORY_RULEBOOK:-}
@@ -31,7 +32,7 @@ rulebook=${FACTORY_RULEBOOK:-}
   || { echo "FACTORY_RULEBOOK must be the rulebook plugin folder (with skills/code/references/smells.md), got '$rulebook'" >&2; exit 1; }
 [ -z "$previous" ] || printf '%s' "$previous" | grep -Eq '^[0-9a-f]{40}$' \
   || { echo "the previous head must be a full 40-character SHA, got '$previous'" >&2; exit 1; }
-g() { git -C "$FACTORY_REPO" -c core.quotePath=false "$@"; }
+g() { hgit -C "$FACTORY_REPO" -c core.quotePath=false "$@"; }
 
 mr=$(forge_pr "$iid") || exit 1
 master_name=$(forge_default_branch) || exit 1
@@ -50,8 +51,8 @@ head=$(g rev-parse "refs/factory/mr-$iid")
 master=$(g rev-parse refs/factory/target)
 base=$(g merge-base "$master" "$head")
 # fixed flags and quoting, so the patch-id is the same on every machine
-diff() { git -C "$FACTORY_REPO" -c core.quotePath=true diff --no-color --no-ext-diff --no-renames -U3 "$@"; }
-patch_id=$(diff "$base" "$head" | git patch-id --stable | cut -d' ' -f1)
+diff() { hgit -C "$FACTORY_REPO" -c core.quotePath=true diff --no-color --no-ext-diff --no-renames -U3 "$@"; }
+patch_id=$(diff "$base" "$head" | hgit patch-id --stable | cut -d' ' -f1)
 
 dir="$FACTORY_REPO/.claude/packs"
 pack="$dir/$iid-$head${previous:+-since-${previous:0:8}}.md"

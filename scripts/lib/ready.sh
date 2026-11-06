@@ -64,7 +64,7 @@ evidence_commands() {
 ready_check() {
   r_iid=$1 r_sha=$2 r_branch=$3 r_desc=$4 r_notes=$5 r_me=$6
   [ "${FACTORY_READY_CHECK:-on}" != off ] || return 0
-  r_hash=$(printf '%s' "$r_desc" | git hash-object --stdin | cut -c1-12)
+  r_hash=$(printf '%s' "$r_desc" | hgit hash-object --stdin | cut -c1-12)
   r_head="[coordinator] not ready at $r_sha · description $r_hash"
   if printf '%s' "$r_notes" | jq -e --arg me "$r_me" --arg h "$r_head" \
        'any(.[]; .author.username == $me and (.body | startswith($h)))' > /dev/null; then
@@ -81,13 +81,13 @@ ready_check() {
   elif [ "${r_sha#"$at"}" = "$r_sha" ]; then
     failed="- the evidence is at $at, but the head is $r_sha (rulebook crq VB3)"
   else
-    git -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$r_branch:refs/factory/mr-$r_iid" \
-      && [ "$(git -C "$FACTORY_REPO" rev-parse "refs/factory/mr-$r_iid")" = "$r_sha" ] \
+    hgit -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$r_branch:refs/factory/mr-$r_iid" \
+      && [ "$(hgit -C "$FACTORY_REPO" rev-parse "refs/factory/mr-$r_iid")" = "$r_sha" ] \
       || { echo "$mark$r_iid: cannot fetch $r_branch at ${r_sha:0:8} for the ready check" >&2; return 2; }
     tree=$(worktree_path "ready-$r_iid")
     [ ! -e "$tree" ] || remove_worktree "$tree"
     mkdir -p "$(dirname "$tree")" "$(dirname "$r_log")" && : > "$r_log"
-    git -C "$FACTORY_REPO" worktree add -q --detach "$tree" "$r_sha" \
+    hgit -C "$FACTORY_REPO" worktree add -q --detach "$tree" "$r_sha" \
       || { echo "$mark$r_iid: cannot make the worktree $tree" >&2; return 2; }
     while IFS= read -r command; do
       shown=$(printf '%s' "$command" | tr '`' "'")
