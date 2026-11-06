@@ -83,3 +83,11 @@ By [ADR-0012](0012-safety-design-for-unattended-runs.md) and [ADR-0013](0013-typ
 - **D17:** the lint hook loads from the default branch or the factory, never from the branch ([Q7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370)).
 - **Rejected auto-approve:** auto-approve stays rejected on the laptop. Skip-all is allowed only in a strong box: `FACTORY_BOX=vm` or `srt`
   ([Q6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370)).
+
+## Amended 2026-11-06 (review of ADR-0012)
+
+By ADR-0012 S3 and S13, as revised ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125), [review 9](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682943767)):
+- **D10, D12, D14:** the writer's question, evidence and blocker come from `.factory/report.json` (status `done`,
+  `asked` or `blocked`). The ready check re-runs its `evidence` rows. The host posts only templated, cleaned text.
+- **D14:** the dispatcher's table gives every failure path a stop: ready check 3, review rounds 3, CI rounds 2,
+  rebase 1. A claim is released only when the MR has been quiet for `FACTORY_QUIET_MINUTES`.

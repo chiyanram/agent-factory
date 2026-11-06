@@ -100,7 +100,7 @@ Pin every GitHub Actions step to a full commit SHA, with the version in a commen
 |---|---|
 | `broken link: <file>:<line>: <target>` | a relative link points at a missing file; fix the path |
 | `too long: AGENTS.md` | the root `AGENTS.md` reached 200 lines; move detail into `GUIDE.md` and link it |
-| `refused: … a human account` | log the CLI in as the bot ([GUIDE.md](GUIDE.md#set-up-the-bot)) |
+| `refused: … a human account` | log the CLI in as the bot ([GUIDE.md](GUIDE.md#set-up-identity)) |
 | `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | export the setting ([GUIDE.md](GUIDE.md#settings)) |
 | `cannot list live runs: claude agents --json failed` | the `claude` CLI is missing or too old |
 | `the writer for !<mr> did not start` | open `claude` once in `FACTORY_REPO` and accept the trust prompt |

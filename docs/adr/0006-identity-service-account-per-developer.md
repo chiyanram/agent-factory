@@ -49,3 +49,13 @@ By [ADR-0012](0012-safety-design-for-unattended-runs.md) ([gap 1 / Q11](https://
   ([W1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6679395560)).
 - The "Known gap" (agents can read the token as the developer's OS user) closes for the writer (S6). For the
   coordinator it narrows to the deny rules of S2.
+
+## Amended 2026-11-06 (review of ADR-0012)
+
+By [ADR-0012](0012-safety-design-for-unattended-runs.md) S14, as revised ([review 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682431737)):
+- Identity is per project. By default the dispatcher pushes and posts with the developer's own `gh` or `glab` login
+  (work has no bots). A project may use a bot (personal: a GitHub App), whose key belongs to a separate `factory` OS
+  user on the VM. This replaces "one bot per project" in the amendment above.
+- Agent text is marked by content (`[writer]`, `[reviewer]`, `[coordinator]` and an `Agent: <seat>` commit trailer),
+  not by author.
+- Approval is a local permission recorded by `approve.sh`, not a forge note ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)).

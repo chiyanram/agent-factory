@@ -12,7 +12,7 @@ reviewed and gate-green by fresh AI workers in a box. Then a human merges it. Th
 every piece of state, so a restart loses nothing.
 
 - **Humans keep the gates.** A human approves before any code, and a human merges. The bot cannot merge.
-- **Code dispatches, not the AI.** The coordinator talks with you; it holds no bot login and starts no worker.
+- **Code dispatches, not the AI.** The coordinator talks with you; it holds no forge login and starts no worker.
 - **Workers run in a box.** No forge token, no network except the model API and package registries. The host pushes.
 - **Fresh workers.** Each job starts a new session, so no worker drifts or forgets its instructions.
 - **One reviewer, two passes.** A find pass lists findings; a verify pass drops what does not hold. It may block,
@@ -37,7 +37,7 @@ cd agent-factory
 make lint && make test
 ```
 
-Point the coordinator at a project. First set up its bot ([GUIDE.md](GUIDE.md#set-up-the-bot)), then:
+Point the coordinator at a project. First set up its identity ([GUIDE.md](GUIDE.md#set-up-identity)), then:
 
 ```bash
 export FACTORY_FORGE=gitlab              # or github

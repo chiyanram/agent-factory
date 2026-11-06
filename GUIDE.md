@@ -1,25 +1,30 @@
 # Guide
 
-How to set up the factory's bot, configure the scripts and run the loop. The coordinator session follows
+How to set up the factory's identity, configure the scripts and run the loop. The coordinator session follows
 [Run the loop](#run-the-loop) as its instructions. Words in **bold** are in [Terms](#terms).
 
 > **Target and today.** [ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) (map #30, 2026-11-06) is the
-> decided design. The bash scripts do not follow it yet. Each place where they still differ is marked **Today:**.
+> decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The bash scripts do not follow it
+> yet. Each place where they still differ is marked **Today:**.
 
-## Set up the bot
+## Set up identity
 
-The scripts that write to the forge refuse a human login. The target is **one bot per project, used only by code**:
-the dispatcher and the host push ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14,
-[gap 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681534148)). No LLM holds its login. The bot pushes branches, opens merge requests and comments. It cannot
-merge the protected branch. The human's own account approves and merges.
+The factory pushes and posts with a forge login that **only code uses**: the dispatcher and the host push. No LLM holds
+it ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14, [review 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682431737)). Which login is set per project:
 
 ```
-dispatcher + host push ──▶ bot (agent-<project>, or <slug>[bot]) ──▶ pushes branches, opens MRs, comments; cannot merge
-human ──▶ own account  ──▶ /approved (typed on the MR, or by approve.sh in the terminal) and merge
+work (default)  dispatcher + host push ──▶ your own gh / glab login ──▶ pushes branches, opens MRs, comments
+personal (opt.) dispatcher + host push ──▶ a bot: GitHub App <slug>[bot] or GitLab service account
+human           approve.sh (a local permission) · reviews · merges with your own account
 ```
 
-**Today:** each developer sets up one bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)), and
-the coordinator and the writer both act as it. The steps below still name the account `agent-<name>`.
+Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
+and agent commits carry an `Agent: <seat>` trailer. With your own login there is nothing more to set up; the steps
+below are for a project that uses a bot. A bot's key belongs to a separate `factory` OS user on the VM, never to a file
+your own user can read.
+
+**Today:** each developer sets up one bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)), the
+coordinator and the writer both act as it, and step 2 below keeps the App's key in your home folder.
 
 ### GitLab
 
@@ -49,9 +54,13 @@ login, email or password.
 ### Both forges
 
 - Every agent post starts with its seat: `[coordinator]`, `[writer]` or `[reviewer]`.
-- On agent branches, CI runs test jobs only, with no secrets, and a CI-file edit waits for a human
-  ([Q5a](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)). GitLab: protect every CI variable and environment, and add `rules:` or a push rule on the
-  CI paths. GitHub: keep Workflows out of the App (step 1) and put secrets in environments that need approval.
+- On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses
+  commits that touch `.gitlab-ci.yml` (and the files it includes), `.github/workflows/**` or `.github/actions/**`, and
+  you make such a change in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). Backstop: GitLab, protect every secret variable;
+  GitHub, keep secrets in environments that need approval and keep Workflows out of a bot App (step 1). `rules:` in
+  `.gitlab-ci.yml` is not a gate: the branch's own copy runs. **Today:** nothing refuses the push.
+- Work laptop (`FACTORY_BOX=laptop`): in Rancher Desktop, share no home folder with its VM. The writer's box is a
+  container there, with its own Docker inside ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)).
 - Whoever started the work does not approve it. Write this rule down for the team; a forge on a free plan cannot
   enforce it.
 - When a developer leaves, revoke the GitLab token and block the account, or delete the App's key or the App.
@@ -85,7 +94,8 @@ The scripts read their settings from the environment.
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `poll`, `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
-| `FACTORY_BOX` | **planned** ([Q4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681022323)): `laptop` runs workers locked down on this machine, with a Docker exception for ITs; `vm` runs them in your own VM. The start refuses to run without a sandbox | `laptop` |
+| `FACTORY_BOX` | **planned** ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs workers in your own VM, with its Docker; `laptop` runs each in a container on Rancher Desktop with its own Docker inside, a private home and filtered egress. The start refuses to run without a box | `laptop` |
+| budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
 | `FACTORY_READY_COMMANDS` | the programs an evidence command may start in the ready check; they run the MR's own build files, with none of this machine's logins | `make ./gradlew ./mvnw` |
@@ -99,15 +109,19 @@ The scripts read their settings from the environment.
 
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
 to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, no LLM) starts. Each does one job on one
-story and goes away. The forge is your only memory. In the target you run only the read scripts and `approve.sh`;
-the start scripts and raw `gh`, `glab` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
+story and goes away. The forge is your only memory. In the target you run only the read commands, `status.sh`,
+questions and status to Jira or the issue, and `approve.sh`; you edit and write only spec drafts in
+`~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
+`gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.
 
 - **The forge is the record.** Every answer, verdict and state lives on the story's issue or MR. What is only in
   this chat was never decided.
-- **The MR is the contract.** It holds the intent in the human's words, the acceptance criteria and the design link,
-  so a writer seldom needs to ask. When it must, it writes the question in `.factory/report.md` and exits, and the
-  host posts it as `[writer] OPEN:` ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159)). **Today:** its prompt tells it to push, post with
+- **The spec is the contract.** It holds the intent in the human's words, the acceptance criteria and the design
+  link, so a writer seldom needs to ask. Where it lives is set per project ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)): work, a local file
+  `~/.factory/specs/<project>/<TICKET>/spec.md` with Jira for questions and status; personal, the issue. The PR body
+  carries the approved spec and its hash. When a writer must ask, it writes `.factory/report.json` with
+  `status: asked` and exits, and the host posts the question as `[writer] OPEN:` ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159)). **Today:** its prompt tells it to push, post with
   `ask.sh` and stop; that is an instruction, not a guardrail the scripts enforce.
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
 
@@ -120,12 +134,13 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    Restate what is decided, the live state of each option, and one concrete example. Once the draft MR exists, post
    each ask as a `[coordinator] OPEN: …` note, so `poll` lists it until a human answers. A two-option ask accepts
    only "A" or "B"; any other reply gets one re-ask. Done when the human has answered every open question.
-3. **Write the contract.** Open the draft MR with the intent, the acceptance criteria and the design link. Done when
-   a stranger with no chat access could build the change from the MR alone.
+3. **Write the contract.** Write the spec where the project keeps it: the local spec file at work, the issue on a
+   personal project. **Today:** open the draft MR with it. Done when a stranger with no chat access could build the
+   change from the spec alone.
 4. **Design review.** Start a reviewer on the design. It returns ALIGNED, CONFLICT or OPEN per decision. Bring every
-   OPEN to the human. Done when nothing is OPEN and the human approves: they type `/approved` on the MR, or tell you,
-   and you run `approve.sh <mr>`. The harness asks them to confirm it, and the note posts with their own login
-   ([W1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6679395560)). Never post `/approved` any other way.
+   OPEN to the human. Done when nothing is OPEN and the human approves: they tell you, and you run
+   `approve.sh <ticket>`. The harness shows them the ticket and the spec hash, and only they can confirm. It records a
+   local approval; an edit of the spec makes it stale ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)). **Today:** they type `/approved` on the MR.
 5. **Run the queue.** Follow the triggers below. Done when the MR is merged or carries `needs-human`.
 6. **Retro.** After about one merge in ten, turn each lesson into a rule change, strongest fix first: architecture →
    types → lint → test → docs. Read `tokens.sh <mr>` for what each phase cost. In the pilot, compare it with one
@@ -133,7 +148,8 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
 
 ### Triggers
 
-This table is the dispatcher's decision table ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). Until the dispatcher exists, run it by hand.
+This table is today's hand-run version of the dispatcher's decision table. The target table, with a stop on every
+row, is ADR-0012 S3 ([review 9](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682943767)). Until the dispatcher exists, run this one by hand.
 The order is fixed: writer done → ready check → reviewer → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
 Poll the forge about every 5 minutes. Limits: one run per MR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
@@ -170,7 +186,7 @@ and `#12` for `!12`.
 | `pack.sh <mr> [<previous-head>]` | builds the reviewer's context pack, with rules from the default branch; an unresolved rule pointer stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. The target: the writer writes the question to a file and the host posts it |
-| `approve.sh <mr>` | **planned** (W1): posts `/approved` at the head with the human's own login; the coordinator may run it only through the harness `ask` prompt |
+| `approve.sh <ticket>` | **planned** ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)): records a local approval with the spec hash in `~/.factory/approvals/`; the coordinator may run it only through the harness `ask` prompt |
 | `block.sh <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason> · log: <log>` note, then releases the claim; the label goes first |
 | `lint-edit.sh '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
@@ -222,7 +238,17 @@ it is a prompt instruction at most.
   and new dependencies are left to the reviewer; the target adds both to the script-made box.
 - **No progress stops the loop.** When a writer round leaves the change empty, or the patch unchanged while its last
   verdict still has Act on findings, `start-reviewer` reuses the verdict and labels the MR `needs-human`.
-- **State goes to the forge**, never to a file only one session can read.
+- **Decided: an agent never changes CI.** The host push refuses CI-file changes ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)).
+- **Decided: no planted git hook runs.** Git control files are read-only in the box, and host git runs with hooks
+  and `core.fsmonitor` off (#87, [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)).
+- **Decided: the writer reads only what it is given.** A private home per run; the coordinator gets a deny list on
+  secret paths ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
+- **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`, and
+  mentions and closing keywords are put in backticks ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
+- **Decided: the coordinator cannot widen its own wall.** It edits only spec drafts, never its settings or the
+  factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)).
+- **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,
+  which the PR body records once there is code.
 
 ## Terms
 
@@ -230,8 +256,8 @@ it is a prompt instruction at most.
 |---|---|
 | **Seat** | a job one party owns for one story: human, coordinator, writer, reviewer or gate |
 | **Coordinator** | the one AI session that talks with the human, plans and approves through `approve.sh`; in the target it starts no workers |
-| **Dispatcher** | code with no LLM that runs the trigger table from `poll` and holds the bot login (ADR-0012 S3); not built yet |
-| **Box** | the sandbox a worker runs in: no forge token, network only to the model API and registries (ADR-0012) |
+| **Dispatcher** | code with no LLM that runs the decision table (ADR-0012 S3) and holds the project's forge login: yours or a bot; not built yet |
+| **Box** | where a worker runs: your VM, or a container on Rancher Desktop; no forge token, a private home, network only to the model API and registries (ADR-0012 S8) |
 | **Worker** | a fresh, short-lived AI session that does one job on one story: a writer or a reviewer |
 | **Writer** | the worker that owns the branch of one MR; it reaches the human only through a `[writer] OPEN:` note |
 | **Reviewer** | the worker that gives a verdict only: a find pass, then a verify pass |
