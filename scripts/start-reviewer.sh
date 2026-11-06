@@ -24,6 +24,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib/forge.sh"
 . "$here/lib/runs.sh"
 . "$here/lib/ready.sh"
+. "$here/lib/tokens.sh"
 iid=${1:-}
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 find_prompt=${FACTORY_REVIEW_FIND:-$here/../prompts/review-find.md}
@@ -147,7 +148,12 @@ review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; pr
   # FACTORY_MAX_USD caps each run's spend (ADR-0011 D14); the CLI honours it in print mode only
   answer=$(cd "$run" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" --model "$1" --restricted --strict-mcp-config \
     --tools Read,Grep,Glob ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} \
-    --output-format json --json-schema "$2" "$(cat "$3")") \
+    --output-format json --json-schema "$2" "$(cat "$3")")
+  status=$?
+  # every answer that spent tokens is kept, a failed or retried pass too, so the retro sees what was spent
+  printf '%s' "$answer" | jq -c 'select(type == "object" and .usage != null)' 2> /dev/null \
+    >> "$records/reviewer-$(printf '%s' "$4" | tr -cs 'a-z' '-' | sed 's/-$//').jsonl"
+  [ "$status" -eq 0 ] \
     && [ "$(printf '%s' "$answer" | jq -r '.is_error')" = false ] \
     && printf '%s' "$answer" | jq -e '.structured_output' > /dev/null \
     || { echo "$mark$iid: the $4 pass failed: $(printf '%s' "$answer" | jq -r '[.subtype // empty, .result // empty] | join(": ")' 2> /dev/null | head -c 200)" >&2; return 1; }
@@ -156,6 +162,9 @@ review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; pr
   printf '%s' "$answer" | jq -c .structured_output
 }
 
+# every pass's answer and the writer sessions that led to this head are kept with it (ADR-0011 D16)
+records=$(record_dir "$iid" "$sha")
+mkdir -p "$records" && keep_writer_transcripts "$iid" "$sha" > /dev/null || exit 1
 found=$(review "${FACTORY_FIND_MODEL:-sonnet}" "$find_schema" "$find_prompt" find) || exit 1
 # Model text goes into notes, so every string is put on one line: a line that starts with "/" would be a GitLab
 # quick action (/approve, /merge) run as this account. Paths lose a "code/" prefix; ids are renumbered F1…Fn, so
@@ -220,8 +229,12 @@ $(printf '%s\n' "$protected" | sed 's/^/- /')"
 # the label goes before the summary, and the summary goes last: it marks the round done, so a round that failed
 # halfway runs again
 [ -z "$fresh" ] || forge_label_add "$iid" needs-human || exit 1
+spent() { tokens_in "$records"/$1; }
+tokens="Tokens at this head: writer $(spent 'writer-*.jsonl') · find $(spent reviewer-find.jsonl) · verify $(spent 'reviewer-verify-*.jsonl')"
 post_note "[reviewer] round $round · head $sha · patch-id $pid · $counts
 
-$lists" || exit 1
+$lists
+
+$tokens" || exit 1
 
 echo "review $mark$iid round $round at ${sha:0:8}: $counts (\$$(cat "$run/cost"))"
