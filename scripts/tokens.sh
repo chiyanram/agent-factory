@@ -13,14 +13,17 @@ iid=${1:-}
 valid_iid "$iid" || exit 1
 require_repo || exit 1
 dir="$FACTORY_REPO/.claude/runs/$iid"
-heads=$(ls "$dir"/*/writer-*.jsonl "$dir"/*/reviewer-*.json 2> /dev/null | sed 's|/[^/]*$||' | sort -u | grep -c . || true)
-kept=$(ls "$dir"/*/writer-*.jsonl 2> /dev/null | sed 's|.*/writer-||')
+heads=$(ls "$dir"/*/writer-*.jsonl "$dir"/*/reviewer-*.jsonl 2> /dev/null | sed 's|/[^/]*$||' | sort -u | grep -c . || true)
+kept=$(ls "$dir"/*/writer-*.jsonl 2> /dev/null | sed 's|.*/||')
+live=$(writer_files "$iid")
 set --
-for t in "$(writer_transcripts "$iid")"/*.jsonl; do
-  [ -f "$t" ] || continue
-  printf '%s\n' "$kept" | grep -qxF "$(basename "$t")" || set -- "$@" "$t"
-done
+while read -r name t; do
+  [ -n "$name" ] || continue
+  printf '%s\n' "$kept" | grep -qxF "$name" || set -- "$@" "$t"
+done <<LIST
+$live
+LIST
 writer=$(tokens_in "$dir"/*/writer-*.jsonl "$@")
-find=$(tokens_in "$dir"/*/reviewer-find.json)
-verify=$(tokens_in "$dir"/*/reviewer-verify-*.json)
+find=$(tokens_in "$dir"/*/reviewer-find.jsonl)
+verify=$(tokens_in "$dir"/*/reviewer-verify-*.jsonl)
 echo "tokens $mark$iid: writer $writer · find $find · verify $verify · total $((writer + find + verify)) ($heads heads)"

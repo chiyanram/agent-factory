@@ -423,7 +423,7 @@ claude_answer 1 '{"findings":[]}'
 records="$FACTORY_REPO/.claude/runs/12/$head"
 expect_eq "the round's note gives the tokens at this head by phase; a repeated message counts once" \
   "Tokens at this head: writer 1100 · find 130 · verify 0" "$(jq -r .body "$gl/inputs.log" | tail -n 1)"
-expect_pass "each pass's answer is kept with the head" jq -e '.usage.input_tokens == 100' "$records/reviewer-find.json"
+expect_pass "each pass's answer is kept with the head" jq -e '.usage.input_tokens == 100' "$records/reviewer-find.jsonl"
 expect_pass "and so is each writer session that led to it" cmp -s "$(transcripts)/s1.jsonl" "$records/writer-s1.jsonl"
 expect_eq "tokens.sh totals the ticket by phase" "tokens !12: writer 1100 · find 130 · verify 0 · total 1230 (1 heads)" \
   "$("$REPO_ROOT/scripts/tokens.sh" 12)"
@@ -433,6 +433,18 @@ expect_eq "a writer session after the last review counts too" "tokens !12: write
 mkdir -p "$FACTORY_REPO/.claude/runs/12/$head1" && cp "$records/writer-s1.jsonl" "$FACTORY_REPO/.claude/runs/12/$head1/"
 expect_eq "a message kept with two heads counts once" "tokens !12: writer 1106 · find 130 · verify 0 · total 1236 (2 heads)" \
   "$("$REPO_ROOT/scripts/tokens.sh" 12)"
+setup
+round_one
+claude_answer 1 '{"findings":[]}'
+printf '{"type":"result","is_error":true,"subtype":"error_max_budget_usd","usage":{"input_tokens":7000,"output_tokens":10}}' > "$cl/p1"
+"$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1
+rm -f "$gl/n" "$gl/inputs.log"; round_one
+respond "$FACTORY_GLAB" 7 200 "$(mr "$head" '["agent::claimed","needs-human"]')"
+respond "$FACTORY_GLAB" 8 201 '{"id":1}'
+claude_answer 2 '{"findings":[]}'
+"$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1
+expect_eq "a pass that failed for its budget is kept and counted with the retry that followed" \
+  "Tokens at this head: writer 0 · find 7140 · verify 0" "$(jq -r .body "$gl/inputs.log" | tail -n 1)"
 expect_fail "tokens.sh needs an MR number" "" "$REPO_ROOT/scripts/tokens.sh" x
 
 finish

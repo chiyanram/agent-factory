@@ -148,11 +148,15 @@ review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; pr
   # FACTORY_MAX_USD caps each run's spend (ADR-0011 D14); the CLI honours it in print mode only
   answer=$(cd "$run" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" --model "$1" --restricted --strict-mcp-config \
     --tools Read,Grep,Glob ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} \
-    --output-format json --json-schema "$2" "$(cat "$3")") \
+    --output-format json --json-schema "$2" "$(cat "$3")")
+  status=$?
+  # every answer that spent tokens is kept, a failed or retried pass too, so the retro sees what was spent
+  printf '%s' "$answer" | jq -c 'select(type == "object" and .usage != null)' 2> /dev/null \
+    >> "$records/reviewer-$(printf '%s' "$4" | tr -cs 'a-z' '-' | sed 's/-$//').jsonl"
+  [ "$status" -eq 0 ] \
     && [ "$(printf '%s' "$answer" | jq -r '.is_error')" = false ] \
     && printf '%s' "$answer" | jq -e '.structured_output' > /dev/null \
     || { echo "$mark$iid: the $4 pass failed: $(printf '%s' "$answer" | jq -r '[.subtype // empty, .result // empty] | join(": ")' 2> /dev/null | head -c 200)" >&2; return 1; }
-  printf '%s' "$answer" | jq -c . > "$records/reviewer-$(printf '%s' "$4" | tr -cs 'a-z' '-' | sed 's/-$//').json"
   printf '%s %s' "$(cat "$run/cost")" "$(printf '%s' "$answer" | jq -r '.total_cost_usd // 0')" \
     | awk '{printf "%.2f\n", $1 + $2}' > "$run/cost.new" && mv "$run/cost.new" "$run/cost"
   printf '%s' "$answer" | jq -c .structured_output
@@ -160,7 +164,6 @@ review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; pr
 
 # every pass's answer and the writer sessions that led to this head are kept with it (ADR-0011 D16)
 records=$(record_dir "$iid" "$sha")
-rm -f "$records"/reviewer-*.json   # a round that failed halfway leaves its passes; this round's replace them
 mkdir -p "$records" && keep_writer_transcripts "$iid" "$sha" > /dev/null || exit 1
 found=$(review "${FACTORY_FIND_MODEL:-sonnet}" "$find_schema" "$find_prompt" find) || exit 1
 # Model text goes into notes, so every string is put on one line: a line that starts with "/" would be a GitLab
@@ -227,7 +230,7 @@ $(printf '%s\n' "$protected" | sed 's/^/- /')"
 # halfway runs again
 [ -z "$fresh" ] || forge_label_add "$iid" needs-human || exit 1
 spent() { tokens_in "$records"/$1; }
-tokens="Tokens at this head: writer $(spent 'writer-*.jsonl') · find $(spent reviewer-find.json) · verify $(spent 'reviewer-verify-*.json')"
+tokens="Tokens at this head: writer $(spent 'writer-*.jsonl') · find $(spent reviewer-find.jsonl) · verify $(spent 'reviewer-verify-*.jsonl')"
 post_note "[reviewer] round $round · head $sha · patch-id $pid · $counts
 
 $lists
