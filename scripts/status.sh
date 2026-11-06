@@ -21,4 +21,4 @@ case $head in
   *) echo "$mark$iid head moved: the run started at $sha, the head is now ${head:0:8}; note not posted" >&2; exit 1 ;;
 esac
 forge_note "$iid" "[coordinator] $line" || exit 1
-echo "posted $mark$iid at ${head:0:8}"
+echo "posted $mark$iid at ${head:0:8}$dry"

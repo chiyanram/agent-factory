@@ -45,4 +45,11 @@ respond "$FACTORY_GLAB" 1 200 "$bot"
 respond "$FACTORY_GLAB" 2 200 "$(mr opened '[]')"
 expect_eq "releasing an unclaimed MR is a no-op that says so" "!12 was not claimed" "$("$REPO_ROOT/scripts/release.sh" 12)"
 
+FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr opened '[]')"
+expect_eq "a dry-run claim says so on its one line (ADR-0011 D14)" "claimed !12 (dry run)" \
+  "$(FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/claim.sh" 12 2>/dev/null)"
+expect_eq "and only reads the forge" 2 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
+
 finish

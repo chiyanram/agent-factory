@@ -22,4 +22,4 @@ mr=$(forge_pr "$iid") || exit 1
 forge_label_add "$iid" needs-human || exit 1
 forge_note "$iid" "[coordinator] blocked: $reason${log:+ · log: $log}" || exit 1
 ! has_label "$mr" "$label" || forge_label_remove "$iid" "$label" || exit 1
-echo "blocked $mark$iid"
+echo "blocked $mark$iid$dry"

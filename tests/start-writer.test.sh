@@ -137,4 +137,7 @@ expect_eq "so those settings are never committed" "" "$(git -C "$worktree" statu
 expect_pass "the prompt sends every GitHub call through the App's gh" \
   grep -q "use $REPO_ROOT/scripts/bin/gh: it acts as the factory's GitHub App" "$(dirname "$FACTORY_CLAUDE")/calls.log"
 
+expect_fail "a dry run never starts a writer, which would push (ADR-0011 D14)" "FACTORY_DRY_RUN is set" \
+  env FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/start-writer.sh" 12
+
 finish

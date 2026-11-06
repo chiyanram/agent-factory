@@ -13,6 +13,7 @@ set -u
 iid=${1:-}
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 valid_iid "$iid" || exit 1
+[ "${FACTORY_DRY_RUN:-}" != 1 ] || { echo "refused: FACTORY_DRY_RUN is set, and a writer pushes to the MR branch; run it without the dry run" >&2; exit 1; }
 require_repo || exit 1
 forge_writer_ready || exit 1
 
@@ -71,7 +72,8 @@ if [ "${FACTORY_RUN_MODE:-bg}" = print ]; then
   (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} "$@" \
     "$prompt") >&2
   status=$?
-  echo "writer finished $mark$iid at ${sha:0:8}"
+  if [ "$status" -eq 0 ]; then echo "writer finished $mark$iid at ${sha:0:8}"
+  else echo "writer failed $mark$iid at ${sha:0:8} (exit $status)"; fi
   exit "$status"
 fi
 

@@ -34,4 +34,12 @@ FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
 respond "$FACTORY_GLAB" 1 200 '{"username":"ann","bot":false}'
 expect_fail "a human login is refused before any write (ADR-0006)" "a human account" "$REPO_ROOT/scripts/block.sh" 12 "x"
 
+FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr '[]')"
+respond "$FACTORY_GLAB" 3 200 "$(mr '["needs-human"]')"
+respond "$FACTORY_GLAB" 4 201 '{"id":8}'
+expect_eq "an MR with no claim is blocked too" "blocked !12" "$("$REPO_ROOT/scripts/block.sh" 12 "silent")"
+expect_pass "and no claim is removed" sh -c "! grep -q remove_labels '$(dirname "$FACTORY_GLAB")/calls.log'"
+
 finish

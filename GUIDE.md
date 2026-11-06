@@ -67,7 +67,7 @@ The scripts read their settings from the environment.
 | `FACTORY_AGENT_PREFIX` | the start of every GitLab agent account's name | `agent-` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
-| `FACTORY_DRY_RUN` | `1` prints every forge write (label, note, finding) instead of making it; reads still go to the forge | off |
+| `FACTORY_DRY_RUN` | `1` makes `poll`, `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |

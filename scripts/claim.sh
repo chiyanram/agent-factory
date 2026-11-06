@@ -18,4 +18,4 @@ if has_label "$mr" "$label"; then
 fi
 
 forge_label_add "$iid" "$label" || exit 1
-echo "claimed $mark$iid"
+echo "claimed $mark$iid$dry"

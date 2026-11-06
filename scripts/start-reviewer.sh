@@ -25,6 +25,9 @@ label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 find_prompt=${FACTORY_REVIEW_FIND:-$here/../prompts/review-find.md}
 verify_prompt=${FACTORY_REVIEW_VERIFY:-$here/../prompts/review-verify.md}
 valid_iid "$iid" || exit 1
+[ "${FACTORY_DRY_RUN:-}" != 1 ] || { echo "refused: FACTORY_DRY_RUN is set, and a reviewer spends on model runs; run it without the dry run" >&2; exit 1; }
+[ -z "${FACTORY_MAX_USD:-}" ] || printf '%s' "$FACTORY_MAX_USD" | grep -Eq '^[0-9]+(\.[0-9]+)?$' \
+  || { echo "FACTORY_MAX_USD must be a dollar amount such as 2 or 0.50, got '${FACTORY_MAX_USD:-}'" >&2; exit 1; }
 require_repo || exit 1
 [ -f "$find_prompt" ] && [ -f "$verify_prompt" ] \
   || { echo "the review instructions are missing: $find_prompt, $verify_prompt" >&2; exit 1; }
@@ -123,7 +126,7 @@ review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; pr
     --output-format json --json-schema "$2" "$(cat "$3")") \
     && [ "$(printf '%s' "$answer" | jq -r '.is_error')" = false ] \
     && printf '%s' "$answer" | jq -e '.structured_output' > /dev/null \
-    || { echo "$mark$iid: the $4 pass failed: $(printf '%s' "$answer" | jq -r '.result // empty' 2> /dev/null | head -c 200)" >&2; return 1; }
+    || { echo "$mark$iid: the $4 pass failed: $(printf '%s' "$answer" | jq -r '[.subtype // empty, .result // empty] | join(": ")' 2> /dev/null | head -c 200)" >&2; return 1; }
   printf '%s %s' "$(cat "$run/cost")" "$(printf '%s' "$answer" | jq -r '.total_cost_usd // 0')" \
     | awk '{printf "%.2f\n", $1 + $2}' > "$run/cost.new" && mv "$run/cost.new" "$run/cost"
   printf '%s' "$answer" | jq -c .structured_output

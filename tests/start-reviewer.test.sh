@@ -228,4 +228,9 @@ expect_fail "a thread that cannot be posted fails the round" "HTTP 500" "$REPO_R
 expect_eq "and no summary note marks it done, so the next run reviews again" "" \
   "$(jq -r .body "$gl/inputs.log" | grep '^\[reviewer\] round 1 ·')"
 
+expect_fail "a dry run never starts a reviewer, which would spend (ADR-0011 D14)" "FACTORY_DRY_RUN is set" \
+  env FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_fail "a cap that is not a dollar amount is refused" "dollar amount" \
+  env FACTORY_MAX_USD=lots "$REPO_ROOT/scripts/start-reviewer.sh" 12
+
 finish
