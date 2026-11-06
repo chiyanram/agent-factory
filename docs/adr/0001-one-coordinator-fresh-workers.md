@@ -45,3 +45,6 @@ and a fresh reviewer per ticket. Workers do one job and go away. Workers never t
 ## Sources
 
 #1 CORRECTION 2026-10-23 · #4 Q2, Q3a · #23 Q1 SUPERSEDED · docs/archive/research/23, 24, 36, 38
+
+Amended by [ADR-0011](0011-crq-pipeline-in-the-factory.md): a writer may post an open question and stop, one
+writer per pull request, and a script checks "ready" before review.
