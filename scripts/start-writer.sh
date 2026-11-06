@@ -48,15 +48,16 @@ note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 
 # the ask command carries its own settings, so it works whatever the writer's session inherits (ADR-0011 D10)
 ask="FACTORY_FORGE=${FACTORY_FORGE:-gitlab} FACTORY_PROJECT=$(printf '%q' "$FACTORY_PROJECT")"
-[ -z "${FACTORY_GLAB:-}" ] || ask="$ask FACTORY_GLAB=$(printf '%q' "$FACTORY_GLAB")"
-[ -z "${FACTORY_GH:-}" ] || ask="$ask FACTORY_GH=$(printf '%q' "$FACTORY_GH")"
+absolute() { case $1 in */*) (cd "$(dirname "$1")" && printf '%s/%s' "$(pwd)" "$(basename "$1")") ;; *) printf '%s' "$1" ;; esac; }
+[ -z "${FACTORY_GLAB:-}" ] || ask="$ask FACTORY_GLAB=$(printf '%q' "$(absolute "$FACTORY_GLAB")")"
+[ -z "${FACTORY_GH:-}" ] || ask="$ask FACTORY_GH=$(printf '%q' "$(absolute "$FACTORY_GH")")"
 ask="$ask $(printf '%q' "$(cd "$(dirname "$0")" && pwd)/ask.sh") $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
 prompt="You are the writer for merge request $mark$iid in $FACTORY_PROJECT, on branch $branch at head $sha.
 Run /crq from the build phase for this MR. The MR description is your contract: the intent, the acceptance criteria
 and the design link. When the contract does not settle a question, never guess: push your commits, then run
 $ask
-with the question in single quotes, and stop without marking the MR ready. Push only this branch; after a rebase use
---force-with-lease.${note:+
+with the question in single quotes (write each ' inside it as '\\''), and stop without marking the MR ready.
+Push only this branch; after a rebase use --force-with-lease.${note:+
 $note}"
 set --
 [ -z "${FACTORY_WRITER_MODEL:-}" ] || set -- --model "$FACTORY_WRITER_MODEL"
