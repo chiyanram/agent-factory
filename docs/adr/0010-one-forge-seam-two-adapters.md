@@ -26,7 +26,7 @@ repository, so the scripts must work on GitHub as well, chosen per project.
 
 | | GitLab | GitHub |
 |---|---|---|
-| the bot | a service account, `bot: true` (ADR-0006) | a GitHub App the developer's account owns, posting as `<slug>[bot]`; `scripts/github-app.sh` mints its one-hour token from the App's key; a token that cannot list the App's installation repositories is refused |
+| the bot | a service account, `bot: true` (ADR-0006) | a GitHub App the developer's account owns, posting as `<slug>[bot]`; `scripts/github-app.sh` mints its one-hour token from the App's key; a token that cannot list the App's installation repositories, or an App not installed on the project, is refused; a writer's session gets no gh login and no system or global git config, so it can act only as the App |
 | who may `/approved` | Maintainer or higher | a collaborator with write access or more |
 | a body edit that makes `/approved` stale | the activity note with action `description` | `userContentEdits` |
 | the gate | the head pipeline | the head commit's `statusCheckRollup`, mapped to `success`, `failed`, `running`, `none` |

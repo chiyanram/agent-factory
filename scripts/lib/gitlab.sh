@@ -90,7 +90,8 @@ forge_claimed() {
 }
 
 # The writer reaches GitLab through the glab and git logins of the service account on this machine (ADR-0006).
-forge_writer_note() { :; }
+forge_writer_ready() { :; }
+forge_writer_setup() { :; }
 
 # forge_changes LABEL : the open MRs and the merged MRs that carry LABEL, in the shape scripts/poll.sh decides on.
 # One GraphQL query, because single calls ran into 429 (docs/archive/research/46 G8). Values go in as GraphQL variables, never

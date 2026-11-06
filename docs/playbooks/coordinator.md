@@ -97,7 +97,7 @@ run as the coordinator's bot account and refuse a human login (ADR-0006). Settin
 | `FACTORY_PROJECT` | the GitLab project path, for example `aruvii/agent-platform`, or the GitHub `owner/name` |
 | `FACTORY_GLAB` | the `glab` binary, logged in as the service account (default `glab`) |
 | `FACTORY_GH` | the `gh` that acts as the GitHub App (default `scripts/bin/gh`) |
-| `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY`, `FACTORY_GH_APP_SLUG` | the App's ID, its private key file and its slug (`docs/setup/identity.md`, GitHub) |
+| `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | the App's ID and its private key file (`docs/setup/identity.md`, GitHub) |
 | `FACTORY_REPO` | the local clone of that project; runs get worktrees in `.claude/worktrees/` inside it |
 | `FACTORY_CLAIM_LABEL` | the claim label (default `agent::claimed`) |
 | `FACTORY_AGENT_PREFIX` | the start of every agent account's name (default `agent-`) |

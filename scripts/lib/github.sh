@@ -3,7 +3,7 @@
 #
 #   FACTORY_GH           the gh binary that acts as the factory's GitHub App (default: scripts/bin/gh, which mints the
 #                        App's token with scripts/github-app.sh); the operator's own gh login is never used (ADR-0006)
-#   FACTORY_GH_APP_SLUG  the App's name in its URL (github.com/apps/<slug>); it posts as <slug>[bot]
+#   FACTORY_GH_APP       scripts/github-app.sh (default); a test points it at a stub
 #   FACTORY_PROJECT      the repository, owner/name, for example chiyanram/ledger
 #
 # Only branches in the repository itself are supported: the writer pushes there, and a fork's branch cannot be
@@ -33,15 +33,17 @@ gh_post() {
 
 # The bot is a GitHub App that the developer's account owns (#64 Q1, amended 2026-11-05). Only an App's installation
 # token can list its installation's repositories; a person's token gets 403 there, so it is refused before any write.
+# The App's name comes from GitHub (github-app.sh slug), never from a setting: the reviewer counts its rounds by it.
 forge_require_bot() {
-  [ -n "${FACTORY_GH_APP_SLUG:-}" ] \
-    || { echo "FACTORY_GH_APP_SLUG is not set (the App's name in github.com/apps/<slug>)" >&2; return 1; }
-  if ! gh_api 'installation/repositories?per_page=1' > /dev/null 2>&1; then
-    echo "refused: gh is not acting as the factory's GitHub App, so it may be a human account;" \
+  if ! installed=$(gh_api 'installation/repositories?per_page=100'); then
+    echo "refused: gh is not acting as the factory's GitHub App, so it may be a person's login;" \
       "point FACTORY_GH at scripts/bin/gh with the App configured (ADR-0006, ADR-0010)" >&2
     return 1
   fi
-  me_name="$FACTORY_GH_APP_SLUG[bot]"
+  [ "$(printf '%s' "$installed" | jq --arg p "${FACTORY_PROJECT:-}" 'any(.repositories[]; .full_name == $p)')" = true ] \
+    || { echo "refused: the factory's GitHub App is not installed on ${FACTORY_PROJECT:-}" >&2; return 1; }
+  slug=$("${FACTORY_GH_APP:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/github-app.sh}" slug) || return 1
+  me_name="$slug[bot]"
 }
 
 forge_pr() {
@@ -103,15 +105,39 @@ forge_line_finding() {
     > /dev/null
 }
 
-# A writer pushes from a worktree of FACTORY_REPO, so that clone's git config makes git push and scripts/bin/gh act as
-# the App. A clone without it would push as the person logged in on this machine.
-forge_writer_note() {
-  case $(git -C "$FACTORY_REPO" config --get credential.https://github.com.helper) in
-    *github-app.sh*) ;;
-    *) echo "FACTORY_REPO would push to GitHub as a person: set its credential helper to scripts/github-app.sh" \
-         "(docs/setup/identity.md, GitHub)" >&2; return 1 ;;
+# A writer runs as the person's OS user, so its session could reach the person's own gh and git logins. Two calls keep
+# it to the App's identity (ADR-0010):
+#   forge_writer_ready       the clone pushes over https, with the App's credential helper first and alone, and
+#                            commits under the bot's email
+#   forge_writer_setup PATH  the worktree's .claude/settings.local.json gives the session an empty GH_CONFIG_DIR and no
+#                            system or global git config, so plain gh has no login and git asks only the App's helper
+forge_writer_ready() {
+  refuse() { echo "refused: FACTORY_REPO $*; see docs/setup/identity.md, GitHub step 5" >&2; return 1; }
+  case $(git -C "$FACTORY_REPO" remote get-url --push origin 2> /dev/null) in
+    https://github.com/*) ;;
+    *) refuse "does not push to https://github.com/, so git would not ask the App's credential helper"; return 1 ;;
   esac
-  echo "For every GitHub call use $(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh, never plain gh: it acts as the factory's GitHub App."
+  helpers=$(git -C "$FACTORY_REPO" config --get-all credential.https://github.com.helper)
+  [ "$(printf '%s\n' "$helpers" | sed -n 1p)" = "" ] && [ "$(printf '%s\n' "$helpers" | wc -l | tr -d ' ')" = 2 ] \
+    && case $(printf '%s\n' "$helpers" | sed -n 2p) in *github-app.sh*git-credential*) true ;; *) false ;; esac \
+    || { refuse "would let another credential helper answer before the App's: set an empty helper, then the App's"; return 1; }
+  case $(git -C "$FACTORY_REPO" config --local --get user.email) in
+    *'[bot]@users.noreply.github.com') ;;
+    *) refuse "would commit under a person's email: set user.email to the bot's noreply address"; return 1 ;;
+  esac
+}
+
+forge_writer_setup() {
+  git -C "$1" ls-files --error-unmatch .claude/settings.local.json > /dev/null 2>&1 \
+    && { echo "refused: the project tracks .claude/settings.local.json, which the writer's settings would overwrite" >&2; return 1; }
+  empty="$FACTORY_REPO/.claude/runs/gh-no-login"
+  mkdir -p "$empty" "$1/.claude" || return 1
+  jq -n --arg gh "$empty" '{env: {GH_CONFIG_DIR: $gh, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null"}}' \
+    > "$1/.claude/settings.local.json" || return 1
+  exclude="$(git -C "$FACTORY_REPO" rev-parse --absolute-git-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"
+  grep -qxF /.claude/settings.local.json "$exclude" 2> /dev/null || echo /.claude/settings.local.json >> "$exclude"
+  echo "For every GitHub call use $(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/gh: it acts as the factory's GitHub App. Plain gh has no login in this session."
 }
 
 # gh_graphql QUERY LABEL : the query's data.repository, or a failure that names the GraphQL error.

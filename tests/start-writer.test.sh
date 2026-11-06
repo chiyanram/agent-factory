@@ -104,17 +104,31 @@ expect_pass "the model name is passed as it is, never glob-expanded" \
 
 expect_fail "FACTORY_REPO must be a git clone" "FACTORY_REPO" env FACTORY_REPO=/nonexistent "$REPO_ROOT/scripts/start-writer.sh" 12
 
-# GitHub: the writer must push and call gh as the factory's App, never as the person on this machine (ADR-0010)
+# GitHub: the writer pushes, commits and calls gh only as the factory's App (ADR-0010)
 setup
 FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '{"number":12,"state":"open","merged":false,"head":{"sha":"'"$head"'","ref":"feat/x"},"base":{"ref":"main"},"labels":[{"name":"agent::claimed"}]}'
-expect_fail "a clone that would push as a person is refused" "would push to GitHub as a person" \
-  env FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger "$REPO_ROOT/scripts/start-writer.sh" 12
+gh_pr='{"number":12,"state":"open","merged":false,"head":{"sha":"'"$head"'","ref":"feat/x"},"base":{"ref":"main"},"labels":[{"name":"agent::claimed"}]}'
+respond "$FACTORY_GH" 1 200 "$gh_pr"
+writer() { env FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger "$REPO_ROOT/scripts/start-writer.sh" 12; }
+helper="!$REPO_ROOT/scripts/github-app.sh git-credential"
+expect_fail "a clone that pushes over ssh or a path is refused: git would ask no credential helper" \
+  "does not push to https://github.com/" writer
+git -C "$FACTORY_REPO" remote set-url --push origin https://github.com/chiyanram/ledger.git
+git -C "$FACTORY_REPO" config credential.https://github.com.helper "$helper"
+expect_fail "the App's helper with no empty reset before it is refused: a global helper would answer first" \
+  "another credential helper answer before the App's" writer
+git -C "$FACTORY_REPO" config --unset-all credential.https://github.com.helper
+git -C "$FACTORY_REPO" config --add credential.https://github.com.helper ""
+git -C "$FACTORY_REPO" config --add credential.https://github.com.helper "$helper"
+expect_fail "a clone that would commit under a person's email is refused" "commit under a person's email" writer
 expect_eq "and nothing started" "" "$(bg_calls)"
-git -C "$FACTORY_REPO" config credential.https://github.com.helper "!$REPO_ROOT/scripts/github-app.sh git-credential"
-expect_eq "a clone set up as the App starts the writer" "writer started #12 at ${head:0:8}: started abc123" \
-  "$(FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger "$REPO_ROOT/scripts/start-writer.sh" 12)"
+git -C "$FACTORY_REPO" config user.email '1+ledger-factory[bot]@users.noreply.github.com'
+expect_eq "a clone set up as the App starts the writer" "writer started #12 at ${head:0:8}: started abc123" "$(writer)"
+expect_eq "the writer's session has no gh login and no system or global git config" \
+  "$FACTORY_REPO/.claude/runs/gh-no-login 1 /dev/null" \
+  "$(jq -r '.env | "\(.GH_CONFIG_DIR) \(.GIT_CONFIG_NOSYSTEM) \(.GIT_CONFIG_GLOBAL)"' "$worktree/.claude/settings.local.json")"
+expect_eq "so those settings are never committed" "" "$(git -C "$worktree" status --porcelain)"
 expect_pass "the prompt sends every GitHub call through the App's gh" \
-  grep -q "use $REPO_ROOT/scripts/bin/gh, never plain gh" "$(dirname "$FACTORY_CLAUDE")/calls.log"
+  grep -q "use $REPO_ROOT/scripts/bin/gh: it acts as the factory's GitHub App" "$(dirname "$FACTORY_CLAUDE")/calls.log"
 
 finish

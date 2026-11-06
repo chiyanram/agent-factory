@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # The GitHub adapter of the forge seam (ADR-0010): the same scripts, the same lines, with # for a pull request.
 . "$(dirname "$0")/lib.sh"
-export FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger FACTORY_SLEEP=true FACTORY_GH_APP_SLUG=ledger-factory
+export FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger FACTORY_SLEEP=true
+FACTORY_GH_APP="$TMP_BASE/github-app"   # the App's own name comes from GitHub (github-app.sh slug)
+printf '#!/bin/sh\n[ "$1" = slug ] && echo ledger-factory\n' > "$FACTORY_GH_APP" && chmod +x "$FACTORY_GH_APP"
+export FACTORY_GH_APP
 bot='{"total_count":1,"repositories":[{"full_name":"chiyanram/ledger"}]}'   # only an App's token can list these
 pr() { printf '{"number":12,"state":"%s","merged":%s,"head":{"sha":"aaaa1111","ref":"feat/1-x"},"base":{"ref":"main"},"labels":%s}' "$1" "$2" "$3"; }
 log() { dirname "$FACTORY_GH"; }
@@ -20,6 +23,15 @@ expect_eq "the label goes in the request body, not as a gh field" '{"labels":["a
 FACTORY_GH=$(glab_stub); export FACTORY_GH
 respond "$FACTORY_GH" 1 403 '{"message":"You must authenticate with an installation access token"}'
 expect_fail "a person's token is refused before any write (ADR-0006)" "not acting as the factory's GitHub App" \
+  "$REPO_ROOT/scripts/claim.sh" 12
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 '{"total_count":1,"repositories":[{"full_name":"chiyanram/other"}]}'
+expect_fail "an App installed elsewhere, not on the project, is refused" "not installed on chiyanram/ledger" \
+  "$REPO_ROOT/scripts/claim.sh" 12
+
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 403 '{"message":"You must authenticate with an installation access token"}'
+expect_fail "the refusal shows GitHub's own reason too" "You must authenticate with an installation access token" \
   "$REPO_ROOT/scripts/claim.sh" 12
 expect_pass "the bot check asks for the App's installation repositories" \
   grep -q '^api --include installation/repositories?per_page=1' "$(log)/calls.log"
