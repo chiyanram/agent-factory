@@ -57,6 +57,7 @@ Run /crq from the build phase for this MR. The MR description is your contract: 
 and the design link. When the contract does not settle a question, never guess: push your commits, then run
 $ask
 with the question in single quotes (write each ' inside it as '\\''), and stop without marking the MR ready.
+If you cannot finish, push what you have and ask the same way, saying what blocks you.
 Push only this branch; after a rebase use --force-with-lease.${note:+
 $note}"
 set --

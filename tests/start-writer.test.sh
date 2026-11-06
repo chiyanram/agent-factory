@@ -28,6 +28,7 @@ expect_pass "the prompt names the MR, its branch and /crq" \
   sh -c "grep -q '!12' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'feat/x' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q '/crq' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the prompt tells the writer to push, ask with ask.sh at its pushed head, and stop (ADR-0011 D10)" \
   sh -c "grep -q 'scripts/ask.sh 12 \"\$(git rev-parse HEAD)\"' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'never guess: push your commits' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'and stop' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_pass "a writer that cannot finish pushes its work and asks (ADR-0011 D14)" sh -c "grep -q 'cannot finish, push what you have' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the ask command carries its own forge and project settings" \
   sh -c "grep -q 'FACTORY_FORGE=gitlab FACTORY_PROJECT=' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 
