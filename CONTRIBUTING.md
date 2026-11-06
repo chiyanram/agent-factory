@@ -61,7 +61,8 @@ data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md]
 5. Add the script to the Scripts table in [GUIDE.md](GUIDE.md#scripts), and any new setting to
    [Settings](GUIDE.md#settings).
 
-Write for bash 3.2 and POSIX tools: no GNU-only flags, no associative arrays. Files in `scripts/lib/` are sourced,
+The factory moves to a TypeScript package that calls CLIs ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)).
+Until a script is ported, keep it in bash. Write for bash 3.2 and POSIX tools: no GNU-only flags, no associative arrays. Files in `scripts/lib/` are sourced,
 never run. Every `claude` call goes through `${FACTORY_CLAUDE:-claude}`.
 
 ## Add a check

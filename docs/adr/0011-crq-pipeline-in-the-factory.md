@@ -67,3 +67,19 @@ Amended 2026-11-06 (#79): a blocked run gets the `needs-human` label, not a new 
 
 chiyanram/skills#210: the design, the decisions and the research notes, with every cite at `path:line@commit` or
 URL and section. chiyanram/skills ADR-0008. ADR-0001, 0002, 0004, 0006.
+
+## Amended 2026-11-06 (map #30)
+
+By [ADR-0012](0012-safety-design-for-unattended-runs.md) and [ADR-0013](0013-typescript-package-cli-first.md):
+- **D10:** the writer writes its question to `.factory/report.md` and exits. The host posts it as `[writer] OPEN:`
+  ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159)).
+- **D12:** the order is kept: ready check → reviewer → gate ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)). The ready check runs in the box
+  (S5).
+- **D13:** decided now, not after the pilot. The dispatcher is code and holds the bot login. The coordinator is denied
+  it and the start scripts ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). It is built first, in TypeScript, before the pilot
+  ([gap 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681648337)).
+- **D14:** the host, not the writer, pushes a failed writer's work-in-progress branch. Protected files also include
+  new dependencies, and every PR gets the script-made box ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)).
+- **D17:** the lint hook loads from the default branch or the factory, never from the branch ([Q7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370)).
+- **Rejected auto-approve:** auto-approve stays rejected on the laptop. Skip-all is allowed only in a strong box: `FACTORY_BOX=vm` or `srt`
+  ([Q6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370)).
