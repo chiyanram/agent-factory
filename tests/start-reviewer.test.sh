@@ -38,7 +38,12 @@ mr() {  # mr SHA [LABELS] [DESCRIPTION]
     '{iid: 12, state: "opened", source_branch: "feat/x", target_branch: "main", sha: $sha, labels: $labels,
       description: $d, diff_refs: {base_sha: "b", start_sha: "s", head_sha: $sha}}'
 }
-claude_answer() { printf '{"is_error":false,"total_cost_usd":0.25,"structured_output":%s}' "$2" > "$cl/p$1"; }
+claude_answer() { printf '{"type":"result","is_error":false,"total_cost_usd":0.25,"usage":{"input_tokens":100,"cache_read_input_tokens":20,"output_tokens":10},"structured_output":%s}' "$2" > "$cl/p$1"; }
+export CLAUDE_CONFIG_DIR="$TMP_BASE/claude-config"
+transcripts() {  # where Claude Code keeps the writer-12 sessions of this project
+  printf '%s/projects/%s' "$CLAUDE_CONFIG_DIR" "$(printf '%s' "$(cd "$FACTORY_REPO" && pwd -P)/.claude/worktrees/writer-12" | sed 's/[^A-Za-z0-9-]/-/g')"
+}
+assistant() { printf '{"type":"assistant","message":{"id":"%s","usage":{"input_tokens":%s,"output_tokens":1}}}\n' "$1" "$2"; }
 findings='{"findings":[
  {"id":"F1","axis":"standards","kind":"rule","file":"svc/Main.java","line":1,"rule":"ROOT-1","severity":"blocker","finding":"breaks ROOT-1","fix":"follow it"},
  {"id":"F2","axis":"spec","kind":"logic","file":"svc/Main.java","line":1,"rule":"correctness","severity":"warning","finding":"returns 2, AC1 wants the sum","fix":"add"},
@@ -404,5 +409,30 @@ expect_eq "when every command it may run passes, the review starts" \
   "review !12 round 1 at ${head:0:8}: Act on 0 · Consider 0 · Noted 0 · Dismissed 0 (\$0.25)" "$out"
 expect_eq "and says what it ran and what it left to the reviewer" \
   "ready !12 at ${head:0:8}: 2 evidence command(s) passed, 1 left to the reviewer" "$(cat "$TMP_BASE/ready.err")"
+
+# Tokens by phase, and the records kept per head (ADR-0011 D16)
+export FACTORY_READY_CHECK=off
+setup
+mkdir -p "$(transcripts)"
+{ assistant m1 999; assistant m1 999; echo 'not json'; assistant m2 99; } > "$(transcripts)/s1.jsonl"
+round_one
+respond "$FACTORY_GLAB" 7 200 "$(mr "$head" '["agent::claimed","needs-human"]')"   # svc/CLAUDE.md is protected
+respond "$FACTORY_GLAB" 8 201 '{"id":1}'
+claude_answer 1 '{"findings":[]}'
+"$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1
+records="$FACTORY_REPO/.claude/runs/12/$head"
+expect_eq "the round's note gives the tokens at this head by phase; a repeated message counts once" \
+  "Tokens at this head: writer 1100 · find 130 · verify 0" "$(jq -r .body "$gl/inputs.log" | tail -n 1)"
+expect_pass "each pass's answer is kept with the head" jq -e '.usage.input_tokens == 100' "$records/reviewer-find.json"
+expect_pass "and so is each writer session that led to it" cmp -s "$(transcripts)/s1.jsonl" "$records/writer-s1.jsonl"
+expect_eq "tokens.sh totals the ticket by phase" "tokens !12: writer 1100 · find 130 · verify 0 · total 1230 (1 heads)" \
+  "$("$REPO_ROOT/scripts/tokens.sh" 12)"
+assistant m3 5 > "$(transcripts)/s2.jsonl"
+expect_eq "a writer session after the last review counts too" "tokens !12: writer 1106 · find 130 · verify 0 · total 1236 (1 heads)" \
+  "$("$REPO_ROOT/scripts/tokens.sh" 12)"
+mkdir -p "$FACTORY_REPO/.claude/runs/12/$head1" && cp "$records/writer-s1.jsonl" "$FACTORY_REPO/.claude/runs/12/$head1/"
+expect_eq "a message kept with two heads counts once" "tokens !12: writer 1106 · find 130 · verify 0 · total 1236 (2 heads)" \
+  "$("$REPO_ROOT/scripts/tokens.sh" 12)"
+expect_fail "tokens.sh needs an MR number" "" "$REPO_ROOT/scripts/tokens.sh" x
 
 finish
