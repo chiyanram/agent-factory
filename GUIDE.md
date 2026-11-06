@@ -240,7 +240,7 @@ it is a prompt instruction at most.
   verdict still has Act on findings, `start-reviewer` reuses the verdict and labels the MR `needs-human`.
 - **Decided: an agent never changes CI.** The host push refuses CI-file changes ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)).
 - **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
-  `hgit` (`scripts/lib/git.sh`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
+  `hgit` (`scripts/lib/git.sh`), and every one the TypeScript package makes through `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
   and the rest come from your own system and global config only, never from the repo's. A repo whose own config
   sets an external diff, a merge driver, a URL rewrite or an `http.*` setting is refused (#87,
   [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)). **Decided:** the git

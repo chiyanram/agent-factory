@@ -1,4 +1,5 @@
 # Host-side git, hardened against a planted hook or repo config (#87; ADR-0012 S12). Source it; do not run it.
+# The TypeScript package has the same rules in src/core/git.ts (hostGit); keep the two in step.
 #
 # A branch or a writer can write the repo's own config (.git/config, a worktree's config.worktree, a file they
 # include) or a hook. Plain git on the host would then run that program as the operator, outside any box:

@@ -19,8 +19,9 @@ CI runs both on every pull request and on push to `main`.
 
 - Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, added to both adapters, because a direct
   `glab` or `gh` call breaks the other forge and cannot be stubbed in a test.
-- Call git on a project's clone only through `hgit` in `scripts/lib/git.sh`, because plain git runs the hooks and
-  programs that a branch or a writer can plant in the repo's own config.
+- Call git on a project's clone only through `hgit` (`scripts/lib/git.sh`) or `hostGit` (`src/core/git.ts`), and keep
+  the two in step, because plain git runs the hooks and programs that a branch or a writer can plant in the repo's
+  own config.
 - Write each script and its test `tests/<script>.test.sh` together, for bash 3.2 and POSIX tools, because the scripts
   run on stock macOS and on Linux. New components go into the TypeScript package and call CLIs
   ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)).
