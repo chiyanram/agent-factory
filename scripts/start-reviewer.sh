@@ -117,8 +117,9 @@ verify_schema='{"type":"object","required":["verdicts"],"properties":{"verdicts"
 echo 0 > "$run/cost"   # a file, because each review runs in a subshell
 review() {  # review MODEL SCHEMA PROMPT-FILE PASS : one fresh read-only run; prints its structured output
   # --restricted: no command or web tools, no settings files, file tools held to this folder; no MCP servers
+  # FACTORY_MAX_USD caps each run's spend (ADR-0011 D14); the CLI honours it in print mode only
   answer=$(cd "$run" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" --model "$1" --restricted --strict-mcp-config \
-    --tools Read,Grep,Glob \
+    --tools Read,Grep,Glob ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} \
     --output-format json --json-schema "$2" "$(cat "$3")") \
     && [ "$(printf '%s' "$answer" | jq -r '.is_error')" = false ] \
     && printf '%s' "$answer" | jq -e '.structured_output' > /dev/null \

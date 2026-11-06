@@ -72,7 +72,8 @@ expect_eq "a worktree left by a dead run is replaced, never reused" no \
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
 expect_eq "the -p fallback runs in the foreground and says so" "writer finished !12 at ${head:0:8}" \
-  "$(FACTORY_RUN_MODE=print "$REPO_ROOT/scripts/start-writer.sh" 12 2>/dev/null)"
+  "$(FACTORY_RUN_MODE=print FACTORY_MAX_USD=5 "$REPO_ROOT/scripts/start-writer.sh" 12 2>/dev/null)"
+expect_pass "FACTORY_MAX_USD caps the -p run's spend (ADR-0011 D14)" sh -c "grep -q -- '--max-budget-usd 5 ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the fallback uses claude -p under the run's name" sh -c "grep -q -- ' -p -n writer-12 ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_eq "the fallback removes its pid file when it exits" no "$([ -f "$FACTORY_REPO/.claude/runs/writer-12.pid" ] && echo yes || echo no)"
 expect_pass "the fallback uses claude -p" sh -c "grep -q -- ' -p ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"

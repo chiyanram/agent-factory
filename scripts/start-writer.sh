@@ -66,7 +66,9 @@ if [ "${FACTORY_RUN_MODE:-bg}" = print ]; then
   pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
   mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"   # a -p run is not in claude agents: this marks it live
   trap 'rm -f "$pidfile"; remove_worktree "$path"' EXIT
-  (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" "$@" "$prompt") >&2
+  # FACTORY_MAX_USD caps the run's spend (ADR-0011 D14); the CLI honours it in print mode only, not for --bg
+  (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} "$@" \
+    "$prompt") >&2
   status=$?
   echo "writer finished $mark$iid at ${sha:0:8}"
   exit "$status"

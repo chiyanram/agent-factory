@@ -61,7 +61,8 @@ claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds"},{"id":
 claude_answer 3 '{"verdicts":[{"id":"F2","bucket":"consider","why":"judgment"}]}'
 expect_eq "a round posts its verdict and says so in one line" \
   "review !12 round 1 at ${head:0:8}: Act on 1 · Consider 1 · Noted 1 · Dismissed 0 (\$0.75)" \
-  "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
+  "$(FACTORY_MAX_USD=2 "$REPO_ROOT/scripts/start-reviewer.sh" 12)"
+expect_eq "FACTORY_MAX_USD caps every run's spend (ADR-0011 D14)" 3 "$(grep -c -- '--max-budget-usd 2 ' "$cl/calls.log")"
 expect_eq "find runs once, then verify once per kind: three fresh -p runs, never resumed" 3 \
   "$(grep -c -- ' -p ' "$cl/calls.log")"
 expect_pass "no run resumes or continues a session (ADR-0001)" sh -c "! grep -Eq -- '--resume|--continue' '$cl/calls.log'"

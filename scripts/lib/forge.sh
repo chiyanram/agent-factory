@@ -27,6 +27,15 @@ case ${FACTORY_FORGE:-gitlab} in
   *) echo "FACTORY_FORGE must be gitlab or github, got '$FACTORY_FORGE'" >&2; exit 1 ;;
 esac
 
+# FACTORY_DRY_RUN=1 (ADR-0011 D14): every forge write is printed on stderr instead of made, so a pilot can run the
+# loop against a real project without changing it. Reads still go to the forge.
+if [ "${FACTORY_DRY_RUN:-}" = 1 ]; then
+  forge_label_add() { echo "DRY RUN: add the label $2 to $mark$1" >&2; }
+  forge_label_remove() { echo "DRY RUN: remove the label $2 from $mark$1" >&2; }
+  forge_note() { echo "DRY RUN: note on $mark$1: $(printf '%s' "$2" | head -n 1)" >&2; }
+  forge_line_finding() { echo "DRY RUN: finding on $mark$1 at $(printf '%s' "$3" | jq -r '"\(.file):\(.line)"')" >&2; }
+fi
+
 # valid_iid VALUE : fails unless VALUE is a change number.
 valid_iid() {
   case $1 in
