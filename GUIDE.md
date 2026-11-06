@@ -241,7 +241,8 @@ it is a prompt instruction at most.
 - **Decided: an agent never changes CI.** The host push refuses CI-file changes ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)).
 - **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
   `hgit` (`scripts/lib/git.sh`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
-  and the rest come from your own system and global config only, never from the repo's (#87,
+  and the rest come from your own system and global config only, never from the repo's. A repo whose own config
+  sets an external diff, a merge driver, a URL rewrite or an `http.*` setting is refused (#87,
   [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)). **Decided:** the git
   control files are also read-only in the box (#110).
 - **Decided: the writer reads only what it is given.** A private home per run; the coordinator gets a deny list on
