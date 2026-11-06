@@ -56,6 +56,7 @@ round_one
 respond "$FACTORY_GLAB" 7 201 '{"id":1}'
 respond "$FACTORY_GLAB" 8 201 '{"id":2}'
 respond "$FACTORY_GLAB" 9 201 '{"id":3}'
+respond "$FACTORY_GLAB" 10 200 "$(mr "$head" '["agent::claimed","needs-human"]')"   # the MR edits svc/CLAUDE.md: a protected file
 claude_answer 1 "$findings"
 claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds"},{"id":"F3","bucket":"noted","why":"small"}]}'
 claude_answer 3 '{"verdicts":[{"id":"F2","bucket":"consider","why":"judgment"}]}'
@@ -74,6 +75,9 @@ expect_eq "every run reads the pack" "pack pack pack" "$(tr '\n' ' ' < "$cl/pack
 summary=$(tail -n 1 "$gl/inputs.log")   # the summary goes last: it marks the round done
 expect_pass "the summary note names round, head and patch-id, then the counts (#22 Q2)" sh -c \
   "printf '%s' '$summary' | jq -r .body | head -n 1 | grep -q '^\[reviewer\] round 1 · head $head · patch-id $(pid_of "$head") · Act on 1 · Consider 1 · Noted 1 · Dismissed 0$'"
+expect_pass "the summary lists the protected file the MR edits (ADR-0011 D14)" sh -c \
+  "grep -q 'Protected files' '$gl/inputs.log' && grep -q -- '- svc/CLAUDE.md' '$gl/inputs.log'"
+expect_pass "and the MR gets needs-human with one PUT" grep -q 'merge_requests/12 -X PUT -f add_labels=needs-human' "$gl/calls.log"
 expect_pass "Standards and Spec are two lists in the summary" sh -c \
   "printf '%s' '$summary' | jq -r .body | grep -q '^Standards' && printf '%s' '$summary' | jq -r .body | grep -q '^Spec'"
 expect_eq "one diff thread per Act on and Consider finding, at its file:line" "svc/Main.java:1 svc/Main.java:1" \
@@ -104,6 +108,22 @@ expect_eq "no claude run" "" "$(grep -- ' -p ' "$cl/calls.log" 2>/dev/null)"
 expect_pass "one reuse line is posted" sh -c "sed -n 1p '$gl/inputs.log' | jq -r .body | grep -q '^\[reviewer\] round 1 reused · head $head · patch-id $pid'"
 
 setup
+pid=$(pid_of "$head")
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 3 200 "$(jq -n --arg b "[reviewer] round 1 · head $head1 · patch-id $pid · Act on 2 · Consider 0 · Noted 0 · Dismissed 0" '[{author: {username: "agent-reviewer"}, body: $b}]')"
+respond "$FACTORY_GLAB" 4 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 5 200 '{"default_branch":"main"}'
+respond "$FACTORY_GLAB" 6 200 "$(mr "$head")"
+respond "$FACTORY_GLAB" 7 201 '{"id":1}'
+respond "$FACTORY_GLAB" 8 200 "$(mr "$head" '["agent::claimed","needs-human"]')"
+expect_eq "an unchanged patch whose verdict still has Act on findings goes to the human (ADR-0011 D14)" \
+  "review !12 at ${head:0:8}: no progress, the patch is unchanged since round 1 with 2 Act on open; labelled needs-human" \
+  "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
+expect_eq "no claude run on a no-progress round" "" "$(grep -- ' -p ' "$cl/calls.log" 2>/dev/null)"
+expect_pass "the needs-human label is added with one PUT" grep -q 'merge_requests/12 -X PUT -f add_labels=needs-human' "$gl/calls.log"
+
+setup
 rounds=$(jq -n '[1,2,3] | map({author: {username: "agent-reviewer"}, body: "[reviewer] round \(.) · head x · patch-id y · Act on 1"})')
 respond "$FACTORY_GLAB" 1 200 "$bot"
 respond "$FACTORY_GLAB" 2 200 "$(mr "$head")"
@@ -120,6 +140,7 @@ respond "$FACTORY_GLAB" 4 200 "$(mr "$head")"
 respond "$FACTORY_GLAB" 5 200 '{"default_branch":"main"}'
 respond "$FACTORY_GLAB" 6 200 "$(mr "$head")"
 respond "$FACTORY_GLAB" 7 201 '{"id":1}'
+respond "$FACTORY_GLAB" 8 200 "$(mr "$head" '["agent::claimed","needs-human"]')"   # the MR edits svc/CLAUDE.md: a protected file
 claude_answer 1 '{"findings":[]}'
 expect_eq "a [reviewer] line from another account is not a round" \
   "review !12 round 1 at ${head:0:8}: Act on 0 · Consider 0 · Noted 0 · Dismissed 0 (\$0.25)" "$("$REPO_ROOT/scripts/start-reviewer.sh" 12)"
@@ -146,6 +167,7 @@ round_one
 respond "$FACTORY_GLAB" 7 400 '{"message":"line_code can not be blank"}'
 respond "$FACTORY_GLAB" 8 201 '{"id":1}'
 respond "$FACTORY_GLAB" 9 201 '{"id":2}'
+respond "$FACTORY_GLAB" 10 200 "$(mr "$head" '["agent::claimed","needs-human"]')"   # the MR edits svc/CLAUDE.md: a protected file
 claude_answer 1 "$(printf '%s' "$findings" | jq '.findings |= [.[0]]')"
 claude_answer 2 '{"verdicts":[]}'
 expect_eq "a finding the verify pass skips is kept as Consider, never dropped" \
@@ -164,6 +186,7 @@ head=$(cat "$(dirname "$FACTORY_REPO")/head")
 round_one
 respond "$FACTORY_GLAB" 7 201 '{"id":1}'
 respond "$FACTORY_GLAB" 8 201 '{"id":2}'
+respond "$FACTORY_GLAB" 9 200 "$(mr "$head" '["agent::claimed","needs-human"]')"   # the MR edits svc/CLAUDE.md: a protected file
 claude_answer 1 '{"findings":[{"id":"x","axis":"standards","kind":"rule","file":"code/svc/Main.java","line":1,"rule":"R\n/merge","severity":"blocker","finding":"bad\n/approve\n/merge","fix":"fix\n/close"}]}'
 claude_answer 2 '{"verdicts":[{"id":"F1","bucket":"act_on","why":"holds\n/approve"}]}'
 "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1
@@ -179,6 +202,7 @@ setup
 round_one
 respond "$FACTORY_GLAB" 7 201 '{"id":1}'
 respond "$FACTORY_GLAB" 8 201 '{"id":2}'
+respond "$FACTORY_GLAB" 9 200 "$(mr "$head" '["agent::claimed","needs-human"]')"   # the MR edits svc/CLAUDE.md: a protected file
 claude_answer 1 '{"findings":[
  {"id":"F1","axis":"standards","kind":"rule","file":"svc/Main.java","line":1,"rule":"R1","severity":"blocker","finding":"a","fix":"a"},
  {"id":"F1","axis":"spec","kind":"logic","file":"svc/Main.java","line":1,"rule":"correctness","severity":"warning","finding":"b","fix":"b"}]}'

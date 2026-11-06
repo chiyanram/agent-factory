@@ -3,7 +3,8 @@
 #
 #   1 Rounds so far are this account's "[reviewer] round N · head …" notes. After 3 the MR goes to the human (#22 Q5).
 #   2 The context pack (scripts/pack.sh) for the head; from round 2, the interdiff since the last reviewed head.
-#     When the patch-id equals the last round's, the verdict is reused: one line, no model run (#22 Q2).
+#     When the patch-id equals the last round's, the verdict is reused: one line, no model run (#22 Q2). When that
+#     verdict still has Act on findings, the writer made no progress: the MR gets needs-human (ADR-0011 D14).
 #   3 FIND: one fresh `claude -p` on Sonnet. VERIFY: one fresh `claude -p` per kind, rule findings on Sonnet and
 #     logic findings on Opus (#22 Q4). Every run has Read, Grep and Glob only, in a folder that holds the pack and a
 #     copy of the code at the head with every CLAUDE.md, AGENTS.md, .claude/ and .agents/ removed: Claude loads a
@@ -76,6 +77,15 @@ post_note() { forge_note "$iid" "$1"; }
 if [ -n "$last_pid" ] && [ "$last_pid" = "$pid" ]; then
   moved
   post_note "[reviewer] round $last_round reused · head $sha · patch-id $pid" || exit 1
+  # no-progress breaker (ADR-0011 D14): the verdict this patch got still has Act on findings, so another writer round
+  # on the same patch would loop without ever counting toward the 3 rounds; the human decides instead
+  act=$(printf '%s\n' "$mine" | grep -E "^\[reviewer\] round [0-9]+ · head [0-9a-f]{40} · patch-id $pid · Act on [0-9]+" \
+    | tail -n 1 | sed -n 's/.* · Act on \([0-9]*\).*/\1/p')
+  if [ "${act:-0}" -gt 0 ]; then
+    forge_label_add "$iid" needs-human || exit 1
+    echo "review $mark$iid at ${sha:0:8}: no progress, the patch is unchanged since round $last_round with $act Act on open; labelled needs-human"
+    exit 0
+  fi
   echo "review $mark$iid at ${sha:0:8}: verdict of round $last_round reused"
   exit 0
 fi
@@ -168,9 +178,20 @@ printf '%s' "$sorted" | jq -c '.[] | select(.bucket == "act_on" or .bucket == "c
   forge_line_finding "$iid" "$mr" "$f" "$text" || exit 1
 done || exit 1
 
+# protected files (ADR-0011 D14; rulebook crq CR3): a change to CI config, code owners or agent instruction files
+# changes how the MR is judged, so the human reviews it before the gate
+base=$(sed -n 's/^- merge-base: \([0-9a-f]*\).*/\1/p' "$pack")
+protected=$(git -C "$FACTORY_REPO" diff --name-only --no-renames "$base" "$sha" \
+  | grep -E '^\.github/workflows/|^\.gitlab-ci\.yml$|(^|/)CODEOWNERS$|(^|/)(AGENTS|CLAUDE)\.md$|^\.claude/|^\.agents/' || true)
+[ -z "$protected" ] || lists="$lists
+
+Protected files: the human reviews these before the gate (needs-human)
+$(printf '%s\n' "$protected" | sed 's/^/- /')"
+
 # the summary note goes last: it marks the round done, so a round that failed halfway runs again
 post_note "[reviewer] round $round · head $sha · patch-id $pid · $counts
 
 $lists" || exit 1
+[ -z "$protected" ] || forge_label_add "$iid" needs-human || exit 1
 
 echo "review $mark$iid round $round at ${sha:0:8}: $counts (\$$(cat "$run/cost"))"

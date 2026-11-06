@@ -133,7 +133,7 @@ and `#12` for `!12`.
 | `poll.sh` | one line per open MR: head, draft, claimed, `approved=yes\|stale\|no`, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim |
 | `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
 | `start-writer.sh <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit |
-| `start-reviewer.sh <mr>` | one review round: the pack, a find run, a verify run, then one summary note and one thread per Act on or Consider; reuses the last verdict when the patch-id is unchanged; refuses a 4th round; exits 3 with `MOVED` when the head moved |
+| `start-reviewer.sh <mr>` | one review round: the pack, a find run, a verify run, then one summary note and one thread per Act on or Consider; reuses the last verdict when the patch-id is unchanged, or labels `needs-human` when that verdict still has Act on findings; labels `needs-human` when protected files changed; refuses a 4th round; exits 3 with `MOVED` when the head moved |
 | `pack.sh <mr> [<previous-head>]` | builds the reviewer's context pack, with rules from the default branch; an unresolved rule pointer stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR |
@@ -162,6 +162,10 @@ The scripts enforce these; prompts alone do not.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
   rules it is judged by. It has Read, Grep and Glob only.
 - **Rules come from the default branch**, never from the MR. An MR that edits a rule file is flagged for the human.
+- **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent
+  instruction files lists them in its summary and labels the MR `needs-human`.
+- **No progress stops the loop.** When a writer round leaves the patch unchanged and its last verdict still has Act
+  on findings, `start-reviewer` labels the MR `needs-human` instead of reusing the verdict for another round.
 - **State goes to the forge**, never to a file only one session can read.
 
 ## Terms
