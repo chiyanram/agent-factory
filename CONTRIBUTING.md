@@ -11,6 +11,8 @@ code in other projects, such as how to write tests or Java, go to the `rulebook`
 | bash, git, jq, make | everything; scripts run on bash 3.2 (stock macOS) and on Linux |
 | `glab` or `gh` | running the scripts against GitLab or GitHub; the tests stub both |
 | `claude` (Claude Code CLI) | running writers and reviewers; the tests stub it |
+| Node 22 or later (npm 10 is fine) | the TypeScript package (ADR-0013): `make` runs `npm ci` from `package-lock.json` |
+| npm 11 | only to change dependencies: `npx npm@11 install <pkg>`. npm 10 crashes when it re-resolves the tree (an arborist bug on vite's optional peer `vitest@*`), so never add `legacy-peer-deps` |
 
 ```bash
 git clone https://github.com/chiyanram/agent-factory.git
@@ -20,8 +22,9 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `scripts/check-links.sh .` (every relative link in a tracked `.md` file resolves) and `scripts/check-size.sh .` (the root `AGENTS.md` is under 200 lines) |
-| `make test` | runs every `tests/*.test.sh`; fails if any one fails. One file: `bash tests/poll.test.sh` |
+| `make lint` | `scripts/check-links.sh .` (every relative link in a tracked `.md` file resolves), `scripts/check-size.sh .` (the root `AGENTS.md` is under 200 lines) and `tsc --noEmit` |
+| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. One file: `bash tests/poll.test.sh` or `npx vitest run test/poll.test.ts` |
+| `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
 
 Each test file prints `ok   <name>` or `FAIL <name>: …` per assertion and exits non-zero on any failure. Tests are
