@@ -2,16 +2,21 @@
 //
 // The words in a post come from a writer, a reviewer or a ticket, and any of them may carry an injected line. Posted
 // with a person's or a bot's login, such a line acts: on GitLab a line that starts with "/" is a quick action run as
-// the poster (/approve, /merge, /label); on GitHub and GitLab "@name" pings people and "fixes #12" closes an issue on
-// merge; on Jira "@name" pings. So no free text is posted. A post is a fixed template, and outside words only fill its
-// fields, each cleaned by cleanField:
-//   - one line: line breaks and runs of white space become one space; control characters go
-//   - no backtick of its own, so it cannot close a code span; HTML is escaped and "[" "]" are escaped, so no tag,
-//     link or image renders
-//   - URLs, @mentions and closing keywords with their reference are put in code spans: they show, but do not link,
-//     ping or close anything
-//   - a field never starts with "/"; it is capped in length, with "…" when cut
-// The template writes the seat prefix ("[writer] " and so on) and the labels, so a field can never start a line.
+// the poster (/approve, /merge, /label); on GitHub and GitLab "@name" pings people and "closes #12" closes an issue on
+// merge; a link or an image can carry data out. So no free text is posted. A post is a fixed template, and outside
+// words only fill its fields, each made inert by cleanField. It breaks the characters that start each of these, rather
+// than matching every form a forge accepts, because a pattern always misses one (a review of the first version found
+// "closing #1", "Closes issue #1" and a mention right after a code span):
+//   - one line: line breaks and runs of white space become one space; control and invisible format characters go
+//   - "\" is escaped first, so no later escape can be undone
+//   - "@" (mentions, e-mail links), "#" and "!" (issue and merge-request references, and so closing keywords; Jira
+//     images) get an invisible word joiner (U+2060) after them, and "://" and "www." (links) one inside, so no forge sees a
+//     mention, a reference or a link
+//   - HTML is escaped; "[", "]", "{", "}", "|" and "`" get a backslash, so no Markdown or Jira link, image, macro or
+//     code span forms
+//   - a field never starts with "/", and it is capped in length after all of this, with "…" when cut
+// The template writes the seat prefix ("[writer] " and so on) and the labels, so a field never starts a line. A label
+// must be the factory's own plain words: renderPost refuses any other.
 
 export type Seat = "writer" | "reviewer" | "coordinator";
 
@@ -26,46 +31,43 @@ export type Post = {
 
 export const DEFAULT_FIELD_LIMIT = 500;
 
-const URL = /\bhttps?:\/\/[^\s<>"']+/gi;
-// GitHub and GitLab closing keywords, then an issue reference: #12, group/project#12 or a full URL (already a span).
-const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|implement(?:s|ed)?)\b:?\s+(?:[\w.-]+\/[\w./-]+)?#\d+/gi;
-// @user, @group/subgroup, @all; not the middle of an e-mail address or a word.
-const MENTION = /(^|[^\w`])(@[\w.-]+(?:\/[\w.-]+)*)/g;
-// Every C0 and C1 control character, plus the line and paragraph separators.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
-
-function span(text: string): string {
-  return `\`${text}\``;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+const JOIN = "\u2060";
+// Every C0 and C1 control character, the invisible format characters a field could use to undo a break (zero-width
+// spaces and joiners, bidi controls, the word joiner itself, the BOM), and the line and paragraph separators.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\ufeff]/g;
+const LABEL = /^[A-Za-z0-9 ()_.,'-]+$/;
 
 function cut(text: string, limit: number): string {
   const chars = Array.from(text);
-  return chars.length <= limit ? text : `${chars.slice(0, Math.max(0, limit - 1)).join("").trimEnd()}…`;
+  if (chars.length <= limit) {
+    return text;
+  }
+  let kept = chars.slice(0, Math.max(0, limit - 1));
+  // never end on an escaping "\" or on a character whose word joiner was cut off
+  while (kept.length > 0 && /[\\@#!:.]/.test(kept[kept.length - 1]!)) {
+    kept = kept.slice(0, -1);
+  }
+  return `${kept.join("").trimEnd()}…`;
 }
 
-// cleanField : one field's words, made safe to place inside a template line. See the header for the rules.
+// cleanField : one field's words, made inert inside a template line. See the header for the rules.
 export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): string {
-  const flat = cut(value.replace(/`/g, "'").replace(CONTROL, " ").replace(/\s+/g, " ").trim(), limit);
-  // URLs first, so a keyword or a mention inside a URL is shown as it is, in the URL's span
-  const urls = flat.match(URL) ?? [];
-  const neutral = flat
-    .split(URL)
-    .map((text) =>
-      escapeHtml(text)
-        .replace(/[[\]]/g, "\\$&")
-        .replace(CLOSING, (m) => span(m))
-        .replace(MENTION, (_m, before: string, who: string) => `${before}${span(who)}`),
-    )
-    .reduce((out, text, i) => out + text + (i < urls.length ? span(urls[i]!) : ""), "");
-  return neutral.startsWith("/") ? `\\${neutral}` : neutral;
+  const flat = value.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
+  const inert = flat
+    .replace(/\\/g, "\\\\")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/[[\]{}|`]/g, "\\$&")
+    .replace(/[@#!]/g, `$&${JOIN}`)
+    .replace(/:\/\//g, `:${JOIN}//`)
+    .replace(/\b(www)\./gi, `$1${JOIN}.`);
+  const capped = cut(inert, limit);
+  return capped.startsWith("/") ? `\\${capped}` : capped;
 }
 
 // renderPost : the full text of one post. The first line is "[seat] title"; each field is "- label: value"; each item
-// is "- value". Labels are the factory's own words, so only their line breaks are removed.
+// is "- value". A label outside the factory's own plain words is refused, so no caller can pass outside text as one.
 export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): string {
   const lines = [`[${post.seat}] ${cleanField(post.title, limit)}`];
   const fields = post.fields ?? [];
@@ -73,7 +75,12 @@ export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): str
   if (fields.length + items.length > 0) {
     lines.push("");
   }
-  fields.forEach((f) => lines.push(`- ${f.label.replace(/\s+/g, " ").trim()}: ${cleanField(f.value, limit)}`));
+  for (const f of fields) {
+    if (!LABEL.test(f.label)) {
+      throw new Error(`post label must be the factory's own plain words, got ${JSON.stringify(f.label)}`);
+    }
+    lines.push(`- ${f.label}: ${cleanField(f.value, limit)}`);
+  }
   items.forEach((item) => lines.push(`- ${cleanField(item, limit)}`));
   return lines.join("\n");
 }
