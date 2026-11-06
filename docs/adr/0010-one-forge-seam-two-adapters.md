@@ -54,3 +54,14 @@ Only branches in the repository itself are supported on GitHub; a fork's branch 
 ## Sources
 
 #64 (body and decisions comment) · #62 · ADR-0002, 0005, 0006, 0009
+
+## Amended 2026-11-06
+
+By [ADR-0013](0013-typescript-package-cli-first.md) ([integration rule](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681380403)):
+- Every forge call stays a CLI call (`gh api`, `glab api`).
+- A direct HTTP call is allowed only where no CLI covers it, with its token from the CLI or the keychain at call time.
+- The seam moves into the TypeScript package when it is ported.
+- The gate is unchanged: a human's `/approved`, stale after a human body edit. `approve.sh` posts it with the human's
+  own login ([gap 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681534148)).
+- The writer gets no `gh` or App path (ADR-0012 S6). The "a writer's session … can act only as the App" cell is the
+  current script behaviour, which ADR-0012 replaces.

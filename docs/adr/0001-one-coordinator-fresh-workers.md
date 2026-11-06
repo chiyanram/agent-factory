@@ -48,3 +48,11 @@ and a fresh reviewer per ticket. Workers do one job and go away. Workers never t
 
 Amended by [ADR-0011](0011-crq-pipeline-in-the-factory.md): a writer may post an open question and stop, one
 writer per pull request, and a script checks "ready" before review.
+
+## Amended 2026-11-06
+
+By [ADR-0012](0012-safety-design-for-unattended-runs.md) ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)):
+- A dispatcher written as code, with no LLM, now runs the loop mechanics: claims, starts, releases and reconciles. This revisits the
+  rejected "script on a timer". The human still has one AI to talk to, but that AI no longer starts workers or holds
+  the bot login.
+- Writers ask through a file that the host posts (S13).

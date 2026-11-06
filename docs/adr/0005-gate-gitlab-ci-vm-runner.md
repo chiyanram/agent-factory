@@ -37,3 +37,12 @@ SHA + result on the MR.
 ## Sources
 
 #4 Q4, Q5a, Q5b · #20 resolution · docs/archive/research/17, 27, 28, 30
+
+## Amended 2026-11-06
+
+By [ADR-0012](0012-safety-design-for-unattended-runs.md):
+- Agent branches run test jobs only, with no secrets, and a CI-file edit stops the pipeline until a human approves
+  ([Q5a](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)).
+- The writer no longer records results on the MR itself. It writes them to `.factory/report.md` and the host posts
+  them ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159)).
+- A project with no forge CI uses the local verifier of #91.

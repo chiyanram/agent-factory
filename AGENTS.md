@@ -1,6 +1,8 @@
 # agent-factory
 
-One coordinator AI that starts fresh writer and reviewer workers on a project's merge requests. The rules those
+A coordinator AI that talks with the human, and a dispatcher (code) that starts fresh writer and reviewer workers
+in a box on a project's merge requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the scripts
+do not follow it yet). The rules those
 workers follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
 People start at `README.md`; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
 
@@ -18,8 +20,12 @@ CI runs both on every pull request and on push to `main`.
 - Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, added to both adapters, because a direct
   `glab` or `gh` call breaks the other forge and cannot be stubbed in a test.
 - Write each script and its test `tests/<script>.test.sh` together, for bash 3.2 and POSIX tools, because the scripts
-  run on stock macOS and on Linux.
-- Keep `GUIDE.md` in step with the scripts, because the coordinator session follows it as its instructions.
+  run on stock macOS and on Linux. New components go into the TypeScript package and call CLIs
+  ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)).
+- Keep `GUIDE.md` in step with the scripts, because the coordinator session follows it as its instructions. Mark
+  each place where a script still differs from ADR-0012 with **Today:**, because a reader must not take a decided
+  guardrail for an enforced one.
+- Give no LLM seat a forge token or a skip-permissions flag in new code, because ADR-0012 S2, S6 and S11 forbid it.
 - Commit and push only with the operator's yes; one issue → one branch → one PR. The human merges.
 
 ## Where things go

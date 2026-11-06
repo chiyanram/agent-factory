@@ -38,3 +38,14 @@ copy of the vendor default.
 ## Sources
 
 #1 "Identity DECIDED" · #22 Q5 · docs/archive/research/24 identity follow-up · setup checklist: L6 #26
+
+## Amended 2026-11-06
+
+By [ADR-0012](0012-safety-design-for-unattended-runs.md) ([gap 1 / Q11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681534148)):
+- **One bot per project, used only by code:** the dispatcher and the host push. It replaces the bot per developer. No LLM holds
+  the bot login, including the writer and the coordinator.
+- The human still approves and merges from their own account. They approve either by typing `/approved` on the
+  PR, or in the terminal through `approve.sh`, which posts it with their own login behind a harness prompt
+  ([W1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6679395560)).
+- The "Known gap" (agents can read the token as the developer's OS user) closes for the writer (S6). For the
+  coordinator it narrows to the deny rules of S2.
