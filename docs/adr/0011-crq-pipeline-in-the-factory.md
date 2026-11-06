@@ -31,6 +31,10 @@ you ⇄ coordinator ──▶ scripts ──▶ forge (issue + pull request = th
 | D16 | Every run records its tokens by phase on the pull request, transcripts are kept per head, and the pilot compares against a single-session `/crq` at the same token budget. A phase that does not change outcomes is retired. | none |
 | D17 | The writer's session lints on every edit and has a quick command for the touched tests. | none |
 
+Amended 2026-11-06 (#79): a blocked run gets the `needs-human` label, not a new `agent::blocked` label, because
+`poll` and every trigger already stop on `needs-human`; `scripts/block.sh` adds it with a `[coordinator] blocked:` note.
+`FACTORY_DRY_RUN` covers the coordinator's own scripts; `start-writer` and `start-reviewer` refuse it.
+
 ## Why
 
 - A writer that cannot ask guesses; failing to ask for clarification is 6.8% of multi-agent failures (MAST, FM-2.2).

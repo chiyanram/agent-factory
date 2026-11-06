@@ -28,6 +28,7 @@ expect_pass "the prompt names the MR, its branch and /crq" \
   sh -c "grep -q '!12' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'feat/x' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q '/crq' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the prompt tells the writer to push, ask with ask.sh at its pushed head, and stop (ADR-0011 D10)" \
   sh -c "grep -q 'scripts/ask.sh 12 \"\$(git rev-parse HEAD)\"' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'never guess: push your commits' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'and stop' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_pass "a writer that cannot finish pushes its work and asks (ADR-0011 D14)" sh -c "grep -q 'cannot finish, push what you have' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the ask command carries its own forge and project settings" \
   sh -c "grep -q 'FACTORY_FORGE=gitlab FACTORY_PROJECT=' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 
@@ -72,7 +73,8 @@ expect_eq "a worktree left by a dead run is replaced, never reused" no \
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
 expect_eq "the -p fallback runs in the foreground and says so" "writer finished !12 at ${head:0:8}" \
-  "$(FACTORY_RUN_MODE=print "$REPO_ROOT/scripts/start-writer.sh" 12 2>/dev/null)"
+  "$(FACTORY_RUN_MODE=print FACTORY_MAX_USD=5 "$REPO_ROOT/scripts/start-writer.sh" 12 2>/dev/null)"
+expect_pass "FACTORY_MAX_USD caps the -p run's spend (ADR-0011 D14)" sh -c "grep -q -- '--max-budget-usd 5 ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the fallback uses claude -p under the run's name" sh -c "grep -q -- ' -p -n writer-12 ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_eq "the fallback removes its pid file when it exits" no "$([ -f "$FACTORY_REPO/.claude/runs/writer-12.pid" ] && echo yes || echo no)"
 expect_pass "the fallback uses claude -p" sh -c "grep -q -- ' -p ' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
@@ -134,5 +136,8 @@ expect_eq "the writer's session has no gh login and no system or global git conf
 expect_eq "so those settings are never committed" "" "$(git -C "$worktree" status --porcelain)"
 expect_pass "the prompt sends every GitHub call through the App's gh" \
   grep -q "use $REPO_ROOT/scripts/bin/gh: it acts as the factory's GitHub App" "$(dirname "$FACTORY_CLAUDE")/calls.log"
+
+expect_fail "a dry run never starts a writer, which would push (ADR-0011 D14)" "FACTORY_DRY_RUN is set" \
+  env FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/start-writer.sh" 12
 
 finish

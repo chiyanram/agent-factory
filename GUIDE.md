@@ -66,6 +66,8 @@ The scripts read their settings from the environment.
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_AGENT_PREFIX` | the start of every GitLab agent account's name | `agent-` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
+| `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
+| `FACTORY_DRY_RUN` | `1` makes `poll`, `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
@@ -115,7 +117,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the gate is green and no Act on is open | undraft, assign a maintainer, `status "ready"` |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
-| a run is silent too long, or hits its time cap | mark it interrupted, `release` the claim |
+| a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
 | you restart | `reconcile`: every claim without a live run goes back to the queue |
 | a human posts `/stop`, or pushes to the branch | stand off that MR |
 | a merge conflict | `start-writer` to rebase; if that fails, `needs-human` |
@@ -138,6 +140,7 @@ and `#12` for `!12`.
 | `pack.sh <mr> [<previous-head>]` | builds the reviewer's context pack, with rules from the default branch; an unresolved rule pointer stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>` |
+| `block.sh <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason> · log: <log>` note, then releases the claim; the label goes first |
 | `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR |
 
 `poll` keeps no state, so a restart re-reads everything. It counts `/approved` only from a human maintainer, as the

@@ -15,4 +15,4 @@ if ! has_label "$mr" "$label"; then
   exit 0
 fi
 forge_label_remove "$iid" "$label" || exit 1
-echo "released $mark$iid"
+echo "released $mark$iid$dry"

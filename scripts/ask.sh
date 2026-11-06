@@ -22,4 +22,4 @@ case $head in
   *) echo "$mark$iid head moved: the run started at $sha, the head is now ${head:0:8}; question not posted" >&2; exit 1 ;;
 esac
 forge_note "$iid" "[writer] OPEN: $question" || exit 1
-echo "asked $mark$iid at ${head:0:8}"
+echo "asked $mark$iid at ${head:0:8}$dry"

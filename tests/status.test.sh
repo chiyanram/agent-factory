@@ -26,6 +26,14 @@ expect_fail "a note of more than one line is refused" "one line" "$REPO_ROOT/scr
 expect_fail "an empty note is refused" "one line" "$REPO_ROOT/scripts/status.sh" 12 aaaa1111 ""
 
 FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr aaaa1111bbbb2222)"
+expect_eq "with FACTORY_DRY_RUN=1 the note is printed, not posted (ADR-0011 D14)" \
+  "DRY RUN: note on !12: [coordinator] writer started" \
+  "$(FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/status.sh" 12 aaaa1111 "writer started" 2>&1 >/dev/null)"
+expect_eq "and the forge sees reads only" 2 "$(calls "$FACTORY_GLAB" | wc -l | tr -d ' ')"
+
+FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
 respond "$FACTORY_GLAB" 1 200 '{"username":"ann","bot":false}'
 expect_fail "a human login is refused before any write (ADR-0006)" "a human account" \
   "$REPO_ROOT/scripts/status.sh" 12 aaaa1111 "ready"

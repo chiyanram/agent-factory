@@ -13,6 +13,7 @@ set -u
 iid=${1:-}
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 valid_iid "$iid" || exit 1
+[ "${FACTORY_DRY_RUN:-}" != 1 ] || { echo "refused: FACTORY_DRY_RUN is set, and a writer pushes to the MR branch; run it without the dry run" >&2; exit 1; }
 require_repo || exit 1
 forge_writer_ready || exit 1
 
@@ -57,6 +58,7 @@ Run /crq from the build phase for this MR. The MR description is your contract: 
 and the design link. When the contract does not settle a question, never guess: push your commits, then run
 $ask
 with the question in single quotes (write each ' inside it as '\\''), and stop without marking the MR ready.
+If you cannot finish, push what you have and ask the same way, saying what blocks you.
 Push only this branch; after a rebase use --force-with-lease.${note:+
 $note}"
 set --
@@ -66,9 +68,12 @@ if [ "${FACTORY_RUN_MODE:-bg}" = print ]; then
   pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
   mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"   # a -p run is not in claude agents: this marks it live
   trap 'rm -f "$pidfile"; remove_worktree "$path"' EXIT
-  (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" "$@" "$prompt") >&2
+  # FACTORY_MAX_USD caps the run's spend (ADR-0011 D14); the CLI honours it in print mode only, not for --bg
+  (cd "$path" && "${FACTORY_CLAUDE:-claude}" -p -n "$name" ${FACTORY_MAX_USD:+--max-budget-usd "$FACTORY_MAX_USD"} "$@" \
+    "$prompt") >&2
   status=$?
-  echo "writer finished $mark$iid at ${sha:0:8}"
+  if [ "$status" -eq 0 ]; then echo "writer finished $mark$iid at ${sha:0:8}"
+  else echo "writer failed $mark$iid at ${sha:0:8} (exit $status)"; fi
   exit "$status"
 fi
 
