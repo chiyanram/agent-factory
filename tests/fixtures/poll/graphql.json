@@ -187,7 +187,7 @@
          }
         },
         {
-         "body": "[coordinator] OPEN: which error text?",
+         "body": "[writer] OPEN: which error text?",
          "createdAt": "2026-10-30T10:01:00Z",
          "author": {
           "username": "agent-coordinator",
@@ -231,6 +231,22 @@
         {
          "body": "A",
          "createdAt": "2026-10-30T08:30:00Z",
+         "author": {
+          "username": "dev",
+          "bot": false
+         }
+        },
+        {
+         "body": "[writer] OPEN: page the list?",
+         "createdAt": "2026-10-30T08:40:00Z",
+         "author": {
+          "username": "agent-coordinator",
+          "bot": true
+         }
+        },
+        {
+         "body": "no paging yet",
+         "createdAt": "2026-10-30T08:50:00Z",
          "author": {
           "username": "dev",
           "bot": false

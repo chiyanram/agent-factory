@@ -26,6 +26,10 @@ expect_fail "it never resumes or continues a session (ADR-0001)" "fresh" \
   sh -c "grep -Eq -- '--resume|--continue| -c ' '$(dirname "$FACTORY_CLAUDE")/calls.log' && exit 0; echo fresh; exit 1"
 expect_pass "the prompt names the MR, its branch and /crq" \
   sh -c "grep -q '!12' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'feat/x' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q '/crq' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_pass "the prompt tells the writer to push, ask with ask.sh at its pushed head, and stop (ADR-0011 D10)" \
+  sh -c "grep -q 'scripts/ask.sh 12 \"\$(git rev-parse HEAD)\"' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'never guess: push your commits' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'and stop' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_pass "the ask command carries its own forge and project settings" \
+  sh -c "grep -q 'FACTORY_FORGE=gitlab FACTORY_PROJECT=' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '[]')"
