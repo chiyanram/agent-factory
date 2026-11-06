@@ -27,8 +27,9 @@ npx agent-factory dispatch | poll | approve | …      (TypeScript, Node — alr
 | T1 | The factory is a TypeScript npm package that runs on the host. It picks its box with `FACTORY_BOX` (ADR-0012 S8). A container image comes later, only to host a UI on the VM. | [Q13 + Q16](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681380403) |
 | T2 | Every integration calls a CLI. Each CLI keeps its own login, so factory code holds no token. | [integration rule](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681380403) |
 | T3 | Where no CLI covers a call, one direct HTTP call is allowed, through one small module per service. Its token or webhook URL comes from the CLI (for example `gh auth token`) or the OS keychain at call time. Never from an env var, a config file or the repo. The Discord pings (Q8) are the first case. | [integration rule](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681380403), [Q8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681441140) |
-| T4 | **Order:** (1) the package with ADR-0012 built in, (2) the dispatcher as part of it, (3) the laptop pilot (#62) on the package. The bash scripts are ported one by one. This replaces "dispatch after the pilot" (ADR-0011 D13). | [gap 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681648337) |
+| T4 | **Order, in two stages** ([review 10](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682975523)): (1) stage A of ADR-0012 S17 in the package, with the dispatcher and the `FACTORY_BOX` seam; (2) the pilot on the Contabo VM with personal projects (three tickets: docs, bug, feature); (3) stage B, in the order the pilot shows, then the work-laptop test. Once the factory works on the VM, agent-factory and chiyanram/skills move onto it. The bash scripts are ported one by one. This replaces "dispatch after the pilot" (ADR-0011 D13). | [gap 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681648337), [review 10](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682975523) |
 | T5 | Every runner call names a full model ID, never an alias. | [Q10](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681453020) |
+| T6 | The factory runs from the installed package, never from a repo checkout. The coordinator's allow-list names each command by full path, and the install folder is denied to it for Edit and Write (ADR-0012 S2). | [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888) |
 
 ## Why
 
@@ -48,6 +49,7 @@ npx agent-factory dispatch | poll | approve | …      (TypeScript, Node — alr
 | a container image as the main way to ship | needs Docker on every laptop and does not fix the sandbox (ADR-0012) |
 | HTTP SDKs for every service | each holds a token in our code; the CLIs already hold the logins |
 | pilot first in bash (the original D13 order) | the safety fixes would be built twice (gap 4) |
+| all of ADR-0012 before the pilot | weeks with no feedback from a real project; stage A closes every hole that could hurt on the first run ([review 10](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682975523)) |
 
 ## Consequences
 

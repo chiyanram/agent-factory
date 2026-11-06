@@ -46,3 +46,9 @@ By [ADR-0012](0012-safety-design-for-unattended-runs.md):
 - The writer no longer records results on the MR itself. It writes them to `.factory/report.md` and the host posts
   them ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159)).
 - A project with no forge CI uses the local verifier of #91.
+
+## Amended 2026-11-06 (review of ADR-0012)
+
+By ADR-0012 S9, as revised ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)): a CI-file edit is stopped by the host push, which refuses commits that
+touch CI config, on both forges and under any identity. `rules:` in `.gitlab-ci.yml` is not a gate, because the
+branch's own copy of the file runs.
