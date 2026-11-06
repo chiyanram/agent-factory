@@ -140,4 +140,28 @@ expect_pass "the prompt sends every GitHub call through the App's gh" \
 expect_fail "a dry run never starts a writer, which would push (ADR-0011 D14)" "FACTORY_DRY_RUN is set" \
   env FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/start-writer.sh" 12
 
+# --test-first: a bug's failing test comes from a separate run, before any fix (ADR-0011 D12; rulebook crq VB7)
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+expect_eq "a test-first run starts and says so in one line" "test writer started !12 at ${head:0:8}: started abc123" \
+  "$("$REPO_ROOT/scripts/start-writer.sh" --test-first 12)"
+log="$(dirname "$FACTORY_CLAUDE")/calls.log"
+expect_pass "it runs under the MR's one run name, so it counts as the MR's live run" grep -q -- '--bg -n writer-12 ' "$log"
+expect_pass "its prompt asks only for the failing test, from the bug spec" \
+  sh -c "grep -q 'Write only the test that reproduces the bug' '$log' && grep -q 'Change no production code' '$log'"
+expect_pass "its stop condition: commit only the test, push it and stop, never fix and never mark ready" \
+  sh -c "grep -q 'Commit only the test' '$log' && grep -q 'push it, and stop. Never fix the bug and never mark the MR ready' '$log'"
+expect_pass "its commit says a separate run wrote it, so the reviewer can check VB7" \
+  grep -q 'Written by a separate test-first run (VB7)' "$log"
+expect_pass "with no testable inputs and result, it asks instead" grep -q 'scripts/ask.sh 12' "$log"
+expect_fail "it is not the fix writer's prompt" "none" sh -c "grep -q 'Run /crq from the build phase' '$log' && exit 0; echo none; exit 1"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+FACTORY_READY_COMMANDS='make npm' "$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+log="$(dirname "$FACTORY_CLAUDE")/calls.log"
+expect_pass "the fix writer keeps a committed failing test as it is" grep -q 'make it pass without changing it' "$log"
+expect_pass "the writer puts the evidence table in the description and learns which commands the ready check runs" \
+  sh -c "grep -q 'Evidence at <your' '$log' && grep -q 'one of: make npm\.' '$log'"
+
 finish

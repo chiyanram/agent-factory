@@ -51,7 +51,8 @@ forge_pr() {
   pr=$(gh_api "repos/$r/pulls/$1") || return 1
   printf '%s' "$pr" | jq -c '{
     state: (if .merged then "merged" elif .state == "open" then "opened" else "closed" end),
-    sha: .head.sha, source_branch: .head.ref, target_branch: .base.ref, labels: [.labels[].name]}'
+    sha: .head.sha, source_branch: .head.ref, target_branch: .base.ref, labels: [.labels[].name],
+    description: (.body // "")}'
 }
 
 forge_default_branch() {

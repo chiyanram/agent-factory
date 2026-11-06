@@ -71,6 +71,8 @@ The scripts read their settings from the environment.
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
+| `FACTORY_READY_COMMANDS` | the programs an evidence command may start in the ready check; they run the MR's own build files, as CI does | `make ./gradlew ./mvnw` |
+| `FACTORY_READY_CHECK` | `off` skips the ready check, for a project whose required CI job proves the build at the head | on |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_CURL` | the `curl` that mints the App's token | `curl` |
 | `FACTORY_MAX_TRIES`, `FACTORY_SLEEP` | tries per request on a rate limit, and the wait command | `4`, `sleep` |
@@ -112,9 +114,11 @@ heavy run (a build, an IT suite or a deploy) per machine.
 
 | when the forge shows | do |
 |---|---|
-| `/approved` from a human maintainer, with `asks=0` and `needs_human=no` | `claim`, `start-writer`, `status "writer started"` |
+| `/approved` from a human maintainer, with `asks=0` and `needs_human=no` | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
+| a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
 | the writer marks the MR ready, with `asks=0` | `start-reviewer` at the head SHA |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
+| `start-reviewer` exits 4: not ready | `start-writer` again; after 3 `[coordinator] not ready` notes, label `needs-human` |
 | the gate is green and no Act on is open | undraft, assign a maintainer, `status "ready"` |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
@@ -135,8 +139,8 @@ and `#12` for `!12`.
 |---|---|
 | `poll.sh` | one line per open MR: head, draft, claimed, `approved=yes\|stale\|no`, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim |
 | `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
-| `start-writer.sh <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit |
-| `start-reviewer.sh <mr>` | one review round: the pack, a find run, a verify run, then one summary note and one thread per Act on or Consider; reuses the last verdict when the patch-id is unchanged, or labels `needs-human` when that verdict still has Act on findings; labels `needs-human` when protected files changed; refuses a 4th round; exits 3 with `MOVED` when the head moved |
+| `start-writer.sh [--test-first] <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit; `--test-first` starts a run that commits only a bug's failing test and stops |
+| `start-reviewer.sh <mr>` | first the ready check: runs each evidence command again at the head in a fresh worktree, with no shell, and exits 4 with one `[coordinator] not ready` note when one fails or the table is missing; then one review round: the pack, a find run, a verify run, then one summary note and one thread per Act on or Consider; reuses the last verdict when the patch-id is unchanged, or labels `needs-human` when that verdict still has Act on findings; labels `needs-human` when protected files changed; refuses a 4th round; exits 3 with `MOVED` when the head moved |
 | `pack.sh <mr> [<previous-head>]` | builds the reviewer's context pack, with rules from the default branch; an unresolved rule pointer stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>` |
@@ -163,6 +167,8 @@ The scripts enforce these; prompts alone do not.
 - **The writer pushes only its own branch**, with `--force-with-lease` after a rebase.
   On GitHub its session gets an empty `GH_CONFIG_DIR` and no system or global git config, so it cannot act as the
   person.
+- **Ready is checked, not reported.** No review starts until a script has run the MR's evidence commands again at
+  its head, with no shell.
 - **The reviewer reads, and the script posts.** It runs in a throwaway folder with the pack and a copy of the code.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
   rules it is judged by. It has Read, Grep and Glob only.

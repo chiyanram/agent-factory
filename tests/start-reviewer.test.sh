@@ -3,6 +3,7 @@
 . "$(dirname "$0")/lib.sh"
 export FACTORY_PROJECT=aruvii/agent-platform FACTORY_SLEEP=true
 export FACTORY_RULEBOOK="$REPO_ROOT/tests/fixtures/pack/rulebook"
+export FACTORY_READY_CHECK=off   # the ready check has its own tests at the end
 commit() { git -c user.name=t -c user.email=t@t commit -q -m "$1"; }
 bot='{"username":"agent-reviewer","bot":true}'
 
@@ -31,10 +32,10 @@ setup() {
   FACTORY_CLAUDE=$(claude_stub); export FACTORY_CLAUDE
   gl=$(dirname "$FACTORY_GLAB"); cl=$(dirname "$FACTORY_CLAUDE")
 }
-mr() {  # mr SHA [LABELS]
-  jq -n --arg sha "$1" --argjson labels "${2:-[\"agent::claimed\"]}" \
+mr() {  # mr SHA [LABELS] [DESCRIPTION]
+  jq -n --arg sha "$1" --argjson labels "${2:-[\"agent::claimed\"]}" --arg d "${3:-AC1: total() returns the sum.}" \
     '{iid: 12, state: "opened", source_branch: "feat/x", target_branch: "main", sha: $sha, labels: $labels,
-      description: "AC1: total() returns the sum.", diff_refs: {base_sha: "b", start_sha: "s", head_sha: $sha}}'
+      description: $d, diff_refs: {base_sha: "b", start_sha: "s", head_sha: $sha}}'
 }
 claude_answer() { printf '{"is_error":false,"total_cost_usd":0.25,"structured_output":%s}' "$2" > "$cl/p$1"; }
 findings='{"findings":[
@@ -283,5 +284,77 @@ expect_fail "a dry run never starts a reviewer, which would spend (ADR-0011 D14)
   env FACTORY_DRY_RUN=1 "$REPO_ROOT/scripts/start-reviewer.sh" 12
 expect_fail "a cap that is not a dollar amount is refused" "dollar amount" \
   env FACTORY_MAX_USD=lots "$REPO_ROOT/scripts/start-reviewer.sh" 12
+
+# The ready check: the evidence in the description runs again at the head before any review (ADR-0011 D12)
+export FACTORY_READY_CHECK=on FACTORY_READY_COMMANDS='grep test'
+evidence() {  # evidence SHA COMMAND... : a description with one evidence row per command
+  printf 'AC1: total() returns the sum.\n\nEvidence at `%s`\n\n| criterion | command | result |\n|---|---|---|\n' "${1:0:7}"
+  shift; for c in "$@"; do printf '| AC1 | `%s` | ok |\n' "$c"; done
+}
+not_ready() {  # not_ready DESCRIPTION : the answers up to the not-ready note
+  respond "$FACTORY_GLAB" 1 200 "$bot"
+  respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]' "$1")"
+  respond "$FACTORY_GLAB" 3 200 '[]'
+  respond "$FACTORY_GLAB" 4 201 '{"id":1}'
+}
+note() { jq -r .body "$gl/inputs.log"; }
+
+setup
+not_ready "$(evidence "$head" "grep -q 'return 1' svc/Main.java" "test -f svc/Main.java")"
+expect_fail "an evidence command that fails at the head refuses the review" "not ready at ${head:0:8}" \
+  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_eq "with exit 4, so the coordinator sends it back to the writer" 4 \
+  "$(rm -f "$gl/n" "$gl/inputs.log" "$gl/calls.log"; "$REPO_ROOT/scripts/start-reviewer.sh" 12 > /dev/null 2>&1; echo $?)"
+expect_pass "one [coordinator] note names the command that failed and the log" sh -c \
+  "printf '%s' \"\$1\" | head -n 1 | grep -q '^\[coordinator\] not ready at $head: ' && printf '%s' \"\$1\" | grep -q \"^- \\\`grep -q 'return 1' svc/Main.java\\\` exited 1\$\" && printf '%s' \"\$1\" | grep -q '^- log: '" sh "$(note)"
+expect_eq "no model runs" "" "$(grep -- ' -p ' "$cl/calls.log" 2>/dev/null)"
+expect_eq "the check's worktree is removed" no "$([ -d "$FACTORY_REPO/.claude/worktrees/ready-12" ] && echo yes || echo no)"
+expect_pass "the log holds what each command printed" grep -q '^\$ test -f svc/Main.java$' "$FACTORY_REPO/.claude/ready/12-${head:0:8}.log"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]' "$(evidence "$head" "grep -q 'return 1' svc/Main.java")")"
+respond "$FACTORY_GLAB" 3 200 "$(jq -n --arg h "$head" '[{author: {username: "agent-reviewer"}, body: "[coordinator] not ready at \($h): x"}]')"
+expect_fail "a head already found not ready is refused again with no run and no second note" "the writer was told" \
+  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_eq "nothing was posted" "" "$(cat "$gl/inputs.log" 2>/dev/null)"
+expect_eq "nothing ran" no "$([ -f "$FACTORY_REPO/.claude/ready/12-${head:0:8}.log" ] && echo yes || echo no)"
+
+setup
+not_ready "AC1: total() returns the sum."
+expect_fail "a description with no evidence table refuses the review" "no evidence table" "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_pass "and the note says what the table must hold (VB5)" sh -c "printf '%s' \"\$1\" | grep -q 'Evidence at <head>'" sh "$(note)"
+
+setup
+not_ready "$(evidence "$head1" "test -f svc/Main.java")"
+expect_fail "evidence at another commit refuses the review (VB3)" "the evidence is at ${head1:0:7}" \
+  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+
+setup
+not_ready "$(evidence "$head" "curl -s localhost:8080/total")"
+expect_fail "evidence this machine may not run at all refuses the review" "no evidence command starts a program" \
+  "$REPO_ROOT/scripts/start-reviewer.sh" 12
+
+setup
+not_ready "$(evidence "$head" "test -f svc/Main.java \$(touch $TMP_BASE/pwned) ; touch $TMP_BASE/pwned2")"
+expect_fail "a command runs with no shell: \$( ) and ; are plain words" "exited" "$REPO_ROOT/scripts/start-reviewer.sh" 12
+expect_eq "so nothing outside the command ran" no "$([ -e "$TMP_BASE/pwned" ] || [ -e "$TMP_BASE/pwned2" ] && echo yes || echo no)"
+
+setup
+desc=$(evidence "$head" "grep -q 'return 2' svc/Main.java" "test -f svc/Main.java" "curl -s localhost:8080/total")
+respond "$FACTORY_GLAB" 1 200 "$bot"
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]' "$desc")"
+respond "$FACTORY_GLAB" 3 200 '[]'
+respond "$FACTORY_GLAB" 4 200 "$(mr "$head" '["agent::claimed"]' "$desc")"
+respond "$FACTORY_GLAB" 5 200 '{"default_branch":"main"}'
+respond "$FACTORY_GLAB" 6 200 "$(mr "$head" '["agent::claimed"]' "$desc")"
+respond "$FACTORY_GLAB" 7 200 "$(mr "$head" '["agent::claimed","needs-human"]' "$desc")"   # svc/CLAUDE.md is protected
+respond "$FACTORY_GLAB" 8 201 '{"id":1}'
+claude_answer 1 '{"findings":[]}'
+out=$("$REPO_ROOT/scripts/start-reviewer.sh" 12 2> "$TMP_BASE/ready.err")
+expect_eq "when every command it may run passes, the review starts" \
+  "review !12 round 1 at ${head:0:8}: Act on 0 · Consider 0 · Noted 0 · Dismissed 0 (\$0.25)" "$out"
+expect_eq "and says what it ran and what it left to the reviewer" \
+  "ready !12 at ${head:0:8}: 2 evidence command(s) passed, 1 left to the reviewer" "$(cat "$TMP_BASE/ready.err")"
 
 finish

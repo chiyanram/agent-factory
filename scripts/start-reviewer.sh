@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # start-reviewer <mr> — one review round on a claimed MR: pack → find → verify → post (#22; #39 PR 3).
 #
+#   0 Ready: the evidence in the description is run again at the head (scripts/lib/ready.sh; ADR-0011 D12). When it
+#     fails, one "[coordinator] not ready" note says why and no review runs.
 #   1 Rounds so far are this account's "[reviewer] round N · head …" notes. After 3 the MR goes to the human (#22 Q5).
 #   2 The context pack (scripts/pack.sh) for the head; from round 2, the interdiff since the last reviewed head.
 #     When the patch-id equals the last round's, the verdict is reused: one line, no model run (#22 Q2). When that
@@ -15,12 +17,13 @@
 #   FACTORY_REVIEW_FIND / FACTORY_REVIEW_VERIFY   the instructions (default prompts/review-*.md, #39 Q4)
 #   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   default sonnet, sonnet, opus
 #
-# Prints one line. Exits 0 when a verdict was posted or reused, 3 on MOVED, 1 otherwise.
+# Prints one line. Exits 0 when a verdict was posted or reused, 3 on MOVED, 4 when not ready, 1 otherwise.
 set -u
 set -o pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib/forge.sh"
 . "$here/lib/runs.sh"
+. "$here/lib/ready.sh"
 iid=${1:-}
 label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 find_prompt=${FACTORY_REVIEW_FIND:-$here/../prompts/review-find.md}
@@ -40,6 +43,7 @@ mr=$(forge_pr "$iid") || exit 1
 has_label "$mr" "$label" \
   || { echo "$mark$iid is not claimed; claim it first, so it gets one run at a time" >&2; exit 1; }
 sha=$(printf '%s' "$mr" | jq -r .sha)
+branch=$(printf '%s' "$mr" | jq -r .source_branch)
 
 runs=$(live_runs) || exit 1
 if printf '%s\n' "$runs" | grep -Eqx "(writer|reviewer)-$iid"; then
@@ -65,6 +69,13 @@ if [ -n "$last_head" ] && [ "$last_head" = "$sha" ]; then
   echo "$mark$iid was already reviewed at ${sha:0:8}; nothing to do"
   exit 0
 fi
+name=reviewer-$iid
+pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
+mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"   # the ready check runs the build: this marks it live
+run=''
+trap 'rm -f "$pidfile"; [ -z "$run" ] || rm -rf "$run"' EXIT
+ready_check "$iid" "$sha" "$branch" "$(printf '%s' "$mr" | jq -r '.description // ""')" "$notes" "$reviewer"
+case $? in 0) ;; 1) exit 4 ;; *) exit 1 ;; esac
 packed=$("$here/pack.sh" "$iid" ${last_head:+"$last_head"}) || exit 1
 pack=${packed##*: }; pack=${pack% (reused)}
 pid=$(sed -n 's/^- patch-id: \([0-9a-f]*\)$/\1/p' "$pack")
@@ -102,11 +113,7 @@ fi
 [ "$rounds" -lt 3 ] || { echo "$mark$iid has had 3 review rounds; it goes to the human (label needs-human)" >&2; exit 1; }
 
 # 3 · find and verify, in a folder the MR's rules cannot reach
-name=reviewer-$iid
-pidfile="$FACTORY_REPO/.claude/runs/$name.pid"
 run=$(mktemp -d "${TMPDIR:-/tmp}/factory-review.XXXXXX")
-mkdir -p "$(dirname "$pidfile")" && echo $$ > "$pidfile"
-trap 'rm -rf "$run"; rm -f "$pidfile"' EXIT
 # The files exactly as committed. Not git archive, whose .gitattributes could hide files (export-ignore) or rewrite
 # them (export-subst); and no .gitattributes at all, from the MR or this machine, so no encoding, eol, ident or
 # filter rule can change what the reviewer reads. Then every symlink goes (a link to a rule file or out of the
