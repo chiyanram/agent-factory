@@ -134,7 +134,8 @@ git -C "$base/repo" remote set-url origin "ssh://git@example.invalid/x.git"
 (cd "$base/repo" && PATH="bin:$base/repo/bin:$PATH" FACTORY_REPO="$base/repo" hgit fetch -q origin > /dev/null 2>&1)
 expect_eq "git's own child programs never come from a relative or in-repo PATH entry" "not run" "$(ran_by ssh)"
 
-for key in diff.external diff.x.command merge.x.driver 'url.file:///bad/.insteadOf' http.proxy; do
+for key in diff.external diff.x.command merge.x.driver 'url.file:///bad/.insteadOf' http.proxy \
+    'http.https://github.com/.proxy' http.sslVerify http.sslCAInfo http.curloptResolve; do
   setup
   git -C "$base/repo" config "$key" "$base/evil"
   expect_fail "a repo-set $key is refused, with nothing run" "refused: the repo's own config sets" hgit -C "$base/repo" status
@@ -149,6 +150,13 @@ expect_eq "a refused key the operator also sets takes the operator's value" http
 setup
 git -C "$base/repo" config credential.zzz.helper "!$base/evil"
 expect_pass "a repo whose last key is a foreign helper still runs" hgit -C "$base/repo" status
+
+setup
+git -C "$base/repo" config 'http.https://github.com/.extraheader' 'AUTHORIZATION: basic x'
+expect_pass "an http key that cannot redirect, such as GitHub checkout's extraheader, is left alone" hgit -C "$base/repo" status
+mkdir -p "$base/repo/sub" && git -C "$base/repo" config diff.external "$base/evil"
+expect_eq "without -C, git runs outside any repo: the current folder's config is never read" \
+  "$(printf x | git hash-object --stdin)" "$(cd "$base/repo/sub" && printf x | hgit hash-object --stdin)"
 
 # every host-side git call in scripts/ goes through hgit (check-links.sh reads this repo, not a project's)
 raw=$(grep -rnE '(^|[^a-z_h-])git (-C|-c|fetch|push|worktree|status|checkout|diff|show|rev-parse|patch-id|hash-object)' \
