@@ -146,9 +146,9 @@ it. A run is live while `claude agents --json` lists its session (`writer-<mr>` 
 
 ### Escalation
 
-The human gets: every OPEN design question, every `[writer] OPEN:` question, `needs-human` after 3 rounds, a merge conflict a writer could not rebase,
-a standing rule that contradicts what you see, and anything irreversible. You keep: polling, claims, retries of flaky
-jobs, and starting and restarting workers.
+The human gets: every OPEN design question, every `[writer] OPEN:` question, `needs-human` after 3 rounds, a merge
+conflict a writer could not rebase, a standing rule that contradicts what you see, and anything irreversible. You
+keep: polling, claims, retries of flaky jobs, and starting and restarting workers.
 
 ## Guardrails
 
