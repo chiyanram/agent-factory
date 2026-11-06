@@ -52,7 +52,7 @@ forge_pr() {
   printf '%s' "$pr" | jq -c '{
     state: (if .merged then "merged" elif .state == "open" then "opened" else "closed" end),
     sha: .head.sha, source_branch: .head.ref, target_branch: .base.ref, labels: [.labels[].name],
-    description: (.body // "")}'
+    description: (.body // ""), updated_at}'
 }
 
 forge_default_branch() {

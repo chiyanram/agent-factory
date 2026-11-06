@@ -4,7 +4,7 @@
 #
 #   forge_require_bot           fails unless the CLI acts as the coordinator's bot; sets me_name (ADR-0006)
 #   forge_pr N                  {state: opened|merged|closed, sha, source_branch, target_branch, labels: [name],
-#                                description}
+#                                description, updated_at: the last push, note or label, as ISO 8601 UTC}
 #   forge_default_branch        the project's default branch
 #   forge_label_add N LABEL     fails unless the forge kept the label
 #   forge_label_remove N LABEL

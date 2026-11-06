@@ -193,5 +193,8 @@ expect_eq "a pull request's body is its description, which the pack and the read
   "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .description)"
 respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
 expect_eq "an empty body is an empty description" "" "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .description)"
+respond "$FACTORY_GH" 3 200 '{"number":12,"state":"open","merged":false,"head":{"sha":"a","ref":"b"},"base":{"ref":"main"},"labels":[],"updated_at":"2026-11-06T09:00:00Z"}'
+expect_eq "a pull request carries the time it last changed, which reconcile reads" "2026-11-06T09:00:00Z" \
+  "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .updated_at)"
 
 finish

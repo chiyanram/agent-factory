@@ -70,6 +70,7 @@ The scripts read their settings from the environment.
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_AGENT_PREFIX` | the start of every GitLab agent account's name | `agent-` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
+| `FACTORY_QUIET_MINUTES` | how long an MR must go without a push, note or label before `reconcile` releases a claim whose run it cannot see | `30` |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `poll`, `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
@@ -128,7 +129,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | the gate is green and no Act on is open | undraft, assign a maintainer, `status "ready"` |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
-| you restart | `reconcile`: every claim without a live run goes back to the queue |
+| you restart | `reconcile`: every claim without a live run, on an MR quiet for `FACTORY_QUIET_MINUTES`, goes back to the queue |
 | a human posts `/stop`, or pushes to the branch | stand off that MR |
 | a merge conflict | `start-writer` to rebase; if that fails, `needs-human` |
 | a claimed MR with no live run shows `approved=stale` or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved MR; `claim` it again when the human answers |
@@ -153,7 +154,7 @@ and `#12` for `!12`.
 | `block.sh <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason> · log: <log>` note, then releases the claim; the label goes first |
 | `lint-edit.sh '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
-| `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR |
+| `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR; keeps a claim, and its worktrees, while its MR changed in the last `FACTORY_QUIET_MINUTES` |
 
 `poll` keeps no state, so a restart re-reads everything. It counts `/approved` only from a human maintainer, as the
 first line of a note, and only when it is newer than the last human edit of the description; an older one shows as
