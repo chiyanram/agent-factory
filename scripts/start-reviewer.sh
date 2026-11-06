@@ -196,8 +196,9 @@ protected=$(printf '%s\n' "$changed" | { grep -E \
   || true; })
 # a path an earlier round already sent to the human is listed again but does not relabel the MR, so a human who
 # cleared needs-human is not stopped again for the same file
-listed=$(printf '%s' "$notes" | jq -r --arg me "$reviewer" '.[] | select(.author.username == $me) | .body' \
-  | sed -n '/^Protected files:/,/^$/p' | sed -n 's/^- //p')
+listed=$(printf '%s' "$notes" | jq -r --arg me "$reviewer" '.[] | select(.author.username == $me) | .body | split("\n")
+  | (index(["Protected files: the human reviews these before the gate (needs-human)"][0]) // null) as $i
+  | if $i == null then empty else .[$i + 1:] | .[] | select(startswith("- ")) | ltrimstr("- ") end')
 fresh=$(printf '%s\n' "$protected" | while IFS= read -r f; do
   [ -n "$f" ] && ! printf '%s\n' "$listed" | grep -qxF -- "$f" && printf '%s\n' "$f"; done || true)
 [ -z "$protected" ] || lists="$lists
