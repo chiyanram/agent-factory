@@ -38,6 +38,7 @@ CI runs both on every pull request and on push to `main`.
 scripts/              the loop scripts and the lint checks
 scripts/lib/          the bash forge seam, until its last caller is ported (#138), and run tracking (runs.sh)
 src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab adapter over gh api and glab api
+src/core/box/         the box seam: one Box interface; FACTORY_BOX picks the place, openBox refuses a box that does not work
 prompts/              the reviewer's default find and verify instructions
 tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
 docs/adr/             decision records
