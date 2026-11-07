@@ -4,7 +4,7 @@
 // A branch or a writer can write the repo's own config (.git/config, a worktree's config.worktree, a file they include)
 // or a hook. Plain git on the host would then run that program as the operator, outside any box. hostGit runs git so
 // that every key that names a program comes from trusted config only:
-//   trusted   the system and global config: the operator's own
+//   trusted   the system (unless GIT_CONFIG_NOSYSTEM) and global config: the operator's own
 //   untrusted the repo's local and worktree config, and what it includes: a branch or a writer may have written it
 // Each such key gets its last trusted value or a neutral one, passed as GIT_CONFIG_COUNT entries (command scope), as
 // Sandcastle's src/hostGitConfig.ts does (study on #83, section 3.3). A repo-set key that has no safe neutral value and
@@ -165,15 +165,25 @@ export type ConfigRead =
     }
   | Refused;
 
+// readsSystem : false when GIT_CONFIG_NOSYSTEM is a true value. git then skips the system config, but an explicit
+// --system reads it anyway, so hostGit must skip it too or it adds back a value the operator turned off (#167).
+function readsSystem(env: NodeJS.ProcessEnv): boolean {
+  return /^(|0|false|no|off)$/i.test(env.GIT_CONFIG_NOSYSTEM ?? "");
+}
+
+// trustedList : one trusted config file as `git config --null --list` prints it. An unreadable file reads as empty,
+// which leaves the neutral values: the safe side.
+async function trustedList(git: string, scope: "--system" | "--global", env: NodeJS.ProcessEnv): Promise<string> {
+  const read = await run(git, ["config", scope, "--null", "--list"], env, NO_INPUT);
+  return read.code === 0 ? read.stdout : "";
+}
+
 // readConfig : the trusted config and the keys the repo sets. A repo read that fails is a refusal, never an empty
 // list: an empty list would leave every repo key unchecked (git before 2.26 has no --show-scope).
 async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Promise<ConfigRead> {
-  const system = await run(git, ["config", "--system", "--null", "--list"], env, NO_INPUT);
-  const global = await run(git, ["config", "--global", "--null", "--list"], env, NO_INPUT);
-  // an unreadable trusted file leaves the neutral values, which is the safe side
   const trusted = [
-    ...parseList(system.code === 0 ? system.stdout : ""),
-    ...parseList(global.code === 0 ? global.stdout : ""),
+    ...parseList(readsSystem(env) ? await trustedList(git, "--system", env) : ""),
+    ...parseList(await trustedList(git, "--global", env)),
   ];
   const scoped = await run(
     git,

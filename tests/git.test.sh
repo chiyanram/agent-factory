@@ -83,6 +83,14 @@ expect_eq "the operator's own helper is kept, and only it" store-trusted \
 : > "$GIT_CONFIG_GLOBAL"
 
 setup
+printf '[credential]\n\thelper = system-helper\n' > "$base/system.gitconfig"
+git -C "$base/repo" config credential.helper "!$base/evil-helper"
+expect_eq "a system helper that GIT_CONFIG_NOSYSTEM turns off is not added back (#167)" "" \
+  "$(GIT_CONFIG_SYSTEM="$base/system.gitconfig" hgit -C "$base/repo" config --get-all credential.helper | effective)"
+expect_eq "with GIT_CONFIG_NOSYSTEM off, the system helper is kept" system-helper \
+  "$(GIT_CONFIG_SYSTEM="$base/system.gitconfig" GIT_CONFIG_NOSYSTEM= hgit -C "$base/repo" config --get-all credential.helper | effective)"
+
+setup
 own="!$REPO_ROOT/scripts/github-app.sh git-credential"
 git -C "$base/repo" config --add credential.https://github.com.helper ""
 git -C "$base/repo" config --add credential.https://github.com.helper "$own"

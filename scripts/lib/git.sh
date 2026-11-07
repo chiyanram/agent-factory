@@ -6,7 +6,7 @@
 # core.fsmonitor on `git status`, a pre-push hook on push, a filter driver on checkout. hgit runs git so that every
 # such key comes from trusted config only.
 #
-#   trusted   the system and global config, and -c on the command line: the operator's own
+#   trusted   the system (unless GIT_CONFIG_NOSYSTEM) and global config, and -c on the command line: the operator's own
 #   untrusted the repo's local and worktree config, and what it includes: a branch or a writer may have written it
 #
 # Each key below gets its last trusted value or a neutral one, passed as GIT_CONFIG_COUNT entries (command scope,
@@ -86,9 +86,15 @@ hg_refuse() {
   return 1
 }
 
+# hg_nosystem : true when GIT_CONFIG_NOSYSTEM is a true value. git then skips the system config, but an explicit
+# --system reads it anyway, so hgit must skip it too or it adds back a value the operator turned off (#167).
+hg_nosystem() {
+  case $(printf '%s' "${GIT_CONFIG_NOSYSTEM:-}" | tr '[:upper:]' '[:lower:]') in '' | 0 | false | no | off) return 1 ;; esac
+}
+
 # hg_overrides DIR : the overrides for the repo at DIR, NUL-separated. Fails when hg_refuse refuses.
 hg_overrides() {
-  hg_tr=$({ "$hg_git" config --system --list; "$hg_git" config --global --list; } 2> /dev/null)
+  hg_tr=$({ hg_nosystem || "$hg_git" config --system --list; "$hg_git" config --global --list; } 2> /dev/null)
   for hg_kv in core.fsmonitor=false core.hookspath=/dev/null core.pager=cat core.editor=true sequence.editor=true \
       gpg.program=gpg gpg.openpgp.program=gpg gpg.x509.program=gpgsm gpg.ssh.program=ssh-keygen \
       protocol.ext.allow=never submodule.recurse=false fetch.recursesubmodules=false; do
