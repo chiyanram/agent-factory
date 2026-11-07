@@ -1,0 +1,9 @@
+[
+  { "hash": "1111111111111111111111111111111111111111", "message": "feat(cli): the dispatcher runs one locked pass (#103) (#154)\n\nThe writer step waits on #113 and #138 until those land." },
+  { "hash": "2222222222222222222222222222222222222222", "message": "fix(box): a box never starts with an expired token (#136) (#155)" },
+  { "hash": "3333333333333333333333333333333333333333", "message": "feat(forge)!: one Forge seam for both forges (#140) (#160)\n\nBREAKING CHANGE: FACTORY_FORGE replaces FACTORY_GLAB." },
+  { "hash": "4444444444444444444444444444444444444444", "message": "docs: the GUIDE names its terms (#161)" },
+  { "hash": "5555555555555555555555555555555555555555", "message": "perf(dispatch): poll each forge once per pass (#162)" },
+  { "hash": "6666666666666666666666666666666666666666", "message": "feat(setup): setup reads the rules from skills#31 (#163)" },
+  { "hash": "7777777777777777777777777777777777777777", "message": "ci(release): pin the release action (#164)" }
+]

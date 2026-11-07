@@ -1,20 +1,16 @@
 // semantic-release config (#153), the same shape as chiyanram/skills. A module, not JSON, because the release notes
-// need a writer transform: the conventionalcommits preset links every `#N` in a subject to this repo, and
-// scripts/release_links.mjs points `repo#N` and `owner/repo#N` at their own repo.
+// need their own templates and transform, which live in scripts/release_notes.mjs (#157).
 //
 // A release is a tag vX.Y.Z, a GitHub release and a CHANGELOG.md entry; nothing is published to npm (package.json is
 // private). A colleague installs a pinned version with: npm i -g github:chiyanram/agent-factory#vX.Y.Z
-import { transformWithCrossRepoLinks } from './scripts/release_links.mjs'
+import { releaseNotes } from './scripts/release_notes.mjs'
 
 export default {
   branches: ['main'],
   tagFormat: 'v${version}',
   plugins: [
     ['@semantic-release/commit-analyzer', { preset: 'conventionalcommits' }],
-    [
-      '@semantic-release/release-notes-generator',
-      { preset: 'conventionalcommits', writerOpts: { transform: transformWithCrossRepoLinks } },
-    ],
+    ['@semantic-release/release-notes-generator', releaseNotes],
     [
       '@semantic-release/changelog',
       {
