@@ -170,9 +170,9 @@ expect_fail "a git that cannot list the repo's keys is refused, never run unchec
 expect_fail "a GIT_CONFIG_COUNT that is not a whole number is refused" "not a whole number" \
   env GIT_CONFIG_COUNT=x bash -c ". '$REPO_ROOT/scripts/lib/git.sh'; hgit -C '$base/repo' status"
 
-# every host-side git call in scripts/ goes through hgit (check-links.sh reads this repo, not a project's)
+# every host-side git call in scripts/ goes through hgit (check-links.ts reads this repo, not a project's)
 raw=$(grep -rnE '(^|[^a-z_h-])git (-C|-c|fetch|push|worktree|status|checkout|diff|show|rev-parse|patch-id|hash-object)' \
-  "$REPO_ROOT/scripts" | grep -v '/check-links.sh:' | grep -vE ':[0-9]+:\s*#' | grep -v 'git rev-parse HEAD' || true)
+  "$REPO_ROOT/scripts" | grep -v '/check-links.ts:' | grep -vE ':[0-9]+:\s*#' | grep -v 'git rev-parse HEAD' || true)
 expect_eq "no script calls git directly on a project's repo" "" "$raw"
 
 finish

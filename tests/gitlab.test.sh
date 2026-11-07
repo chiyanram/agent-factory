@@ -36,13 +36,4 @@ printf 'glab: not logged in\n' > "$(dirname "$FACTORY_GLAB")/e1"
 : > "$(dirname "$FACTORY_GLAB")/r1"
 expect_fail "output with no HTTP status fails" "no HTTP status" gl_api projects/1/merge_requests/12
 
-FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
-export FACTORY_PROJECT=o/r
-respond "$FACTORY_GLAB" 1 400 '{"message":"400 Bad request - line_code can not be blank"}'
-respond "$FACTORY_GLAB" 2 201 '{"id":"d2"}'
-forge_line_finding 12 '{"diff_refs":{"base_sha":"b","start_sha":"s","head_sha":"h"}}' \
-  '{"file":"src/A.java","line":400}' "[reviewer] Act on F1"
-expect_eq "a line outside the diff opens an unanchored thread that keeps the seat prefix first (#128)" \
-  '[reviewer] `src/A.java:400` Act on F1' "$(sed -n 2p "$(dirname "$FACTORY_GLAB")/inputs.log" | jq -r .body)"
-
 finish

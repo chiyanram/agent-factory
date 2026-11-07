@@ -77,6 +77,20 @@ function refusal(runs: readonly string[], number: number, maxRuns: number): stri
     : "";
 }
 
+// liveRuns : the names of this machine's live runs (writer-<n>, reviewer-<n>); fails when claude cannot say, so a
+// caller never mistakes "unknown" for "none" and releases a claim a run still holds
+export async function liveRuns(input: {
+  readonly repo: string;
+  readonly sessions: Sessions;
+}): Promise<Result<readonly string[]>> {
+  const listed = await input.sessions();
+  if (listed.kind === "failed") {
+    return listed;
+  }
+  const pids = await pidRuns(join(input.repo, ".claude", "runs"));
+  return { kind: "ok", value: [...new Set([...listed.value, ...pids])].filter((r) => RUN.test(r)) };
+}
+
 // holdRun : the reviewer's run on change `number`, or why it may not start now
 export async function holdRun(input: {
   readonly repo: string;
@@ -84,12 +98,12 @@ export async function holdRun(input: {
   readonly sessions: Sessions;
   readonly maxRuns: number;
 }): Promise<Result<Held>> {
-  const listed = await input.sessions();
-  if (listed.kind === "failed") {
-    return listed;
+  const live = await liveRuns(input);
+  if (live.kind === "failed") {
+    return live;
   }
   const dir = join(input.repo, ".claude", "runs");
-  const runs = [...new Set([...listed.value, ...(await pidRuns(dir))])].filter((r) => RUN.test(r));
+  const runs = live.value;
   const refused = refusal(runs, input.number, input.maxRuns);
   if (refused !== "") {
     return { kind: "failed", reason: refused };

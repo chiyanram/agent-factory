@@ -7,8 +7,8 @@ node_modules/.package-lock.json: package.json package-lock.json
 	@npm ci --no-audit --no-fund --ignore-scripts
 
 lint: node_modules/.package-lock.json ## check links, the AGENTS.md size, type-check, the Biome format, and the oxlint rules
-	@scripts/check-links.sh .
-	@scripts/check-size.sh .
+	@node scripts/check-links.ts .
+	@node scripts/check-size.ts .
 	@npm run --silent lint
 	@npx --no-install biome ci .
 	@node scripts/lint-ratchet.ts

@@ -22,8 +22,8 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `scripts/check-links.sh .` (every relative link in a tracked `.md` file resolves), `scripts/check-size.sh .` (the root `AGENTS.md` is under 200 lines) and `tsc --noEmit` |
-| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. One file: `bash tests/claim.test.sh` or `npx vitest run test/poll.test.ts` |
+| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
+| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. One file: `bash tests/start-writer.test.sh` or `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
 

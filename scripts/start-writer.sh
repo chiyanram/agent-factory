@@ -61,11 +61,13 @@ target=$(printf '%s' "$mr" | jq -r '.target_branch // empty')
 commands=''
 [ -z "$target" ] || ! hgit -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$target:refs/factory/target" 2> /dev/null \
   || commands=$(hgit -C "$FACTORY_REPO" show refs/factory/target:docs/agents/commands.md 2> /dev/null | tr -d '\r')
+# the package's own CLI (npm run build), run by an absolute node: ask and the lint hook are TypeScript now (#138)
+cli="$(printf '%q' "$(command -v node)") $(printf '%q' "$(cd "$(dirname "$0")/.." && pwd)/dist/cli.js")"
 tool() { printf '%s\n' "$commands" | sed -n "s/^$1:[[:space:]]*//p" | head -n 1 | sed 's/^`\(.*\)`[[:space:]]*$/\1/; s/[[:space:]]*$//'; }
 lint=$(tool lint-file)
 quick=$(tool test-touched)
 if [ -n "$lint" ]; then
-  hook="$(printf '%q' "$(cd "$(dirname "$0")" && pwd)/lint-edit.sh") $(printf '%q' "$lint")"
+  hook="$cli lint-edit $(printf '%q' "$lint")"
   writer_settings "$path" "$(jq -cn --arg c "$hook" \
     '{hooks: {PostToolUse: [{matcher: "Edit|MultiEdit|Write", hooks: [{type: "command", command: $c}]}]}}')" \
     || { remove_worktree "$path"; exit 1; }
@@ -79,8 +81,9 @@ tools=''
 ask="FACTORY_FORGE=${FACTORY_FORGE:-gitlab} FACTORY_PROJECT=$(printf '%q' "$FACTORY_PROJECT")"
 absolute() { case $1 in */*) (cd "$(dirname "$1")" && printf '%s/%s' "$(pwd)" "$(basename "$1")") ;; *) printf '%s' "$1" ;; esac; }
 [ -z "${FACTORY_GLAB:-}" ] || ask="$ask FACTORY_GLAB=$(printf '%q' "$(absolute "$FACTORY_GLAB")")"
-[ -z "${FACTORY_GH:-}" ] || ask="$ask FACTORY_GH=$(printf '%q' "$(absolute "$FACTORY_GH")")"
-ask="$ask $(printf '%q' "$(cd "$(dirname "$0")" && pwd)/ask.sh") $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
+# on GitHub the writer's session has no gh login: the ask goes through the App's gh, as lib/github.sh's own calls do
+ask="$ask FACTORY_GH=$(printf '%q' "$(absolute "${FACTORY_GH:-$(cd "$(dirname "$0")/bin" && pwd)/gh}")")"
+ask="$ask $cli ask $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
 asking="When the contract does not settle a question, never guess: push your commits, then run
 $ask
 with the question in single quotes (write each ' inside it as '\\''), and stop without marking the MR ready.

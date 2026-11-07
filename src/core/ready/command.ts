@@ -76,8 +76,8 @@ function double(l: Lex, c: string): void {
 
 const BY_QUOTE: Readonly<Record<Quote, (l: Lex, c: string) => void>> = { none: bare, single, double };
 
-// words : the command's words, or what stops it
-function words(command: string): Result<readonly string[]> {
+// commandWords : the command's words, or what stops it
+export function commandWords(command: string): Result<readonly string[]> {
   if (/\p{Cc}/u.test(command.replaceAll("\t", " "))) {
     return { kind: "failed", reason: "it holds a control character" };
   }
@@ -94,7 +94,7 @@ function words(command: string): Result<readonly string[]> {
 
 // commandArgv : the row's command as argv, when it runs one program from the list with no shell
 export function commandArgv(command: string, programs: readonly string[]): Result<Argv> {
-  const split = words(command);
+  const split = commandWords(command);
   if (split.kind === "failed") {
     return split;
   }
