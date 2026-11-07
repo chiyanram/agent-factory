@@ -26,12 +26,20 @@ const change = (number: number, o: Partial<OpenChange> = {}): OpenChange => ({
   comments: [],
   ...o,
 });
-const changes = (open: readonly OpenChange[], merged: readonly number[] = []): Changes => ({ team, open, merged: merged.map((number) => ({ number, branch: `factory/T-${number}`, fork: false })) });
-const one = (c: OpenChange): OpenLine => decide({ changes: changes([c]), label: "agent::claimed", factory: "ram" })[0] as OpenLine;
+const changes = (open: readonly OpenChange[], merged: readonly number[] = []): Changes => ({
+  team,
+  open,
+  merged: merged.map((number) => ({ number, branch: `factory/T-${number}`, fork: false })),
+});
+const one = (c: OpenChange): OpenLine =>
+  decide({ changes: changes([c]), label: "agent::claimed", factory: "ram" })[0] as OpenLine;
 
 describe("decide", () => {
   it("reads claimed and needs-human from the labels", () => {
-    expect(one(change(1, { labels: ["agent::claimed", "needs-human"] }))).toMatchObject({ claimed: true, needsHuman: true });
+    expect(one(change(1, { labels: ["agent::claimed", "needs-human"] }))).toMatchObject({
+      claimed: true,
+      needsHuman: true,
+    });
     expect(one(change(1))).toMatchObject({ claimed: false, needsHuman: false, stop: { kind: "none" }, asks: 0 });
   });
 
@@ -46,7 +54,11 @@ describe("decide", () => {
 
   it("lists merged claims, all in change-number order", () => {
     const lines = decide({ changes: changes([change(7), change(2)], [5]), label: "agent::claimed", factory: "ram" });
-    expect(lines.map((l) => [l.kind, l.number])).toEqual([["open", 2], ["merged", 5], ["open", 7]]);
+    expect(lines.map((l) => [l.kind, l.number])).toEqual([
+      ["open", 2],
+      ["merged", 5],
+      ["open", 7],
+    ]);
   });
 });
 
@@ -55,22 +67,42 @@ describe("stop", () => {
   const maintainers = new Set(["ram"]);
 
   it("is a maintainer's last /stop, as the first line, even under the factory's login", () => {
-    const comments = [n("ram", "/stop", "2026-11-02T10:00:00Z"), n("ram", " /stop \nwait for me", "2026-11-02T12:00:00Z")];
+    const comments = [
+      n("ram", "/stop", "2026-11-02T10:00:00Z"),
+      n("ram", " /stop \nwait for me", "2026-11-02T12:00:00Z"),
+    ];
     expect(stop({ comments, readers, maintainers })).toEqual({ kind: "stopped", at: "2026-11-02T12:00:00.000Z" });
   });
 
   it("gives the time in ISO 8601 UTC, and a time that does not parse as undated, which still stops", () => {
-    expect(stop({ comments: [n("ram", "/stop", "2026-11-02T11:00:00+01:00")], readers, maintainers })).toEqual({ kind: "stopped", at: "2026-11-02T10:00:00.000Z" });
-    expect(stop({ comments: [n("ram", "/stop", "2026-11-02T10:00:00Z"), n("ram", "/stop", "last tuesday")], readers, maintainers })).toEqual({ kind: "undated" });
+    expect(stop({ comments: [n("ram", "/stop", "2026-11-02T11:00:00+01:00")], readers, maintainers })).toEqual({
+      kind: "stopped",
+      at: "2026-11-02T10:00:00.000Z",
+    });
+    expect(
+      stop({
+        comments: [n("ram", "/stop", "2026-11-02T10:00:00Z"), n("ram", "/stop", "last tuesday")],
+        readers,
+        maintainers,
+      }),
+    ).toEqual({ kind: "undated" });
   });
 
   it("a bot's /stop never stops, whatever its access", () => {
-    const line = decide({ changes: changes([change(1, { comments: [n("ci-bot", "/stop", "2026-11-02T10:00:00Z")] })]), label: "l", factory: "ram" })[0] as OpenLine;
+    const line = decide({
+      changes: changes([change(1, { comments: [n("ci-bot", "/stop", "2026-11-02T10:00:00Z")] })]),
+      label: "l",
+      factory: "ram",
+    })[0] as OpenLine;
     expect(line.stop).toEqual({ kind: "none" });
   });
 
   it("a developer's /stop, a /stop later in a note, or a stop word in a post does not count", () => {
-    const comments = [n("lee", "/stop", "2026-11-02T10:00:00Z"), n("ram", "ok\n/stop", "2026-11-02T11:00:00Z"), n("ram", agent("coordinator", "/stop"), "2026-11-02T12:00:00Z")];
+    const comments = [
+      n("lee", "/stop", "2026-11-02T10:00:00Z"),
+      n("ram", "ok\n/stop", "2026-11-02T11:00:00Z"),
+      n("ram", agent("coordinator", "/stop"), "2026-11-02T12:00:00Z"),
+    ];
     expect(stop({ comments, readers, maintainers })).toEqual({ kind: "none" });
   });
 });
@@ -78,9 +110,13 @@ describe("stop", () => {
 describe("format", () => {
   it("writes one line per change, with the forge's mark", () => {
     const line = one(change(12, { labels: ["agent::claimed"], comments: [n("ram", "/stop", "2026-11-02T10:00:00Z")] }));
-    expect(format({ line, mark: "!" })).toBe("!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00.000Z asks=0");
+    expect(format({ line, mark: "!" })).toBe(
+      "!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00.000Z asks=0",
+    );
     expect(format({ line: { ...line, stop: { kind: "undated" } }, mark: "!" })).toContain(" stop=undated ");
-    expect(format({ line: { kind: "merged", number: 9, branch: "factory/T-9", fork: false }, mark: "#" })).toBe("#9 merged claimed=yes");
+    expect(format({ line: { kind: "merged", number: 9, branch: "factory/T-9", fork: false }, mark: "#" })).toBe(
+      "#9 merged claimed=yes",
+    );
   });
 
   it("an unknown pipeline says what the forge said, in plain characters (#124)", () => {
@@ -90,17 +126,39 @@ describe("format", () => {
 });
 
 describe("poll", () => {
-  const forge = (me: Forge["me"], read: Forge["changes"]): Forge => ({ me, changes: read } as unknown as Forge);
+  const forge = (me: Forge["me"], read: Forge["changes"]): Forge => ({ me, changes: read }) as unknown as Forge;
 
   it("decides with the CLI's login as the factory's", async () => {
     const ask = n("lee", agent("writer", "OPEN: x"), "2026-11-02T10:00:00Z");
-    const result = await poll({ forge: forge(async () => ({ kind: "ok", value: "lee" }), async () => ({ kind: "ok", value: changes([change(1, { comments: [ask] })]) })), label: "l" });
+    const result = await poll({
+      forge: forge(
+        async () => ({ kind: "ok", value: "lee" }),
+        async () => ({ kind: "ok", value: changes([change(1, { comments: [ask] })]) }),
+      ),
+      label: "l",
+    });
     expect(result.kind === "ok" ? (result.value[0] as OpenLine).asks : -1).toBe(1);
   });
 
   it("fails when the login or the changes cannot be read, never prints a partial poll", async () => {
     const failed = { kind: "failed", reason: "github: HTTP 502" } as const;
-    expect(await poll({ forge: forge(async () => failed, async () => ({ kind: "ok", value: changes([]) })), label: "l" })).toEqual(failed);
-    expect(await poll({ forge: forge(async () => ({ kind: "ok", value: "ram" }), async () => failed), label: "l" })).toEqual(failed);
+    expect(
+      await poll({
+        forge: forge(
+          async () => failed,
+          async () => ({ kind: "ok", value: changes([]) }),
+        ),
+        label: "l",
+      }),
+    ).toEqual(failed);
+    expect(
+      await poll({
+        forge: forge(
+          async () => ({ kind: "ok", value: "ram" }),
+          async () => failed,
+        ),
+        label: "l",
+      }),
+    ).toEqual(failed);
   });
 });

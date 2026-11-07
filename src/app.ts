@@ -53,7 +53,11 @@ type Args = {
   readonly io: Io;
 };
 
-export type Io = { readonly env: NodeJS.ProcessEnv; readonly out: (text: string) => void; readonly err: (text: string) => void };
+export type Io = {
+  readonly env: NodeJS.ProcessEnv;
+  readonly out: (text: string) => void;
+  readonly err: (text: string) => void;
+};
 
 type Home = { readonly kind: "home"; readonly path: string } | { readonly kind: "refused"; readonly reason: string };
 
@@ -64,7 +68,9 @@ function factoryHome(env: NodeJS.ProcessEnv): Home {
   if (set === undefined) {
     return { kind: "home", path: join(homedir(), ".factory") };
   }
-  return isAbsolute(set) ? { kind: "home", path: set } : { kind: "refused", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(set)}` };
+  return isAbsolute(set)
+    ? { kind: "home", path: set }
+    : { kind: "refused", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(set)}` };
 }
 
 function version(): string {
@@ -129,7 +135,9 @@ async function spec({ template: wantTemplate, positionals, io }: Args): Promise<
     case "found": {
       const checked = checkSpec(read.text);
       if (checked.kind === "invalid") {
-        io.err(`agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`);
+        io.err(
+          `agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`,
+        );
         return 2;
       }
       io.out(`spec ${project}/${ticket} ${checked.spec.hash} ${read.where}\n`);
@@ -141,7 +149,13 @@ async function spec({ template: wantTemplate, positionals, io }: Args): Promise<
 // whoApproves : the OS user and, when set, the operator's own git user.name. A record, not proof: the harness prompt is
 // the gate.
 async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
-  const name = await hostGit({ args: ["config", "--get", "user.name"], repo: { kind: "none" }, env, ownHelper: { kind: "none" }, stdin: { kind: "none" } });
+  const name = await hostGit({
+    args: ["config", "--get", "user.name"],
+    repo: { kind: "none" },
+    env,
+    ownHelper: { kind: "none" },
+    stdin: { kind: "none" },
+  });
   const gitName = name.kind === "ok" ? name.stdout.trim() : "";
   return gitName.length > 0 ? `${userInfo().username} (${gitName})` : userInfo().username;
 }
@@ -157,7 +171,12 @@ async function approveCommand({ positionals, io }: Args): Promise<number> {
     io.err(`agent-factory approve: refused: ${home.reason}\n`);
     return 1;
   }
-  const result = await approve({ where: { home: home.path, project, ticket }, seenHash: hash, by: await whoApproves(io.env), at: new Date().toISOString() });
+  const result = await approve({
+    where: { home: home.path, project, ticket },
+    seenHash: hash,
+    by: await whoApproves(io.env),
+    at: new Date().toISOString(),
+  });
   if (result.kind === "refused") {
     io.err(`agent-factory approve: refused: ${result.reason}\n`);
     return 1;
@@ -177,10 +196,14 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
   const state = home.kind === "home" ? await approvalState({ home: home.path, project, ticket }) : home;
   switch (state.kind) {
     case "approved":
-      io.out(`approved ${project}/${ticket} spec ${state.record.spec_hash} by ${state.record.by} at ${state.record.at}\n`);
+      io.out(
+        `approved ${project}/${ticket} spec ${state.record.spec_hash} by ${state.record.by} at ${state.record.at}\n`,
+      );
       return 0;
     case "stale":
-      io.out(`stale ${project}/${ticket}: approved spec ${state.approvedHash}, now ${state.currentHash}; approve again\n`);
+      io.out(
+        `stale ${project}/${ticket}: approved spec ${state.approvedHash}, now ${state.currentHash}; approve again\n`,
+      );
       return 3;
     case "missing":
       io.out(`missing ${project}/${ticket}: not approved\n`);
@@ -198,6 +221,51 @@ function quietMinutes(env: NodeJS.ProcessEnv): number | "bad" {
   return /^[1-9]\d{0,5}$/.test(raw) ? Number(raw) : "bad";
 }
 
+type DispatchSettings =
+  | { readonly home: string; readonly quiet: number }
+  | { readonly kind: "refused"; readonly reason: string };
+
+function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
+  const home = factoryHome(env);
+  const quiet = quietMinutes(env);
+  if (home.kind === "refused") {
+    return home;
+  }
+  return quiet === "bad"
+    ? { kind: "refused", reason: "FACTORY_QUIET_MINUTES must be a whole number of minutes" }
+    : { home: home.path, quiet };
+}
+
+async function onePass(
+  project: string,
+  dryRun: boolean,
+  io: Io,
+  settings: { readonly home: string; readonly quiet: number },
+): Promise<number> {
+  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  if (opened.kind === "failed") {
+    io.err(`agent-factory dispatch: ${opened.reason}\n`);
+    return 1;
+  }
+  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  const passed = await tick({
+    home: settings.home,
+    project,
+    forge: opened.value.forge,
+    label,
+    steps: STEPS_TODAY,
+    now: () => Date.now(),
+    quietMinutes: settings.quiet,
+    dryRun,
+    log: (line) => io.out(`${line}\n`),
+  });
+  if (passed.kind === "failed") {
+    io.err(`agent-factory dispatch: ${passed.reason}\n`);
+    return 1;
+  }
+  return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
+}
+
 // dispatch : one pass (#103). Only --once: launchd or cron runs it every few minutes, and a lock keeps passes apart.
 async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise<number> {
   const [project] = positionals;
@@ -205,24 +273,12 @@ async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise
     io.err("usage: agent-factory dispatch <project> --once [--dry-run]\n");
     return 64;
   }
-  const home = factoryHome(io.env);
-  const quiet = quietMinutes(io.env);
-  if (home.kind === "refused" || quiet === "bad") {
-    io.err(`agent-factory dispatch: ${home.kind === "refused" ? home.reason : "FACTORY_QUIET_MINUTES must be a whole number of minutes"}\n`);
+  const settings = dispatchSettings(io.env);
+  if ("kind" in settings) {
+    io.err(`agent-factory dispatch: ${settings.reason}\n`);
     return 1;
   }
-  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
-  if (opened.kind === "failed") {
-    io.err(`agent-factory dispatch: ${opened.reason}\n`);
-    return 1;
-  }
-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
-  const passed = await tick({ home: home.path, project, forge: opened.value.forge, label, steps: STEPS_TODAY, now: () => Date.now(), quietMinutes: quiet, dryRun, log: (line) => io.out(`${line}\n`) });
-  if (passed.kind === "failed") {
-    io.err(`agent-factory dispatch: ${passed.reason}\n`);
-    return 1;
-  }
-  return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
+  return onePass(project, dryRun, io, settings);
 }
 
 // app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the
@@ -235,9 +291,16 @@ async function appTokenCommand({ positionals, io }: Args): Promise<number> {
   }
   const me = userInfo();
   const config = await readAppConfig({ home: me.homedir, me: { uid: me.uid } });
-  const minted = config.kind === "ok"
-    ? await mint({ config: config.value, project, http: realHttp, now: Math.floor(Date.now() / 1000), cacheDir: join(me.homedir, ".cache", "agent-factory") })
-    : config;
+  const minted =
+    config.kind === "ok"
+      ? await mint({
+          config: config.value,
+          project,
+          http: realHttp,
+          now: Math.floor(Date.now() / 1000),
+          cacheDir: join(me.homedir, ".cache", "agent-factory"),
+        })
+      : config;
   if (minted.kind === "failed") {
     io.err(`agent-factory app-token: ${minted.reason}\n`);
     return 1;
@@ -286,4 +349,3 @@ export async function runCli(argv: readonly string[], io: Io): Promise<number> {
     io,
   });
 }
-

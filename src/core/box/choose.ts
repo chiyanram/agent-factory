@@ -30,7 +30,9 @@ export function chooseBox(env: NodeJS.ProcessEnv): BoxChoice {
     return { kind: "refused", reason: "FACTORY_BOX is not set; set it to vm" };
   }
   const place = PLACES.find((p) => p.value === set);
-  return place === undefined ? { kind: "refused", reason: `FACTORY_BOX=${JSON.stringify(set)} is not a box; use vm` } : place.choice;
+  return place === undefined
+    ? { kind: "refused", reason: `FACTORY_BOX=${JSON.stringify(set)} is not a box; use vm` }
+    : place.choice;
 }
 
 export type Pin = PinnedImage | { readonly kind: "refused"; readonly reason: string };
@@ -39,7 +41,9 @@ const DIGEST = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 // pinImage : an image named by its sha256 digest; a tag alone can change under the factory, so it is refused (S7)
 export function pinImage(ref: string): Pin {
-  return DIGEST.test(ref) ? { kind: "pinned", ref } : { kind: "refused", reason: `image ${JSON.stringify(ref)} is not pinned by digest (name@sha256:<64 hex>)` };
+  return DIGEST.test(ref)
+    ? { kind: "pinned", ref }
+    : { kind: "refused", reason: `image ${JSON.stringify(ref)} is not pinned by digest (name@sha256:<64 hex>)` };
 }
 
 export type Opened =

@@ -3,7 +3,9 @@
 
 import type { Call, Client, Runner } from "../src/core/forge/api.js";
 
-export type Scripted = { readonly status: number; readonly body: unknown; readonly headers?: Readonly<Record<string, string>> } | { readonly raw: Exit };
+export type Scripted =
+  | { readonly status: number; readonly body: unknown; readonly headers?: Readonly<Record<string, string>> }
+  | { readonly raw: Exit };
 type Exit = { readonly code: number; readonly stdout: string; readonly stderr: string };
 
 export type Fake = { readonly calls: Call[]; readonly slept: number[]; readonly client: Client };
@@ -12,7 +14,9 @@ function answer(s: Scripted): Exit {
   if ("raw" in s) {
     return s.raw;
   }
-  const headers = Object.entries(s.headers ?? {}).map(([k, v]) => `${k}: ${v}\r\n`).join("");
+  const headers = Object.entries(s.headers ?? {})
+    .map(([k, v]) => `${k}: ${v}\r\n`)
+    .join("");
   const body = typeof s.body === "string" ? s.body : JSON.stringify(s.body);
   return { code: s.status >= 400 ? 1 : 0, stdout: `HTTP/2.0 ${s.status} X\r\n${headers}\r\n${body}`, stderr: "" };
 }
@@ -23,7 +27,9 @@ export function fake(name: "github" | "gitlab", script: readonly Scripted[], max
   const run: Runner = async (call) => {
     calls.push(call);
     const next = script[calls.length - 1];
-    return next === undefined ? { code: 3, stdout: "", stderr: `fake: no answer for call ${calls.length}: ${call.args.join(" ")}` } : answer(next);
+    return next === undefined
+      ? { code: 3, stdout: "", stderr: `fake: no answer for call ${calls.length}: ${call.args.join(" ")}` }
+      : answer(next);
   };
   const client: Client = {
     name,

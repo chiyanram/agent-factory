@@ -2,7 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkSpec, normalise, prBlock, readSpec, specHash, specPath, template, type Spec, type SpecRead } from "../src/core/spec.js";
+import {
+  checkSpec,
+  normalise,
+  prBlock,
+  readSpec,
+  specHash,
+  specPath,
+  template,
+  type Spec,
+  type SpecRead,
+} from "../src/core/spec.js";
 
 const GOOD = [
   "# PROJ-123: renewals refuse a reserved loan",
@@ -159,13 +169,23 @@ describe("the spec stores", () => {
   });
 
   it("says missing, not refused, when there is no spec yet", async () => {
-    expect(await readSpec({ store: { kind: "local", root }, project: "ledger", ticket: "PROJ-1" })).toMatchObject({ kind: "missing" });
+    expect(await readSpec({ store: { kind: "local", root }, project: "ledger", ticket: "PROJ-1" })).toMatchObject({
+      kind: "missing",
+    });
   });
 
   it("refuses a project or ticket that is not a plain name, so no path leaves the store", async () => {
-    for (const [project, ticket] of [["..", "x"], ["ledger", "../../etc"], ["a/b", "x"], [".hidden", "x"], ["ledger", ""]] as const) {
+    for (const [project, ticket] of [
+      ["..", "x"],
+      ["ledger", "../../etc"],
+      ["a/b", "x"],
+      [".hidden", "x"],
+      ["ledger", ""],
+    ] as const) {
       expect(specPath({ root, project, ticket })).toMatchObject({ kind: "refused" });
-      expect(await readSpec({ store: { kind: "local", root }, project: project, ticket: ticket })).toMatchObject({ kind: "refused" });
+      expect(await readSpec({ store: { kind: "local", root }, project: project, ticket: ticket })).toMatchObject({
+        kind: "refused",
+      });
     }
   });
 
@@ -175,9 +195,14 @@ describe("the spec stores", () => {
       asked.push(ticket);
       return Promise.resolve({ kind: "found", text: GOOD, where: `issue ${ticket}` });
     };
-    expect(await readSpec({ store: { kind: "issue", readIssueBody }, project: "ledger", ticket: "42" })).toMatchObject({ kind: "found", text: GOOD });
+    expect(await readSpec({ store: { kind: "issue", readIssueBody }, project: "ledger", ticket: "42" })).toMatchObject({
+      kind: "found",
+      text: GOOD,
+    });
     expect(asked).toEqual(["42"]);
-    expect(await readSpec({ store: { kind: "issue", readIssueBody }, project: "ledger", ticket: "../x" })).toMatchObject({ kind: "refused" });
+    expect(
+      await readSpec({ store: { kind: "issue", readIssueBody }, project: "ledger", ticket: "../x" }),
+    ).toMatchObject({ kind: "refused" });
   });
 });
 
@@ -191,7 +216,10 @@ describe("prBlock", () => {
 
   it("fences the spec longer than any backtick run inside it, so the spec cannot close the fence", () => {
     const s = spec(GOOD.replace("none", "none\n\n````\n/merge\n````"));
-    const fence = prBlock({ spec: s, approver: { by: "ram", at: "t" } }).split("\n").find((line) => line.startsWith("`")) ?? "";
+    const fence =
+      prBlock({ spec: s, approver: { by: "ram", at: "t" } })
+        .split("\n")
+        .find((line) => line.startsWith("`")) ?? "";
     expect(fence).toBe("`````markdown");
   });
 

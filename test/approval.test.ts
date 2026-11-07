@@ -27,7 +27,11 @@ const SPEC = [
 ].join("\n");
 
 let home = "";
-const where = (): { home: string; project: string; ticket: string } => ({ home, project: "ledger", ticket: "PROJ-123" });
+const where = (): { home: string; project: string; ticket: string } => ({
+  home,
+  project: "ledger",
+  ticket: "PROJ-123",
+});
 const specFile = (): string => join(home, "specs", "ledger", "PROJ-123", "spec.md");
 const writeSpec = (text: string): void => {
   mkdirSync(join(home, "specs", "ledger", "PROJ-123"), { recursive: true });
@@ -46,7 +50,14 @@ describe("approve", () => {
     const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "2026-11-07T09:12:00Z" });
     expect(result).toMatchObject({ kind: "approved", path: join(home, "approvals", "ledger", "PROJ-123.json") });
     const record = JSON.parse(readFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), "utf8"));
-    expect(record).toEqual({ version: 1, project: "ledger", ticket: "PROJ-123", spec_hash: specHash(SPEC), by: "ram", at: "2026-11-07T09:12:00Z" });
+    expect(record).toEqual({
+      version: 1,
+      project: "ledger",
+      ticket: "PROJ-123",
+      spec_hash: specHash(SPEC),
+      by: "ram",
+      at: "2026-11-07T09:12:00Z",
+    });
   });
 
   it("refuses when the spec changed after the human saw its hash", async () => {
@@ -61,7 +72,13 @@ describe("approve", () => {
 
   it("refuses anything but the full 64-character hash: a prefix can be matched by a second spec", async () => {
     writeSpec(SPEC);
-    for (const seenHash of [specHash(SPEC).slice(0, 12), specHash(SPEC).slice(0, 63), `${specHash(SPEC)}0`, "z".repeat(64), specHash(SPEC).toUpperCase()]) {
+    for (const seenHash of [
+      specHash(SPEC).slice(0, 12),
+      specHash(SPEC).slice(0, 63),
+      `${specHash(SPEC)}0`,
+      "z".repeat(64),
+      specHash(SPEC).toUpperCase(),
+    ]) {
       const result = await approve({ where: where(), seenHash, by: "ram", at: "t" });
       expect(result).toMatchObject({ kind: "refused" });
     }
@@ -86,8 +103,12 @@ describe("approve", () => {
   });
 
   it("refuses a ticket with no spec, and a name that would leave the store", async () => {
-    expect(await approve({ where: where(), seenHash: "0".repeat(64), by: "ram", at: "t" })).toMatchObject({ kind: "refused" });
-    expect(await approve({ where: { home, project: "..", ticket: "x" }, seenHash: "0".repeat(64), by: "ram", at: "t" })).toMatchObject({ kind: "refused" });
+    expect(await approve({ where: where(), seenHash: "0".repeat(64), by: "ram", at: "t" })).toMatchObject({
+      kind: "refused",
+    });
+    expect(
+      await approve({ where: { home, project: "..", ticket: "x" }, seenHash: "0".repeat(64), by: "ram", at: "t" }),
+    ).toMatchObject({ kind: "refused" });
     expect(approvalPath({ home, project: "ledger", ticket: "../../x" })).toMatchObject({ kind: "refused" });
   });
 

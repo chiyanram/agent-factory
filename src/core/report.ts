@@ -102,13 +102,22 @@ function evidenceRow(row: unknown, i: number): Check<Evidence> {
   const extra = extras(row, CELLS);
   const cells = all(CELLS.map((c) => text(row[c], `${what} ${c}`)));
   if (extra > 0 || cells.kind === "bad") {
-    return bad(extra > 0 ? `${what} has ${extra} field(s) the schema does not name` : (cells as { readonly problem: string }).problem);
+    return bad(
+      extra > 0
+        ? `${what} has ${extra} field(s) the schema does not name`
+        : (cells as { readonly problem: string }).problem,
+    );
   }
   const [criterion, command, result] = cells.value as [string, string, string];
   return ok({ criterion, command, result });
 }
 
-function listOf<T>(value: unknown, what: string, max: number, each: (item: unknown, i: number) => Check<T>): Check<readonly T[]> {
+function listOf<T>(
+  value: unknown,
+  what: string,
+  max: number,
+  each: (item: unknown, i: number) => Check<T>,
+): Check<readonly T[]> {
   if (!Array.isArray(value) || value.length === 0) {
     return bad(`${what} must be a list with at least one entry`);
   }
@@ -137,7 +146,9 @@ const READ: Readonly<Record<string, (body: Field) => Outcome>> = {
   },
   blocked: (body) => {
     const blocker = text(body.blocker, "blocker");
-    return blocker.kind === "ok" ? { kind: "blocked", reason: blocker.value, by: "writer" } : malformed(blocker.problem);
+    return blocker.kind === "ok"
+      ? { kind: "blocked", reason: blocker.value, by: "writer" }
+      : malformed(blocker.problem);
   },
 };
 
@@ -163,7 +174,9 @@ export function parseReport(text: string): Outcome {
     return hostBlocked("the report's status must be done, asked or blocked");
   }
   const extra = extras(body, ["status", field]);
-  return extra > 0 ? hostBlocked(`the report has ${extra} field(s) the schema does not name for ${status}`) : READ[status]!(body);
+  return extra > 0
+    ? hostBlocked(`the report has ${extra} field(s) the schema does not name for ${status}`)
+    : READ[status]!(body);
 }
 
 function ended(end: RunEnd): string {
@@ -194,7 +207,10 @@ export function decide(input: { readonly end: RunEnd; readonly file: ReportFile 
   }
 }
 
-type Dir = { readonly kind: "dir"; readonly dev: number; readonly ino: number } | { readonly kind: "missing" } | { readonly kind: "other" };
+type Dir =
+  | { readonly kind: "dir"; readonly dev: number; readonly ino: number }
+  | { readonly kind: "missing" }
+  | { readonly kind: "other" };
 
 // a folder that is a real folder, not a symlink
 async function realDir(path: string): Promise<Dir> {
@@ -225,18 +241,25 @@ async function readCapped(handle: FileHandle): Promise<ReportFile> {
 
 function openFailure(error: unknown): ReportFile {
   const code = (error as { code?: string }).code;
-  return code === "ENOENT" ? { kind: "missing" } : { kind: "unreadable", reason: code === "ELOOP" ? "it is a symlink" : "it cannot be opened" };
+  return code === "ENOENT"
+    ? { kind: "missing" }
+    : { kind: "unreadable", reason: code === "ELOOP" ? "it is a symlink" : "it cannot be opened" };
 }
 
 // openReport : the report under a .factory already checked; O_NOFOLLOW refuses a symlink in the last step, O_NONBLOCK
 // keeps a FIFO from hanging the host
 async function openReport(worktree: string, before: Dir): Promise<ReportFile> {
   try {
-    const handle = await open(join(worktree, REPORT_PATH), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const handle = await open(
+      join(worktree, REPORT_PATH),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
     try {
       // .factory is still the folder that was checked, so the file opened is the one inside it
       const after = await realDir(join(worktree, ".factory"));
-      return sameDir(before, after) ? await readCapped(handle) : { kind: "unreadable", reason: ".factory changed while it was read" };
+      return sameDir(before, after)
+        ? await readCapped(handle)
+        : { kind: "unreadable", reason: ".factory changed while it was read" };
     } finally {
       await handle.close();
     }
@@ -250,7 +273,9 @@ async function openReport(worktree: string, before: Dir): Promise<ReportFile> {
 export async function loadReport(input: { readonly worktree: string }): Promise<ReportFile> {
   const dir = await realDir(join(input.worktree, ".factory"));
   if (dir.kind !== "dir") {
-    return dir.kind === "missing" ? { kind: "missing" } : { kind: "unreadable", reason: ".factory is not a plain folder" };
+    return dir.kind === "missing"
+      ? { kind: "missing" }
+      : { kind: "unreadable", reason: ".factory is not a plain folder" };
   }
   return openReport(input.worktree, dir);
 }

@@ -18,7 +18,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Post } from "../post.js";
 import { plainName } from "../spec.js";
-import { readRecords, record, summarize, type WriterMode } from "./records.js";
+import { codeOf, readRecords, record, summarize, type WriterMode } from "./records.js";
 import { decide, type Action, type ApprovalView, type ChangeView, type TicketState } from "./table.js";
 
 export const BRANCH_PREFIX = "factory/";
@@ -28,7 +28,10 @@ export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly ru
 
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 export type Steps = {
-  readonly writer: Step<RunInput & { readonly mode: WriterMode }, { readonly head: string; readonly outcome: "done" | "asked" | "blocked"; readonly patch: string }>;
+  readonly writer: Step<
+    RunInput & { readonly mode: WriterMode },
+    { readonly head: string; readonly outcome: "done" | "asked" | "blocked"; readonly patch: string }
+  >;
   readonly ready: Step<RunInput, { readonly passed: boolean }>;
   readonly review: Step<RunInput, { readonly actOn: number }>;
 };
@@ -60,8 +63,10 @@ export type Decision = { readonly ticket: string; readonly action: Action };
 async function ticketNames(setup: TickSetup, lines: readonly (OpenLine | MergedLine)[]): Promise<readonly string[]> {
   const files = await readdir(join(setup.home, "approvals", setup.project)).catch(() => [] as string[]);
   const approved = files.filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
-  const onForge = lines.filter((l) => l.branch.startsWith(BRANCH_PREFIX) && !l.fork).map((l) => l.branch.slice(BRANCH_PREFIX.length));
-  return [...new Set([...approved, ...onForge])].filter(plainName).sort();
+  const onForge = lines
+    .filter((l) => l.branch.startsWith(BRANCH_PREFIX) && !l.fork)
+    .map((l) => l.branch.slice(BRANCH_PREFIX.length));
+  return [...new Set([...approved, ...onForge])].filter(plainName).toSorted();
 }
 
 async function approvalOf(setup: TickSetup, ticket: string): Promise<Result<ApprovalView>> {
@@ -93,7 +98,11 @@ function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): Ch
   return only.kind === "open" ? { kind: "open", line: only } : { kind: "merged", line: only };
 }
 
-async function stateOf(setup: TickSetup, ticket: string, lines: readonly (OpenLine | MergedLine)[]): Promise<Result<TicketState>> {
+async function stateOf(
+  setup: TickSetup,
+  ticket: string,
+  lines: readonly (OpenLine | MergedLine)[],
+): Promise<Result<TicketState>> {
   const approval = await approvalOf(setup, ticket);
   if (approval.kind === "failed") {
     return approval;
@@ -104,10 +113,22 @@ async function stateOf(setup: TickSetup, ticket: string, lines: readonly (OpenLi
   }
   const since = approval.value.kind === "approved" ? approval.value.at : "1970-01-01T00:00:00Z";
   const runs = summarize({ events: events.value, since });
-  return { kind: "ok", value: { ticket, approval: approval.value, change: changeOf(ticket, lines), runs, now: setup.now(), quietMinutes: setup.quietMinutes } };
+  return {
+    kind: "ok",
+    value: {
+      ticket,
+      approval: approval.value,
+      change: changeOf(ticket, lines),
+      runs,
+      now: setup.now(),
+      quietMinutes: setup.quietMinutes,
+    },
+  };
 }
 
-export type Decided = { readonly state: TicketState; readonly action: Action } | { readonly kind: "broken"; readonly ticket: string; readonly reason: string };
+export type Decided =
+  | { readonly state: TicketState; readonly action: Action }
+  | { readonly kind: "broken"; readonly ticket: string; readonly reason: string };
 
 // decideAll : one decision per ticket, in ticket order. A ticket whose spec, approval or records cannot be read is
 // broken: it fails on its own, and every other ticket is still decided.
@@ -119,7 +140,11 @@ export async function decideAll(setup: TickSetup): Promise<Result<readonly Decid
   const out: Decided[] = [];
   for (const ticket of await ticketNames(setup, lines.value)) {
     const state = await stateOf(setup, ticket, lines.value);
-    out.push(state.kind === "ok" ? { state: state.value, action: decide(state.value) } : { kind: "broken", ticket, reason: state.reason });
+    out.push(
+      state.kind === "ok"
+        ? { state: state.value, action: decide(state.value) }
+        : { kind: "broken", ticket, reason: state.reason },
+    );
   }
   return { kind: "ok", value: out };
 }
@@ -133,7 +158,10 @@ async function say(setup: TickSetup, state: TicketState, post: Post): Promise<Do
   return n === "none" ? { kind: "ok" } : setup.forge.note({ number: n, post });
 }
 
-function where(setup: TickSetup, state: TicketState): { readonly home: string; readonly project: string; readonly ticket: string } {
+function where(
+  setup: TickSetup,
+  state: TicketState,
+): { readonly home: string; readonly project: string; readonly ticket: string } {
   return { home: setup.home, project: setup.project, ticket: state.ticket };
 }
 
@@ -159,25 +187,61 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
   return { kind: "ok" };
 }
 
-// forgeAction : the actions that only touch the forge; "none" for a run or a wait
-async function forgeAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | "none"> {
+// each action by its kind, so a handler per kind is typed without an assertion
+type ActionMap = { readonly [A in Action as A["kind"]]: A };
+type ActionKind = keyof ActionMap;
+type Handler<R> = { readonly [K in ActionKind]: (setup: TickSetup, state: TicketState, action: ActionMap[K]) => R };
+
+function dispatchOn<K extends ActionKind, R>(
+  table: Handler<R>,
+  kind: K,
+  setup: TickSetup,
+  state: TicketState,
+  action: ActionMap[K],
+): R {
+  return table[kind](setup, state, action);
+}
+
+async function releaseClaim(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
   const n = number(state);
-  switch (action.kind) {
-    case "needs-human":
-      return handOver(setup, state, action.why);
-    case "release": {
-      const removed = n === "none" ? ({ kind: "ok" } as const) : await setup.forge.removeLabel({ number: n, label: setup.label });
-      return removed.kind === "ok" ? say(setup, state, { seat: "coordinator", title: `released: ${action.why}`, fields: [], items: [] }) : removed;
-    }
-    case "ping": {
-      const said = await say(setup, state, { seat: "coordinator", title: `ready for you at ${action.head.slice(0, 8)}: the gate is green; review and merge`, fields: [], items: [] });
-      return said.kind === "ok" ? record({ where: { home: setup.home, project: setup.project, ticket: state.ticket }, event: { at: new Date(setup.now()).toISOString(), kind: "pinged", head: action.head } }) : said;
-    }
-    case "reconcile":
-      return n === "none" ? { kind: "ok" } : setup.forge.removeLabel({ number: n, label: setup.label });
-    default:
-      return "none";
-  }
+  const removed =
+    n === "none" ? ({ kind: "ok" } as const) : await setup.forge.removeLabel({ number: n, label: setup.label });
+  return removed.kind === "ok"
+    ? say(setup, state, { seat: "coordinator", title: `released: ${why}`, fields: [], items: [] })
+    : removed;
+}
+
+async function ping(setup: TickSetup, state: TicketState, head: string): Promise<Done> {
+  const said = await say(setup, state, {
+    seat: "coordinator",
+    title: `ready for you at ${head.slice(0, 8)}: the gate is green; review and merge`,
+    fields: [],
+    items: [],
+  });
+  return said.kind === "ok"
+    ? record({ where: where(setup, state), event: { at: at(setup), kind: "pinged", head } })
+    : said;
+}
+
+async function reconcile(setup: TickSetup, state: TicketState): Promise<Done> {
+  const n = number(state);
+  return n === "none" ? { kind: "ok" } : setup.forge.removeLabel({ number: n, label: setup.label });
+}
+
+// the actions that only touch the forge; "none" for a run or a wait
+const FORGE: Handler<Promise<Done> | "none"> = {
+  "needs-human": (setup, state, a) => handOver(setup, state, a.why),
+  release: (setup, state, a) => releaseClaim(setup, state, a.why),
+  ping: (setup, state, a) => ping(setup, state, a.head),
+  reconcile: (setup, state) => reconcile(setup, state),
+  wait: () => "none",
+  writer: () => "none",
+  ready: () => "none",
+  review: () => "none",
+};
+
+async function forgeAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | "none"> {
+  return dispatchOn(FORGE, action.kind, setup, state, action);
 }
 
 export type Ran = { readonly ticket: string; readonly action: Action; readonly result: Done | Unavailable };
@@ -185,7 +249,9 @@ export type Ran = { readonly ticket: string; readonly action: Action; readonly r
 // claim : the change carries the claim label before a writer runs on it
 async function claim(setup: TickSetup, state: TicketState): Promise<Done> {
   const line = state.change.kind === "open" ? state.change.line : "none";
-  return line === "none" || line.claimed ? { kind: "ok" } : setup.forge.addLabel({ number: line.number, label: setup.label });
+  return line === "none" || line.claimed
+    ? { kind: "ok" }
+    : setup.forge.addLabel({ number: line.number, label: setup.label });
 }
 
 function at(setup: TickSetup): string {
@@ -201,66 +267,99 @@ async function runWriter(setup: TickSetup, state: TicketState, mode: WriterMode)
   if (step.kind === "unavailable") {
     return step;
   }
-  const where = { home: setup.home, project: setup.project, ticket: state.ticket };
+  const place = where(setup, state);
   // the start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to
   // a person, never a claim with no record, which would look like someone else's
-  const started = await record({ where, event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) } });
+  const started = await record({
+    where: place,
+    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) },
+  });
   const claimed = started.kind === "ok" ? await claim(setup, state) : started;
   if (claimed.kind === "failed") {
     return claimed;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), mode });
   // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person
-  return ran.kind === "ok" ? record({ where, event: { at: at(setup), kind: "writer-ended", mode, ...ran.value } }) : ran;
+  return ran.kind === "ok"
+    ? record({ where: place, event: { at: at(setup), kind: "writer-ended", mode, ...ran.value } })
+    : ran;
 }
 
-async function runCheck(setup: TickSetup, state: TicketState, phase: "ready" | "review", head: string): Promise<Done | Unavailable> {
-  const where = { home: setup.home, project: setup.project, ticket: state.ticket };
-  const step = phase === "ready" ? setup.steps.ready : setup.steps.review;
-  if (step.kind === "unavailable") {
-    return step;
-  }
-  const started = await record({ where, event: { at: at(setup), kind: "started", phase, mode: "none", head } });
-  if (started.kind === "failed") {
+// startCheck : the "started" line of a ready check or a review, or why it cannot start
+async function startCheck(
+  setup: TickSetup,
+  state: TicketState,
+  phase: "ready" | "review",
+  head: string,
+): Promise<Done> {
+  return record({ where: where(setup, state), event: { at: at(setup), kind: "started", phase, mode: "none", head } });
+}
+
+async function runReady(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
+  const step = setup.steps.ready;
+  const started = step.kind === "available" ? await startCheck(setup, state, "ready", head) : step;
+  if (started.kind !== "ok" || step.kind === "unavailable") {
     return started;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head });
-  if (ran.kind === "failed") {
-    return ran;
-  }
-  const value = ran.value as { readonly passed?: boolean; readonly actOn?: number };
-  return phase === "ready"
-    ? record({ where, event: { at: at(setup), kind: "ready-ended", head, passed: value.passed === true } })
-    : record({ where, event: { at: at(setup), kind: "review-ended", head, actOn: value.actOn ?? 0 } });
+  return ran.kind === "ok"
+    ? record({
+        where: where(setup, state),
+        event: { at: at(setup), kind: "ready-ended", head, passed: ran.value.passed },
+      })
+    : ran;
 }
 
-function runAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | Unavailable> | "none" {
-  switch (action.kind) {
-    case "writer":
-      return runWriter(setup, state, action.mode);
-    case "ready":
-    case "review":
-      return runCheck(setup, state, action.kind, action.head);
-    default:
-      return "none";
+async function runReview(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
+  const step = setup.steps.review;
+  const started = step.kind === "available" ? await startCheck(setup, state, "review", head) : step;
+  if (started.kind !== "ok" || step.kind === "unavailable") {
+    return started;
   }
+  const ran = await step.run({ ticket: state.ticket, change: state.change, head });
+  return ran.kind === "ok"
+    ? record({
+        where: where(setup, state),
+        event: { at: at(setup), kind: "review-ended", head, actOn: ran.value.actOn },
+      })
+    : ran;
+}
+
+// the actions that start a run; "none" for the rest
+const RUN: Handler<Promise<Done | Unavailable> | "none"> = {
+  writer: (setup, state, a) => runWriter(setup, state, a.mode),
+  ready: (setup, state, a) => runReady(setup, state, a.head),
+  review: (setup, state, a) => runReview(setup, state, a.head),
+  "needs-human": () => "none",
+  release: () => "none",
+  ping: () => "none",
+  reconcile: () => "none",
+  wait: () => "none",
+};
+
+function runAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | Unavailable> | "none" {
+  return dispatchOn(RUN, action.kind, setup, state, action);
+}
+
+type Describe = { readonly [K in ActionKind]: (action: ActionMap[K]) => string };
+
+const DESCRIBE: Describe = {
+  wait: (a) => `wait: ${a.why}`,
+  "needs-human": (a) => `needs-human: ${a.why}`,
+  release: (a) => `release: ${a.why}`,
+  writer: (a) => `writer (${a.mode}): ${a.why}`,
+  ready: (a) => `ready at ${a.head.slice(0, 8)}`,
+  review: (a) => `review at ${a.head.slice(0, 8)}`,
+  ping: (a) => `ping at ${a.head.slice(0, 8)}`,
+  reconcile: () => "reconcile: merged; remove the claim",
+};
+
+function describeAs<K extends ActionKind>(kind: K, action: ActionMap[K]): string {
+  return DESCRIBE[kind](action);
 }
 
 function describe(action: Action): string {
-  switch (action.kind) {
-    case "wait":
-    case "needs-human":
-    case "release":
-      return `${action.kind}: ${action.why}`;
-    case "writer":
-      return `writer (${action.mode}): ${action.why}`;
-    case "ready":
-    case "review":
-    case "ping":
-      return `${action.kind} at ${action.head.slice(0, 8)}`;
-    case "reconcile":
-      return "reconcile: merged; remove the claim";
-  }
+  return describeAs(action.kind, action);
 }
 
 function logResult(setup: TickSetup, ticket: string, result: Done | Unavailable): void {
@@ -275,7 +374,11 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
   for (const d of decided) {
     if ("kind" in d) {
       setup.log(`${d.ticket}: broken: ${d.reason}`);
-      ran.push({ ticket: d.ticket, action: { kind: "wait", why: "broken" }, result: { kind: "failed", reason: d.reason } });
+      ran.push({
+        ticket: d.ticket,
+        action: { kind: "wait", why: "broken" },
+        result: { kind: "failed", reason: d.reason },
+      });
       continue;
     }
     setup.log(`${d.state.ticket}: ${describe(d.action)}`);
@@ -312,7 +415,9 @@ async function actAll(setup: TickSetup, decided: readonly Decided[]): Promise<re
   return ran;
 }
 
-type Lock = { readonly kind: "held"; readonly release: () => Promise<void> } | { readonly kind: "busy"; readonly reason: string };
+type Lock =
+  | { readonly kind: "held"; readonly release: () => Promise<void> }
+  | { readonly kind: "busy"; readonly reason: string };
 
 // a lock with no readable pid this old is left over from a crash, not one being written
 const STALE_UNREADABLE_MS = 10 * 60_000;
@@ -322,11 +427,14 @@ function alive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as { code?: string }).code === "EPERM";
+    return codeOf(error) === "EPERM";
   }
 }
 
-type Holder = { readonly kind: "alive"; readonly pid: number } | { readonly kind: "dead" } | { readonly kind: "unknown" };
+type Holder =
+  | { readonly kind: "alive"; readonly pid: number }
+  | { readonly kind: "dead" }
+  | { readonly kind: "unknown" };
 
 async function holder(path: string, now: number): Promise<Holder> {
   const text = await readFile(path, "utf8").catch(() => "");
@@ -334,7 +442,10 @@ async function holder(path: string, now: number): Promise<Holder> {
   if (Number.isSafeInteger(pid) && pid > 0) {
     return alive(pid) ? { kind: "alive", pid } : { kind: "dead" };
   }
-  const age = await stat(path).then((st) => now - st.mtimeMs, () => 0);
+  const age = await stat(path).then(
+    (st) => now - st.mtimeMs,
+    () => 0,
+  );
   return age > STALE_UNREADABLE_MS ? { kind: "dead" } : { kind: "unknown" };
 }
 
@@ -367,7 +478,13 @@ export async function lock(input: { readonly home: string; readonly project: str
     await rm(mine, { force: true });
     if (!held) {
       const found = await holder(lockPath, Date.now());
-      return { kind: "busy", reason: found.kind === "alive" ? `another pass (pid ${found.pid}) is running for ${input.project}` : `another pass holds ${lockPath}` };
+      return {
+        kind: "busy",
+        reason:
+          found.kind === "alive"
+            ? `another pass (pid ${found.pid}) is running for ${input.project}`
+            : `another pass holds ${lockPath}`,
+      };
     }
     // release only a lock that is still ours
     const release = async (): Promise<void> => {
@@ -398,7 +515,13 @@ export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
       return decided;
     }
     if (setup.dryRun) {
-      decided.value.forEach((d) => setup.log("kind" in d ? `${d.ticket}: broken: ${d.reason} (dry run)` : `${d.state.ticket}: ${describe(d.action)} (dry run)`));
+      decided.value.forEach((d) =>
+        setup.log(
+          "kind" in d
+            ? `${d.ticket}: broken: ${d.reason} (dry run)`
+            : `${d.state.ticket}: ${describe(d.action)} (dry run)`,
+        ),
+      );
       return { kind: "ok", value: [] };
     }
     return { kind: "ok", value: await actAll(setup, decided.value) };

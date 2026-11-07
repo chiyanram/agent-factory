@@ -32,7 +32,14 @@ function ranBy(name: string): boolean {
   return existsSync(ran) && readFileSync(ran, "utf8").split("\n").includes(name);
 }
 function request(args: readonly string[], more: Partial<GitRequest> = {}): GitRequest {
-  return { args, repo: { kind: "repo", path: repo }, env, ownHelper: { kind: "none" }, stdin: { kind: "none" }, ...more };
+  return {
+    args,
+    repo: { kind: "repo", path: repo },
+    env,
+    ownHelper: { kind: "none" },
+    stdin: { kind: "none" },
+    ...more,
+  };
 }
 function ok(result: GitResult): string {
   if (result.kind !== "ok") {
@@ -51,7 +58,12 @@ beforeEach(() => {
   repo = join(base, "repo");
   ran = join(base, "ran");
   writeFileSync(join(base, "global.gitconfig"), "");
-  env = { PATH: process.env.PATH ?? "", HOME: base, GIT_CONFIG_GLOBAL: join(base, "global.gitconfig"), GIT_CONFIG_NOSYSTEM: "1" };
+  env = {
+    PATH: process.env.PATH ?? "",
+    HOME: base,
+    GIT_CONFIG_GLOBAL: join(base, "global.gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+  };
   execFileSync("git", ["init", "-q", "--bare", join(base, "origin.git")], { env });
   execFileSync("git", ["init", "-q", repo], { env });
   git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
@@ -77,7 +89,9 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     rmSync(ran);
     ok(await hostGit(request(["push", "-q", "origin", "HEAD:refs/heads/b"])));
     expect(ranBy("pre-push")).toBe(false);
-    expect(git(["rev-parse", "--verify", "-q", "refs/heads/b"], join(base, "origin.git")).trim()).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(["rev-parse", "--verify", "-q", "refs/heads/b"], join(base, "origin.git")).trim()).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
   });
 
   it("a planted filter driver, also one whose name holds =", async () => {
@@ -114,7 +128,9 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     gitTry(["credential", "fill"], "protocol=https\nhost=example.invalid\n\n");
     expect(ranBy("helper")).toBe(true);
     rmSync(ran);
-    await hostGit(request(["credential", "fill"], { stdin: { kind: "text", text: "protocol=https\nhost=example.invalid\n\n" } }));
+    await hostGit(
+      request(["credential", "fill"], { stdin: { kind: "text", text: "protocol=https\nhost=example.invalid\n\n" } }),
+    );
     expect(ranBy("helper")).toBe(false);
   });
 
@@ -123,14 +139,25 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     writeFileSync(join(repo, "bin/ssh"), readFileSync(plant("ssh")));
     chmodSync(join(repo, "bin/ssh"), 0o755);
     git(["remote", "set-url", "origin", "ssh://git@example.invalid/x.git"]);
-    await hostGit(request(["fetch", "-q", "origin"], { env: { ...env, PATH: `bin:${join(repo, "bin")}:${env.PATH ?? ""}` } }));
+    await hostGit(
+      request(["fetch", "-q", "origin"], { env: { ...env, PATH: `bin:${join(repo, "bin")}:${env.PATH ?? ""}` } }),
+    );
     expect(ranBy("ssh")).toBe(false);
   });
 });
 
 describe("hostGit refuses what it cannot neutralise", () => {
-  for (const key of ["diff.external", "diff.x.command", "merge.x.driver", "url.file:///bad/.insteadOf", "http.proxy",
-    "http.https://github.com/.proxy", "http.sslVerify", "http.curloptResolve", "remote.origin.proxy"]) {
+  for (const key of [
+    "diff.external",
+    "diff.x.command",
+    "merge.x.driver",
+    "url.file:///bad/.insteadOf",
+    "http.proxy",
+    "http.https://github.com/.proxy",
+    "http.sslVerify",
+    "http.curloptResolve",
+    "remote.origin.proxy",
+  ]) {
     it(`a repo-set ${key} is refused, and git does not run`, async () => {
       git(["config", key, plant("evil")]);
       const result = await hostGit(request(["status"]));
@@ -156,7 +183,9 @@ describe("hostGit keeps what the operator chose", () => {
   it("keeps the operator's own credential helper, and only it", async () => {
     git(["config", "--global", "credential.helper", "store-trusted"]);
     git(["config", "credential.helper", "!/evil"]);
-    expect(effective(ok(await hostGit(request(["config", "--get-all", "credential.helper"]))))).toEqual(["store-trusted"]);
+    expect(effective(ok(await hostGit(request(["config", "--get-all", "credential.helper"]))))).toEqual([
+      "store-trusted",
+    ]);
   });
 
   it("keeps the factory's own App helper at its exact path, never a look-alike", async () => {
@@ -165,7 +194,11 @@ describe("hostGit keeps what the operator chose", () => {
     git(["config", "--add", key, ""]);
     git(["config", "--add", key, own]);
     git(["config", "--add", key, "!/elsewhere/github-app.sh git-credential"]);
-    expect(effective(ok(await hostGit(request(["config", "--get-all", key], { ownHelper: { kind: "helper", value: own } }))))).toEqual([own]);
+    expect(
+      effective(
+        ok(await hostGit(request(["config", "--get-all", key], { ownHelper: { kind: "helper", value: own } }))),
+      ),
+    ).toEqual([own]);
   });
 
   it("an always-set key takes the operator's own value when there is one", async () => {
@@ -180,27 +213,40 @@ describe("hostGit keeps what the operator chose", () => {
   });
 
   it("without a repo, git runs outside any repo and reads no folder's config", async () => {
-    git(["config", "diff.external", "/evil"]);   // would be refused, if hostGit read this repo's config
+    git(["config", "diff.external", "/evil"]); // would be refused, if hostGit read this repo's config
     const before = process.cwd();
     process.chdir(repo);
-    const result = await hostGit({ args: ["hash-object", "--stdin"], repo: { kind: "none" }, env, ownHelper: { kind: "none" }, stdin: { kind: "text", text: "x" } }).finally(() =>
-      process.chdir(before),
+    const result = await hostGit({
+      args: ["hash-object", "--stdin"],
+      repo: { kind: "none" },
+      env,
+      ownHelper: { kind: "none" },
+      stdin: { kind: "text", text: "x" },
+    }).finally(() => process.chdir(before));
+    expect(ok(result).trim()).toBe(
+      execFileSync("git", ["hash-object", "--stdin"], { env, input: "x", encoding: "utf8" }).trim(),
     );
-    expect(ok(result).trim()).toBe(execFileSync("git", ["hash-object", "--stdin"], { env, input: "x", encoding: "utf8" }).trim());
   });
 
   it("runs git with GIT_TERMINAL_PROMPT=0, so a missing login fails and never asks", async () => {
     const fake = join(base, "fakebin");
     mkdirSync(fake);
-    writeFileSync(join(fake, "git"), '#!/bin/sh\ncase "$*" in *config*) exit 0 ;; esac\necho "prompt=$GIT_TERMINAL_PROMPT"\n');
+    writeFileSync(
+      join(fake, "git"),
+      '#!/bin/sh\ncase "$*" in *config*) exit 0 ;; esac\necho "prompt=$GIT_TERMINAL_PROMPT"\n',
+    );
     chmodSync(join(fake, "git"), 0o755);
-    const result = await hostGit(request(["fetch"], { env: { ...env, PATH: `${fake}:${env.PATH ?? ""}`, GIT_TERMINAL_PROMPT: "1" } }));
+    const result = await hostGit(
+      request(["fetch"], { env: { ...env, PATH: `${fake}:${env.PATH ?? ""}`, GIT_TERMINAL_PROMPT: "1" } }),
+    );
     expect(ok(result).trim()).toBe("prompt=0");
   });
   it("refuses a GIT_CONFIG_COUNT that is not a whole number, before git runs", async () => {
     expect(callerCount("x")).toMatchObject({ kind: "refused" });
     expect(callerCount(undefined)).toEqual({ kind: "count", n: 0 });
-    expect(await hostGit(request(["status"], { env: { ...env, GIT_CONFIG_COUNT: "1x" } }))).toMatchObject({ kind: "refused" });
+    expect(await hostGit(request(["status"], { env: { ...env, GIT_CONFIG_COUNT: "1x" } }))).toMatchObject({
+      kind: "refused",
+    });
   });
 
   it("refuses when git cannot list the repo's own keys, never runs unchecked", async () => {
@@ -218,7 +264,9 @@ describe("hostGit keeps what the operator chose", () => {
 
 describe("trustedPath and plan", () => {
   it("drops relative entries and entries inside the repo", () => {
-    expect(trustedPath("bin:/usr/bin:/r/x/bin:/r/x:/opt/bin", { kind: "repo", path: "/r/x" })).toBe("/usr/bin:/opt/bin");
+    expect(trustedPath("bin:/usr/bin:/r/x/bin:/r/x:/opt/bin", { kind: "repo", path: "/r/x" })).toBe(
+      "/usr/bin:/opt/bin",
+    );
     expect(trustedPath(".:/usr/bin", { kind: "none" })).toBe("/usr/bin");
   });
 

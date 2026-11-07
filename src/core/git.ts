@@ -66,7 +66,10 @@ type RepoRule =
 
 const REPO_RULES: readonly { readonly pattern: RegExp; readonly rule: RepoRule }[] = [
   { pattern: /^core\.sshcommand$/, rule: { kind: "neutral", value: "ssh" } },
-  { pattern: /^(core\.askpass|core\.alternaterefscommand|gpg\.ssh\.defaultkeycommand)$/, rule: { kind: "neutral", value: "" } },
+  {
+    pattern: /^(core\.askpass|core\.alternaterefscommand|gpg\.ssh\.defaultkeycommand)$/,
+    rule: { kind: "neutral", value: "" },
+  },
   { pattern: /^core\.gitproxy$/, rule: { kind: "gitproxy" } },
   { pattern: /^filter\..*\.required$/, rule: { kind: "neutral", value: "false" } },
   { pattern: /^filter\..*\.(clean|smudge|process)$/, rule: { kind: "neutral", value: "" } },
@@ -147,7 +150,9 @@ function parseList(stdout: string): readonly Override[] {
 // "scope\0key\0" pairs of `git config --show-scope --null --name-only --list`: the keys of local and worktree scope.
 function repoKeys(stdout: string): readonly string[] {
   const parts = stdout.split("\0");
-  const pairs = parts.flatMap((scope, i) => (i % 2 === 0 && i + 1 < parts.length ? [{ scope, key: parts[i + 1]! }] : []));
+  const pairs = parts.flatMap((scope, i) =>
+    i % 2 === 0 && i + 1 < parts.length ? [{ scope, key: parts[i + 1]! }] : [],
+  );
   return [...new Set(pairs.filter((p) => p.scope === "local" || p.scope === "worktree").map((p) => p.key))].sort();
 }
 
@@ -166,8 +171,16 @@ async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Pro
   const system = await run(git, ["config", "--system", "--null", "--list"], env, NO_INPUT);
   const global = await run(git, ["config", "--global", "--null", "--list"], env, NO_INPUT);
   // an unreadable trusted file leaves the neutral values, which is the safe side
-  const trusted = [...parseList(system.code === 0 ? system.stdout : ""), ...parseList(global.code === 0 ? global.stdout : "")];
-  const scoped = await run(git, ["-C", dir, "config", "--show-scope", "--null", "--name-only", "--list"], env, NO_INPUT);
+  const trusted = [
+    ...parseList(system.code === 0 ? system.stdout : ""),
+    ...parseList(global.code === 0 ? global.stdout : ""),
+  ];
+  const scoped = await run(
+    git,
+    ["-C", dir, "config", "--show-scope", "--null", "--name-only", "--list"],
+    env,
+    NO_INPUT,
+  );
   if (scoped.code !== 0) {
     return { kind: "refused", reason: "cannot list the repo's own config keys (git 2.26 or later is needed)" };
   }
@@ -179,7 +192,10 @@ async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Pro
     if (local.code !== 0 && local.code !== 1) {
       return { kind: "refused", reason: `cannot read the repo's ${key}` };
     }
-    repoHelpers.set(key, local.stdout.split("\0").filter((v) => v.length > 0));
+    repoHelpers.set(
+      key,
+      local.stdout.split("\0").filter((v) => v.length > 0),
+    );
   }
   return { kind: "read", trusted, repoSet, repoHelpers };
 }
@@ -207,14 +223,21 @@ function gitproxyStep(ctx: Context, key: string): Step {
 function refuseStep(ctx: Context, key: string): Step {
   return ctx.values(key).length > 0
     ? { kind: "add", overrides: [lastOr(ctx, key, "")] }
-    : { kind: "refused", reason: `the repo's own config sets ${key}, which would run a program or redirect git; remove it` };
+    : {
+        kind: "refused",
+        reason: `the repo's own config sets ${key}, which would run a program or redirect git; remove it`,
+      };
 }
 
 // helperStep : an empty helper clears the list so far, then the trusted helpers, then the factory's own if the repo
 // names it exactly.
 function helperStep(ctx: Context, key: string): Step {
-  const own = ctx.ownHelper.kind === "helper" && ctx.repoHelpers(key).includes(ctx.ownHelper.value) ? [ctx.ownHelper.value] : [];
-  return { kind: "add", overrides: [{ key, value: "" }, ...[...ctx.values(key), ...own].map((value) => ({ key, value }))] };
+  const own =
+    ctx.ownHelper.kind === "helper" && ctx.repoHelpers(key).includes(ctx.ownHelper.value) ? [ctx.ownHelper.value] : [];
+  return {
+    kind: "add",
+    overrides: [{ key, value: "" }, ...[...ctx.values(key), ...own].map((value) => ({ key, value }))],
+  };
 }
 
 function step(ctx: Context, key: string): Step {
@@ -246,7 +269,11 @@ export function plan(
   repoHelpers: (key: string) => readonly string[],
   ownHelper: OwnHelper,
 ): Plan {
-  const ctx: Context = { values: (key) => trusted.filter((t) => t.key === key).map((t) => t.value), repoHelpers, ownHelper };
+  const ctx: Context = {
+    values: (key) => trusted.filter((t) => t.key === key).map((t) => t.value),
+    repoHelpers,
+    ownHelper,
+  };
   const start: Plan = { kind: "ok", overrides: ALWAYS.map((o) => lastOr(ctx, o.key, o.value)) };
   return repoSet.reduce<Plan>((acc, key) => {
     if (acc.kind === "refused") {
@@ -262,7 +289,9 @@ type Count = { readonly kind: "count"; readonly n: number } | Refused;
 // callerCount : how many GIT_CONFIG_COUNT entries the caller set already; anything but a whole number is refused.
 export function callerCount(value: string | undefined): Count {
   const text = value ?? "0";
-  return /^\d+$/.test(text) ? { kind: "count", n: Number(text) } : { kind: "refused", reason: `GIT_CONFIG_COUNT is not a whole number ('${text}')` };
+  return /^\d+$/.test(text)
+    ? { kind: "count", n: Number(text) }
+    : { kind: "refused", reason: `GIT_CONFIG_COUNT is not a whole number ('${text}')` };
 }
 
 function withOverrides(env: NodeJS.ProcessEnv, from: number, overrides: readonly Override[]): NodeJS.ProcessEnv {
@@ -288,13 +317,19 @@ export async function hostGit(request: GitRequest): Promise<GitResult> {
   const base: NodeJS.ProcessEnv = { ...request.env, PATH: path, GIT_TERMINAL_PROMPT: "0" };
   const dir = request.repo.kind === "repo" ? request.repo.path : "/";
   const config = await readConfig(git.path, dir, base);
-  const decided = config.kind === "read"
-    ? plan(config.trusted, config.repoSet, (key) => config.repoHelpers.get(key) ?? [], request.ownHelper)
-    : config;
+  const decided =
+    config.kind === "read"
+      ? plan(config.trusted, config.repoSet, (key) => config.repoHelpers.get(key) ?? [], request.ownHelper)
+      : config;
   if (decided.kind === "refused") {
     return decided;
   }
-  const result = await run(git.path, ["-C", dir, ...request.args], withOverrides(base, count.n, decided.overrides), request.stdin);
+  const result = await run(
+    git.path,
+    ["-C", dir, ...request.args],
+    withOverrides(base, count.n, decided.overrides),
+    request.stdin,
+  );
   return result.code === 0
     ? { kind: "ok", stdout: result.stdout, stderr: result.stderr }
     : { kind: "failed", exitCode: result.code, stdout: result.stdout, stderr: result.stderr };

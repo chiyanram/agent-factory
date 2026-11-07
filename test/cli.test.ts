@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { runCli } from "../src/app.js";
 import { specHash } from "../src/core/spec.js";
 
-const SPEC = "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
+const SPEC =
+  "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
 
 let home = "";
 type Run = { readonly code: number; readonly out: string; readonly err: string };
@@ -29,7 +30,10 @@ describe("agent-factory spec", () => {
   it("prints the hash of a spec that follows the template, exit 0", async () => {
     writeSpec(SPEC);
     const run = await cli(["spec", "ledger", "PROJ-1"]);
-    expect(run).toMatchObject({ code: 0, out: `spec ledger/PROJ-1 ${specHash(SPEC)} ${join(home, "specs", "ledger", "PROJ-1", "spec.md")}\n` });
+    expect(run).toMatchObject({
+      code: 0,
+      out: `spec ledger/PROJ-1 ${specHash(SPEC)} ${join(home, "specs", "ledger", "PROJ-1", "spec.md")}\n`,
+    });
   });
 
   it("lists what a spec is missing, exit 2", async () => {
@@ -87,7 +91,10 @@ describe("agent-factory approve and approval", () => {
     mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
     writeFileSync(join(home, "approvals", "ledger", "PROJ-1.json"), "{not json");
     expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(1);
-    for (const argv of [["approve", "ledger", "PROJ-1", specHash(SPEC)], ["approval", "ledger", "PROJ-1"]]) {
+    for (const argv of [
+      ["approve", "ledger", "PROJ-1", specHash(SPEC)],
+      ["approval", "ledger", "PROJ-1"],
+    ]) {
       const run = await cli(argv, { FACTORY_HOME: "" });
       expect(run.code).toBe(1);
       expect(run.err).toContain("FACTORY_HOME must be an absolute path");
@@ -99,13 +106,43 @@ describe("agent-factory approve and approval", () => {
 function fakeGlab(): string {
   const answers = {
     user: { username: "ram" },
-    members: { data: { project: { projectMembers: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ user: { username: "ram" }, accessLevel: { integerValue: 50 } }] } } } },
+    members: {
+      data: {
+        project: {
+          projectMembers: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{ user: { username: "ram" }, accessLevel: { integerValue: 50 } }],
+          },
+        },
+      },
+    },
     open: {
       data: {
         project: {
           mergeRequests: {
             pageInfo: { hasNextPage: false, endCursor: null },
-            nodes: [{ iid: "12", draft: false, diffHeadSha: "1a2b3c4d5e6f", sourceBranch: "factory/PROJ-12", sourceProjectId: 1, targetProjectId: 1, labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] }, headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" }, notes: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [{ body: "[writer] OPEN: which port?", createdAt: "2026-11-02T10:00:00Z", author: { username: "ram" } }] } }],
+            nodes: [
+              {
+                iid: "12",
+                draft: false,
+                diffHeadSha: "1a2b3c4d5e6f",
+                sourceBranch: "factory/PROJ-12",
+                sourceProjectId: 1,
+                targetProjectId: 1,
+                labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] },
+                headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" },
+                notes: {
+                  pageInfo: { hasPreviousPage: false, startCursor: null },
+                  nodes: [
+                    {
+                      body: "[writer] OPEN: which port?",
+                      createdAt: "2026-11-02T10:00:00Z",
+                      author: { username: "ram" },
+                    },
+                  ],
+                },
+              },
+            ],
           },
         },
       },
@@ -131,9 +168,18 @@ describe("agent-factory poll", () => {
   it("prints one line per change, read through the forge's CLI", async () => {
     const env = { FACTORY_PROJECT: "aruvii/agent-platform", FACTORY_GLAB: fakeGlab(), PATH: process.env.PATH };
     const run = await cli(["poll"], env);
-    expect(run).toEqual({ code: 0, out: "!9 merged claimed=yes\n!12 head=1a2b3c4d draft=no claimed=yes pipeline=success needs_human=no stop=no asks=1\n", err: "" });
+    expect(run).toEqual({
+      code: 0,
+      out: "!9 merged claimed=yes\n!12 head=1a2b3c4d draft=no claimed=yes pipeline=success needs_human=no stop=no asks=1\n",
+      err: "",
+    });
     const json = await cli(["poll", "--json"], env);
-    expect(JSON.parse(json.out.split("\n")[1]!)).toMatchObject({ kind: "open", number: 12, asks: 1, pipeline: { kind: "success" } });
+    expect(JSON.parse(json.out.split("\n")[1]!)).toMatchObject({
+      kind: "open",
+      number: 12,
+      asks: 1,
+      pipeline: { kind: "success" },
+    });
   });
 
   it("fails with the reason, and prints no line, when a setting or the forge fails", async () => {
@@ -165,7 +211,11 @@ describe("agent-factory dispatch", () => {
   });
 
   it("refuses a bad quiet time, and a project that is not a plain name", async () => {
-    const bad = await cli(["dispatch", "ledger", "--once"], { FACTORY_HOME: home, FACTORY_QUIET_MINUTES: "soon", FACTORY_PROJECT: "a/b" });
+    const bad = await cli(["dispatch", "ledger", "--once"], {
+      FACTORY_HOME: home,
+      FACTORY_QUIET_MINUTES: "soon",
+      FACTORY_PROJECT: "a/b",
+    });
     expect(bad).toMatchObject({ code: 1 });
     expect(bad.err).toContain("FACTORY_QUIET_MINUTES");
   });

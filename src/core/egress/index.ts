@@ -13,7 +13,15 @@ import { startEgress, type Started } from "./start.js";
 export { parseAllowlist, type Allowlist } from "./allowlist.js";
 export { squidConf, PROXY_PORT, type Upstream } from "./squid.js";
 export { dockerdProxy, proxyEnv, type ProxyAddress } from "./env.js";
-export { INTERNAL_NETWORK, OUTBOUND_NETWORK, PROXY_CONTAINER, planNetwork, readNetwork, startEgress, type Started } from "./start.js";
+export {
+  INTERNAL_NETWORK,
+  OUTBOUND_NETWORK,
+  PROXY_CONTAINER,
+  planNetwork,
+  readNetwork,
+  startEgress,
+  type Started,
+} from "./start.js";
 
 export type EgressSetup = {
   readonly allowlist: readonly string[];
@@ -24,14 +32,20 @@ export type EgressSetup = {
   readonly docker: { readonly run: Runner; readonly bin: string; readonly env: NodeJS.ProcessEnv };
 };
 
-async function writeConf(dir: string, text: string): Promise<{ readonly kind: "written"; readonly file: string } | { readonly kind: "failed"; readonly reason: string }> {
+async function writeConf(
+  dir: string,
+  text: string,
+): Promise<{ readonly kind: "written"; readonly file: string } | { readonly kind: "failed"; readonly reason: string }> {
   const file = join(dir, "squid.conf");
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(file, text, { mode: 0o600 });
     return { kind: "written", file };
   } catch (error) {
-    return { kind: "failed", reason: `cannot write ${file}: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      kind: "failed",
+      reason: `cannot write ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 

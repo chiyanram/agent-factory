@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+
+  // The operator's code rules, as checks (#148): cyclomatic complexity 5 or less, a switch over a sealed result names
+  // every case and has no default, and no promise is left unhandled. Biome formats; oxlint does not check style.
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node", "vitest"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "options": { "typeAware": true, "reportUnusedDisableDirectives": "error" },
+  "ignorePatterns": ["dist/**", "node_modules/**"],
+  "rules": {
+    "eslint/complexity": ["error", { "max": 5 }],
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      { "allowDefaultCaseForExhaustiveSwitch": true, "considerDefaultExhaustiveForUnions": false }
+    ],
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "eslint/no-var": "error",
+    "import/no-cycle": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+
+    // Off: they fight a rule the operator set.
+    // An exhaustive switch over a sealed result returns from every case; TypeScript's noImplicitReturns already checks it.
+    "typescript/consistent-return": "off",
+    // Steps run one after another on purpose: a failed step must stop the next (start.ts, the forge paging).
+    "eslint/no-await-in-loop": "off",
+    // Style only: a helper kept next to the one test that uses it reads better there.
+    "unicorn/consistent-function-scoping": "off"
+  }
+}

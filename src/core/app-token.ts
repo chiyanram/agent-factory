@@ -25,7 +25,12 @@ import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 
-export type HttpRequest = { readonly method: "GET" | "POST"; readonly url: string; readonly headers: Readonly<Record<string, string>>; readonly body: string };
+export type HttpRequest = {
+  readonly method: "GET" | "POST";
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+};
 export type HttpAnswer = { readonly status: number; readonly body: string };
 export type Http = (request: HttpRequest) => Promise<Result<HttpAnswer>>;
 
@@ -35,7 +40,11 @@ type Cached = Minted & { readonly project: string };
 
 export const realHttp: Http = async (request) => {
   try {
-    const answer = await fetch(request.url, { method: request.method, headers: request.headers, ...(request.method === "POST" ? { body: request.body } : {}) });
+    const answer = await fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      ...(request.method === "POST" ? { body: request.body } : {}),
+    });
     return { kind: "ok", value: { status: answer.status, body: await answer.text() } };
   } catch (error) {
     return { kind: "failed", reason: `cannot reach GitHub: ${error instanceof Error ? error.message : String(error)}` };
@@ -49,7 +58,10 @@ async function privateFile(path: string, me: Owned): Promise<Result<string>> {
   try {
     const s = await stat(path);
     if (!s.isFile() || s.uid !== me.uid || (s.mode & 0o077) !== 0) {
-      return { kind: "failed", reason: `${path} must be a file of this user's, readable by it alone: chmod 600 ${path}` };
+      return {
+        kind: "failed",
+        reason: `${path} must be a file of this user's, readable by it alone: chmod 600 ${path}`,
+      };
     }
     return { kind: "ok", value: await readFile(path, "utf8") };
   } catch {
@@ -111,21 +123,42 @@ export type MintSetup = {
 const API = "https://api.github.com";
 
 function headers(bearer: string): Record<string, string> {
-  return { Authorization: `Bearer ${bearer}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "agent-factory" };
+  return {
+    Authorization: `Bearer ${bearer}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "agent-factory",
+  };
 }
 
 // call : one GitHub REST call, its JSON on a 2xx; a 401 names the likely causes.
-async function call(setup: MintSetup, bearer: string, method: "GET" | "POST", path: string, body: unknown): Promise<Result<Record<string, unknown>>> {
-  const answer = await setup.http({ method, url: `${API}/${path}`, headers: headers(bearer), body: JSON.stringify(body) });
+async function call(
+  setup: MintSetup,
+  bearer: string,
+  method: "GET" | "POST",
+  path: string,
+  body: unknown,
+): Promise<Result<Record<string, unknown>>> {
+  const answer = await setup.http({
+    method,
+    url: `${API}/${path}`,
+    headers: headers(bearer),
+    body: JSON.stringify(body),
+  });
   if (answer.kind === "failed") {
     return answer;
   }
   const { status } = answer.value;
   if (status === 401) {
-    return { kind: "failed", reason: `HTTP 401 on ${method} ${path}: GitHub refused App ${setup.config.appId}; check the App ID, the key, and this machine's clock` };
+    return {
+      kind: "failed",
+      reason: `HTTP 401 on ${method} ${path}: GitHub refused App ${setup.config.appId}; check the App ID, the key, and this machine's clock`,
+    };
   }
   if (status === 404) {
-    const why = path.endsWith("/installation") ? `the App ${setup.config.appId} is not installed on ${setup.project}` : `GitHub does not know this App or path`;
+    const why = path.endsWith("/installation")
+      ? `the App ${setup.config.appId} is not installed on ${setup.project}`
+      : `GitHub does not know this App or path`;
     return { kind: "failed", reason: `HTTP 404 on ${method} ${path}: ${why}` };
   }
   if (status < 200 || status > 299) {
@@ -147,8 +180,14 @@ function cacheFile(setup: MintSetup): string {
 async function cached(setup: MintSetup): Promise<Minted | "none"> {
   try {
     const raw = JSON.parse(await readFile(cacheFile(setup), "utf8")) as Partial<Cached>;
-    const valid = typeof raw.token === "string" && typeof raw.login === "string" && typeof raw.expiresAt === "string" && raw.project === setup.project;
-    return valid && Date.parse(raw.expiresAt!) / 1000 > setup.now + 900 ? { token: raw.token!, login: raw.login!, expiresAt: raw.expiresAt! } : "none";
+    const valid =
+      typeof raw.token === "string" &&
+      typeof raw.login === "string" &&
+      typeof raw.expiresAt === "string" &&
+      raw.project === setup.project;
+    return valid && Date.parse(raw.expiresAt!) / 1000 > setup.now + 900
+      ? { token: raw.token!, login: raw.login!, expiresAt: raw.expiresAt! }
+      : "none";
   } catch {
     return "none";
   }

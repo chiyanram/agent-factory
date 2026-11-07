@@ -37,7 +37,10 @@ import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
 import type { Summary, WriterMode } from "./records.js";
 
-export type ApprovalView = { readonly kind: "approved"; readonly at: string; readonly lane: Lane } | { readonly kind: "stale" } | { readonly kind: "missing" };
+export type ApprovalView =
+  | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
+  | { readonly kind: "stale" }
+  | { readonly kind: "missing" };
 
 export type ChangeView =
   | { readonly kind: "none" }
@@ -78,7 +81,10 @@ function open(s: TicketState): OpenLine | "none" {
 
 const merged: Rule = (s) => (s.change.kind === "merged" ? { kind: "reconcile" } : "next");
 
-const many: Rule = (s) => (s.change.kind === "many" ? { kind: "needs-human", why: `${s.change.numbers.length} changes use factory/${s.ticket}` } : "next");
+const many: Rule = (s) =>
+  s.change.kind === "many"
+    ? { kind: "needs-human", why: `${s.change.numbers.length} changes use factory/${s.ticket}` }
+    : "next";
 
 const needsHuman: Rule = (s) => {
   const line = open(s);
@@ -87,7 +93,9 @@ const needsHuman: Rule = (s) => {
 
 const interrupted: Rule = (s) => {
   const i = s.runs.interrupted;
-  return i.kind === "interrupted" ? { kind: "needs-human", why: `the ${i.phase} run started at ${i.at} never ended; check what it pushed` } : "next";
+  return i.kind === "interrupted"
+    ? { kind: "needs-human", why: `the ${i.phase} run started at ${i.at} never ended; check what it pushed` }
+    : "next";
 };
 
 const approval: Rule = (s) => {
@@ -99,18 +107,26 @@ const approval: Rule = (s) => {
   return line !== "none" && line.claimed ? { kind: "release", why } : { kind: "wait", why };
 };
 
+// newerStop : a /stop that is newer than the approval; an undated one counts as newer
+function newerStop(line: OpenLine, approvedAt: string): boolean {
+  return line.stop.kind === "stopped"
+    ? Date.parse(line.stop.at) > Date.parse(approvedAt)
+    : line.stop.kind === "undated";
+}
+
 const stopped: Rule = (s) => {
   const line = open(s);
-  if (line === "none" || line.stop.kind === "none" || s.approval.kind !== "approved") {
-    return "next";
-  }
-  const newer = line.stop.kind === "undated" || Date.parse(line.stop.at) > Date.parse(s.approval.at);
-  return newer ? { kind: "wait", why: "a maintainer's /stop is newer than the approval; approve again to go on" } : "next";
+  const held = line !== "none" && s.approval.kind === "approved" && newerStop(line, s.approval.at);
+  return held
+    ? { kind: "wait", why: "a maintainer's /stop is newer than the approval; approve again to go on" }
+    : "next";
 };
 
 // quiet : nothing on the change since the newest of our record, its last comment and the approval
 function quiet(s: TicketState, line: OpenLine): boolean {
-  const times = [s.runs.lastAt, line.lastNoteAt, s.approval.kind === "approved" ? s.approval.at : ""].map(Date.parse).filter(Number.isFinite);
+  const times = [s.runs.lastAt, line.lastNoteAt, s.approval.kind === "approved" ? s.approval.at : ""]
+    .map(Date.parse)
+    .filter(Number.isFinite);
   return times.length > 0 && s.now - Math.max(...times) > s.quietMinutes * 60_000;
 }
 
@@ -121,16 +137,22 @@ const asks: Rule = (s) => {
 
 const unknownPipeline: Rule = (s) => {
   const line = open(s);
-  return line !== "none" && line.pipeline.kind === "unknown" ? { kind: "needs-human", why: `the forge reports a pipeline state the factory does not know: ${line.pipeline.raw}` } : "next";
+  return line !== "none" && line.pipeline.kind === "unknown"
+    ? { kind: "needs-human", why: `the forge reports a pipeline state the factory does not know: ${line.pipeline.raw}` }
+    : "next";
 };
 
 const claimedElsewhere: Rule = (s) => {
   const line = open(s);
-  return line !== "none" && line.claimed && s.runs.lastAt === "" ? { kind: "wait", why: "claimed, but not by this dispatcher" } : "next";
+  return line !== "none" && line.claimed && s.runs.lastAt === ""
+    ? { kind: "wait", why: "claimed, but not by this dispatcher" }
+    : "next";
 };
 
 const noChange: Rule = (s) =>
-  s.change.kind === "none" && s.runs.lastWriter.kind === "ended" ? { kind: "needs-human", why: `a run ended, but no change is open on factory/${s.ticket} (closed?)` } : "next";
+  s.change.kind === "none" && s.runs.lastWriter.kind === "ended"
+    ? { kind: "needs-human", why: `a run ended, but no change is open on factory/${s.ticket} (closed?)` }
+    : "next";
 
 // a bug's fix waits for its failing test, however the test-first run ended
 function nextMode(s: TicketState): WriterMode {
@@ -138,16 +160,23 @@ function nextMode(s: TicketState): WriterMode {
   return bug && !s.runs.testFirstDone ? "test-first" : "fix";
 }
 
+const AGAIN: Readonly<Record<"asked" | "blocked", string>> = {
+  asked: "the question was answered",
+  blocked: "a person removed needs-human",
+};
+
+// after : the writer's next run once the last one ended; "next" when it finished its work
+function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): Action | "next" {
+  if (w.outcome !== "done") {
+    return { kind: "writer", mode: nextMode(s), why: AGAIN[w.outcome] };
+  }
+  return w.mode === "test-first" ? { kind: "writer", mode: "fix", why: "the failing test is in; now the fix" } : "next";
+}
+
 // the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
-  if (w.kind === "none") {
-    return { kind: "writer", mode: nextMode(s), why: "approved; no run yet" };
-  }
-  if (w.mode === "test-first" && w.outcome === "done") {
-    return { kind: "writer", mode: "fix", why: "the failing test is in; now the fix" };
-  }
-  return w.outcome === "done" ? "next" : { kind: "writer", mode: nextMode(s), why: w.outcome === "asked" ? "the question was answered" : "a person removed needs-human" };
+  return w.kind === "none" ? { kind: "writer", mode: nextMode(s), why: "approved; no run yet" } : after(s, w);
 };
 
 function writerHead(s: TicketState): string {
@@ -156,7 +185,9 @@ function writerHead(s: TicketState): string {
 
 const headMoved: Rule = (s) => {
   const line = open(s);
-  return line !== "none" && line.head !== writerHead(s) ? { kind: "wait", why: "the head is not the writer's: a person pushed; stand off" } : "next";
+  return line !== "none" && line.head !== writerHead(s)
+    ? { kind: "wait", why: "the head is not the writer's: a person pushed; stand off" }
+    : "next";
 };
 
 const samePatch: Rule = (s) => {
@@ -167,7 +198,9 @@ const samePatch: Rule = (s) => {
   if (w.patch === "") {
     return { kind: "needs-human", why: "the writer's run changed nothing" };
   }
-  return w.patch === s.runs.previousPatch ? { kind: "needs-human", why: "the writer made the same patch twice" } : "next";
+  return w.patch === s.runs.previousPatch
+    ? { kind: "needs-human", why: "the writer made the same patch twice" }
+    : "next";
 };
 
 const ready: Rule = (s) => {
@@ -184,17 +217,30 @@ const ready: Rule = (s) => {
     : { kind: "writer", mode: "rework", why: "the ready check failed at this head" };
 };
 
-const review: Rule = (s) => {
-  const head = writerHead(s);
+// the review at this head, or "none" when there is none yet
+function reviewHere(s: TicketState): number | "none" {
   const r = s.runs.lastReview;
+  return r.kind === "ended" && r.head === writerHead(s) ? r.actOn : "none";
+}
+
+const review: Rule = (s) => {
+  const actOn = reviewHere(s);
   const spent = s.runs.reviewRounds >= MAX_REVIEW_ROUNDS;
-  if (r.kind === "none" || r.head !== head) {
-    return spent ? { kind: "needs-human", why: `${s.runs.reviewRounds} review rounds and still not through` } : { kind: "review", head };
-  }
-  if (r.actOn === 0) {
+  if (actOn === 0) {
     return "next";
   }
-  return spent ? { kind: "needs-human", why: `Act on findings after ${s.runs.reviewRounds} review rounds` } : { kind: "writer", mode: "rework", why: `${r.actOn} Act on finding(s)` };
+  if (spent) {
+    return {
+      kind: "needs-human",
+      why:
+        actOn === "none"
+          ? `${s.runs.reviewRounds} review rounds and still not through`
+          : `Act on findings after ${s.runs.reviewRounds} review rounds`,
+    };
+  }
+  return actOn === "none"
+    ? { kind: "review", head: writerHead(s) }
+    : { kind: "writer", mode: "rework", why: `${actOn} Act on finding(s)` };
 };
 
 const WAITS: Readonly<Record<string, string>> = {
@@ -204,20 +250,48 @@ const WAITS: Readonly<Record<string, string>> = {
   skipped: "CI skipped this head",
 };
 
+const RED = new Set(["failed", "canceled"]);
+
+function red(s: TicketState): Action {
+  return s.runs.ciRounds >= MAX_CI_ROUNDS
+    ? { kind: "needs-human", why: `CI is still red after ${s.runs.ciRounds} CI rounds` }
+    : { kind: "writer", mode: "ci", why: "CI is red at this head" };
+}
+
+function green(s: TicketState): Action {
+  const head = writerHead(s);
+  return s.runs.pingedAt === head
+    ? { kind: "wait", why: "the gate is green; the human reviews and merges" }
+    : { kind: "ping", head };
+}
+
 const gate: Rule = (s) => {
   const line = open(s);
   const pipeline = line === "none" ? "none" : line.pipeline.kind;
-  if (pipeline === "failed" || pipeline === "canceled") {
-    return s.runs.ciRounds >= MAX_CI_ROUNDS ? { kind: "needs-human", why: `CI is still red after ${s.runs.ciRounds} CI rounds` } : { kind: "writer", mode: "ci", why: "CI is red at this head" };
+  if (RED.has(pipeline)) {
+    return red(s);
   }
-  if (pipeline !== "success") {
-    return { kind: "wait", why: WAITS[pipeline] ?? "waiting for CI" };
-  }
-  const head = writerHead(s);
-  return s.runs.pingedAt === head ? { kind: "wait", why: "the gate is green; the human reviews and merges" } : { kind: "ping", head };
+  return pipeline === "success" ? green(s) : { kind: "wait", why: WAITS[pipeline] ?? "waiting for CI" };
 };
 
-const RULES: readonly Rule[] = [merged, many, needsHuman, interrupted, approval, stopped, asks, unknownPipeline, claimedElsewhere, noChange, writerAgain, headMoved, samePatch, ready, review, gate];
+const RULES: readonly Rule[] = [
+  merged,
+  many,
+  needsHuman,
+  interrupted,
+  approval,
+  stopped,
+  asks,
+  unknownPipeline,
+  claimedElsewhere,
+  noChange,
+  writerAgain,
+  headMoved,
+  samePatch,
+  ready,
+  review,
+  gate,
+];
 
 function first(state: TicketState): Action {
   for (const rule of RULES) {
@@ -231,14 +305,18 @@ function first(state: TicketState): Action {
 
 // once : a stop already handed to a person waits; removing needs-human does not lift it
 function once(state: TicketState, action: Action): Action {
-  return action.kind === "needs-human" && state.runs.blocked.includes(action.why) ? { kind: "wait", why: `handed to a person earlier: ${action.why}; approve again to go on` } : action;
+  return action.kind === "needs-human" && state.runs.blocked.includes(action.why)
+    ? { kind: "wait", why: `handed to a person earlier: ${action.why}; approve again to go on` }
+    : action;
 }
 
 // released : a wait on a claimed change that has gone quiet gives the claim back
 function released(state: TicketState, action: Action): Action {
   const line = open(state);
   const quietClaim = line !== "none" && line.claimed && quiet(state, line);
-  return action.kind === "wait" && quietClaim ? { kind: "release", why: `quiet for over ${state.quietMinutes} minutes: ${action.why}` } : action;
+  return action.kind === "wait" && quietClaim
+    ? { kind: "release", why: `quiet for over ${state.quietMinutes} minutes: ${action.why}` }
+    : action;
 }
 
 // decide : the one action for this ticket now, with the two rules that hold over every row.

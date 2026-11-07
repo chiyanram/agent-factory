@@ -3,7 +3,14 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hostPush as realHostPush, plainBranch, pushEnv, pushUrlFits, pushUrls, type PushRequest } from "../src/core/push.js";
+import {
+  hostPush as realHostPush,
+  plainBranch,
+  pushEnv,
+  pushUrlFits,
+  pushUrls,
+  type PushRequest,
+} from "../src/core/push.js";
 import type { Identity } from "../src/core/identity.js";
 
 // A real clone whose origin is https://github.com/o/r.git; the operator's global config (trusted) maps that URL to a
@@ -24,7 +31,12 @@ function commit(message: string): string {
   return git(work, "rev-parse", "HEAD");
 }
 
-const APP: Identity = { kind: "app", token: "ghs_0123456789abcdefghij", login: "ledger-factory[bot]", expiresAt: "2026-11-07T06:00:00Z" };
+const APP: Identity = {
+  kind: "app",
+  token: "ghs_0123456789abcdefghij",
+  login: "ledger-factory[bot]",
+  expiresAt: "2026-11-07T06:00:00Z",
+};
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "factory-push-"));
@@ -46,7 +58,8 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 // git resolves origin through the trusted insteadOf to the bare repository on disk; these tests check the push, so they
 // report the URL the clone names. pushUrls itself is tested against real git below.
-const hostPush = (r: PushRequest) => realHostPush(r, { urls: async () => ({ kind: "ok", value: ["https://github.com/o/r.git"] }) });
+const hostPush = (r: PushRequest) =>
+  realHostPush(r, { urls: async () => ({ kind: "ok", value: ["https://github.com/o/r.git"] }) });
 
 function request(over: Partial<PushRequest>): PushRequest {
   return {
@@ -79,22 +92,40 @@ describe("hostPush", () => {
     git(work, "push", "-q", "origin", "HEAD:refs/heads/feat/x");
     git(work, "reset", "-q", "--hard", seen);
     const head = commit("the writer's change");
-    expect(await hostPush(request({ commit: head, lease: { kind: "sha", sha: seen } }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("moved") });
+    expect(await hostPush(request({ commit: head, lease: { kind: "sha", sha: seen } }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("moved"),
+    });
     expect(git(remote, "rev-parse", "refs/heads/feat/x")).toBe(human);
   });
 
   it("refuses a protected branch, a name that is not a plain branch, and a short SHA, before any git call", async () => {
-    expect(await hostPush(request({ branch: "main" }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("protected") });
+    expect(await hostPush(request({ branch: "main" }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("protected"),
+    });
     for (const branch of ["--force", "a..b", "x:refs/heads/main", "HEAD", "a/", "a.lock", "a//b", "a@{1}"]) {
       expect(plainBranch(branch)).toBe(false);
-      expect(await hostPush(request({ branch }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("plain branch") });
+      expect(await hostPush(request({ branch }))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("plain branch"),
+      });
     }
-    expect(await hostPush(request({ commit: "abc123" }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("full SHAs") });
+    expect(await hostPush(request({ commit: "abc123" }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("full SHAs"),
+    });
   });
 
   it("refuses a commit the clone does not have, and an empty list of protected branches", async () => {
-    expect(await hostPush(request({ commit: "f".repeat(40) }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("not a commit") });
-    expect(await hostPush(request({ protectedBranches: [] }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("protected") });
+    expect(await hostPush(request({ commit: "f".repeat(40) }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("not a commit"),
+    });
+    expect(await hostPush(request({ protectedBranches: [] }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("protected"),
+    });
   });
 
   it("refuses a clone that pushes elsewhere, or to more than one URL, as git resolves them (the review's findings 1-3)", async () => {
@@ -109,13 +140,23 @@ describe("hostPush", () => {
 
   it("with an App, refuses a repo whose own config sets a credential helper: the push would go out as you", async () => {
     git(work, "config", "credential.helper", "store");
-    expect(await hostPush(request({ identity: APP }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("credential.helper") });
+    expect(await hostPush(request({ identity: APP }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("credential.helper"),
+    });
   });
 
   it("with an App, pushes; a guard's refusal stops the push", async () => {
     const lease = { kind: "sha", sha: git(remote, "rev-parse", "refs/heads/feat/x") } as const;
     const head = commit("the writer's change");
-    const refused = await hostPush(request({ commit: head, lease, identity: APP, guards: [async () => ({ kind: "failed", reason: "touches CI config" })] }));
+    const refused = await hostPush(
+      request({
+        commit: head,
+        lease,
+        identity: APP,
+        guards: [async () => ({ kind: "failed", reason: "touches CI config" })],
+      }),
+    );
     expect(refused).toEqual({ kind: "failed", reason: "touches CI config" });
     expect(await hostPush(request({ commit: head, lease, identity: APP }))).toEqual({ kind: "ok" });
     expect(git(remote, "rev-parse", "refs/heads/feat/x")).toBe(head);
@@ -123,10 +164,15 @@ describe("hostPush", () => {
 
   it("can create the branch when the caller saw none", async () => {
     const head = commit("first push");
-    expect(await hostPush(request({ branch: "feat/new", commit: head, lease: { kind: "absent" } }))).toEqual({ kind: "ok" });
+    expect(await hostPush(request({ branch: "feat/new", commit: head, lease: { kind: "absent" } }))).toEqual({
+      kind: "ok",
+    });
     // the branch exists now, so "the caller saw none" no longer holds
     const next = commit("second push");
-    expect(await hostPush(request({ branch: "feat/new", commit: next, lease: { kind: "absent" } }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("moved") });
+    expect(await hostPush(request({ branch: "feat/new", commit: next, lease: { kind: "absent" } }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("moved"),
+    });
     expect(git(remote, "rev-parse", "refs/heads/feat/new")).toBe(head);
   });
 });
@@ -134,17 +180,33 @@ describe("hostPush", () => {
 describe("pushEnv", () => {
   function fill(host: string, extra: NodeJS.ProcessEnv): string {
     try {
-      return execFileSync("git", ["credential", "fill"], { env: { ...env, GIT_TERMINAL_PROMPT: "0", ...extra }, input: `protocol=https\nhost=${host}\npath=o/r.git\n\n`, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+      return execFileSync("git", ["credential", "fill"], {
+        env: { ...env, GIT_TERMINAL_PROMPT: "0", ...extra },
+        input: `protocol=https\nhost=${host}\npath=o/r.git\n\n`,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "ignore"],
+      });
     } catch {
       return "";
     }
   }
 
   it("gives git the App's token for github.com only, and drops every other helper", () => {
-    git(work, "config", "--global", "credential.helper", "!f() { echo username=OPERATOR; echo password=OPERATOR_SECRET; }; f");
+    git(
+      work,
+      "config",
+      "--global",
+      "credential.helper",
+      "!f() { echo username=OPERATOR; echo password=OPERATOR_SECRET; }; f",
+    );
     const own = pushEnv({ kind: "own" }, env);
     expect(fill("github.com", own.kind === "ok" ? own.value : {})).toContain("OPERATOR_SECRET");
-    const app = pushEnv(APP, { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.quotepath", GIT_CONFIG_VALUE_0: "off" });
+    const app = pushEnv(APP, {
+      ...env,
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.quotepath",
+      GIT_CONFIG_VALUE_0: "off",
+    });
     const appEnv = app.kind === "ok" ? app.value : {};
     expect(fill("github.com", appEnv)).toContain("password=ghs_0123456789abcdefghij");
     expect(fill("github.com", appEnv)).not.toContain("OPERATOR");
@@ -162,7 +224,10 @@ describe("pushUrls", () => {
     git(root, "config", "--global", "url.git@github.com:.insteadOf", "https://github.com/");
     git(root, "config", "--global", "--unset", `url.${remote}.insteadOf`);
     expect(await pushUrls(request({}))).toEqual({ kind: "ok", value: ["git@github.com:o/r.git"] });
-    expect(await realHostPush(request({ identity: APP }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("git@github.com:o/r.git") });
+    expect(await realHostPush(request({ identity: APP }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("git@github.com:o/r.git"),
+    });
   });
 });
 
@@ -177,7 +242,12 @@ describe("pushUrlFits", () => {
     expect(fits("git@github.com:o/r.git", false)).toBe(true);
     expect(fits("ssh://git@gitlab.example.com:2222/group/sub/app.git", false, "gitlab", "group/sub/app")).toBe(true);
     expect(fits("https://gitlab.example.com/group/other.git", false, "gitlab", "group/sub/app")).toBe(false);
-    for (const url of ["https://evil.example/group/sub/app", "git@evil.example:group/sub/app.git", "https://gitlab.example.com:8443/group/sub/app", "https://gitlab.example.com.evil/group/sub/app"]) {
+    for (const url of [
+      "https://evil.example/group/sub/app",
+      "git@evil.example:group/sub/app.git",
+      "https://gitlab.example.com:8443/group/sub/app",
+      "https://gitlab.example.com.evil/group/sub/app",
+    ]) {
       expect(fits(url, false, "gitlab", "group/sub/app")).toBe(false);
     }
   });

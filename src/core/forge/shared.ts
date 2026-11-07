@@ -45,7 +45,9 @@ export function nextPage(full: boolean, page: number): Cursor | { readonly kind:
 // nextCursor : the next cursor from a GraphQL pageInfo at path. The cursor is read only when there is a next page:
 // GraphQL sends null for it on the last page.
 export function nextCursor(r: Reader, value: unknown, path: string): Cursor | { readonly kind: "end" } {
-  return r.bool(value, `${path}.hasNextPage`) ? { kind: "after", cursor: r.text(value, `${path}.endCursor`) } : { kind: "end" };
+  return r.bool(value, `${path}.hasNextPage`)
+    ? { kind: "after", cursor: r.text(value, `${path}.endCursor`) }
+    : { kind: "end" };
 }
 
 export function text(variable: string): Variable {
@@ -70,7 +72,12 @@ export function done<T>(result: Result<T>): Done {
 }
 
 // An open change as its first page read it: its newest 100 comments, and whether older ones are left.
-export type RawOpen = { readonly change: OpenChange; readonly more: boolean; readonly start: string; readonly manyLabels: boolean };
+export type RawOpen = {
+  readonly change: OpenChange;
+  readonly more: boolean;
+  readonly start: string;
+  readonly manyLabels: boolean;
+};
 export type Earlier = { readonly notes: readonly Note[]; readonly more: boolean; readonly start: string };
 export type FetchEarlier = (input: { readonly number: number; readonly before: Cursor }) => Promise<Result<Earlier>>;
 
@@ -100,11 +107,17 @@ async function complete(raw: RawOpen, mark: string, fetch: FetchEarlier): Promis
     return { kind: "ok", value: raw.change };
   }
   const before = await earlier(raw.change.number, raw.start, fetch);
-  return before.kind === "ok" ? { kind: "ok", value: { ...raw.change, comments: [...before.value, ...raw.change.comments] } } : before;
+  return before.kind === "ok"
+    ? { kind: "ok", value: { ...raw.change, comments: [...before.value, ...raw.change.comments] } }
+    : before;
 }
 
 // completeAll : every open change with all of its comments, so an ask older than the newest 100 is still counted.
-export async function completeAll(raws: readonly RawOpen[], mark: string, fetch: FetchEarlier): Promise<Result<readonly OpenChange[]>> {
+export async function completeAll(
+  raws: readonly RawOpen[],
+  mark: string,
+  fetch: FetchEarlier,
+): Promise<Result<readonly OpenChange[]>> {
   const changes: OpenChange[] = [];
   for (const raw of raws) {
     const full = await complete(raw, mark, fetch);
