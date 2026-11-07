@@ -40,7 +40,7 @@ const COLLABORATORS = `query($owner: String!, $name: String!, $after: String) { 
 const OPEN = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   pullRequests(states: [OPEN], first: 50, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
-    nodes { number isDraft headRefOid headRefName
+    nodes { number isDraft headRefOid headRefName isCrossRepository
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       comments(last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
@@ -52,7 +52,7 @@ const EARLIER = `query($owner: String!, $name: String!, $number: Int!, $before: 
 function byState(state: "opened" | "merged"): string {
   return `query($owner: String!, $name: String!, $label: String!, $after: String) { repository(owner: $owner, name: $name) {
   pullRequests(states: [${state === "opened" ? "OPEN" : "MERGED"}], labels: [$label], first: 100, after: $after) {
-    pageInfo { hasNextPage endCursor } nodes { number headRefName } } } }`;
+    pageInfo { hasNextPage endCursor } nodes { number headRefName isCrossRepository } } } }`;
 }
 
 // GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and app-token use "ledger-factory[bot]".
@@ -130,6 +130,7 @@ export function github(client: Client, project: GithubProject): Forge {
       change: {
         number: r.int(node, "number"),
         branch: r.text(node, "headRefName"),
+        fork: r.bool(node, "isCrossRepository"),
         head: r.text(node, "headRefOid"),
         draft: r.bool(node, "isDraft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "name")),
@@ -164,7 +165,7 @@ export function github(client: Client, project: GithubProject): Forge {
   async function labelled(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly MergedChange[]>> {
     return pages((cursor) =>
       query(byState(input.state), { label: text(input.label), ...after(cursor) }, (data, r): Page<MergedChange> => ({
-        items: r.list(data, "repository.pullRequests.nodes").map((n) => ({ number: r.int(n, "number"), branch: r.text(n, "headRefName") })),
+        items: r.list(data, "repository.pullRequests.nodes").map((n) => ({ number: r.int(n, "number"), branch: r.text(n, "headRefName"), fork: r.bool(n, "isCrossRepository") })),
         next: nextCursor(r, data, "repository.pullRequests.pageInfo"),
       })),
     );

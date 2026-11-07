@@ -53,7 +53,7 @@ const MEMBERS = `query($project: ID!, $after: String) { project(fullPath: $proje
 const OPEN = `query($project: ID!, $after: String) { project(fullPath: $project) {
   mergeRequests(state: opened, first: 50, after: $after, sort: CREATED_ASC) {
     pageInfo { hasNextPage endCursor }
-    nodes { iid draft diffHeadSha sourceBranch
+    nodes { iid draft diffHeadSha sourceBranch sourceProjectId targetProjectId
       labels(first: 100) { pageInfo { hasNextPage } nodes { title } }
       headPipeline { status }
       notes(filter: ONLY_COMMENTS, last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
@@ -160,6 +160,7 @@ export function gitlab(client: Client, project: string): Forge {
       change: {
         number: r.int(node, "iid"),
         branch: r.text(node, "sourceBranch"),
+        fork: r.at(node, "sourceProjectId") !== r.at(node, "targetProjectId"),
         head,
         draft: r.bool(node, "draft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "title")),
@@ -212,7 +213,7 @@ export function gitlab(client: Client, project: string): Forge {
         return answer;
       }
       const r = reader("gitlab merge requests");
-      const batch = r.list(answer.value, "").map((m) => ({ number: r.int(m, "iid"), branch: r.text(m, "source_branch") }));
+      const batch = r.list(answer.value, "").map((m) => ({ number: r.int(m, "iid"), branch: r.text(m, "source_branch"), fork: r.at(m, "source_project_id") !== r.at(m, "target_project_id") }));
       return r.done({ items: batch, next: nextPage(batch.length === 100, page) });
     });
   }

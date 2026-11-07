@@ -40,6 +40,8 @@ export type OpenChange = {
   readonly number: number;
   // the source branch: the dispatcher finds a ticket's change by it (factory/<ticket>)
   readonly branch: string;
+  // the branch lives in another repository (a fork): never the factory's own change
+  readonly fork: boolean;
   readonly head: string;
   readonly draft: boolean;
   readonly labels: readonly string[];
@@ -55,7 +57,7 @@ export type Changes = {
   readonly merged: readonly MergedChange[];
 };
 
-export type MergedChange = { readonly number: number; readonly branch: string };
+export type MergedChange = { readonly number: number; readonly branch: string; readonly fork: boolean };
 
 export type LineFinding = { readonly file: string; readonly line: number };
 

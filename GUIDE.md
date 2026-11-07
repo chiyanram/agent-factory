@@ -190,9 +190,15 @@ The dispatcher's decision table is code: [`src/core/dispatch/table.ts`](src/core
 posts and labels as the project's identity, and starts at most one run. Run it from launchd or cron every few
 minutes; a lock keeps two passes apart, and `--dry-run` prints the decisions and acts on none. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
-ended goes to a person. **Today:** the writer's box (#113) and the TypeScript ready check and reviewer (#138) are not
-built, so `dispatch` does the forge-only rows (release, reconcile, needs-human, the green-gate ping) and says which
-run it would start; run the table below by hand for the rest, and there is no merge-conflict row yet.
+ended goes to a person. A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that
+name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
+has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
+(`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
+which also starts every count afresh. **Today:** the writer's box (#113) and the TypeScript ready check and reviewer
+(#138) are not built, and no run record is ever written, so `dispatch` does only these rows: reconcile a merged claim,
+release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
+person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
+start. Run the table below by hand for the rest. There is no merge-conflict row yet.
 The order is fixed: writer done → ready check → reviewer → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
 Poll the forge about every 5 minutes. Limits: one run per MR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.

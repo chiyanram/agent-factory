@@ -26,6 +26,7 @@ async function approved(ticket = "PROJ-1", lane = "feature"): Promise<void> {
 const open = (over: Partial<OpenChange> = {}): OpenChange => ({
   number: 12,
   branch: "factory/PROJ-1",
+  fork: false,
   head: H,
   draft: true,
   labels: ["agent::claimed"],
@@ -120,7 +121,7 @@ describe("tick", () => {
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
     await approved();
     const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async () => ({ kind: "failed", reason: "the box died" }) } };
-    const changes = { team, open: [open()], merged: [] };
+    const changes = { team, open: [open({ labels: [] })], merged: [] };
     const first: string[] = [];
     await tick(setup(changes, first, { steps }));
     expect(first).toContain("log PROJ-1: failed: the box died");
@@ -137,7 +138,7 @@ describe("tick", () => {
     await record({ where: { home, project: "ledger", ticket: "PROJ-3" }, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p" } });
     await record({ where: { home, project: "ledger", ticket: "PROJ-3" }, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true } });
     await record({ where: { home, project: "ledger", ticket: "PROJ-3" }, event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 } });
-    const changes = { team, open: [open(), open({ number: 14, branch: "factory/PROJ-3" })], merged: [{ number: 9, branch: "factory/PROJ-9" }] };
+    const changes = { team, open: [open(), open({ number: 14, branch: "factory/PROJ-3" })], merged: [{ number: 9, branch: "factory/PROJ-9", fork: false }] };
     const log: string[] = [];
     await tick(setup(changes, log));
     expect(log).toContain("label -agent::claimed #12");
@@ -151,9 +152,73 @@ describe("tick", () => {
   it("a dry run decides every ticket and acts on none", async () => {
     await approved();
     const log: string[] = [];
-    await tick(setup({ team, open: [open()], merged: [{ number: 9, branch: "factory/PROJ-9" }] }, log, { dryRun: true }));
+    await tick(setup({ team, open: [open()], merged: [{ number: 9, branch: "factory/PROJ-9", fork: false }] }, log, { dryRun: true }));
     expect(log.every((l) => l.startsWith("log ") && l.endsWith("(dry run)"))).toBe(true);
     expect(log).toHaveLength(2);
+  });
+
+  it("a fork's branch named factory/<ticket> is never the ticket's change", async () => {
+    await approved();
+    const log: string[] = [];
+    const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async (input) => (log.push(`writer on ${input.change.kind}`), { kind: "failed", reason: "stop here" }) } };
+    await tick(setup({ team, open: [open({ fork: true, labels: [] })], merged: [] }, log, { steps }));
+    expect(log).toContain("writer on none");
+    expect(log.some((l) => l.includes("#12"))).toBe(false);
+  });
+
+  it("a broken ticket fails on its own; every other ticket is still decided and acted on", async () => {
+    await approved("PROJ-1");
+    await approved("PROJ-2");
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), "not a record\n", { flag: "a" });
+    const log: string[] = [];
+    const passed = await tick(setup({ team, open: [], merged: [{ number: 9, branch: "factory/PROJ-2", fork: false }] }, log));
+    expect(log).toContain("log PROJ-1: broken: " + join(home, "runs", "ledger", "PROJ-1.jsonl") + " line 1 is not a record; fix or remove it");
+    expect(log).toContain("label -agent::claimed #9");
+    expect(passed.kind === "ok" ? passed.value.some((r) => r.result.kind === "failed") : false).toBe(true);
+  });
+
+  it("a stop is handed to a person once: needs-human, the claim released, one note; a person removing the label does not repost it", async () => {
+    await approved();
+    await record({ where: { home, project: "ledger", ticket: "PROJ-1" }, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "" } });
+    const changes = { team, open: [open()], merged: [] };
+    const first: string[] = [];
+    await tick(setup(changes, first));
+    expect(first.filter((l) => !l.startsWith("log"))).toEqual(["label +needs-human #12", "label -agent::claimed #12", "note #12 [coordinator] blocked: the writer's run changed nothing"]);
+    const second: string[] = [];
+    await tick(setup(changes, second));
+    expect(second.filter((l) => !l.startsWith("log"))).toEqual([]);
+    expect(second.join(" ")).toContain("approve again");
+  });
+
+  it("forge-only actions come before the one run, so no ping waits behind an hour-long writer", async () => {
+    await approved("PROJ-1");
+    await approved("PROJ-3");
+    for (const event of [
+      { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p" },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true },
+      { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+    ] as const) {
+      await record({ where: { home, project: "ledger", ticket: "PROJ-3" }, event });
+    }
+    const log: string[] = [];
+    const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async () => (log.push("writer runs"), { kind: "ok", value: { head: H, outcome: "done", patch: "p1" } }) } };
+    await tick(setup({ team, open: [open({ labels: [] }), open({ number: 14, branch: "factory/PROJ-3" })], merged: [] }, log, { steps }));
+    expect(log.findIndex((l) => l.startsWith("note #14"))).toBeLessThan(log.indexOf("writer runs"));
+  });
+
+  it("a lock just made and not yet written is busy, and a pass never removes a lock that is not its own", async () => {
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(join(home, "runs", "ledger", ".lock"), "");
+    expect(await lock({ home, project: "ledger" })).toMatchObject({ kind: "busy" });
+    rmSync(join(home, "runs", "ledger", ".lock"));
+    const a = await lock({ home, project: "ledger" });
+    expect(a.kind).toBe("held");
+    writeFileSync(join(home, "runs", "ledger", ".lock"), `${process.pid}:someone-else`);
+    if (a.kind === "held") {
+      await a.release();
+    }
+    expect(readFileSync(join(home, "runs", "ledger", ".lock"), "utf8")).toBe(`${process.pid}:someone-else`);
   });
 
   it("one pass at a time: a live lock refuses, a dead one is taken over", async () => {

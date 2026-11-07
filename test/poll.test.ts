@@ -18,6 +18,7 @@ const n = (name: string, body: string, at: string) => ({ body, author: { name },
 const change = (number: number, o: Partial<OpenChange> = {}): OpenChange => ({
   number,
   branch: `factory/T-${number}`,
+  fork: false,
   head: "1234567890abcdef",
   draft: true,
   labels: [],
@@ -25,7 +26,7 @@ const change = (number: number, o: Partial<OpenChange> = {}): OpenChange => ({
   comments: [],
   ...o,
 });
-const changes = (open: readonly OpenChange[], merged: readonly number[] = []): Changes => ({ team, open, merged: merged.map((number) => ({ number, branch: `factory/T-${number}` })) });
+const changes = (open: readonly OpenChange[], merged: readonly number[] = []): Changes => ({ team, open, merged: merged.map((number) => ({ number, branch: `factory/T-${number}`, fork: false })) });
 const one = (c: OpenChange): OpenLine => decide({ changes: changes([c]), label: "agent::claimed", factory: "ram" })[0] as OpenLine;
 
 describe("decide", () => {
@@ -79,7 +80,7 @@ describe("format", () => {
     const line = one(change(12, { labels: ["agent::claimed"], comments: [n("ram", "/stop", "2026-11-02T10:00:00Z")] }));
     expect(format({ line, mark: "!" })).toBe("!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00.000Z asks=0");
     expect(format({ line: { ...line, stop: { kind: "undated" } }, mark: "!" })).toContain(" stop=undated ");
-    expect(format({ line: { kind: "merged", number: 9, branch: "factory/T-9" }, mark: "#" })).toBe("#9 merged claimed=yes");
+    expect(format({ line: { kind: "merged", number: 9, branch: "factory/T-9", fork: false }, mark: "#" })).toBe("#9 merged claimed=yes");
   });
 
   it("an unknown pipeline says what the forge said, in plain characters (#124)", () => {

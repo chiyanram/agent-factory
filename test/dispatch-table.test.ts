@@ -8,7 +8,7 @@ const APPROVED_AT = "2026-11-07T08:00:00Z";
 const NOW = Date.parse("2026-11-07T10:00:00Z");
 
 function line(over: Partial<OpenLine> = {}): OpenLine {
-  return { kind: "open", number: 12, branch: "factory/PROJ-1", head: H, draft: true, claimed: true, pipeline: { kind: "success" }, needsHuman: false, stop: { kind: "none" }, asks: 0, ...over };
+  return { kind: "open", number: 12, branch: "factory/PROJ-1", fork: false, lastNoteAt: "", head: H, draft: true, claimed: true, pipeline: { kind: "success" }, needsHuman: false, stop: { kind: "none" }, asks: 0, ...over };
 }
 
 const wrote = (over: Partial<Summary> = {}): Summary => ({
@@ -34,7 +34,7 @@ function state(over: Partial<TicketState> = {}): TicketState {
 
 describe("decide: one row each", () => {
   it("a merged change that is still claimed is reconciled", () => {
-    expect(decide(state({ change: { kind: "merged", line: { kind: "merged", number: 12, branch: "factory/PROJ-1" } } }))).toEqual({ kind: "reconcile" });
+    expect(decide(state({ change: { kind: "merged", line: { kind: "merged", number: 12, branch: "factory/PROJ-1", fork: false } } }))).toEqual({ kind: "reconcile" });
   });
 
   it("needs-human on the change: a person decides, nothing runs", () => {
@@ -58,10 +58,33 @@ describe("decide: one row each", () => {
     expect(decide(state({ change: { kind: "open", line: line({ stop: { kind: "undated" } }) } }))).toMatchObject({ kind: "wait" });
   });
 
-  it("an open question waits, and the claim is released once it has been quiet too long", () => {
-    expect(decide(state({ change: { kind: "open", line: line({ asks: 1 }) } }))).toMatchObject({ kind: "wait", why: expect.stringContaining("question") });
+  it("an open question waits, and the claim is released once the change has been quiet too long", () => {
+    expect(decide(state({ change: { kind: "open", line: line({ asks: 1, lastNoteAt: "2026-11-07T09:55:00Z" }) } }))).toMatchObject({ kind: "wait", why: expect.stringContaining("question") });
     const quiet = wrote({ lastAt: "2026-11-07T09:00:00Z" });
     expect(decide(state({ runs: quiet, change: { kind: "open", line: line({ asks: 1 }) } }))).toMatchObject({ kind: "release", why: expect.stringContaining("30 minutes") });
+  });
+
+  it("any wait on a claimed change releases the claim once the change is quiet: a person's push, a /stop, CI", () => {
+    const quiet = wrote({ ...reviewed(0), lastAt: "2026-11-05T09:00:00Z" });
+    for (const over of [{ head: "2".repeat(40) }, { pipeline: { kind: "running" } as const }, { stop: { kind: "undated" } as const }]) {
+      expect(decide(state({ runs: quiet, approval: { kind: "approved", at: "2026-11-05T08:00:00Z", lane: "feature" }, change: { kind: "open", line: line(over) } }))).toMatchObject({ kind: "release" });
+    }
+    expect(decide(state({ runs: quiet, change: { kind: "open", line: line({ head: "2".repeat(40), claimed: false }) } }))).toMatchObject({ kind: "wait" });
+  });
+
+  it("two changes on the ticket's branch go to a person", () => {
+    expect(decide(state({ change: { kind: "many", numbers: [12, 15] } }))).toMatchObject({ kind: "needs-human", why: "2 changes use factory/PROJ-1" });
+  });
+
+  it("a change someone else claimed, with no run of ours, is left alone", () => {
+    const busy = { kind: "open", line: line({ lastNoteAt: "2026-11-07T09:55:00Z" }) } as const;
+    expect(decide(state({ runs: EMPTY, change: busy }))).toMatchObject({ kind: "wait", why: "claimed, but not by this dispatcher" });
+    expect(decide(state({ runs: EMPTY }))).toMatchObject({ kind: "release", why: expect.stringContaining("not by this dispatcher") });
+  });
+
+  it("a stop handed to a person once is not handed over again; approving again is the way on", () => {
+    const runs = wrote({ previousPatch: "p1", blocked: ["the writer made the same patch twice"] });
+    expect(decide(state({ runs }))).toMatchObject({ kind: "wait", why: expect.stringContaining("approve again") });
   });
 
   it("a pipeline state the factory does not know goes to a person", () => {
@@ -81,8 +104,16 @@ describe("decide: one row each", () => {
     expect(decide(state({ runs: wrote({ lastWriter: { kind: "ended", mode: "fix", head: H, outcome: "blocked", patch: "p1" } }) }))).toMatchObject({ kind: "writer", why: "a person removed needs-human" });
   });
 
-  it("a run that ended with no change open waits for a person", () => {
-    expect(decide(state({ change: { kind: "none" } }))).toMatchObject({ kind: "wait", why: expect.stringContaining("no change is open") });
+  it("a run that ended with no change open goes to a person, never back to the writer (a closed change)", () => {
+    expect(decide(state({ change: { kind: "none" } }))).toMatchObject({ kind: "needs-human", why: expect.stringContaining("no change is open") });
+    const blocked = wrote({ lastWriter: { kind: "ended", mode: "fix", head: H, outcome: "blocked", patch: "p1" } });
+    expect(decide(state({ change: { kind: "none" }, runs: blocked }))).toMatchObject({ kind: "needs-human" });
+  });
+
+  it("a bug's test-first run that asked or was blocked runs as test-first again, never as the fix", () => {
+    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug" } as const;
+    const asked = wrote({ lastWriter: { kind: "ended", mode: "test-first", head: H, outcome: "asked", patch: "t" } });
+    expect(decide(state({ approval: bug, runs: asked }))).toMatchObject({ kind: "writer", mode: "test-first" });
   });
 
   it("a head that is not the writer's means a person pushed: stand off", () => {

@@ -3,12 +3,15 @@
 // repeat has a stop, after which a person decides.
 //
 //   the change is merged and still claimed                     reconcile (remove the claim)
+//   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
 //   needs-human on the change                                  wait: a person decides
 //   a run started and never ended (the dispatcher died)        needs-human: check what that run pushed
 //   no approval, or a stale one                                release a claim, else wait
 //   a maintainer's /stop newer than the approval               wait; approving again lifts it
-//   an open question                                           wait; release when quiet FACTORY_QUIET_MINUTES
+//   an open question                                           wait
 //   a pipeline state the factory does not know                 needs-human
+//   claimed, but this dispatcher never ran on it               wait: someone else holds it
+//   a run ended and its change is gone (closed)                needs-human
 //   approved, no writer run yet                                writer (a bug: the test-first writer first)
 //   the test-first run is done                                 writer for the fix
 //   the writer asked and a person answered                     writer again
@@ -23,6 +26,11 @@
 //   CI running, none yet, or a manual job                      wait
 //   gate green                                                 ping the human once; never undraft
 //
+// Two rules hold over every row. A wait on a claimed change that has been quiet (no record, no comment) for
+// FACTORY_QUIET_MINUTES releases the claim, so a stuck change goes back to the queue. A stop the dispatcher already
+// handed to a person is not handed over again: removing needs-human does not lift it; approving again does, and starts
+// every count afresh.
+//
 // Today: a merge conflict has no row, since poll does not report mergeability yet; the writer is not sent to rebase.
 
 import type { Lane } from "../spec.js";
@@ -31,7 +39,12 @@ import type { Summary, WriterMode } from "./records.js";
 
 export type ApprovalView = { readonly kind: "approved"; readonly at: string; readonly lane: Lane } | { readonly kind: "stale" } | { readonly kind: "missing" };
 
-export type ChangeView = { readonly kind: "none" } | { readonly kind: "open"; readonly line: OpenLine } | { readonly kind: "merged"; readonly line: MergedLine };
+export type ChangeView =
+  | { readonly kind: "none" }
+  | { readonly kind: "open"; readonly line: OpenLine }
+  | { readonly kind: "merged"; readonly line: MergedLine }
+  // more than one change of this repository on the ticket's branch: none of them can be trusted to be the one
+  | { readonly kind: "many"; readonly numbers: readonly number[] };
 
 export type TicketState = {
   readonly ticket: string;
@@ -65,6 +78,8 @@ function open(s: TicketState): OpenLine | "none" {
 
 const merged: Rule = (s) => (s.change.kind === "merged" ? { kind: "reconcile" } : "next");
 
+const many: Rule = (s) => (s.change.kind === "many" ? { kind: "needs-human", why: `${s.change.numbers.length} changes use factory/${s.ticket}` } : "next");
+
 const needsHuman: Rule = (s) => {
   const line = open(s);
   return line !== "none" && line.needsHuman ? { kind: "wait", why: "needs-human: a person decides" } : "next";
@@ -93,18 +108,15 @@ const stopped: Rule = (s) => {
   return newer ? { kind: "wait", why: "a maintainer's /stop is newer than the approval; approve again to go on" } : "next";
 };
 
-function quiet(s: TicketState): boolean {
-  const last = Date.parse(s.runs.lastAt);
-  return Number.isFinite(last) && s.now - last > s.quietMinutes * 60_000;
+// quiet : nothing on the change since the newest of our record, its last comment and the approval
+function quiet(s: TicketState, line: OpenLine): boolean {
+  const times = [s.runs.lastAt, line.lastNoteAt, s.approval.kind === "approved" ? s.approval.at : ""].map(Date.parse).filter(Number.isFinite);
+  return times.length > 0 && s.now - Math.max(...times) > s.quietMinutes * 60_000;
 }
 
 const asks: Rule = (s) => {
   const line = open(s);
-  if (line === "none" || line.asks === 0) {
-    return "next";
-  }
-  const release = line.claimed && quiet(s);
-  return release ? { kind: "release", why: `an open question, quiet for over ${s.quietMinutes} minutes` } : { kind: "wait", why: "an open question waits for a person" };
+  return line === "none" || line.asks === 0 ? "next" : { kind: "wait", why: "an open question waits for a person" };
 };
 
 const unknownPipeline: Rule = (s) => {
@@ -112,20 +124,31 @@ const unknownPipeline: Rule = (s) => {
   return line !== "none" && line.pipeline.kind === "unknown" ? { kind: "needs-human", why: `the forge reports a pipeline state the factory does not know: ${line.pipeline.raw}` } : "next";
 };
 
+const claimedElsewhere: Rule = (s) => {
+  const line = open(s);
+  return line !== "none" && line.claimed && s.runs.lastAt === "" ? { kind: "wait", why: "claimed, but not by this dispatcher" } : "next";
+};
+
+const noChange: Rule = (s) =>
+  s.change.kind === "none" && s.runs.lastWriter.kind === "ended" ? { kind: "needs-human", why: `a run ended, but no change is open on factory/${s.ticket} (closed?)` } : "next";
+
+// a bug's fix waits for its failing test, however the test-first run ended
+function nextMode(s: TicketState): WriterMode {
+  const bug = s.approval.kind === "approved" && s.approval.lane === "bug";
+  return bug && !s.runs.testFirstDone ? "test-first" : "fix";
+}
+
 // the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
   if (w.kind === "none") {
-    const bug = s.approval.kind === "approved" && s.approval.lane === "bug";
-    return { kind: "writer", mode: bug ? "test-first" : "fix", why: "approved; no run yet" };
+    return { kind: "writer", mode: nextMode(s), why: "approved; no run yet" };
   }
   if (w.mode === "test-first" && w.outcome === "done") {
     return { kind: "writer", mode: "fix", why: "the failing test is in; now the fix" };
   }
-  return w.outcome === "done" ? "next" : { kind: "writer", mode: "fix", why: w.outcome === "asked" ? "the question was answered" : "a person removed needs-human" };
+  return w.outcome === "done" ? "next" : { kind: "writer", mode: nextMode(s), why: w.outcome === "asked" ? "the question was answered" : "a person removed needs-human" };
 };
-
-const noChange: Rule = (s) => (s.change.kind === "none" && s.runs.lastWriter.kind === "ended" ? { kind: "wait", why: `a run ended but no change is open for factory/${s.ticket}; tell a person` } : "next");
 
 function writerHead(s: TicketState): string {
   return s.runs.lastWriter.kind === "ended" ? s.runs.lastWriter.head : "";
@@ -194,10 +217,9 @@ const gate: Rule = (s) => {
   return s.runs.pingedAt === head ? { kind: "wait", why: "the gate is green; the human reviews and merges" } : { kind: "ping", head };
 };
 
-const RULES: readonly Rule[] = [merged, needsHuman, interrupted, approval, stopped, asks, unknownPipeline, writerAgain, noChange, headMoved, samePatch, ready, review, gate];
+const RULES: readonly Rule[] = [merged, many, needsHuman, interrupted, approval, stopped, asks, unknownPipeline, claimedElsewhere, noChange, writerAgain, headMoved, samePatch, ready, review, gate];
 
-// decide : the one action for this ticket now.
-export function decide(state: TicketState): Action {
+function first(state: TicketState): Action {
   for (const rule of RULES) {
     const action = rule(state);
     if (action !== "next") {
@@ -205,4 +227,21 @@ export function decide(state: TicketState): Action {
     }
   }
   return { kind: "wait", why: "nothing to do" };
+}
+
+// once : a stop already handed to a person waits; removing needs-human does not lift it
+function once(state: TicketState, action: Action): Action {
+  return action.kind === "needs-human" && state.runs.blocked.includes(action.why) ? { kind: "wait", why: `handed to a person earlier: ${action.why}; approve again to go on` } : action;
+}
+
+// released : a wait on a claimed change that has gone quiet gives the claim back
+function released(state: TicketState, action: Action): Action {
+  const line = open(state);
+  const quietClaim = line !== "none" && line.claimed && quiet(state, line);
+  return action.kind === "wait" && quietClaim ? { kind: "release", why: `quiet for over ${state.quietMinutes} minutes: ${action.why}` } : action;
+}
+
+// decide : the one action for this ticket now, with the two rules that hold over every row.
+export function decide(state: TicketState): Action {
+  return released(state, once(state, first(state)));
 }

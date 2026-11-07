@@ -8,8 +8,8 @@
 //
 // A lock file keeps two passes from running at once (cron every few minutes, a run of an hour).
 
-import { constants } from "node:fs";
-import { mkdir, open, readdir, readFile, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { approvalState } from "../approval.js";
 import { NEEDS_HUMAN } from "../finish.js";
@@ -60,7 +60,7 @@ export type Decision = { readonly ticket: string; readonly action: Action };
 async function ticketNames(setup: TickSetup, lines: readonly (OpenLine | MergedLine)[]): Promise<readonly string[]> {
   const files = await readdir(join(setup.home, "approvals", setup.project)).catch(() => [] as string[]);
   const approved = files.filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
-  const onForge = lines.filter((l) => l.branch.startsWith(BRANCH_PREFIX)).map((l) => l.branch.slice(BRANCH_PREFIX.length));
+  const onForge = lines.filter((l) => l.branch.startsWith(BRANCH_PREFIX) && !l.fork).map((l) => l.branch.slice(BRANCH_PREFIX.length));
   return [...new Set([...approved, ...onForge])].filter(plainName).sort();
 }
 
@@ -77,12 +77,20 @@ async function approvalOf(setup: TickSetup, ticket: string): Promise<Result<Appr
   }
 }
 
+// changeOf : the ticket's change: on factory/<ticket>, in this repository (a fork's branch is never it). An open change
+// wins over merged ones; two of the same kind cannot be told apart, so a person decides.
 function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): ChangeView {
-  const line = lines.find((l) => l.branch === `${BRANCH_PREFIX}${ticket}`);
-  if (line === undefined) {
+  const ours = lines.filter((l) => l.branch === `${BRANCH_PREFIX}${ticket}` && !l.fork);
+  const opened = ours.filter((l): l is OpenLine => l.kind === "open");
+  const pick: readonly (OpenLine | MergedLine)[] = opened.length > 0 ? opened : ours;
+  const [only] = pick;
+  if (only === undefined) {
     return { kind: "none" };
   }
-  return line.kind === "open" ? { kind: "open", line } : { kind: "merged", line };
+  if (pick.length > 1) {
+    return { kind: "many", numbers: pick.map((l) => l.number) };
+  }
+  return only.kind === "open" ? { kind: "open", line: only } : { kind: "merged", line: only };
 }
 
 async function stateOf(setup: TickSetup, ticket: string, lines: readonly (OpenLine | MergedLine)[]): Promise<Result<TicketState>> {
@@ -99,25 +107,25 @@ async function stateOf(setup: TickSetup, ticket: string, lines: readonly (OpenLi
   return { kind: "ok", value: { ticket, approval: approval.value, change: changeOf(ticket, lines), runs, now: setup.now(), quietMinutes: setup.quietMinutes } };
 }
 
-// decideAll : one decision per ticket, in ticket order
-export async function decideAll(setup: TickSetup): Promise<Result<readonly { readonly state: TicketState; readonly action: Action }[]>> {
+export type Decided = { readonly state: TicketState; readonly action: Action } | { readonly kind: "broken"; readonly ticket: string; readonly reason: string };
+
+// decideAll : one decision per ticket, in ticket order. A ticket whose spec, approval or records cannot be read is
+// broken: it fails on its own, and every other ticket is still decided.
+export async function decideAll(setup: TickSetup): Promise<Result<readonly Decided[]>> {
   const lines = await poll({ forge: setup.forge, label: setup.label });
   if (lines.kind === "failed") {
     return lines;
   }
-  const out: { readonly state: TicketState; readonly action: Action }[] = [];
+  const out: Decided[] = [];
   for (const ticket of await ticketNames(setup, lines.value)) {
     const state = await stateOf(setup, ticket, lines.value);
-    if (state.kind === "failed") {
-      return state;
-    }
-    out.push({ state: state.value, action: decide(state.value) });
+    out.push(state.kind === "ok" ? { state: state.value, action: decide(state.value) } : { kind: "broken", ticket, reason: state.reason });
   }
   return { kind: "ok", value: out };
 }
 
 function number(state: TicketState): number | "none" {
-  return state.change.kind === "none" ? "none" : state.change.line.number;
+  return state.change.kind === "open" || state.change.kind === "merged" ? state.change.line.number : "none";
 }
 
 async function say(setup: TickSetup, state: TicketState, post: Post): Promise<Done> {
@@ -125,14 +133,38 @@ async function say(setup: TickSetup, state: TicketState, post: Post): Promise<Do
   return n === "none" ? { kind: "ok" } : setup.forge.note({ number: n, post });
 }
 
+function where(setup: TickSetup, state: TicketState): { readonly home: string; readonly project: string; readonly ticket: string } {
+  return { home: setup.home, project: setup.project, ticket: state.ticket };
+}
+
+// handOver : needs-human, the claim released (as block does), one note, and a record so the same stop is never posted
+// twice. With no change to label, the pass fails for this ticket, so the operator sees it.
+async function handOver(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
+  const n = number(state);
+  if (n === "none") {
+    return { kind: "failed", reason: `a person must look, and there is no change to label: ${why}` };
+  }
+  const steps: readonly (() => Promise<Done>)[] = [
+    () => setup.forge.addLabel({ number: n, label: NEEDS_HUMAN }),
+    () => setup.forge.removeLabel({ number: n, label: setup.label }),
+    () => say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields: [], items: [] }),
+    () => record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } }),
+  ];
+  for (const step of steps) {
+    const done = await step();
+    if (done.kind === "failed") {
+      return done;
+    }
+  }
+  return { kind: "ok" };
+}
+
 // forgeAction : the actions that only touch the forge; "none" for a run or a wait
 async function forgeAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | "none"> {
   const n = number(state);
   switch (action.kind) {
-    case "needs-human": {
-      const label = n === "none" ? ({ kind: "ok" } as const) : await setup.forge.addLabel({ number: n, label: NEEDS_HUMAN });
-      return label.kind === "ok" ? say(setup, state, { seat: "coordinator", title: `blocked: ${action.why}`, fields: [], items: [] }) : label;
-    }
+    case "needs-human":
+      return handOver(setup, state, action.why);
     case "release": {
       const removed = n === "none" ? ({ kind: "ok" } as const) : await setup.forge.removeLabel({ number: n, label: setup.label });
       return removed.kind === "ok" ? say(setup, state, { seat: "coordinator", title: `released: ${action.why}`, fields: [], items: [] }) : removed;
@@ -169,11 +201,13 @@ async function runWriter(setup: TickSetup, state: TicketState, mode: WriterMode)
   if (step.kind === "unavailable") {
     return step;
   }
-  const claimed = await claim(setup, state);
   const where = { home: setup.home, project: setup.project, ticket: state.ticket };
-  const started = claimed.kind === "ok" ? await record({ where, event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) } }) : claimed;
-  if (started.kind === "failed") {
-    return started;
+  // the start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to
+  // a person, never a claim with no record, which would look like someone else's
+  const started = await record({ where, event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) } });
+  const claimed = started.kind === "ok" ? await claim(setup, state) : started;
+  if (claimed.kind === "failed") {
+    return claimed;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), mode });
   // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person
@@ -233,26 +267,55 @@ function logResult(setup: TickSetup, ticket: string, result: Done | Unavailable)
   setup.log(`${ticket}: ${result.kind === "ok" ? "done" : `${result.kind}: ${result.reason}`}`);
 }
 
-// actAll : every forge-only action, then the first run that can start; one line per ticket on the log
-async function actAll(setup: TickSetup, decided: readonly { readonly state: TicketState; readonly action: Action }[]): Promise<readonly Ran[]> {
-  const ran: Ran[] = [];
-  let runStarted = false;
-  for (const { state, action } of decided) {
-    setup.log(`${state.ticket}: ${describe(action)}`);
-    const forgeDone = await forgeAction(setup, state, action);
-    const pending: Promise<Done | Unavailable> | "none" = forgeDone === "none" && !runStarted ? runAction(setup, state, action) : "none";
-    const result: Done | Unavailable | "none" = forgeDone !== "none" ? forgeDone : pending !== "none" ? await pending : "none";
+type Later = { readonly state: TicketState; readonly action: Action };
+
+// forgePass : every forge-only action, on fresh decisions; what is left is a run or a wait
+async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran[]): Promise<readonly Later[]> {
+  const later: Later[] = [];
+  for (const d of decided) {
+    if ("kind" in d) {
+      setup.log(`${d.ticket}: broken: ${d.reason}`);
+      ran.push({ ticket: d.ticket, action: { kind: "wait", why: "broken" }, result: { kind: "failed", reason: d.reason } });
+      continue;
+    }
+    setup.log(`${d.state.ticket}: ${describe(d.action)}`);
+    const done = await forgeAction(setup, d.state, d.action);
+    if (done === "none") {
+      later.push(d);
+    } else {
+      ran.push({ ticket: d.state.ticket, action: d.action, result: done });
+      logResult(setup, d.state.ticket, done);
+    }
+  }
+  return later;
+}
+
+// runPass : the first run that can start, and no other: runs at once is 1
+async function runPass(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
+  for (const { state, action } of later) {
+    const pending = runAction(setup, state, action);
+    const result = pending === "none" ? "none" : await pending;
     if (result === "none") {
       continue;
     }
-    runStarted ||= pending !== "none" && result.kind !== "unavailable";
     ran.push({ ticket: state.ticket, action, result });
     logResult(setup, state.ticket, result);
+    if (result.kind !== "unavailable") {
+      return;
+    }
   }
+}
+
+async function actAll(setup: TickSetup, decided: readonly Decided[]): Promise<readonly Ran[]> {
+  const ran: Ran[] = [];
+  await runPass(setup, await forgePass(setup, decided, ran), ran);
   return ran;
 }
 
 type Lock = { readonly kind: "held"; readonly release: () => Promise<void> } | { readonly kind: "busy"; readonly reason: string };
+
+// a lock with no readable pid this old is left over from a crash, not one being written
+const STALE_UNREADABLE_MS = 10 * 60_000;
 
 function alive(pid: number): boolean {
   try {
@@ -263,25 +326,61 @@ function alive(pid: number): boolean {
   }
 }
 
-// lock : one pass at a time per project; a lock whose process is gone is taken over
-export async function lock(input: { readonly home: string; readonly project: string }): Promise<Lock> {
-  const path = join(input.home, "runs", input.project, ".lock");
-  await mkdir(join(input.home, "runs", input.project), { recursive: true, mode: 0o700 });
-  for (let tries = 0; tries < 2; tries++) {
-    try {
-      const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-      await handle.writeFile(String(process.pid));
-      await handle.close();
-      return { kind: "held", release: () => rm(path, { force: true }) };
-    } catch {
-      const pid = Number((await readFile(path, "utf8").catch(() => "")).trim());
-      if (Number.isSafeInteger(pid) && pid > 0 && alive(pid)) {
-        return { kind: "busy", reason: `another pass (pid ${pid}) is running for ${input.project}` };
-      }
-      await rm(path, { force: true });
-    }
+type Holder = { readonly kind: "alive"; readonly pid: number } | { readonly kind: "dead" } | { readonly kind: "unknown" };
+
+async function holder(path: string, now: number): Promise<Holder> {
+  const text = await readFile(path, "utf8").catch(() => "");
+  const pid = Number(text.split(":")[0]);
+  if (Number.isSafeInteger(pid) && pid > 0) {
+    return alive(pid) ? { kind: "alive", pid } : { kind: "dead" };
   }
-  return { kind: "busy", reason: `cannot take ${path}` };
+  const age = await stat(path).then((st) => now - st.mtimeMs, () => 0);
+  return age > STALE_UNREADABLE_MS ? { kind: "dead" } : { kind: "unknown" };
+}
+
+// take : the lock, from a file already holding our token: link (fails if any lock is there), or, over a dead one, an
+// atomic rename followed by a read-back, so of two passes that both found it dead only one keeps it
+async function take(lockPath: string, mine: string, token: string): Promise<boolean> {
+  try {
+    await link(mine, lockPath);
+    return true;
+  } catch {
+    const found = await holder(lockPath, Date.now());
+    if (found.kind !== "dead") {
+      return false;
+    }
+    await rename(mine, lockPath);
+    return (await readFile(lockPath, "utf8").catch(() => "")) === token;
+  }
+}
+
+// lock : one pass at a time per project. It never throws: a lock it cannot take is "busy", with the reason.
+export async function lock(input: { readonly home: string; readonly project: string }): Promise<Lock> {
+  const dir = join(input.home, "runs", input.project);
+  const lockPath = join(dir, ".lock");
+  const token = `${process.pid}:${randomUUID()}`;
+  const mine = join(dir, `.lock.${randomUUID()}`);
+  try {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await writeFile(mine, token, { mode: 0o600, flag: "wx" });
+    const held = await take(lockPath, mine, token);
+    await rm(mine, { force: true });
+    if (!held) {
+      const found = await holder(lockPath, Date.now());
+      return { kind: "busy", reason: found.kind === "alive" ? `another pass (pid ${found.pid}) is running for ${input.project}` : `another pass holds ${lockPath}` };
+    }
+    // release only a lock that is still ours
+    const release = async (): Promise<void> => {
+      const now = await readFile(lockPath, "utf8").catch(() => "");
+      if (now === token) {
+        await rm(lockPath, { force: true });
+      }
+    };
+    return { kind: "held", release };
+  } catch {
+    await rm(mine, { force: true }).catch(() => undefined);
+    return { kind: "busy", reason: `cannot take ${lockPath}` };
+  }
 }
 
 // tick : one locked pass
@@ -299,7 +398,7 @@ export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
       return decided;
     }
     if (setup.dryRun) {
-      decided.value.forEach(({ state, action }) => setup.log(`${state.ticket}: ${describe(action)} (dry run)`));
+      decided.value.forEach((d) => setup.log("kind" in d ? `${d.ticket}: broken: ${d.reason} (dry run)` : `${d.state.ticket}: ${describe(d.action)} (dry run)`));
       return { kind: "ok", value: [] };
     }
     return { kind: "ok", value: await actAll(setup, decided.value) };

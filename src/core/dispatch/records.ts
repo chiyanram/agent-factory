@@ -20,7 +20,9 @@ export type Event =
   | { readonly at: string; readonly kind: "writer-ended"; readonly mode: WriterMode; readonly head: string; readonly outcome: "done" | "asked" | "blocked"; readonly patch: string }
   | { readonly at: string; readonly kind: "ready-ended"; readonly head: string; readonly passed: boolean }
   | { readonly at: string; readonly kind: "review-ended"; readonly head: string; readonly actOn: number }
-  | { readonly at: string; readonly kind: "pinged"; readonly head: string };
+  | { readonly at: string; readonly kind: "pinged"; readonly head: string }
+  // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
+  | { readonly at: string; readonly kind: "blocked"; readonly why: string };
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 
@@ -45,7 +47,7 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   }
 }
 
-const KINDS = new Set(["started", "writer-ended", "ready-ended", "review-ended", "pinged"]);
+const KINDS = new Set(["started", "writer-ended", "ready-ended", "review-ended", "pinged", "blocked"]);
 
 function eventOf(line: string): Event | "bad" {
   try {
@@ -92,6 +94,8 @@ export type Summary = {
   readonly ciRounds: number;
   readonly rebaseRuns: number;
   readonly pingedAt: string;
+  // every reason the dispatcher already handed the ticket to a person for
+  readonly blocked: readonly string[];
   // the time of the newest line, or "" for none
   readonly lastAt: string;
 };
@@ -108,6 +112,7 @@ export const EMPTY: Summary = {
   ciRounds: 0,
   rebaseRuns: 0,
   pingedAt: "",
+  blocked: [],
   lastAt: "",
 };
 
@@ -132,6 +137,7 @@ const STEPS: Readonly<Record<Event["kind"], Step>> = {
   "review-ended": (s, e) =>
     e.kind === "review-ended" ? { ...s, interrupted: { kind: "none" }, lastReview: { kind: "ended", head: e.head, actOn: e.actOn }, reviewRounds: s.reviewRounds + 1 } : s,
   pinged: (s, e) => ({ ...s, pingedAt: e.kind === "pinged" ? e.head : s.pingedAt }),
+  blocked: (s, e) => (e.kind === "blocked" ? { ...s, blocked: [...s.blocked, e.why] } : s),
 };
 
 // summarize : the counts since the approval at `since` (ISO 8601); older lines belong to an earlier approval.

@@ -105,12 +105,12 @@ function fakeGlab(): string {
         project: {
           mergeRequests: {
             pageInfo: { hasNextPage: false, endCursor: null },
-            nodes: [{ iid: "12", draft: false, diffHeadSha: "1a2b3c4d5e6f", sourceBranch: "factory/PROJ-12", labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] }, headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" }, notes: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [{ body: "[writer] OPEN: which port?", createdAt: "2026-11-02T10:00:00Z", author: { username: "ram" } }] } }],
+            nodes: [{ iid: "12", draft: false, diffHeadSha: "1a2b3c4d5e6f", sourceBranch: "factory/PROJ-12", sourceProjectId: 1, targetProjectId: 1, labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] }, headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" }, notes: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [{ body: "[writer] OPEN: which port?", createdAt: "2026-11-02T10:00:00Z", author: { username: "ram" } }] } }],
           },
         },
       },
     },
-    merged: [{ iid: 9, source_branch: "factory/PROJ-9" }],
+    merged: [{ iid: 9, source_branch: "factory/PROJ-9", source_project_id: 1, target_project_id: 1 }],
   };
   const reply = (body: unknown) => `printf 'HTTP/2.0 200 OK\\r\\n\\r\\n%s' '${JSON.stringify(body)}'`;
   const script = `#!/bin/sh
