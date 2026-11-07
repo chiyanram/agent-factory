@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { finishRun, noFactoryFolder, NEEDS_HUMAN, type Pusher } from "../src/core/finish.js";
+import { excludeFactory, fastForwardOnly, finishRun, noFactoryFolder, NEEDS_HUMAN, type Pusher } from "../src/core/finish.js";
 import type { Done } from "../src/core/forge/api.js";
 import type { Forge } from "../src/core/forge/types.js";
 import { openAsks } from "../src/core/notes.js";
@@ -55,20 +55,29 @@ describe("finishRun", () => {
     expect(log).toEqual(["push bbbb guards=1", "note [writer] done at bbbbbbbb\n\n- AC1 refuses a reserved loan · make test · 142 passed"]);
   });
 
-  it("asked: pushes, then posts each question as a [writer] OPEN: note that poll counts as an open ask", async () => {
+  it("asked: pushes, then posts the questions in one [writer] OPEN: note, which poll counts as an open ask", async () => {
     const log: Log = [];
     const next = await finishRun({ outcome: { kind: "asked", questions: ["EUR or USD?", "Round half up?"] }, change: 12, forge: forge(log), push: push(), pusher: pusher(log) });
     expect(next).toEqual({ kind: "ok", value: { kind: "wait-for-answer", head: B } });
     const notes = log.filter((l) => l.startsWith("note ")).map((l, i) => ({ body: l.slice(5), author: { name: "ram" }, at: `2026-11-07T10:0${i}:00Z` }));
-    expect(notes.map((n) => n.body)).toEqual(["[writer] OPEN: EUR or USD?", "[writer] OPEN: Round half up?"]);
-    expect(openAsks({ notes, readers: { factory: "ram", members: new Set(["ram"]) } })).toBe(2);
+    expect(notes.map((n) => n.body)).toEqual(["[writer] OPEN: 2 questions\n\n- EUR or USD?\n- Round half up?"]);
+    expect(openAsks({ notes, readers: { factory: "ram", members: new Set(["ram"]) } })).toBe(1);
+    const one: Log = [];
+    await finishRun({ outcome: { kind: "asked", questions: ["EUR or USD?"] }, change: 12, forge: forge(one), push: push({ commit: A }), pusher: pusher(one) });
+    expect(one).toEqual(["note [writer] OPEN: EUR or USD?"]);
   });
 
-  it("blocked: labels needs-human first, then pushes the work in progress, then posts the reason", async () => {
+  it("blocked: labels needs-human first, then pushes the work in progress on top of the branch only, then posts the reason", async () => {
     const log: Log = [];
     const next = await finishRun({ outcome: { kind: "blocked", reason: "the run exited 2", by: "host" }, change: 12, forge: forge(log), push: push(), pusher: pusher(log) });
     expect(next).toEqual({ kind: "ok", value: { kind: "needs-human", reason: "the run exited 2" } });
-    expect(log).toEqual([`label ${NEEDS_HUMAN}`, "push bbbb guards=1", "note [coordinator] blocked: the run exited 2"]);
+    expect(log).toEqual([`label ${NEEDS_HUMAN}`, "push bbbb guards=2", "note [coordinator] blocked: the run exited 2"]);
+  });
+
+  it("the writer's own blocker is posted in the writer's seat", async () => {
+    const log: Log = [];
+    await finishRun({ outcome: { kind: "blocked", reason: "the build needs a licence key", by: "writer" }, change: 12, forge: forge(log), push: push({ commit: A }), pusher: pusher(log) });
+    expect(log).toEqual([`label ${NEEDS_HUMAN}`, "note [writer] blocked: the build needs a licence key"]);
   });
 
   it("a push that fails turns done into blocked, with the push's reason, and is not tried again", async () => {
@@ -109,17 +118,50 @@ describe("noFactoryFolder", () => {
   });
   afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
-  it("refuses a commit whose tree holds the report, and passes one that does not", async () => {
-    writeFileSync(join(repo, "a.txt"), "a\n");
-    git("add", "a.txt");
-    git("commit", "-q", "-m", "work");
-    const clean = git("rev-parse", "HEAD");
-    expect(await noFactoryFolder(env())({ repo, commit: clean, lease: { kind: "absent" } })).toEqual({ kind: "ok" });
+  function commit(path: string, content: string | "delete"): string {
+    if (content === "delete") {
+      git("rm", "-q", "-r", path);
+    } else {
+      mkdirSync(join(repo, path, ".."), { recursive: true });
+      writeFileSync(join(repo, path), content);
+      git("add", "-f", path);
+    }
+    git("commit", "-q", "-m", `change ${path}`);
+    return git("rev-parse", "HEAD");
+  }
+
+  it("refuses when any new commit touches .factory, even one deleted again, and in any letter case", async () => {
+    const base = commit("a.txt", "a\n");
+    const clean = commit("b.txt", "b\n");
+    const guard = noFactoryFolder(env());
+    expect(await guard({ repo, commit: clean, lease: { kind: "sha", sha: base } })).toEqual({ kind: "ok" });
+    commit(".factory/report.json", "{}");
+    const hidden = commit(".factory", "delete");
+    expect(await guard({ repo, commit: hidden, lease: { kind: "sha", sha: clean } })).toMatchObject({ kind: "failed", reason: expect.stringContaining(".factory") });
+    expect(await guard({ repo, commit: hidden, lease: { kind: "absent" } })).toMatchObject({ kind: "failed" });
+    const upper = commit(".Factory/notes.txt", "x");
+    expect(await guard({ repo, commit: upper, lease: { kind: "sha", sha: hidden } })).toMatchObject({ kind: "failed" });
+  });
+
+  it("fastForwardOnly refuses a commit that is not on top of the lease", async () => {
+    const base = commit("a.txt", "a\n");
+    const next = commit("a.txt", "b\n");
+    git("reset", "-q", "--hard", base);
+    const other = commit("c.txt", "c\n");
+    const guard = fastForwardOnly(env());
+    expect(await guard({ repo, commit: next, lease: { kind: "sha", sha: base } })).toEqual({ kind: "ok" });
+    expect(await guard({ repo, commit: other, lease: { kind: "sha", sha: next } })).toEqual({ kind: "failed", reason: "the run rewrote the branch's history" });
+  });
+
+  it("excludeFactory keeps .factory out of git add, once", async () => {
+    commit("a.txt", "a\n");
+    expect(await excludeFactory({ repo, env: env() })).toEqual({ kind: "ok" });
+    expect(await excludeFactory({ repo, env: env() })).toEqual({ kind: "ok" });
     mkdirSync(join(repo, ".factory"));
     writeFileSync(join(repo, ".factory", "report.json"), "{}");
-    git("add", "-f", ".factory/report.json");
-    git("commit", "-q", "-m", "oops");
-    const dirty = git("rev-parse", "HEAD");
-    expect(await noFactoryFolder(env())({ repo, commit: dirty, lease: { kind: "absent" } })).toMatchObject({ kind: "failed", reason: expect.stringContaining(".factory/") });
+    git("add", "-A");
+    expect(git("status", "--porcelain")).toBe("");
+    const exclude = readFileSync(join(repo, ".git", "info", "exclude"), "utf8");
+    expect(exclude.split("\n").filter((line) => line === "/.factory/")).toHaveLength(1);
   });
 });

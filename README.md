@@ -55,8 +55,8 @@ Until the dispatcher exists, you or the coordinator run the trigger table by han
 ```mermaid
 flowchart LR
     H([human]) -- "approve" --> C{{coordinator<br/>agent-factory approve + prompt}}
-    C -- "/approved, your login" --> F[(forge)]
-    F --> D{{dispatcher<br/>code}}
+    C -- "local approval record" --> D{{dispatcher<br/>code}}
+    F[(forge)] -- poll --> D
     D -- start --> W[writer<br/>in a box]
     W -- "exit + report" --> RC[ready check<br/>in a box]
     RC --> R[reviewer<br/>find + verify]

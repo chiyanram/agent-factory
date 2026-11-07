@@ -46,9 +46,11 @@ describe("parseReport", () => {
       [{ status: "done" }, "evidence must be a list"],
       [{ status: "done", evidence: [] }, "at least one"],
       [{ status: "done", evidence: [{ criterion: "a", command: "b" }] }, "evidence 1 result"],
-      [{ status: "done", evidence: [{ ...DONE.evidence[0], url: "x" }] }, "evidence 1 has fields"],
+      [{ status: "done", evidence: [{ ...DONE.evidence[0], url: "x" }] }, "evidence 1 has 1 field(s)"],
       [{ status: "done", evidence: ["make test"] }, "evidence 1 must be"],
-      [{ status: "done", evidence: DONE.evidence, questions: ["x"] }, "fields the schema does not name for done: questions"],
+      [{ status: "done", evidence: DONE.evidence, questions: ["x"] }, "1 field(s) the schema does not name for done"],
+      [{ status: "asked", questions: ["\u200b"] }, "question 1 must be non-empty"],
+      [{ status: "blocked", blocker: "\u0000\u2060 " }, "blocker must be non-empty"],
       [{ status: "asked", questions: ["a", "b", "c", "d", "e", "f"] }, "more than 5"],
       [{ status: "asked", questions: ["  "] }, "question 1 must be non-empty"],
       [{ status: "blocked" }, "blocker must be non-empty"],
@@ -56,6 +58,29 @@ describe("parseReport", () => {
     ] as const) {
       expect(parseReport(JSON.stringify(report))).toMatchObject({ kind: "blocked", by: "host", reason: expect.stringContaining(why) });
     }
+  });
+
+  it("never quotes the report in a reason, not even a key name or the status, since the reason is posted", () => {
+    const leaky = [
+      { status: "done", evidence: [{ ...DONE.evidence[0], ghp_SECRETTOKENVALUE1234567890: 1 }] },
+      { status: "done", evidence: DONE.evidence, ghp_SECRETTOKENVALUE1234567890: 1 },
+      { status: "ghp_SECRETTOKENVALUE1234567890" },
+    ];
+    for (const report of leaky) {
+      const out = parseReport(JSON.stringify(report));
+      expect(out.kind).toBe("blocked");
+      expect(JSON.stringify(out)).not.toContain("SECRET");
+    }
+  });
+
+  it("a status named after a built-in property is no status", () => {
+    for (const status of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(parseReport(JSON.stringify({ status, blocker: "x", evidence: [] }))).toEqual({ kind: "blocked", reason: "the report's status must be done, asked or blocked", by: "host" });
+    }
+  });
+
+  it("a byte-order mark before the JSON is no reason to block", () => {
+    expect(parseReport(`\uFEFF${JSON.stringify(DONE)}`)).toMatchObject({ kind: "done" });
   });
 
   it("the writer's prompt names every status and field", () => {

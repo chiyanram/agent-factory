@@ -148,10 +148,12 @@ exists yet, so you run the triggers below by hand.
 - **A run ends with a report** ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159), #109, `src/core/report.ts`). The writer writes `.factory/report.json` (never committed)
   and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to five `questions`,
   or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
-  `done` → push, post the evidence, run the ready check; `asked` → push, post each question as `[writer] OPEN:`, wait;
-  `blocked` → label `needs-human` first, push the work in progress, post `[coordinator] blocked: <reason>`. A missing,
-  unreadable or malformed report, any other field, a non-zero exit, a timeout, a cap or a failed box is `blocked` with
-  the reason. The host never follows a symlink to read the report, and refuses to push a commit that holds `.factory/`.
+  `done` → push, post the evidence, run the ready check; `asked` → push, post the questions in one `[writer] OPEN:`
+  note, wait; `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
+  `blocked: <reason>` (in the writer's seat when the writer said it). A missing, unreadable or malformed report, any
+  other field, a non-zero exit, a timeout, a cap or a failed box is `blocked` with the reason; a reason never quotes
+  the report. The host reads the report only after the box has stopped, never through a symlink, and refuses to push
+  when any new commit touches `.factory` (`excludeFactory` keeps it out of `git add`).
   **Today:** the bash `start-writer` still tells the writer to push, post with `ask.sh` and mark the MR ready; the
   report replaces that once the writer starts through the box and the dispatcher (#103, #138).
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
