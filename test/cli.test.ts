@@ -94,3 +94,54 @@ describe("agent-factory approve and approval", () => {
     }
   });
 });
+
+// A fake glab on disk: the poll command runs it as a real process, so this checks the whole path from argv to the line.
+function fakeGlab(): string {
+  const answers = {
+    user: { username: "ram" },
+    members: { data: { project: { projectMembers: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ user: { username: "ram" }, accessLevel: { integerValue: 50 } }] } } } },
+    open: {
+      data: {
+        project: {
+          mergeRequests: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{ iid: "12", draft: false, diffHeadSha: "1a2b3c4d5e6f", labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] }, headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" }, notes: { pageInfo: { hasPreviousPage: false, startCursor: null }, nodes: [{ body: "[writer] OPEN: which port?", createdAt: "2026-11-02T10:00:00Z", author: { username: "ram" } }] } }],
+          },
+        },
+      },
+    },
+    merged: [{ iid: 9 }],
+  };
+  const reply = (body: unknown) => `printf 'HTTP/2.0 200 OK\\r\\n\\r\\n%s' '${JSON.stringify(body)}'`;
+  const script = `#!/bin/sh
+case "$*" in
+  *projectMembers*) ${reply(answers.members)} ;;
+  *mergeRequests*) ${reply(answers.open)} ;;
+  *merge_requests\\?state=merged*) ${reply(answers.merged)} ;;
+  *" user "*|*" user") ${reply(answers.user)} ;;
+  *) echo "fake glab: unexpected $*" >&2; exit 3 ;;
+esac
+`;
+  const path = join(home, "glab");
+  writeFileSync(path, script, { mode: 0o755 });
+  return path;
+}
+
+describe("agent-factory poll", () => {
+  it("prints one line per change, read through the forge's CLI", async () => {
+    const env = { FACTORY_PROJECT: "aruvii/agent-platform", FACTORY_GLAB: fakeGlab(), PATH: process.env.PATH };
+    const run = await cli(["poll"], env);
+    expect(run).toEqual({ code: 0, out: "!9 merged claimed=yes\n!12 head=1a2b3c4d draft=no claimed=yes pipeline=success needs_human=no stop=no asks=1\n", err: "" });
+    const json = await cli(["poll", "--json"], env);
+    expect(JSON.parse(json.out.split("\n")[1]!)).toMatchObject({ kind: "open", number: 12, asks: 1, pipeline: { kind: "success" } });
+  });
+
+  it("fails with the reason, and prints no line, when a setting or the forge fails", async () => {
+    const bad = await cli(["poll"], { FACTORY_FORGE: "github", FACTORY_PROJECT: "ledger" });
+    expect(bad).toMatchObject({ code: 1, out: "" });
+    expect(bad.err).toContain("must be owner/name");
+    const down = await cli(["poll"], { FACTORY_PROJECT: "a/b", FACTORY_GLAB: join(home, "missing-glab") });
+    expect(down).toMatchObject({ code: 1, out: "" });
+    expect(down.err).toContain("no HTTP status");
+  });
+});

@@ -44,7 +44,7 @@ export FACTORY_FORGE=gitlab              # or github
 export FACTORY_PROJECT=group/project     # the GitLab project path, or owner/repo on GitHub
 export FACTORY_REPO=~/src/project        # a local clone of it
 export FACTORY_RULEBOOK=<rulebook plugin folder>
-scripts/poll.sh                          # one line of facts per open merge request
+npx agent-factory poll                   # one line of facts per open merge request
 ```
 
 Then start a Claude Code session in this repo and tell it to run the loop in [GUIDE.md](GUIDE.md#run-the-loop).

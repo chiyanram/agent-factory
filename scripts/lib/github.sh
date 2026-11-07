@@ -162,37 +162,3 @@ forge_claimed() {
   repository=$(gh_graphql "$query" "$2") || return 1
   printf '%s' "$repository" | jq -r '.pullRequests.nodes[].number'
 }
-
-# forge_changes LABEL : the open PRs and the merged PRs that carry LABEL, in the shape scripts/poll.sh decides on.
-# One GraphQL query. Values go in as GraphQL variables, never into the query text.
-#
-#   members   {login: "maintainer" (write access or more) | "member" (any other collaborator)}
-#   edits     the PR body's newest 100 edits (userContentEdits lists the newest first)
-#   pipeline  the head commit's checks (statusCheckRollup), in poll's words: success, failed, running or none
-#   window    the oldest edit when the last-100 window is full, so an older edit may be out of view; else null
-forge_changes() {
-  query='query($owner: String!, $name: String!, $label: String!) { repository(owner: $owner, name: $name) {
-  collaborators(first: 100) { edges { permission node { login } } }
-  open: pullRequests(states: [OPEN], first: 50) { nodes {
-    number isDraft headRefOid
-    labels(first: 50) { nodes { name } }
-    commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-    comments(last: 100) { nodes { body createdAt author { login __typename } } }
-    userContentEdits(first: 100) { nodes { editedAt editor { login __typename } } } } }
-  merged: pullRequests(states: [MERGED], labels: [$label], first: 20) { nodes { number } } } }'
-  repository=$(gh_graphql "$query" "$1") || return 1
-  printf '%s' "$repository" | jq -c '
-    def who: if . == null then null else {name: .login, bot: (.__typename == "Bot")} end;
-    def pipeline: {SUCCESS: "success", FAILURE: "failed", ERROR: "failed", PENDING: "running", EXPECTED: "running"}[.]
-      // "none";
-    { members: (.collaborators.edges | map({key: .node.login,
-        value: (if .permission == "WRITE" or .permission == "MAINTAIN" or .permission == "ADMIN"
-                then "maintainer" else "member" end)}) | from_entries),
-      open: [ .open.nodes[] | (.userContentEdits.nodes | sort_by(.editedAt)) as $edits | {
-        number, draft: .isDraft, head: .headRefOid, labels: [.labels.nodes[].name],
-        pipeline: (.commits.nodes[0].commit.statusCheckRollup.state // "" | pipeline),
-        comments: [.comments.nodes[] | {body, at: .createdAt, author: (.author | who)}],
-        edits: [$edits[] | {at: .editedAt, author: (.editor | who)}],
-        window: (if ($edits | length) >= 100 then $edits[0].editedAt else null end) } ],
-      merged: [ .merged.nodes[].number ] }'
-}

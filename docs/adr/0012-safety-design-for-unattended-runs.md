@@ -19,7 +19,7 @@ injection.
 
 ```
 you ⇄ coordinator (LLM, interactive)        dispatcher (code, no LLM)            box (writer, reviewer, ready check)
-      reads issues, PRs, Jira (read only)   reads poll.sh; one decision table    no forge token, no network but
+      reads issues, PRs, Jira (read only)   reads poll; one decision table       no forge token, no network but
       runs only allow-listed commands       holds the forge login                the model API and registries
       approve → harness "ask" → record       claim · start · release · reconcile  writes .factory/report.md, exits
                                             host: push, post the report  ◀───────┘

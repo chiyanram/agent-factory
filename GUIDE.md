@@ -50,7 +50,7 @@ login, email or password.
 | 3 | developer | Install the App on the project's repository only. | The scripts refuse an App that is not installed on `FACTORY_PROJECT`. |
 | 4 | repo owner | Add a ruleset on `main`: restrict updates, require a pull request with one approval, block force pushes and deletion. Make the repository admin the only bypass actor, for pull requests only. | Only the owner can merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
 | 5 | developer | In `FACTORY_REPO`: clone over `https://github.com/`; set `git config factory.ghAppId <id>`, `factory.ghAppKey <pem path>` and `factory.project <owner/name>`; add an empty credential helper and then the App's: `git config --add credential.https://github.com.helper ""` and `git config --add credential.https://github.com.helper "!<agent-factory>/scripts/github-app.sh git-credential"`; set `user.name <slug>[bot]` and `user.email <bot-id>+<slug>[bot]@users.noreply.github.com` (`gh api "users/<slug>[bot]" --jq .id` gives the id). | `start-writer` refuses a clone without each of these. The empty helper stops a global helper from answering with the person's login. |
-| 6 | developer | For the coordinator scripts, set `FACTORY_FORGE=github`, `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` and `FACTORY_PROJECT`. | The scripts refuse any token that is not the App's. |
+| 6 | developer | For the coordinator scripts, set `FACTORY_FORGE=github`, `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY`, `FACTORY_PROJECT` and `FACTORY_LOGIN=<slug>[bot]`. | The scripts refuse any token that is not the App's. An App has no user to ask, so `poll` learns the factory's own login from `FACTORY_LOGIN`, and without it refuses to run. |
 
 ### Both forges
 
@@ -87,13 +87,13 @@ The scripts read their settings from the environment.
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` | — |
 | `FACTORY_REPO` | a local clone of that project; worktrees, packs and run files go in its `.claude/` | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
-| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `scripts/bin/gh`, `claude` |
+| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `scripts/bin/gh`, `claude`. **Today:** `gh` is the GitHub App's wrapper for `agent-factory` and the bash scripts alike, and the bash scripts refuse a person's login; #108 moves both to your own login by default (ADR-0012 S14) |
+| `FACTORY_LOGIN` | the login the factory posts as, when the CLI cannot say who it is (a GitHub App: `<app-slug>[bot]`); `poll` tells the factory's notes by it | the CLI's own login |
 | `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | the GitHub App's ID and its private key file | git config `factory.ghAppId`, `factory.ghAppKey` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
-| `FACTORY_AGENT_PREFIX` | the start of every GitLab agent account's name | `agent-` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
-| `FACTORY_DRY_RUN` | `1` makes `poll`, `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
+| `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_BOX` | **planned** ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs workers in your own VM, with its Docker; `laptop` runs each in a container on Rancher Desktop with its own Docker inside, a private home and filtered egress. The start refuses to run without a box | `laptop` |
 | budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
@@ -142,7 +142,8 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    OPEN to the human. Done when nothing is OPEN and the human approves: run `agent-factory spec <project> <ticket>`,
    show them the hash, and when they say yes run `agent-factory approve <project> <ticket> <hash>`. The harness shows
    them the ticket and the hash, and only they can confirm. It records a local approval; an edit of the spec makes it
-   stale, and `agent-factory approval <project> <ticket>` then says so ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)). **Today:** they type `/approved` on the MR.
+   stale, and `agent-factory approval <project> <ticket>` then says so ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)). A `/approved` note on the MR
+   counts for nothing. **Today:** the harness `ask` rule that keeps `approve` the human's own is not set up yet (#106).
 5. **Run the queue.** Follow the triggers below. Done when the MR is merged or carries `needs-human`.
 6. **Retro.** After about one merge in ten, turn each lesson into a rule change, strongest fix first: architecture →
    types → lint → test → docs. Read `tokens.sh <mr>` for what each phase cost. In the pilot, compare it with one
@@ -158,7 +159,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 
 | when the forge shows | do |
 |---|---|
-| `/approved` from a human maintainer, with `asks=0` and `needs_human=no` | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
+| the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
 | the writer's run ended with exit 0 and the host posted its report, with `asks=0` (**today:** the writer marks the MR ready) | `start-reviewer` at the head SHA; it runs the ready check first |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
@@ -167,12 +168,13 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
 | you restart | `reconcile`: every claim without a live run goes back to the queue |
-| a human posts `/stop`, or pushes to the branch | stand off that MR |
+| `poll` shows `stop=<time>` newer than the ticket's approval (a maintainer's `/stop`), or a human pushes to the branch | stand off that MR; approving again lifts the stop |
 | a merge conflict | `start-writer` to rebase; if that fails, `needs-human` |
-| a claimed MR with no live run shows `approved=stale` or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved MR; `claim` it again when the human answers |
+| a claimed MR with no live run has a stale approval (`agent-factory approval` exits 3) or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved MR; `claim` it again when the human answers |
 | the usage limit is near | pause every run |
 
-Act only on notes from human accounts. Notes from agent accounts are output, not triggers.
+Act only on people's notes. A note is the factory's own when it comes from the factory's login and starts with a
+seat prefix; such notes are output, not triggers.
 
 ### Scripts
 
@@ -181,7 +183,7 @@ and `#12` for `!12`.
 
 | script | does |
 |---|---|
-| `poll.sh` | one line per open MR: head, draft, claimed, `approved=yes\|stale\|no`, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim |
+| `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim; `--json` prints the records |
 | `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
 | `start-writer.sh [--test-first] <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit; `--test-first` starts a run that commits only a bug's failing test and stops |
 | `start-reviewer.sh <mr>` | first the ready check: runs each evidence command again at the head in a fresh worktree, with no shell, and exits 4 with one `[coordinator] not ready` note when one fails or the table is missing, once per head and description; then one review round: the pack, a find run, a verify run, then one summary note, with the tokens at this head by phase, and one thread per Act on or Consider; keeps each pass's answer and the writer transcripts under `.claude/runs/<mr>/<head>/`; reuses the last verdict when the patch-id is unchanged, or labels `needs-human` when that verdict still has Act on findings; labels `needs-human` when protected files changed; refuses a 4th round; exits 3 with `MOVED` when the head moved |
@@ -196,13 +198,19 @@ and `#12` for `!12`.
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
 | `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR |
 
-`poll` keeps no state, so a restart re-reads everything. It counts `/approved` only from a human maintainer, as the
-first line of a note, and only when it is newer than the last human edit of the description; an older one shows as
-`approved=stale`. It counts an open ask as a `[coordinator] OPEN:` or `[writer] OPEN:` note with no human note after
-it. **Today** it tells agent from human by author. The target (#128, `src/core/notes.ts`) works when the factory
-posts with your own login: a note is the factory's only when it comes from the factory's login **and** starts with a
-seat prefix, and an ask stays open until a project member writes after it. The ported poll (#102) will use it; the
-bash poll does not. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
+`poll` keeps no state, so a restart re-reads everything. It reads the forge through its CLI (`gh api`, `glab api`),
+pages every list to its end, and waits out a rate limit. It does not read approvals: an approval is the local
+`agent-factory approve`. A note is the factory's only when it comes from the factory's login **and** starts with a
+seat prefix (`src/core/notes.ts`, #128); every other note is a person's. `asks` counts each `[coordinator] OPEN:` or
+`[writer] OPEN:` note with no note after it from a project member: a GitLab Developer or more, or a GitHub
+collaborator with write access. `stop` is the time of a maintainer's last note whose first line is exactly `/stop`
+(a GitLab Maintainer or more, or a GitHub collaborator with write access), in UTC, or `undated` when its time does
+not parse. A bot account is neither a member nor a maintainer, whatever its access, so a CI bot never answers an
+ask or stops a change. `poll` reads the MR's conversation only: an answer or a `/stop` in a review comment or a review
+body is not seen. `pipeline` is `success`, `failed`,
+`running`, `canceled`, `skipped`, `manual`, `none`, or `unknown:<state>` for a state the forge sends that `poll` does
+not know (#124); stand off an unknown one and tell the human. GitLab's own activity notes ("added ~label") are not
+counted. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
 
 ### Escalation
 
@@ -226,8 +234,9 @@ it is a prompt instruction at most.
 
 - **Code goes to a writer, always.** The coordinator never edits code. (A prompt rule today; the target allow-list
   enforces it.)
-- **Enforced: approval and merge are the human's.** `poll` counts `/approved` only from a human maintainer, and the
-  bot cannot merge the protected branch.
+- **Approval and merge are the human's.** An approval is `agent-factory approve`, which records the spec's full hash;
+  a note on the MR approves nothing, and the bot cannot merge the protected branch. **Today:** the harness `ask` rule
+  that keeps `approve` from the coordinator is not set up yet (#106).
 - **Today: the writer pushes only its own branch**, with `--force-with-lease` after a rebase. On GitHub its session
   gets an empty `GH_CONFIG_DIR` and no system or global git config, so it cannot act as the person. This is a prompt
   rule plus a missing login, not a wall; the target removes the forge token from the writer.

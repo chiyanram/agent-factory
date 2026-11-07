@@ -1,4 +1,5 @@
-# The forge seam for the coordinator scripts (ADR-0010). Source it; do not run it.
+# The forge seam for the coordinator scripts (ADR-0010). Source it; do not run it. The TypeScript seam in
+# src/core/forge/ has every call below; this file stays only until its last bash caller is ported (#138).
 # FACTORY_FORGE picks the adapter for the project: gitlab (default, lib/gitlab.sh) or github (lib/github.sh).
 # Every adapter defines the same calls, and each call answers in the same shape:
 #
@@ -15,7 +16,6 @@
 #                               answer; unanchored, naming
 #                               file:line, when the forge refuses that line
 #   forge_claimed STATE LABEL   the numbers of the changes in STATE (opened or merged) that carry LABEL, one per line
-#   forge_changes LABEL         the open and merged changes, in the shape scripts/poll.sh decides on
 #   forge_writer_ready          fails unless a writer in FACTORY_REPO would push and commit as the bot
 #   forge_writer_setup PATH     keeps the writer's session in worktree PATH to the bot's identity; prints any extra
 #                               line the writer's prompt needs
@@ -28,7 +28,7 @@ case ${FACTORY_FORGE:-gitlab} in
   *) echo "FACTORY_FORGE must be gitlab or github, got '$FACTORY_FORGE'" >&2; exit 1 ;;
 esac
 
-# FACTORY_DRY_RUN=1 (ADR-0011 D14): every forge write of the coordinator's own scripts (poll, claim, release, status,
+# FACTORY_DRY_RUN=1 (ADR-0011 D14): every forge write of the coordinator's own scripts (claim, release, status,
 # ask, block, reconcile) is printed on stderr instead of made, and their one-line answer ends in " (dry run)". Reads
 # still go to the forge, so a pilot can check the scripts' decisions against a real project without changing it.
 # start-writer and start-reviewer refuse a dry run: a writer pushes and a reviewer spends.

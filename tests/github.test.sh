@@ -107,58 +107,7 @@ FACTORY_GH=$(glab_stub); export FACTORY_GH
 respond "$FACTORY_GH" 1 200 "$bot"
 respond "$FACTORY_GH" 2 502 '{"message":"Bad Gateway"}'
 expect_fail "a failed list of claims fails reconcile, never reads as nothing to reconcile" "github: HTTP 502" \
-  env FACTORY_REPO="$(fixture_repo poll)" FACTORY_CLAUDE="$(claude_stub)" "$REPO_ROOT/scripts/reconcile.sh"
-
-# poll: the same decisions as on GitLab, from GitHub's own data
-c() { printf '{"body":"%s","createdAt":"%s","author":{"login":"%s","__typename":"%s"}}' "$1" "$2" "$3" "${4:-User}"; }
-e() { printf '{"editedAt":"%s","editor":{"login":"%s","__typename":"%s"}}' "$1" "$2" "${3:-User}"; }
-p() {  # p NUMBER DRAFT ROLLUP LABELS COMMENTS EDITS
-  printf '{"number":%s,"isDraft":%s,"headRefOid":"%s","labels":{"nodes":%s},"commits":{"nodes":[{"commit":{"statusCheckRollup":%s}}]},"comments":{"nodes":[%s]},"userContentEdits":{"nodes":[%s]}}' \
-    "$1" "$2" "$(printf '%s' "$1" | sed 's/./&&&&/;s/^\(.\{8\}\).*/\1/')abcdefgh" "$4" "$3" "$5" "$6"
-}
-graphql=$(cat <<JSON
-{"data":{"repository":{
- "collaborators":{"edges":[{"permission":"ADMIN","node":{"login":"chiyanram"}},{"permission":"TRIAGE","node":{"login":"ann"}},
-   {"permission":"WRITE","node":{"login":"dev2"}}]},
- "open":{"nodes":[
-  $(p 1 true '{"state":"SUCCESS"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram)" "$(e 2026-11-01T10:00:00Z chiyanram)"),
-  $(p 2 true '{"state":"FAILURE"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram)" "$(e 2026-11-03T10:00:00Z chiyanram)"),
-  $(p 3 true null '[]' "$(c /approved 2026-11-02T10:00:00Z ann),$(c /approved 2026-11-02T11:00:00Z factory Bot)" ""),
-  $(p 4 false '{"state":"PENDING"}' '[{"name":"agent::claimed"},{"name":"needs-human"}]' "$(c /approved 2026-11-02T10:00:00Z chiyanram),$(c '[coordinator] OPEN: which port?' 2026-11-02T12:00:00Z ledger-factory Bot)" "$(e 2026-11-03T10:00:00Z ledger-factory Bot)"),
-  $(p 5 true '{"state":"SUCCESS"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram),$(c /stop 2026-11-02T11:00:00Z chiyanram)" ""),
-  $(p 6 true '{"state":"SUCCESS"}' '[]' "$(c /approved 2026-11-02T10:00:00Z chiyanram)" "$(e 2026-11-03T10:00:00Z chiyanram)$(for i in $(seq 1 99); do printf ',%s' "$(e 2026-11-02T09:00:00Z ledger-factory Bot)"; done)")
- ]},
- "merged":{"nodes":[{"number":9}]}}}}
-JSON
-)
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$graphql"
-out=$("$REPO_ROOT/scripts/poll.sh")
-line() { printf '%s\n' "$out" | grep "^#$1 "; }
-expect_eq "an admin's /approved after the last body edit counts" \
-  "#1 head=1111abcd draft=yes claimed=no approved=yes pipeline=success needs_human=no stop=no asks=0" "$(line 1)"
-expect_eq "a human body edit after /approved makes it stale; a failed check reads failed" \
-  "#2 head=2222abcd draft=yes claimed=no approved=stale pipeline=failed needs_human=no stop=no asks=0" "$(line 2)"
-expect_eq "an /approved from a collaborator without write access, or from a bot, does not count" \
-  "#3 head=3333abcd draft=yes claimed=no approved=no pipeline=none needs_human=no stop=no asks=0" "$(line 3)"
-expect_eq "the App's own body edit leaves /approved fresh; its open ask is counted" \
-  "#4 head=4444abcd draft=no claimed=yes approved=yes pipeline=running needs_human=yes stop=no asks=1" "$(line 4)"
-expect_eq "a /stop after /approved stops" \
-  "#5 head=5555abcd draft=yes claimed=no approved=yes pipeline=success needs_human=no stop=yes asks=0" "$(line 5)"
-expect_eq "with 100 edits in view, the newest human edit still makes /approved stale" \
-  "#6 head=6666abcd draft=yes claimed=no approved=stale pipeline=success needs_human=no stop=no asks=0" "$(line 6)"
-expect_eq "a merged pull request that still carries the claim is listed" "#9 merged claimed=yes" "$(line 9)"
-expect_eq "one call per poll" 1 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
-expect_pass "the query asks for the newest 100 edits (GitHub lists edits newest first)" \
-  grep -q 'userContentEdits(first: 100)' "$(log)/calls.log"
-expect_pass "owner, name and label go in as GraphQL variables" \
-  grep -qF -- '-f owner=chiyanram -f name=ledger -f label=agent::claimed' "$(log)/calls.log"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '{"data":{"repository":null},"errors":[{"message":"Could not resolve to a Repository"}]}'
-expect_fail "a GraphQL error fails" "GraphQL: Could not resolve to a Repository" "$REPO_ROOT/scripts/poll.sh"
-expect_fail "a project that is not owner/name is refused" "must be owner/name" \
-  env FACTORY_PROJECT=ledger "$REPO_ROOT/scripts/poll.sh"
+  env FACTORY_REPO="$(fixture_repo links-ok)" FACTORY_CLAUDE="$(claude_stub)" "$REPO_ROOT/scripts/reconcile.sh"
 
 # the seam calls the scripts above do not reach
 . "$REPO_ROOT/scripts/lib/forge.sh"

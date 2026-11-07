@@ -23,7 +23,7 @@ make lint && make test
 | target | does |
 |---|---|
 | `make lint` | `scripts/check-links.sh .` (every relative link in a tracked `.md` file resolves), `scripts/check-size.sh .` (the root `AGENTS.md` is under 200 lines) and `tsc --noEmit` |
-| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. One file: `bash tests/poll.test.sh` or `npx vitest run test/poll.test.ts` |
+| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. One file: `bash tests/claim.test.sh` or `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
 
@@ -59,7 +59,8 @@ data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md]
 
 1. Write the test first: `tests/<script>.test.sh`, using the helpers in `tests/lib.sh`. Watch it fail.
 2. Add `scripts/<script>.sh`. Start it with a header comment: usage, what it prints, the settings it reads.
-3. Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, and add it to both adapters.
+3. Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, and add it to both adapters. (New code
+   goes into the TypeScript package and uses the `Forge` seam in `src/core/forge/`.)
 4. Print one line on success. Write errors to stderr and exit non-zero.
 5. Add the script to the Scripts table in [GUIDE.md](GUIDE.md#scripts), and any new setting to
    [Settings](GUIDE.md#settings).

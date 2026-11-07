@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
-import { runPoll } from "./core/poll.js";
+import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
+import { openForge } from "./core/forge/index.js";
 import { checkSpec, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
@@ -14,7 +15,7 @@ import { hostGit } from "./core/git.js";
 const HELP = `usage: agent-factory <command>
 
 commands:
-  poll                         one line of facts per open change (wraps scripts/poll.sh)
+  poll                         one line of facts per open change, read from the forge
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
   spec --template <ticket>     print an empty spec to fill in
   approve <project> <ticket> <hash>
@@ -28,7 +29,12 @@ options:
   --json      poll: print the parsed records as JSON
 
 settings:
-  FACTORY_HOME   where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
+  FACTORY_HOME         where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
+  FACTORY_FORGE        gitlab (default) or github
+  FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
+  FACTORY_CLAIM_LABEL  the label a claimed change carries (default agent::claimed)
+  FACTORY_GH           the gh to call (default scripts/bin/gh, the GitHub App); FACTORY_GLAB the glab (default glab)
+  FACTORY_LOGIN        the login the factory posts as, when the CLI cannot say (a GitHub App: <slug>[bot])
 `;
 
 type Args = { readonly json: boolean; readonly template: boolean; readonly positionals: readonly string[]; readonly io: Io };
@@ -54,19 +60,25 @@ function version(): string {
 }
 
 async function poll({ json, io }: Args): Promise<number> {
-  const result = await runPoll();
-  switch (result.kind) {
-    case "failed":
-      io.err(`agent-factory poll: scripts/poll.sh exited ${result.exitCode}\n${result.stderr}`);
-      return result.exitCode;
-    case "ok": {
-      const errors = result.lines.filter((line) => line.kind === "parse-error");
-      const out = json ? result.lines.map((line) => JSON.stringify(line)) : result.raw;
-      io.out(out.map((line) => `${line}\n`).join(""));
-      errors.forEach((e) => io.err(`agent-factory poll: ${e.reason}: ${e.line}\n`));
-      return errors.length > 0 ? 2 : 0;
-    }
+  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  if (label.trim() === "") {
+    io.err("agent-factory poll: FACTORY_CLAIM_LABEL is set but empty\n");
+    return 1;
   }
+  const forge = openForge({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  if (forge.kind === "failed") {
+    io.err(`agent-factory poll: ${forge.reason}\n`);
+    return 1;
+  }
+  const result = await pollForge({ forge: forge.value, label });
+  if (result.kind === "failed") {
+    io.err(`agent-factory poll: ${result.reason}\n`);
+    return 1;
+  }
+  const mark = forge.value.mark;
+  const out = result.value.map((line) => (json ? JSON.stringify(line) : format({ line, mark })));
+  io.out(out.map((line) => `${line}\n`).join(""));
+  return 0;
 }
 
 // spec : one line "spec <project>/<ticket> <hash> <path>" for a spec that follows the template (exit 0); its problems
