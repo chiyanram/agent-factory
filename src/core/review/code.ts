@@ -11,7 +11,8 @@ import { join } from "node:path";
 import type { Done } from "../forge/api.js";
 import { hostGit } from "../git.js";
 
-const RULE_FILES = new Set(["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"]);
+// matched without case: on macOS claude.md opens CLAUDE.md
+const RULE_FILES = new Set(["claude.md", "claude.local.md", "agents.md"]);
 const RULE_DIRS = new Set([".claude", ".agents"]);
 
 type CopyInput = {
@@ -51,7 +52,8 @@ async function attributes(input: CopyInput): Promise<readonly string[] | "failed
 
 // a symlink, a rule file or a rule folder: never shown to the reviewer
 function ruleOrLink(name: string, s: Awaited<ReturnType<typeof lstat>>): boolean {
-  return s.isSymbolicLink() || RULE_FILES.has(name) || (s.isDirectory() && RULE_DIRS.has(name));
+  const lower = name.toLowerCase();
+  return s.isSymbolicLink() || RULE_FILES.has(lower) || (s.isDirectory() && RULE_DIRS.has(lower));
 }
 
 // prune : removes every symlink, every rule file and every rule folder under dir

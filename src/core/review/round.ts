@@ -21,8 +21,10 @@ import type { Post } from "../post.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
+import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Pack } from "./pack.js";
+import { attempt } from "./safe.js";
 import { statusBox, type Box } from "./status.js";
 import {
   BUCKET_NAMES,
@@ -54,11 +56,15 @@ export type ReviewSetup = {
   readonly packDir: string;
   // where each pass's answer is kept, per change and head (ADR-0011 D16)
   readonly recordsDir: string;
-  readonly tmpDir: string;
+  // a private folder (0700) the throwaway run folders go in; never /tmp, where anyone can plant a CLAUDE.md above them
+  readonly runsDir: string;
   readonly prompts: { readonly find: string; readonly verify: string };
   readonly models: { readonly find: string; readonly rule: string; readonly logic: string };
   readonly maxUsd: string;
   readonly model: Model;
+  // the live runs on this machine, and how many may run at once (live.ts)
+  readonly sessions: Sessions;
+  readonly maxRuns: number;
 };
 
 export type Outcome =
@@ -192,14 +198,17 @@ async function reuse(ctx: Ctx, pack: Pack, round: number): Promise<Result<Outcom
 
 type Pass = { readonly name: string; readonly model: string; readonly schema: string; readonly prompt: string };
 
+// keep : the pass's answer, kept with the head; a full disk loses the record, never the round
 async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
   const dir = join(ctx.setup.recordsDir, String(ctx.setup.number), ctx.change.sha);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await appendFile(
-    join(dir, `reviewer-${pass.replace(/[^a-z]+/g, "-").replace(/-$/, "")}.jsonl`),
-    `${JSON.stringify(answer)}\n`,
-    { mode: 0o600 },
-  );
+  await attempt(async () => {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await appendFile(
+      join(dir, `reviewer-${pass.replace(/[^a-z]+/g, "-").replace(/-$/, "")}.jsonl`),
+      `${JSON.stringify(answer)}\n`,
+      { mode: 0o600 },
+    );
+  }, "cannot keep the pass's answer");
 }
 
 async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<ModelAnswer>> {
@@ -235,7 +244,13 @@ async function verifySubset(
   subset: readonly Finding[],
   kind: "rule" | "logic",
 ): Promise<Result<Checked>> {
-  await writeFile(join(folder, "findings.json"), JSON.stringify(subset));
+  const wrote = await attempt(
+    () => writeFile(join(folder, "findings.json"), JSON.stringify(subset)),
+    "cannot write findings.json",
+  );
+  if (wrote.kind === "failed") {
+    return wrote;
+  }
   const model = kind === "rule" ? ctx.setup.models.rule : ctx.setup.models.logic;
   const ran = await runPass(ctx, folder, {
     name: `verify (${kind})`,
@@ -246,8 +261,18 @@ async function verifySubset(
   if (ran.kind === "failed") {
     return ran;
   }
-  const read = readVerdicts(ran.value.output);
-  return read.kind === "ok" ? { kind: "ok", value: { verdicts: read.value, answer: ran.value } } : read;
+  return checked(subset, ran.value);
+}
+
+// checked : the verdicts on this subset only; a verdict on a finding of the other kind is dropped, so one pass cannot
+// overrule the other
+function checked(subset: readonly Finding[], answer: ModelAnswer): Result<Checked> {
+  const read = readVerdicts(answer.output);
+  if (read.kind === "failed") {
+    return read;
+  }
+  const ids = new Set(subset.map((f) => f.id));
+  return { kind: "ok", value: { verdicts: read.value.filter((v) => ids.has(v.id)), answer } };
 }
 
 // verifyKind : one verify pass over the findings of one kind; none when there are none
@@ -299,7 +324,10 @@ async function findAndVerify(ctx: Ctx, run: string, pack: Pack): Promise<Result<
   if (copied.kind === "failed") {
     return copied;
   }
-  await copyFile(pack.path, join(run, "pack.md"));
+  const placed = await attempt(() => copyFile(pack.path, join(run, "pack.md")), `cannot copy the pack ${pack.path}`);
+  if (placed.kind === "failed") {
+    return placed;
+  }
   const found = await runPass(ctx, run, {
     name: "find",
     model: ctx.setup.models.find,
@@ -315,11 +343,18 @@ async function findAndVerify(ctx: Ctx, run: string, pack: Pack): Promise<Result<
 
 // passes : find, then verify per kind, in a fresh folder with the pack and the code at the head; the folder goes after
 async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
-  const run = await mkdtemp(join(ctx.setup.tmpDir, "factory-review-"));
+  const dir = ctx.setup.runsDir;
+  const run = await attempt(async () => {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    return mkdtemp(join(dir, "review-"));
+  }, `cannot make a run folder in ${dir}`);
+  if (run.kind === "failed") {
+    return run;
+  }
   try {
-    return await findAndVerify(ctx, run, pack);
+    return await findAndVerify(ctx, run.value, pack);
   } finally {
-    await rm(run, { recursive: true, force: true });
+    await rm(run.value, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -405,7 +440,8 @@ function summaryItems(sorted: readonly Sorted[], box: Box): readonly string[] {
 // the protected files no earlier round listed: only these label the change, so a person who cleared needs-human is not
 // stopped again for the same file
 function freshProtected(ctx: Ctx, box: Box): readonly string[] {
-  return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)));
+  // the bash reviewer listed a protected file as its bare path
+  return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)) && !ctx.past.listed.has(p));
 }
 
 // threadsAndLabel : the threads, then needs-human for a protected file not listed before
@@ -472,8 +508,25 @@ function alreadyReviewed(ctx: Ctx): Outcome | "no" {
   return { kind: "already", head: last.head, actOn: ctx.past.actOn.get(last.patchId) ?? 0 };
 }
 
-// reviewRound : one round on the change, or why none ran
+// reviewRound : one round on the change, or why none ran; it holds the change's run while it works (live.ts)
 export async function reviewRound(setup: ReviewSetup): Promise<Result<Outcome>> {
+  const held = await holdRun({
+    repo: setup.repo,
+    number: setup.number,
+    sessions: setup.sessions,
+    maxRuns: setup.maxRuns,
+  });
+  if (held.kind === "failed") {
+    return failed(`${setup.forge.mark}${setup.number}: ${held.reason}`);
+  }
+  try {
+    return await heldRound(setup);
+  } finally {
+    await held.value.release();
+  }
+}
+
+async function heldRound(setup: ReviewSetup): Promise<Result<Outcome>> {
   const ctx = await load(setup);
   if (ctx.kind === "failed") {
     return ctx;

@@ -7,6 +7,7 @@
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import type { RunInput, Step } from "../dispatch/tick.js";
+import type { Sessions } from "./live.js";
 import type { Model } from "./model.js";
 import { reviewRound, type Outcome } from "./round.js";
 import { paths, reviewSetup } from "./settings.js";
@@ -40,6 +41,7 @@ export function reviewStep(input: {
   readonly forge: Forge;
   readonly factory: string;
   readonly model?: Model;
+  readonly sessions?: Sessions;
 }): Step<RunInput, { readonly actOn: number }> {
   const p = paths(input.env);
   if (p.kind === "failed") {

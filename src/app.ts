@@ -12,7 +12,7 @@ import type { Forge } from "./core/forge/types.js";
 import { checkSpec, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
-import type { Runner as CliRunner } from "./core/forge/api.js";
+import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { chooseBox } from "./core/box/index.js";
 import {
   claudeTokenStatus,
@@ -280,7 +280,7 @@ async function onePass(
     label,
     steps: {
       ...STEPS_TODAY,
-      review: reviewStep({ env: io.env, forge: opened.value.forge, factory: await factoryLogin(opened.value.forge) }),
+      review: await reviewStepFor(io.env, opened.value.forge),
     },
     now: () => Date.now(),
     quietMinutes: settings.quiet,
@@ -310,9 +310,20 @@ async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise
 }
 
 // the login the factory posts as, or "" when the forge cannot say (the reviewer then counts no earlier round)
-async function factoryLogin(forge: Forge): Promise<string> {
+// factoryLogin : the login the factory posts as; its notes are the review rounds, so an unknown login is refused,
+// never read as "no rounds"
+async function factoryLogin(forge: Forge): Promise<Result<string>> {
   const me = await forge.me();
-  return me.kind === "ok" ? me.value : "";
+  return me.kind === "ok"
+    ? me
+    : { kind: "failed", reason: `cannot tell which login the factory posts as: ${me.reason}` };
+}
+
+async function reviewStepFor(env: NodeJS.ProcessEnv, forge: Forge): Promise<ReturnType<typeof reviewStep>> {
+  const factory = await factoryLogin(forge);
+  return factory.kind === "ok"
+    ? reviewStep({ env, forge, factory: factory.value })
+    : { kind: "unavailable", reason: factory.reason };
 }
 
 type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
@@ -358,7 +369,10 @@ async function runReview(n: number, io: Io, p: Paths): Promise<number> {
   }
   const forge = opened.value.forge;
   const factory = await factoryLogin(forge);
-  const round = await reviewRound(reviewSetup({ env: io.env, forge, factory, number: n, paths: p }));
+  const round =
+    factory.kind === "ok"
+      ? await reviewRound(reviewSetup({ env: io.env, forge, factory: factory.value, number: n, paths: p }))
+      : factory;
   if (round.kind === "failed") {
     io.err(`agent-factory review: ${round.reason}\n`);
     return 1;

@@ -46,6 +46,12 @@ function pomDeps(text: string): readonly string[] {
   );
 }
 
+// goDeps : the modules go.mod requires; a replace, exclude or retract block names no new dependency
+function goDeps(text: string): readonly string[] {
+  const required = text.replace(/^\s*(?:replace|exclude|retract)\s*\([\s\S]*?^\s*\)/gm, "");
+  return matches(required, /^\s*(?:require\s+)?([a-z0-9.-]+\.[a-z]+\/[^\s]+)\s+v/gm);
+}
+
 const GRADLE =
   /\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testRuntimeOnly|annotationProcessor|kapt|ksp)\s*\(?\s*["']([^:"']+:[^:"']+)(?::[^"']*)?["']/g;
 
@@ -58,8 +64,8 @@ const PARSERS: readonly { readonly file: RegExp; readonly read: (text: string) =
     file: /(^|\/)libs\.versions\.toml$/,
     read: (t) => [...matches(t, /module\s*=\s*"([^"]+)"/g), ...matches(t, /=\s*"([^":\s]+:[^":\s]+):[^"]*"/g)],
   },
-  { file: /(^|\/)requirements[^/]*\.txt$/, read: (t) => matches(t, /^\s*([A-Za-z0-9_.-]+)/gm) },
-  { file: /(^|\/)go\.mod$/, read: (t) => matches(t, /^\s*(?:require\s+)?([a-z0-9.-]+\.[a-z]+\/[^\s]+)\s+v/gm) },
+  { file: /(^|\/)requirements[^/]*\.txt$/, read: (t) => matches(t, /^\s*([A-Za-z0-9][A-Za-z0-9_.-]*)/gm) },
+  { file: /(^|\/)go\.mod$/, read: goDeps },
 ];
 
 async function newIn(path: string, before: Reader, after: Reader): Promise<readonly string[]> {

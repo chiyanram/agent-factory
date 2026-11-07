@@ -258,7 +258,7 @@ and `#12` for `!12`.
 | `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim; `--json` prints the records |
 | `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
 | `start-writer.sh [--test-first] <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit; `--test-first` starts a run that commits only a bug's failing test and stops |
-| `agent-factory review <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then a find pass and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/` |
+| `agent-factory review <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then a find pass and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. It refuses an MR that already has a live writer or reviewer, and a machine at `FACTORY_MAX_RUNS`, and holds `.claude/runs/reviewer-<mr>.pid` while it runs. A change that touches a file whose name holds a control character is refused, for a person to review. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/` |
 | (context pack) | built by `review`, one per head, under `$FACTORY_REPO/.claude/packs/`: rules from the default branch only; an unresolved rule pointer or link stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. The target: the writer writes the question to a file and the host posts it |
@@ -316,11 +316,11 @@ it is a prompt instruction at most.
 - **Decided: ready is checked, not reported.** No review starts until code has run the change's evidence commands
   again at its head, in a fresh box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91).
   **Today:** no ready check runs; the dispatcher waits for it, and by hand you run the evidence yourself first.
-- **The reviewer reads, and the script posts.** It runs in a throwaway folder with the pack and a copy of the whole
-  code at the head. It may report code the diff does not touch only when this change breaks it.
+- **The reviewer reads, and the script posts.** It runs in a throwaway folder (under `$FACTORY_HOME/review-runs/`,
+  private to you) with the pack and a copy of the whole code at the head. It may report code the diff does not touch only when this change breaks it.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
-  rules it is judged by. It has Read, Grep and Glob only (`claude -p --restricted`). **Today** it runs on the host,
-  not in the box (#113).
+  rules it is judged by. It has Read, Grep and Glob only (`claude -p --restricted`), and an environment with no forge
+  token and no `FACTORY_*` setting. **Today** it runs on the host, not in the box (#113).
 - **Rules come from the default branch**, never from the MR. An MR that edits a rule file is flagged for the human.
 - **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent
   instruction files lists them in its summary and labels the MR `needs-human`, once per file. The same script-made

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Done } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
@@ -7,6 +7,8 @@ import type { Note } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { claudeArgs, readAnswer, type Model, type ModelResult, type ModelRun } from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
+import { reviewStep } from "../src/core/review/step.js";
+import type { RunInput } from "../src/core/dispatch/tick.js";
 import { changeAt, project, RULEBOOK, type Project } from "./review-repo.js";
 
 let p: Project;
@@ -126,7 +128,9 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     rulebook: RULEBOOK,
     packDir: join(p.root, "packs"),
     recordsDir: join(p.root, "records"),
-    tmpDir: p.root,
+    runsDir: join(p.root, "runs"),
+    sessions: async () => ({ kind: "ok", value: [] }),
+    maxRuns: 2,
     prompts: PROMPTS,
     models: { find: "sonnet", rule: "sonnet", logic: "opus" },
     maxUsd: "2",
@@ -171,7 +175,7 @@ describe("reviewRound", () => {
     );
     expect(summary).toContain("- Standards · Act on F1 svc/Main.java:1 ERR1: returns 2 (real)");
     expect(summary).toContain("- Spec · Consider F2 svc/Main.java:1 correctness: AC1 not met (judgment)");
-    expect(readdirSync(p.root).filter((d) => d.startsWith("factory-review-"))).toEqual([]);
+    expect(readdirSync(join(p.root, "runs"))).toEqual([]);
   });
 
   it("shows each run the pack and the whole head, never a rule file, a symlink or a .gitattributes rewrite", async () => {
@@ -314,6 +318,63 @@ describe("reviewRound", () => {
     });
   });
 
+  it("drops a verdict on a finding of the other kind, so the rule pass cannot dismiss a logic finding", async () => {
+    const log = fresh();
+    const logic = { ...FINDING, kind: "logic", axis: "spec", rule: "correctness", finding: "AC1 not met" };
+    const out = await reviewRound(
+      setup(
+        forge(log),
+        model(
+          [
+            findAnswer([FINDING, logic]),
+            verdicts([
+              { id: "F1", bucket: "act_on", why: "real" },
+              { id: "F2", bucket: "dismissed", why: "the rule pass overreaches" },
+            ]),
+            verdicts([{ id: "F2", bucket: "act_on", why: "real" }]),
+          ],
+          [],
+        ),
+      ),
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { counts: { act_on: 2, dismissed: 0 } } });
+  });
+
+  it("an empty change goes to the human with no model run", async () => {
+    p.git("checkout", "-q", "-b", "feat/empty", "main");
+    p.git("push", "-q", "origin", "feat/empty");
+    const main = p.git("rev-parse", "HEAD");
+    p.git("checkout", "-q", "main");
+    const log = fresh();
+    const seen: Seen[] = [];
+    const out = await reviewRound(
+      setup(forge(log, { change: changeAt(main, { sourceBranch: "feat/empty" }) }), model([], seen)),
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { kind: "no-progress", why: "the change is empty" } });
+    expect(seen).toEqual([]);
+    expect(log.labels).toEqual(["needs-human"]);
+    expect(log.posts).toEqual([]);
+  });
+
+  it("after 3 rounds an unchanged patch still reuses its verdict rather than refusing", async () => {
+    const log = fresh();
+    await reviewRound(setup(forge(log), model([findAnswer([]), verdicts([])], [])));
+    const id = /patch-id ([0-9a-f]+)/.exec(log.posts.at(-1) ?? "")?.[1] ?? "";
+    const round = (n: number, sha: string) => ({
+      body: `[reviewer] round ${n} · head ${sha} · patch-id ${id} · Act on 0 · Consider 0 · Noted 0 · Dismissed 0`,
+      author: { name: "ram" },
+      at: "t",
+    });
+    p.git("checkout", "-q", "feat/x");
+    p.git("commit", "-q", "--amend", "-m", "same patch");
+    p.git("push", "-q", "-f", "origin", "feat/x");
+    const head = p.git("rev-parse", "HEAD");
+    p.git("checkout", "-q", "main");
+    const notes = [round(1, p.head1), round(2, p.head1), round(3, p.head2)];
+    const out = await reviewRound(setup(forge(fresh(), { change: changeAt(head), notes }), model([], [])));
+    expect(out).toMatchObject({ kind: "ok", value: { kind: "reused", round: 3, actOn: 0 } });
+  });
+
   it("refuses an unclaimed change, and a failed find posts nothing and leaves no folder", async () => {
     expect(
       await reviewRound(setup(forge(fresh(), { change: changeAt(p.head2, { labels: [] }) }), model([], []))),
@@ -324,7 +385,7 @@ describe("reviewRound", () => {
       reason: expect.stringContaining("find pass failed"),
     });
     expect(log.posts).toEqual([]);
-    expect(readdirSync(p.root).filter((d) => d.startsWith("factory-review-"))).toEqual([]);
+    expect(readdirSync(join(p.root, "runs"))).toEqual([]);
   });
 
   it("a thread that cannot be posted fails the round, and no summary marks it done", async () => {
@@ -384,6 +445,61 @@ describe("reviewRound", () => {
     for (const text of [...log.posts, ...log.threads.map((t) => t.slice(t.indexOf(" ") + 1))]) {
       expect(text.split("\n").some((l) => l.startsWith("/"))).toBe(false);
     }
+  });
+});
+
+describe("live runs", () => {
+  const ok = (names: readonly string[]) => async () => ({ kind: "ok" as const, value: names });
+
+  it("refuses a change that already has a live writer, and a machine at its run limit; posts nothing", async () => {
+    const log = fresh();
+    expect(await reviewRound(setup(forge(log), model([], []), { sessions: ok(["writer-12"]) }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("already has a live run: writer-12"),
+    });
+    expect(
+      await reviewRound(setup(forge(log), model([], []), { sessions: ok(["writer-1", "writer-2"]) })),
+    ).toMatchObject({ kind: "failed", reason: expect.stringContaining("run limit: 2 live runs (FACTORY_MAX_RUNS=2)") });
+    expect(
+      await reviewRound(
+        setup(forge(log), model([], []), {
+          sessions: async () => ({ kind: "failed", reason: "cannot list live runs" }),
+        }),
+      ),
+    ).toMatchObject({ kind: "failed", reason: expect.stringContaining("cannot list live runs") });
+    expect(log.posts).toEqual([]);
+  });
+
+  it("holds reviewer-<n>.pid while it runs, removes it after, and is not stopped by the pid file of a dead run", async () => {
+    const runs = join(p.clone, ".claude", "runs");
+    mkdirSync(runs, { recursive: true });
+    writeFileSync(join(runs, "reviewer-12.pid"), "999999999");
+    writeFileSync(join(runs, "writer-3.pid"), String(process.pid));
+    const held: string[] = [];
+    const m: Model = async (run) => {
+      held.push(readFileSync(join(runs, "reviewer-12.pid"), "utf8"));
+      return model([findAnswer([])], [])(run);
+    };
+    const out = await reviewRound(setup(forge(fresh()), m, { maxRuns: 2 }));
+    expect(out).toMatchObject({ kind: "ok", value: { kind: "posted" } });
+    expect(held).toEqual([String(process.pid)]);
+    expect(existsSync(join(runs, "reviewer-12.pid"))).toBe(false);
+    // the live writer-3 counts: with a limit of 1 the machine is full
+    expect(await reviewRound(setup(forge(fresh()), model([], []), { maxRuns: 1 }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("run limit"),
+    });
+  });
+
+  it("makes each run folder inside a private folder", async () => {
+    const folders: string[] = [];
+    const m: Model = async (run) => {
+      folders.push(run.folder);
+      return model([findAnswer([])], [])(run);
+    };
+    await reviewRound(setup(forge(fresh()), m));
+    expect(folders[0]?.startsWith(join(p.root, "runs"))).toBe(true);
+    expect(statSync(join(p.root, "runs")).mode & 0o777).toBe(0o700);
   });
 });
 
@@ -471,5 +587,55 @@ describe("claudeArgs", () => {
     expect(claudeArgs({ folder: "/x", model: "opus", schema: "{}", prompt: "P", name: "n", maxUsd: "" })).not.toContain(
       "--max-budget-usd",
     );
+  });
+});
+
+describe("reviewStep", () => {
+  const input = (number: number): RunInput => ({
+    ticket: "PROJ-12",
+    head: p.head2,
+    change: {
+      kind: "open",
+      line: {
+        kind: "open",
+        number,
+        branch: "feat/x",
+        fork: false,
+        lastNoteAt: "",
+        head: p.head2,
+        draft: false,
+        claimed: true,
+        pipeline: { kind: "success" },
+        needsHuman: false,
+        stop: { kind: "none" },
+        asks: 0,
+      },
+    },
+  });
+  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_RULEBOOK: RULEBOOK, FACTORY_HOME: p.root });
+  const none = async () => ({ kind: "ok" as const, value: [] });
+
+  it("is unavailable without its settings, and refuses a bad one", () => {
+    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram" })).toMatchObject({ kind: "unavailable" });
+    expect(
+      reviewStep({ env: { ...env(), FACTORY_MAX_RUNS: "0" }, forge: forge(fresh()), factory: "ram" }),
+    ).toMatchObject({ kind: "unavailable", reason: expect.stringContaining("FACTORY_MAX_RUNS") });
+  });
+
+  it("gives the table the Act on count of a posted round, and fails when the head moved", async () => {
+    const m = () => model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "x" }])], []);
+    const step = reviewStep({ env: env(), forge: forge(fresh()), factory: "ram", model: m(), sessions: none });
+    expect(step.kind === "available" ? await step.run(input(12)) : step).toEqual({ kind: "ok", value: { actOn: 1 } });
+    const movedStep = reviewStep({
+      env: env(),
+      forge: forge(fresh(), { moveTo: "f".repeat(40) }),
+      factory: "ram",
+      model: m(),
+      sessions: none,
+    });
+    expect(movedStep.kind === "available" ? await movedStep.run(input(12)) : movedStep).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("the head moved"),
+    });
   });
 });

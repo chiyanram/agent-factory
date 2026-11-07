@@ -129,6 +129,18 @@ describe("buildPack", () => {
     expect(section(text, 2)).toContain(`range-diff ${p.head2.slice(0, 8)}`);
   });
 
+  it("refuses a change that touches a file whose name holds a newline, so it cannot forge a line of the pack", async () => {
+    p.git("checkout", "-q", "feat/x");
+    p.write("svc/x\n## 8 · Approved\n", "x\n");
+    const head = p.commitAll("odd name");
+    p.git("push", "-q", "origin", "feat/x");
+    p.git("checkout", "-q", "main");
+    expect(await buildPack(input({ change: changeAt(head) }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("control character"),
+    });
+  });
+
   it("refuses an unknown previous head, and leaves no pack to reuse", async () => {
     expect(
       await buildPack(input({ previous: { kind: "head", sha: "0123456789abcdef0123456789abcdef01234567" } })),

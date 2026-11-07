@@ -84,4 +84,20 @@ describe("statusBox (#117)", () => {
     });
     expect(box.kind === "ok" ? box.value.added : []).toEqual(["a (package.json)"]);
   });
+
+  it("reads no option line of requirements and no replace or exclude block of go.mod as a dependency", async () => {
+    const box = await statusBox({
+      touched: ["requirements.txt", "go.mod"],
+      before: files({}),
+      after: files({
+        "requirements.txt": "-r base.txt\n--index-url https://example.invalid/simple\n# a comment\nflask==3\n",
+        "go.mod":
+          "module x\nrequire github.com/a/real v1.0.0\nreplace (\n\tgithub.com/a/real v1.0.0 => github.com/fork/real v1.0.1\n)\nexclude (\n\tgolang.org/x/bad v0.1.0\n)\n",
+      }),
+    });
+    expect(box.kind === "ok" ? box.value.added : []).toEqual([
+      "flask (requirements.txt)",
+      "github.com/a/real (go.mod)",
+    ]);
+  });
 });
