@@ -2,18 +2,15 @@
 //
 //   FACTORY_FORGE      gitlab (default) or github
 //   FACTORY_PROJECT    the project: owner/name on GitHub, the full path on GitLab (for example aruvii/agent-platform)
-//   FACTORY_GH         the gh the factory acts through (default: scripts/bin/gh, which mints the GitHub App's token,
-//                      the same default as the bash scripts until #108 moves both to the developer's own login, S14).
-//                      An App has no user to ask, so with it set FACTORY_LOGIN to <app-slug>[bot].
+//   FACTORY_GH         the gh the factory acts through (default: gh)
 //   FACTORY_GLAB       the glab the factory acts through (default: glab)
-//   FACTORY_LOGIN      the login the factory posts as, when the CLI cannot say (a GitHub App: <app-slug>[bot])
+//   FACTORY_IDENTITY   who it acts as: own (default) or app (src/core/identity.ts)
 //   FACTORY_MAX_TRIES  calls per request while the forge answers with a rate limit (default: 4)
 //   FACTORY_DRY_RUN    1: every write is printed instead of made; reads still go to the forge (ADR-0011 D14)
 //
 // No setting is guessed: a value that is set but not valid is refused, never replaced by the default.
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { identitySetting, resolveIdentity, type Identity } from "../identity.js";
 import { realSleep, runProcess, type Client, type Result, type Runner, type Sleeper } from "./api.js";
 import { github } from "./github.js";
 import { gitlab } from "./gitlab.js";
@@ -23,6 +20,8 @@ export type { Forge } from "./types.js";
 
 export type ForgeSetup = {
   readonly env: NodeJS.ProcessEnv;
+  // who the forge calls act as; resolve it with openProject, or pass { kind: "own" }
+  readonly identity: Identity;
   // where a dry run reports each write it did not make
   readonly log: (line: string) => void;
   readonly run?: Runner;
@@ -37,18 +36,19 @@ function maxTries(value: string | undefined): Result<number> {
   return /^[1-9]\d{0,2}$/.test(value) ? { kind: "ok", value: Number(value) } : { kind: "failed", reason: `FACTORY_MAX_TRIES must be a whole number from 1, got ${JSON.stringify(value)}` };
 }
 
-// the App's gh wrapper in this package: src/core/forge or dist/core/forge, three folders below the package root
-export function appGh(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "scripts", "bin", "gh");
+// The environment of every CLI call this forge makes: no update notice and no prompt, since an unattended call must
+// answer or fail. With an App identity, each gh call gets the App's token in its own environment.
+function cliEnv(setup: ForgeSetup): NodeJS.ProcessEnv {
+  const quiet = { ...setup.env, GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1", GLAB_CHECK_UPDATE: "false" };
+  return setup.identity.kind === "app" ? { ...quiet, GH_TOKEN: setup.identity.token } : quiet;
 }
 
 function client(setup: ForgeSetup, name: "github" | "gitlab", tries: number): Client {
-  const bin = name === "github" ? setup.env.FACTORY_GH ?? appGh() : setup.env.FACTORY_GLAB ?? "glab";
+  const bin = name === "github" ? setup.env.FACTORY_GH ?? "gh" : setup.env.FACTORY_GLAB ?? "glab";
   return {
     name,
     bin,
-    // no update notice, no prompt: an unattended call must answer or fail
-    env: { ...setup.env, GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1", GLAB_CHECK_UPDATE: "false" },
+    env: cliEnv(setup),
     run: setup.run ?? runProcess,
     sleep: setup.sleep ?? realSleep,
     maxTries: tries,
@@ -60,20 +60,21 @@ function adapter(setup: ForgeSetup, tries: number): Result<Forge> {
   const project = setup.env.FACTORY_PROJECT ?? "";
   const kind = setup.env.FACTORY_FORGE ?? "gitlab";
   if (kind === "github") {
-    const parts = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(project);
+    // every segment starts with a letter or a digit, so "." and ".." never reach an API path
+    const parts = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9][A-Za-z0-9_.-]*)$/.exec(project);
     return parts === null
       ? { kind: "failed", reason: `FACTORY_PROJECT must be owner/name (for example chiyanram/ledger), got ${JSON.stringify(project)}` }
       : { kind: "ok", value: github(client(setup, "github", tries), { owner: parts[1]!, name: parts[2]! }) };
   }
   if (kind === "gitlab") {
-    return /^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+$/.test(project)
+    return /^[A-Za-z0-9][A-Za-z0-9_.-]*(\/[A-Za-z0-9][A-Za-z0-9_.-]*)+$/.test(project)
       ? { kind: "ok", value: gitlab(client(setup, "gitlab", tries), project) }
       : { kind: "failed", reason: `FACTORY_PROJECT must be the project's full path (for example aruvii/agent-platform), got ${JSON.stringify(project)}` };
   }
   return { kind: "failed", reason: `FACTORY_FORGE must be gitlab or github, got ${JSON.stringify(kind)}` };
 }
 
-// withLogin : FACTORY_LOGIN, when set, answers me() without asking the forge.
+// withLogin : an App has no user to ask; its login came with its token.
 function withLogin(forge: Forge, name: string): Forge {
   return { ...forge, me: async () => ({ kind: "ok", value: name }) };
 }
@@ -90,29 +91,18 @@ function dryRun(forge: Forge, log: (line: string) => void): Forge {
   };
 }
 
-function login(value: string | undefined): Result<string | "cli"> {
-  if (value === undefined) {
-    return { kind: "ok", value: "cli" };
-  }
-  return /^[A-Za-z0-9][A-Za-z0-9_.\-[\]]*$/.test(value) ? { kind: "ok", value } : { kind: "failed", reason: `FACTORY_LOGIN must be a login, got ${JSON.stringify(value)}` };
-}
-
 function dryRunSetting(value: string | undefined): Result<boolean> {
   const dry = value ?? "";
   return ["", "0", "1"].includes(dry) ? { kind: "ok", value: dry === "1" } : { kind: "failed", reason: `FACTORY_DRY_RUN must be 1 or 0, got ${JSON.stringify(dry)}` };
 }
 
-// settled : the adapter with FACTORY_LOGIN and FACTORY_DRY_RUN applied.
+// settled : the adapter with the identity's login and FACTORY_DRY_RUN applied.
 function settled(setup: ForgeSetup, forge: Forge): Result<Forge> {
-  const who = login(setup.env.FACTORY_LOGIN);
-  if (who.kind === "failed") {
-    return who;
-  }
   const dry = dryRunSetting(setup.env.FACTORY_DRY_RUN);
   if (dry.kind === "failed") {
     return dry;
   }
-  const named = who.value === "cli" ? forge : withLogin(forge, who.value);
+  const named = setup.identity.kind === "app" ? withLogin(forge, setup.identity.login) : forge;
   return { kind: "ok", value: dry.value ? dryRun(named, setup.log) : named };
 }
 
@@ -123,4 +113,36 @@ export function openForge(setup: ForgeSetup): Result<Forge> {
   }
   const opened = adapter(setup, tries.value);
   return opened.kind === "ok" ? settled(setup, opened.value) : opened;
+}
+
+// forgeHost : the forge's host, FACTORY_FORGE_HOST, checked: github.com and gitlab.com unless set. The host push sends a
+// branch only to a URL on this host.
+export function forgeHost(env: NodeJS.ProcessEnv, forge: "github" | "gitlab"): Result<string> {
+  const host = env.FACTORY_FORGE_HOST ?? (forge === "github" ? "github.com" : "gitlab.com");
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)
+    ? { kind: "ok", value: host }
+    : { kind: "failed", reason: `FACTORY_FORGE_HOST must be a host name, got ${JSON.stringify(host)}` };
+}
+
+// forgeName : FACTORY_FORGE, checked.
+export function forgeName(env: NodeJS.ProcessEnv): Result<"github" | "gitlab"> {
+  const kind = env.FACTORY_FORGE ?? "gitlab";
+  return kind === "github" || kind === "gitlab" ? { kind: "ok", value: kind } : { kind: "failed", reason: `FACTORY_FORGE must be gitlab or github, got ${JSON.stringify(kind)}` };
+}
+
+// openProject : the forge for the project in the settings, acting as the project's identity. With an App, this asks the
+// factory user for a token once (src/core/identity.ts).
+export async function openProject(setup: Omit<ForgeSetup, "identity">): Promise<Result<{ readonly forge: Forge; readonly identity: Identity }>> {
+  const name = forgeName(setup.env);
+  const setting = name.kind === "ok" ? identitySetting({ env: setup.env, forge: name.value }) : name;
+  if (setting.kind === "failed") {
+    return setting;
+  }
+  const now = setup.now ?? (() => Math.floor(Date.now() / 1000));
+  const identity = await resolveIdentity({ setting: setting.value, project: setup.env.FACTORY_PROJECT ?? "", run: setup.run ?? runProcess, env: setup.env, now: now() });
+  if (identity.kind === "failed") {
+    return identity;
+  }
+  const forge = openForge({ ...setup, identity: identity.value });
+  return forge.kind === "ok" ? { kind: "ok", value: { forge: forge.value, identity: identity.value } } : forge;
 }
