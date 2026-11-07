@@ -15,6 +15,8 @@ export type BoxSpec = {
   readonly image: PinnedImage;
   // the host path of the worktree: the only folder mounted into the box
   readonly worktree: string;
+  // paths inside the worktree the run may read but not change: the agent's own settings and instructions (#113 Q1)
+  readonly readOnly: readonly string[];
   // every variable the run sees, and nothing else: the host environment is never inherited (ADR-0014 P11)
   readonly env: Readonly<Record<string, string>>;
   // the egress proxy every request leaves through (#130)
