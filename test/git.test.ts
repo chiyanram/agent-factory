@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hostGit, plan, trustedPath, type GitRequest, type GitResult } from "../src/core/git.js";
+import { callerCount, hostGit, plan, trustedPath, type GitRequest, type GitResult } from "../src/core/git.js";
 
 // Real repos in a temp folder. The operator's config is a temp global file; the system config is off.
 let base = "";
@@ -32,7 +32,7 @@ function ranBy(name: string): boolean {
   return existsSync(ran) && readFileSync(ran, "utf8").split("\n").includes(name);
 }
 function request(args: readonly string[], more: Partial<GitRequest> = {}): GitRequest {
-  return { args, repo, env, ownHelper: null, stdin: null, ...more };
+  return { args, repo: { kind: "repo", path: repo }, env, ownHelper: { kind: "none" }, stdin: { kind: "none" }, ...more };
 }
 function ok(result: GitResult): string {
   if (result.kind !== "ok") {
@@ -114,7 +114,7 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     gitTry(["credential", "fill"], "protocol=https\nhost=example.invalid\n\n");
     expect(ranBy("helper")).toBe(true);
     rmSync(ran);
-    await hostGit(request(["credential", "fill"], { stdin: "protocol=https\nhost=example.invalid\n\n" }));
+    await hostGit(request(["credential", "fill"], { stdin: { kind: "text", text: "protocol=https\nhost=example.invalid\n\n" } }));
     expect(ranBy("helper")).toBe(false);
   });
 
@@ -165,7 +165,7 @@ describe("hostGit keeps what the operator chose", () => {
     git(["config", "--add", key, ""]);
     git(["config", "--add", key, own]);
     git(["config", "--add", key, "!/elsewhere/github-app.sh git-credential"]);
-    expect(effective(ok(await hostGit(request(["config", "--get-all", key], { ownHelper: own }))))).toEqual([own]);
+    expect(effective(ok(await hostGit(request(["config", "--get-all", key], { ownHelper: { kind: "helper", value: own } }))))).toEqual([own]);
   });
 
   it("an always-set key takes the operator's own value when there is one", async () => {
@@ -183,7 +183,7 @@ describe("hostGit keeps what the operator chose", () => {
     git(["config", "diff.external", "/evil"]);   // would be refused, if hostGit read this repo's config
     const before = process.cwd();
     process.chdir(repo);
-    const result = await hostGit({ args: ["hash-object", "--stdin"], repo: null, env, ownHelper: null, stdin: "x" }).finally(() =>
+    const result = await hostGit({ args: ["hash-object", "--stdin"], repo: { kind: "none" }, env, ownHelper: { kind: "none" }, stdin: { kind: "text", text: "x" } }).finally(() =>
       process.chdir(before),
     );
     expect(ok(result).trim()).toBe(execFileSync("git", ["hash-object", "--stdin"], { env, input: "x", encoding: "utf8" }).trim());
@@ -197,16 +197,33 @@ describe("hostGit keeps what the operator chose", () => {
     const result = await hostGit(request(["fetch"], { env: { ...env, PATH: `${fake}:${env.PATH ?? ""}`, GIT_TERMINAL_PROMPT: "1" } }));
     expect(ok(result).trim()).toBe("prompt=0");
   });
+  it("refuses a GIT_CONFIG_COUNT that is not a whole number, before git runs", async () => {
+    expect(callerCount("x")).toMatchObject({ kind: "refused" });
+    expect(callerCount(undefined)).toEqual({ kind: "count", n: 0 });
+    expect(await hostGit(request(["status"], { env: { ...env, GIT_CONFIG_COUNT: "1x" } }))).toMatchObject({ kind: "refused" });
+  });
+
+  it("refuses when git cannot list the repo's own keys, never runs unchecked", async () => {
+    git(["config", "filter.x.smudge", plant("smudge-old")]);
+    const old = join(base, "oldgit");
+    mkdirSync(old);
+    const real = execFileSync("sh", ["-c", "command -v git"], { env, encoding: "utf8" }).trim();
+    writeFileSync(join(old, "git"), `#!/bin/sh\ncase "$*" in *--show-scope*) exit 129 ;; esac\nexec "${real}" "$@"\n`);
+    chmodSync(join(old, "git"), 0o755);
+    const result = await hostGit(request(["status"], { env: { ...env, PATH: `${old}:${env.PATH ?? ""}` } }));
+    expect(result).toMatchObject({ kind: "refused" });
+    expect(result.kind === "refused" ? result.reason : "").toContain("cannot list the repo's own config keys");
+  });
 });
 
 describe("trustedPath and plan", () => {
   it("drops relative entries and entries inside the repo", () => {
-    expect(trustedPath("bin:/usr/bin:/r/x/bin:/r/x:/opt/bin", "/r/x")).toBe("/usr/bin:/opt/bin");
-    expect(trustedPath(".:/usr/bin", null)).toBe("/usr/bin");
+    expect(trustedPath("bin:/usr/bin:/r/x/bin:/r/x:/opt/bin", { kind: "repo", path: "/r/x" })).toBe("/usr/bin:/opt/bin");
+    expect(trustedPath(".:/usr/bin", { kind: "none" })).toBe("/usr/bin");
   });
 
   it("plans the always-set keys even for a repo that sets nothing", () => {
-    const planned = plan([], [], () => [], null);
+    const planned = plan([], [], () => [], { kind: "none" });
     expect(planned).toMatchObject({ kind: "ok" });
     const keys = planned.kind === "ok" ? planned.overrides.map((o) => o.key) : [];
     expect(keys).toContain("core.fsmonitor");

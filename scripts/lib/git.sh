@@ -33,11 +33,14 @@
 # /), so a command that needs none (hash-object --stdin, patch-id) never reads the config of the current folder.
 hgit() {
   if [ "${1:-}" = -C ]; then hg_dir=$2; shift 2; else hg_dir=/; fi
+  hg_n=${GIT_CONFIG_COUNT:-0}
+  case $hg_n in
+    '' | *[!0-9]*) echo "hgit: refused: GIT_CONFIG_COUNT is not a whole number ('$hg_n'); nothing run" >&2; return 1 ;;
+  esac
   hg_path=$(hg_trusted_path) || return 1
   hg_git=$(PATH=$hg_path command -v git) || { echo "hgit: no git on a trusted PATH entry" >&2; return 1; }
   hg_file=$(mktemp "${TMPDIR:-/tmp}/hgit.XXXXXX") || return 1
   hg_overrides "$hg_dir" > "$hg_file" || { rm -f "$hg_file"; return 1; }
-  hg_n=${GIT_CONFIG_COUNT:-0}
   set -- "$hg_git" -C "$hg_dir" "$@"
   hg_env=''
   while IFS= read -r -d '' hg_key && IFS= read -r -d '' hg_value; do   # NUL-separated: a key may hold "=" or a tab
@@ -91,8 +94,13 @@ hg_overrides() {
       protocol.ext.allow=never submodule.recurse=false fetch.recursesubmodules=false; do
     hg_set "${hg_kv%%=*}" "${hg_kv#*=}"
   done
-  # keys the repo itself sets: local and worktree scope, and what those files include
-  hg_repo=$("$hg_git" -C "$1" config --show-scope --name-only --list 2> /dev/null \
+  # keys the repo itself sets: local and worktree scope, and what those files include. A read that fails would leave
+  # every repo key unchecked, so it refuses instead (git before 2.26 has no --show-scope).
+  hg_scoped=$("$hg_git" -C "$1" config --show-scope --name-only --list 2> /dev/null) || {
+    echo "hgit: refused: cannot list the repo's own config keys (git 2.26 or later is needed); nothing run" >&2
+    return 1
+  }
+  hg_repo=$(printf '%s\n' "$hg_scoped" \
     | awk -F '\t' '$1 == "local" || $1 == "worktree" { print substr($0, index($0, "\t") + 1) }' | sort -u)
   hg_own="!$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/github-app.sh git-credential"
   while IFS= read -r hg_key; do
@@ -113,7 +121,12 @@ hg_overrides() {
       credential.helper | credential.*.helper)
         hg_pair "$hg_key" ''                                         # an empty helper clears the list so far
         hg_trusted "$hg_key" | while IFS= read -r hg_h; do hg_pair "$hg_key" "$hg_h"; done
-        if "$hg_git" -C "$1" config --local --get-all "$hg_key" 2> /dev/null | grep -qxF "$hg_own"; then
+        hg_local=$("$hg_git" -C "$1" config --local --get-all "$hg_key" 2> /dev/null); hg_rc=$?
+        case $hg_rc in
+          0 | 1) ;;                                                  # 1: set only in the worktree's config
+          *) echo "hgit: refused: cannot read the repo's $hg_key; nothing run" >&2; return 1 ;;
+        esac
+        if printf '%s\n' "$hg_local" | grep -qxF "$hg_own"; then
           hg_pair "$hg_key" "$hg_own"
         fi ;;
     esac

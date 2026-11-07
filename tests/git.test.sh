@@ -160,6 +160,16 @@ mkdir -p "$base/repo/sub" && git -C "$base/repo" config diff.external "$base/evi
 expect_eq "without -C, git runs outside any repo: the current folder's config is never read" \
   "$(printf x | git hash-object --stdin)" "$(cd "$base/repo/sub" && printf x | hgit hash-object --stdin)"
 
+setup
+mkdir "$base/oldgit" && real=$(command -v git)
+printf '#!/bin/sh\ncase "$*" in *--show-scope*) echo "error: unknown option show-scope" >&2; exit 129 ;; esac\nexec "%s" "$@"\n' "$real" \
+  > "$base/oldgit/git" && chmod +x "$base/oldgit/git"
+plant smudge2 && git -C "$base/repo" config filter.x.smudge "$base/smudge2"
+expect_fail "a git that cannot list the repo's keys is refused, never run unchecked" "cannot list the repo's own config keys" \
+  env PATH="$base/oldgit:$PATH" bash -c ". '$REPO_ROOT/scripts/lib/git.sh'; hgit -C '$base/repo' status"
+expect_fail "a GIT_CONFIG_COUNT that is not a whole number is refused" "not a whole number" \
+  env GIT_CONFIG_COUNT=x bash -c ". '$REPO_ROOT/scripts/lib/git.sh'; hgit -C '$base/repo' status"
+
 # every host-side git call in scripts/ goes through hgit (check-links.sh reads this repo, not a project's)
 raw=$(grep -rnE '(^|[^a-z_h-])git (-C|-c|fetch|push|worktree|status|checkout|diff|show|rev-parse|patch-id|hash-object)' \
   "$REPO_ROOT/scripts" | grep -v '/check-links.sh:' | grep -vE ':[0-9]+:\s*#' | grep -v 'git rev-parse HEAD' || true)
