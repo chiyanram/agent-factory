@@ -78,10 +78,14 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    S["loop scripts<br/>poll · claim · release · status<br/>start-writer · start-reviewer · pack · reconcile"]
-    S --> SEAM["forge seam<br/>scripts/lib/forge.sh"]
-    SEAM --> GL["gitlab.sh → glab api"]
-    SEAM --> GH["github.sh → gh api"]
+    P["agent-factory<br/>poll · dispatch · review<br/>approve · spec · app-token"]
+    P --> SEAM["forge seam<br/>src/core/forge"]
+    S["bash scripts, until ported (#138)<br/>claim · release · status · ask · block<br/>start-writer · reconcile"]
+    S --> BSEAM["scripts/lib/forge.sh"]
+    SEAM --> GL["glab api"]
+    SEAM --> GH["gh api"]
+    BSEAM --> GL
+    BSEAM --> GH
 ```
 
 Today the coordinator decides and the scripts act. In the target design the dispatcher decides from `poll` and the

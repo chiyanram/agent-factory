@@ -101,8 +101,8 @@ Run /crq from the build phase for this MR. The MR description is your contract: 
 and the design link. If a separate run committed a failing test for this bug, make it pass without changing it.
 $asking
 Before you mark the MR ready, put the evidence in its description (rulebook crq VB5): a line \"Evidence at <your
-pushed head>\", then a table | criterion | command | result |. The review starts only after a script runs each
-command again at the head; it runs only commands that start with one of: ${FACTORY_READY_COMMANDS:-make ./gradlew ./mvnw}.
+pushed head>\", then a table | criterion | command | result |. The review starts only after each command runs
+again at the head, with no shell, so write each as one plain command: no pipe, no &&, no redirect.
 Push only this branch; after a rebase use --force-with-lease.${tools:+
 $tools}${note:+
 $note}"

@@ -31,7 +31,7 @@ esac
 # FACTORY_DRY_RUN=1 (ADR-0011 D14): every forge write of the coordinator's own scripts (claim, release, status,
 # ask, block, reconcile) is printed on stderr instead of made, and their one-line answer ends in " (dry run)". Reads
 # still go to the forge, so a pilot can check the scripts' decisions against a real project without changing it.
-# start-writer and start-reviewer refuse a dry run: a writer pushes and a reviewer spends.
+# start-writer refuses a dry run, since a writer pushes; so does `agent-factory review`, since a reviewer spends.
 dry=
 if [ "${FACTORY_DRY_RUN:-}" = 1 ]; then
   dry=' (dry run)'

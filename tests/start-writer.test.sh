@@ -169,11 +169,11 @@ expect_fail "a flag after the MR is refused, never ignored" "usage" "$REPO_ROOT/
 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
-FACTORY_READY_COMMANDS='make npm' "$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
 log="$(dirname "$FACTORY_CLAUDE")/calls.log"
 expect_pass "the fix writer keeps a committed failing test as it is" grep -q 'make it pass without changing it' "$log"
-expect_pass "the writer puts the evidence table in the description and learns which commands the ready check runs" \
-  sh -c "grep -q 'Evidence at <your' '$log' && grep -q 'one of: make npm\.' '$log'"
+expect_pass "the writer puts the evidence table in the description, as commands that run with no shell" \
+  sh -c "grep -q 'Evidence at <your' '$log' && grep -q 'with no shell' '$log'"
 
 # The project's writer tools from docs/agents/commands.md (ADR-0011 D17)
 setup

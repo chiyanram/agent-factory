@@ -275,3 +275,36 @@ describe("agent-factory setup", () => {
     expect((await cli(["setup"])).code).toBe(64);
   });
 });
+
+describe("agent-factory review", () => {
+  const set = () => ({ FACTORY_REPO: home, FACTORY_RULEBOOK: home, FACTORY_HOME: home, PATH: process.env.PATH });
+
+  it("prints its usage without exactly one change number (64)", async () => {
+    for (const argv of [["review"], ["review", "abc"], ["review", "1", "2"], ["review", "0"]]) {
+      expect(await cli(argv, set())).toMatchObject({ code: 64, err: "usage: agent-factory review <number>\n" });
+    }
+  });
+
+  it("refuses a dry run, and a setting that is set but not valid, before it reads the forge (1)", async () => {
+    const cases: readonly [NodeJS.ProcessEnv, string][] = [
+      [{ ...set(), FACTORY_DRY_RUN: "1" }, "FACTORY_DRY_RUN is set"],
+      [{ ...set(), FACTORY_MAX_USD: "two" }, "FACTORY_MAX_USD"],
+      [{ ...set(), FACTORY_MAX_RUNS: "-1" }, "FACTORY_MAX_RUNS"],
+      [{ ...set(), FACTORY_REPO: "clone" }, "FACTORY_REPO must be an absolute path"],
+      [{ ...set(), FACTORY_HOME: "" }, "FACTORY_HOME must be an absolute path"],
+    ];
+    for (const [env, reason] of cases) {
+      const run = await cli(["review", "12"], env);
+      expect(run).toMatchObject({ code: 1, out: "" });
+      expect(run.err).toContain(reason);
+    }
+  });
+
+  it("refuses the round when it cannot tell which login the factory posts as (1)", async () => {
+    const glab = join(home, "glab");
+    writeFileSync(glab, "#!/bin/sh\necho down >&2\nexit 3\n", { mode: 0o755 });
+    const run = await cli(["review", "12"], { ...set(), FACTORY_PROJECT: "a/b", FACTORY_GLAB: glab });
+    expect(run).toMatchObject({ code: 1, out: "" });
+    expect(run.err).toContain("cannot tell which login the factory posts as");
+  });
+});
