@@ -74,6 +74,16 @@ export type CommitStatus = {
   readonly description: string;
 };
 
+// A draft change the host opens after a ticket's first push (#164). Its title and body are the factory's own words: the
+// title is cleaned like any posted field, and the body goes through the posting template. The spec's text never goes
+// in, because at work the spec stays local (#127).
+export type ChangeRequest = {
+  readonly branch: string;
+  readonly base: string;
+  readonly title: string;
+  readonly body: Post;
+};
+
 export type Forge = {
   readonly name: ForgeName;
   // the change's prefix in every line the factory prints: ! on GitLab, # on GitHub
@@ -96,6 +106,8 @@ export type Forge = {
   status(input: CommitStatus): Promise<Done>;
   // the numbers of the changes in that state that carry the label
   claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>>;
+  // the change open from this branch of the repository itself, or a new draft one; two or more fail, so a person decides
+  openChange(input: ChangeRequest): Promise<Result<number>>;
   // everything poll decides on, in as few calls as paging allows
   changes(input: { readonly label: string }): Promise<Result<Changes>>;
 };
