@@ -1,0 +1,137 @@
+// app — the command line, as a function: runCli(argv, io) returns the exit code and writes only through io, so a test
+// can run every command. src/cli.ts only binds it to the process (#101). A UI replaces only these two files.
+
+import { parseArgs } from "node:util";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, isAbsolute, join } from "node:path";
+import { homedir } from "node:os";
+import { runPoll } from "./core/poll.js";
+import { checkSpec, readSpec, template } from "./core/spec.js";
+
+const HELP = `usage: agent-factory <command>
+
+commands:
+  poll                         one line of facts per open change (wraps scripts/poll.sh)
+  spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
+  spec --template <ticket>     print an empty spec to fill in
+
+options:
+  --help      show this help
+  --version   show the package version
+  --json      poll: print the parsed records as JSON
+
+settings:
+  FACTORY_HOME   where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
+`;
+
+type Args = { readonly json: boolean; readonly template: boolean; readonly positionals: readonly string[]; readonly io: Io };
+
+export type Io = { readonly env: NodeJS.ProcessEnv; readonly out: (text: string) => void; readonly err: (text: string) => void };
+
+type Home = { readonly kind: "home"; readonly path: string } | { readonly kind: "refused"; readonly reason: string };
+
+// factoryHome : where specs and approvals live. An empty or relative FACTORY_HOME is refused, never read as the
+// current folder, which the coordinator may be able to write.
+function factoryHome(env: NodeJS.ProcessEnv): Home {
+  const set = env.FACTORY_HOME;
+  if (set === undefined) {
+    return { kind: "home", path: join(homedir(), ".factory") };
+  }
+  return isAbsolute(set) ? { kind: "home", path: set } : { kind: "refused", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(set)}` };
+}
+
+function version(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version: string };
+  return pkg.version;
+}
+
+async function poll({ json, io }: Args): Promise<number> {
+  const result = await runPoll();
+  switch (result.kind) {
+    case "failed":
+      io.err(`agent-factory poll: scripts/poll.sh exited ${result.exitCode}\n${result.stderr}`);
+      return result.exitCode;
+    case "ok": {
+      const errors = result.lines.filter((line) => line.kind === "parse-error");
+      const out = json ? result.lines.map((line) => JSON.stringify(line)) : result.raw;
+      io.out(out.map((line) => `${line}\n`).join(""));
+      errors.forEach((e) => io.err(`agent-factory poll: ${e.reason}: ${e.line}\n`));
+      return errors.length > 0 ? 2 : 0;
+    }
+  }
+}
+
+// spec : one line "spec <project>/<ticket> <hash> <path>" for a spec that follows the template (exit 0); its problems
+// (exit 2); or why it cannot be read (exit 1). The hash is what `approve` (#104) asks the human to confirm.
+async function spec({ template: wantTemplate, positionals, io }: Args): Promise<number> {
+  if (wantTemplate) {
+    const [ticket] = positionals;
+    if (ticket === undefined) {
+      io.err("usage: agent-factory spec --template <ticket>\n");
+      return 64;
+    }
+    io.out(template(ticket));
+    return 0;
+  }
+  const [project, ticket] = positionals;
+  if (project === undefined || ticket === undefined) {
+    io.err("usage: agent-factory spec <project> <ticket>\n");
+    return 64;
+  }
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    io.err(`agent-factory spec: ${home.reason}\n`);
+    return 1;
+  }
+  const read = await readSpec({ store: { kind: "local", root: join(home.path, "specs") }, project, ticket });
+  switch (read.kind) {
+    case "refused":
+      io.err(`agent-factory spec: ${read.reason}\n`);
+      return 1;
+    case "missing":
+      io.err(`agent-factory spec: no spec at ${read.where}; start one with: agent-factory spec --template ${ticket}\n`);
+      return 1;
+    case "found": {
+      const checked = checkSpec(read.text);
+      if (checked.kind === "invalid") {
+        io.err(`agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`);
+        return 2;
+      }
+      io.out(`spec ${project}/${ticket} ${checked.spec.hash} ${read.where}\n`);
+      return 0;
+    }
+  }
+}
+
+type Command = { readonly name: string; readonly run: (args: Args) => Promise<number> };
+
+const COMMANDS: readonly Command[] = [
+  { name: "poll", run: poll },
+  { name: "spec", run: spec },
+];
+
+export async function runCli(argv: readonly string[], io: Io): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    allowPositionals: true,
+    options: {
+      help: { type: "boolean" },
+      version: { type: "boolean" },
+      json: { type: "boolean" },
+      template: { type: "boolean" },
+    },
+  });
+  if (values.version === true) {
+    io.out(`${version()}\n`);
+    return 0;
+  }
+  const command = COMMANDS.find((c) => c.name === positionals[0]);
+  if (values.help === true || command === undefined) {
+    io.out(HELP);
+    return values.help === true ? 0 : 64;
+  }
+  return command.run({ json: values.json === true, template: values.template === true, positionals: positionals.slice(1), io });
+}
+
