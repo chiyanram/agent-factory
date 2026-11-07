@@ -31,6 +31,7 @@ export type Stop = { readonly kind: "none" } | { readonly kind: "stopped"; reado
 export type OpenLine = {
   readonly kind: "open";
   readonly number: number;
+  readonly branch: string;
   readonly head: string;
   readonly draft: boolean;
   readonly claimed: boolean;
@@ -40,7 +41,7 @@ export type OpenLine = {
   readonly asks: number;
 };
 
-export type MergedLine = { readonly kind: "merged"; readonly number: number };
+export type MergedLine = { readonly kind: "merged"; readonly number: number; readonly branch: string };
 
 export type PollLine = OpenLine | MergedLine;
 
@@ -80,6 +81,7 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
   return {
     kind: "open",
     number: change.number,
+    branch: change.branch,
     head: change.head,
     draft: change.draft,
     claimed: change.labels.includes(label),
@@ -97,7 +99,7 @@ export function decide(input: { readonly changes: Changes; readonly label: strin
   const maintainers = names(changes.team, (p) => !p.bot && p.level === "maintainer");
   const lines: PollLine[] = [
     ...changes.open.map((c) => openLine(c, label, readers, maintainers)),
-    ...changes.merged.map((number): MergedLine => ({ kind: "merged", number })),
+    ...changes.merged.map((m): MergedLine => ({ kind: "merged", number: m.number, branch: m.branch })),
   ];
   return lines.sort((a, b) => a.number - b.number);
 }

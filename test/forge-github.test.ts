@@ -16,12 +16,13 @@ const pr = (number: number, o: PrOptions = {}) => ({
   number,
   isDraft: false,
   headRefOid: `${number}`.repeat(8).slice(0, 8) + "ffffffff",
+  headRefName: `factory/T-${number}`,
   labels: { pageInfo: { hasNextPage: false }, nodes: (o.labels ?? []).map((name) => ({ name })) },
   commits: { nodes: [{ commit: { statusCheckRollup: o.rollup === undefined ? null : o.rollup } }] },
   comments: { pageInfo: { hasPreviousPage: o.older !== undefined, startCursor: o.older ?? null }, nodes: o.comments ?? [] },
 });
 const open = (nodes: readonly unknown[], more = false) => ok({ data: { repository: { pullRequests: { pageInfo: page(more, "p1"), nodes } } } });
-const merged = (numbers: readonly number[]) => ok({ data: { repository: { pullRequests: { pageInfo: page(false), nodes: numbers.map((number) => ({ number })) } } } });
+const merged = (numbers: readonly number[]) => ok({ data: { repository: { pullRequests: { pageInfo: page(false), nodes: numbers.map((number) => ({ number, headRefName: `factory/T-${number}` })) } } } });
 
 describe("pipeline (#124)", () => {
   it("maps every check rollup state, and no checks at all is none", () => {
@@ -57,6 +58,7 @@ describe("changes", () => {
         open: [
           {
             number: 4,
+            branch: "factory/T-4",
             head: "44444444ffffffff",
             draft: false,
             labels: ["agent::claimed"],
@@ -64,7 +66,7 @@ describe("changes", () => {
             comments: [{ body: "[writer] OPEN: which port?", author: { name: "chiyanram" }, at: "2026-11-02T12:00:00Z" }],
           },
         ],
-        merged: [9],
+        merged: [{ number: 9, branch: "factory/T-9" }],
       },
     });
     expect(field(f.calls[2], "label")).toBe("agent::claimed");

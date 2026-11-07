@@ -38,6 +38,8 @@ export type Person = { readonly name: string; readonly level: Level; readonly bo
 
 export type OpenChange = {
   readonly number: number;
+  // the source branch: the dispatcher finds a ticket's change by it (factory/<ticket>)
+  readonly branch: string;
   readonly head: string;
   readonly draft: boolean;
   readonly labels: readonly string[];
@@ -50,8 +52,10 @@ export type Changes = {
   readonly team: readonly Person[];
   readonly open: readonly OpenChange[];
   // the merged changes that still carry the claim label
-  readonly merged: readonly number[];
+  readonly merged: readonly MergedChange[];
 };
+
+export type MergedChange = { readonly number: number; readonly branch: string };
 
 export type LineFinding = { readonly file: string; readonly line: number };
 

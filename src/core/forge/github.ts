@@ -6,7 +6,7 @@ import type { Note } from "../notes.js";
 import { graphql, rest, type Client, type Done, type Result } from "./api.js";
 import { reader } from "./read.js";
 import { after, completeAll, done, nextCursor, nextPage, pages, rendered, text, unanchored, type Page, type RawOpen } from "./shared.js";
-import type { Change, Changes, Forge, Level, OpenChange, Person, Pipeline } from "./types.js";
+import type { Change, Changes, Forge, Level, MergedChange, OpenChange, Person, Pipeline } from "./types.js";
 
 export type GithubProject = { readonly owner: string; readonly name: string };
 
@@ -40,7 +40,7 @@ const COLLABORATORS = `query($owner: String!, $name: String!, $after: String) { 
 const OPEN = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   pullRequests(states: [OPEN], first: 50, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
-    nodes { number isDraft headRefOid
+    nodes { number isDraft headRefOid headRefName
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       comments(last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
@@ -52,7 +52,7 @@ const EARLIER = `query($owner: String!, $name: String!, $number: Int!, $before: 
 function byState(state: "opened" | "merged"): string {
   return `query($owner: String!, $name: String!, $label: String!, $after: String) { repository(owner: $owner, name: $name) {
   pullRequests(states: [${state === "opened" ? "OPEN" : "MERGED"}], labels: [$label], first: 100, after: $after) {
-    pageInfo { hasNextPage endCursor } nodes { number } } } }`;
+    pageInfo { hasNextPage endCursor } nodes { number headRefName } } } }`;
 }
 
 // GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and app-token use "ledger-factory[bot]".
@@ -129,6 +129,7 @@ export function github(client: Client, project: GithubProject): Forge {
     return {
       change: {
         number: r.int(node, "number"),
+        branch: r.text(node, "headRefName"),
         head: r.text(node, "headRefOid"),
         draft: r.bool(node, "isDraft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "name")),
@@ -160,10 +161,10 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
-  async function claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>> {
+  async function labelled(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly MergedChange[]>> {
     return pages((cursor) =>
-      query(byState(input.state), { label: text(input.label), ...after(cursor) }, (data, r): Page<number> => ({
-        items: r.list(data, "repository.pullRequests.nodes").map((n) => r.int(n, "number")),
+      query(byState(input.state), { label: text(input.label), ...after(cursor) }, (data, r): Page<MergedChange> => ({
+        items: r.list(data, "repository.pullRequests.nodes").map((n) => ({ number: r.int(n, "number"), branch: r.text(n, "headRefName") })),
         next: nextCursor(r, data, "repository.pullRequests.pageInfo"),
       })),
     );
@@ -243,7 +244,10 @@ export function github(client: Client, project: GithubProject): Forge {
       const anchored = await rest(client, { path: `${repo}/pulls/${input.change.number}/comments`, method: "POST", body: { kind: "json", value } });
       return anchored.kind === "ok" ? { kind: "ok" } : note({ number: input.change.number, post: unanchored(input.post, input.at) });
     },
-    claimed,
+    async claimed(input) {
+      const found = await labelled(input);
+      return found.kind === "ok" ? { kind: "ok", value: found.value.map((c) => c.number) } : found;
+    },
     async changes(input): Promise<Result<Changes>> {
       const people = await team();
       if (people.kind === "failed") {
@@ -253,7 +257,7 @@ export function github(client: Client, project: GithubProject): Forge {
       if (opened.kind === "failed") {
         return opened;
       }
-      const merged = await claimed({ state: "merged", label: input.label });
+      const merged = await labelled({ state: "merged", label: input.label });
       return merged.kind === "ok" ? { kind: "ok", value: { team: people.value, open: opened.value, merged: merged.value } } : merged;
     },
   };
