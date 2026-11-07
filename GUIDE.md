@@ -198,7 +198,9 @@ and `#12` for `!12`.
 `poll` keeps no state, so a restart re-reads everything. It counts `/approved` only from a human maintainer, as the
 first line of a note, and only when it is newer than the last human edit of the description; an older one shows as
 `approved=stale`. It counts an open ask as a `[coordinator] OPEN:` or `[writer] OPEN:` note with no human note after
-it. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
+it. **Today** it tells agent from human by author. The target (#128, `src/core/notes.ts`) works when the factory
+posts with your own login: a note is the factory's only when it comes from the factory's login **and** starts with a
+seat prefix, and an ask stays open until a project member writes after it. The ported poll (#102) uses it. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
 
 ### Escalation
 
