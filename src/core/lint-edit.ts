@@ -3,14 +3,15 @@
 //
 // Claude Code passes the tool call as JSON on stdin; the file is tool_input.file_path. The command runs with no shell
 // (the ready check's reader, ready/command.ts), with the file as its last word, in the session's folder. A file that
-// is gone, or outside that folder, is skipped. On a lint failure the hook exits 2 with the lint's last 40 lines, which
-// Claude Code shows the writer; on a command that needs a shell it exits 1, which Claude Code shows the person and
-// does not hold the writer on; otherwise it exits 0 and prints nothing.
+// is gone, or outside that folder once symlinks are followed, is skipped. On a lint failure the hook exits 2 with the
+// lint's last 40 lines, which Claude Code shows the writer; on a command that needs a shell or a program that cannot
+// start it exits 1, which Claude Code shows the person and does not hold the writer on; otherwise it exits 0 and prints
+// nothing.
 
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { prop } from "./dispatch/records.js";
-import type { FolderRunner } from "./review/model.js";
+import { CANNOT_START, type FolderRunner } from "./review/model.js";
 import { commandWords } from "./ready/command.js";
 import type { Result } from "./forge/api.js";
 import type { Argv } from "./project.js";
@@ -39,10 +40,15 @@ function pathOf(stdin: string, root: string): string {
   return resolve(isAbsolute(file) ? file : join(root, file));
 }
 
-// edited : the file the tool call changed, when it is still there and inside root
+async function real(path: string): Promise<string> {
+  return realpath(path).catch(() => "");
+}
+
+// edited : the file the tool call changed, when it is still there and inside root, symlinks followed first
 async function edited(stdin: string, root: string): Promise<Edited> {
-  const path = pathOf(stdin, root);
-  const inside = path !== "" && path.startsWith(`${resolve(root)}${sep}`);
+  const path = await real(pathOf(stdin, root));
+  const top = await real(root);
+  const inside = path !== "" && top !== "" && path.startsWith(`${top}${sep}`);
   const isFile = await stat(path).then(
     (s) => s.isFile(),
     () => false,
@@ -57,7 +63,13 @@ function argvOf(command: string): Result<Argv> {
     return words;
   }
   const [bin, ...args] = words.value;
-  return bin === undefined ? { kind: "failed", reason: "it is empty" } : { kind: "ok", value: [bin, ...args] };
+  if (bin === undefined) {
+    return { kind: "failed", reason: "it is empty" };
+  }
+  // NAME=value before the program sets a variable only in a shell
+  return bin.includes("=")
+    ? { kind: "failed", reason: "it sets a variable, which needs a shell" }
+    : { kind: "ok", value: [bin, ...args] };
 }
 
 function tail(text: string): string {
@@ -86,6 +98,12 @@ export async function lintEdit(input: {
   }
   const [bin, ...args] = argv.value;
   const ran = await input.run({ bin, args: [...args, file.path], env: input.env, cwd: input.root });
+  if (ran.code === CANNOT_START) {
+    return {
+      code: 1,
+      err: `lint-edit: the lint command ${JSON.stringify(input.command)} cannot run: ${ran.stderr.trim()}\n`,
+    };
+  }
   return ran.code === 0
     ? QUIET
     : { code: 2, err: `lint failed on ${file.path} (${input.command}):\n${tail(`${ran.stdout}${ran.stderr}`)}\n` };

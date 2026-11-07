@@ -329,6 +329,12 @@ describe("agent-factory loop commands (#138)", () => {
     }
   });
 
+  it("text after -- that starts with - is text, not an option", async () => {
+    const run = await cli(["ask", "--", "12", "aaaa1111", "- is X ok?"], { FACTORY_FORGE: "github" });
+    expect(run.code).toBe(1);
+    expect(run.err).toContain("FACTORY_PROJECT must be owner/name");
+  });
+
   it("reconcile refuses a relative FACTORY_REPO before it reads the forge", async () => {
     const run = await cli(["reconcile"], { FACTORY_REPO: "clone" });
     expect(run).toMatchObject({ code: 1, err: expect.stringContaining("FACTORY_REPO must be an absolute path") });

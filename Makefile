@@ -13,7 +13,8 @@ lint: node_modules/.package-lock.json ## check links, the AGENTS.md size, type-c
 	@npx --no-install biome ci .
 	@node scripts/lint-ratchet.ts
 
-test: node_modules/.package-lock.json ## run every tests/*.test.sh and the vitest suite; fail if any one fails
+test: node_modules/.package-lock.json ## build, then run every tests/*.test.sh and the vitest suite; fail if any one fails
+	@npm run --silent build
 	@status=0; for t in tests/*.test.sh; do echo "== $$t"; bash "$$t" || status=1; done; \
 	echo "== vitest"; npm test --silent || status=1; exit $$status
 

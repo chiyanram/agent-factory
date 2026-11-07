@@ -174,6 +174,8 @@ export type Reconcile = {
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
   readonly sessions: Sessions;
+  // a dry run removes no worktree: it says which it would
+  readonly dryRun: boolean;
 };
 
 const RUN = /^(writer|reviewer)-(\d+)$/;
@@ -240,6 +242,10 @@ async function worktrees(input: Reconcile, runs: readonly string[]): Promise<Res
   const names = await readdir(dir).catch(() => [] as string[]);
   const lines: string[] = [];
   for (const name of names.filter((n) => RUN.test(n) && !runs.includes(n)).toSorted()) {
+    if (input.dryRun) {
+      lines.push(`would remove worktree ${name} (no live run)`);
+      continue;
+    }
     const removed = await removeWorktree(input, join(dir, name));
     if (removed.kind === "failed") {
       return removed;
@@ -251,8 +257,28 @@ async function worktrees(input: Reconcile, runs: readonly string[]): Promise<Res
 
 // reconcile : every line of what it did, or "nothing to reconcile"; a live-run list it cannot read stops it, so
 // "unknown" is never read as "none" and a live run's claim is never released
+// isClone : FACTORY_REPO must be a clone: a wrong path would show no pid file, so a live run's claim would go
+async function isClone(input: Reconcile): Promise<Done> {
+  const ran = await hostGit({
+    args: ["rev-parse", "--git-dir"],
+    repo: { kind: "repo", path: input.repo },
+    env: input.env,
+    ownHelper: { kind: "none" },
+    stdin: { kind: "none" },
+  });
+  return ran.kind === "ok"
+    ? { kind: "ok" }
+    : failed(`FACTORY_REPO must be a local clone of the project, got ${JSON.stringify(input.repo)}`);
+}
+
+// runsIn : the live runs, read from the clone; never from a path that is not one
+async function runsIn(input: Reconcile): Promise<Result<readonly string[]>> {
+  const clone = await isClone(input);
+  return clone.kind === "ok" ? liveRuns({ repo: input.repo, sessions: input.sessions }) : clone;
+}
+
 export async function reconcile(input: Reconcile): Promise<Result<readonly string[]>> {
-  const runs = await liveRuns({ repo: input.repo, sessions: input.sessions });
+  const runs = await runsIn(input);
   if (runs.kind === "failed") {
     return runs;
   }

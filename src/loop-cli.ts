@@ -109,7 +109,9 @@ function reconciled(positionals: readonly string[], io: LoopIo): Promise<number>
     return 1;
   }
   const sessions = claudeSessions({ bin: io.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(io.env) });
-  return onForge("reconcile", io, (forge, label) => reconcile({ forge, label, repo, env: io.env, sessions }));
+  return onForge("reconcile", io, (forge, label) =>
+    reconcile({ forge, label, repo, env: io.env, sessions, dryRun: io.env.FACTORY_DRY_RUN === "1" }),
+  );
 }
 
 async function linted(positionals: readonly string[], io: LoopIo): Promise<number> {

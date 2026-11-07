@@ -22,6 +22,12 @@ label=${FACTORY_CLAIM_LABEL:-agent::claimed}
 valid_iid "$iid" || exit 1
 [ "${FACTORY_DRY_RUN:-}" != 1 ] || { echo "refused: FACTORY_DRY_RUN is set, and a writer pushes to the MR branch; run it without the dry run" >&2; exit 1; }
 require_repo || exit 1
+# the writer's ask and its lint hook run the package's own CLI (#138), so it must be there and built
+node=$(command -v node) || { echo "refused: node is not on PATH; the writer's ask and lint hook run agent-factory" >&2; exit 1; }
+pkg=$(cd "$(dirname "$0")/.." && pwd)
+"$node" "$pkg/dist/cli.js" --help 2> /dev/null | grep -q 'lint-edit' \
+  || { echo "refused: $pkg/dist/cli.js is missing or out of date; run npm run build in $pkg" >&2; exit 1; }
+cli="$(printf '%q' "$node") $(printf '%q' "$pkg/dist/cli.js")"
 forge_writer_ready || exit 1
 
 mr=$(forge_pr "$iid") || exit 1
@@ -61,8 +67,6 @@ target=$(printf '%s' "$mr" | jq -r '.target_branch // empty')
 commands=''
 [ -z "$target" ] || ! hgit -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$target:refs/factory/target" 2> /dev/null \
   || commands=$(hgit -C "$FACTORY_REPO" show refs/factory/target:docs/agents/commands.md 2> /dev/null | tr -d '\r')
-# the package's own CLI (npm run build), run by an absolute node: ask and the lint hook are TypeScript now (#138)
-cli="$(printf '%q' "$(command -v node)") $(printf '%q' "$(cd "$(dirname "$0")/.." && pwd)/dist/cli.js")"
 tool() { printf '%s\n' "$commands" | sed -n "s/^$1:[[:space:]]*//p" | head -n 1 | sed 's/^`\(.*\)`[[:space:]]*$/\1/; s/[[:space:]]*$//'; }
 lint=$(tool lint-file)
 quick=$(tool test-touched)
@@ -77,13 +81,14 @@ tools=''
 [ -z "$quick" ] || tools="${tools:+$tools
 }Run the tests you touched with: $quick. Run the full check only before you push."
 
-# the ask command carries its own settings, so it works whatever the writer's session inherits (ADR-0011 D10)
-ask="FACTORY_FORGE=${FACTORY_FORGE:-gitlab} FACTORY_PROJECT=$(printf '%q' "$FACTORY_PROJECT")"
+# the ask command carries its own settings, so it works whatever the writer's session inherits (ADR-0011 D10): its own
+# forge login, never the App token's sudo rule (ADR-0012 S2), and never a dry run
+ask="FACTORY_FORGE=${FACTORY_FORGE:-gitlab} FACTORY_PROJECT=$(printf '%q' "$FACTORY_PROJECT") FACTORY_IDENTITY=own FACTORY_DRY_RUN=0"
 absolute() { case $1 in */*) (cd "$(dirname "$1")" && printf '%s/%s' "$(pwd)" "$(basename "$1")") ;; *) printf '%s' "$1" ;; esac; }
 [ -z "${FACTORY_GLAB:-}" ] || ask="$ask FACTORY_GLAB=$(printf '%q' "$(absolute "$FACTORY_GLAB")")"
 # on GitHub the writer's session has no gh login: the ask goes through the App's gh, as lib/github.sh's own calls do
 ask="$ask FACTORY_GH=$(printf '%q' "$(absolute "${FACTORY_GH:-$(cd "$(dirname "$0")/bin" && pwd)/gh}")")"
-ask="$ask $cli ask $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
+ask="$ask $cli ask -- $iid \"\$(git rev-parse HEAD)\" '<the question in one line>'"
 asking="When the contract does not settle a question, never guess: push your commits, then run
 $ask
 with the question in single quotes (write each ' inside it as '\\''), and stop without marking the MR ready.
