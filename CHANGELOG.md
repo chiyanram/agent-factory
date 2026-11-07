@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.5.0](https://github.com/chiyanram/agent-factory/compare/v0.4.0...v0.5.0) (2026-11-07)
+
+### ✨ Features
+
+* **forge** — openChange: the host opens a draft change after a ticket's first push · [#164](https://github.com/chiyanram/agent-factory/issues/164) (PR [#165](https://github.com/chiyanram/agent-factory/pull/165))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.5.0`
+
 ## [0.4.0](https://github.com/chiyanram/agent-factory/compare/v0.3.0...v0.4.0) (2026-11-07)
 
 ### ✨ Features
