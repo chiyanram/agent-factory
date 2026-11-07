@@ -1,5 +1,5 @@
-// The contract every Box keeps (#112), whatever its place. The fake box runs it here; the vm box (#113) and the laptop
-// box (#129) run the same suite against a real container runtime, so a caller can never tell the places apart.
+// The contract every Box keeps (#112), whatever its place. The fake box and the vm box (#113, on a fake docker) run it
+// here; the laptop box (#129) runs the same suite, so a caller can never tell the places apart.
 
 import { describe, expect, it } from "vitest";
 import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
@@ -7,7 +7,14 @@ import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
 const IMAGE: PinnedImage = { kind: "pinned", ref: `factory-box@sha256:${"a".repeat(64)}` };
 
 export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec> = {}): void {
-  const full: BoxSpec = { image: IMAGE, worktree: "/tmp/wt", env: {}, proxy: "http://proxy:3128", ...spec };
+  const full: BoxSpec = {
+    image: IMAGE,
+    worktree: "/tmp/wt",
+    readOnly: [],
+    env: {},
+    proxy: "http://proxy:3128",
+    ...spec,
+  };
 
   describe(`box contract: ${name}`, () => {
     it("runs a command in a started box and gives back its exit", async () => {

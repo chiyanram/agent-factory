@@ -14,7 +14,7 @@ type Place = { readonly value: string; readonly choice: BoxChoice };
 
 // The risks a person accepts by choosing the place. Setup prints them before the first run (#112).
 const VM_RISKS: readonly string[] = [
-  "the box runs its own Docker daemon, so the container is privileged: an escape from it reaches the VM as the box user",
+  "the box runs its own Docker engine under Sysbox: an escape from it reaches the VM as an unprivileged user, and a Sysbox flaw could widen that",
   "a host on the egress allowlist (the model API, the package and image registries) can still carry data out",
   "the box holds the model-only token: a tricked writer can spend model budget with it until the token is revoked",
 ];

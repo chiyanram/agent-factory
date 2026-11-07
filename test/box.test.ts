@@ -16,7 +16,7 @@ describe("chooseBox", () => {
     expect(choice.kind).toBe("chosen");
     if (choice.kind !== "chosen") return;
     expect(choice.place).toBe("vm");
-    expect(choice.risks.join("\n")).toMatch(/privileged/);
+    expect(choice.risks.join("\n")).toMatch(/Sysbox/);
     expect(choice.risks.join("\n")).toMatch(/allowlist/);
     expect(choice.risks.join("\n")).toMatch(/model-only token/);
   });
