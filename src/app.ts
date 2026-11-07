@@ -268,7 +268,7 @@ type Planned = { readonly gate: Gate; readonly steps: Steps };
 
 // stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
 async function stepsFor(io: Io, forge: Forge, home: string, project: string): Promise<Result<Planned>> {
-  // no box is built yet (#113): with none to open, the ready check and the verifier say so and wait
+  // the dispatcher does not open the vm box yet (#113): with none to open, the ready check and the verifier wait
   const planned = await boxPlan({ env: io.env, home, project, boxes: [] });
   if (planned.kind === "failed") {
     return planned;

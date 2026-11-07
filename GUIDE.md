@@ -251,7 +251,7 @@ has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the 
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
 which also starts every count afresh. The ready check runs each evidence row of the writer's report again at the head,
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
-proxy; nothing of the branch runs on the host. **Today:** no box is built yet (#113), so the writer, the ready check
+proxy; nothing of the branch runs on the host. **Today:** the dispatcher does not open the vm box yet (#113), so the writer, the ready check
 and the verifier say so and wait, and the review step runs only after a ready check, so no run record is ever written;
 `dispatch` does only these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
@@ -265,10 +265,10 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
-| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** no box yet, #113, so run them by hand), then `agent-factory review <mr>` |
+| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** dispatch opens no box yet, #113, so run them by hand), then `agent-factory review <mr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the evidence fails at the head | `start-writer` again; after 3 failures, label `needs-human` |
-| the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does (**today:** no box yet, #113) |
+| the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does (**today:** dispatch opens no box yet, #113) |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
@@ -348,7 +348,7 @@ it is a prompt instruction at most.
   rule plus a missing login, not a wall; the target removes the forge token from the writer.
 - **Decided: ready is checked, not reported.** No review starts until code has run the change's evidence commands
   again at its head, in a fresh box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91), with no
-  shell and only the programs the project file lists. **Today:** it is built on the box seam, but no box exists yet
+  shell and only the programs the project file lists. **Today:** it is built on the box seam, but the dispatcher opens no box yet
   (#113), so the dispatcher waits for it, and by hand you run the evidence yourself first.
 - **The reviewer reads, and the script posts.** It runs in a throwaway folder (under `$FACTORY_HOME/review-runs/`,
   private to you) with the pack and a copy of the whole code at the head. It may report code the diff does not touch only when this change breaks it.

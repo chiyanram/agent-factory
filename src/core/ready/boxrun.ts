@@ -97,6 +97,8 @@ async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>>
   const started = await box.start({
     image,
     worktree: code,
+    // no agent runs here, so there are no settings to hold read-only; the copy is thrown away after
+    readOnly: [],
     env: proxyEnv(proxy),
     proxy: `http://${proxy.host}:${proxy.port}`,
   });
