@@ -10,10 +10,24 @@ const SPEC =
 
 let home = "";
 type Run = { readonly code: number; readonly out: string; readonly err: string };
-async function cli(argv: readonly string[], env: NodeJS.ProcessEnv = { FACTORY_HOME: home }): Promise<Run> {
+async function cli(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv = { FACTORY_HOME: home },
+  pasted = "",
+): Promise<Run> {
   let out = "";
   let err = "";
-  const code = await runCli(argv, { env, out: (t) => (out += t), err: (t) => (err += t) });
+  const code = await runCli(argv, {
+    env,
+    out: (t) => (out += t),
+    err: (t) => (err += t),
+    readSecret: async () => pasted,
+    system: {
+      platform: "linux",
+      uid: process.getuid?.() ?? -1,
+      run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
+    },
+  });
   return { code, out, err };
 }
 function writeSpec(text: string): void {
@@ -197,5 +211,46 @@ describe("agent-factory app-token", () => {
     expect(run.code).toBe(1);
     expect(run.out).toBe("");
     expect(run.err).toContain("github-app.json");
+  });
+});
+
+describe("agent-factory setup", () => {
+  const TOKEN = "sk-ant-oat01-AbCdEf0123456789_xyz-TOKEN";
+
+  it("stores the pasted claude token and never prints it", async () => {
+    const run = await cli(["setup", "claude"], { FACTORY_HOME: home }, `${TOKEN}\n`);
+    expect(run.code).toBe(0);
+    expect(run.out).toMatch(/^stored the claude token in .*secrets; made 20\d\d-.*, expires 20\d\d-/);
+    expect(run.out + run.err).not.toContain(TOKEN);
+  });
+
+  it("refuses a GitHub login and stores nothing", async () => {
+    const run = await cli(["setup", "claude"], { FACTORY_HOME: home }, "gho_16C7e42F292c6912E7710c838347Ae178B4a");
+    expect(run.code).toBe(1);
+    expect(run.err).toContain("GitHub login");
+    expect(run.err).not.toContain("gho_16C7");
+    expect((await cli(["setup", "status"], { FACTORY_HOME: home, FACTORY_BOX: "vm" })).out).toContain(
+      "claude token: none",
+    );
+  });
+
+  it("status names the box, its risks and a valid token, exit 0", async () => {
+    await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+    const run = await cli(["setup", "status"], { FACTORY_HOME: home, FACTORY_BOX: "vm" });
+    expect(run.code).toBe(0);
+    expect(run.out).toMatch(/^box: vm\n {2}risk: /);
+    expect(run.out).toMatch(/claude token: valid, 36\d days left/);
+    expect(run.out).not.toContain(TOKEN);
+  });
+
+  it("status fails when no box is chosen", async () => {
+    await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+    const run = await cli(["setup", "status"], { FACTORY_HOME: home });
+    expect(run.code).toBe(1);
+    expect(run.out).toContain("box: refused: FACTORY_BOX is not set");
+  });
+
+  it("names its steps when given none", async () => {
+    expect((await cli(["setup"])).code).toBe(64);
   });
 });
