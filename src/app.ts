@@ -5,9 +5,11 @@ import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { runPoll } from "./core/poll.js";
 import { checkSpec, readSpec, template } from "./core/spec.js";
+import { approvalState, approve } from "./core/approval.js";
+import { hostGit } from "./core/git.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -15,6 +17,10 @@ commands:
   poll                         one line of facts per open change (wraps scripts/poll.sh)
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
   spec --template <ticket>     print an empty spec to fill in
+  approve <project> <ticket> <hash>
+                               record the human's approval of the spec with exactly that hash (all 64 characters,
+                               as spec printed it); run it only behind the harness ask prompt, never from an allow list
+  approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
 
 options:
   --help      show this help
@@ -105,11 +111,66 @@ async function spec({ template: wantTemplate, positionals, io }: Args): Promise<
   }
 }
 
+// whoApproves : the OS user and, when set, the operator's own git user.name. A record, not proof: the harness prompt is
+// the gate.
+async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
+  const name = await hostGit({ args: ["config", "--get", "user.name"], repo: { kind: "none" }, env, ownHelper: { kind: "none" }, stdin: { kind: "none" } });
+  const gitName = name.kind === "ok" ? name.stdout.trim() : "";
+  return gitName.length > 0 ? `${userInfo().username} (${gitName})` : userInfo().username;
+}
+
+async function approveCommand({ positionals, io }: Args): Promise<number> {
+  const [project, ticket, hash] = positionals;
+  if (project === undefined || ticket === undefined || hash === undefined) {
+    io.err("usage: agent-factory approve <project> <ticket> <the full spec hash that agent-factory spec printed>\n");
+    return 64;
+  }
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    io.err(`agent-factory approve: refused: ${home.reason}\n`);
+    return 1;
+  }
+  const result = await approve({ where: { home: home.path, project, ticket }, seenHash: hash, by: await whoApproves(io.env), at: new Date().toISOString() });
+  if (result.kind === "refused") {
+    io.err(`agent-factory approve: refused: ${result.reason}\n`);
+    return 1;
+  }
+  const r = result.record;
+  io.out(`approved ${project}/${ticket} spec ${r.spec_hash} by ${r.by} at ${r.at}\n`);
+  return 0;
+}
+
+async function approvalCommand({ positionals, io }: Args): Promise<number> {
+  const [project, ticket] = positionals;
+  if (project === undefined || ticket === undefined) {
+    io.err("usage: agent-factory approval <project> <ticket>\n");
+    return 64;
+  }
+  const home = factoryHome(io.env);
+  const state = home.kind === "home" ? await approvalState({ home: home.path, project, ticket }) : home;
+  switch (state.kind) {
+    case "approved":
+      io.out(`approved ${project}/${ticket} spec ${state.record.spec_hash} by ${state.record.by} at ${state.record.at}\n`);
+      return 0;
+    case "stale":
+      io.out(`stale ${project}/${ticket}: approved spec ${state.approvedHash}, now ${state.currentHash}; approve again\n`);
+      return 3;
+    case "missing":
+      io.out(`missing ${project}/${ticket}: not approved\n`);
+      return 4;
+    case "refused":
+      io.err(`agent-factory approval: refused: ${state.reason}\n`);
+      return 1;
+  }
+}
+
 type Command = { readonly name: string; readonly run: (args: Args) => Promise<number> };
 
 const COMMANDS: readonly Command[] = [
   { name: "poll", run: poll },
   { name: "spec", run: spec },
+  { name: "approve", run: approveCommand },
+  { name: "approval", run: approvalCommand },
 ];
 
 export async function runCli(argv: readonly string[], io: Io): Promise<number> {

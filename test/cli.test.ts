@@ -58,3 +58,39 @@ describe("agent-factory spec", () => {
     }
   });
 });
+
+describe("agent-factory approve and approval", () => {
+  it("approve records, approval says approved (0), an edit makes it stale (3)", async () => {
+    writeSpec(SPEC);
+    const hash = specHash(SPEC);
+    expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(4);
+    const approved = await cli(["approve", "ledger", "PROJ-1", hash]);
+    expect(approved.code).toBe(0);
+    expect(approved.out).toMatch(new RegExp(`^approved ledger/PROJ-1 spec ${hash} by `));
+    expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(0);
+    writeSpec(SPEC.replace("It works.", "It works, fast."));
+    const stale = await cli(["approval", "ledger", "PROJ-1"]);
+    expect(stale.code).toBe(3);
+    expect(stale.out).toContain("approve again");
+  });
+
+  it("approve refuses a short hash or a changed spec (1), and prints its usage when arguments are missing (64)", async () => {
+    writeSpec(SPEC);
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC).slice(0, 12)])).code).toBe(1);
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash("other")])).code).toBe(1);
+    expect((await cli(["approve", "ledger", "PROJ-1"])).code).toBe(64);
+    expect((await cli(["approval", "ledger"])).code).toBe(64);
+  });
+
+  it("approval refuses a broken record (1), and both refuse a relative FACTORY_HOME", async () => {
+    writeSpec(SPEC);
+    mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
+    writeFileSync(join(home, "approvals", "ledger", "PROJ-1.json"), "{not json");
+    expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(1);
+    for (const argv of [["approve", "ledger", "PROJ-1", specHash(SPEC)], ["approval", "ledger", "PROJ-1"]]) {
+      const run = await cli(argv, { FACTORY_HOME: "" });
+      expect(run.code).toBe(1);
+      expect(run.err).toContain("FACTORY_HOME must be an absolute path");
+    }
+  });
+});
