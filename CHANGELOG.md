@@ -3,6 +3,12 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.2.0](https://github.com/chiyanram/agent-factory/compare/v0.1.0...v0.2.0) (2026-11-07)
+
+### Features
+
+* **cli:** port the reviewer to TypeScript ([#138](https://github.com/chiyanram/agent-factory/issues/138) part 1; [#117](https://github.com/chiyanram/agent-factory/issues/117), [#118](https://github.com/chiyanram/agent-factory/issues/118)) ([#159](https://github.com/chiyanram/agent-factory/issues/159)) ([36c670d](https://github.com/chiyanram/agent-factory/commit/36c670dc52d0cd4f9cf9ac80a4a78ff777a0d625)), closes [#91](https://github.com/chiyanram/agent-factory/issues/91)
+
 ## [0.1.0](https://github.com/chiyanram/agent-factory/compare/v0.0.0...v0.1.0) (2026-11-07)
 
 ### Features
