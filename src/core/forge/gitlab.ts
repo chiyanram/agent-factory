@@ -22,7 +22,17 @@ import {
   type Page,
   type RawOpen,
 } from "./shared.js";
-import type { Change, ChangeState, Changes, Forge, Level, OpenChange, Person, Pipeline } from "./types.js";
+import type {
+  Change,
+  ChangeState,
+  Changes,
+  Forge,
+  Level,
+  MergedChange,
+  OpenChange,
+  Person,
+  Pipeline,
+} from "./types.js";
 
 // Every pipeline status GitLab defines (PipelineStatusEnum). Anything else is unknown, never "none" (#124).
 const STATUS: Readonly<Record<string, Pipeline>> = {
@@ -72,7 +82,7 @@ const MEMBERS = `query($project: ID!, $after: String) { project(fullPath: $proje
 const OPEN = `query($project: ID!, $after: String) { project(fullPath: $project) {
   mergeRequests(state: opened, first: 50, after: $after, sort: CREATED_ASC) {
     pageInfo { hasNextPage endCursor }
-    nodes { iid draft diffHeadSha
+    nodes { iid draft diffHeadSha sourceBranch sourceProjectId targetProjectId
       labels(first: 100) { pageInfo { hasNextPage } nodes { title } }
       headPipeline { status }
       notes(filter: ONLY_COMMENTS, last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
@@ -214,6 +224,8 @@ export function gitlab(client: Client, project: string): Forge {
     return {
       change: {
         number: r.int(node, "iid"),
+        branch: r.text(node, "sourceBranch"),
+        fork: r.at(node, "sourceProjectId") !== r.at(node, "targetProjectId"),
         head,
         draft: r.bool(node, "draft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "title")),
@@ -268,15 +280,15 @@ export function gitlab(client: Client, project: string): Forge {
     );
   }
 
-  async function claimed(input: {
+  async function labelled(input: {
     readonly state: "opened" | "merged";
     readonly label: string;
-  }): Promise<Result<readonly number[]>> {
+  }): Promise<Result<readonly MergedChange[]>> {
     const one = oneLabel(input.label);
     if (one.kind === "failed") {
       return one;
     }
-    return pages(async (cursor): Promise<Result<Page<number>>> => {
+    return pages(async (cursor): Promise<Result<Page<MergedChange>>> => {
       const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;
       const path = `${base}/merge_requests?state=${input.state}&labels=${encodeURIComponent(input.label)}&per_page=100&page=${page}`;
       const answer = await rest(client, { path, method: "GET", body: none });
@@ -284,7 +296,11 @@ export function gitlab(client: Client, project: string): Forge {
         return answer;
       }
       const r = reader("gitlab merge requests");
-      const batch = r.list(answer.value, "").map((m) => r.int(m, "iid"));
+      const batch = r.list(answer.value, "").map((m) => ({
+        number: r.int(m, "iid"),
+        branch: r.text(m, "source_branch"),
+        fork: r.at(m, "source_project_id") !== r.at(m, "target_project_id"),
+      }));
       return r.done({ items: batch, next: nextPage(batch.length === 100, page) });
     });
   }
@@ -366,7 +382,10 @@ export function gitlab(client: Client, project: string): Forge {
       const plain = rendered(unanchored(input.post, input.at));
       return plain.kind === "ok" ? done(await discussion(input.change.number, { body: plain.value })) : plain;
     },
-    claimed,
+    async claimed(input) {
+      const found = await labelled(input);
+      return found.kind === "ok" ? { kind: "ok", value: found.value.map((c) => c.number) } : found;
+    },
     async changes(input): Promise<Result<Changes>> {
       const people = await team();
       if (people.kind === "failed") {
@@ -376,7 +395,7 @@ export function gitlab(client: Client, project: string): Forge {
       if (opened.kind === "failed") {
         return opened;
       }
-      const merged = await claimed({ state: "merged", label: input.label });
+      const merged = await labelled({ state: "merged", label: input.label });
       return merged.kind === "ok"
         ? { kind: "ok", value: { team: people.value, open: opened.value, merged: merged.value } }
         : merged;

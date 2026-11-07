@@ -23,6 +23,7 @@ import {
   type TokenStore,
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
+import { STEPS_TODAY, tick } from "./core/dispatch/tick.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -34,6 +35,8 @@ commands:
                                record the human's approval of the spec with exactly that hash (all 64 characters,
                                as spec printed it); run it only behind the harness ask prompt, never from an allow list
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
+  dispatch <project> --once    one pass of the dispatcher over the project's approved tickets and their changes:
+                               decides each with the table and acts (--dry-run: decides and acts on none)
   app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
                                repository, as JSON {token, login, expiresAt}
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
@@ -46,6 +49,7 @@ options:
   --json      poll: print the parsed records as JSON
 
 settings:
+  FACTORY_QUIET_MINUTES  dispatch: how long an open question may sit before the claim is released (default 30)
   FACTORY_HOME         where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
   FACTORY_FORGE        gitlab (default) or github
   FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
@@ -57,6 +61,8 @@ settings:
 type Args = {
   readonly json: boolean;
   readonly template: boolean;
+  readonly once: boolean;
+  readonly dryRun: boolean;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -228,6 +234,71 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
 
 type Command = { readonly name: string; readonly run: (args: Args) => Promise<number> };
 
+function quietMinutes(env: NodeJS.ProcessEnv): number | "bad" {
+  const raw = env.FACTORY_QUIET_MINUTES ?? "30";
+  return /^[1-9]\d{0,5}$/.test(raw) ? Number(raw) : "bad";
+}
+
+type DispatchSettings =
+  | { readonly home: string; readonly quiet: number }
+  | { readonly kind: "refused"; readonly reason: string };
+
+function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
+  const home = factoryHome(env);
+  const quiet = quietMinutes(env);
+  if (home.kind === "refused") {
+    return home;
+  }
+  return quiet === "bad"
+    ? { kind: "refused", reason: "FACTORY_QUIET_MINUTES must be a whole number of minutes" }
+    : { home: home.path, quiet };
+}
+
+async function onePass(
+  project: string,
+  dryRun: boolean,
+  io: Io,
+  settings: { readonly home: string; readonly quiet: number },
+): Promise<number> {
+  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  if (opened.kind === "failed") {
+    io.err(`agent-factory dispatch: ${opened.reason}\n`);
+    return 1;
+  }
+  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  const passed = await tick({
+    home: settings.home,
+    project,
+    forge: opened.value.forge,
+    label,
+    steps: STEPS_TODAY,
+    now: () => Date.now(),
+    quietMinutes: settings.quiet,
+    dryRun,
+    log: (line) => io.out(`${line}\n`),
+  });
+  if (passed.kind === "failed") {
+    io.err(`agent-factory dispatch: ${passed.reason}\n`);
+    return 1;
+  }
+  return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
+}
+
+// dispatch : one pass (#103). Only --once: launchd or cron runs it every few minutes, and a lock keeps passes apart.
+async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise<number> {
+  const [project] = positionals;
+  if (project === undefined || positionals.length !== 1 || !once) {
+    io.err("usage: agent-factory dispatch <project> --once [--dry-run]\n");
+    return 64;
+  }
+  const settings = dispatchSettings(io.env);
+  if ("kind" in settings) {
+    io.err(`agent-factory dispatch: ${settings.reason}\n`);
+    return 1;
+  }
+  return onePass(project, dryRun, io, settings);
+}
+
 // app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the
 // developer's host process that called it through sudo; nothing else is printed there.
 async function appTokenCommand({ positionals, io }: Args): Promise<number> {
@@ -342,6 +413,7 @@ const COMMANDS: readonly Command[] = [
   { name: "approve", run: approveCommand },
   { name: "approval", run: approvalCommand },
   { name: "app-token", run: appTokenCommand },
+  { name: "dispatch", run: dispatchCommand },
   { name: "setup", run: setupCommand },
 ];
 
@@ -353,6 +425,8 @@ export async function runCli(argv: readonly string[], io: Io): Promise<number> {
       help: { type: "boolean" },
       version: { type: "boolean" },
       json: { type: "boolean" },
+      once: { type: "boolean" },
+      "dry-run": { type: "boolean" },
       template: { type: "boolean" },
     },
   });
@@ -368,6 +442,8 @@ export async function runCli(argv: readonly string[], io: Io): Promise<number> {
   return command.run({
     json: values.json === true,
     template: values.template === true,
+    once: values.once === true,
+    dryRun: values["dry-run"] === true,
     positionals: positionals.slice(1),
     io,
   });

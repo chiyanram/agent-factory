@@ -34,6 +34,9 @@ const mr = (iid: number, o: MrOptions = {}) => ({
   iid: String(iid),
   draft: true,
   diffHeadSha: "aaaa1111aaaa1111",
+  sourceBranch: `factory/T-${iid}`,
+  sourceProjectId: 1,
+  targetProjectId: 1,
   labels: { pageInfo: { hasNextPage: false }, nodes: (o.labels ?? []).map((title) => ({ title })) },
   headPipeline: o.pipeline === undefined ? null : o.pipeline,
   notes: { pageInfo: { hasPreviousPage: o.older !== undefined, startCursor: o.older ?? null }, nodes: o.notes ?? [] },
@@ -86,7 +89,7 @@ describe("changes", () => {
           notes: [note("[writer] OPEN: which port?", "2026-11-02T12:00:00Z")],
         }),
       ]),
-      ok([{ iid: 9 }]),
+      ok([{ iid: 9, source_branch: "factory/T-9", source_project_id: 1, target_project_id: 1 }]),
     ]);
     const result = await gitlab(f.client, project).changes({ label: "agent::claimed" });
     expect(result).toEqual({
@@ -101,6 +104,8 @@ describe("changes", () => {
         open: [
           {
             number: 4,
+            branch: "factory/T-4",
+            fork: false,
             head: "aaaa1111aaaa1111",
             draft: true,
             labels: ["agent::claimed"],
@@ -108,7 +113,7 @@ describe("changes", () => {
             comments: [{ body: "[writer] OPEN: which port?", author: { name: "ram" }, at: "2026-11-02T12:00:00Z" }],
           },
         ],
-        merged: [9],
+        merged: [{ number: 9, branch: "factory/T-9", fork: false }],
       },
     });
     expect(field(f.calls[0], "project")).toBe(project);

@@ -34,6 +34,10 @@ export type Stop =
 export type OpenLine = {
   readonly kind: "open";
   readonly number: number;
+  readonly branch: string;
+  readonly fork: boolean;
+  // the newest comment's time, "" for none: how quiet the change is
+  readonly lastNoteAt: string;
   readonly head: string;
   readonly draft: boolean;
   readonly claimed: boolean;
@@ -43,7 +47,12 @@ export type OpenLine = {
   readonly asks: number;
 };
 
-export type MergedLine = { readonly kind: "merged"; readonly number: number };
+export type MergedLine = {
+  readonly kind: "merged";
+  readonly number: number;
+  readonly branch: string;
+  readonly fork: boolean;
+};
 
 export type PollLine = OpenLine | MergedLine;
 
@@ -90,6 +99,9 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
   return {
     kind: "open",
     number: change.number,
+    branch: change.branch,
+    fork: change.fork,
+    lastNoteAt: change.comments.reduce((last, c) => (Date.parse(c.at) > Date.parse(last || "0") ? c.at : last), ""),
     head: change.head,
     draft: change.draft,
     claimed: change.labels.includes(label),
@@ -114,7 +126,7 @@ export function decide(input: {
   const maintainers = names(changes.team, (p) => !p.bot && p.level === "maintainer");
   const lines: PollLine[] = [
     ...changes.open.map((c) => openLine(c, label, readers, maintainers)),
-    ...changes.merged.map((number): MergedLine => ({ kind: "merged", number })),
+    ...changes.merged.map((m): MergedLine => ({ kind: "merged", number: m.number, branch: m.branch, fork: m.fork })),
   ];
   return lines.sort((a, b) => a.number - b.number);
 }

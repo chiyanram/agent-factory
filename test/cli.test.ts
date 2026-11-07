@@ -140,6 +140,9 @@ function fakeGlab(): string {
                 iid: "12",
                 draft: false,
                 diffHeadSha: "1a2b3c4d5e6f",
+                sourceBranch: "factory/PROJ-12",
+                sourceProjectId: 1,
+                targetProjectId: 1,
                 labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] },
                 headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" },
                 notes: {
@@ -158,7 +161,7 @@ function fakeGlab(): string {
         },
       },
     },
-    merged: [{ iid: 9 }],
+    merged: [{ iid: 9, source_branch: "factory/PROJ-9", source_project_id: 1, target_project_id: 1 }],
   };
   const reply = (body: unknown) => `printf 'HTTP/2.0 200 OK\\r\\n\\r\\n%s' '${JSON.stringify(body)}'`;
   const script = `#!/bin/sh
@@ -211,6 +214,24 @@ describe("agent-factory app-token", () => {
     expect(run.code).toBe(1);
     expect(run.out).toBe("");
     expect(run.err).toContain("github-app.json");
+  });
+});
+
+describe("agent-factory dispatch", () => {
+  it("runs only one pass, named with --once, for one plain project (64 otherwise)", async () => {
+    expect((await cli(["dispatch", "ledger"])).code).toBe(64);
+    expect((await cli(["dispatch", "--once"])).code).toBe(64);
+    expect((await cli(["dispatch", "ledger", "extra", "--once"])).code).toBe(64);
+  });
+
+  it("refuses a bad quiet time, and a project that is not a plain name", async () => {
+    const bad = await cli(["dispatch", "ledger", "--once"], {
+      FACTORY_HOME: home,
+      FACTORY_QUIET_MINUTES: "soon",
+      FACTORY_PROJECT: "a/b",
+    });
+    expect(bad).toMatchObject({ code: 1 });
+    expect(bad.err).toContain("FACTORY_QUIET_MINUTES");
   });
 });
 

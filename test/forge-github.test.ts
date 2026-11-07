@@ -34,6 +34,8 @@ const pr = (number: number, o: PrOptions = {}) => ({
   number,
   isDraft: false,
   headRefOid: `${number}`.repeat(8).slice(0, 8) + "ffffffff",
+  headRefName: `factory/T-${number}`,
+  isCrossRepository: false,
   labels: { pageInfo: { hasNextPage: false }, nodes: (o.labels ?? []).map((name) => ({ name })) },
   commits: { nodes: [{ commit: { statusCheckRollup: o.rollup === undefined ? null : o.rollup } }] },
   comments: {
@@ -45,7 +47,14 @@ const open = (nodes: readonly unknown[], more = false) =>
   ok({ data: { repository: { pullRequests: { pageInfo: page(more, "p1"), nodes } } } });
 const merged = (numbers: readonly number[]) =>
   ok({
-    data: { repository: { pullRequests: { pageInfo: page(false), nodes: numbers.map((number) => ({ number })) } } },
+    data: {
+      repository: {
+        pullRequests: {
+          pageInfo: page(false),
+          nodes: numbers.map((number) => ({ number, headRefName: `factory/T-${number}`, isCrossRepository: false })),
+        },
+      },
+    },
   });
 
 describe("pipeline (#124)", () => {
@@ -92,6 +101,8 @@ describe("changes", () => {
         open: [
           {
             number: 4,
+            branch: "factory/T-4",
+            fork: false,
             head: "44444444ffffffff",
             draft: false,
             labels: ["agent::claimed"],
@@ -101,7 +112,7 @@ describe("changes", () => {
             ],
           },
         ],
-        merged: [9],
+        merged: [{ number: 9, branch: "factory/T-9", fork: false }],
       },
     });
     expect(field(f.calls[2], "label")).toBe("agent::claimed");
