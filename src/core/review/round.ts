@@ -320,7 +320,13 @@ async function verifyAll(
 type Reviewed = { readonly sorted: readonly Sorted[]; readonly spent: Spent };
 
 async function findAndVerify(ctx: Ctx, run: string, pack: Pack): Promise<Result<Reviewed>> {
-  const copied = await copyCode({ repo: ctx.setup.repo, sha: pack.head, into: join(run, "code"), env: ctx.setup.env });
+  const copied = await copyCode({
+    repo: ctx.setup.repo,
+    sha: pack.head,
+    into: join(run, "code"),
+    env: ctx.setup.env,
+    prune: "rules",
+  });
   if (copied.kind === "failed") {
     return copied;
   }

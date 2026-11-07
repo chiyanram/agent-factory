@@ -98,6 +98,7 @@ function forge(
       notes.push({ body, author: { name: "ram" }, at: new Date().toISOString() });
       return { kind: "ok" };
     },
+    status: failed,
     lineFinding: async ({ at, post }): Promise<Done> => {
       log.threads.push(`${at.file}:${at.line} ${text(post)}`);
       return over.threadFails === true ? { kind: "failed", reason: "github: HTTP 502" } : { kind: "ok" };

@@ -20,6 +20,8 @@ type CopyInput = {
   readonly sha: string;
   readonly into: string;
   readonly env: NodeJS.ProcessEnv;
+  // rules: every symlink and rule file goes, for a reader (the reviewer); none: the tree as it is, for a box run
+  readonly prune: "rules" | "none";
 };
 
 function git(input: CopyInput, args: readonly string[]): ReturnType<typeof hostGit> {
@@ -96,7 +98,7 @@ export async function copyCode(input: CopyInput): Promise<Done> {
     await mkdir(input.into, { recursive: true, mode: 0o700 });
     const out = await checkout(input);
     await rm(join(input.into, "..", "index"), { force: true });
-    if (out.kind === "ok") {
+    if (out.kind === "ok" && input.prune === "rules") {
       await prune(input.into);
     }
     return out;

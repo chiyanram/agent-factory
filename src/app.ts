@@ -28,6 +28,8 @@ import { STEPS_TODAY, tick } from "./core/dispatch/tick.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
 import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
 import { reviewStep } from "./core/review/step.js";
+import { boxPlan } from "./core/ready/plan.js";
+import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 
 const HELP = `usage: agent-factory <command>
@@ -273,14 +275,19 @@ async function onePass(
     return 1;
   }
   const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  // no box is built yet (#113): with none to open, the ready check and the verifier say so and wait
+  const { gate, plan } = await boxPlan({ env: io.env, home: settings.home, project, boxes: [] });
   const passed = await tick({
     home: settings.home,
     project,
     forge: opened.value.forge,
     label,
+    gate,
     steps: {
       ...STEPS_TODAY,
+      ready: readyStep(plan),
       review: await reviewStepFor(io.env, opened.value.forge),
+      verify: verifyStep(plan, opened.value.forge),
     },
     now: () => Date.now(),
     quietMinutes: settings.quiet,
