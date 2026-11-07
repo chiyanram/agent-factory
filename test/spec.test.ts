@@ -134,6 +134,10 @@ describe("specHash", () => {
     expect(specHash(GOOD.replace("409 Conflict", "423 Locked"))).not.toBe(specHash(GOOD));
   });
 
+  it("accepts a spec saved with CRLF line endings and trailing spaces: editor noise is not hidden text", () => {
+    expect(spec(`${GOOD.replace(/\n/g, "  \r\n")}\r\n`).hash).toBe(specHash(GOOD));
+  });
+
   it("is the hash a checked spec carries", () => {
     expect(spec(GOOD).hash).toBe(specHash(GOOD));
     expect(spec(GOOD).hash).toMatch(/^[0-9a-f]{64}$/);

@@ -199,7 +199,7 @@ export function checkSpec(raw: string): SpecCheck {
   const text = normalise(raw);
   const parsed = parse(text);
   const f = fields(parsed);
-  const problems = [...hiddenProblems(raw), ...templateProblems(f, parsed.duplicates)];
+  const problems = [...hiddenProblems(text), ...templateProblems(f, parsed.duplicates)];
   return problems.length > 0
     ? { kind: "invalid", problems }
     : { kind: "ok", spec: { title: f.title, intent: f.intent, criteria: f.criteria, design: f.design, lane: f.lane as Lane, text, hash: specHash(text) } };
