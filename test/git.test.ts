@@ -130,7 +130,7 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
 
 describe("hostGit refuses what it cannot neutralise", () => {
   for (const key of ["diff.external", "diff.x.command", "merge.x.driver", "url.file:///bad/.insteadOf", "http.proxy",
-    "http.https://github.com/.proxy", "http.sslVerify", "http.curloptResolve"]) {
+    "http.https://github.com/.proxy", "http.sslVerify", "http.curloptResolve", "remote.origin.proxy"]) {
     it(`a repo-set ${key} is refused, and git does not run`, async () => {
       git(["config", key, plant("evil")]);
       const result = await hostGit(request(["status"]));

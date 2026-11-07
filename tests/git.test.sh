@@ -135,7 +135,7 @@ git -C "$base/repo" remote set-url origin "ssh://git@example.invalid/x.git"
 expect_eq "git's own child programs never come from a relative or in-repo PATH entry" "not run" "$(ran_by ssh)"
 
 for key in diff.external diff.x.command merge.x.driver 'url.file:///bad/.insteadOf' http.proxy \
-    'http.https://github.com/.proxy' http.sslVerify http.curloptResolve; do
+    'http.https://github.com/.proxy' http.sslVerify http.curloptResolve remote.origin.proxy; do
   setup
   git -C "$base/repo" config "$key" "$base/evil"
   expect_fail "a repo-set $key is refused, with nothing run" "refused: the repo's own config sets" hgit -C "$base/repo" status

@@ -68,7 +68,7 @@ const REPO_RULES: readonly { readonly pattern: RegExp; readonly rule: RepoRule }
   { pattern: /^remote\..*\.receivepack$/, rule: { kind: "neutral", value: "git-receive-pack" } },
   {
     pattern:
-      /^(diff\.external|diff\..*\.command|merge\..*\.driver|url\..*\.(insteadof|pushinsteadof)|http\.(.*\.)?(proxy|sslverify|curloptresolve))$/,
+      /^(diff\.external|diff\..*\.command|merge\..*\.driver|url\..*\.(insteadof|pushinsteadof)|http\.(.*\.)?(proxy|sslverify|curloptresolve)|remote\..*\.proxy)$/,
     rule: { kind: "refuse" },
   },
   { pattern: /^credential\.(.*\.)?helper$/, rule: { kind: "helper" } },
