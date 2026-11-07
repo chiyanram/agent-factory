@@ -191,6 +191,7 @@ function statusForge(posted: CommitStatus[]): Forge {
     note: notUsed,
     notes: notUsed,
     lineFinding: notUsed,
+    ciConfig: notUsed,
     claimed: notUsed,
     changes: notUsed,
     status: async (s) => (posted.push(s), { kind: "ok" }),

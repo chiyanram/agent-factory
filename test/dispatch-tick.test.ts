@@ -76,6 +76,7 @@ function forge(changes: Changes, log: string[]): Forge {
     notes: notUsed,
     lineFinding: notUsed,
     status: notUsed,
+    ciConfig: notUsed,
     claimed: notUsed,
     changes: async () => ({ kind: "ok", value: changes }),
     addLabel: async ({ number, label }) => {

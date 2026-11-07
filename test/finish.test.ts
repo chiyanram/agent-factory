@@ -29,6 +29,8 @@ function forge(log: Log, fail: { readonly label?: boolean; readonly note?: boole
     return r.kind === "ok" ? r.text : `refused: ${r.reason}`;
   };
   return {
+    defaultBranch: async () => ({ kind: "ok", value: "main" }),
+    ciConfig: async () => ({ kind: "ok", value: { kind: "file", path: ".gitlab-ci.yml" } }),
     addLabel: async ({ label }: { readonly label: string }): Promise<Done> => (
       log.push(`label ${label}`), fail.label ? { kind: "failed", reason: "github: HTTP 502" } : { kind: "ok" }
     ),

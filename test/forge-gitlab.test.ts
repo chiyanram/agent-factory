@@ -350,4 +350,19 @@ describe("openChange (#164)", () => {
       reason: "2 changes are open from factory/T-7: !12, !14; a person decides",
     });
   });
+
+  it("ciConfig reads the project's CI config path: empty is .gitlab-ci.yml, another project's file is not ours", async () => {
+    const empty = fake("gitlab", [ok({ default_branch: "main", ci_config_path: null })]);
+    expect(await gitlab(empty.client, project).ciConfig()).toEqual({
+      kind: "ok",
+      value: { kind: "file", path: ".gitlab-ci.yml" },
+    });
+    const custom = fake("gitlab", [ok({ ci_config_path: "ci/pipeline.yml" })]);
+    expect(await gitlab(custom.client, project).ciConfig()).toEqual({
+      kind: "ok",
+      value: { kind: "file", path: "ci/pipeline.yml" },
+    });
+    const elsewhere = fake("gitlab", [ok({ ci_config_path: ".gitlab-ci.yml@group/ci" })]);
+    expect(await gitlab(elsewhere.client, project).ciConfig()).toMatchObject({ value: { kind: "none" } });
+  });
 });

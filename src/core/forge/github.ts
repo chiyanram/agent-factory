@@ -291,6 +291,10 @@ export function github(client: Client, project: GithubProject): Forge {
       return r.done(r.text(answer.value, "login"));
     },
     change,
+    // GitHub runs .github/workflows only, which the guard always covers
+    async ciConfig() {
+      return { kind: "ok", value: { kind: "none", why: "GitHub runs .github/workflows" } };
+    },
     async defaultBranch() {
       const answer = await rest(client, { path: repo, method: "GET", body: { kind: "none" } });
       if (answer.kind === "failed") {

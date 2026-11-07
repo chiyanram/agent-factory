@@ -63,6 +63,7 @@ function forge(
     notes: notUsed,
     lineFinding: notUsed,
     status: notUsed,
+    ciConfig: notUsed,
     openChange: notUsed,
     claimed: async ({ state }): Promise<Result<readonly number[]>> => ({ kind: "ok", value: lists[state] }),
     changes: notUsed,

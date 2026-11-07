@@ -90,12 +90,16 @@ stays out of reach either way.
   change onto the default branch, as the project's identity. Its title is the spec's title and its body names the
   ticket; the spec's text stays local. A change already open from that branch is reused, never doubled; two are left
   to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). **Today:** the writer step (#113) does not call it yet.
-- On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses any
-  commit it adds that touches `.gitlab-ci.yml`, a file it includes locally (followed into those files; a glob is
-  guarded as a glob), `.github/workflows/**` or `.github/actions/**`, a rename away included, and the work is blocked
-  with "touches CI config" and the files named (`src/core/ci-files.ts`, #115). You make such a change in your own
-  commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). `rules:` in `.gitlab-ci.yml` is not a gate: the branch's own copy runs. **Today:** the bash
-  writer still pushes itself, so the refusal applies once the writer runs in the box and the host pushes (#113).
+- On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses it, and
+  the work is blocked with "touches CI config" and the files named (`src/core/ci-files.ts`, #115). The CI files are
+  `.github/workflows/**`, `.github/actions/**`, `.gitlab-ci.yml` or the file the project's GitLab settings name
+  instead, and every file those include in this repository, at any depth, child pipelines (`trigger: include:`) too;
+  a glob follows GitLab's rules. For each, the pushed commit's version must be the branch's before the push or the
+  default branch's, so a merge or rebase onto the default branch passes, and an edited merge or a reset does not. A CI
+  file that does not parse, an include it cannot read, or one that names a variable is refused. You make a CI change
+  in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). `rules:` in `.gitlab-ci.yml` is not a gate: the branch's own copy runs.
+  **Today:** the bash writer still pushes itself, so the refusal applies once the writer runs in the box and the host
+  pushes (#113).
 - The backstop, in case a CI change gets through anyway; set it up once per project:
   - GitLab: mark every secret CI/CD variable **Protected**, so a pipeline on an agent branch never sees it. Optional:
     point Settings → CI/CD → General pipelines → CI/CD configuration file at a file in a separate project you

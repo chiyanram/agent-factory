@@ -100,6 +100,7 @@ function forge(
       return { kind: "ok" };
     },
     status: failed,
+    ciConfig: failed,
     lineFinding: async ({ at, post }): Promise<Done> => {
       log.threads.push(`${at.file}:${at.line} ${text(post)}`);
       return over.threadFails === true ? { kind: "failed", reason: "github: HTTP 502" } : { kind: "ok" };
