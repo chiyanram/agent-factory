@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hostPush, plainBranch, pushEnv, pushUrlFits, type PushRequest } from "../src/core/push.js";
+import { hostPush as realHostPush, plainBranch, pushEnv, pushUrlFits, pushUrls, type PushRequest } from "../src/core/push.js";
 import type { Identity } from "../src/core/identity.js";
 
 // A real clone whose origin is https://github.com/o/r.git; the operator's global config (trusted) maps that URL to a
@@ -44,10 +44,15 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+// git resolves origin through the trusted insteadOf to the bare repository on disk; these tests check the push, so they
+// report the URL the clone names. pushUrls itself is tested against real git below.
+const hostPush = (r: PushRequest) => realHostPush(r, { urls: async () => ({ kind: "ok", value: ["https://github.com/o/r.git"] }) });
+
 function request(over: Partial<PushRequest>): PushRequest {
   return {
     repo: work,
     forge: "github",
+    host: "github.com",
     project: "o/r",
     branch: "feat/x",
     commit: git(work, "rev-parse", "HEAD"),
@@ -87,10 +92,19 @@ describe("hostPush", () => {
     expect(await hostPush(request({ commit: "abc123" }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("full SHAs") });
   });
 
-  it("refuses a commit the clone does not have, and a clone that pushes somewhere else", async () => {
+  it("refuses a commit the clone does not have, and an empty list of protected branches", async () => {
     expect(await hostPush(request({ commit: "f".repeat(40) }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("not a commit") });
-    git(work, "remote", "set-url", "--push", "origin", "https://evil.example/o/r.git");
-    expect(await hostPush(request({}))).toMatchObject({ kind: "failed", reason: expect.stringContaining("evil.example") });
+    expect(await hostPush(request({ protectedBranches: [] }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("protected") });
+  });
+
+  it("refuses a clone that pushes elsewhere, or to more than one URL, as git resolves them (the review's findings 1-3)", async () => {
+    const real = (r: PushRequest) => realHostPush(r);
+    // the trusted insteadOf rewrites the clone's URL to the bare repository on disk, which is not the project
+    expect(await real(request({}))).toMatchObject({ kind: "failed", reason: expect.stringContaining(remote) });
+    git(root, "config", "--global", "--unset", `url.${remote}.insteadOf`);
+    git(work, "config", "--add", "remote.origin.pushurl", join(root, "evil.git"));
+    git(work, "config", "--add", "remote.origin.pushurl", "https://github.com/o/r.git");
+    expect(await real(request({}))).toMatchObject({ kind: "failed", reason: expect.stringContaining("2 URLs") });
   });
 
   it("with an App, refuses a repo whose own config sets a credential helper: the push would go out as you", async () => {
@@ -143,9 +157,19 @@ describe("pushEnv", () => {
   });
 });
 
+describe("pushUrls", () => {
+  it("gives every push URL as git resolves it: a global insteadOf to ssh is seen, never hidden", async () => {
+    git(root, "config", "--global", "url.git@github.com:.insteadOf", "https://github.com/");
+    git(root, "config", "--global", "--unset", `url.${remote}.insteadOf`);
+    expect(await pushUrls(request({}))).toEqual({ kind: "ok", value: ["git@github.com:o/r.git"] });
+    expect(await realHostPush(request({ identity: APP }))).toMatchObject({ kind: "failed", reason: expect.stringContaining("git@github.com:o/r.git") });
+  });
+});
+
 describe("pushUrlFits", () => {
-  it("an App pushes over https to github.com/<owner/name> only; your own login may also use ssh", () => {
-    const fits = (url: string, app: boolean, forge: "github" | "gitlab" = "github", project = "o/r") => pushUrlFits({ url, project, forge, app });
+  it("an App pushes over https to github.com/<owner/name> only; your own login may also use ssh, to the forge's host only", () => {
+    const fits = (url: string, app: boolean, forge: "github" | "gitlab" = "github", project = "o/r") =>
+      pushUrlFits({ url, project, host: forge === "github" ? "github.com" : "gitlab.example.com", app });
     expect(fits("https://github.com/o/r.git", true)).toBe(true);
     expect(fits("git@github.com:o/r.git", true)).toBe(false);
     expect(fits("https://github.com/o/r2.git", true)).toBe(false);
@@ -153,5 +177,8 @@ describe("pushUrlFits", () => {
     expect(fits("git@github.com:o/r.git", false)).toBe(true);
     expect(fits("ssh://git@gitlab.example.com:2222/group/sub/app.git", false, "gitlab", "group/sub/app")).toBe(true);
     expect(fits("https://gitlab.example.com/group/other.git", false, "gitlab", "group/sub/app")).toBe(false);
+    for (const url of ["https://evil.example/group/sub/app", "git@evil.example:group/sub/app.git", "https://gitlab.example.com:8443/group/sub/app", "https://gitlab.example.com.evil/group/sub/app"]) {
+      expect(fits(url, false, "gitlab", "group/sub/app")).toBe(false);
+    }
   });
 });

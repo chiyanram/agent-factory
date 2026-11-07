@@ -49,11 +49,11 @@ sudo rule, and never reads the key ([#108](https://github.com/chiyanram/agent-fa
 
 ```
 dispatcher, poll, host push (your user)
-  └─ sudo -n -u factory -- /usr/local/bin/agent-factory app-token <owner/name>
+  └─ sudo -n -u factory -- /usr/local/bin/agent-factory-app-token <owner/name>
        └─ factory user: reads ~factory/.config/agent-factory/github-app.json and the .pem (mode 600)
           signs a JWT, mints a token scoped to that one repository, caches it mode 600
-  ◀─ {"token", "login": "<slug>[bot]", "expiresAt"}: held in memory; given to one gh call (GH_TOKEN) or one
-     git push (a credential helper for https://github.com only, every other helper dropped)
+  ◀─ {"token", "login": "<slug>[bot]", "expiresAt"}: held in that process's memory; given to each of its gh calls
+     (GH_TOKEN) and git pushes (a credential helper for https://github.com only, every other helper dropped)
 ```
 
 | # | who | step | why |
@@ -63,9 +63,15 @@ dispatcher, poll, host push (your user)
 | 3 | developer | Add a ruleset on `main`: restrict updates, require a pull request with one approval, block force pushes and deletion. Make the repository admin the only bypass actor, for pull requests only. | Only the owner can merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
 | 4 | developer, on the VM | Create the user and hand it the key: `sudo useradd --system --create-home --shell /usr/sbin/nologin factory`; `sudo install -d -m 700 -o factory -g factory ~factory/.config ~factory/.config/agent-factory`; `sudo install -m 600 -o factory -g factory <key>.pem ~factory/.config/agent-factory/app.pem`; then delete the `.pem` from your own folders. | Your user, and anything it runs, can never read the key. |
 | 5 | developer, on the VM | Write `~factory/.config/agent-factory/github-app.json`, mode 600, owned by `factory`: `{"appId": "<id>", "key": "/home/factory/.config/agent-factory/app.pem"}` (use the real home of `factory`). | `app-token` refuses a file of another user's, or one others can read. |
-| 6 | developer, on the VM | Install the package for everyone: `sudo npm install -g @chiyanram/agent-factory`, so `/usr/local/bin/agent-factory` exists and only root can change it. | The sudo rule names that path; a copy your user can edit would be a way around it. |
-| 7 | developer, on the VM | Add the rule with `sudo visudo -f /etc/sudoers.d/agent-factory`, one line per project: `<you> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory app-token <owner/name>`. Check it with `sudo -n -u factory -- /usr/local/bin/agent-factory app-token <owner/name> \| jq .login`, which prints `"<slug>[bot]"`. | sudo matches the whole command line, so the rule allows that one command and nothing else. Never print the token itself. |
-| 8 | developer | Set `FACTORY_FORGE=github`, `FACTORY_PROJECT=<owner/name>` and `FACTORY_IDENTITY=app`. Clone `FACTORY_REPO` over `https://github.com/`, with no credential helper in the clone's own config. | The host push refuses an App push from a clone that sets its own helper: git would fall back to your login. |
+| 6 | developer, on the VM | Install a root-owned copy: `sudo git clone https://github.com/chiyanram/agent-factory /opt/agent-factory`, then `cd /opt/agent-factory && sudo npm ci && sudo npm run build`. Write the wrapper `/usr/local/bin/agent-factory-app-token`, owned by root, mode 755, with two lines: `#!/bin/sh` and `exec /usr/bin/node /opt/agent-factory/dist/cli.js app-token "$1"` (use `command -v node` for the real path). | The package is not on npm. Root owns every file the rule reaches, and the absolute `node` path means your PATH never chooses the program that reads the key. |
+| 7 | developer, on the VM | Add the rule with `sudo visudo -f /etc/sudoers.d/agent-factory`, one line per project: `<you> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory-app-token <owner/name>`. Check it with `sudo -n -u factory -- /usr/local/bin/agent-factory-app-token <owner/name> \| jq .login`, which prints `"<slug>[bot]"`. | sudo matches the whole command line, so the rule allows that one command for that one repository. Never print the token itself. |
+| 8 | developer | Set `FACTORY_FORGE=github`, `FACTORY_PROJECT=<owner/name>` and `FACTORY_IDENTITY=app`. Clone `FACTORY_REPO` over `https://github.com/`, with no credential helper in the clone's own config, and with no global `url.*.insteadOf` that rewrites `https://github.com/`. | The host push checks the one URL git will really push to: for an App it must be `https://github.com/<owner/name>`, and a clone that sets its own helper is refused, since git would fall back to your login. |
+
+**Today:** any process of your user can run the same sudo line and get a token, the coordinator's Bash tool included.
+The coordinator's deny list ([#106](https://github.com/chiyanram/agent-factory/issues/106)) must deny `sudo`; until it
+does, do not leave a coordinator session running unattended on a project with `FACTORY_IDENTITY=app`. The key itself
+stays out of reach either way.
+
 
 ### Both forges
 
@@ -104,7 +110,8 @@ The scripts read their settings from the environment.
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude`. **Today:** the bash scripts default `FACTORY_GH` to `scripts/bin/gh`, the App |
 | `FACTORY_IDENTITY` | who `agent-factory` acts as on the forge: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
-| `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the `agent-factory` its sudo rule names | `factory`, `/usr/local/bin/agent-factory` |
+| `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
+| `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
 | `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | **Today:** the bash scripts only: the GitHub App's ID and its private key file in your own home; `agent-factory` reads neither | git config `factory.ghAppId`, `factory.ghAppKey` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |

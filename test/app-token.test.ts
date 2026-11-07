@@ -55,18 +55,31 @@ describe("mint", () => {
     expect(await mint(setup(gh.http))).toEqual({ kind: "ok", value: { token: "ghs_minted0123456789abcd", login: "ledger-factory[bot]", expiresAt: "2027-01-15T09:00:00Z" } });
     expect(JSON.parse(gh.seen[2]!.body)).toEqual({ repositories: ["ledger"] });
     expect(gh.seen[0]!.headers.Authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
-    expect(statSync(join(home, "cache", "123-chiyanram_ledger.json")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(home, "cache", "123-chiyanram%2Fledger.json")).mode & 0o777).toBe(0o600);
   });
 
-  it("reuses the cached token while it has more than 5 minutes left, then mints again", async () => {
+  it("reuses the cached token while it has more than 15 minutes left, then mints again", async () => {
     const first = fakeGithub(GITHUB);
     await mint(setup(first.http));
     const again = fakeGithub(GITHUB);
     expect(await mint(setup(again.http))).toMatchObject({ kind: "ok" });
     expect(again.seen).toHaveLength(0);
-    const late = Date.parse("2027-01-15T09:00:00Z") / 1000 - 200;
+    const late = Date.parse("2027-01-15T09:00:00Z") / 1000 - 800;
     await mint(setup(again.http, late));
     expect(again.seen).toHaveLength(3);
+  });
+
+  it("never serves one project's cached token to another, even when their names share a file name once flattened", async () => {
+    await mint({ ...setup(fakeGithub({ ...GITHUB, "GET repos/a_b/c/installation": { status: 200, body: { id: 77 } } }).http), project: "a_b/c" });
+    const other = fakeGithub({ ...GITHUB, "GET repos/a/b_c/installation": { status: 200, body: { id: 77 } } });
+    await mint({ ...setup(other.http), project: "a/b_c" });
+    expect(other.seen).toHaveLength(3);
+    expect(JSON.parse(other.seen[2]!.body)).toEqual({ repositories: ["b_c"] });
+  });
+
+  it("fails when GitHub gives no installation id, and tells a 404 on the App from one on the installation", async () => {
+    expect(await mint(setup(fakeGithub({ ...GITHUB, "GET repos/chiyanram/ledger/installation": { status: 200, body: {} } }).http))).toMatchObject({ kind: "failed", reason: expect.stringContaining("no installation id") });
+    expect(await mint(setup(fakeGithub({ "GET app": { status: 404, body: {} } }).http))).toMatchObject({ kind: "failed", reason: expect.stringContaining("does not know this App") });
   });
 
   it("names the likely cause of a 401 and a 404, and refuses a project that is not owner/name", async () => {

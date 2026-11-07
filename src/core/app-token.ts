@@ -4,11 +4,13 @@
 // the developer's own user (and anything it runs: the coordinator, a tricked writer) cannot read it. The developer's
 // user gets a token only through one sudo rule that runs exactly `agent-factory app-token <owner/name>` as `factory`:
 //
-//   <developer> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory app-token chiyanram/ledger
+//   <developer> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory-app-token chiyanram/ledger
+//
+// The wrapper is root-owned and runs `<absolute node> <root-owned checkout>/dist/cli.js app-token "$1"` (GUIDE).
 //
 // The command prints {"token", "login", "expiresAt"} on stdout:
 //   token      an installation token scoped to that one repository, valid about an hour; reused from a cache in the
-//              factory user's ~/.cache/agent-factory (mode 600) while it has more than 5 minutes left
+//              factory user's ~/.cache/agent-factory (mode 600) while it has more than 15 minutes left
 //   login      "<app-slug>[bot]", the name the App posts and commits as
 //   expiresAt  ISO 8601
 //
@@ -29,6 +31,7 @@ export type Http = (request: HttpRequest) => Promise<Result<HttpAnswer>>;
 
 export type AppConfig = { readonly appId: string; readonly keyPem: string };
 export type Minted = { readonly token: string; readonly login: string; readonly expiresAt: string };
+type Cached = Minted & { readonly project: string };
 
 export const realHttp: Http = async (request) => {
   try {
@@ -122,7 +125,8 @@ async function call(setup: MintSetup, bearer: string, method: "GET" | "POST", pa
     return { kind: "failed", reason: `HTTP 401 on ${method} ${path}: GitHub refused App ${setup.config.appId}; check the App ID, the key, and this machine's clock` };
   }
   if (status === 404) {
-    return { kind: "failed", reason: `HTTP 404 on ${method} ${path}: the App ${setup.config.appId} is not installed on ${setup.project}` };
+    const why = path.endsWith("/installation") ? `the App ${setup.config.appId} is not installed on ${setup.project}` : `GitHub does not know this App or path`;
+    return { kind: "failed", reason: `HTTP 404 on ${method} ${path}: ${why}` };
   }
   if (status < 200 || status > 299) {
     return { kind: "failed", reason: `HTTP ${status} on ${method} ${path}: ${answer.value.body.slice(0, 200)}` };
@@ -134,16 +138,17 @@ async function call(setup: MintSetup, bearer: string, method: "GET" | "POST", pa
   }
 }
 
+// one file per App and project; the name is encoded so no two projects share one ("a_b/c" and "a/b_c")
 function cacheFile(setup: MintSetup): string {
-  return join(setup.cacheDir, `${setup.config.appId}-${setup.project.replace("/", "_")}.json`);
+  return join(setup.cacheDir, `${setup.config.appId}-${encodeURIComponent(setup.project)}.json`);
 }
 
-// cached : the cached token while it has more than 5 minutes left; else none.
+// cached : the cached token for this very project while it has more than 15 minutes left; else none.
 async function cached(setup: MintSetup): Promise<Minted | "none"> {
   try {
-    const raw = JSON.parse(await readFile(cacheFile(setup), "utf8")) as Partial<Minted>;
-    const valid = typeof raw.token === "string" && typeof raw.login === "string" && typeof raw.expiresAt === "string";
-    return valid && Date.parse(raw.expiresAt!) / 1000 > setup.now + 300 ? (raw as Minted) : "none";
+    const raw = JSON.parse(await readFile(cacheFile(setup), "utf8")) as Partial<Cached>;
+    const valid = typeof raw.token === "string" && typeof raw.login === "string" && typeof raw.expiresAt === "string" && raw.project === setup.project;
+    return valid && Date.parse(raw.expiresAt!) / 1000 > setup.now + 900 ? { token: raw.token!, login: raw.login!, expiresAt: raw.expiresAt! } : "none";
   } catch {
     return "none";
   }
@@ -153,7 +158,8 @@ async function remember(setup: MintSetup, minted: Minted): Promise<void> {
   try {
     await mkdir(setup.cacheDir, { recursive: true, mode: 0o700 });
     // a new file, then a rename: a reader never sees half a token
-    await writeFile(`${cacheFile(setup)}.new`, JSON.stringify(minted), { mode: 0o600 });
+    const entry: Cached = { ...minted, project: setup.project };
+    await writeFile(`${cacheFile(setup)}.new`, JSON.stringify(entry), { mode: 0o600 });
     await rename(`${cacheFile(setup)}.new`, cacheFile(setup));
   } catch {
     // a cache that cannot be written only costs a new token next time
@@ -178,9 +184,13 @@ async function fresh(setup: MintSetup, bearer: string): Promise<Result<Minted>> 
   if (installation.kind === "failed") {
     return installation;
   }
+  const id = installation.value.id;
+  if (typeof id !== "number" || !Number.isSafeInteger(id)) {
+    return { kind: "failed", reason: `GitHub gave no installation id for ${setup.project}` };
+  }
   // scoped to the one repository: the token cannot touch the App's other installations' repositories
   const name = setup.project.split("/")[1]!;
-  const minted = await call(setup, bearer, "POST", `app/installations/${String(installation.value.id)}/access_tokens`, { repositories: [name] });
+  const minted = await call(setup, bearer, "POST", `app/installations/${id}/access_tokens`, { repositories: [name] });
   return minted.kind === "ok" ? grant(minted.value, app.value.slug, setup.project) : minted;
 }
 

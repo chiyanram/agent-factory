@@ -4,7 +4,9 @@
 // What it checks before anything is sent, each as a refusal:
 //   - the branch is a plain branch name and none of the protected ones (the default branch)
 //   - the commit and the lease are full SHAs, and the commit is in the clone
-//   - the clone's own push URL names the project (an App's token goes to https://github.com/<owner/name> only)
+//   - the clone pushes to exactly one URL, as git resolves it (pushurl, insteadOf and pushInsteadOf applied), and that
+//     URL is the project on the forge's own host (FACTORY_FORGE_HOST); with an App, https://github.com/<owner/name> only,
+//     so a global insteadOf to ssh or elsewhere can never send the App's push as you or to another place
 //   - with an App: the repo's own config sets no credential helper. hostGit would put the operator's trusted helpers
 //     back after the App's, and the push would go out as the developer, not the App.
 //   - every guard the caller passes (the CI-file refusal, #115)
@@ -27,6 +29,8 @@ export type PushRequest = {
   // the clone or worktree that holds the commit
   readonly repo: string;
   readonly forge: "github" | "gitlab";
+  // the forge's host: github.com, gitlab.com or the company's GitLab (FACTORY_FORGE_HOST)
+  readonly host: string;
   // owner/name on GitHub, the full path on GitLab
   readonly project: string;
   readonly branch: string;
@@ -56,14 +60,14 @@ function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// pushUrlFits : whether the clone's push URL is the project's. An App needs https to github.com exactly.
-export function pushUrlFits(input: { readonly url: string; readonly project: string; readonly forge: "github" | "gitlab"; readonly app: boolean }): boolean {
+// pushUrlFits : whether a push URL is the project on the forge's host. An App needs https to github.com exactly.
+export function pushUrlFits(input: { readonly url: string; readonly project: string; readonly host: string; readonly app: boolean }): boolean {
   const project = escape(input.project);
   if (input.app) {
     return new RegExp(`^https://github\\.com/${project}(\\.git)?/?$`, "i").test(input.url);
   }
-  const host = input.forge === "github" ? "github\\.com" : "[A-Za-z0-9.-]+(:\\d+)?";
-  return new RegExp(`^(https://${host}/|ssh://git@${host}/|git@${host}:)${project}(\\.git)?/?$`, "i").test(input.url);
+  const host = escape(input.host);
+  return new RegExp(`^(https://${host}/|ssh://git@${host}(:\\d+)?/|git@${host}:)${project}(\\.git)?/?$`, "i").test(input.url);
 }
 
 function failed(what: string, result: GitResult): Done {
@@ -102,6 +106,9 @@ function shapeProblem(request: PushRequest): string {
   if (!plainBranch(request.branch)) {
     return `refused: ${JSON.stringify(request.branch)} is not a plain branch name`;
   }
+  if (request.protectedBranches.length === 0) {
+    return "refused: no protected branch given; pass the default branch at least";
+  }
   if (request.protectedBranches.includes(request.branch)) {
     return `refused: ${request.branch} is protected; the factory never pushes to it`;
   }
@@ -109,37 +116,41 @@ function shapeProblem(request: PushRequest): string {
   return SHA.test(request.commit) && leaseOk ? "" : "refused: the commit and the lease must be full SHAs";
 }
 
-// the URL the clone's own config pushes to: pushurl, else url
-async function pushUrl(request: PushRequest): Promise<Result<string>> {
-  for (const key of ["remote.origin.pushurl", "remote.origin.url"]) {
-    const read = await git(request, ["config", "--get", key]);
-    if (read.kind === "ok") {
-      return { kind: "ok", value: read.stdout.trim() };
-    }
-    if (read.kind === "refused") {
-      return { kind: "failed", reason: read.reason };
-    }
+// pushUrls : every URL git would push origin to, as git resolves them: pushurl or url, insteadOf and pushInsteadOf applied
+export async function pushUrls(request: PushRequest): Promise<Result<readonly string[]>> {
+  const read = await git(request, ["remote", "get-url", "--push", "--all", "origin"]);
+  if (read.kind !== "ok") {
+    return { kind: "failed", reason: read.kind === "refused" ? read.reason : "refused: the clone has no origin remote" };
   }
-  return { kind: "failed", reason: "refused: the clone has no origin remote" };
+  return { kind: "ok", value: read.stdout.split("\n").map((u) => u.trim()).filter((u) => u.length > 0) };
 }
 
-async function placeChecks(request: PushRequest): Promise<Done> {
+// Seams : how the push URLs are read. The real one asks git; a test that pushes to a bare repository on disk passes one
+// that answers with the GitHub URL its trusted insteadOf maps from.
+export type Seams = { readonly urls: (request: PushRequest) => Promise<Result<readonly string[]>> };
+const REAL: Seams = { urls: pushUrls };
+
+async function placeChecks(request: PushRequest, seams: Seams): Promise<Done> {
   const found = await git(request, ["rev-parse", "--verify", "--quiet", `${request.commit}^{commit}`]);
   if (found.kind !== "ok" || found.stdout.trim() !== request.commit) {
     return { kind: "failed", reason: found.kind === "refused" ? found.reason : `refused: ${request.commit} is not a commit in ${request.repo}` };
   }
-  const url = await pushUrl(request);
-  if (url.kind === "failed") {
-    return url;
+  const urls = await seams.urls(request);
+  if (urls.kind === "failed") {
+    return urls;
   }
   const app = request.identity.kind === "app";
-  return pushUrlFits({ url: url.value, project: request.project, forge: request.forge, app })
+  const [url] = urls.value;
+  if (urls.value.length !== 1 || url === undefined) {
+    return { kind: "failed", reason: `refused: the clone pushes origin to ${urls.value.length} URLs (${urls.value.join(", ")}); it must push to exactly one` };
+  }
+  return pushUrlFits({ url, project: request.project, host: request.host, app })
     ? { kind: "ok" }
-    : { kind: "failed", reason: `refused: the clone pushes to ${url.value}, which is not ${request.project}${app ? " over https://github.com" : ""}` };
+    : { kind: "failed", reason: `refused: the clone pushes to ${url}, which is not ${request.project} on ${app ? "https://github.com" : request.host}` };
 }
 
 // repoHelpers : refuses, with an App, a credential helper the repo's own config sets.
-async function repoHelpers(request: PushRequest): Promise<Done> {
+async function repoHelpers(request: PushRequest, _seams: Seams): Promise<Done> {
   if (request.identity.kind === "own") {
     return { kind: "ok" };
   }
@@ -153,7 +164,7 @@ async function repoHelpers(request: PushRequest): Promise<Done> {
     : { kind: "failed", reason: `refused: the repo's own config sets ${own.map((l) => l.split("\t")[1]).join(", ")}; with an App the push would go out as you. Remove it` };
 }
 
-async function guarded(request: PushRequest): Promise<Done> {
+async function guarded(request: PushRequest, _seams: Seams): Promise<Done> {
   for (const guard of request.guards) {
     const verdict = await guard({ repo: request.repo, commit: request.commit, lease: request.lease });
     if (verdict.kind === "failed") {
@@ -180,13 +191,13 @@ async function send(request: PushRequest): Promise<Done> {
 }
 
 // hostPush : the writer's commit onto its branch, after every check, as the project's identity.
-export async function hostPush(request: PushRequest): Promise<Done> {
+export async function hostPush(request: PushRequest, seams: Seams = REAL): Promise<Done> {
   const shape = shapeProblem(request);
   if (shape !== "") {
     return { kind: "failed", reason: shape };
   }
   for (const step of [placeChecks, repoHelpers, guarded]) {
-    const verdict = await step(request);
+    const verdict = await step(request, seams);
     if (verdict.kind === "failed") {
       return verdict;
     }

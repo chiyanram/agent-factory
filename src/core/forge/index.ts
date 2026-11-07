@@ -36,8 +36,8 @@ function maxTries(value: string | undefined): Result<number> {
   return /^[1-9]\d{0,2}$/.test(value) ? { kind: "ok", value: Number(value) } : { kind: "failed", reason: `FACTORY_MAX_TRIES must be a whole number from 1, got ${JSON.stringify(value)}` };
 }
 
-// The environment of one CLI call: no update notice and no prompt, since an unattended call must answer or fail. With an
-// App identity, gh gets the App's token for that call alone.
+// The environment of every CLI call this forge makes: no update notice and no prompt, since an unattended call must
+// answer or fail. With an App identity, each gh call gets the App's token in its own environment.
 function cliEnv(setup: ForgeSetup): NodeJS.ProcessEnv {
   const quiet = { ...setup.env, GH_NO_UPDATE_NOTIFIER: "1", GH_PROMPT_DISABLED: "1", GLAB_CHECK_UPDATE: "false" };
   return setup.identity.kind === "app" ? { ...quiet, GH_TOKEN: setup.identity.token } : quiet;
@@ -115,6 +115,15 @@ export function openForge(setup: ForgeSetup): Result<Forge> {
   return opened.kind === "ok" ? settled(setup, opened.value) : opened;
 }
 
+// forgeHost : the forge's host, FACTORY_FORGE_HOST, checked: github.com and gitlab.com unless set. The host push sends a
+// branch only to a URL on this host.
+export function forgeHost(env: NodeJS.ProcessEnv, forge: "github" | "gitlab"): Result<string> {
+  const host = env.FACTORY_FORGE_HOST ?? (forge === "github" ? "github.com" : "gitlab.com");
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)
+    ? { kind: "ok", value: host }
+    : { kind: "failed", reason: `FACTORY_FORGE_HOST must be a host name, got ${JSON.stringify(host)}` };
+}
+
 // forgeName : FACTORY_FORGE, checked.
 export function forgeName(env: NodeJS.ProcessEnv): Result<"github" | "gitlab"> {
   const kind = env.FACTORY_FORGE ?? "gitlab";
@@ -129,7 +138,8 @@ export async function openProject(setup: Omit<ForgeSetup, "identity">): Promise<
   if (setting.kind === "failed") {
     return setting;
   }
-  const identity = await resolveIdentity({ setting: setting.value, project: setup.env.FACTORY_PROJECT ?? "", run: setup.run ?? runProcess, env: setup.env });
+  const now = setup.now ?? (() => Math.floor(Date.now() / 1000));
+  const identity = await resolveIdentity({ setting: setting.value, project: setup.env.FACTORY_PROJECT ?? "", run: setup.run ?? runProcess, env: setup.env, now: now() });
   if (identity.kind === "failed") {
     return identity;
   }

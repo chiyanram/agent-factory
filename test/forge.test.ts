@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openForge, openProject } from "../src/core/forge/index.js";
+import { forgeHost, openForge, openProject } from "../src/core/forge/index.js";
 import type { Identity } from "../src/core/identity.js";
 import type { Runner } from "../src/core/forge/api.js";
 
@@ -66,11 +66,11 @@ describe("openForge", () => {
     const calls: { bin: string; args: readonly string[] }[] = [];
     const run: Runner = async (call) => {
       calls.push({ bin: call.bin, args: call.args });
-      return { code: 0, stdout: JSON.stringify({ token: "ghs_0123456789abcdefghij", login: "ledger-factory[bot]", expiresAt: "2026-11-07T06:00:00Z" }), stderr: "" };
+      return { code: 0, stdout: JSON.stringify({ token: "ghs_0123456789abcdefghij", login: "ledger-factory[bot]", expiresAt: "2099-01-01T00:00:00Z" }), stderr: "" };
     };
     const opened = await openProject({ env: { FACTORY_FORGE: "github", FACTORY_PROJECT: "chiyanram/ledger", FACTORY_IDENTITY: "app" }, log: () => undefined, run });
     expect(opened.kind === "ok" ? opened.value.identity.kind : "").toBe("app");
-    expect(calls).toEqual([{ bin: "sudo", args: ["-n", "-u", "factory", "--", "/usr/local/bin/agent-factory", "app-token", "chiyanram/ledger"] }]);
+    expect(calls).toEqual([{ bin: "sudo", args: ["-n", "-u", "factory", "--", "/usr/local/bin/agent-factory-app-token", "chiyanram/ledger"] }]);
     const gitlab = await openProject({ env: { FACTORY_PROJECT: "a/b", FACTORY_IDENTITY: "app" }, log: () => undefined, run });
     expect(gitlab).toMatchObject({ kind: "failed", reason: expect.stringContaining("GitHub App") });
   });
@@ -94,6 +94,15 @@ describe("openForge", () => {
       "DRY RUN: finding on !3 at a.ts:1",
     ]);
     expect(await f.me()).toMatchObject({ kind: "failed", reason: expect.stringContaining("a call was made") });
+  });
+
+  it("FACTORY_FORGE_HOST is github.com or gitlab.com unless set, and must be a plain host name", () => {
+    expect(forgeHost({}, "github")).toEqual({ kind: "ok", value: "github.com" });
+    expect(forgeHost({}, "gitlab")).toEqual({ kind: "ok", value: "gitlab.com" });
+    expect(forgeHost({ FACTORY_FORGE_HOST: "gitlab.example.com" }, "gitlab")).toEqual({ kind: "ok", value: "gitlab.example.com" });
+    for (const host of ["", "gitlab", "evil.example/x", "user@host.com", "host.com:22", ".example.com"]) {
+      expect(forgeHost({ FACTORY_FORGE_HOST: host }, "gitlab")).toMatchObject({ kind: "failed" });
+    }
   });
 
   it("defaults gh to plain gh: the developer's own login (S14)", async () => {
