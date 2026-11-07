@@ -1,89 +1,91 @@
 import { describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parseLine, parseOutput, runPoll } from "../src/core/poll.js";
+import { decide, format, poll, stop, type OpenLine } from "../src/core/poll.js";
+import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
+import { renderPost } from "../src/core/post.js";
 
-// Real lines, copied from tests/github.test.sh:139-150 and tests/poll.test.sh.
-const GITHUB_FRESH = "#1 head=1111abcd draft=yes claimed=no approved=yes pipeline=success needs_human=no stop=no asks=0";
-const GITHUB_STALE = "#2 head=2222abcd draft=yes claimed=no approved=stale pipeline=failed needs_human=no stop=no asks=0";
-const GITHUB_CLAIMED = "#4 head=4444abcd draft=no claimed=yes approved=yes pipeline=running needs_human=yes stop=no asks=1";
-const GITLAB_STOP = "!5 head=eeee5555 draft=yes claimed=no approved=yes pipeline=running needs_human=no stop=yes asks=0";
-const MERGED = "#9 merged claimed=yes";
+// At work the factory posts as the developer: "ram" writes both the agents' notes and their own replies.
+const team = [
+  { name: "ram", level: "maintainer" },
+  { name: "lee", level: "developer" },
+  { name: "gus", level: "guest" },
+] as const;
+const agent = (seat: "writer" | "coordinator", title: string): string => {
+  const r = renderPost({ seat, title, fields: [], items: [] });
+  return r.kind === "ok" ? r.text : "";
+};
+const n = (name: string, body: string, at: string) => ({ body, author: { name }, at });
+const change = (number: number, o: Partial<OpenChange> = {}): OpenChange => ({
+  number,
+  head: "1234567890abcdef",
+  draft: true,
+  labels: [],
+  pipeline: { kind: "success" },
+  comments: [],
+  ...o,
+});
+const changes = (open: readonly OpenChange[], merged: readonly number[] = []): Changes => ({ team, open, merged });
+const one = (c: OpenChange): OpenLine => decide({ changes: changes([c]), label: "agent::claimed", factory: "ram" })[0] as OpenLine;
 
-describe("parseLine", () => {
-  it("reads every field of an open change", () => {
-    expect(parseLine(GITHUB_CLAIMED)).toEqual({
-      kind: "open",
-      number: 4,
-      head: "4444abcd",
-      draft: "no",
-      claimed: "yes",
-      approved: "yes",
-      pipeline: "running",
-      needsHuman: "yes",
-      stop: "no",
-      asks: 1,
-    });
+describe("decide", () => {
+  it("reads claimed and needs-human from the labels", () => {
+    expect(one(change(1, { labels: ["agent::claimed", "needs-human"] }))).toMatchObject({ claimed: true, needsHuman: true });
+    expect(one(change(1))).toMatchObject({ claimed: false, needsHuman: false, stop: { kind: "none" }, asks: 0 });
   });
 
-  it("keeps a stale approval stale, never yes", () => {
-    const line = parseLine(GITHUB_STALE);
-    expect(line.kind).toBe("open");
-    expect(line).toMatchObject({ approved: "stale", pipeline: "failed" });
+  it("an agent's ask stays open until a developer or maintainer writes; a guest's reply does not answer it", () => {
+    const ask = n("ram", agent("writer", "OPEN: which currency?"), "2026-11-02T10:00:00Z");
+    expect(one(change(1, { comments: [ask] })).asks).toBe(1);
+    expect(one(change(1, { comments: [ask, n("gus", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(1);
+    expect(one(change(1, { comments: [ask, n("Lee", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(0);
+    expect(one(change(1, { comments: [ask, n("ram", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(0);
   });
 
-  it("reads a GitLab line, which starts with !", () => {
-    expect(parseLine(GITLAB_STOP)).toMatchObject({ kind: "open", number: 5, stop: "yes" });
-  });
-
-  it("reads a merged change that still carries the claim", () => {
-    expect(parseLine(MERGED)).toEqual({ kind: "merged", number: 9, claimed: "yes" });
-  });
-
-  it("refuses an unknown value instead of defaulting it", () => {
-    const line = parseLine(GITHUB_FRESH.replace("approved=yes", "approved=maybe"));
-    expect(line).toEqual({
-      kind: "parse-error",
-      line: GITHUB_FRESH.replace("approved=yes", "approved=maybe"),
-      reason: "unknown approved=maybe",
-    });
-  });
-
-  it("refuses a line with a missing field", () => {
-    expect(parseLine("#1 head=1111abcd draft=yes")).toMatchObject({ kind: "parse-error" });
+  it("lists merged claims, all in change-number order", () => {
+    const lines = decide({ changes: changes([change(7), change(2)], [5]), label: "agent::claimed", factory: "ram" });
+    expect(lines.map((l) => [l.kind, l.number])).toEqual([["open", 2], ["merged", 5], ["open", 7]]);
   });
 });
 
-describe("parseOutput", () => {
-  it("gives nothing for empty output", () => {
-    expect(parseOutput("")).toEqual([]);
-    expect(parseOutput("\n\n")).toEqual([]);
+describe("stop", () => {
+  const readers = { factory: "ram", members: new Set(["ram", "lee"]) };
+  const maintainers = new Set(["ram"]);
+
+  it("is a maintainer's last /stop, as the first line, even under the factory's login", () => {
+    const comments = [n("ram", "/stop", "2026-11-02T10:00:00Z"), n("ram", " /stop \nwait for me", "2026-11-02T12:00:00Z")];
+    expect(stop({ comments, readers, maintainers })).toEqual({ kind: "stopped", at: "2026-11-02T12:00:00Z" });
   });
 
-  it("keeps the order of poll's lines", () => {
-    const kinds = parseOutput(`${GITHUB_FRESH}\n${GITHUB_STALE}\n${MERGED}\n`).map((line) => line.kind);
-    expect(kinds).toEqual(["open", "open", "merged"]);
+  it("a developer's /stop, a /stop later in a note, or a stop word in a post does not count", () => {
+    const comments = [n("lee", "/stop", "2026-11-02T10:00:00Z"), n("ram", "ok\n/stop", "2026-11-02T11:00:00Z"), n("ram", agent("coordinator", "/stop"), "2026-11-02T12:00:00Z")];
+    expect(stop({ comments, readers, maintainers })).toEqual({ kind: "none" });
   });
 });
 
-function fakePoll(body: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "af-poll-"));
-  const script = join(dir, "poll.sh");
-  writeFileSync(script, `#!/usr/bin/env bash\n${body}\n`);
-  chmodSync(script, 0o755);
-  return script;
-}
-
-describe("runPoll", () => {
-  it("returns the raw lines and the parsed records", async () => {
-    const result = await runPoll(fakePoll(`printf '%s\\n' '${GITHUB_FRESH}' '${MERGED}'`));
-    expect(result).toMatchObject({ kind: "ok", raw: [GITHUB_FRESH, MERGED] });
-    expect(result.kind === "ok" && result.lines.map((line) => line.kind)).toEqual(["open", "merged"]);
+describe("format", () => {
+  it("writes one line per change, with the forge's mark", () => {
+    const line = one(change(12, { labels: ["agent::claimed"], comments: [n("ram", "/stop", "2026-11-02T10:00:00Z")] }));
+    expect(format({ line, mark: "!" })).toBe("!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00Z asks=0");
+    expect(format({ line: { kind: "merged", number: 9 }, mark: "#" })).toBe("#9 merged claimed=yes");
   });
 
-  it("reports a failed poll with its exit code and stderr, never as an empty list", async () => {
-    const result = await runPoll(fakePoll("echo 'forge: not logged in' >&2; exit 3"));
-    expect(result).toEqual({ kind: "failed", exitCode: 3, stderr: "forge: not logged in\n" });
+  it("an unknown pipeline says what the forge said, in plain characters (#124)", () => {
+    const line = one(change(3, { pipeline: { kind: "unknown", raw: "WEIRD state=x" } }));
+    expect(format({ line, mark: "#" })).toContain(" pipeline=unknown:WEIRD_state_x ");
+  });
+});
+
+describe("poll", () => {
+  const forge = (me: Forge["me"], read: Forge["changes"]): Forge => ({ me, changes: read } as unknown as Forge);
+
+  it("decides with the CLI's login as the factory's", async () => {
+    const ask = n("lee", agent("writer", "OPEN: x"), "2026-11-02T10:00:00Z");
+    const result = await poll({ forge: forge(async () => ({ kind: "ok", value: "lee" }), async () => ({ kind: "ok", value: changes([change(1, { comments: [ask] })]) })), label: "l" });
+    expect(result.kind === "ok" ? (result.value[0] as OpenLine).asks : -1).toBe(1);
+  });
+
+  it("fails when the login or the changes cannot be read, never prints a partial poll", async () => {
+    const failed = { kind: "failed", reason: "github: HTTP 502" } as const;
+    expect(await poll({ forge: forge(async () => failed, async () => ({ kind: "ok", value: changes([]) })), label: "l" })).toEqual(failed);
+    expect(await poll({ forge: forge(async () => ({ kind: "ok", value: "ram" }), async () => failed), label: "l" })).toEqual(failed);
   });
 });

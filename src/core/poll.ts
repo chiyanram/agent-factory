@@ -1,141 +1,130 @@
-// poll — run scripts/poll.sh and parse each line into a typed record (#101).
-// The line format is owned by scripts/poll.sh; this file only reads it. The dispatcher (#103) consumes the records.
+// poll — one record of facts per open change, read from the forge as it is now (#36, #102). The dispatcher (#103)
+// decides; poll only reports. It keeps no state between runs, so a restart loses nothing (ADR-0002).
+//
+//   !12 head=1a2b3c4d draft=yes claimed=no pipeline=success needs_human=no stop=no asks=0
+//   !9 merged claimed=yes
+//
+//   claimed      the change carries the claim label (FACTORY_CLAIM_LABEL, default agent::claimed)
+//   pipeline     the head's pipeline: success, failed, running, canceled, skipped, manual, none, or unknown:<what the
+//                forge said> (#124)
+//   needs_human  the change carries needs-human
+//   stop         the time of a maintainer's last "/stop" (a note whose first line is exactly that), else no. The
+//                dispatcher holds the change while that stop is newer than the ticket's local approval, so approving
+//                again lifts it.
+//   asks         [coordinator] OPEN: and [writer] OPEN: notes with no note from a project member after them (#128)
+//
+// There is no approved field: an approval is a local permission (`agent-factory approve`, ADR-0012 S1), never a note.
+// Who wrote a note is told by notes.ts: the factory's login AND a seat prefix make an agent note; everything else is a
+// person's. A project member is a GitLab Developer or more, or a GitHub collaborator with write access; a maintainer is
+// a GitLab Maintainer or more, or a GitHub collaborator with write access.
 
-import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { classify, openAsks, type Note, type Readers } from "./notes.js";
+import type { Result } from "./forge/api.js";
+import type { Changes, Forge, OpenChange, Person, Pipeline } from "./forge/types.js";
 
-export type YesNo = "yes" | "no";
-export type Approval = "yes" | "no" | "stale";
-// GitHub reports success, failed, running or none (scripts/lib/github.sh:168); GitLab passes its own status through,
-// lower-cased (scripts/lib/gitlab.sh:128).
-export type Pipeline =
-  | "success" | "failed" | "running" | "none"
-  | "created" | "waiting_for_resource" | "preparing" | "pending" | "canceled" | "skipped" | "manual" | "scheduled";
+export type Stop = { readonly kind: "none" } | { readonly kind: "stopped"; readonly at: string };
 
-export type OpenChange = {
+export type OpenLine = {
   readonly kind: "open";
   readonly number: number;
   readonly head: string;
-  readonly draft: YesNo;
-  readonly claimed: YesNo;
-  readonly approved: Approval;
+  readonly draft: boolean;
+  readonly claimed: boolean;
   readonly pipeline: Pipeline;
-  readonly needsHuman: YesNo;
-  readonly stop: YesNo;
+  readonly needsHuman: boolean;
+  readonly stop: Stop;
   readonly asks: number;
 };
 
-export type MergedChange = {
-  readonly kind: "merged";
-  readonly number: number;
-  readonly claimed: "yes";
-};
+export type MergedLine = { readonly kind: "merged"; readonly number: number };
 
-export type ParseError = {
-  readonly kind: "parse-error";
-  readonly line: string;
-  readonly reason: string;
-};
+export type PollLine = OpenLine | MergedLine;
 
-export type PollLine = OpenChange | MergedChange | ParseError;
+export const DEFAULT_CLAIM_LABEL = "agent::claimed";
 
-export type PollResult =
-  | { readonly kind: "ok"; readonly raw: readonly string[]; readonly lines: readonly PollLine[] }
-  | { readonly kind: "failed"; readonly exitCode: number; readonly stderr: string };
-
-const YES_NO: readonly YesNo[] = ["yes", "no"];
-const APPROVALS: readonly Approval[] = ["yes", "no", "stale"];
-const PIPELINES: readonly Pipeline[] = [
-  "success", "failed", "running", "none",
-  "created", "waiting_for_resource", "preparing", "pending", "canceled", "skipped", "manual", "scheduled",
-];
-
-const OPEN_LINE =
-  /^[!#](\d+) head=([0-9a-f]{1,40}) draft=(\S+) claimed=(\S+) approved=(\S+) pipeline=(\S+) needs_human=(\S+) stop=(\S+) asks=(\d+)$/;
-const MERGED_LINE = /^[!#](\d+) merged claimed=yes$/;
-
-function oneOf<T extends string>(allowed: readonly T[], value: string): T | undefined {
-  return allowed.find((candidate) => candidate === value);
+function names(team: readonly Person[], keep: (p: Person) => boolean): ReadonlySet<string> {
+  return new Set(team.filter(keep).map((p) => p.name.toLowerCase()));
 }
 
-type Field = { readonly name: string; readonly value: string; readonly allowed: readonly string[] };
-
-function firstBadField(fields: readonly Field[]): Field | undefined {
-  return fields.find((field) => oneOf(field.allowed, field.value) === undefined);
+// A time that does not parse is taken as the newest, so a garbled /stop still stops.
+function instant(at: string): number {
+  const time = Date.parse(at);
+  return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
 }
 
-function parseOpen(line: string, m: RegExpExecArray): OpenChange | ParseError {
-  const [, number, head, draft, claimed, approved, pipeline, needsHuman, stop, asks] = m as unknown as string[];
-  const fields: readonly Field[] = [
-    { name: "draft", value: draft!, allowed: YES_NO },
-    { name: "claimed", value: claimed!, allowed: YES_NO },
-    { name: "approved", value: approved!, allowed: APPROVALS },
-    { name: "pipeline", value: pipeline!, allowed: PIPELINES },
-    { name: "needs_human", value: needsHuman!, allowed: YES_NO },
-    { name: "stop", value: stop!, allowed: YES_NO },
-  ];
-  const bad = firstBadField(fields);
-  if (bad !== undefined) {
-    return { kind: "parse-error", line, reason: `unknown ${bad.name}=${bad.value}` };
-  }
+function firstLine(body: string): string {
+  return (body.split(/\r?\n/, 1)[0] ?? "").trim();
+}
+
+// stop : a maintainer's last /stop. An agent note never counts: the template never starts a post with "/".
+export function stop(input: { readonly comments: readonly Note[]; readonly readers: Readers; readonly maintainers: ReadonlySet<string> }): Stop {
+  const stops = input.comments.filter(
+    (note) =>
+      firstLine(note.body) === "/stop" &&
+      input.maintainers.has(note.author.name.toLowerCase()) &&
+      classify({ note, readers: input.readers }).kind === "person",
+  );
+  const last = stops.reduce<Note | "none">((best, note) => (best === "none" || instant(note.at) >= instant(best.at) ? note : best), "none");
+  return last === "none" ? { kind: "none" } : { kind: "stopped", at: last.at };
+}
+
+function openLine(change: OpenChange, label: string, readers: Readers, maintainers: ReadonlySet<string>): OpenLine {
   return {
     kind: "open",
-    number: Number(number),
-    head: head!,
-    draft: draft as YesNo,
-    claimed: claimed as YesNo,
-    approved: approved as Approval,
-    pipeline: pipeline as Pipeline,
-    needsHuman: needsHuman as YesNo,
-    stop: stop as YesNo,
-    asks: Number(asks),
+    number: change.number,
+    head: change.head,
+    draft: change.draft,
+    claimed: change.labels.includes(label),
+    pipeline: change.pipeline,
+    needsHuman: change.labels.includes("needs-human"),
+    stop: stop({ comments: change.comments, readers, maintainers }),
+    asks: openAsks({ notes: change.comments, readers }),
   };
 }
 
-type Rule = { readonly pattern: RegExp; readonly build: (line: string, m: RegExpExecArray) => PollLine };
+// decide : the lines for what the forge answered, in change-number order.
+export function decide(input: { readonly changes: Changes; readonly label: string; readonly factory: string }): readonly PollLine[] {
+  const { changes, label } = input;
+  const readers: Readers = { factory: input.factory, members: names(changes.team, (p) => p.level !== "guest") };
+  const maintainers = names(changes.team, (p) => p.level === "maintainer");
+  const lines: PollLine[] = [
+    ...changes.open.map((c) => openLine(c, label, readers, maintainers)),
+    ...changes.merged.map((number): MergedLine => ({ kind: "merged", number })),
+  ];
+  return lines.sort((a, b) => a.number - b.number);
+}
 
-const RULES: readonly Rule[] = [
-  { pattern: OPEN_LINE, build: parseOpen },
-  { pattern: MERGED_LINE, build: (_line, m) => ({ kind: "merged", number: Number(m[1]), claimed: "yes" }) },
-];
+function yn(value: boolean): string {
+  return value ? "yes" : "no";
+}
 
-export function parseLine(line: string): PollLine {
-  for (const rule of RULES) {
-    const m = rule.pattern.exec(line);
-    if (m !== null) {
-      return rule.build(line, m);
-    }
+function pipelineWord(p: Pipeline): string {
+  // what an unknown state said, kept to plain characters so it cannot break the line
+  return p.kind === "unknown" ? `unknown:${p.raw.replace(/[^A-Za-z0-9_]/g, "_")}` : p.kind;
+}
+
+// format : one line, as the coordinator and the human read it.
+export function format(input: { readonly line: PollLine; readonly mark: string }): string {
+  const { line, mark } = input;
+  if (line.kind === "merged") {
+    return `${mark}${line.number} merged claimed=yes`;
   }
-  return { kind: "parse-error", line, reason: "line matches no known poll format" };
+  const stopped = line.stop.kind === "stopped" ? line.stop.at : "no";
+  return (
+    `${mark}${line.number} head=${line.head.slice(0, 8)} draft=${yn(line.draft)} claimed=${yn(line.claimed)}` +
+    ` pipeline=${pipelineWord(line.pipeline)} needs_human=${yn(line.needsHuman)} stop=${stopped} asks=${line.asks}`
+  );
 }
 
-export function splitLines(stdout: string): readonly string[] {
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-export function parseOutput(stdout: string): readonly PollLine[] {
-  return splitLines(stdout).map(parseLine);
-}
-
-export function defaultPollScript(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, "..", "..", "scripts", "poll.sh");
-}
-
-// Runs poll.sh with the caller's environment, so the forge settings (FACTORY_*) and the CLI logins pass through.
-export function runPoll(script: string = defaultPollScript()): Promise<PollResult> {
-  return new Promise((resolve) => {
-    execFile(script, [], { env: process.env, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error === null) {
-        resolve({ kind: "ok", raw: splitLines(stdout), lines: parseOutput(stdout) });
-        return;
-      }
-      const exitCode = typeof error.code === "number" ? error.code : 1;
-      resolve({ kind: "failed", exitCode, stderr: stderr.length > 0 ? stderr : error.message });
-    });
-  });
+// poll : the forge's open and merged changes, decided. The factory's login comes from the forge (or FACTORY_LOGIN).
+export async function poll(input: { readonly forge: Forge; readonly label: string }): Promise<Result<readonly PollLine[]>> {
+  const me = await input.forge.me();
+  if (me.kind === "failed") {
+    return me;
+  }
+  const changes = await input.forge.changes({ label: input.label });
+  if (changes.kind === "failed") {
+    return changes;
+  }
+  return { kind: "ok", value: decide({ changes: changes.value, label: input.label, factory: me.value }) };
 }

@@ -17,8 +17,9 @@ CI runs both on every pull request and on push to `main`.
 
 ## MUSTs
 
-- Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, added to both adapters, because a direct
-  `glab` or `gh` call breaks the other forge and cannot be stubbed in a test.
+- Call the forge only through the `Forge` seam in `src/core/forge/` (or, in a bash script not yet ported, a `forge_*`
+  call in `scripts/lib/forge.sh`), added to both adapters, because a direct `glab` or `gh` call breaks the other forge
+  and cannot be stubbed in a test.
 - Call git on a project's clone only through `hgit` (`scripts/lib/git.sh`) or `hostGit` (`src/core/git.ts`), and keep
   the two in step, because plain git runs the hooks and programs that a branch or a writer can plant in the repo's
   own config.
@@ -35,7 +36,8 @@ CI runs both on every pull request and on push to `main`.
 
 ```text
 scripts/              the loop scripts and the lint checks
-scripts/lib/          the forge seam (forge.sh, gitlab.sh, github.sh, http.sh) and run tracking (runs.sh)
+scripts/lib/          the bash forge seam, until its last caller is ported (#138), and run tracking (runs.sh)
+src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab adapter over gh api and glab api
 prompts/              the reviewer's default find and verify instructions
 tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
 docs/adr/             decision records
