@@ -144,9 +144,18 @@ exists yet, so you run the triggers below by hand.
 - **The spec is the contract.** It holds the intent in the human's words, the acceptance criteria and the design
   link, so a writer seldom needs to ask. Where it lives is set per project ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)): work, a local file
   `~/.factory/specs/<project>/<TICKET>/spec.md` with Jira for questions and status; personal, the issue. The PR body
-  carries the approved spec and its hash. When a writer must ask, it writes `.factory/report.json` with
-  `status: asked` and exits, and the host posts the question as `[writer] OPEN:` ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159)). **Today:** its prompt tells it to push, post with
-  `ask.sh` and stop; that is an instruction, not a guardrail the scripts enforce.
+  carries the approved spec and its hash.
+- **A run ends with a report** ([gap 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681622159), #109, `src/core/report.ts`). The writer writes `.factory/report.json` (never committed)
+  and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to five `questions`,
+  or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
+  `done` → push, post the evidence, run the ready check; `asked` → push, post the questions in one `[writer] OPEN:`
+  note, wait; `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
+  `blocked: <reason>` (in the writer's seat when the writer said it). A missing, unreadable or malformed report, any
+  other field, a non-zero exit, a timeout, a cap or a failed box is `blocked` with the reason; a reason never quotes
+  the report. The host reads the report only after the box has stopped, never through a symlink, and refuses to push
+  when any new commit touches `.factory` (`excludeFactory` keeps it out of `git add`).
+  **Today:** the bash `start-writer` still tells the writer to push, post with `ask.sh` and mark the MR ready; the
+  report replaces that once the writer starts through the box and the dispatcher (#103, #138).
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
 
 A developer without the fleet runs `/crq` in one session and takes these steps itself. A small fix costs less that way.
@@ -184,7 +193,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
-| the writer's run ended with exit 0 and the host posted its report, with `asks=0` (**today:** the writer marks the MR ready) | `start-reviewer` at the head SHA; it runs the ready check first |
+| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | `start-reviewer` at the head SHA; it runs the ready check first |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | `start-reviewer` exits 4: not ready | `start-writer` again; after 3 `[coordinator] not ready` notes, label `needs-human` |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
