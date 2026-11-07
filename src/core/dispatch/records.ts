@@ -10,8 +10,9 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { plainName } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
+import type { Evidence } from "../report.js";
 
-export type Phase = "writer" | "ready" | "review";
+export type Phase = "writer" | "ready" | "review" | "verify";
 // what the writer was started for
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase";
 
@@ -30,8 +31,19 @@ export type Event =
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
+      // the rows the ready check runs again; none unless the outcome is done
+      readonly evidence: readonly Evidence[];
     }
-  | { readonly at: string; readonly kind: "ready-ended"; readonly head: string; readonly passed: boolean }
+  // why: the first row that failed, "" when it passed
+  | {
+      readonly at: string;
+      readonly kind: "ready-ended";
+      readonly head: string;
+      readonly passed: boolean;
+      readonly why: string;
+    }
+  // the local verifier's run (#91); its result is the commit status it posted
+  | { readonly at: string; readonly kind: "verify-ended"; readonly head: string; readonly passed: boolean }
   | { readonly at: string; readonly kind: "review-ended"; readonly head: string; readonly actOn: number }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
@@ -88,7 +100,7 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
   return allowed.find((a) => a === v) ?? BAD;
 }
 
-const PHASES = ["writer", "ready", "review"] as const;
+const PHASES = ["writer", "ready", "review", "verify"] as const;
 const MODES = ["test-first", "fix", "rework", "ci", "rebase"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
 
@@ -106,21 +118,52 @@ function startedOf(raw: unknown, at: string): Event | Bad {
   return phase === BAD || mode === BAD || head === BAD ? BAD : { at, kind: "started", phase, mode, head };
 }
 
+function rowOf(row: unknown): Evidence | Bad {
+  const criterion = str(row, "criterion");
+  const command = str(row, "command");
+  const result = str(row, "result");
+  return criterion === BAD || command === BAD || result === BAD ? BAD : { criterion, command, result };
+}
+
+// evidenceOf : the rows; a line written before the rows were kept has none
+function evidenceOf(raw: unknown): readonly Evidence[] | Bad {
+  const rows = prop(raw, "evidence");
+  if (rows === undefined) {
+    return [];
+  }
+  const read = Array.isArray(rows) ? rows.map(rowOf) : [BAD];
+  return read.includes(BAD) ? BAD : read.filter((r): r is Evidence => r !== BAD);
+}
+
+type WriterParts = { readonly head: string; readonly patch: string; readonly evidence: readonly Evidence[] };
+
+function writerParts(raw: unknown): WriterParts | Bad {
+  const head = str(raw, "head");
+  const patch = str(raw, "patch");
+  const evidence = evidenceOf(raw);
+  return head === BAD || patch === BAD || evidence === BAD ? BAD : { head, patch, evidence };
+}
+
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const mode = oneOf(raw, "mode", MODES);
   const outcome = oneOf(raw, "outcome", OUTCOMES);
-  const head = str(raw, "head");
-  const patch = str(raw, "patch");
-  if (head === BAD || patch === BAD) {
-    return BAD;
-  }
-  return mode === BAD || outcome === BAD ? BAD : { at, kind: "writer-ended", mode, outcome, head, patch };
+  const parts = writerParts(raw);
+  return mode === BAD || outcome === BAD || parts === BAD ? BAD : { at, kind: "writer-ended", mode, outcome, ...parts };
 }
 
 function readyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
-  return head === BAD || typeof passed !== "boolean" ? BAD : { at, kind: "ready-ended", head, passed };
+  const why = prop(raw, "why") === undefined ? "" : str(raw, "why");
+  return head === BAD || why === BAD || typeof passed !== "boolean"
+    ? BAD
+    : { at, kind: "ready-ended", head, passed, why };
+}
+
+function verifyEndedOf(raw: unknown, at: string): Event | Bad {
+  const head = str(raw, "head");
+  const passed = prop(raw, "passed");
+  return head === BAD || typeof passed !== "boolean" ? BAD : { at, kind: "verify-ended", head, passed };
 }
 
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
@@ -134,6 +177,7 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
   "writer-ended": writerEndedOf,
   "ready-ended": readyEndedOf,
   "review-ended": reviewEndedOf,
+  "verify-ended": verifyEndedOf,
   pinged: (raw, at) => {
     const head = str(raw, "head");
     return head === BAD ? BAD : { at, kind: "pinged", head };
@@ -197,6 +241,7 @@ export type LastWriter =
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
+      readonly evidence: readonly Evidence[];
     };
 
 export type Summary = {
@@ -210,6 +255,9 @@ export type Summary = {
   readonly testFirstDone: boolean;
   readonly readyFailures: number;
   readonly lastReady:
+    | { readonly kind: "none" }
+    | { readonly kind: "ended"; readonly head: string; readonly passed: boolean; readonly why: string };
+  readonly lastVerify:
     | { readonly kind: "none" }
     | { readonly kind: "ended"; readonly head: string; readonly passed: boolean };
   readonly reviewRounds: number;
@@ -232,6 +280,7 @@ export const EMPTY: Summary = {
   testFirstDone: false,
   readyFailures: 0,
   lastReady: { kind: "none" },
+  lastVerify: { kind: "none" },
   reviewRounds: 0,
   lastReview: { kind: "none" },
   ciRounds: 0,
@@ -247,7 +296,14 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
     ...s,
     interrupted: { kind: "none" },
     previousPatch: s.lastWriter.kind === "ended" ? s.lastWriter.patch : "",
-    lastWriter: { kind: "ended", mode: e.mode, head: e.head, outcome: e.outcome, patch: e.patch },
+    lastWriter: {
+      kind: "ended",
+      mode: e.mode,
+      head: e.head,
+      outcome: e.outcome,
+      patch: e.patch,
+      evidence: e.evidence,
+    },
     testFirstDone: s.testFirstDone || testFirst,
     rebaseRuns: s.rebaseRuns + Number(e.mode === "rebase"),
     ciRounds: s.ciRounds + Number(e.mode === "ci"),
@@ -262,7 +318,7 @@ const STEPS: Steps = {
   "ready-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
-    lastReady: { kind: "ended", head: e.head, passed: e.passed },
+    lastReady: { kind: "ended", head: e.head, passed: e.passed, why: e.why },
     readyFailures: s.readyFailures + Number(!e.passed),
   }),
   "review-ended": (s, e) => ({
@@ -270,6 +326,11 @@ const STEPS: Steps = {
     interrupted: { kind: "none" },
     lastReview: { kind: "ended", head: e.head, actOn: e.actOn },
     reviewRounds: s.reviewRounds + 1,
+  }),
+  "verify-ended": (s, e) => ({
+    ...s,
+    interrupted: { kind: "none" },
+    lastVerify: { kind: "ended", head: e.head, passed: e.passed },
   }),
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),

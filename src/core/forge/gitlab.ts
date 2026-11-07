@@ -23,6 +23,7 @@ import {
   type RawOpen,
 } from "./shared.js";
 import type {
+  CommitStatus,
   Change,
   ChangeState,
   Changes,
@@ -316,6 +317,19 @@ export function gitlab(client: Client, project: string): Forge {
     async defaultBranch() {
       const branch = await get(base, "gitlab project", (v, r) => r.text(v, "default_branch"));
       return branch.kind === "ok" ? { kind: "ok", value: String(branch.value) } : branch;
+    },
+    // a commit status with the branch as ref: GitLab adds it to an external pipeline for that head, which the merge
+    // request shows as its head pipeline
+    async status(input: CommitStatus) {
+      const value = {
+        state: input.state,
+        name: input.context,
+        ref: input.ref,
+        description: Array.from(input.description).slice(0, 140).join(""),
+      };
+      return done(
+        await rest(client, { path: `${base}/statuses/${input.sha}`, method: "POST", body: { kind: "json", value } }),
+      );
     },
     async addLabel(input) {
       const after = await labels(input, "add_labels");

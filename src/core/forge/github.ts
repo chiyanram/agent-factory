@@ -18,7 +18,17 @@ import {
   type Page,
   type RawOpen,
 } from "./shared.js";
-import type { Change, Changes, Forge, Level, MergedChange, OpenChange, Person, Pipeline } from "./types.js";
+import type {
+  Change,
+  Changes,
+  CommitStatus,
+  Forge,
+  Level,
+  MergedChange,
+  OpenChange,
+  Person,
+  Pipeline,
+} from "./types.js";
 
 export type GithubProject = { readonly owner: string; readonly name: string };
 
@@ -39,6 +49,12 @@ export function pipeline(
   }
   return ROLLUP[rollup.state] ?? { kind: "unknown", raw: rollup.state };
 }
+
+const GITHUB_STATES: Readonly<Record<CommitStatus["state"], string>> = {
+  pending: "pending",
+  success: "success",
+  failed: "failure",
+};
 
 // GitHub's repository permission, in the seam's levels: write or more counts as a maintainer, as on a personal
 // repository a collaborator has write access and the owner admin.
@@ -309,6 +325,17 @@ export function github(client: Client, project: GithubProject): Forge {
         }));
         return r.done({ items: batch, next: nextPage(batch.length === 100, page) });
       });
+    },
+    // a commit status: statusCheckRollup, which poll reads, counts it with the checks
+    async status(input) {
+      const value = {
+        state: GITHUB_STATES[input.state],
+        context: input.context,
+        description: Array.from(input.description).slice(0, 140).join(""),
+      };
+      return done(
+        await rest(client, { path: `${repo}/statuses/${input.sha}`, method: "POST", body: { kind: "json", value } }),
+      );
     },
     // GitHub anchors a review comment only to a line in the diff; otherwise the finding goes out as a plain comment
     async lineFinding(input) {

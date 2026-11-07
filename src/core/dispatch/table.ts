@@ -23,6 +23,9 @@
 //   ready check passed, no review at this head                 reviewer            3 rounds → needs-human
 //   Act on findings                                            writer again        3 rounds → needs-human
 //   CI red                                                     writer again        2 CI rounds → needs-human
+//   local gate (#91), no verifier run at this head             local verifier (it also posts a commit status)
+//   local gate, the verifier failed, or a forge check is red   writer again        2 CI rounds → needs-human
+//   local gate, the verifier passed                            ping the human once
 //   CI running, none yet, or a manual job                      wait
 //   gate green                                                 ping the human once; never undraft
 //
@@ -49,8 +52,12 @@ export type ChangeView =
   // more than one change of this repository on the ticket's branch: none of them can be trusted to be the one
   | { readonly kind: "many"; readonly numbers: readonly number[] };
 
+// where the gate's result comes from: the forge's own CI, or the local verifier's commit status (#91; the project file)
+export type Gate = "forge-ci" | "local";
+
 export type TicketState = {
   readonly ticket: string;
+  readonly gate: Gate;
   readonly approval: ApprovalView;
   readonly change: ChangeView;
   readonly runs: Summary;
@@ -64,6 +71,7 @@ export type Action =
   | { readonly kind: "writer"; readonly mode: WriterMode; readonly why: string }
   | { readonly kind: "ready"; readonly head: string }
   | { readonly kind: "review"; readonly head: string }
+  | { readonly kind: "verify"; readonly head: string }
   | { readonly kind: "needs-human"; readonly why: string }
   | { readonly kind: "release"; readonly why: string }
   | { readonly kind: "ping"; readonly head: string }
@@ -214,7 +222,7 @@ const ready: Rule = (s) => {
   }
   return s.runs.readyFailures >= MAX_READY_FAILURES
     ? { kind: "needs-human", why: `the ready check failed ${s.runs.readyFailures} times` }
-    : { kind: "writer", mode: "rework", why: "the ready check failed at this head" };
+    : { kind: "writer", mode: "rework", why: `the ready check failed at this head: ${r.why}` };
 };
 
 // the review at this head, or "none" when there is none yet
@@ -265,6 +273,31 @@ function green(s: TicketState): Action {
     : { kind: "ping", head };
 }
 
+// verifiedHere : the local verifier's result at the writer's head, from the dispatcher's own record; never from the
+// forge, where any other check or status (a bot, a preview) could read as green (#91)
+function verifiedHere(s: TicketState): boolean | "none" {
+  const v = s.runs.lastVerify;
+  return v.kind === "ended" && v.head === writerHead(s) ? v.passed : "none";
+}
+
+// localGate : with a local gate the verifier's own run decides; a red forge check still sends the writer back
+const localGate: Rule = (s) => {
+  if (s.gate !== "local") {
+    return "next";
+  }
+  const passed = verifiedHere(s);
+  if (passed === "none") {
+    return { kind: "verify", head: writerHead(s) };
+  }
+  return passed && !forgeRed(s) ? green(s) : red(s);
+};
+
+// forgeRed : a check on the forge is red at this head, whatever the gate
+function forgeRed(s: TicketState): boolean {
+  const line = open(s);
+  return line !== "none" && RED.has(line.pipeline.kind);
+}
+
 const gate: Rule = (s) => {
   const line = open(s);
   const pipeline = line === "none" ? "none" : line.pipeline.kind;
@@ -290,6 +323,7 @@ const RULES: readonly Rule[] = [
   samePatch,
   ready,
   review,
+  localGate,
   gate,
 ];
 

@@ -61,6 +61,19 @@ export type MergedChange = { readonly number: number; readonly branch: string; r
 
 export type LineFinding = { readonly file: string; readonly line: number };
 
+// A commit status the factory posts at a head (#91): the local verifier's result, read back by poll as the pipeline.
+export type StatusState = "pending" | "success" | "failed";
+export type CommitStatus = {
+  readonly sha: string;
+  // the change's branch: GitLab ties the status to the merge request's pipeline through it
+  readonly ref: string;
+  readonly state: StatusState;
+  // the status's name, such as agent-factory/verify
+  readonly context: string;
+  // one line, cut to the forge's limit
+  readonly description: string;
+};
+
 export type Forge = {
   readonly name: ForgeName;
   // the change's prefix in every line the factory prints: ! on GitLab, # on GitHub
@@ -79,6 +92,8 @@ export type Forge = {
   notes(input: { readonly number: number }): Promise<Result<readonly Note[]>>;
   // one comment at file:line on the change's head; when the forge refuses that line, an unanchored one that names it
   lineFinding(input: { readonly change: Change; readonly at: LineFinding; readonly post: Post }): Promise<Done>;
+  // one commit status at a head; posting the same context again replaces it
+  status(input: CommitStatus): Promise<Done>;
   // the numbers of the changes in that state that carry the label
   claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>>;
   // everything poll decides on, in as few calls as paging allows

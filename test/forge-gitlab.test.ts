@@ -289,4 +289,25 @@ describe("single calls", () => {
     const f = fake("gitlab", [ok({ username: "ram", bot: false })]);
     expect(await gitlab(f.client, project).me()).toEqual({ kind: "ok", value: "ram" });
   });
+
+  it("status posts a commit status at the head with the branch as ref, so the merge request's pipeline shows it", async () => {
+    const f = fake("gitlab", [ok({})]);
+    const forge = gitlab(f.client, project);
+    expect(
+      await forge.status({
+        sha: "b".repeat(40),
+        ref: "factory/PROJ-1",
+        state: "success",
+        context: "agent-factory/verify",
+        description: "make verify passed",
+      }),
+    ).toEqual({ kind: "ok" });
+    expect((f.calls[0]?.args ?? []).join(" ")).toContain(`projects/aruvii%2Fagent-platform/statuses/${"b".repeat(40)}`);
+    expect(JSON.parse(f.calls[0]?.stdin ?? "")).toEqual({
+      state: "success",
+      name: "agent-factory/verify",
+      ref: "factory/PROJ-1",
+      description: "make verify passed",
+    });
+  });
 });

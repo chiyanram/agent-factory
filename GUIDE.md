@@ -157,10 +157,33 @@ The scripts read their settings from the environment.
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
-| (ready check) | **Today:** no ready check runs: the bash one is gone, and its TypeScript port runs the evidence in a box (#91, the next #138 PR). Run the evidence commands yourself before you start a review | — |
+| `FACTORY_BOX_IMAGE` | the box image the ready check and the local verifier start, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7). **Today:** read until the box (#113) names its own setting | — |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_CURL` | the `curl` that mints the App's token | `curl` |
 | `FACTORY_MAX_TRIES`, `FACTORY_SLEEP` | tries per request on a rate limit, and the wait command | `4`, `sleep` |
+
+### The project file
+
+Each project has one file on this machine, `$FACTORY_HOME/projects/<project>.json` (ADR-0014 P3), never in the repo,
+so a branch cannot choose its own gate or the programs its evidence runs (#91):
+
+```json
+{
+  "gate": "local",
+  "verify": ["make", "verify"],
+  "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30 }
+}
+```
+
+- `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
+  runs `verify` once at each head, and the dispatcher decides from its own record of that run, never from the forge,
+  where any other check (a bot, a preview) could read as green; a red check on the forge still sends the writer back.
+  It also posts the result as the commit status `agent-factory/verify` at the head, for people and branch protection.
+  **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
+- `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
+  redirect, `$`, glob or backslash); any other row fails the ready check.
+- With no file, the gate is forge CI and neither the ready check nor the verifier runs. A file that is there but not
+  valid stops `dispatch` with the reason, so a typo never turns a local gate into forge CI. `#134` adds the plugin fields to the same file.
 
 ## Run the loop
 
@@ -226,9 +249,11 @@ ended goes to a person. A ticket's change is the one on `factory/<ticket>` in th
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
-which also starts every count afresh. **Today:** the writer's box (#113) and the TypeScript ready check (#91) are not
-built, and the review step runs only after a ready check, so no run record is ever written; `dispatch` does only these
-rows: reconcile a merged claim,
+which also starts every count afresh. The ready check runs each evidence row of the writer's report again at the head,
+and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
+proxy; nothing of the branch runs on the host. **Today:** the dispatcher does not open the vm box yet (#113), so the writer, the ready check
+and the verifier say so and wait, and the review step runs only after a ready check, so no run record is ever written;
+`dispatch` does only these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
 start. Run the table below by hand for the rest. There is no merge-conflict row yet.
@@ -240,9 +265,10 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
-| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | run its evidence commands at the head (**today:** by hand, #91), then `agent-factory review <mr>` |
+| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** dispatch opens no box yet, #113, so run them by hand), then `agent-factory review <mr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the evidence fails at the head | `start-writer` again; after 3 failures, label `needs-human` |
+| the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does (**today:** dispatch opens no box yet, #113) |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
@@ -321,8 +347,9 @@ it is a prompt instruction at most.
   gets an empty `GH_CONFIG_DIR` and no system or global git config, so it cannot act as the person. This is a prompt
   rule plus a missing login, not a wall; the target removes the forge token from the writer.
 - **Decided: ready is checked, not reported.** No review starts until code has run the change's evidence commands
-  again at its head, in a fresh box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91).
-  **Today:** no ready check runs; the dispatcher waits for it, and by hand you run the evidence yourself first.
+  again at its head, in a fresh box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91), with no
+  shell and only the programs the project file lists. **Today:** it is built on the box seam, but the dispatcher opens no box yet
+  (#113), so the dispatcher waits for it, and by hand you run the evidence yourself first.
 - **The reviewer reads, and the script posts.** It runs in a throwaway folder (under `$FACTORY_HOME/review-runs/`,
   private to you) with the pack and a copy of the whole code at the head. It may report code the diff does not touch only when this change breaks it.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the

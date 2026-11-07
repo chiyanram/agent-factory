@@ -74,6 +74,7 @@ function forge(changes: Changes, log: string[]): Forge {
     defaultBranch: notUsed,
     notes: notUsed,
     lineFinding: notUsed,
+    status: notUsed,
     claimed: notUsed,
     changes: async () => ({ kind: "ok", value: changes }),
     addLabel: async ({ number, label }) => {
@@ -98,6 +99,7 @@ function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): 
   return {
     home,
     project: "ledger",
+    gate: "forge-ci",
     forge: forge(changes, log),
     label: "agent::claimed",
     steps: STEPS_TODAY,
@@ -119,10 +121,18 @@ describe("records", () => {
 
   it("appends one line per event, and counts only what came after the approval", async () => {
     const events: Event[] = [
-      { at: "2026-11-06T09:00:00Z", kind: "ready-ended", head: H, passed: false },
-      { at: "2026-11-07T09:00:00Z", kind: "ready-ended", head: H, passed: false },
+      { at: "2026-11-06T09:00:00Z", kind: "ready-ended", head: H, passed: false, why: "" },
+      { at: "2026-11-07T09:00:00Z", kind: "ready-ended", head: H, passed: false, why: "" },
       { at: "2026-11-07T09:10:00Z", kind: "started", phase: "writer", mode: "ci", head: H },
-      { at: "2026-11-07T09:20:00Z", kind: "writer-ended", mode: "ci", head: H, outcome: "done", patch: "p" },
+      {
+        at: "2026-11-07T09:20:00Z",
+        kind: "writer-ended",
+        mode: "ci",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence: [],
+      },
     ];
     for (const event of events) {
       expect(await record({ where: where(), event })).toEqual({ kind: "ok" });
@@ -155,6 +165,25 @@ describe("records", () => {
   });
 });
 
+describe("records: evidence", () => {
+  it("keeps the writer's evidence rows; a line from before the rows has none; a bad row fails the read", async () => {
+    const file = join(home, "runs", "ledger", "PROJ-1.jsonl");
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(
+      file,
+      `${JSON.stringify({ at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p" })}\n${JSON.stringify({ at: "2026-11-07T09:01:00Z", kind: "ready-ended", head: H, passed: true })}\n`,
+    );
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read).toMatchObject({ kind: "ok", value: [{ evidence: [] }, { why: "" }] });
+    writeFileSync(
+      file,
+      `${JSON.stringify({ at: "2026-11-07T09:02:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p", evidence: [{ criterion: "AC1" }] })}\n`,
+      { flag: "a" },
+    );
+    expect(await readRecords({ home, project: "ledger", ticket: "PROJ-1" })).toMatchObject({ kind: "failed" });
+  });
+});
+
 describe("tick", () => {
   it("today the writer's step is not built: the pass says so and records nothing, so the next pass decides the same", async () => {
     await approved();
@@ -177,7 +206,7 @@ describe("tick", () => {
       writer: {
         kind: "available",
         run: async (input) => (
-          runs.push(input.ticket), { kind: "ok", value: { head: H, outcome: "done", patch: "p1" } }
+          runs.push(input.ticket), { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [] } }
         ),
       },
     };
@@ -217,11 +246,19 @@ describe("tick", () => {
     await approved("PROJ-3");
     await record({
       where: { home, project: "ledger", ticket: "PROJ-3" },
-      event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p" },
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence: [],
+      },
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-3" },
-      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true },
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-3" },
@@ -242,6 +279,64 @@ describe("tick", () => {
     const again: string[] = [];
     await tick(setup(changes, again));
     expect(again.filter((l) => l.startsWith("note #14"))).toEqual([]);
+  });
+
+  it("the ready check gets the writer's evidence rows and records its reason; a local gate runs the verifier (#91)", async () => {
+    await approved();
+    const evidence = [{ criterion: "AC1", command: "make test", result: "passed" }];
+    await record({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence,
+      },
+    });
+    const given: unknown[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      ready: {
+        kind: "available",
+        run: async (input) => (
+          given.push(input.evidence), { kind: "ok", value: { passed: false, why: "row 1 (AC1): make test exited 2" } }
+        ),
+      },
+    };
+    const changes = { team, open: [open()], merged: [] };
+    await tick(setup(changes, [], { steps }));
+    expect(given).toEqual([evidence]);
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({
+      kind: "ready-ended",
+      passed: false,
+      why: "row 1 (AC1): make test exited 2",
+    });
+    // the ready check passed and the review found nothing: with a local gate and no status, the verifier runs
+    await record({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      event: { at: "2026-11-07T09:10:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
+    });
+    await record({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      event: { at: "2026-11-07T09:20:00Z", kind: "review-ended", head: H, actOn: 0 },
+    });
+    const verified: string[] = [];
+    const local: Steps = {
+      ...STEPS_TODAY,
+      verify: {
+        kind: "available",
+        run: async (input) => (verified.push(input.head), { kind: "ok", value: { passed: true } }),
+      },
+    };
+    const noCi = { team, open: [open({ pipeline: { kind: "none" } })], merged: [] };
+    await tick(setup(noCi, [], { steps: local, gate: "local" }));
+    expect(verified).toEqual([H]);
+    const after = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(after.kind === "ok" ? after.value.slice(-2).map((e) => e.kind) : []).toEqual(["started", "verify-ended"]);
   });
 
   it("a dry run decides every ticket and acts on none", async () => {
@@ -293,7 +388,15 @@ describe("tick", () => {
     await approved();
     await record({
       where: { home, project: "ledger", ticket: "PROJ-1" },
-      event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "" },
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "",
+        evidence: [],
+      },
     });
     const changes = { team, open: [open()], merged: [] };
     const first: string[] = [];
@@ -313,8 +416,16 @@ describe("tick", () => {
     await approved("PROJ-1");
     await approved("PROJ-3");
     for (const event of [
-      { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p" },
-      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true },
+      {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence: [],
+      },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
       { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
     ] as const) {
       await record({ where: { home, project: "ledger", ticket: "PROJ-3" }, event });
@@ -324,7 +435,9 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
-        run: async () => (log.push("writer runs"), { kind: "ok", value: { head: H, outcome: "done", patch: "p1" } }),
+        run: async () => (
+          log.push("writer runs"), { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [] } }
+        ),
       },
     };
     await tick(

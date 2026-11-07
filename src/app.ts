@@ -24,10 +24,13 @@ import {
   type TokenStore,
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
-import { STEPS_TODAY, tick } from "./core/dispatch/tick.js";
+import { STEPS_TODAY, tick, type Steps } from "./core/dispatch/tick.js";
+import type { Gate } from "./core/dispatch/table.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
 import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
 import { reviewStep } from "./core/review/step.js";
+import { boxPlan } from "./core/ready/plan.js";
+import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 
 const HELP = `usage: agent-factory <command>
@@ -261,32 +264,55 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
     : { home: home.path, quiet };
 }
 
-async function onePass(
+type Planned = { readonly gate: Gate; readonly steps: Steps };
+
+// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
+async function stepsFor(io: Io, forge: Forge, home: string, project: string): Promise<Result<Planned>> {
+  // the dispatcher does not open the vm box yet (#113): with none to open, the ready check and the verifier wait
+  const planned = await boxPlan({ env: io.env, home, project, boxes: [] });
+  if (planned.kind === "failed") {
+    return planned;
+  }
+  const { gate, plan } = planned.value;
+  const steps: Steps = {
+    ...STEPS_TODAY,
+    ready: readyStep(plan),
+    review: await reviewStepFor(io.env, forge),
+    verify: verifyStep(plan, forge),
+  };
+  return { kind: "ok", value: { gate, steps } };
+}
+
+type PassSettings = { readonly home: string; readonly quiet: number };
+
+// pass : the steps, then one locked pass with them
+async function pass(
   project: string,
   dryRun: boolean,
   io: Io,
-  settings: { readonly home: string; readonly quiet: number },
-): Promise<number> {
-  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
-  if (opened.kind === "failed") {
-    io.err(`agent-factory dispatch: ${opened.reason}\n`);
-    return 1;
+  settings: PassSettings,
+  forge: Forge,
+): Promise<ReturnType<typeof tick>> {
+  const planned = await stepsFor(io, forge, settings.home, project);
+  if (planned.kind === "failed") {
+    return planned;
   }
-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
-  const passed = await tick({
+  return tick({
     home: settings.home,
     project,
-    forge: opened.value.forge,
-    label,
-    steps: {
-      ...STEPS_TODAY,
-      review: await reviewStepFor(io.env, opened.value.forge),
-    },
+    forge,
+    label: io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL,
+    ...planned.value,
     now: () => Date.now(),
     quietMinutes: settings.quiet,
     dryRun,
     log: (line) => io.out(`${line}\n`),
   });
+}
+
+async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
+  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  const passed = opened.kind === "ok" ? await pass(project, dryRun, io, settings, opened.value.forge) : opened;
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);
     return 1;

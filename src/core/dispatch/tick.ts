@@ -18,8 +18,9 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Post } from "../post.js";
 import { plainName } from "../spec.js";
+import type { Evidence } from "../report.js";
 import { codeOf, readRecords, record, summarize, type WriterMode } from "./records.js";
-import { decide, type Action, type ApprovalView, type ChangeView, type TicketState } from "./table.js";
+import { decide, type Action, type ApprovalView, type ChangeView, type Gate, type TicketState } from "./table.js";
 
 export const BRANCH_PREFIX = "factory/";
 
@@ -30,18 +31,30 @@ export type RunInput = { readonly ticket: string; readonly change: ChangeView; r
 export type Steps = {
   readonly writer: Step<
     RunInput & { readonly mode: WriterMode },
-    { readonly head: string; readonly outcome: "done" | "asked" | "blocked"; readonly patch: string }
+    {
+      readonly head: string;
+      readonly outcome: "done" | "asked" | "blocked";
+      readonly patch: string;
+      readonly evidence: readonly Evidence[];
+    }
   >;
-  readonly ready: Step<RunInput, { readonly passed: boolean }>;
+  // the ready check runs the writer's evidence rows again at the head; why names the first row that failed
+  readonly ready: Step<
+    RunInput & { readonly evidence: readonly Evidence[] },
+    { readonly passed: boolean; readonly why: string }
+  >;
   readonly review: Step<RunInput, { readonly actOn: number }>;
+  // the local verifier (#91): it posts its result as a commit status at the head
+  readonly verify: Step<RunInput, { readonly passed: boolean }>;
 };
 
-// The steps as they are today: the writer waits on the container box (#113), the ready check and the reviewer on
-// their port to TypeScript (#138).
+// The steps when nothing is set up: the writer waits on the container box (#113); the ready check and the verifier on
+// a box and the project file; the reviewer on its settings.
 export const STEPS_TODAY: Steps = {
   writer: { kind: "unavailable", reason: "the writer's box is not built yet (#113)" },
-  ready: { kind: "unavailable", reason: "the ready check is not ported yet (#138, #91)" },
+  ready: { kind: "unavailable", reason: "the ready check needs a box (#113) and the project file" },
   review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and FACTORY_RULEBOOK" },
+  verify: { kind: "unavailable", reason: "the local verifier needs a box (#113) and the project file" },
 };
 
 export type TickSetup = {
@@ -50,6 +63,8 @@ export type TickSetup = {
   readonly forge: Forge;
   readonly label: string;
   readonly steps: Steps;
+  // the project file's gate (#91)
+  readonly gate: Gate;
   readonly now: () => number;
   readonly quietMinutes: number;
   // print each decision and act on none
@@ -117,6 +132,7 @@ async function stateOf(
     kind: "ok",
     value: {
       ticket,
+      gate: setup.gate,
       approval: approval.value,
       change: changeOf(ticket, lines),
       runs,
@@ -238,6 +254,7 @@ const FORGE: Handler<Promise<Done> | "none"> = {
   writer: () => "none",
   ready: () => "none",
   review: () => "none",
+  verify: () => "none",
 };
 
 async function forgeAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | "none"> {
@@ -289,10 +306,16 @@ async function runWriter(setup: TickSetup, state: TicketState, mode: WriterMode)
 async function startCheck(
   setup: TickSetup,
   state: TicketState,
-  phase: "ready" | "review",
+  phase: "ready" | "review" | "verify",
   head: string,
 ): Promise<Done> {
   return record({ where: where(setup, state), event: { at: at(setup), kind: "started", phase, mode: "none", head } });
+}
+
+// the rows the writer's last done run gave, which the ready check runs again
+function evidenceOf(state: TicketState): readonly Evidence[] {
+  const w = state.runs.lastWriter;
+  return w.kind === "ended" ? w.evidence : [];
 }
 
 async function runReady(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
@@ -301,11 +324,26 @@ async function runReady(setup: TickSetup, state: TicketState, head: string): Pro
   if (started.kind !== "ok" || step.kind === "unavailable") {
     return started;
   }
+  const ran = await step.run({ ticket: state.ticket, change: state.change, head, evidence: evidenceOf(state) });
+  return ran.kind === "ok"
+    ? record({
+        where: where(setup, state),
+        event: { at: at(setup), kind: "ready-ended", head, passed: ran.value.passed, why: ran.value.why },
+      })
+    : ran;
+}
+
+async function runVerify(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
+  const step = setup.steps.verify;
+  const started = step.kind === "available" ? await startCheck(setup, state, "verify", head) : step;
+  if (started.kind !== "ok" || step.kind === "unavailable") {
+    return started;
+  }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head });
   return ran.kind === "ok"
     ? record({
         where: where(setup, state),
-        event: { at: at(setup), kind: "ready-ended", head, passed: ran.value.passed },
+        event: { at: at(setup), kind: "verify-ended", head, passed: ran.value.passed },
       })
     : ran;
 }
@@ -330,6 +368,7 @@ const RUN: Handler<Promise<Done | Unavailable> | "none"> = {
   writer: (setup, state, a) => runWriter(setup, state, a.mode),
   ready: (setup, state, a) => runReady(setup, state, a.head),
   review: (setup, state, a) => runReview(setup, state, a.head),
+  verify: (setup, state, a) => runVerify(setup, state, a.head),
   "needs-human": () => "none",
   release: () => "none",
   ping: () => "none",
@@ -350,6 +389,7 @@ const DESCRIBE: Describe = {
   writer: (a) => `writer (${a.mode}): ${a.why}`,
   ready: (a) => `ready at ${a.head.slice(0, 8)}`,
   review: (a) => `review at ${a.head.slice(0, 8)}`,
+  verify: (a) => `local verifier at ${a.head.slice(0, 8)}`,
   ping: (a) => `ping at ${a.head.slice(0, 8)}`,
   reconcile: () => "reconcile: merged; remove the claim",
 };

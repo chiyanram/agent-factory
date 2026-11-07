@@ -359,4 +359,18 @@ describe("single calls", () => {
     });
     expect(f.calls[0]!.args.join(" ")).toContain("states: [OPEN]");
   });
+
+  it("status posts a commit status at the head, in GitHub's words, cut to 140 characters", async () => {
+    const f = fake("github", [ok({})]);
+    const sent = { sha: "a".repeat(40), ref: "factory/PROJ-1", context: "agent-factory/verify" } as const;
+    expect(await github(f.client, project).status({ ...sent, state: "failed", description: "x".repeat(200) })).toEqual({
+      kind: "ok",
+    });
+    expect(f.calls[0]?.args[2]).toBe(`repos/chiyanram/ledger/statuses/${"a".repeat(40)}`);
+    expect(JSON.parse(f.calls[0]?.stdin ?? "")).toEqual({
+      state: "failure",
+      context: "agent-factory/verify",
+      description: "x".repeat(140),
+    });
+  });
 });
