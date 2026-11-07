@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Box, Ran } from "../src/core/box/types.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
@@ -147,6 +147,15 @@ describe("the ready check (#91, #138)", () => {
     });
   });
 
+  it("a box that will not stop fails the run, so it is seen", async () => {
+    const fake = fakeBox({ runs: [exited(0)] });
+    const stuck: Box = { ...fake.box, stop: async () => ({ kind: "failed", reason: "container still running" }) };
+    expect(await ready(stuck, [row("make test")])).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("did not stop: container still running"),
+    });
+  });
+
   it("gives no verdict when the head moved or the box fails: the run fails, so a person looks", async () => {
     const fake = fakeBox({ runs: [exited(0)] });
     expect(await ready(fake.box, [row("make test")], p.head1)).toMatchObject({
@@ -204,7 +213,7 @@ describe("the local verifier (#91)", () => {
     expect(existsSync(join(p.root, "planted"))).toBe(false);
   });
 
-  it("posts failed with how it ended; a box that cannot run posts failed and fails the run", async () => {
+  it("posts failed with how it ended; a box that cannot run fails the run and leaves the status pending", async () => {
     const posted: CommitStatus[] = [];
     const red = verifyStep(plan(fakeBox({ runs: [exited(1)] }).box), statusForge(posted));
     expect(red.kind === "available" ? await red.run(input([])) : red).toEqual({ kind: "ok", value: { passed: false } });
@@ -214,7 +223,7 @@ describe("the local verifier (#91)", () => {
       statusForge(posted),
     );
     expect(broken.kind === "available" ? await broken.run(input([])) : broken).toMatchObject({ kind: "failed" });
-    expect(posted.at(-1)).toMatchObject({ state: "failed", description: expect.stringContaining("could not run") });
+    expect(posted.at(-1)).toMatchObject({ state: "pending", description: expect.stringContaining("could not run") });
   });
 
   it("is unavailable when the project's gate is forge CI, or when there is no box", () => {
@@ -232,8 +241,8 @@ describe("boxPlan", () => {
     const home = join(p.root, "home-f");
     const none = await boxPlan({ env: {}, home, project: "ledger", boxes: [] });
     expect(none).toMatchObject({
-      gate: "forge-ci",
-      plan: { kind: "unavailable", reason: expect.stringContaining("no project file") },
+      kind: "ok",
+      value: { gate: "forge-ci", plan: { kind: "unavailable", reason: expect.stringContaining("no project file") } },
     });
     mkdirSync(join(home, "projects"), { recursive: true });
     writeFileSync(
@@ -242,17 +251,26 @@ describe("boxPlan", () => {
     );
     const env = { FACTORY_BOX: "vm", FACTORY_REPO: p.clone, FACTORY_BOX_IMAGE: `b@sha256:${"1".repeat(64)}` };
     expect(await boxPlan({ env, home, project: "ledger", boxes: [] })).toMatchObject({
-      gate: "local",
-      plan: { kind: "unavailable", reason: expect.stringContaining("not built yet (#113)") },
+      value: { gate: "local", plan: { kind: "unavailable", reason: expect.stringContaining("not built yet (#113)") } },
     });
     const box = fakeBox({}).box;
     expect(
       await boxPlan({ env: { ...env, FACTORY_BOX_IMAGE: "b:latest" }, home, project: "ledger", boxes: [box] }),
     ).toMatchObject({
-      plan: { kind: "unavailable", reason: expect.stringContaining("not pinned") },
+      value: { plan: { kind: "unavailable", reason: expect.stringContaining("not pinned") } },
     });
     const ok = await boxPlan({ env, home, project: "ledger", boxes: [box] });
-    expect(ok).toMatchObject({ gate: "local", plan: { kind: "ready", setup: { runsDir: join(home, "box-runs") } } });
-    expect(readFileSync(join(home, "projects", "ledger.json"), "utf8")).toContain("verify");
+    expect(ok).toMatchObject({
+      value: { gate: "local", plan: { kind: "ready", setup: { runsDir: join(home, "box-runs") } } },
+    });
+    // a file that is there but refused stops the pass: read as forge CI, the project would lose its local gate
+    writeFileSync(
+      join(home, "projects", "ledger.json"),
+      JSON.stringify({ gate: "locl", ready: { programs: ["make"] } }),
+    );
+    expect(await boxPlan({ env, home, project: "ledger", boxes: [box] })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"gate" must be'),
+    });
   });
 });

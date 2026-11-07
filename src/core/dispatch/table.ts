@@ -23,8 +23,9 @@
 //   ready check passed, no review at this head                 reviewer            3 rounds → needs-human
 //   Act on findings                                            writer again        3 rounds → needs-human
 //   CI red                                                     writer again        2 CI rounds → needs-human
-//   local gate (#91), no status at this head                   local verifier: it posts the commit status
-//   local gate, verifier ran but its status is not seen        wait
+//   local gate (#91), no verifier run at this head             local verifier (it also posts a commit status)
+//   local gate, the verifier failed, or a forge check is red   writer again        2 CI rounds → needs-human
+//   local gate, the verifier passed                            ping the human once
 //   CI running, none yet, or a manual job                      wait
 //   gate green                                                 ping the human once; never undraft
 //
@@ -272,25 +273,30 @@ function green(s: TicketState): Action {
     : { kind: "ping", head };
 }
 
-// localGate : with no forge CI, the local verifier runs once per head and posts the status the gate then reads (#91)
-function awaitsLocal(s: TicketState): boolean {
-  const line = open(s);
-  return s.gate === "local" && line !== "none" && line.pipeline.kind === "none";
-}
-
-function verifiedHere(s: TicketState): boolean {
+// verifiedHere : the local verifier's result at the writer's head, from the dispatcher's own record; never from the
+// forge, where any other check or status (a bot, a preview) could read as green (#91)
+function verifiedHere(s: TicketState): boolean | "none" {
   const v = s.runs.lastVerify;
-  return v.kind === "ended" && v.head === writerHead(s);
+  return v.kind === "ended" && v.head === writerHead(s) ? v.passed : "none";
 }
 
+// localGate : with a local gate the verifier's own run decides; a red forge check still sends the writer back
 const localGate: Rule = (s) => {
-  if (!awaitsLocal(s)) {
+  if (s.gate !== "local") {
     return "next";
   }
-  return verifiedHere(s)
-    ? { kind: "wait", why: "the local verifier ran at this head; its commit status is not on the forge yet" }
-    : { kind: "verify", head: writerHead(s) };
+  const passed = verifiedHere(s);
+  if (passed === "none") {
+    return { kind: "verify", head: writerHead(s) };
+  }
+  return passed && !forgeRed(s) ? green(s) : red(s);
 };
+
+// forgeRed : a check on the forge is red at this head, whatever the gate
+function forgeRed(s: TicketState): boolean {
+  const line = open(s);
+  return line !== "none" && RED.has(line.pipeline.kind);
+}
 
 const gate: Rule = (s) => {
   const line = open(s);

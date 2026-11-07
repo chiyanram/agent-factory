@@ -41,7 +41,7 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
   });
 
   it("refuses a missing file, and every field that is there but not valid", async () => {
-    expect(await read()).toMatchObject({ kind: "failed", reason: expect.stringContaining("no project file") });
+    expect(await read()).toMatchObject({ kind: "missing", reason: expect.stringContaining("no project file") });
     const cases: readonly [unknown, string][] = [
       ["{not json", "is not a JSON object"],
       [{ gate: "ci", ready: { programs: ["make"] } }, '"gate" must be'],

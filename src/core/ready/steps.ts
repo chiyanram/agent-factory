@@ -4,8 +4,9 @@
 //   ready    each evidence row of the writer's report runs again at the head. A row whose command needs a shell, or
 //            starts with a program the project file does not list, fails the check: the writer is sent back to fix it.
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
-//            as the commit status agent-factory/verify, which poll then reads as the pipeline. It posts "pending"
-//            first, so a run that dies leaves a gate that is not green.
+//            as the commit status agent-factory/verify, for people and branch protection. The dispatcher decides from
+//            its own record of the run, never from the forge, where any other check could read as green. It posts
+//            "pending" first, so a run that dies leaves no green status.
 
 import type { Result } from "../forge/api.js";
 import type { Forge, StatusState } from "../forge/types.js";
@@ -127,7 +128,8 @@ async function verifyRun(plan: ReadyPlan, v: Verifying, verify: Argv): Promise<R
     timeoutSeconds: plan.project.ready.timeoutSeconds,
   });
   if (rows.kind === "failed") {
-    await post(v, "failed", `the local verifier could not run: ${rows.reason}`);
+    // no verdict from a box that failed: the status stays pending, and with no record of an end a person looks
+    await post(v, "pending", `the local verifier could not run; a person looks: ${rows.reason}`);
     return rows;
   }
   return report(v, verify, rows.value);

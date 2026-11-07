@@ -103,11 +103,12 @@ async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>>
   if (started.kind === "failed") {
     return { kind: "failed", reason: `the box did not start: ${started.reason}` };
   }
-  try {
-    return await runAll(job, started.session);
-  } finally {
-    await box.stop(started.session);
-  }
+  // the box seam never throws, so the stop always runs; a box that will not stop fails the run, so it is seen
+  const rows = await runAll(job, started.session);
+  const stopped = await box.stop(started.session);
+  return stopped.kind === "ok"
+    ? rows
+    : { kind: "failed", reason: `the box ${started.session.id} did not stop: ${stopped.reason}` };
 }
 
 async function inFolder(job: BoxJob, dir: string): Promise<Result<readonly Row[]>> {
@@ -129,11 +130,10 @@ export async function runInBox(job: BoxJob): Promise<Result<readonly Row[]>> {
   if (dir.kind === "failed") {
     return dir;
   }
-  try {
-    return await inFolder(job, dir.value);
-  } finally {
-    await rm(dir.value, { recursive: true, force: true }).catch(() => undefined);
-  }
+  const rows = await inFolder(job, dir.value);
+  // a folder the box filled with files this user cannot remove fails the run, rather than fill the disk unseen
+  const removed = await attempt(() => rm(dir.value, { recursive: true, force: true }), `cannot remove ${dir.value}`);
+  return removed.kind === "ok" ? rows : removed;
 }
 
 // rowLine : how one row ended, for a reason or a status

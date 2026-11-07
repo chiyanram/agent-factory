@@ -257,7 +257,9 @@ export type Summary = {
   readonly lastReady:
     | { readonly kind: "none" }
     | { readonly kind: "ended"; readonly head: string; readonly passed: boolean; readonly why: string };
-  readonly lastVerify: { readonly kind: "none" } | { readonly kind: "ended"; readonly head: string };
+  readonly lastVerify:
+    | { readonly kind: "none" }
+    | { readonly kind: "ended"; readonly head: string; readonly passed: boolean };
   readonly reviewRounds: number;
   readonly lastReview:
     | { readonly kind: "none" }
@@ -325,7 +327,11 @@ const STEPS: Steps = {
     lastReview: { kind: "ended", head: e.head, actOn: e.actOn },
     reviewRounds: s.reviewRounds + 1,
   }),
-  "verify-ended": (s, e) => ({ ...s, interrupted: { kind: "none" }, lastVerify: { kind: "ended", head: e.head } }),
+  "verify-ended": (s, e) => ({
+    ...s,
+    interrupted: { kind: "none" },
+    lastVerify: { kind: "ended", head: e.head, passed: e.passed },
+  }),
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
 };

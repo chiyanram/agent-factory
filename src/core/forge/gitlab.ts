@@ -325,7 +325,7 @@ export function gitlab(client: Client, project: string): Forge {
         state: input.state,
         name: input.context,
         ref: input.ref,
-        description: input.description.slice(0, 140),
+        description: Array.from(input.description).slice(0, 140).join(""),
       };
       return done(
         await rest(client, { path: `${base}/statuses/${input.sha}`, method: "POST", body: { kind: "json", value } }),

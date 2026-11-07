@@ -308,21 +308,25 @@ describe("decide: one row each", () => {
     }
   });
 
-  it("a local gate with no status at this head runs the local verifier once, then waits for its status (#91)", () => {
+  it("a local gate decides from the verifier's own run, never from a check on the forge (#91)", () => {
     const none = { kind: "open", line: line({ pipeline: { kind: "none" } }) } as const;
+    // no verifier run at this head: run it, even when some other check on the forge is green
     expect(decide(state({ gate: "local", change: none }))).toEqual({ kind: "verify", head: H });
-    const ran = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H } });
-    expect(decide(state({ gate: "local", change: none, runs: ran }))).toMatchObject({
-      kind: "wait",
-      why: expect.stringContaining("commit status is not on the forge yet"),
-    });
+    expect(decide(state({ gate: "local" }))).toEqual({ kind: "verify", head: H });
     // a new push: the verifier's run was at another head
-    const old = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: "9".repeat(40) } });
-    expect(decide(state({ gate: "local", change: none, runs: old }))).toEqual({ kind: "verify", head: H });
-    // its status is the gate, read the same way as forge CI
-    expect(decide(state({ gate: "local" }))).toEqual({ kind: "ping", head: H });
+    const old = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: "9".repeat(40), passed: true } });
+    expect(decide(state({ gate: "local", runs: old }))).toEqual({ kind: "verify", head: H });
+    // passed here: ping, whatever the forge shows, unless a check on it is red
+    const passed = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H, passed: true } });
+    expect(decide(state({ gate: "local", change: none, runs: passed }))).toEqual({ kind: "ping", head: H });
     const red = { kind: "open", line: line({ pipeline: { kind: "failed" } }) } as const;
-    expect(decide(state({ gate: "local", change: red }))).toMatchObject({ kind: "writer", mode: "ci" });
+    expect(decide(state({ gate: "local", change: red, runs: passed }))).toMatchObject({ kind: "writer", mode: "ci" });
+    // failed here: the writer goes back, and after 2 CI rounds a person decides
+    const failed = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H, passed: false } });
+    expect(decide(state({ gate: "local", runs: failed }))).toMatchObject({ kind: "writer", mode: "ci" });
+    expect(decide(state({ gate: "local", runs: { ...failed, ciRounds: MAX_CI_ROUNDS } }))).toMatchObject({
+      kind: "needs-human",
+    });
     // with forge CI as the gate, no CI result yet is a wait, never the verifier
     expect(decide(state({ change: none }))).toMatchObject({ kind: "wait" });
   });

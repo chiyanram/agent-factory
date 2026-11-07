@@ -168,13 +168,15 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 }
 ```
 
-- `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none, and the local verifier
-  runs `verify` at each head and posts the result as the commit status `agent-factory/verify`, which `poll` reads as
-  the pipeline.
+- `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
+  runs `verify` once at each head, and the dispatcher decides from its own record of that run, never from the forge,
+  where any other check (a bot, a preview) could read as green; a red check on the forge still sends the writer back.
+  It also posts the result as the commit status `agent-factory/verify` at the head, for people and branch protection.
+  **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
 - `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
   redirect, `$`, glob or backslash); any other row fails the ready check.
-- A field that is there but not valid is refused. With no file, the gate is forge CI and neither the ready check nor
-  the verifier runs. `#134` adds the plugin fields to the same file.
+- With no file, the gate is forge CI and neither the ready check nor the verifier runs. A file that is there but not
+  valid stops `dispatch` with the reason, so a typo never turns a local gate into forge CI. `#134` adds the plugin fields to the same file.
 
 ## Run the loop
 
@@ -259,7 +261,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** no box yet, #113, so run them by hand), then `agent-factory review <mr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the evidence fails at the head | `start-writer` again; after 3 failures, label `needs-human` |
-| the project's gate is `local` and no status is at the head yet | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head (**today:** no box yet, #113) |
+| the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does (**today:** no box yet, #113) |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |

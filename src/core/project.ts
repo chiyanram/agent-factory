@@ -21,6 +21,12 @@ import { plainName } from "./spec.js";
 // a command with no shell: argv[0] is the program
 export type Argv = readonly [string, ...string[]];
 
+// a read: the file, none at all (the project uses no ready check or verifier yet), or one that is there but refused
+export type ProjectRead =
+  | { readonly kind: "ok"; readonly value: ProjectFile }
+  | { readonly kind: "missing"; readonly reason: string }
+  | { readonly kind: "failed"; readonly reason: string };
+
 export type ProjectFile = {
   readonly gate: { readonly kind: "forge-ci" } | { readonly kind: "local"; readonly verify: Argv };
   readonly ready: { readonly programs: readonly string[]; readonly timeoutSeconds: number };
@@ -87,16 +93,16 @@ function parsed(text: string): unknown {
   }
 }
 
-async function fileText(path: string): Promise<Result<string>> {
+async function fileText(path: string): Promise<Result<string> | Extract<ProjectRead, { kind: "missing" }>> {
   try {
     return { kind: "ok", value: await readFile(path, "utf8") };
   } catch (error) {
-    return failed(
-      path,
-      codeOf(error) === "ENOENT"
-        ? "no project file; write one (gate, verify, ready.programs) before the ready check or the verifier runs"
-        : "cannot read the project file",
-    );
+    return codeOf(error) === "ENOENT"
+      ? {
+          kind: "missing",
+          reason: `${path}: no project file; write one (gate, verify, ready.programs) before the ready check or the verifier runs`,
+        }
+      : failed(path, "cannot read the project file");
   }
 }
 
@@ -113,7 +119,7 @@ function fromRaw(path: string, raw: unknown): Result<ProjectFile> {
 export async function readProjectFile(input: {
   readonly home: string;
   readonly project: string;
-}): Promise<Result<ProjectFile>> {
+}): Promise<ProjectRead> {
   if (!plainName(input.project)) {
     return { kind: "failed", reason: `${JSON.stringify(input.project)} is not a plain project name` };
   }

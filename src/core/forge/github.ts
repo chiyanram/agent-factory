@@ -331,7 +331,7 @@ export function github(client: Client, project: GithubProject): Forge {
       const value = {
         state: GITHUB_STATES[input.state],
         context: input.context,
-        description: input.description.slice(0, 140),
+        description: Array.from(input.description).slice(0, 140).join(""),
       };
       return done(
         await rest(client, { path: `${repo}/statuses/${input.sha}`, method: "POST", body: { kind: "json", value } }),
