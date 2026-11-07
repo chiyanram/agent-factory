@@ -72,6 +72,7 @@ function forge(changes: Changes, log: string[]): Forge {
     me: async () => ({ kind: "ok", value: "ram" }),
     change: notUsed,
     defaultBranch: notUsed,
+    openChange: notUsed,
     notes: notUsed,
     lineFinding: notUsed,
     status: notUsed,

@@ -91,6 +91,7 @@ function forge(
       return { kind: "ok", value: calls > 1 && over.moveTo !== undefined ? { ...base, sha: over.moveTo } : base };
     },
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
+    openChange: failed,
     notes: async () => ({ kind: "ok", value: [...notes] }),
     note: async ({ post }): Promise<Done> => {
       const body = text(post);

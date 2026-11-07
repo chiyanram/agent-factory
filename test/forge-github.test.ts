@@ -374,3 +374,54 @@ describe("single calls", () => {
     });
   });
 });
+
+describe("openChange (#164)", () => {
+  const request = {
+    branch: "factory/T-7",
+    base: "main",
+    title: "Add the ledger row @all closes #1",
+    body: { seat: "coordinator", title: "T-7", fields: [{ label: "ticket", value: "T-7" }], items: [] },
+  } as const;
+
+  it("opens a draft pull request from the branch when none is open, with cleaned words", async () => {
+    const f = fake("github", [ok([]), { status: 201, body: { number: 42 } }]);
+    expect(await github(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 42 });
+    expect(f.calls[0]?.args[2]).toBe(
+      "repos/chiyanram/ledger/pulls?state=open&head=chiyanram%3Afactory%2FT-7&per_page=100",
+    );
+    const sent = JSON.parse(f.calls[1]?.stdin ?? "");
+    expect(sent).toEqual({
+      title: "Add the ledger row @⁠all closes #⁠1",
+      body: "[coordinator] T-7\n\n- ticket: T-7",
+      head: "factory/T-7",
+      base: "main",
+      draft: true,
+    });
+  });
+
+  it("reuses the one pull request already open from the branch, and opens no second", async () => {
+    const f = fake("github", [ok([{ number: 9 }])]);
+    expect(await github(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 9 });
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it("leaves two open pull requests to a person", async () => {
+    const f = fake("github", [ok([{ number: 9 }, { number: 11 }])]);
+    expect(await github(f.client, project).openChange(request)).toEqual({
+      kind: "failed",
+      reason: "2 changes are open from factory/T-7: #9, #11; a person decides",
+    });
+  });
+
+  it("refuses a branch that is not plain before any call", async () => {
+    const f = fake("github", []);
+    expect((await github(f.client, project).openChange({ ...request, branch: "x&head=y:z" })).kind).toBe("failed");
+    expect(f.calls).toEqual([]);
+  });
+
+  it("fails with GitHub's reason when it refuses the pull request", async () => {
+    const f = fake("github", [ok([]), { status: 422, body: { message: "No commits between main and factory/T-7" } }]);
+    const opened = await github(f.client, project).openChange(request);
+    expect(opened).toEqual({ kind: "failed", reason: expect.stringContaining("No commits between") });
+  });
+});

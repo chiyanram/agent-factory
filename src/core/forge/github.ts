@@ -11,6 +11,7 @@ import {
   done,
   nextCursor,
   nextPage,
+  openOnce,
   pages,
   rendered,
   text,
@@ -20,6 +21,7 @@ import {
 } from "./shared.js";
 import type {
   Change,
+  ChangeRequest,
   Changes,
   CommitStatus,
   Forge,
@@ -241,9 +243,42 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
+  // the open pull requests from this branch of the repository itself: head=owner:branch leaves forks out
+  async function openFrom(branch: string): Promise<Result<readonly number[]>> {
+    const head = encodeURIComponent(`${project.owner}:${branch}`);
+    const answer = await rest(client, {
+      path: `${repo}/pulls?state=open&head=${head}&per_page=100`,
+      method: "GET",
+      body: { kind: "none" },
+    });
+    if (answer.kind === "failed") {
+      return answer;
+    }
+    const r = reader("github pull requests");
+    return r.done(r.list(answer.value, "").map((p) => r.int(p, "number")));
+  }
+
+  async function openChange(request: ChangeRequest): Promise<Result<number>> {
+    return openOnce({
+      mark: "#",
+      request,
+      find: () => openFrom(request.branch),
+      create: async (words) => {
+        const value = { title: words.title, body: words.body, head: request.branch, base: request.base, draft: true };
+        const answer = await rest(client, { path: `${repo}/pulls`, method: "POST", body: { kind: "json", value } });
+        if (answer.kind === "failed") {
+          return answer;
+        }
+        const r = reader("github pull request");
+        return r.done(r.int(answer.value, "number"));
+      },
+    });
+  }
+
   return {
     name: "github",
     mark: "#",
+    openChange,
     async me() {
       const answer = await rest(client, { path: "user", method: "GET", body: { kind: "none" } });
       if (answer.kind === "failed") {

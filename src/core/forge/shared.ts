@@ -1,10 +1,11 @@
 // shared — what both adapters do the same way: paging, posting through the template, and the line-finding fallback.
 
 import type { Note } from "../notes.js";
-import { renderPost, type Post } from "../post.js";
-import type { Done, Result, Variable } from "./api.js";
+import { cleanField, renderPost, type Post } from "../post.js";
+import { plainBranch } from "../push.js";
+import type { Done, Failed, Result, Variable } from "./api.js";
 import type { Reader } from "./read.js";
-import type { OpenChange } from "./types.js";
+import type { ChangeRequest, OpenChange } from "./types.js";
 
 // A page of a list, and where the next one starts.
 export type Cursor = { readonly kind: "start" } | { readonly kind: "after"; readonly cursor: string };
@@ -127,4 +128,73 @@ export async function completeAll(
     changes.push(full.value);
   }
   return { kind: "ok", value: changes };
+}
+
+// GitHub caps a pull request title at 256 characters; GitLab's merge request title is longer. Both stay under this.
+const TITLE_LIMIT = 200;
+
+export type ChangeWords = { readonly title: string; readonly body: string };
+
+// reuse : what the open changes from the branch decide. None: open one. One: it is the ticket's change (a retry after a
+// crash between the push and the open). More: no one of them can be trusted, so a person decides, as poll does.
+export function reuse(
+  numbers: readonly number[],
+  where: { readonly mark: string; readonly branch: string },
+): { readonly kind: "open" } | { readonly kind: "reuse"; readonly number: number } | Failed {
+  const [only, second] = numbers;
+  if (only === undefined) {
+    return { kind: "open" };
+  }
+  return second === undefined
+    ? { kind: "reuse", number: only }
+    : {
+        kind: "failed",
+        reason: `${numbers.length} changes are open from ${where.branch}: ${numbers.map((n) => `${where.mark}${n}`).join(", ")}; a person decides`,
+      };
+}
+
+// changeWords : the title, cleaned like a posted field, and the body through the template; refused for a branch that is
+// not plain, so no branch name can change the request
+export function changeWords(request: ChangeRequest): Result<ChangeWords> {
+  if (!plainBranch(request.branch) || !plainBranch(request.base)) {
+    return {
+      kind: "failed",
+      reason: `branch ${JSON.stringify(request.branch)} onto ${JSON.stringify(request.base)} is not a plain branch`,
+    };
+  }
+  const body = rendered(request.body);
+  return body.kind === "ok"
+    ? { kind: "ok", value: { title: cleanField(request.title, TITLE_LIMIT), body: body.value } }
+    : body;
+}
+
+// openOnce : the change open from the branch, or a new draft one. Both adapters keep this order: words, find, open.
+export async function openOnce(input: {
+  readonly mark: string;
+  readonly request: ChangeRequest;
+  readonly find: () => Promise<Result<readonly number[]>>;
+  readonly create: (words: ChangeWords) => Promise<Result<number>>;
+}): Promise<Result<number>> {
+  const words = changeWords(input.request);
+  if (words.kind === "failed") {
+    return words;
+  }
+  const found = await input.find();
+  return found.kind === "ok"
+    ? act(reuse(found.value, { mark: input.mark, branch: input.request.branch }), () => input.create(words.value))
+    : found;
+}
+
+function act(
+  decided: ReturnType<typeof reuse>,
+  create: () => Promise<Result<number>>,
+): Promise<Result<number>> | Result<number> {
+  switch (decided.kind) {
+    case "open":
+      return create();
+    case "reuse":
+      return { kind: "ok", value: decided.number };
+    case "failed":
+      return decided;
+  }
 }

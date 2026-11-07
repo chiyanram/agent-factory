@@ -15,6 +15,7 @@ import {
   done,
   nextCursor,
   nextPage,
+  openOnce,
   pages,
   rendered,
   text,
@@ -25,6 +26,7 @@ import {
 import type {
   CommitStatus,
   Change,
+  ChangeRequest,
   ChangeState,
   Changes,
   Forge,
@@ -306,9 +308,49 @@ export function gitlab(client: Client, project: string): Forge {
     });
   }
 
+  // the open merge requests from this branch of the project itself: one from a fork has another source project
+  async function openFrom(branch: string): Promise<Result<readonly number[]>> {
+    const path = `${base}/merge_requests?state=opened&source_branch=${encodeURIComponent(branch)}&per_page=100`;
+    const answer = await rest(client, { path, method: "GET", body: none });
+    if (answer.kind === "failed") {
+      return answer;
+    }
+    const r = reader("gitlab merge requests");
+    const ours = r.list(answer.value, "").filter((m) => r.at(m, "source_project_id") === r.at(m, "target_project_id"));
+    return r.done(ours.map((m) => r.int(m, "iid")));
+  }
+
+  // GitLab marks a draft by the title's "Draft: " prefix
+  async function openChange(request: ChangeRequest): Promise<Result<number>> {
+    return openOnce({
+      mark: "!",
+      request,
+      find: () => openFrom(request.branch),
+      create: async (words) => {
+        const value = {
+          source_branch: request.branch,
+          target_branch: request.base,
+          title: `Draft: ${words.title}`,
+          description: words.body,
+        };
+        const answer = await rest(client, {
+          path: `${base}/merge_requests`,
+          method: "POST",
+          body: { kind: "json", value },
+        });
+        if (answer.kind === "failed") {
+          return answer;
+        }
+        const r = reader("gitlab merge request");
+        return r.done(r.int(answer.value, "iid"));
+      },
+    });
+  }
+
   return {
     name: "gitlab",
     mark: "!",
+    openChange,
     async me() {
       const login = await get("user", "gitlab user", (v, r) => r.text(v, "username"));
       return login.kind === "ok" ? { kind: "ok", value: String(login.value) } : login;
