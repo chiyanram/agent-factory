@@ -188,6 +188,20 @@ describe("hostGit keeps what the operator chose", () => {
     ]);
   });
 
+  it("does not add back a system helper that GIT_CONFIG_NOSYSTEM turns off (#167)", async () => {
+    const system = join(base, "system.gitconfig");
+    writeFileSync(system, "[credential]\n\thelper = system-helper\n");
+    git(["config", "credential.helper", "!/evil"]);
+    const read = (nosystem: string) =>
+      hostGit(
+        request(["config", "--get-all", "credential.helper"], {
+          env: { ...env, GIT_CONFIG_SYSTEM: system, GIT_CONFIG_NOSYSTEM: nosystem },
+        }),
+      );
+    expect(effective(ok(await read("1")))).toEqual([]);
+    expect(effective(ok(await read("")))).toEqual(["system-helper"]);
+  });
+
   it("keeps the factory's own App helper at its exact path, never a look-alike", async () => {
     const own = "!/opt/agent-factory/scripts/github-app.sh git-credential";
     const key = "credential.https://github.com.helper";
