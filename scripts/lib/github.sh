@@ -9,6 +9,7 @@
 # Only branches in the repository itself are supported: the writer pushes there, and a fork's branch cannot be
 # fetched from origin.
 . "$(dirname "${BASH_SOURCE[0]}")/http.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/git.sh"
 export GH_NO_UPDATE_NOTIFIER=1 GH_PROMPT_DISABLED=1
 
 # gh_api ARGS... : one `gh api` request (lib/http.sh).
@@ -114,15 +115,15 @@ forge_line_finding() {
 #                            system or global git config, so plain gh has no login and git asks only the App's helper
 forge_writer_ready() {
   refuse() { echo "refused: FACTORY_REPO $*; see GUIDE.md, Set up the bot, GitHub step 5" >&2; return 1; }
-  case $(git -C "$FACTORY_REPO" remote get-url --push origin 2> /dev/null) in
+  case $(hgit -C "$FACTORY_REPO" remote get-url --push origin 2> /dev/null) in
     https://github.com/*) ;;
     *) refuse "does not push to https://github.com/, so git would not ask the App's credential helper"; return 1 ;;
   esac
-  helpers=$(git -C "$FACTORY_REPO" config --get-all credential.https://github.com.helper)
+  helpers=$(hgit -C "$FACTORY_REPO" config --local --get-all credential.https://github.com.helper)
   [ "$(printf '%s\n' "$helpers" | sed -n 1p)" = "" ] && [ "$(printf '%s\n' "$helpers" | wc -l | tr -d ' ')" = 2 ] \
     && case $(printf '%s\n' "$helpers" | sed -n 2p) in *github-app.sh*git-credential*) true ;; *) false ;; esac \
     || { refuse "would let another credential helper answer before the App's: set an empty helper, then the App's"; return 1; }
-  case $(git -C "$FACTORY_REPO" config --local --get user.email) in
+  case $(hgit -C "$FACTORY_REPO" config --local --get user.email) in
     *'[bot]@users.noreply.github.com') ;;
     *) refuse "would commit under a person's email: set user.email to the bot's noreply address"; return 1 ;;
   esac

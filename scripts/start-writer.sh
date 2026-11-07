@@ -41,16 +41,16 @@ count=$(printf '%s\n' "$runs" | grep -c . || true)
 [ "$count" -lt "${FACTORY_MAX_RUNS:-2}" ] \
   || { echo "this machine is at its run limit: $count live runs (FACTORY_MAX_RUNS=${FACTORY_MAX_RUNS:-2})" >&2; exit 1; }
 
-git -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch" \
+hgit -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch" \
   || { echo "cannot fetch $branch" >&2; exit 1; }
-tip=$(git -C "$FACTORY_REPO" rev-parse "origin/$branch")
+tip=$(hgit -C "$FACTORY_REPO" rev-parse "origin/$branch")
 [ "$tip" = "$sha" ] || { echo "$mark$iid: the tip of $branch is ${tip:0:8}, but the MR's head is ${sha:0:8}; not started" >&2; exit 1; }
 
 name=writer-$iid
 path=$(worktree_path "$name")
 [ ! -e "$path" ] || remove_worktree "$path"   # left by a dead run: never reuse it
 mkdir -p "$(dirname "$path")"
-git -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$branch" \
+hgit -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$branch" \
   || { echo "cannot make the worktree $path" >&2; exit 1; }
 note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 
@@ -59,8 +59,8 @@ note=$(forge_writer_setup "$path") || { remove_worktree "$path"; exit 1; }
 # MR's target branch, never from the MR, because a hook runs with no permission prompt (ADR-0004).
 target=$(printf '%s' "$mr" | jq -r '.target_branch // empty')
 commands=''
-[ -z "$target" ] || ! git -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$target:refs/factory/target" 2> /dev/null \
-  || commands=$(git -C "$FACTORY_REPO" show refs/factory/target:docs/agents/commands.md 2> /dev/null | tr -d '\r')
+[ -z "$target" ] || ! hgit -C "$FACTORY_REPO" fetch -q origin "+refs/heads/$target:refs/factory/target" 2> /dev/null \
+  || commands=$(hgit -C "$FACTORY_REPO" show refs/factory/target:docs/agents/commands.md 2> /dev/null | tr -d '\r')
 tool() { printf '%s\n' "$commands" | sed -n "s/^$1:[[:space:]]*//p" | head -n 1 | sed 's/^`\(.*\)`[[:space:]]*$/\1/; s/[[:space:]]*$//'; }
 lint=$(tool lint-file)
 quick=$(tool test-touched)

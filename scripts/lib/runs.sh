@@ -8,6 +8,8 @@
 # lists it, so liveness never depends on poking a worker (ADR-0002). A foreground `claude -p` run is not listed there,
 # so it holds a pid file in $FACTORY_REPO/.claude/runs/ while it lives.
 
+. "$(dirname "${BASH_SOURCE[0]}")/git.sh"
+
 # live_runs : the names of this machine's live runs, one per line. Fails when claude cannot say, so a caller never
 # mistakes "unknown" for "none" and releases a claim that a run still holds.
 live_runs() {
@@ -24,21 +26,21 @@ $(basename "$pidfile" .pid)"
 
 # require_repo : fails unless FACTORY_REPO is a git clone.
 require_repo() {
-  git -C "${FACTORY_REPO:-}" rev-parse --git-dir > /dev/null 2>&1 \
+  hgit -C "${FACTORY_REPO:-}" rev-parse --git-dir > /dev/null 2>&1 \
     || { echo "FACTORY_REPO must be a local clone of the project, got '${FACTORY_REPO:-}'" >&2; return 1; }
-  FACTORY_REPO=$(cd "$FACTORY_REPO" && pwd)   # absolute, so git -C and cd read a run's path the same way
+  FACTORY_REPO=$(cd "$FACTORY_REPO" && pwd)   # absolute, so hgit -C and cd read a run's path the same way
 }
 
 # writer_settings DIR JSON : merges JSON into the run's .claude/settings.local.json in the worktree DIR. The file is
 # excluded from git, so it is never committed; a project that tracks it is refused, since the run would overwrite it.
 writer_settings() {
-  git -C "$1" ls-files --error-unmatch .claude/settings.local.json > /dev/null 2>&1 \
+  hgit -C "$1" ls-files --error-unmatch .claude/settings.local.json > /dev/null 2>&1 \
     && { echo "refused: the project tracks .claude/settings.local.json, which the writer's settings would overwrite" >&2; return 1; }
   ws_file="$1/.claude/settings.local.json"
   mkdir -p "$1/.claude" || return 1
   [ -f "$ws_file" ] || echo '{}' > "$ws_file"
   jq --argjson add "$2" '. * $add' "$ws_file" > "$ws_file.new" && mv "$ws_file.new" "$ws_file" || return 1
-  ws_exclude="$(git -C "$FACTORY_REPO" rev-parse --absolute-git-dir)/info/exclude"
+  ws_exclude="$(hgit -C "$FACTORY_REPO" rev-parse --absolute-git-dir)/info/exclude"
   mkdir -p "$(dirname "$ws_exclude")"
   grep -qxF /.claude/settings.local.json "$ws_exclude" 2> /dev/null || echo /.claude/settings.local.json >> "$ws_exclude"
 }
@@ -50,6 +52,6 @@ worktree_path() {
 
 # remove_worktree PATH : removes a run's worktree and anything left in it.
 remove_worktree() {
-  git -C "$FACTORY_REPO" worktree remove --force "$1" > /dev/null 2>&1 || rm -rf "$1"
-  git -C "$FACTORY_REPO" worktree prune
+  hgit -C "$FACTORY_REPO" worktree remove --force "$1" > /dev/null 2>&1 || rm -rf "$1"
+  hgit -C "$FACTORY_REPO" worktree prune
 }

@@ -120,7 +120,7 @@ run=$(mktemp -d "${TMPDIR:-/tmp}/factory-review.XXXXXX")
 # filter rule can change what the reviewer reads. Then every symlink goes (a link to a rule file or out of the
 # folder), then every rule file.
 # The work tree is the empty copy folder, so not even the clone's own .gitattributes applies.
-gi() { GIT_INDEX_FILE="$run/index" git -C "$FACTORY_REPO" --work-tree="$run/code" -c core.attributesFile=/dev/null \
+gi() { GIT_INDEX_FILE="$run/index" hgit -C "$FACTORY_REPO" --work-tree="$run/code" -c core.attributesFile=/dev/null \
   -c core.autocrlf=false "$@"; }
 mkdir "$run/code"
 gi read-tree "$sha" \
@@ -210,7 +210,7 @@ done || exit 1
 # Build files are left to the reviewer (rulebook crq CR3 lets a patch-level version bump through).
 base=$(sed -n 's/^- merge-base: \([0-9a-f]*\).*/\1/p' "$pack")
 [ -n "$base" ] || { echo "$mark$iid: no merge-base in the pack $pack" >&2; exit 1; }
-changed=$(git -C "$FACTORY_REPO" diff --name-only --no-renames "$base" "$sha") || exit 1
+changed=$(hgit -C "$FACTORY_REPO" diff --name-only --no-renames "$base" "$sha") || exit 1
 protected=$(printf '%s\n' "$changed" | { grep -E \
   '^\.github/workflows/|^\.gitlab-ci\.yml$|(^|/)CODEOWNERS$|(^|/)(AGENTS|CLAUDE|CLAUDE\.local)\.md$|(^|/)\.claude/|(^|/)\.agents/' \
   || true; })

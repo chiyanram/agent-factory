@@ -239,8 +239,12 @@ it is a prompt instruction at most.
 - **No progress stops the loop.** When a writer round leaves the change empty, or the patch unchanged while its last
   verdict still has Act on findings, `start-reviewer` reuses the verdict and labels the MR `needs-human`.
 - **Decided: an agent never changes CI.** The host push refuses CI-file changes ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)).
-- **Decided: no planted git hook runs.** Git control files are read-only in the box, and host git runs with hooks
-  and `core.fsmonitor` off (#87, [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)).
+- **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
+  `hgit` (`scripts/lib/git.sh`), and every one the TypeScript package makes through `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
+  and the rest come from your own system and global config only, never from the repo's. A repo whose own config
+  sets an external diff, a merge driver, a URL rewrite or an `http.*` setting is refused (#87,
+  [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)). **Decided:** the git
+  control files are also read-only in the box (#110).
 - **Decided: the writer reads only what it is given.** A private home per run; the coordinator gets a deny list on
   secret paths ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
 - **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,

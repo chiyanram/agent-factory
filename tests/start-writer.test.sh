@@ -206,4 +206,15 @@ respond "$FACTORY_GLAB" 1 200 "$(mr_to_main "$head")"
 expect_eq "with no commands file, no hook and no settings file" no "$([ -e "$worktree/.claude/settings.local.json" ] && echo yes || echo no)"
 expect_fail "and no tool line in the prompt" "none" sh -c "grep -q 'linted at once' '$(dirname "$FACTORY_CLAUDE")/calls.log' && exit 0; echo none; exit 1"
 
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+printf '#!/bin/sh\necho ran >> "%s/planted.log"\n' "$TMP_BASE" > "$TMP_BASE/planted" && chmod +x "$TMP_BASE/planted"
+git -C "$FACTORY_REPO" config core.fsmonitor "$TMP_BASE/planted"
+cp "$TMP_BASE/planted" "$FACTORY_REPO/.git/hooks/post-checkout"
+"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
+expect_eq "start-writer runs no hook or fsmonitor planted in the project's clone (#87)" no \
+  "$([ -f "$TMP_BASE/planted.log" ] && echo yes || echo no)"
+expect_eq "and still makes the worktree" "$head" "$(git -C "$worktree" rev-parse HEAD)"
+git -C "$FACTORY_REPO" config --unset core.fsmonitor; rm -f "$FACTORY_REPO/.git/hooks/post-checkout"
+
 finish
