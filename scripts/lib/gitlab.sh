@@ -76,7 +76,8 @@ forge_line_finding() {
     position: {position_type: "text", base_sha: $r.base_sha, start_sha: $r.start_sha, head_sha: $r.head_sha,
     new_path: .file, new_line: .line}}' > "$thread"
   if ! gl_api "projects/$(project_ref)/merge_requests/$1/discussions" -X POST --input "$thread" > /dev/null 2>&1; then
-    printf '%s' "$3" | jq -c --arg b "$4" '{body: ("`\(.file):\(.line)` " + $b)}' > "$thread"
+    # the file:line goes after the seat prefix, so the note still starts "[reviewer] " (#128)
+    printf '%s' "$3" | jq -c --arg b "$4" '. as $x | ($x.file) as $f | ($x.line) as $l | {body: ($b | if test("^\\[[a-z]+\\] ") then sub("^(?<p>\\[[a-z]+\\] )"; "\(.p)`\($f):\($l)` ") else "`\($f):\($l)` " + . end)}' > "$thread"
     gl_api "projects/$(project_ref)/merge_requests/$1/discussions" -X POST --input "$thread" > /dev/null \
       || { rm -f "$thread"; return 1; }
   fi

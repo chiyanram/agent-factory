@@ -19,7 +19,8 @@ human           agent-factory approve (a local permission) · reviews · merges 
 ```
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
-and agent commits carry an `Agent: <seat>` trailer. With your own login there is nothing more to set up; the steps
+and agent commits carry an `Agent: <seat>` trailer. **Today:** no script writes the trailer yet; `src/core/notes.ts`
+reads it, and the writer's box (#108, #109) will add it. With your own login there is nothing more to set up; the steps
 below are for a project that uses a bot. A bot's key belongs to a separate `factory` OS user on the VM, never to a file
 your own user can read.
 
@@ -200,7 +201,8 @@ first line of a note, and only when it is newer than the last human edit of the 
 `approved=stale`. It counts an open ask as a `[coordinator] OPEN:` or `[writer] OPEN:` note with no human note after
 it. **Today** it tells agent from human by author. The target (#128, `src/core/notes.ts`) works when the factory
 posts with your own login: a note is the factory's only when it comes from the factory's login **and** starts with a
-seat prefix, and an ask stays open until a project member writes after it. The ported poll (#102) uses it. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
+seat prefix, and an ask stays open until a project member writes after it. The ported poll (#102) will use it; the
+bash poll does not. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
 
 ### Escalation
 

@@ -179,7 +179,7 @@ respond "$FACTORY_GH" 1 422 '{"message":"Validation Failed"}'
 respond "$FACTORY_GH" 2 201 '{"id":2}'
 forge_line_finding 12 '{"sha":"aaaa1111"}' '{"file":"src/A.java","line":400}' "[reviewer] Act on F1"
 expect_eq "a line outside the diff goes out as a plain comment that names file:line" \
-  '`src/A.java:400` [reviewer] Act on F1' "$(sed -n 2p "$(log)/inputs.log" | jq -r .body)"
+  '[reviewer] `src/A.java:400` Act on F1' "$(sed -n 2p "$(log)/inputs.log" | jq -r .body)"
 expect_pass "on the conversation, not the diff" grep -q '^api --include repos/chiyanram/ledger/issues/12/comments ' "$(log)/calls.log"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH

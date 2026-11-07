@@ -97,13 +97,15 @@ forge_notes() {
 }
 
 # GitHub anchors a review comment only to a line in the diff; otherwise the finding goes out as a plain comment that
-# names file:line.
+# names file:line. The file:line goes after the seat prefix, so the note still starts "[reviewer] " and reads as the
+# factory's own under the developer's login (#128).
 forge_line_finding() {
+  line_note='. as $x | ($x.file) as $f | ($x.line) as $l | {body: ($b | if test("^\\[[a-z]+\\] ") then sub("^(?<p>\\[[a-z]+\\] )"; "\(.p)`\($f):\($l)` ") else "`\($f):\($l)` " + . end)}'
   r=$(repo) || return 1
   comment=$(printf '%s' "$3" | jq -c --arg b "$4" --arg sha "$(printf '%s' "$2" | jq -r .sha)" \
     '{body: $b, commit_id: $sha, path: .file, line: .line, side: "RIGHT"}')
   gh_post "repos/$r/pulls/$1/comments" "$comment" > /dev/null 2>&1 && return 0
-  gh_post "repos/$r/issues/$1/comments" "$(printf '%s' "$3" | jq -c --arg b "$4" '{body: ("`\(.file):\(.line)` " + $b)}')" \
+  gh_post "repos/$r/issues/$1/comments" "$(printf '%s' "$3" | jq -c --arg b "$4" "$line_note")" \
     > /dev/null
 }
 
