@@ -33,8 +33,8 @@ expect_fail "it never resumes or continues a session (ADR-0001)" "fresh" \
   sh -c "grep -Eq -- '--resume|--continue| -c ' '$(dirname "$FACTORY_CLAUDE")/calls.log' && exit 0; echo fresh; exit 1"
 expect_pass "the prompt names the MR, its branch and /crq" \
   sh -c "grep -q '!12' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'feat/x' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q '/crq' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
-expect_pass "the prompt tells the writer to push, ask with ask.sh at its pushed head, and stop (ADR-0011 D10)" \
-  sh -c "grep -q 'scripts/ask.sh 12 \"\$(git rev-parse HEAD)\"' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'never guess: push your commits' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'and stop' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
+expect_pass "the prompt tells the writer to push, ask with agent-factory ask at its pushed head, and stop (ADR-0011 D10)" \
+  sh -c "grep -q 'dist/cli.js ask -- 12 \"\$(git rev-parse HEAD)\"' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'never guess: push your commits' '$(dirname "$FACTORY_CLAUDE")/calls.log' && grep -q 'and stop' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "a writer that cannot finish pushes its work and asks (ADR-0011 D14)" sh -c "grep -q 'cannot finish, push what you have' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
 expect_pass "the ask command carries its own forge and project settings" \
   sh -c "grep -q 'FACTORY_FORGE=gitlab FACTORY_PROJECT=' '$(dirname "$FACTORY_CLAUDE")/calls.log'"
@@ -141,7 +141,7 @@ expect_eq "a clone set up as the App starts the writer" "writer started #12 at $
 expect_eq "the writer's session has no gh login and no system or global git config" \
   "$FACTORY_REPO/.claude/runs/gh-no-login 1 /dev/null" \
   "$(jq -r '.env | "\(.GH_CONFIG_DIR) \(.GIT_CONFIG_NOSYSTEM) \(.GIT_CONFIG_GLOBAL)"' "$worktree/.claude/settings.local.json")"
-expect_eq "and the lint hook sits beside those settings in the same file" "$REPO_ROOT/scripts/lint-edit.sh ./lint" \
+expect_eq "and the lint hook sits beside those settings in the same file" "$(command -v node) $REPO_ROOT/dist/cli.js lint-edit ./lint" \
   "$(jq -r '.hooks.PostToolUse[0].hooks[0].command' "$worktree/.claude/settings.local.json")"
 expect_eq "so those settings are never committed" "" "$(git -C "$worktree" status --porcelain)"
 expect_pass "the prompt sends every GitHub call through the App's gh" \
@@ -163,7 +163,9 @@ expect_pass "its stop condition: commit only the test, push it and stop, never f
   sh -c "grep -q 'Commit only the test' '$log' && grep -q 'push it, and stop. Never fix the bug and never mark the MR ready' '$log'"
 expect_pass "its commit says a separate run wrote it, so the reviewer can check VB7" \
   grep -q 'Written by a separate test-first run (VB7)' "$log"
-expect_pass "with no testable inputs and result, it asks instead" grep -q 'scripts/ask.sh 12' "$log"
+expect_pass "the writer's ask acts as its own forge login, never the App token's sudo rule, and never in a dry run" \
+  grep -q 'FACTORY_IDENTITY=own FACTORY_DRY_RUN=0' "$log"
+expect_pass "with no testable inputs and result, it asks instead" grep -q 'dist/cli.js ask -- 12' "$log"
 expect_fail "it is not the fix writer's prompt" "none" sh -c "grep -q 'Run /crq from the build phase' '$log' && exit 0; echo none; exit 1"
 expect_fail "a flag after the MR is refused, never ignored" "usage" "$REPO_ROOT/scripts/start-writer.sh" 12 --test-first
 
@@ -182,7 +184,7 @@ respond "$FACTORY_GLAB" 1 200 "$(mr_to_main "$head")"
 "$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
 settings="$worktree/.claude/settings.local.json"
 expect_eq "the writer's session lints each Edit, MultiEdit and Write with the project's lint" \
-  "Edit|MultiEdit|Write $REPO_ROOT/scripts/lint-edit.sh npx\\ eslint\\ --max-warnings\\ 0" \
+  "Edit|MultiEdit|Write $(command -v node) $REPO_ROOT/dist/cli.js lint-edit npx\\ eslint\\ --max-warnings\\ 0" \
   "$(jq -r '.hooks.PostToolUse[0] | "\(.matcher) \(.hooks[0].command)"' "$settings")"
 expect_eq "so the hook settings are never committed" "" "$(git -C "$worktree" status --porcelain)"
 log="$(dirname "$FACTORY_CLAUDE")/calls.log"

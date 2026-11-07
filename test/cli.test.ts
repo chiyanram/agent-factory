@@ -22,6 +22,7 @@ async function cli(
     out: (t) => (out += t),
     err: (t) => (err += t),
     readSecret: async () => pasted,
+    readStdin: async () => pasted,
     system: {
       platform: "linux",
       uid: process.getuid?.() ?? -1,
@@ -306,5 +307,45 @@ describe("agent-factory review", () => {
     const run = await cli(["review", "12"], { ...set(), FACTORY_PROJECT: "a/b", FACTORY_GLAB: glab });
     expect(run).toMatchObject({ code: 1, out: "" });
     expect(run.err).toContain("cannot tell which login the factory posts as");
+  });
+});
+
+describe("agent-factory loop commands (#138)", () => {
+  it("print their usage on wrong arguments (64)", async () => {
+    const cases: readonly (readonly string[])[] = [
+      ["claim"],
+      ["claim", "abc"],
+      ["release", "1", "2"],
+      ["status", "12", "aaaa1111"],
+      ["ask", "x", "aaaa1111", "q"],
+      ["block", "12"],
+      ["reconcile", "now"],
+      ["lint-edit"],
+    ];
+    for (const argv of cases) {
+      const run = await cli(argv, {});
+      expect(run.code).toBe(64);
+      expect(run.err).toContain(`usage: agent-factory ${argv[0]}`);
+    }
+  });
+
+  it("text after -- that starts with - is text, not an option", async () => {
+    const run = await cli(["ask", "--", "12", "aaaa1111", "- is X ok?"], { FACTORY_FORGE: "github" });
+    expect(run.code).toBe(1);
+    expect(run.err).toContain("FACTORY_PROJECT must be owner/name");
+  });
+
+  it("reconcile refuses a relative FACTORY_REPO before it reads the forge", async () => {
+    const run = await cli(["reconcile"], { FACTORY_REPO: "clone" });
+    expect(run).toMatchObject({ code: 1, err: expect.stringContaining("FACTORY_REPO must be an absolute path") });
+  });
+
+  it("lint-edit reads the tool call on stdin and skips a file outside the session's folder", async () => {
+    const tool = JSON.stringify({ tool_input: { file_path: "/etc/hostname" } });
+    expect(await cli(["lint-edit", "grep -n BAD"], { CLAUDE_PROJECT_DIR: home }, tool)).toEqual({
+      code: 0,
+      out: "",
+      err: "",
+    });
   });
 });

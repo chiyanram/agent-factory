@@ -1,146 +1,38 @@
 #!/usr/bin/env bash
-# The GitHub adapter of the forge seam (ADR-0010): the same scripts, the same lines, with # for a pull request.
+# scripts/lib/github.sh: the GitHub calls the bash scripts still make (start-writer.sh, #138), with gh as a stub.
 . "$(dirname "$0")/lib.sh"
 export FACTORY_FORGE=github FACTORY_PROJECT=chiyanram/ledger FACTORY_SLEEP=true
-FACTORY_GH_APP="$TMP_BASE/github-app"   # the App's own name comes from GitHub (github-app.sh slug)
-printf '#!/bin/sh\n[ "$1" = slug ] && echo ledger-factory\n' > "$FACTORY_GH_APP" && chmod +x "$FACTORY_GH_APP"
-export FACTORY_GH_APP
-bot='{"total_count":1,"repositories":[{"full_name":"chiyanram/ledger"}]}'   # only an App's token can list these
-pr() { printf '{"number":12,"state":"%s","merged":%s,"head":{"sha":"aaaa1111","ref":"feat/1-x"},"base":{"ref":"main"},"labels":%s}' "$1" "$2" "$3"; }
+pr() { printf '{"number":12,"state":"%s","merged":%s,"head":{"sha":"aaaa1111","ref":"feat/1-x"},"base":{"ref":"main"},"labels":%s,"body":%s}' "$1" "$2" "$3" "$4"; }
 log() { dirname "$FACTORY_GH"; }
 
 expect_fail "an unknown forge is refused" "FACTORY_FORGE must be gitlab or github" \
-  env FACTORY_FORGE=bitbucket "$REPO_ROOT/scripts/claim.sh" 12
+  env FACTORY_FORGE=bitbucket bash -c ". '$REPO_ROOT/scripts/lib/forge.sh'"
+
+. "$REPO_ROOT/scripts/lib/forge.sh"
+FACTORY_GH=$(glab_stub); export FACTORY_GH
+respond "$FACTORY_GH" 1 200 "$(pr open false '[{"name":"agent::claimed"}]' '"AC1: it works."')"
+expect_eq "forge_pr reads the pull request in the seam's shape" \
+  '{"state":"opened","sha":"aaaa1111","source_branch":"feat/1-x","target_branch":"main","labels":["agent::claimed"],"description":"AC1: it works."}' \
+  "$(forge_pr 12)"
+expect_pass "from the repository's pulls" grep -q '^api --include repos/chiyanram/ledger/pulls/12 ' "$(log)/calls.log"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
-respond "$FACTORY_GH" 3 200 '[{"name":"agent::claimed"}]'
-expect_eq "claim adds the label to the pull request" "claimed #12" "$("$REPO_ROOT/scripts/claim.sh" 12)"
-expect_pass "claim reads the pull request" grep -q '^api --include repos/chiyanram/ledger/pulls/12 ' "$(log)/calls.log"
-expect_eq "the label goes in the request body, not as a gh field" '{"labels":["agent::claimed"]}' "$(cat "$(log)/inputs.log")"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 403 '{"message":"You must authenticate with an installation access token"}'
-expect_fail "a person's token is refused before any write (ADR-0006)" "not acting as the factory's GitHub App" \
-  "$REPO_ROOT/scripts/claim.sh" 12
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '{"total_count":1,"repositories":[{"full_name":"chiyanram/other"}]}'
-expect_fail "an App installed elsewhere, not on the project, is refused" "not installed on chiyanram/ledger" \
-  "$REPO_ROOT/scripts/claim.sh" 12
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 403 '{"message":"You must authenticate with an installation access token"}'
-expect_fail "the refusal shows GitHub's own reason too" "You must authenticate with an installation access token" \
-  "$REPO_ROOT/scripts/claim.sh" 12
-expect_pass "the bot check asks for the App's installation repositories" \
-  grep -q '^api --include installation/repositories?per_page=1' "$(log)/calls.log"
-expect_eq "the refusal writes nothing" 1 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr closed true '[]')"
-expect_fail "a merged pull request is not claimed" "#12 is merged" \
-  "$REPO_ROOT/scripts/claim.sh" 12
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr closed false '[{"name":"agent::claimed"}]')"
-respond "$FACTORY_GH" 3 200 '[]'
-expect_eq "release removes the label from a closed pull request" "released #12" "$("$REPO_ROOT/scripts/release.sh" 12)"
-expect_pass "the label is URL-encoded in the DELETE path" \
-  grep -q '^api --include repos/chiyanram/ledger/issues/12/labels/agent%3A%3Aclaimed -X DELETE' "$(log)/calls.log"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr open false '[{"name":"agent::claimed"}]')"
-respond "$FACTORY_GH" 3 404 '{"message":"Label does not exist"}'
-respond "$FACTORY_GH" 4 200 "$(pr open false '[]')"
-expect_eq "a label a human removed meanwhile (404) still counts as released" "released #12" \
-  "$("$REPO_ROOT/scripts/release.sh" 12)"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr open false '[{"name":"agent::claimed"}]')"
-respond "$FACTORY_GH" 3 500 '{"message":"Server Error"}'
-respond "$FACTORY_GH" 4 200 "$(pr open false '[{"name":"agent::claimed"}]')"
-expect_fail "a failed DELETE with the label still there fails" "did not remove the label" \
-  "$REPO_ROOT/scripts/release.sh" 12
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
-respond "$FACTORY_GH" 3 201 '{"id":1}'
-expect_eq "status posts a comment at the run's head" "posted #12 at aaaa1111" \
-  "$("$REPO_ROOT/scripts/status.sh" 12 aaaa1111 "writer started")"
-expect_eq "the comment is the seat and the line" "[coordinator] writer started" "$(jq -r .body "$(log)/inputs.log")"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
-respond "$FACTORY_GH" 3 201 '{"id":2}'
-expect_eq "ask posts the writer's question at its head on GitHub" "asked #12 at aaaa1111" \
-  "$("$REPO_ROOT/scripts/ask.sh" 12 aaaa1111 'is $PATH a "literal" here?')"
-expect_eq "the question arrives as written, quotes and dollar sign kept" '[writer] OPEN: is $PATH a "literal" here?' \
-  "$(jq -r .body "$(log)/inputs.log")"
+respond "$FACTORY_GH" 1 200 "$(pr closed true '[]' null)"
+expect_eq "a merged pull request is merged, and an empty body an empty description" "merged " \
+  "$(forge_pr 12 | jq -r '"\(.state) \(.description)"')"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
 respond "$FACTORY_GH" 1 403 '{"message":"API rate limit exceeded"}' 'x-ratelimit-remaining: 0' 'x-ratelimit-reset: 1'
-respond "$FACTORY_GH" 2 200 "$bot"
-respond "$FACTORY_GH" 3 200 "$(pr open false '[{"name":"agent::claimed"}]')"
-expect_fail "a 403 rate limit is retried, then the real answer decides" "#12 is already claimed" \
-  "$REPO_ROOT/scripts/claim.sh" 12
+respond "$FACTORY_GH" 2 200 "$(pr open false '[]' null)"
+expect_eq "a 403 rate limit is retried, then the real answer is read" opened "$(forge_pr 12 2> /dev/null | jq -r .state)"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 403 '{"message":"Resource not accessible by integration"}'
-expect_fail "a 403 that is not a rate limit fails at once" "github: HTTP 403" "$REPO_ROOT/scripts/claim.sh" 12
-expect_eq "and is not retried" 2 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
+respond "$FACTORY_GH" 1 403 '{"message":"Resource not accessible by integration"}'
+expect_fail "a 403 that is not a rate limit fails at once" "github: HTTP 403" forge_pr 12
+expect_eq "and is not retried" 1 "$(calls "$FACTORY_GH" | wc -l | tr -d ' ')"
 
 FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 502 '{"message":"Bad Gateway"}'
-expect_fail "a failed read of the pull request fails release, never reads as not claimed" "github: HTTP 502" \
-  "$REPO_ROOT/scripts/release.sh" 12
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 "$bot"
-respond "$FACTORY_GH" 2 502 '{"message":"Bad Gateway"}'
-expect_fail "a failed list of claims fails reconcile, never reads as nothing to reconcile" "github: HTTP 502" \
-  env FACTORY_REPO="$(fixture_repo links-ok)" FACTORY_CLAUDE="$(claude_stub)" "$REPO_ROOT/scripts/reconcile.sh"
-
-# the seam calls the scripts above do not reach
-. "$REPO_ROOT/scripts/lib/forge.sh"
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '{"data":{"repository":{"pullRequests":{"nodes":[{"number":3},{"number":7}]}}}}'
-expect_eq "forge_claimed lists the numbers" "3 7" "$(forge_claimed merged agent::claimed | tr '\n' ' ' | sed 's/ $//')"
-expect_pass "merged means the MERGED state" grep -q 'states: \[MERGED\]' "$(log)/calls.log"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 201 '{"id":1}'
-forge_line_finding 12 '{"sha":"aaaa1111"}' '{"file":"src/A.java","line":4}' "[reviewer] Act on F1"
-expect_eq "a finding is a review comment on the head, at file and line" \
-  '{"body":"[reviewer] Act on F1","commit_id":"aaaa1111","path":"src/A.java","line":4,"side":"RIGHT"}' \
-  "$(cat "$(log)/inputs.log")"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 422 '{"message":"Validation Failed"}'
-respond "$FACTORY_GH" 2 201 '{"id":2}'
-forge_line_finding 12 '{"sha":"aaaa1111"}' '{"file":"src/A.java","line":400}' "[reviewer] Act on F1"
-expect_eq "a line outside the diff goes out as a plain comment that names file:line" \
-  '[reviewer] `src/A.java:400` Act on F1' "$(sed -n 2p "$(log)/inputs.log" | jq -r .body)"
-expect_pass "on the conversation, not the diff" grep -q '^api --include repos/chiyanram/ledger/issues/12/comments ' "$(log)/calls.log"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '[{"body":"a","user":{"login":"ledger-factory[bot]"}}]'
-expect_eq "forge_notes gives every comment in the seam's shape" '[{"body":"a","author":{"username":"ledger-factory[bot]"}}]' \
-  "$(forge_notes 12)"
-
-FACTORY_GH=$(glab_stub); export FACTORY_GH
-respond "$FACTORY_GH" 1 200 '{"number":12,"state":"open","merged":false,"head":{"sha":"aaaa1111","ref":"feat/1-x"},"base":{"ref":"main"},"labels":[],"body":"AC1: it works."}'
-expect_eq "a pull request's body is its description, which the pack and the ready check read" "AC1: it works." \
-  "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .description)"
-respond "$FACTORY_GH" 2 200 "$(pr open false '[]')"
-expect_eq "an empty body is an empty description" "" "$(. "$REPO_ROOT/scripts/lib/forge.sh" && forge_pr 12 | jq -r .description)"
+respond "$FACTORY_GH" 1 502 '{"message":"Bad Gateway"}'
+expect_fail "a failed read fails, never reads as an empty pull request" "github: HTTP 502" forge_pr 12
 
 finish

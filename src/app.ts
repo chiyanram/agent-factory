@@ -32,6 +32,7 @@ import { reviewStep } from "./core/review/step.js";
 import { boxPlan } from "./core/ready/plan.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
+import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -52,7 +53,7 @@ commands:
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
                                at the hidden prompt; it is never printed (#136)
   setup status                 the box chosen, its risks, and whether the claude token is valid
-
+${LOOP_HELP}
 options:
   --help      show this help
   --version   show the package version
@@ -83,6 +84,8 @@ export type Io = {
   readonly err: (text: string) => void;
   // a pasted secret, never shown: echo off on a terminal (src/core/token/prompt.ts)
   readonly readSecret: (prompt: string) => Promise<string>;
+  // all of stdin, for the lint-edit hook
+  readonly readStdin: () => Promise<string>;
   // the machine setup stores tokens on; a test passes linux and its own uid, so it never touches a Keychain
   readonly system: { readonly platform: NodeJS.Platform; readonly uid: number; readonly run: CliRunner };
 };
@@ -539,6 +542,10 @@ const COMMANDS: readonly Command[] = [
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
   { name: "setup", run: setupCommand },
+  ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
+    name,
+    run: ({ positionals, io }: Args) => Promise.resolve(run(positionals, io)),
+  })),
 ];
 
 export async function runCli(argv: readonly string[], io: Io): Promise<number> {

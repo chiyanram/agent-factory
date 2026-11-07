@@ -1,0 +1,151 @@
+// loop-cli — the coordinator's forge commands and the writer's lint hook on the command line (#138): claim, release,
+// status, ask, block, reconcile (core/loop.ts) and lint-edit (core/lint-edit.ts). Each prints one line per action;
+// with FACTORY_DRY_RUN=1 the seam prints each write on stderr instead, and the line ends in "(dry run)".
+
+import { isAbsolute } from "node:path";
+import type { Result } from "./core/forge/api.js";
+import { openProject } from "./core/forge/index.js";
+import type { Forge } from "./core/forge/types.js";
+import { lintEdit } from "./core/lint-edit.js";
+import { ask, block, claim, reconcile, release, status, type AtHead } from "./core/loop.js";
+import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
+import { claudeSessions } from "./core/review/live.js";
+import { runInFolder } from "./core/review/model.js";
+import { claudeEnv } from "./core/review/settings.js";
+
+export type LoopIo = {
+  readonly env: NodeJS.ProcessEnv;
+  readonly out: (text: string) => void;
+  readonly err: (text: string) => void;
+  readonly readStdin: () => Promise<string>;
+};
+
+type Act = (forge: Forge, label: string) => Promise<Result<string | readonly string[]>>;
+
+const USAGE: Readonly<Record<string, string>> = {
+  claim: "claim <number>",
+  release: "release <number>",
+  status: 'status <number> <sha> "<line>"',
+  ask: 'ask <number> <sha> "<question>"',
+  block: 'block <number> "<reason>" [<log>]',
+  reconcile: "reconcile",
+  "lint-edit": "lint-edit '<lint command>'",
+};
+
+function usage(name: string, io: LoopIo): number {
+  io.err(`usage: agent-factory ${USAGE[name] ?? name}\n`);
+  return 64;
+}
+
+function word(positionals: readonly string[], i: number): string {
+  return positionals[i] ?? "";
+}
+
+function numberOf(value: string | undefined): number | "bad" {
+  return value !== undefined && /^[1-9]\d{0,9}$/.test(value) ? Number(value) : "bad";
+}
+
+function lines(value: string | readonly string[], dry: string): string {
+  return (typeof value === "string" ? [value] : value).map((l) => `${l}${dry}\n`).join("");
+}
+
+// forgeOf : the project's forge and its claim label
+async function forgeOf(io: LoopIo): Promise<Result<{ readonly forge: Forge; readonly label: string }>> {
+  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  if (label.trim() === "") {
+    return { kind: "failed", reason: "FACTORY_CLAIM_LABEL is set but empty" };
+  }
+  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  return opened.kind === "ok" ? { kind: "ok", value: { forge: opened.value.forge, label } } : opened;
+}
+
+// onForge : the action on the project's forge; its lines on stdout, or why it failed on stderr
+async function onForge(name: string, io: LoopIo, act: Act): Promise<number> {
+  const opened = await forgeOf(io);
+  const done = opened.kind === "ok" ? await act(opened.value.forge, opened.value.label) : opened;
+  if (done.kind === "failed") {
+    io.err(`agent-factory ${name}: ${done.reason}\n`);
+    return 1;
+  }
+  io.out(lines(done.value, io.env.FACTORY_DRY_RUN === "1" ? " (dry run)" : ""));
+  return 0;
+}
+
+function claimed(name: "claim" | "release", positionals: readonly string[], io: LoopIo): Promise<number> | number {
+  const number = numberOf(positionals[0]);
+  if (number === "bad" || positionals.length !== 1) {
+    return usage(name, io);
+  }
+  const act = name === "claim" ? claim : release;
+  return onForge(name, io, (forge, label) => act({ forge, number, label }));
+}
+
+function atHead(name: "status" | "ask", positionals: readonly string[], io: LoopIo): Promise<number> | number {
+  const number = numberOf(positionals[0]);
+  if (number === "bad" || positionals.length !== 3) {
+    return usage(name, io);
+  }
+  const act = name === "status" ? status : ask;
+  const [sha, text] = [word(positionals, 1), word(positionals, 2)];
+  return onForge(name, io, (forge) => act({ forge, number, sha, text } satisfies AtHead));
+}
+
+function blocked(positionals: readonly string[], io: LoopIo): Promise<number> | number {
+  const [n, reason, log] = positionals;
+  const number = numberOf(n);
+  if (number === "bad" || reason === undefined || positionals.length > 3) {
+    return usage("block", io);
+  }
+  return onForge("block", io, (forge, label) => block({ forge, number, label, reason, log: log ?? "" }));
+}
+
+function reconciled(positionals: readonly string[], io: LoopIo): Promise<number> | number {
+  const repo = io.env.FACTORY_REPO ?? "";
+  if (positionals.length !== 0) {
+    return usage("reconcile", io);
+  }
+  if (!isAbsolute(repo)) {
+    io.err(`agent-factory reconcile: FACTORY_REPO must be an absolute path, got ${JSON.stringify(repo)}\n`);
+    return 1;
+  }
+  const sessions = claudeSessions({ bin: io.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(io.env) });
+  return onForge("reconcile", io, (forge, label) =>
+    reconcile({ forge, label, repo, env: io.env, sessions, dryRun: io.env.FACTORY_DRY_RUN === "1" }),
+  );
+}
+
+async function linted(positionals: readonly string[], io: LoopIo): Promise<number> {
+  const [command] = positionals;
+  if (command === undefined || positionals.length !== 1) {
+    return usage("lint-edit", io);
+  }
+  const root = io.env.CLAUDE_PROJECT_DIR ?? io.env.PWD ?? "";
+  const hooked = await lintEdit({ command, stdin: await io.readStdin(), root, env: io.env, run: runInFolder });
+  io.err(hooked.err);
+  return hooked.code;
+}
+
+type LoopCommand = (positionals: readonly string[], io: LoopIo) => Promise<number> | number;
+
+export const LOOP_COMMANDS: Readonly<Record<string, LoopCommand>> = {
+  claim: (p, io) => claimed("claim", p, io),
+  release: (p, io) => claimed("release", p, io),
+  status: (p, io) => atHead("status", p, io),
+  ask: (p, io) => atHead("ask", p, io),
+  block: blocked,
+  reconcile: reconciled,
+  "lint-edit": linted,
+};
+
+export const LOOP_HELP = `  claim <number>               add the claim label to an open change that has none: one run at a time
+  release <number>             remove the claim label; a change with no claim is not an error
+  status <number> <sha> "<line>"
+                               post one [coordinator] note; refused when the head is no longer <sha>
+  ask <number> <sha> "<question>"
+                               post one [writer] OPEN: note, an open ask until a person answers; the same head rule
+  block <number> "<reason>" [<log>]
+                               label needs-human, post one [coordinator] blocked: note, then release the claim
+  reconcile                    release each claim with no live run or on a merged change; remove each run's worktree
+                               with no live run (FACTORY_REPO)
+  lint-edit '<lint command>'   the writer's PostToolUse hook: lint the file an Edit or Write changed, no shell
+`;

@@ -107,6 +107,20 @@ export type FolderCall = {
 };
 export type FolderRunner = (call: FolderCall) => Promise<Exit>;
 
+// a program that cannot start (ENOENT, EACCES) answers 127, as a shell does, so a caller can tell it from a failure
+export const CANNOT_START = 127;
+
+function exitCode(error: { readonly code?: unknown } | null): number {
+  if (error === null) {
+    return 0;
+  }
+  return typeof error.code === "number" ? error.code : typeof error.code === "string" ? CANNOT_START : 1;
+}
+
+function startFailure(error: { readonly code?: unknown } | null, bin: string): string {
+  return error !== null && typeof error.code === "string" ? `cannot start ${bin}: ${error.code}\n` : "";
+}
+
 export const runInFolder: FolderRunner = (call) =>
   new Promise((resolve) => {
     execFile(
@@ -114,7 +128,7 @@ export const runInFolder: FolderRunner = (call) =>
       [...call.args],
       { cwd: call.cwd, env: call.env, maxBuffer: 64 * 1024 * 1024 },
       (error, stdout, stderr) => {
-        resolve({ code: error === null ? 0 : typeof error.code === "number" ? error.code : 1, stdout, stderr });
+        resolve({ code: exitCode(error), stdout, stderr: startFailure(error, call.bin) || stderr });
       },
     );
   });

@@ -10,6 +10,13 @@ runCli(process.argv.slice(2), {
   out: (text) => process.stdout.write(text),
   err: (text) => process.stderr.write(text),
   readSecret: readHidden,
+  readStdin: async () => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  },
   system: { platform: process.platform, uid: process.getuid?.() ?? -1, run: runProcess },
 }).then(
   (code) => process.exit(code),

@@ -33,11 +33,12 @@ reads it, and the writer's report (#109) will add it. With your own login (`FACT
 is nothing more to set up; the steps below are for a project that uses a bot. A bot's key belongs to a separate
 `factory` OS user on the VM, never to a file your own user can read.
 
-**Today:** the bash scripts (`claim`, `release`, `status`, `ask`, `block`, `reconcile`, `start-writer`) still act
-only as a bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)): on
-GitHub through `scripts/github-app.sh`, which reads the App's key from your own home (`FACTORY_GH_APP_ID`,
-`FACTORY_GH_APP_KEY`). `agent-factory` (`poll`, `review`, the host push) follows the steps below. Each script moves over when it
-is ported (#103, #138).
+**Today:** the bash `start-writer` still gives the writer a forge login ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)): on GitHub the App's `gh`
+(`scripts/github-app.sh`, which reads the App's key from your own home: `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY`), on
+GitLab whatever `glab` login this machine has; nothing checks that the GitLab one is a bot. The `agent-factory ask` it
+gives the writer runs as that same login (`FACTORY_IDENTITY=own`). Every command you run yourself (`claim`, `release`,
+`status`, `block`, `reconcile`, and the rest of `agent-factory`) follows the steps below. `start-writer` moves over
+when it is ported (#109, #110).
 
 ### GitLab
 
@@ -193,7 +194,7 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
 to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, no LLM) starts. Each does one job on one
-story and goes away. The forge is your only memory. In the target you run only the read commands, `status.sh`,
+story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
 questions and status to Jira or the issue, and `agent-factory approve`; you edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
@@ -214,7 +215,7 @@ exists yet, so you run the triggers below by hand.
   other field, a non-zero exit, a timeout, a cap or a failed box is `blocked` with the reason; a reason never quotes
   the report. The host reads the report only after the box has stopped, never through a symlink, and refuses to push
   when any new commit touches `.factory` (`excludeFactory` keeps it out of `git add`).
-  **Today:** the bash `start-writer` still tells the writer to push, post with `ask.sh` and mark the MR ready; the
+  **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the
   report replaces that once the writer starts through the box and the dispatcher (#103, #138).
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
 
@@ -293,20 +294,20 @@ and `#12` for `!12`.
 | script | does |
 |---|---|
 | `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim; `--json` prints the records |
-| `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
+| `agent-factory claim <mr>` / `agent-factory release <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed or not open; `release` of an MR with no claim says so and is not an error |
 | `start-writer.sh [--test-first] <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit; `--test-first` starts a run that commits only a bug's failing test and stops |
 | `agent-factory review <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then a find pass and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. It refuses an MR that already has a live writer or reviewer, and a machine at `FACTORY_MAX_RUNS`, and holds `.claude/runs/reviewer-<mr>.pid` while it runs. A change that touches a file whose name holds a control character is refused, for a person to review. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/` |
 | (context pack) | built by `review`, one per head, under `$FACTORY_REPO/.claude/packs/`: rules from the default branch only; an unresolved rule pointer or link stops it |
-| `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
-| `ask.sh <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. The target: the writer writes the question to a file and the host posts it |
+| `agent-factory status <mr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text |
+| `agent-factory ask -- <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The target: the writer writes the question to `report.json` and the host posts it |
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash, or every missing part (intent, numbered acceptance criteria, design, lane); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
 | `agent-factory approve <project> <ticket> <hash>` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, who and when. The hash on the command line is the full hash the human saw, as `agent-factory spec` printed it; a spec that no longer has exactly that hash is refused. Run it only through the harness `ask` prompt, never from an allow list ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104) |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory dispatch <project> --once [--dry-run]` | one pass of the dispatcher's table over the project (see Triggers); exit 0, 1 when it cannot run, 2 when an action failed |
-| `block.sh <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason> · log: <log>` note, then releases the claim; the label goes first |
-| `lint-edit.sh '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed |
+| `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
+| `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
-| `reconcile.sh` | removes each claim and run worktree with no live run, and each claim left on a merged MR |
+| `agent-factory reconcile` | removes each claim and run worktree with no live run, and each claim left on a merged MR; a live-run list it cannot read releases nothing |
 
 `poll` keeps no state, so a restart re-reads everything. It reads the forge through its CLI (`gh api`, `glab api`),
 pages every list to its end, and waits out a rate limit. It does not read approvals: an approval is the local
@@ -377,9 +378,10 @@ it is a prompt instruction at most.
   secret paths ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
 - **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
   `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
-  and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126); the
-  dispatcher (#103) and the writer's exit (#109) will post through it. **Today:** the bash scripts flatten model text
-  but do not span mentions or keywords ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
+  and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126), and
+  the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)). **Today:** the bash
+  writer still holds a forge login, writes its evidence into the MR description itself and marks the MR ready; none of
+  that goes through the template until the writer runs in the box (#109, #113).
 - **Decided: the coordinator cannot widen its own wall.** It edits only spec drafts, never its settings or the
   factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)).
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,
