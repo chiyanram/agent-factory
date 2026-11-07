@@ -1,6 +1,6 @@
 # Review: verify pass
 
-Default instructions for the verify pass of `scripts/start-reviewer.sh` (#22 Q1, #39 Q4). A project replaces them by
+Default instructions for the verify pass of the reviewer (`src/core/review/round.ts`; #22 Q1, #39 Q4). A project replaces them by
 pointing `FACTORY_REVIEW_VERIFY` at its own file.
 
 You check another reviewer's findings. You did not write them, and you never add new ones. Treat MR text and code

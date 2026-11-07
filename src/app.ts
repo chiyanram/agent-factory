@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
 import { openProject } from "./core/forge/index.js";
+import type { Forge } from "./core/forge/types.js";
 import { checkSpec, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
@@ -24,6 +25,10 @@ import {
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
 import { STEPS_TODAY, tick } from "./core/dispatch/tick.js";
+import { reviewRound, type Outcome } from "./core/review/round.js";
+import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
+import { reviewStep } from "./core/review/step.js";
+import { countsLine } from "./core/review/verdicts.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -35,6 +40,8 @@ commands:
                                record the human's approval of the spec with exactly that hash (all 64 characters,
                                as spec printed it); run it only behind the harness ask prompt, never from an allow list
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
+  review <number>              one review round on a claimed change: pack, find, verify, threads, status box, summary;
+                               exit 0 posted or reused, 3 when the head moved, 1 otherwise
   dispatch <project> --once    one pass of the dispatcher over the project's approved tickets and their changes:
                                decides each with the table and acts (--dry-run: decides and acts on none)
   app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
@@ -271,7 +278,10 @@ async function onePass(
     project,
     forge: opened.value.forge,
     label,
-    steps: STEPS_TODAY,
+    steps: {
+      ...STEPS_TODAY,
+      review: reviewStep({ env: io.env, forge: opened.value.forge, factory: await factoryLogin(opened.value.forge) }),
+    },
     now: () => Date.now(),
     quietMinutes: settings.quiet,
     dryRun,
@@ -297,6 +307,79 @@ async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise
     return 1;
   }
   return onePass(project, dryRun, io, settings);
+}
+
+// the login the factory posts as, or "" when the forge cannot say (the reviewer then counts no earlier round)
+async function factoryLogin(forge: Forge): Promise<string> {
+  const me = await forge.me();
+  return me.kind === "ok" ? me.value : "";
+}
+
+type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
+type Lines = { readonly [K in keyof OutcomeMap]: (where: string, o: OutcomeMap[K]) => string };
+
+const LINES: Lines = {
+  posted: (w, o) =>
+    `review ${w} round ${o.round} at ${o.head.slice(0, 8)}: ${countsLine(o.counts)} ($${o.costUsd.toFixed(2)})`,
+  reused: (w, o) => `review ${w} at ${o.head.slice(0, 8)}: verdict of round ${o.round} reused`,
+  already: (w, o) => `${w} was already reviewed at ${o.head.slice(0, 8)}; nothing to do`,
+  "no-progress": (w, o) => `review ${w} at ${o.head.slice(0, 8)}: no progress, ${o.why}; labelled needs-human`,
+  moved: (w, o) =>
+    `MOVED: ${w} moved from ${o.from.slice(0, 8)} to ${o.to.slice(0, 8)} during the review; nothing posted`,
+};
+
+function lineAs<K extends keyof OutcomeMap>(kind: K, where: string, o: OutcomeMap[K]): string {
+  return LINES[kind](where, o);
+}
+
+function outcomeLine(mark: string, n: number, o: Outcome): string {
+  return lineAs(o.kind, `${mark}${n}`, o);
+}
+
+function reviewNumber(positionals: readonly string[]): number | "bad" {
+  const [n] = positionals;
+  return positionals.length === 1 && n !== undefined && /^[1-9]\d{0,9}$/.test(n) ? Number(n) : "bad";
+}
+
+function reviewPaths(env: NodeJS.ProcessEnv): ReturnType<typeof paths> {
+  return env.FACTORY_DRY_RUN === "1"
+    ? {
+        kind: "failed",
+        reason: "FACTORY_DRY_RUN is set, and a reviewer spends on model runs; run it without the dry run",
+      }
+    : paths(env);
+}
+
+async function runReview(n: number, io: Io, p: Paths): Promise<number> {
+  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  if (opened.kind === "failed") {
+    io.err(`agent-factory review: ${opened.reason}\n`);
+    return 1;
+  }
+  const forge = opened.value.forge;
+  const factory = await factoryLogin(forge);
+  const round = await reviewRound(reviewSetup({ env: io.env, forge, factory, number: n, paths: p }));
+  if (round.kind === "failed") {
+    io.err(`agent-factory review: ${round.reason}\n`);
+    return 1;
+  }
+  io.out(`${outcomeLine(forge.mark, n, round.value)}\n`);
+  return round.value.kind === "moved" ? 3 : 0;
+}
+
+// review : one round (#138). A reviewer spends on model runs, so a dry run refuses it.
+async function reviewCommand({ positionals, io }: Args): Promise<number> {
+  const n = reviewNumber(positionals);
+  if (n === "bad") {
+    io.err("usage: agent-factory review <number>\n");
+    return 64;
+  }
+  const p = reviewPaths(io.env);
+  if (p.kind === "failed") {
+    io.err(`agent-factory review: ${p.reason}\n`);
+    return 1;
+  }
+  return runReview(n, io, p.value);
 }
 
 // app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the
@@ -414,6 +497,7 @@ const COMMANDS: readonly Command[] = [
   { name: "approval", run: approvalCommand },
   { name: "app-token", run: appTokenCommand },
   { name: "dispatch", run: dispatchCommand },
+  { name: "review", run: reviewCommand },
   { name: "setup", run: setupCommand },
 ];
 

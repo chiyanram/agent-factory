@@ -40,8 +40,8 @@ export type Steps = {
 // their port to TypeScript (#138).
 export const STEPS_TODAY: Steps = {
   writer: { kind: "unavailable", reason: "the writer's box is not built yet (#113)" },
-  ready: { kind: "unavailable", reason: "the ready check is not ported yet (#138)" },
-  review: { kind: "unavailable", reason: "the reviewer is not ported yet (#138)" },
+  ready: { kind: "unavailable", reason: "the ready check is not ported yet (#138, #91)" },
+  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and FACTORY_RULEBOOK" },
 };
 
 export type TickSetup = {

@@ -33,10 +33,10 @@ reads it, and the writer's report (#109) will add it. With your own login (`FACT
 is nothing more to set up; the steps below are for a project that uses a bot. A bot's key belongs to a separate
 `factory` OS user on the VM, never to a file your own user can read.
 
-**Today:** the bash scripts (`claim`, `release`, `status`, `ask`, `block`, `reconcile`, `start-writer`,
-`start-reviewer`) still act only as a bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)): on
+**Today:** the bash scripts (`claim`, `release`, `status`, `ask`, `block`, `reconcile`, `start-writer`) still act
+only as a bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)): on
 GitHub through `scripts/github-app.sh`, which reads the App's key from your own home (`FACTORY_GH_APP_ID`,
-`FACTORY_GH_APP_KEY`). `agent-factory` (`poll`, the host push) follows the steps below. Each script moves over when it
+`FACTORY_GH_APP_KEY`). `agent-factory` (`poll`, `review`, the host push) follows the steps below. Each script moves over when it
 is ported (#103, #138).
 
 ### GitLab
@@ -142,16 +142,16 @@ The scripts read their settings from the environment.
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
-| `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `start-reviewer` refuse it | off |
+| `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `agent-factory review` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_BOX` | **planned** ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs workers in your own VM, with its Docker; `laptop` runs each in a container on Rancher Desktop with its own Docker inside, a private home and filtered egress. The start refuses to run without a box | `laptop` |
 | budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
-| `FACTORY_READY_COMMANDS` | the programs an evidence command may start in the ready check; they run the MR's own build files, with none of this machine's logins | `make ./gradlew ./mvnw` |
-| `FACTORY_READY_ENV`, `FACTORY_READY_TIMEOUT` | the variables an evidence command keeps (it gets a fresh `HOME`, an empty `GH_CONFIG_DIR` and no git config besides), and the seconds it may run | `PATH LANG JAVA_HOME`, `1800` |
-| `FACTORY_READY_CHECK` | `off` skips the ready check, for a project whose required CI job proves the build at the head | on |
-| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | `prompts/review-find.md`, `prompts/review-verify.md` |
+| `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path | — |
+| `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
+| (ready check) | **Today:** no ready check runs: the bash one is gone, and its TypeScript port runs the evidence in a box (#91, the next #138 PR). Run the evidence commands yourself before you start a review | — |
+| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_CURL` | the `curl` that mints the App's token | `curl` |
 | `FACTORY_MAX_TRIES`, `FACTORY_SLEEP` | tries per request on a rate limit, and the wait command | `4`, `sleep` |
 
@@ -219,8 +219,9 @@ ended goes to a person. A ticket's change is the one on `factory/<ticket>` in th
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
-which also starts every count afresh. **Today:** the writer's box (#113) and the TypeScript ready check and reviewer
-(#138) are not built, and no run record is ever written, so `dispatch` does only these rows: reconcile a merged claim,
+which also starts every count afresh. **Today:** the writer's box (#113) and the TypeScript ready check (#91) are not
+built, and the review step runs only after a ready check, so no run record is ever written; `dispatch` does only these
+rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
 start. Run the table below by hand for the rest. There is no merge-conflict row yet.
@@ -232,9 +233,9 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
-| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | `start-reviewer` at the head SHA; it runs the ready check first |
+| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | run its evidence commands at the head (**today:** by hand, #91), then `agent-factory review <mr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
-| `start-reviewer` exits 4: not ready | `start-writer` again; after 3 `[coordinator] not ready` notes, label `needs-human` |
+| the evidence fails at the head | `start-writer` again; after 3 failures, label `needs-human` |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
@@ -257,8 +258,8 @@ and `#12` for `!12`.
 | `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim; `--json` prints the records |
 | `claim.sh <mr>` / `release.sh <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed |
 | `start-writer.sh [--test-first] <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit; `--test-first` starts a run that commits only a bug's failing test and stops |
-| `start-reviewer.sh <mr>` | first the ready check: runs each evidence command again at the head in a fresh worktree, with no shell, and exits 4 with one `[coordinator] not ready` note when one fails or the table is missing, once per head and description; then one review round: the pack, a find run, a verify run, then one summary note, with the tokens at this head by phase, and one thread per Act on or Consider; keeps each pass's answer and the writer transcripts under `.claude/runs/<mr>/<head>/`; reuses the last verdict when the patch-id is unchanged, or labels `needs-human` when that verdict still has Act on findings; labels `needs-human` when protected files changed; refuses a 4th round; exits 3 with `MOVED` when the head moved |
-| `pack.sh <mr> [<previous-head>]` | builds the reviewer's context pack, with rules from the default branch; an unresolved rule pointer stops it |
+| `agent-factory review <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then a find pass and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/` |
+| (context pack) | built by `review`, one per head, under `$FACTORY_REPO/.claude/packs/`: rules from the default branch only; an unresolved rule pointer or link stops it |
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. The target: the writer writes the question to a file and the host posts it |
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash, or every missing part (intent, numbered acceptance criteria, design, lane); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
@@ -312,20 +313,21 @@ it is a prompt instruction at most.
 - **Today: the writer pushes only its own branch**, with `--force-with-lease` after a rebase. On GitHub its session
   gets an empty `GH_CONFIG_DIR` and no system or global git config, so it cannot act as the person. This is a prompt
   rule plus a missing login, not a wall; the target removes the forge token from the writer.
-- **Enforced: ready is checked, not reported.** No review starts until a script has run the MR's evidence commands
-  again at its head, with no shell. **Today** that run uses the MR's own build files on the host, with open network;
-  the target runs it in the box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91).
+- **Decided: ready is checked, not reported.** No review starts until code has run the change's evidence commands
+  again at its head, in a fresh box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91).
+  **Today:** no ready check runs; the dispatcher waits for it, and by hand you run the evidence yourself first.
 - **The reviewer reads, and the script posts.** It runs in a throwaway folder with the pack and a copy of the whole
   code at the head. It may report code the diff does not touch only when this change breaks it.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
-  rules it is judged by. It has Read, Grep and Glob only. **Today** it runs unsandboxed; the target puts it in the
-  box.
+  rules it is judged by. It has Read, Grep and Glob only (`claude -p --restricted`). **Today** it runs on the host,
+  not in the box (#113).
 - **Rules come from the default branch**, never from the MR. An MR that edits a rule file is flagged for the human.
 - **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent
-  instruction files lists them in its summary and labels the MR `needs-human`, once per file. **Today** build files
-  and new dependencies are left to the reviewer; the target adds both to the script-made box.
+  instruction files lists them in its summary and labels the MR `needs-human`, once per file. The same script-made
+  box lists every build file and dependency manifest touched, and each new dependency (ADR-0012 S10, #117). Zero
+  findings is not a pass: the summary says so, and no verdict ever approves or undrafts (#118).
 - **No progress stops the loop.** When a writer round leaves the change empty, or the patch unchanged while its last
-  verdict still has Act on findings, `start-reviewer` reuses the verdict and labels the MR `needs-human`.
+  verdict still has Act on findings, `agent-factory review` reuses the verdict and labels the MR `needs-human`.
 - **Decided: an agent never changes CI.** The host push refuses CI-file changes ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)).
 - **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
   `hgit` (`scripts/lib/git.sh`), and every one the TypeScript package makes through `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers

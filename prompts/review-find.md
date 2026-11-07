@@ -1,6 +1,6 @@
 # Review: find pass
 
-Default instructions for the find pass of `scripts/start-reviewer.sh` (#22, #39 Q4). A project replaces them by
+Default instructions for the find pass of the reviewer (`src/core/review/round.ts`; #22, #39 Q4). A project replaces them by
 pointing `FACTORY_REVIEW_FIND` at its own file (agent-platform, T10 #40).
 
 You are a fresh reviewer for one merge request. You find problems; a second, separate pass checks each one.

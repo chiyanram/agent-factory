@@ -1,0 +1,172 @@
+// verdicts — what the find pass found and how the verify pass sorted it (#22 Q1, Q2). Model output is data: every
+// field is checked, ids are renumbered F1…Fn (so a verdict can never match two findings), and a "code/" path prefix is
+// dropped (so a thread anchors). A finding the verify pass gives no verdict is kept as Consider, never dropped.
+// Nothing here posts: the post template (#126) makes every field inert.
+
+import { prop } from "../dispatch/records.js";
+import type { Result } from "../forge/api.js";
+
+export type Axis = "standards" | "spec";
+export type Kind = "rule" | "logic";
+export type Severity = "blocker" | "warning" | "nit";
+export type Bucket = "act_on" | "consider" | "noted" | "dismissed";
+
+export type Finding = {
+  readonly id: string;
+  readonly axis: Axis;
+  readonly kind: Kind;
+  readonly file: string;
+  readonly line: number;
+  readonly rule: string;
+  readonly severity: Severity;
+  readonly finding: string;
+  readonly fix: string;
+};
+
+export type Sorted = Finding & { readonly bucket: Bucket; readonly why: string };
+
+const FINDING_SCHEMA = {
+  type: "object",
+  required: ["id", "axis", "kind", "file", "line", "rule", "severity", "finding", "fix"],
+  properties: {
+    id: { type: "string" },
+    axis: { enum: ["standards", "spec"] },
+    kind: { enum: ["rule", "logic"] },
+    file: { type: "string" },
+    line: { type: "integer" },
+    rule: { type: "string" },
+    severity: { enum: ["blocker", "warning", "nit"] },
+    finding: { type: "string" },
+    fix: { type: "string" },
+  },
+};
+
+export const FIND_SCHEMA = JSON.stringify({
+  type: "object",
+  required: ["findings"],
+  properties: { findings: { type: "array", items: FINDING_SCHEMA } },
+});
+
+export const VERIFY_SCHEMA = JSON.stringify({
+  type: "object",
+  required: ["verdicts"],
+  properties: {
+    verdicts: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "bucket", "why"],
+        properties: {
+          id: { type: "string" },
+          bucket: { enum: ["act_on", "consider", "noted", "dismissed"] },
+          why: { type: "string" },
+        },
+      },
+    },
+  },
+});
+
+// a field that is not there, or not what it should be
+const BAD: unique symbol = Symbol("bad");
+type Bad = typeof BAD;
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | Bad {
+  return allowed.find((a) => a === value) ?? BAD;
+}
+
+function text(value: unknown): string | Bad {
+  return typeof value === "string" ? value : BAD;
+}
+
+type Fields = { readonly axis: Axis; readonly kind: Kind; readonly severity: Severity };
+
+function enums(raw: unknown): Fields | Bad {
+  const axis = oneOf(prop(raw, "axis"), ["standards", "spec"] as const);
+  const kind = oneOf(prop(raw, "kind"), ["rule", "logic"] as const);
+  const severity = oneOf(prop(raw, "severity"), ["blocker", "warning", "nit"] as const);
+  return axis === BAD || kind === BAD || severity === BAD ? BAD : { axis, kind, severity };
+}
+
+type Words = { readonly file: string; readonly rule: string; readonly finding: string; readonly fix: string };
+
+function words(raw: unknown): Words | Bad {
+  const file = text(prop(raw, "file"));
+  const rule = text(prop(raw, "rule"));
+  const finding = text(prop(raw, "finding"));
+  const fix = text(prop(raw, "fix"));
+  if (file === BAD || rule === BAD) {
+    return BAD;
+  }
+  return finding === BAD || fix === BAD ? BAD : { file: file.replace(/^(\.\/)?code\//, ""), rule, finding, fix };
+}
+
+function findingOf(raw: unknown, i: number): Finding | Bad {
+  const e = enums(raw);
+  const w = words(raw);
+  const line = prop(raw, "line");
+  if (e === BAD || w === BAD || !Number.isSafeInteger(line)) {
+    return BAD;
+  }
+  return { id: `F${i + 1}`, ...e, ...w, line: Number(line) };
+}
+
+function isFinding(f: Finding | Bad): f is Finding {
+  return f !== BAD;
+}
+
+// readFindings : the find pass's output, renumbered; one malformed finding fails the pass
+export function readFindings(output: unknown): Result<readonly Finding[]> {
+  const list = prop(output, "findings");
+  const found: readonly (Finding | Bad)[] = Array.isArray(list) ? list.map(findingOf) : [BAD];
+  return found.every(isFinding)
+    ? { kind: "ok", value: found.filter(isFinding) }
+    : { kind: "failed", reason: "the find pass gave a finding that is not well formed" };
+}
+
+export type Verdict = { readonly id: string; readonly bucket: Bucket; readonly why: string };
+
+function verdictOf(raw: unknown): Verdict | Bad {
+  const id = text(prop(raw, "id"));
+  const bucket = oneOf(prop(raw, "bucket"), ["act_on", "consider", "noted", "dismissed"] as const);
+  const why = text(prop(raw, "why"));
+  return id === BAD || bucket === BAD || why === BAD ? BAD : { id, bucket, why };
+}
+
+function isVerdict(v: Verdict | Bad): v is Verdict {
+  return v !== BAD;
+}
+
+// readVerdicts : the verify pass's output
+export function readVerdicts(output: unknown): Result<readonly Verdict[]> {
+  const list = prop(output, "verdicts");
+  const read: readonly (Verdict | Bad)[] = Array.isArray(list) ? list.map(verdictOf) : [BAD];
+  return read.every(isVerdict)
+    ? { kind: "ok", value: read.filter(isVerdict) }
+    : { kind: "failed", reason: "the verify pass gave a verdict that is not well formed" };
+}
+
+// sortFindings : every finding in exactly one bucket; one the verify pass skipped is Consider
+export function sortFindings(findings: readonly Finding[], verdicts: readonly Verdict[]): readonly Sorted[] {
+  return findings.map((f) => {
+    const v = verdicts.find((x) => x.id === f.id);
+    return { ...f, bucket: v?.bucket ?? "consider", why: v?.why ?? "the verify pass gave no verdict" };
+  });
+}
+
+export const BUCKET_NAMES: Readonly<Record<Bucket, string>> = {
+  act_on: "Act on",
+  consider: "Consider",
+  noted: "Noted",
+  dismissed: "Dismissed",
+};
+
+export type Counts = Readonly<Record<Bucket, number>>;
+
+export function counts(sorted: readonly Sorted[]): Counts {
+  const n = (b: Bucket) => sorted.filter((f) => f.bucket === b).length;
+  return { act_on: n("act_on"), consider: n("consider"), noted: n("noted"), dismissed: n("dismissed") };
+}
+
+export function countsLine(c: Counts): string {
+  return `Act on ${c.act_on} · Consider ${c.consider} · Noted ${c.noted} · Dismissed ${c.dismissed}`;
+}
