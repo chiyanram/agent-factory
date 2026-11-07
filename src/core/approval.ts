@@ -6,16 +6,17 @@
 // record goes to <home>/approvals/<project>/<ticket>.json with the spec's hash, who approved and when.
 //
 // The dispatcher (#103) starts work only while the spec still has the approved hash: a spec edited after approval is
-// stale, the same rule as a forge dismissing a PR approval when new commits arrive. The command line carries the hash
-// the human saw, and approve refuses when the spec on disk no longer has it, so nobody approves a spec that changed
-// between showing it and confirming it.
+// stale, the same rule as a forge dismissing a PR approval when new commits arrive. The command line carries the full
+// hash the human saw, and approve refuses unless the spec on disk has exactly that hash: a prefix could be matched by a
+// second, different spec in minutes (a review of the first version found a 12-character collision).
 //
 // The coordinator must never write the approvals folder itself: its settings deny it (#106). On the VM the folder
 // belongs to the separate `factory` OS user, and `approve` writes it through a narrow sudo rule (GUIDE §Set up identity).
+// The local store is the one this reads today; an issue-backed spec joins when the forge seam (#102) is ported.
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { checkSpec, plainName, readSpec, type Spec } from "./spec.js";
+import { checkSpec, plainName, readSpec, type Refused, type Spec, type Ticket } from "./spec.js";
 
 export type ApprovalRecord = {
   readonly version: 1;
@@ -26,7 +27,9 @@ export type ApprovalRecord = {
   readonly at: string;
 };
 
-export type Refused = { readonly kind: "refused"; readonly reason: string };
+export type Where = { readonly home: string } & Ticket;
+
+export type ApproveRequest = { readonly where: Where; readonly seenHash: string; readonly by: string; readonly at: string };
 
 export type Approve = { readonly kind: "approved"; readonly record: ApprovalRecord; readonly path: string } | Refused;
 
@@ -36,93 +39,89 @@ export type ApprovalState =
   | { readonly kind: "missing" }
   | Refused;
 
-// The shortest hash prefix a human may confirm: 12 hex characters is 48 bits, more than enough to tell two edits apart.
-export const MIN_CONFIRM = 12;
+const FULL_HASH = /^[0-9a-f]{64}$/;
 
-type Where = { readonly home: string; readonly project: string; readonly ticket: string };
+type PathResult = { readonly kind: "path"; readonly path: string } | Refused;
 
-export function approvalPath(where: Where): { readonly kind: "path"; readonly path: string } | Refused {
+export function approvalPath(where: Where): PathResult {
   return plainName(where.project) && plainName(where.ticket)
     ? { kind: "path", path: join(where.home, "approvals", where.project, `${where.ticket}.json`) }
     : { kind: "refused", reason: `a project and a ticket must be plain names, got ${JSON.stringify(where.project)} ${JSON.stringify(where.ticket)}` };
 }
 
-type Checked = { readonly kind: "spec"; readonly spec: Spec } | Refused | { readonly kind: "missing" };
+type Current = { readonly kind: "spec"; readonly spec: Spec } | { readonly kind: "missing" } | Refused;
 
-async function currentSpec(where: Where): Promise<Checked> {
-  const read = await readSpec({ kind: "local", root: join(where.home, "specs") }, where.project, where.ticket);
+async function currentSpec(where: Where): Promise<Current> {
+  const read = await readSpec({ store: { kind: "local", root: join(where.home, "specs") }, project: where.project, ticket: where.ticket });
   if (read.kind !== "found") {
-    return read;
+    return read.kind === "missing" ? { kind: "missing" } : read;
   }
   const checked = checkSpec(read.text);
-  return checked.kind === "ok"
-    ? { kind: "spec", spec: checked.spec }
-    : { kind: "refused", reason: `the spec is not ready: ${checked.problems.join("; ")}` };
+  return checked.kind === "ok" ? { kind: "spec", spec: checked.spec } : { kind: "refused", reason: `the spec is not ready: ${checked.problems.join("; ")}` };
 }
 
-function confirms(seen: string, actual: string): boolean {
-  return /^[0-9a-f]+$/.test(seen) && seen.length >= MIN_CONFIRM && actual.startsWith(seen);
+// confirmedSpec : the current spec, if it has exactly the hash the human confirmed.
+async function confirmedSpec(request: ApproveRequest): Promise<{ readonly kind: "spec"; readonly spec: Spec } | Refused> {
+  if (!FULL_HASH.test(request.seenHash)) {
+    return { kind: "refused", reason: "give the full 64-character spec hash that `agent-factory spec` printed" };
+  }
+  const current = await currentSpec(request.where);
+  if (current.kind !== "spec") {
+    return current.kind === "missing" ? { kind: "refused", reason: `there is no spec for ${request.where.project}/${request.where.ticket}` } : current;
+  }
+  return current.spec.hash === request.seenHash
+    ? current
+    : { kind: "refused", reason: `the spec's hash is now ${current.spec.hash}, not the one you confirmed: it changed; look at it again` };
 }
 
-// approve : records the human's approval of the spec they saw. Refuses a spec that is missing, breaks the template, or
-// no longer has the hash the human confirmed. The record is written to a temp file and renamed, so a reader never sees
-// half a record.
-export async function approve(where: Where, seenHash: string, by: string, at: string): Promise<Approve> {
-  const path = approvalPath(where);
+// writeRecord : the record, through a temp file and a rename so a reader never sees half of it. A failure is a
+// refusal, and the temp file is removed.
+async function writeRecord(path: string, record: ApprovalRecord): Promise<Approve> {
+  const temp = `${path}.${process.pid}.tmp`;
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o644 });
+    await rename(temp, path);
+    return { kind: "approved", record, path };
+  } catch (error: unknown) {
+    await rm(temp, { force: true }).catch(() => undefined);   // best effort: the temp may never have been made
+    return { kind: "refused", reason: `cannot write ${path}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+// approve : records the human's approval of the spec they saw.
+export async function approve(request: ApproveRequest): Promise<Approve> {
+  const path = approvalPath(request.where);
   if (path.kind === "refused") {
     return path;
   }
-  const current = await currentSpec(where);
-  switch (current.kind) {
-    case "missing":
-      return { kind: "refused", reason: `there is no spec for ${where.project}/${where.ticket}` };
-    case "refused":
-      return current;
-    case "spec":
-      break;
-    default: {
-      const unreachable: never = current;
-      return unreachable;
-    }
+  const confirmed = await confirmedSpec(request);
+  if (confirmed.kind === "refused") {
+    return confirmed;
   }
-  if (!confirms(seenHash.toLowerCase(), current.spec.hash)) {
-    return {
-      kind: "refused",
-      reason: `the spec's hash is ${current.spec.hash.slice(0, MIN_CONFIRM)}, not the ${seenHash} you confirmed: it changed, or the hash is shorter than ${MIN_CONFIRM}; look at it again`,
-    };
-  }
-  const record: ApprovalRecord = { version: 1, project: where.project, ticket: where.ticket, spec_hash: current.spec.hash, by, at };
-  await mkdir(dirname(path.path), { recursive: true });
-  const temp = `${path.path}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o644 });
-  await rename(temp, path.path);
-  return { kind: "approved", record, path: path.path };
+  const { project, ticket } = request.where;
+  return writeRecord(path.path, { version: 1, project, ticket, spec_hash: confirmed.spec.hash, by: request.by, at: request.at });
+}
+
+// The fields a record must hold, and the value each must have, so isRecord is a table, not a chain of conditions.
+function recordProblems(r: Readonly<Record<string, unknown>>, where: Where): readonly boolean[] {
+  return [
+    r.version === 1,
+    r.project === where.project,
+    r.ticket === where.ticket,
+    typeof r.spec_hash === "string" && FULL_HASH.test(r.spec_hash),
+    typeof r.by === "string",
+    typeof r.at === "string",
+  ];
 }
 
 function isRecord(value: unknown, where: Where): value is ApprovalRecord {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const r = value as Record<string, unknown>;
-  return (
-    r.version === 1 &&
-    r.project === where.project &&
-    r.ticket === where.ticket &&
-    typeof r.spec_hash === "string" &&
-    /^[0-9a-f]{64}$/.test(r.spec_hash) &&
-    typeof r.by === "string" &&
-    typeof r.at === "string"
-  );
+  return typeof value === "object" && value !== null && recordProblems(value as Record<string, unknown>, where).every(Boolean);
 }
 
-async function readRecord(path: string, where: Where): Promise<{ readonly kind: "record"; readonly record: ApprovalRecord } | Refused | { readonly kind: "missing" }> {
-  let text = "";
-  try {
-    text = await readFile(path, "utf8");
-  } catch (error: unknown) {
-    const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
-    return missing ? { kind: "missing" } : { kind: "refused", reason: `cannot read ${path}: ${String(error)}` };
-  }
+type Stored = { readonly kind: "record"; readonly record: ApprovalRecord } | { readonly kind: "missing" } | Refused;
+
+function parseRecord(text: string, path: string, where: Where): Stored {
   try {
     const parsed: unknown = JSON.parse(text);
     return isRecord(parsed, where) ? { kind: "record", record: parsed } : { kind: "refused", reason: `${path} is not an approval record for ${where.project}/${where.ticket}` };
@@ -131,29 +130,27 @@ async function readRecord(path: string, where: Where): Promise<{ readonly kind: 
   }
 }
 
+async function readRecord(path: string, where: Where): Promise<Stored> {
+  try {
+    return parseRecord(await readFile(path, "utf8"), path, where);
+  } catch (error: unknown) {
+    const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
+    return missing ? { kind: "missing" } : { kind: "refused", reason: `cannot read ${path}: ${String(error)}` };
+  }
+}
+
+function compare(record: ApprovalRecord, current: Current, where: Where): ApprovalState {
+  if (current.kind !== "spec") {
+    return current.kind === "missing" ? { kind: "refused", reason: `${where.project}/${where.ticket} is approved, but its spec is gone` } : current;
+  }
+  return current.spec.hash === record.spec_hash
+    ? { kind: "approved", record, spec: current.spec }
+    : { kind: "stale", approvedHash: record.spec_hash, currentHash: current.spec.hash };
+}
+
 // approvalState : what the dispatcher decides on. Approved only while the spec still has the approved hash.
 export async function approvalState(where: Where): Promise<ApprovalState> {
   const path = approvalPath(where);
-  if (path.kind === "refused") {
-    return path;
-  }
-  const record = await readRecord(path.path, where);
-  if (record.kind !== "record") {
-    return record;
-  }
-  const current = await currentSpec(where);
-  switch (current.kind) {
-    case "missing":
-      return { kind: "refused", reason: `${where.project}/${where.ticket} is approved, but its spec is gone` };
-    case "refused":
-      return current;
-    case "spec":
-      return current.spec.hash === record.record.spec_hash
-        ? { kind: "approved", record: record.record, spec: current.spec }
-        : { kind: "stale", approvedHash: record.record.spec_hash, currentHash: current.spec.hash };
-    default: {
-      const unreachable: never = current;
-      return unreachable;
-    }
-  }
+  const stored = path.kind === "path" ? await readRecord(path.path, where) : path;
+  return stored.kind === "record" ? compare(stored.record, await currentSpec(where), where) : stored;
 }

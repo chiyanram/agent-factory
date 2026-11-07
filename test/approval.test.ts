@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { approvalPath, approvalState, approve, MIN_CONFIRM } from "../src/core/approval.js";
+import { approvalPath, approvalState, approve } from "../src/core/approval.js";
 import { specHash } from "../src/core/spec.js";
 
 const SPEC = [
@@ -33,7 +33,7 @@ const writeSpec = (text: string): void => {
   mkdirSync(join(home, "specs", "ledger", "PROJ-123"), { recursive: true });
   writeFileSync(specFile(), text);
 };
-const seen = (text: string): string => specHash(text).slice(0, MIN_CONFIRM);
+const seen = (text: string): string => specHash(text);
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "factory-home-"));
@@ -43,7 +43,7 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 describe("approve", () => {
   it("records the approval with the spec's full hash, who and when", async () => {
     writeSpec(SPEC);
-    const result = await approve(where(), seen(SPEC), "ram", "2026-11-07T09:12:00Z");
+    const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "2026-11-07T09:12:00Z" });
     expect(result).toMatchObject({ kind: "approved", path: join(home, "approvals", "ledger", "PROJ-123.json") });
     const record = JSON.parse(readFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), "utf8"));
     expect(record).toEqual({ version: 1, project: "ledger", ticket: "PROJ-123", spec_hash: specHash(SPEC), by: "ram", at: "2026-11-07T09:12:00Z" });
@@ -53,34 +53,47 @@ describe("approve", () => {
     writeSpec(SPEC);
     const shown = seen(SPEC);
     writeSpec(SPEC.replace("409 Conflict", "423 Locked"));
-    const result = await approve(where(), shown, "ram", "t");
+    const result = await approve({ where: where(), seenHash: shown, by: "ram", at: "t" });
     expect(result).toMatchObject({ kind: "refused" });
     expect(result.kind === "refused" ? result.reason : "").toContain("look at it again");
     expect(existsSync(join(home, "approvals"))).toBe(false);
   });
 
-  it("refuses a confirmed hash shorter than 12 characters, or not hex", async () => {
+  it("refuses anything but the full 64-character hash: a prefix can be matched by a second spec", async () => {
     writeSpec(SPEC);
-    expect(await approve(where(), specHash(SPEC).slice(0, 8), "ram", "t")).toMatchObject({ kind: "refused" });
-    expect(await approve(where(), "zzzzzzzzzzzzzz", "ram", "t")).toMatchObject({ kind: "refused" });
+    for (const seenHash of [specHash(SPEC).slice(0, 12), specHash(SPEC).slice(0, 63), `${specHash(SPEC)}0`, "z".repeat(64), specHash(SPEC).toUpperCase()]) {
+      const result = await approve({ where: where(), seenHash, by: "ram", at: "t" });
+      expect(result).toMatchObject({ kind: "refused" });
+    }
+    expect(existsSync(join(home, "approvals"))).toBe(false);
+  });
+
+  it("returns a refusal, never a throw, when the record cannot be written, and leaves no temp file", async () => {
+    writeSpec(SPEC);
+    mkdirSync(join(home, "approvals"), { recursive: true });
+    writeFileSync(join(home, "approvals", "ledger"), "a file where the folder should be");
+    const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
+    expect(result).toMatchObject({ kind: "refused" });
+    expect(result.kind === "refused" ? result.reason : "").toContain("cannot write");
+    expect(readdirSync(join(home, "approvals"))).toEqual(["ledger"]);
   });
 
   it("refuses a spec that breaks the template, such as one with no acceptance criteria", async () => {
     const noCriteria = SPEC.replace("1. Renewing a reserved loan answers 409 Conflict.", "TBD");
     writeSpec(noCriteria);
-    const result = await approve(where(), seen(noCriteria), "ram", "t");
+    const result = await approve({ where: where(), seenHash: seen(noCriteria), by: "ram", at: "t" });
     expect(result.kind === "refused" ? result.reason : "").toContain("Acceptance criteria");
   });
 
   it("refuses a ticket with no spec, and a name that would leave the store", async () => {
-    expect(await approve(where(), "0".repeat(12), "ram", "t")).toMatchObject({ kind: "refused" });
-    expect(await approve({ home, project: "..", ticket: "x" }, "0".repeat(12), "ram", "t")).toMatchObject({ kind: "refused" });
+    expect(await approve({ where: where(), seenHash: "0".repeat(64), by: "ram", at: "t" })).toMatchObject({ kind: "refused" });
+    expect(await approve({ where: { home, project: "..", ticket: "x" }, seenHash: "0".repeat(64), by: "ram", at: "t" })).toMatchObject({ kind: "refused" });
     expect(approvalPath({ home, project: "ledger", ticket: "../../x" })).toMatchObject({ kind: "refused" });
   });
 
   it("leaves no temp file behind", async () => {
     writeSpec(SPEC);
-    await approve(where(), seen(SPEC), "ram", "t");
+    await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
     expect(readdirSync(join(home, "approvals", "ledger"))).toEqual(["PROJ-123.json"]);
   });
 });
@@ -88,7 +101,7 @@ describe("approve", () => {
 describe("approvalState", () => {
   it("is approved while the spec has the approved hash, and carries the spec", async () => {
     writeSpec(SPEC);
-    await approve(where(), seen(SPEC), "ram", "t");
+    await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
     const state = await approvalState(where());
     expect(state).toMatchObject({ kind: "approved", record: { by: "ram" } });
     expect(state.kind === "approved" ? state.spec.hash : "").toBe(specHash(SPEC));
@@ -96,14 +109,14 @@ describe("approvalState", () => {
 
   it("goes stale when the spec is edited after approval: nothing may start", async () => {
     writeSpec(SPEC);
-    await approve(where(), seen(SPEC), "ram", "t");
+    await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
     writeSpec(SPEC.replace("409 Conflict", "423 Locked"));
     expect(await approvalState(where())).toMatchObject({ kind: "stale", approvedHash: specHash(SPEC) });
   });
 
   it("stays approved through editor noise: line endings and trailing spaces", async () => {
     writeSpec(SPEC);
-    await approve(where(), seen(SPEC), "ram", "t");
+    await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
     writeSpec(`${SPEC.replace(/\n/g, "  \r\n")}\r\n`);
     expect(await approvalState(where())).toMatchObject({ kind: "approved" });
   });
@@ -129,7 +142,7 @@ describe("approvalState", () => {
 
   it("refuses an approval whose spec is gone", async () => {
     writeSpec(SPEC);
-    await approve(where(), seen(SPEC), "ram", "t");
+    await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
     rmSync(specFile());
     expect(await approvalState(where())).toMatchObject({ kind: "refused" });
   });
