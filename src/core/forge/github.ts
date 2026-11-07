@@ -5,7 +5,19 @@
 import type { Note } from "../notes.js";
 import { graphql, rest, type Client, type Done, type Result } from "./api.js";
 import { reader } from "./read.js";
-import { after, completeAll, done, nextCursor, nextPage, pages, rendered, text, unanchored, type Page, type RawOpen } from "./shared.js";
+import {
+  after,
+  completeAll,
+  done,
+  nextCursor,
+  nextPage,
+  pages,
+  rendered,
+  text,
+  unanchored,
+  type Page,
+  type RawOpen,
+} from "./shared.js";
 import type { Change, Changes, Forge, Level, OpenChange, Person, Pipeline } from "./types.js";
 
 export type GithubProject = { readonly owner: string; readonly name: string };
@@ -19,7 +31,9 @@ const ROLLUP: Readonly<Record<string, Pipeline>> = {
   EXPECTED: { kind: "running" },
 };
 
-export function pipeline(rollup: { readonly kind: "none" } | { readonly kind: "state"; readonly state: string }): Pipeline {
+export function pipeline(
+  rollup: { readonly kind: "none" } | { readonly kind: "state"; readonly state: string },
+): Pipeline {
   if (rollup.kind === "none") {
     return { kind: "none" };
   }
@@ -74,7 +88,11 @@ export function github(client: Client, project: GithubProject): Forge {
   const repo = `repos/${project.owner}/${project.name}`;
   const where = { owner: text(project.owner), name: text(project.name) };
 
-  async function query<T>(q: string, vars: Record<string, ReturnType<typeof text> | { kind: "int"; value: number }>, read: (data: unknown, r: ReturnType<typeof reader>) => T): Promise<Result<T>> {
+  async function query<T>(
+    q: string,
+    vars: Record<string, ReturnType<typeof text> | { kind: "int"; value: number }>,
+    read: (data: unknown, r: ReturnType<typeof reader>) => T,
+  ): Promise<Result<T>> {
     const data = await graphql(client, { query: q, variables: { ...where, ...vars } });
     if (data.kind === "failed") {
       return data;
@@ -107,20 +125,35 @@ export function github(client: Client, project: GithubProject): Forge {
     });
   }
 
-  async function note(input: { readonly number: number; readonly post: Parameters<Forge["note"]>[0]["post"] }): Promise<Done> {
+  async function note(input: {
+    readonly number: number;
+    readonly post: Parameters<Forge["note"]>[0]["post"];
+  }): Promise<Done> {
     const body = rendered(input.post);
     if (body.kind === "failed") {
       return body;
     }
-    return done(await rest(client, { path: `${repo}/issues/${input.number}/comments`, method: "POST", body: { kind: "json", value: { body: body.value } } }));
+    return done(
+      await rest(client, {
+        path: `${repo}/issues/${input.number}/comments`,
+        method: "POST",
+        body: { kind: "json", value: { body: body.value } },
+      }),
+    );
   }
 
   async function team(): Promise<Result<readonly Person[]>> {
     return pages((cursor) =>
-      query(COLLABORATORS, after(cursor), (data, r): Page<Person> => ({
-        items: r.list(data, "repository.collaborators.edges").map((e) => ({ name: r.text(e, "node.login"), level: level(r.text(e, "permission")), bot: false })),
-        next: nextCursor(r, data, "repository.collaborators.pageInfo"),
-      })),
+      query(
+        COLLABORATORS,
+        after(cursor),
+        (data, r): Page<Person> => ({
+          items: r
+            .list(data, "repository.collaborators.edges")
+            .map((e) => ({ name: r.text(e, "node.login"), level: level(r.text(e, "permission")), bot: false })),
+          next: nextCursor(r, data, "repository.collaborators.pageInfo"),
+        }),
+      ),
     );
   }
 
@@ -132,7 +165,11 @@ export function github(client: Client, project: GithubProject): Forge {
         head: r.text(node, "headRefOid"),
         draft: r.bool(node, "isDraft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "name")),
-        pipeline: pipeline(rollup === null || rollup === undefined ? { kind: "none" } : { kind: "state", state: r.text(rollup, "state") }),
+        pipeline: pipeline(
+          rollup === null || rollup === undefined
+            ? { kind: "none" }
+            : { kind: "state", state: r.text(rollup, "state") },
+        ),
         comments: r.list(node, "comments.nodes").map((n) => comment(r, n)),
       },
       more: r.bool(node, "comments.pageInfo.hasPreviousPage"),
@@ -143,10 +180,14 @@ export function github(client: Client, project: GithubProject): Forge {
 
   async function open(): Promise<Result<readonly OpenChange[]>> {
     const raws = await pages((cursor) =>
-      query(OPEN, after(cursor), (data, r): Page<RawOpen> => ({
-        items: r.list(data, "repository.pullRequests.nodes").map((n) => openNode(r, n)),
-        next: nextCursor(r, data, "repository.pullRequests.pageInfo"),
-      })),
+      query(
+        OPEN,
+        after(cursor),
+        (data, r): Page<RawOpen> => ({
+          items: r.list(data, "repository.pullRequests.nodes").map((n) => openNode(r, n)),
+          next: nextCursor(r, data, "repository.pullRequests.pageInfo"),
+        }),
+      ),
     );
     if (raws.kind === "failed") {
       return raws;
@@ -155,17 +196,26 @@ export function github(client: Client, project: GithubProject): Forge {
       query(EARLIER, { number: { kind: "int", value: number }, ...after(before, "before") }, (data, r) => ({
         notes: r.list(data, "repository.pullRequest.comments.nodes").map((n) => comment(r, n)),
         more: r.bool(data, "repository.pullRequest.comments.pageInfo.hasPreviousPage"),
-        start: r.bool(data, "repository.pullRequest.comments.pageInfo.hasPreviousPage") ? r.text(data, "repository.pullRequest.comments.pageInfo.startCursor") : "",
+        start: r.bool(data, "repository.pullRequest.comments.pageInfo.hasPreviousPage")
+          ? r.text(data, "repository.pullRequest.comments.pageInfo.startCursor")
+          : "",
       })),
     );
   }
 
-  async function claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>> {
+  async function claimed(input: {
+    readonly state: "opened" | "merged";
+    readonly label: string;
+  }): Promise<Result<readonly number[]>> {
     return pages((cursor) =>
-      query(byState(input.state), { label: text(input.label), ...after(cursor) }, (data, r): Page<number> => ({
-        items: r.list(data, "repository.pullRequests.nodes").map((n) => r.int(n, "number")),
-        next: nextCursor(r, data, "repository.pullRequests.pageInfo"),
-      })),
+      query(
+        byState(input.state),
+        { label: text(input.label), ...after(cursor) },
+        (data, r): Page<number> => ({
+          items: r.list(data, "repository.pullRequests.nodes").map((n) => r.int(n, "number")),
+          next: nextCursor(r, data, "repository.pullRequests.pageInfo"),
+        }),
+      ),
     );
   }
 
@@ -175,7 +225,10 @@ export function github(client: Client, project: GithubProject): Forge {
     async me() {
       const answer = await rest(client, { path: "user", method: "GET", body: { kind: "none" } });
       if (answer.kind === "failed") {
-        return { kind: "failed", reason: `${answer.reason} (a GitHub App token has no user: with an App, set FACTORY_IDENTITY=app)` };
+        return {
+          kind: "failed",
+          reason: `${answer.reason} (a GitHub App token has no user: with an App, set FACTORY_IDENTITY=app)`,
+        };
       }
       const r = reader("github user");
       return r.done(r.text(answer.value, "login"));
@@ -190,7 +243,11 @@ export function github(client: Client, project: GithubProject): Forge {
       return r.done(r.text(answer.value, "default_branch"));
     },
     async addLabel(input) {
-      const answer = await rest(client, { path: `${repo}/issues/${input.number}/labels`, method: "POST", body: { kind: "json", value: { labels: [input.label] } } });
+      const answer = await rest(client, {
+        path: `${repo}/issues/${input.number}/labels`,
+        method: "POST",
+        body: { kind: "json", value: { labels: [input.label] } },
+      });
       if (answer.kind === "failed") {
         return answer;
       }
@@ -200,12 +257,18 @@ export function github(client: Client, project: GithubProject): Forge {
       if (read.kind === "failed") {
         return read;
       }
-      return read.value ? { kind: "ok" } : { kind: "failed", reason: `github: #${input.number}: GitHub did not keep the label ${input.label}` };
+      return read.value
+        ? { kind: "ok" }
+        : { kind: "failed", reason: `github: #${input.number}: GitHub did not keep the label ${input.label}` };
     },
     // GitHub answers 404 when the label is already gone (a human removed it after the caller looked). That is a
     // release, so a failed DELETE counts only when the label is still on the pull request.
     async removeLabel(input) {
-      const removed = await rest(client, { path: `${repo}/issues/${input.number}/labels/${encodeURIComponent(input.label)}`, method: "DELETE", body: { kind: "none" } });
+      const removed = await rest(client, {
+        path: `${repo}/issues/${input.number}/labels/${encodeURIComponent(input.label)}`,
+        method: "DELETE",
+        body: { kind: "none" },
+      });
       if (removed.kind === "ok") {
         return { kind: "ok" };
       }
@@ -213,13 +276,22 @@ export function github(client: Client, project: GithubProject): Forge {
       if (now.kind === "failed") {
         return now;
       }
-      return now.value.labels.includes(input.label) ? { kind: "failed", reason: `github: #${input.number}: GitHub did not remove the label ${input.label}: ${removed.reason}` } : { kind: "ok" };
+      return now.value.labels.includes(input.label)
+        ? {
+            kind: "failed",
+            reason: `github: #${input.number}: GitHub did not remove the label ${input.label}: ${removed.reason}`,
+          }
+        : { kind: "ok" };
     },
     note,
     async notes(input) {
       return pages(async (cursor): Promise<Result<Page<Note>>> => {
         const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;
-        const answer = await rest(client, { path: `${repo}/issues/${input.number}/comments?per_page=100&page=${page}`, method: "GET", body: { kind: "none" } });
+        const answer = await rest(client, {
+          path: `${repo}/issues/${input.number}/comments?per_page=100&page=${page}`,
+          method: "GET",
+          body: { kind: "none" },
+        });
         if (answer.kind === "failed") {
           return answer;
         }
@@ -240,8 +312,14 @@ export function github(client: Client, project: GithubProject): Forge {
       }
       const head = input.change.anchor.kind === "github" ? input.change.anchor.head : input.change.sha;
       const value = { body: body.value, commit_id: head, path: input.at.file, line: input.at.line, side: "RIGHT" };
-      const anchored = await rest(client, { path: `${repo}/pulls/${input.change.number}/comments`, method: "POST", body: { kind: "json", value } });
-      return anchored.kind === "ok" ? { kind: "ok" } : note({ number: input.change.number, post: unanchored(input.post, input.at) });
+      const anchored = await rest(client, {
+        path: `${repo}/pulls/${input.change.number}/comments`,
+        method: "POST",
+        body: { kind: "json", value },
+      });
+      return anchored.kind === "ok"
+        ? { kind: "ok" }
+        : note({ number: input.change.number, post: unanchored(input.post, input.at) });
     },
     claimed,
     async changes(input): Promise<Result<Changes>> {
@@ -254,7 +332,9 @@ export function github(client: Client, project: GithubProject): Forge {
         return opened;
       }
       const merged = await claimed({ state: "merged", label: input.label });
-      return merged.kind === "ok" ? { kind: "ok", value: { team: people.value, open: opened.value, merged: merged.value } } : merged;
+      return merged.kind === "ok"
+        ? { kind: "ok", value: { team: people.value, open: opened.value, merged: merged.value } }
+        : merged;
     },
   };
 }

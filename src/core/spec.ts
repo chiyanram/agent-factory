@@ -32,7 +32,9 @@ export type Spec = {
   readonly hash: string;
 };
 
-export type SpecCheck = { readonly kind: "ok"; readonly spec: Spec } | { readonly kind: "invalid"; readonly problems: readonly string[] };
+export type SpecCheck =
+  | { readonly kind: "ok"; readonly spec: Spec }
+  | { readonly kind: "invalid"; readonly problems: readonly string[] };
 
 export type Refused = { readonly kind: "refused"; readonly reason: string };
 
@@ -86,7 +88,10 @@ export function template(ticket: string): string {
 // normalise : the text an approval is bound to. CRLF and CR become LF, trailing spaces and tabs go, blank lines at the
 // end go, and the text ends with one newline.
 export function normalise(text: string): string {
-  const lines = text.replace(/\r\n?/g, "\n").split("\n").map((line) => line.replace(/[ \t]+$/, ""));
+  const lines = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/, ""));
   return `${lines.join("\n").replace(/\n+$/, "")}\n`;
 }
 
@@ -96,11 +101,14 @@ export function specHash(text: string): string {
 
 // Characters that do not show, or show something other than what is there: C0 and C1 controls but tab and newline,
 // zero-width and joiner characters, bidi controls, invisible operators, the byte-order mark, and the tag block.
-const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]|[\u{e0000}-\u{e007f}]/u;
+const HIDDEN =
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]|[\u{e0000}-\u{e007f}]/u;
 
 function hiddenProblems(text: string): readonly string[] {
   return [
-    ...(HIDDEN.test(text) ? ["characters that do not show (control, zero-width, bidi, tag or byte-order mark): remove them"] : []),
+    ...(HIDDEN.test(text)
+      ? ["characters that do not show (control, zero-width, bidi, tag or byte-order mark): remove them"]
+      : []),
     ...(text.normalize("NFC") === text ? [] : ["text that is not in Unicode NFC form: save it normalised"]),
   ];
 }
@@ -141,7 +149,11 @@ function visibleLines(text: string): readonly Line[] {
   });
 }
 
-type Parsed = { readonly title: string; readonly sections: ReadonlyMap<string, string>; readonly duplicates: readonly string[] };
+type Parsed = {
+  readonly title: string;
+  readonly sections: ReadonlyMap<string, string>;
+  readonly duplicates: readonly string[];
+};
 
 // parse : the title (line 1 only) and the body under each visible "## Heading", plus any heading met twice.
 function parse(text: string): Parsed {
@@ -176,20 +188,36 @@ function numbered(body: string): readonly string[] {
     .filter(real);
 }
 
-type Fields = { readonly title: string; readonly intent: string; readonly criteria: readonly string[]; readonly design: string; readonly lane: string };
+type Fields = {
+  readonly title: string;
+  readonly intent: string;
+  readonly criteria: readonly string[];
+  readonly design: string;
+  readonly lane: string;
+};
 
 function fields(p: Parsed): Fields {
   const at = (name: string): string => p.sections.get(name) ?? "";
-  return { title: p.title, intent: at("intent"), criteria: numbered(at("acceptance criteria")), design: at("design"), lane: at("lane").toLowerCase() };
+  return {
+    title: p.title,
+    intent: at("intent"),
+    criteria: numbered(at("acceptance criteria")),
+    design: at("design"),
+    lane: at("lane").toLowerCase(),
+  };
 }
 
 function templateProblems(f: Fields, duplicates: readonly string[]): readonly string[] {
   return [
     ...(real(f.title) && !f.title.includes("<") ? [] : ["missing a first line '# <ticket>: <title>'"]),
     ...(real(f.intent) ? [] : ["missing an '## Intent' section in the person's own words"]),
-    ...(f.criteria.length > 0 ? [] : ["missing an '## Acceptance criteria' section with at least one real numbered criterion"]),
+    ...(f.criteria.length > 0
+      ? []
+      : ["missing an '## Acceptance criteria' section with at least one real numbered criterion"]),
     ...(real(f.design) ? [] : ["missing a '## Design' section: a link, or 'none'"]),
-    ...((LANES as readonly string[]).includes(f.lane) ? [] : [`missing a '## Lane' section: one of ${LANES.join(", ")}`]),
+    ...((LANES as readonly string[]).includes(f.lane)
+      ? []
+      : [`missing a '## Lane' section: one of ${LANES.join(", ")}`]),
     ...duplicates.map((d) => `the '## ${d}' section appears more than once`),
   ];
 }
@@ -202,7 +230,18 @@ export function checkSpec(raw: string): SpecCheck {
   const problems = [...hiddenProblems(text), ...templateProblems(f, parsed.duplicates)];
   return problems.length > 0
     ? { kind: "invalid", problems }
-    : { kind: "ok", spec: { title: f.title, intent: f.intent, criteria: f.criteria, design: f.design, lane: f.lane as Lane, text, hash: specHash(text) } };
+    : {
+        kind: "ok",
+        spec: {
+          title: f.title,
+          intent: f.intent,
+          criteria: f.criteria,
+          design: f.design,
+          lane: f.lane as Lane,
+          text,
+          hash: specHash(text),
+        },
+      };
 }
 
 export type SpecPath = { readonly kind: "path"; readonly path: string } | Refused;
@@ -210,7 +249,10 @@ export type SpecPath = { readonly kind: "path"; readonly path: string } | Refuse
 export function specPath(at: { readonly root: string } & Ticket): SpecPath {
   return plainTicket(at)
     ? { kind: "path", path: join(at.root, at.project, at.ticket, "spec.md") }
-    : { kind: "refused", reason: `a project and a ticket must be plain names, got ${JSON.stringify(at.project)} ${JSON.stringify(at.ticket)}` };
+    : {
+        kind: "refused",
+        reason: `a project and a ticket must be plain names, got ${JSON.stringify(at.project)} ${JSON.stringify(at.ticket)}`,
+      };
 }
 
 function missingFile(error: unknown): boolean {
@@ -225,7 +267,9 @@ async function readLocal(at: { readonly root: string } & Ticket): Promise<SpecRe
   try {
     return { kind: "found", text: await readFile(path.path, "utf8"), where: path.path };
   } catch (error: unknown) {
-    return missingFile(error) ? { kind: "missing", where: path.path } : { kind: "refused", reason: `cannot read ${path.path}: ${String(error)}` };
+    return missingFile(error)
+      ? { kind: "missing", where: path.path }
+      : { kind: "refused", reason: `cannot read ${path.path}: ${String(error)}` };
   }
 }
 
@@ -233,7 +277,10 @@ async function readLocal(at: { readonly root: string } & Ticket): Promise<SpecRe
 export function readSpec(request: { readonly store: SpecStore } & Ticket): Promise<SpecRead> {
   const { store } = request;
   if (!plainTicket(request)) {
-    return Promise.resolve({ kind: "refused", reason: `a project and a ticket must be plain names, got ${JSON.stringify(request.project)} ${JSON.stringify(request.ticket)}` });
+    return Promise.resolve({
+      kind: "refused",
+      reason: `a project and a ticket must be plain names, got ${JSON.stringify(request.project)} ${JSON.stringify(request.ticket)}`,
+    });
   }
   switch (store.kind) {
     case "local":

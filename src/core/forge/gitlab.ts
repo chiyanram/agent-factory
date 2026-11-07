@@ -9,7 +9,19 @@
 import type { Note } from "../notes.js";
 import { graphql, rest, type Client, type Done, type Result } from "./api.js";
 import { reader, type Reader } from "./read.js";
-import { after, completeAll, done, nextCursor, nextPage, pages, rendered, text, unanchored, type Page, type RawOpen } from "./shared.js";
+import {
+  after,
+  completeAll,
+  done,
+  nextCursor,
+  nextPage,
+  pages,
+  rendered,
+  text,
+  unanchored,
+  type Page,
+  type RawOpen,
+} from "./shared.js";
 import type { Change, ChangeState, Changes, Forge, Level, OpenChange, Person, Pipeline } from "./types.js";
 
 // Every pipeline status GitLab defines (PipelineStatusEnum). Anything else is unknown, never "none" (#124).
@@ -34,7 +46,9 @@ export type HeadPipeline = { readonly kind: "none" } | { readonly kind: "pipelin
 // pipeline : the status of the head pipeline. GitLab already gives only a pipeline for the diff head: its sha is the
 // head, or for a merged-results or merge-train pipeline the merge ref with the head as source_sha.
 export function pipeline(head: HeadPipeline): Pipeline {
-  return head.kind === "none" ? { kind: "none" } : (STATUS[head.status.toUpperCase()] ?? { kind: "unknown", raw: head.status });
+  return head.kind === "none"
+    ? { kind: "none" }
+    : (STATUS[head.status.toUpperCase()] ?? { kind: "unknown", raw: head.status });
 }
 
 // GitLab's access levels: 40 Maintainer, 50 Owner; 30 Developer; lower is a guest or less.
@@ -42,7 +56,12 @@ function level(access: number): Level {
   return access >= 40 ? "maintainer" : access >= 30 ? "developer" : "guest";
 }
 
-const STATES: Readonly<Record<string, ChangeState>> = { opened: "opened", locked: "opened", merged: "merged", closed: "closed" };
+const STATES: Readonly<Record<string, ChangeState>> = {
+  opened: "opened",
+  locked: "opened",
+  merged: "merged",
+  closed: "closed",
+};
 
 const COMMENT = "body createdAt author { username }";
 
@@ -70,14 +89,20 @@ function comment(r: Reader, node: unknown): Note {
 
 // GitLab's add_labels and remove_labels split on commas, so a label with a comma would touch two labels.
 function oneLabel(label: string): Done {
-  return label.includes(",") ? { kind: "failed", reason: `gitlab: a label must not contain a comma, got ${JSON.stringify(label)}` } : { kind: "ok" };
+  return label.includes(",")
+    ? { kind: "failed", reason: `gitlab: a label must not contain a comma, got ${JSON.stringify(label)}` }
+    : { kind: "ok" };
 }
 
 export function gitlab(client: Client, project: string): Forge {
   const base = `projects/${encodeURIComponent(project)}`;
   const none = { kind: "none" } as const;
 
-  async function query<T>(q: string, vars: Readonly<Record<string, ReturnType<typeof text>>>, read: (data: unknown, r: Reader) => T): Promise<Result<T>> {
+  async function query<T>(
+    q: string,
+    vars: Readonly<Record<string, ReturnType<typeof text>>>,
+    read: (data: unknown, r: Reader) => T,
+  ): Promise<Result<T>> {
     const data = await graphql(client, { query: q, variables: { project: text(project), ...vars } });
     if (data.kind === "failed") {
       return data;
@@ -89,7 +114,11 @@ export function gitlab(client: Client, project: string): Forge {
     return r.done(read(data.value, r));
   }
 
-  async function get(path: string, context: string, read: (value: unknown, r: Reader) => unknown): Promise<Result<unknown>> {
+  async function get(
+    path: string,
+    context: string,
+    read: (value: unknown, r: Reader) => unknown,
+  ): Promise<Result<unknown>> {
     const answer = await rest(client, { path, method: "GET", body: none });
     if (answer.kind === "failed") {
       return answer;
@@ -118,20 +147,36 @@ export function gitlab(client: Client, project: string): Forge {
       targetBranch: r.text(v, "target_branch"),
       labels: r.list(v, "labels").map((l) => r.text(l, "")),
       description: r.absent(v, "description") ? "" : r.text(v, "description"),
-      anchor: { kind: "gitlab", base: r.text(v, "diff_refs.base_sha"), start: r.text(v, "diff_refs.start_sha"), head: r.text(v, "diff_refs.head_sha") },
+      anchor: {
+        kind: "gitlab",
+        base: r.text(v, "diff_refs.base_sha"),
+        start: r.text(v, "diff_refs.start_sha"),
+        head: r.text(v, "diff_refs.head_sha"),
+      },
     });
   }
 
   async function discussion(number: number, value: unknown): Promise<Result<unknown>> {
-    return rest(client, { path: `${base}/merge_requests/${number}/discussions`, method: "POST", body: { kind: "json", value } });
+    return rest(client, {
+      path: `${base}/merge_requests/${number}/discussions`,
+      method: "POST",
+      body: { kind: "json", value },
+    });
   }
 
-  async function labels(input: { readonly number: number; readonly label: string }, key: "add_labels" | "remove_labels"): Promise<Result<readonly string[]>> {
+  async function labels(
+    input: { readonly number: number; readonly label: string },
+    key: "add_labels" | "remove_labels",
+  ): Promise<Result<readonly string[]>> {
     const one = oneLabel(input.label);
     if (one.kind === "failed") {
       return one;
     }
-    const answer = await rest(client, { path: `${base}/merge_requests/${input.number}`, method: "PUT", body: { kind: "json", value: { [key]: input.label } } });
+    const answer = await rest(client, {
+      path: `${base}/merge_requests/${input.number}`,
+      method: "PUT",
+      body: { kind: "json", value: { [key]: input.label } },
+    });
     if (answer.kind === "failed") {
       return answer;
     }
@@ -141,12 +186,22 @@ export function gitlab(client: Client, project: string): Forge {
 
   async function team(): Promise<Result<readonly Person[]>> {
     const all = await pages((cursor) =>
-      query(MEMBERS, after(cursor), (data, r): Page<Person | "none"> => ({
-        items: r.list(data, "project.projectMembers.nodes").map((n) =>
-          r.absent(n, "user") ? "none" : { name: r.text(n, "user.username"), level: level(r.int(n, "accessLevel.integerValue")), bot: r.at(n, "user.bot") === true },
-        ),
-        next: nextCursor(r, data, "project.projectMembers.pageInfo"),
-      })),
+      query(
+        MEMBERS,
+        after(cursor),
+        (data, r): Page<Person | "none"> => ({
+          items: r.list(data, "project.projectMembers.nodes").map((n) =>
+            r.absent(n, "user")
+              ? "none"
+              : {
+                  name: r.text(n, "user.username"),
+                  level: level(r.int(n, "accessLevel.integerValue")),
+                  bot: r.at(n, "user.bot") === true,
+                },
+          ),
+          next: nextCursor(r, data, "project.projectMembers.pageInfo"),
+        }),
+      ),
     );
     return all.kind === "ok" ? { kind: "ok", value: all.value.filter((p): p is Person => p !== "none") } : all;
   }
@@ -173,10 +228,14 @@ export function gitlab(client: Client, project: string): Forge {
 
   async function open(): Promise<Result<readonly OpenChange[]>> {
     const raws = await pages((cursor) =>
-      query(OPEN, after(cursor), (data, r): Page<RawOpen> => ({
-        items: r.list(data, "project.mergeRequests.nodes").map((n) => openNode(r, n)),
-        next: nextCursor(r, data, "project.mergeRequests.pageInfo"),
-      })),
+      query(
+        OPEN,
+        after(cursor),
+        (data, r): Page<RawOpen> => ({
+          items: r.list(data, "project.mergeRequests.nodes").map((n) => openNode(r, n)),
+          next: nextCursor(r, data, "project.mergeRequests.pageInfo"),
+        }),
+      ),
     );
     if (raws.kind === "failed") {
       return raws;
@@ -185,20 +244,34 @@ export function gitlab(client: Client, project: string): Forge {
       query(EARLIER, { iid: text(String(number)), ...after(before, "before") }, (data, r) => ({
         notes: r.list(data, "project.mergeRequest.notes.nodes").map((n) => comment(r, n)),
         more: r.bool(data, "project.mergeRequest.notes.pageInfo.hasPreviousPage"),
-        start: r.bool(data, "project.mergeRequest.notes.pageInfo.hasPreviousPage") ? r.text(data, "project.mergeRequest.notes.pageInfo.startCursor") : "",
+        start: r.bool(data, "project.mergeRequest.notes.pageInfo.hasPreviousPage")
+          ? r.text(data, "project.mergeRequest.notes.pageInfo.startCursor")
+          : "",
       })),
     );
   }
 
-  async function note(input: { readonly number: number; readonly post: Parameters<Forge["note"]>[0]["post"] }): Promise<Done> {
+  async function note(input: {
+    readonly number: number;
+    readonly post: Parameters<Forge["note"]>[0]["post"];
+  }): Promise<Done> {
     const body = rendered(input.post);
     if (body.kind === "failed") {
       return body;
     }
-    return done(await rest(client, { path: `${base}/merge_requests/${input.number}/notes`, method: "POST", body: { kind: "json", value: { body: body.value } } }));
+    return done(
+      await rest(client, {
+        path: `${base}/merge_requests/${input.number}/notes`,
+        method: "POST",
+        body: { kind: "json", value: { body: body.value } },
+      }),
+    );
   }
 
-  async function claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>> {
+  async function claimed(input: {
+    readonly state: "opened" | "merged";
+    readonly label: string;
+  }): Promise<Result<readonly number[]>> {
     const one = oneLabel(input.label);
     if (one.kind === "failed") {
       return one;
@@ -233,14 +306,18 @@ export function gitlab(client: Client, project: string): Forge {
       if (after.kind === "failed") {
         return after;
       }
-      return after.value.includes(input.label) ? { kind: "ok" } : { kind: "failed", reason: `gitlab: !${input.number}: GitLab did not keep the label ${input.label}` };
+      return after.value.includes(input.label)
+        ? { kind: "ok" }
+        : { kind: "failed", reason: `gitlab: !${input.number}: GitLab did not keep the label ${input.label}` };
     },
     async removeLabel(input) {
       const after = await labels(input, "remove_labels");
       if (after.kind === "failed") {
         return after;
       }
-      return after.value.includes(input.label) ? { kind: "failed", reason: `gitlab: !${input.number}: GitLab did not remove the label ${input.label}` } : { kind: "ok" };
+      return after.value.includes(input.label)
+        ? { kind: "failed", reason: `gitlab: !${input.number}: GitLab did not remove the label ${input.label}` }
+        : { kind: "ok" };
     },
     note,
     // every comment, oldest first, every page: an MR with many notes must not push the reviewer's rounds out of view
@@ -256,7 +333,11 @@ export function gitlab(client: Client, project: string): Forge {
         const batch = r.list(answer.value, "");
         const notes = batch
           .filter((n) => r.at(n, "system") !== true)
-          .map((n) => ({ body: r.text(n, "body"), author: { name: r.absent(n, "author") ? "" : r.text(n, "author.username") }, at: r.text(n, "created_at") }));
+          .map((n) => ({
+            body: r.text(n, "body"),
+            author: { name: r.absent(n, "author") ? "" : r.text(n, "author.username") },
+            at: r.text(n, "created_at"),
+          }));
         return r.done({ items: notes, next: nextPage(batch.length === 100, page) });
       });
     },
@@ -270,7 +351,14 @@ export function gitlab(client: Client, project: string): Forge {
       if (a.kind !== "gitlab") {
         return { kind: "failed", reason: "gitlab: the change was not read from GitLab, so it has no diff refs" };
       }
-      const position = { position_type: "text", base_sha: a.base, start_sha: a.start, head_sha: a.head, new_path: input.at.file, new_line: input.at.line };
+      const position = {
+        position_type: "text",
+        base_sha: a.base,
+        start_sha: a.start,
+        head_sha: a.head,
+        new_path: input.at.file,
+        new_line: input.at.line,
+      };
       const anchored = await discussion(input.change.number, { body: body.value, position });
       if (anchored.kind === "ok") {
         return { kind: "ok" };
@@ -289,7 +377,9 @@ export function gitlab(client: Client, project: string): Forge {
         return opened;
       }
       const merged = await claimed({ state: "merged", label: input.label });
-      return merged.kind === "ok" ? { kind: "ok", value: { team: people.value, open: opened.value, merged: merged.value } } : merged;
+      return merged.kind === "ok"
+        ? { kind: "ok", value: { team: people.value, open: opened.value, merged: merged.value } }
+        : merged;
     },
   };
 }

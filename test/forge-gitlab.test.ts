@@ -10,9 +10,26 @@ const post: Post = { seat: "reviewer", title: "Act on F1", fields: [], items: []
 
 const page = (hasNextPage: boolean, endCursor = "c1") => ({ hasNextPage, endCursor: hasNextPage ? endCursor : null });
 const members = (nodes: readonly [string | null, number, boolean?][], more = false) =>
-  ok({ data: { project: { projectMembers: { pageInfo: page(more), nodes: nodes.map(([u, a, bot]) => ({ user: u === null ? null : { username: u, bot: bot === true }, accessLevel: { integerValue: a } })) } } } });
+  ok({
+    data: {
+      project: {
+        projectMembers: {
+          pageInfo: page(more),
+          nodes: nodes.map(([u, a, bot]) => ({
+            user: u === null ? null : { username: u, bot: bot === true },
+            accessLevel: { integerValue: a },
+          })),
+        },
+      },
+    },
+  });
 const note = (body: string, at: string, username = "ram") => ({ body, createdAt: at, author: { username } });
-type MrOptions = { readonly pipeline?: unknown; readonly labels?: readonly string[]; readonly notes?: readonly unknown[]; readonly older?: string };
+type MrOptions = {
+  readonly pipeline?: unknown;
+  readonly labels?: readonly string[];
+  readonly notes?: readonly unknown[];
+  readonly older?: string;
+};
 const mr = (iid: number, o: MrOptions = {}) => ({
   iid: String(iid),
   draft: true,
@@ -21,12 +38,21 @@ const mr = (iid: number, o: MrOptions = {}) => ({
   headPipeline: o.pipeline === undefined ? null : o.pipeline,
   notes: { pageInfo: { hasPreviousPage: o.older !== undefined, startCursor: o.older ?? null }, nodes: o.notes ?? [] },
 });
-const open = (nodes: readonly unknown[], more = false) => ok({ data: { project: { mergeRequests: { pageInfo: page(more, "m1"), nodes } } } });
+const open = (nodes: readonly unknown[], more = false) =>
+  ok({ data: { project: { mergeRequests: { pageInfo: page(more, "m1"), nodes } } } });
 
 describe("pipeline (#124)", () => {
   it("maps every GitLab status, in any case", () => {
     const at = (status: string) => pipeline({ kind: "pipeline", status }).kind;
-    for (const s of ["CREATED", "WAITING_FOR_RESOURCE", "PREPARING", "WAITING_FOR_CALLBACK", "PENDING", "RUNNING", "SCHEDULED"]) {
+    for (const s of [
+      "CREATED",
+      "WAITING_FOR_RESOURCE",
+      "PREPARING",
+      "WAITING_FOR_CALLBACK",
+      "PENDING",
+      "RUNNING",
+      "SCHEDULED",
+    ]) {
       expect(at(s)).toBe("running");
     }
     expect(at("success")).toBe("success");
@@ -46,8 +72,20 @@ describe("pipeline (#124)", () => {
 describe("changes", () => {
   it("reads members by access level, open merge requests and merged claims", async () => {
     const f = fake("gitlab", [
-      members([["ann", 50], ["dev", 30], ["rep", 20], [null, 40], ["project_1_bot", 40, true]]),
-      open([mr(4, { pipeline: { status: "RUNNING" }, labels: ["agent::claimed"], notes: [note("[writer] OPEN: which port?", "2026-11-02T12:00:00Z")] })]),
+      members([
+        ["ann", 50],
+        ["dev", 30],
+        ["rep", 20],
+        [null, 40],
+        ["project_1_bot", 40, true],
+      ]),
+      open([
+        mr(4, {
+          pipeline: { status: "RUNNING" },
+          labels: ["agent::claimed"],
+          notes: [note("[writer] OPEN: which port?", "2026-11-02T12:00:00Z")],
+        }),
+      ]),
       ok([{ iid: 9 }]),
     ]);
     const result = await gitlab(f.client, project).changes({ label: "agent::claimed" });
@@ -74,13 +112,28 @@ describe("changes", () => {
       },
     });
     expect(field(f.calls[0], "project")).toBe(project);
-    expect(f.calls[0]!.args.join(" ")).toContain("relations: [DIRECT, INHERITED, INVITED_GROUPS, SHARED_INTO_ANCESTORS]");
+    expect(f.calls[0]!.args.join(" ")).toContain(
+      "relations: [DIRECT, INHERITED, INVITED_GROUPS, SHARED_INTO_ANCESTORS]",
+    );
     expect(f.calls[1]!.args.join(" ")).toContain("filter: ONLY_COMMENTS");
-    expect(f.calls[2]!.args[2]).toBe(`${base}/merge_requests?state=merged&labels=agent%3A%3Aclaimed&per_page=100&page=1`);
+    expect(f.calls[2]!.args[2]).toBe(
+      `${base}/merge_requests?state=merged&labels=agent%3A%3Aclaimed&per_page=100&page=1`,
+    );
   });
 
   it("pages members and merge requests to the end, and reads notes before the newest 100", async () => {
-    const older = { data: { project: { mergeRequest: { notes: { pageInfo: { hasPreviousPage: false, startCursor: "s0" }, nodes: [note("[coordinator] OPEN: ok?", "2026-11-01T00:00:00Z")] } } } } };
+    const older = {
+      data: {
+        project: {
+          mergeRequest: {
+            notes: {
+              pageInfo: { hasPreviousPage: false, startCursor: "s0" },
+              nodes: [note("[coordinator] OPEN: ok?", "2026-11-01T00:00:00Z")],
+            },
+          },
+        },
+      },
+    };
     const f = fake("gitlab", [
       members([["ann", 40]], true),
       members([["late", 30]]),
@@ -104,13 +157,27 @@ describe("changes", () => {
 
   it("fails on a missing project and on a GraphQL error", async () => {
     const missing = fake("gitlab", [ok({ data: { project: null } })]);
-    expect(await gitlab(missing.client, project).changes({ label: "l" })).toMatchObject({ kind: "failed", reason: expect.stringContaining("no project aruvii/agent-platform") });
+    expect(await gitlab(missing.client, project).changes({ label: "l" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("no project aruvii/agent-platform"),
+    });
     const error = fake("gitlab", [ok({ errors: [{ message: "Field must have selections" }] })]);
-    expect(await gitlab(error.client, project).changes({ label: "l" })).toMatchObject({ kind: "failed", reason: expect.stringContaining("GraphQL: Field must have selections") });
+    expect(await gitlab(error.client, project).changes({ label: "l" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("GraphQL: Field must have selections"),
+    });
   });
 });
 
-const MR = { state: "opened", sha: "h1", source_branch: "feat/x", target_branch: "main", labels: ["agent::claimed"], description: null, diff_refs: { base_sha: "b", start_sha: "s", head_sha: "h1" } };
+const MR = {
+  state: "opened",
+  sha: "h1",
+  source_branch: "feat/x",
+  target_branch: "main",
+  labels: ["agent::claimed"],
+  description: null,
+  diff_refs: { base_sha: "b", start_sha: "s", head_sha: "h1" },
+};
 
 describe("single calls", () => {
   it("change maps its fields; locked reads as opened; an unknown state fails", async () => {
@@ -118,38 +185,97 @@ describe("single calls", () => {
     const forge = gitlab(f.client, project);
     expect(await forge.change({ number: 12 })).toEqual({
       kind: "ok",
-      value: { number: 12, state: "opened", sha: "h1", sourceBranch: "feat/x", targetBranch: "main", labels: ["agent::claimed"], description: "", anchor: { kind: "gitlab", base: "b", start: "s", head: "h1" } },
+      value: {
+        number: 12,
+        state: "opened",
+        sha: "h1",
+        sourceBranch: "feat/x",
+        targetBranch: "main",
+        labels: ["agent::claimed"],
+        description: "",
+        anchor: { kind: "gitlab", base: "b", start: "s", head: "h1" },
+      },
     });
     expect(await forge.change({ number: 12 })).toMatchObject({ value: { state: "opened" } });
-    expect(await forge.change({ number: 12 })).toMatchObject({ kind: "failed", reason: expect.stringContaining("archived") });
+    expect(await forge.change({ number: 12 })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("archived"),
+    });
   });
 
   it("addLabel and removeLabel check what GitLab kept, and refuse a label with a comma", async () => {
     const f = fake("gitlab", [ok({ ...MR, labels: [] }), ok(MR), ok(MR)]);
     const forge = gitlab(f.client, project);
-    expect(await forge.addLabel({ number: 12, label: "agent::claimed" })).toMatchObject({ kind: "failed", reason: expect.stringContaining("did not keep") });
+    expect(await forge.addLabel({ number: 12, label: "agent::claimed" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("did not keep"),
+    });
     expect(await forge.addLabel({ number: 12, label: "agent::claimed" })).toEqual({ kind: "ok" });
     expect(JSON.parse(f.calls[1]!.stdin)).toEqual({ add_labels: "agent::claimed" });
-    expect(await forge.removeLabel({ number: 12, label: "agent::claimed" })).toMatchObject({ kind: "failed", reason: expect.stringContaining("did not remove") });
-    expect(await forge.addLabel({ number: 12, label: "a,b" })).toMatchObject({ kind: "failed", reason: expect.stringContaining("comma") });
+    expect(await forge.removeLabel({ number: 12, label: "agent::claimed" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("did not remove"),
+    });
+    expect(await forge.addLabel({ number: 12, label: "a,b" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("comma"),
+    });
     expect(f.calls).toHaveLength(3);
   });
 
   it("notes reads every page and leaves out GitLab's system notes, which would read as the developer's reply (#128)", async () => {
-    const hundred = Array.from({ length: 100 }, (_, i) => ({ body: `n${i}`, author: { username: "a" }, created_at: "2026-11-01T00:00:00Z", system: i === 0 }));
-    const f = fake("gitlab", [ok(hundred), ok([{ body: "added ~agent::claimed label", author: { username: "ram" }, created_at: "2026-11-02T00:00:00Z", system: true }])]);
+    const hundred = Array.from({ length: 100 }, (_, i) => ({
+      body: `n${i}`,
+      author: { username: "a" },
+      created_at: "2026-11-01T00:00:00Z",
+      system: i === 0,
+    }));
+    const f = fake("gitlab", [
+      ok(hundred),
+      ok([
+        {
+          body: "added ~agent::claimed label",
+          author: { username: "ram" },
+          created_at: "2026-11-02T00:00:00Z",
+          system: true,
+        },
+      ]),
+    ]);
     const notes = await gitlab(f.client, project).notes({ number: 12 });
     expect(notes.kind === "ok" ? notes.value.length : 0).toBe(99);
-    expect(f.calls[1]!.args[2]).toBe(`${base}/merge_requests/12/notes?sort=asc&order_by=created_at&per_page=100&page=2`);
+    expect(f.calls[1]!.args[2]).toBe(
+      `${base}/merge_requests/12/notes?sort=asc&order_by=created_at&per_page=100&page=2`,
+    );
   });
 
   it("lineFinding anchors to the diff refs; when GitLab refuses the line, an unanchored thread names file:line after the seat prefix", async () => {
-    const change: Change = { number: 12, state: "opened", sha: "h1", sourceBranch: "x", targetBranch: "main", labels: [], description: "", anchor: { kind: "gitlab", base: "b", start: "s", head: "h1" } };
-    const f = fake("gitlab", [{ status: 400, body: { message: "line_code can not be blank" } }, { status: 201, body: { id: "d2" } }]);
-    expect(await gitlab(f.client, project).lineFinding({ change, at: { file: "src/A.java", line: 400 }, post })).toEqual({ kind: "ok" });
+    const change: Change = {
+      number: 12,
+      state: "opened",
+      sha: "h1",
+      sourceBranch: "x",
+      targetBranch: "main",
+      labels: [],
+      description: "",
+      anchor: { kind: "gitlab", base: "b", start: "s", head: "h1" },
+    };
+    const f = fake("gitlab", [
+      { status: 400, body: { message: "line_code can not be blank" } },
+      { status: 201, body: { id: "d2" } },
+    ]);
+    expect(
+      await gitlab(f.client, project).lineFinding({ change, at: { file: "src/A.java", line: 400 }, post }),
+    ).toEqual({ kind: "ok" });
     expect(JSON.parse(f.calls[0]!.stdin)).toEqual({
       body: "[reviewer] Act on F1",
-      position: { position_type: "text", base_sha: "b", start_sha: "s", head_sha: "h1", new_path: "src/A.java", new_line: 400 },
+      position: {
+        position_type: "text",
+        base_sha: "b",
+        start_sha: "s",
+        head_sha: "h1",
+        new_path: "src/A.java",
+        new_line: 400,
+      },
     });
     expect(JSON.parse(f.calls[1]!.stdin)).toEqual({ body: "[reviewer] Act on F1\n\n- at: src/A.java:400" });
   });

@@ -18,7 +18,12 @@ export type Failed = { readonly kind: "failed"; readonly reason: string };
 export type Result<T> = { readonly kind: "ok"; readonly value: T } | Failed;
 export type Done = { readonly kind: "ok" } | Failed;
 
-export type Call = { readonly bin: string; readonly args: readonly string[]; readonly stdin: string; readonly env: NodeJS.ProcessEnv };
+export type Call = {
+  readonly bin: string;
+  readonly args: readonly string[];
+  readonly stdin: string;
+  readonly env: NodeJS.ProcessEnv;
+};
 export type Exit = { readonly code: number; readonly stdout: string; readonly stderr: string };
 // Runs one CLI call. The real one is runProcess; a test passes its own.
 export type Runner = (call: Call) => Promise<Exit>;
@@ -40,17 +45,24 @@ export type Method = "GET" | "POST" | "PUT" | "DELETE";
 export type Body = { readonly kind: "json"; readonly value: unknown } | { readonly kind: "none" };
 export type RestRequest = { readonly path: string; readonly method: Method; readonly body: Body };
 // GraphQL variables go in as -f (text) or -F (whole numbers) fields, never into the query text.
-export type Variable = { readonly kind: "text"; readonly value: string } | { readonly kind: "int"; readonly value: number };
+export type Variable =
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "int"; readonly value: number };
 export type GraphqlRequest = { readonly query: string; readonly variables: Readonly<Record<string, Variable>> };
 
 export type Answer = { readonly status: number; readonly headers: ReadonlyMap<string, string>; readonly body: string };
 
 export const runProcess: Runner = (call) =>
   new Promise((resolve) => {
-    const child = execFile(call.bin, [...call.args], { env: call.env, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
-      const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1;
-      resolve({ code, stdout, stderr: stderr.length > 0 || error === null ? stderr : error.message });
-    });
+    const child = execFile(
+      call.bin,
+      [...call.args],
+      { env: call.env, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1;
+        resolve({ code, stdout, stderr: stderr.length > 0 || error === null ? stderr : error.message });
+      },
+    );
     // a CLI that exits without reading its input closes the pipe; its exit already says what happened
     child.stdin?.on("error", () => undefined);
     child.stdin?.end(call.stdin);
@@ -99,7 +111,10 @@ export function limited(answer: Answer): boolean {
     return true;
   }
   const h = answer.headers;
-  return answer.status === 403 && (h.has("retry-after") || h.get("x-ratelimit-remaining") === "0" || limitedBody(answer.body));
+  return (
+    answer.status === 403 &&
+    (h.has("retry-after") || h.get("x-ratelimit-remaining") === "0" || limitedBody(answer.body))
+  );
 }
 
 // The longest one wait may be: a poll that waits longer is better failing loudly after its tries.
@@ -122,17 +137,26 @@ function graphqlLimited(answer: Answer): boolean {
     return false;
   }
   const errors = (parsed.value as { errors?: unknown }).errors;
-  return Array.isArray(errors) && errors.some((e) => typeof e === "object" && e !== null && (e as { type?: unknown }).type === "RATE_LIMITED");
+  return (
+    Array.isArray(errors) &&
+    errors.some((e) => typeof e === "object" && e !== null && (e as { type?: unknown }).type === "RATE_LIMITED")
+  );
 }
 
-type Attempt = { readonly kind: "answer"; readonly answer: Answer } | { readonly kind: "retry"; readonly answer: Answer } | Failed;
+type Attempt =
+  | { readonly kind: "answer"; readonly answer: Answer }
+  | { readonly kind: "retry"; readonly answer: Answer }
+  | Failed;
 
 function outcome(client: Client, args: readonly string[], answer: Answer): Attempt {
   if (limited(answer) || (answer.status === 200 && graphqlLimited(answer))) {
     return { kind: "retry", answer };
   }
   if (answer.status < 200 || answer.status > 299) {
-    return { kind: "failed", reason: `${client.name}: HTTP ${answer.status} on ${args[0] ?? ""}: ${answer.body.slice(0, 200)}` };
+    return {
+      kind: "failed",
+      reason: `${client.name}: HTTP ${answer.status} on ${args[0] ?? ""}: ${answer.body.slice(0, 200)}`,
+    };
   }
   return { kind: "answer", answer };
 }
@@ -155,7 +179,10 @@ async function send(client: Client, args: readonly string[], stdin: string): Pro
       return result.kind === "answer" ? { kind: "ok", value: result.answer } : result;
     }
     if (tries >= client.maxTries) {
-      return { kind: "failed", reason: `${client.name}: HTTP ${result.answer.status} after ${client.maxTries} tries, rate limited: ${args[0] ?? ""}` };
+      return {
+        kind: "failed",
+        reason: `${client.name}: HTTP ${result.answer.status} after ${client.maxTries} tries, rate limited: ${args[0] ?? ""}`,
+      };
     }
     await client.sleep(waitSeconds(result.answer.headers, client.now()));
   }

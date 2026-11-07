@@ -16,7 +16,10 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
       const started = await box.start(full);
       expect(started.kind).toBe("started");
       if (started.kind !== "started") return;
-      const ran = await box.run({ session: started.session, command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } });
+      const ran = await box.run({
+        session: started.session,
+        command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 },
+      });
       expect(ran).toMatchObject({ kind: "exited", code: 0 });
       await box.stop(started.session);
     });
@@ -26,7 +29,10 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
       const started = await box.start(full);
       if (started.kind !== "started") throw new Error("start failed");
       await box.stop(started.session);
-      const ran = await box.run({ session: started.session, command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } });
+      const ran = await box.run({
+        session: started.session,
+        command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 },
+      });
       expect(ran.kind).toBe("failed");
     });
 
@@ -45,7 +51,10 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
       if (one.kind !== "started" || two.kind !== "started") throw new Error("start failed");
       expect(one.session.id).not.toBe(two.session.id);
       await box.stop(one.session);
-      const ran = await box.run({ session: two.session, command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } });
+      const ran = await box.run({
+        session: two.session,
+        command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 },
+      });
       expect(ran).toMatchObject({ kind: "exited", code: 0 });
       await box.stop(two.session);
     });

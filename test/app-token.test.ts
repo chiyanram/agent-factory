@@ -22,7 +22,9 @@ function fakeGithub(answers: Record<string, { status: number; body: unknown }>):
   const http: Http = async (request) => {
     seen.push(request);
     const hit = answers[`${request.method} ${request.url.replace("https://api.github.com/", "")}`];
-    return hit === undefined ? { kind: "ok", value: { status: 599, body: "no fake" } } : { kind: "ok", value: { status: hit.status, body: JSON.stringify(hit.body) } };
+    return hit === undefined
+      ? { kind: "ok", value: { status: 599, body: "no fake" } }
+      : { kind: "ok", value: { status: hit.status, body: JSON.stringify(hit.body) } };
   };
   return { http, seen };
 }
@@ -30,7 +32,10 @@ function fakeGithub(answers: Record<string, { status: number; body: unknown }>):
 const GITHUB = {
   "GET app": { status: 200, body: { slug: "ledger-factory" } },
   "GET repos/chiyanram/ledger/installation": { status: 200, body: { id: 77 } },
-  "POST app/installations/77/access_tokens": { status: 201, body: { token: "ghs_minted0123456789abcd", expires_at: "2027-01-15T09:00:00Z" } },
+  "POST app/installations/77/access_tokens": {
+    status: 201,
+    body: { token: "ghs_minted0123456789abcd", expires_at: "2027-01-15T09:00:00Z" },
+  },
 };
 
 describe("jwt", () => {
@@ -38,8 +43,14 @@ describe("jwt", () => {
     const token = jwt({ config, now: NOW });
     expect(token.kind).toBe("ok");
     const [head, body, signature] = (token.kind === "ok" ? token.value : "").split(".");
-    expect(createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, Buffer.from(signature!, "base64url"))).toBe(true);
-    expect(JSON.parse(Buffer.from(body!, "base64url").toString())).toEqual({ iat: NOW - 60, exp: NOW + 540, iss: "123" });
+    expect(
+      createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, Buffer.from(signature!, "base64url")),
+    ).toBe(true);
+    expect(JSON.parse(Buffer.from(body!, "base64url").toString())).toEqual({
+      iat: NOW - 60,
+      exp: NOW + 540,
+      iss: "123",
+    });
   });
 
   it("a key that is not a private key fails, never throws", () => {
@@ -48,11 +59,20 @@ describe("jwt", () => {
 });
 
 describe("mint", () => {
-  const setup = (http: Http, now = NOW) => ({ config, project: "chiyanram/ledger", http, now, cacheDir: join(home, "cache") });
+  const setup = (http: Http, now = NOW) => ({
+    config,
+    project: "chiyanram/ledger",
+    http,
+    now,
+    cacheDir: join(home, "cache"),
+  });
 
   it("mints a token scoped to the one repository, with the App's [bot] login, and caches it mode 600", async () => {
     const gh = fakeGithub(GITHUB);
-    expect(await mint(setup(gh.http))).toEqual({ kind: "ok", value: { token: "ghs_minted0123456789abcd", login: "ledger-factory[bot]", expiresAt: "2027-01-15T09:00:00Z" } });
+    expect(await mint(setup(gh.http))).toEqual({
+      kind: "ok",
+      value: { token: "ghs_minted0123456789abcd", login: "ledger-factory[bot]", expiresAt: "2027-01-15T09:00:00Z" },
+    });
     expect(JSON.parse(gh.seen[2]!.body)).toEqual({ repositories: ["ledger"] });
     expect(gh.seen[0]!.headers.Authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
     expect(statSync(join(home, "cache", "123-chiyanram%2Fledger.json")).mode & 0o777).toBe(0o600);
@@ -70,7 +90,10 @@ describe("mint", () => {
   });
 
   it("never serves one project's cached token to another, even when their names share a file name once flattened", async () => {
-    await mint({ ...setup(fakeGithub({ ...GITHUB, "GET repos/a_b/c/installation": { status: 200, body: { id: 77 } } }).http), project: "a_b/c" });
+    await mint({
+      ...setup(fakeGithub({ ...GITHUB, "GET repos/a_b/c/installation": { status: 200, body: { id: 77 } } }).http),
+      project: "a_b/c",
+    });
     const other = fakeGithub({ ...GITHUB, "GET repos/a/b_c/installation": { status: 200, body: { id: 77 } } });
     await mint({ ...setup(other.http), project: "a/b_c" });
     expect(other.seen).toHaveLength(3);
@@ -78,17 +101,34 @@ describe("mint", () => {
   });
 
   it("fails when GitHub gives no installation id, and tells a 404 on the App from one on the installation", async () => {
-    expect(await mint(setup(fakeGithub({ ...GITHUB, "GET repos/chiyanram/ledger/installation": { status: 200, body: {} } }).http))).toMatchObject({ kind: "failed", reason: expect.stringContaining("no installation id") });
-    expect(await mint(setup(fakeGithub({ "GET app": { status: 404, body: {} } }).http))).toMatchObject({ kind: "failed", reason: expect.stringContaining("does not know this App") });
+    expect(
+      await mint(
+        setup(fakeGithub({ ...GITHUB, "GET repos/chiyanram/ledger/installation": { status: 200, body: {} } }).http),
+      ),
+    ).toMatchObject({ kind: "failed", reason: expect.stringContaining("no installation id") });
+    expect(await mint(setup(fakeGithub({ "GET app": { status: 404, body: {} } }).http))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("does not know this App"),
+    });
   });
 
   it("names the likely cause of a 401 and a 404, and refuses a project that is not owner/name", async () => {
-    expect(await mint(setup(fakeGithub({ "GET app": { status: 401, body: {} } }).http))).toMatchObject({ kind: "failed", reason: expect.stringContaining("clock") });
-    expect(await mint(setup(fakeGithub({ ...GITHUB, "GET repos/chiyanram/ledger/installation": { status: 404, body: {} } }).http))).toMatchObject({
+    expect(await mint(setup(fakeGithub({ "GET app": { status: 401, body: {} } }).http))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("clock"),
+    });
+    expect(
+      await mint(
+        setup(fakeGithub({ ...GITHUB, "GET repos/chiyanram/ledger/installation": { status: 404, body: {} } }).http),
+      ),
+    ).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("not installed on chiyanram/ledger"),
     });
-    expect(await mint({ ...setup(fakeGithub(GITHUB).http), project: "../x" })).toMatchObject({ kind: "failed", reason: expect.stringContaining("owner/name") });
+    expect(await mint({ ...setup(fakeGithub(GITHUB).http), project: "../x" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("owner/name"),
+    });
   });
 });
 
@@ -109,13 +149,25 @@ describe("readAppConfig", () => {
 
   it("refuses a file others can read, another user's file, a missing file and a bad config", async () => {
     files(0o644, 0o600);
-    expect(await readAppConfig({ home, me })).toMatchObject({ kind: "failed", reason: expect.stringContaining("chmod 600") });
+    expect(await readAppConfig({ home, me })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("chmod 600"),
+    });
     files(0o600, 0o640);
-    expect(await readAppConfig({ home, me })).toMatchObject({ kind: "failed", reason: expect.stringContaining("app.pem") });
+    expect(await readAppConfig({ home, me })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("app.pem"),
+    });
     files(0o600, 0o600);
     expect(await readAppConfig({ home, me: { uid: me.uid + 1 } })).toMatchObject({ kind: "failed" });
     files(0o600, 0o600, JSON.stringify({ appId: "x", key: "relative.pem" }));
-    expect(await readAppConfig({ home, me })).toMatchObject({ kind: "failed", reason: expect.stringContaining("appId") });
-    expect(await readAppConfig({ home: join(home, "nobody"), me })).toMatchObject({ kind: "failed", reason: expect.stringContaining("cannot read") });
+    expect(await readAppConfig({ home, me })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("appId"),
+    });
+    expect(await readAppConfig({ home: join(home, "nobody"), me })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("cannot read"),
+    });
   });
 });

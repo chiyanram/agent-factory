@@ -22,11 +22,17 @@ describe("chooseBox", () => {
   });
 
   it("refuses the laptop box until stage B", () => {
-    expect(chooseBox({ FACTORY_BOX: "laptop" })).toEqual({ kind: "refused", reason: "FACTORY_BOX=laptop is stage B (#129); use vm" });
+    expect(chooseBox({ FACTORY_BOX: "laptop" })).toEqual({
+      kind: "refused",
+      reason: "FACTORY_BOX=laptop is stage B (#129); use vm",
+    });
   });
 
   it("refuses a place that is not a box", () => {
-    expect(chooseBox({ FACTORY_BOX: "host" })).toEqual({ kind: "refused", reason: 'FACTORY_BOX="host" is not a box; use vm' });
+    expect(chooseBox({ FACTORY_BOX: "host" })).toEqual({
+      kind: "refused",
+      reason: 'FACTORY_BOX="host" is not a box; use vm',
+    });
     expect(chooseBox({ FACTORY_BOX: "VM" }).kind).toBe("refused");
   });
 });
@@ -66,7 +72,10 @@ describe("openBox", () => {
 
   it("refuses to start when the chosen place has no box yet", async () => {
     const laptop = fakeBox({ place: "laptop" });
-    expect(await openBox({ env: { FACTORY_BOX: "vm" }, boxes: [laptop.box] })).toEqual({ kind: "refused", reason: "the vm box is not built yet (#113)" });
+    expect(await openBox({ env: { FACTORY_BOX: "vm" }, boxes: [laptop.box] })).toEqual({
+      kind: "refused",
+      reason: "the vm box is not built yet (#113)",
+    });
     expect(laptop.calls).toEqual([]);
   });
 

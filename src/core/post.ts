@@ -76,7 +76,10 @@ export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): 
 export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): RenderResult {
   const bad = post.fields.find((f) => !LABEL.test(f.label));
   if (bad !== undefined) {
-    return { kind: "refused", reason: `post label must be the factory's own plain words, got ${JSON.stringify(bad.label)}` };
+    return {
+      kind: "refused",
+      reason: `post label must be the factory's own plain words, got ${JSON.stringify(bad.label)}`,
+    };
   }
   const head = [`[${post.seat}] ${cleanField(post.title, limit)}`];
   const body = [

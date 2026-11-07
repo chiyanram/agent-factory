@@ -5,7 +5,9 @@
 // the proxy matches names, and an IP entry would let a writer reach any service on it. An entry that a dotted entry
 // already covers is dropped, because Squid refuses a list that names the same host twice.
 
-export type Allowlist = { readonly kind: "ok"; readonly hosts: readonly string[] } | { readonly kind: "refused"; readonly reason: string };
+export type Allowlist =
+  | { readonly kind: "ok"; readonly hosts: readonly string[] }
+  | { readonly kind: "refused"; readonly reason: string };
 
 const LABEL = "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?";
 const HOST = new RegExp(`^\\.?(${LABEL}\\.)+[a-z]{2,63}$`);
@@ -30,7 +32,11 @@ export function parseAllowlist(entries: readonly string[]): Allowlist {
   if (trimmed.length === 0) {
     return { kind: "refused", reason: "the egress allowlist is empty; a box needs at least its model API" };
   }
-  const bad = trimmed.flatMap((e) => CHECKS.filter((c) => c.fails(e)).slice(0, 1).map((c) => `${JSON.stringify(e)} is ${c.why}`));
+  const bad = trimmed.flatMap((e) =>
+    CHECKS.filter((c) => c.fails(e))
+      .slice(0, 1)
+      .map((c) => `${JSON.stringify(e)} is ${c.why}`),
+  );
   if (bad.length > 0) {
     return { kind: "refused", reason: bad.join("; ") };
   }

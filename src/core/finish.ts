@@ -43,11 +43,20 @@ export type FinishInput = {
 };
 
 function git(env: NodeJS.ProcessEnv, repo: string, args: readonly string[]): ReturnType<typeof hostGit> {
-  return hostGit({ args, repo: { kind: "repo", path: repo }, env, ownHelper: { kind: "none" }, stdin: { kind: "none" } });
+  return hostGit({
+    args,
+    repo: { kind: "repo", path: repo },
+    env,
+    ownHelper: { kind: "none" },
+    stdin: { kind: "none" },
+  });
 }
 
 function gitProblem(what: string, result: Awaited<ReturnType<typeof hostGit>>): Done {
-  return { kind: "failed", reason: `${what}: ${result.kind === "refused" ? result.reason : result.kind === "failed" ? result.stderr.trim() : ""}` };
+  return {
+    kind: "failed",
+    reason: `${what}: ${result.kind === "refused" ? result.reason : result.kind === "failed" ? result.stderr.trim() : ""}`,
+  };
 }
 
 // the commits the push adds: after the lease, or, for a new branch, those on no remote branch
@@ -59,11 +68,20 @@ function newCommits(input: GuardInput): readonly string[] {
 // so a report committed and then deleted still never leaves.
 export function noFactoryFolder(env: NodeJS.ProcessEnv): Guard {
   return async (input) => {
-    const listed = await git(env, input.repo, ["log", "--format=%H", "--name-only", ...newCommits(input), "--", ":(icase).factory"]);
+    const listed = await git(env, input.repo, [
+      "log",
+      "--format=%H",
+      "--name-only",
+      ...newCommits(input),
+      "--",
+      ":(icase).factory",
+    ]);
     if (listed.kind !== "ok") {
       return gitProblem(`cannot list the commits of ${input.commit.slice(0, 8)}`, listed);
     }
-    return listed.stdout.trim() === "" ? { kind: "ok" } : { kind: "failed", reason: "a commit touches .factory: the run's report and files are never pushed" };
+    return listed.stdout.trim() === ""
+      ? { kind: "ok" }
+      : { kind: "failed", reason: "a commit touches .factory: the run's report and files are never pushed" };
   };
 }
 
@@ -77,7 +95,9 @@ export function fastForwardOnly(env: NodeJS.ProcessEnv): Guard {
     if (checked.kind === "ok") {
       return { kind: "ok" };
     }
-    return checked.kind === "failed" && checked.exitCode === 1 ? { kind: "failed", reason: "the run rewrote the branch's history" } : gitProblem("cannot compare the commits", checked);
+    return checked.kind === "failed" && checked.exitCode === 1
+      ? { kind: "failed", reason: "the run rewrote the branch's history" }
+      : gitProblem("cannot compare the commits", checked);
   };
 }
 
@@ -140,7 +160,12 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
   const wip = block.pushFirst ? await pushed(input, "on-top") : ({ kind: "ok" } as const);
   const why = wip.kind === "ok" ? block.reason : `${block.reason}; the work in progress was not pushed: ${wip.reason}`;
   // the writer's own words stay in the writer's seat; what the host decided is the coordinator's
-  const said = await post(input, { seat: block.by === "writer" ? "writer" : "coordinator", title: `blocked: ${why}`, fields: [], items: [] });
+  const said = await post(input, {
+    seat: block.by === "writer" ? "writer" : "coordinator",
+    title: `blocked: ${why}`,
+    fields: [],
+    items: [],
+  });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
 }
 
@@ -153,9 +178,10 @@ async function done(input: FinishInput, evidence: readonly Evidence[]): Promise<
 
 async function asked(input: FinishInput, questions: readonly string[]): Promise<Result<Next>> {
   const [only] = questions;
-  const ask: Post = questions.length === 1 && only !== undefined
-    ? { seat: "writer", title: `OPEN: ${only}`, fields: [], items: [] }
-    : { seat: "writer", title: `OPEN: ${questions.length} questions`, fields: [], items: questions };
+  const ask: Post =
+    questions.length === 1 && only !== undefined
+      ? { seat: "writer", title: `OPEN: ${only}`, fields: [], items: [] }
+      : { seat: "writer", title: `OPEN: ${questions.length} questions`, fields: [], items: questions };
   const said = await post(input, ask);
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }

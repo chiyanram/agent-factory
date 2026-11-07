@@ -61,17 +61,28 @@ function escape(text: string): string {
 }
 
 // pushUrlFits : whether a push URL is the project on the forge's host. An App needs https to github.com exactly.
-export function pushUrlFits(input: { readonly url: string; readonly project: string; readonly host: string; readonly app: boolean }): boolean {
+export function pushUrlFits(input: {
+  readonly url: string;
+  readonly project: string;
+  readonly host: string;
+  readonly app: boolean;
+}): boolean {
   const project = escape(input.project);
   if (input.app) {
     return new RegExp(`^https://github\\.com/${project}(\\.git)?/?$`, "i").test(input.url);
   }
   const host = escape(input.host);
-  return new RegExp(`^(https://${host}/|ssh://git@${host}(:\\d+)?/|git@${host}:)${project}(\\.git)?/?$`, "i").test(input.url);
+  return new RegExp(`^(https://${host}/|ssh://git@${host}(:\\d+)?/|git@${host}:)${project}(\\.git)?/?$`, "i").test(
+    input.url,
+  );
 }
 
 function failed(what: string, result: GitResult): Done {
-  return { kind: "failed", reason: result.kind === "refused" ? result.reason : `${what}: ${result.stderr.trim().split("\n").slice(-2).join(" ")}` };
+  return {
+    kind: "failed",
+    reason:
+      result.kind === "refused" ? result.reason : `${what}: ${result.stderr.trim().split("\n").slice(-2).join(" ")}`,
+  };
 }
 
 // pushEnv : the environment of the git push. With an App: every other helper dropped, the App's helper for github.com.
@@ -99,7 +110,13 @@ export function pushEnv(identity: Identity, env: NodeJS.ProcessEnv): Result<Node
 }
 
 function git(request: PushRequest, args: readonly string[], env: NodeJS.ProcessEnv = request.env): Promise<GitResult> {
-  return hostGit({ args, repo: { kind: "repo", path: request.repo }, env, ownHelper: { kind: "none" }, stdin: { kind: "none" } });
+  return hostGit({
+    args,
+    repo: { kind: "repo", path: request.repo },
+    env,
+    ownHelper: { kind: "none" },
+    stdin: { kind: "none" },
+  });
 }
 
 function shapeProblem(request: PushRequest): string {
@@ -120,9 +137,18 @@ function shapeProblem(request: PushRequest): string {
 export async function pushUrls(request: PushRequest): Promise<Result<readonly string[]>> {
   const read = await git(request, ["remote", "get-url", "--push", "--all", "origin"]);
   if (read.kind !== "ok") {
-    return { kind: "failed", reason: read.kind === "refused" ? read.reason : "refused: the clone has no origin remote" };
+    return {
+      kind: "failed",
+      reason: read.kind === "refused" ? read.reason : "refused: the clone has no origin remote",
+    };
   }
-  return { kind: "ok", value: read.stdout.split("\n").map((u) => u.trim()).filter((u) => u.length > 0) };
+  return {
+    kind: "ok",
+    value: read.stdout
+      .split("\n")
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0),
+  };
 }
 
 // Seams : how the push URLs are read. The real one asks git; a test that pushes to a bare repository on disk passes one
@@ -133,7 +159,10 @@ const REAL: Seams = { urls: pushUrls };
 async function placeChecks(request: PushRequest, seams: Seams): Promise<Done> {
   const found = await git(request, ["rev-parse", "--verify", "--quiet", `${request.commit}^{commit}`]);
   if (found.kind !== "ok" || found.stdout.trim() !== request.commit) {
-    return { kind: "failed", reason: found.kind === "refused" ? found.reason : `refused: ${request.commit} is not a commit in ${request.repo}` };
+    return {
+      kind: "failed",
+      reason: found.kind === "refused" ? found.reason : `refused: ${request.commit} is not a commit in ${request.repo}`,
+    };
   }
   const urls = await seams.urls(request);
   if (urls.kind === "failed") {
@@ -142,11 +171,17 @@ async function placeChecks(request: PushRequest, seams: Seams): Promise<Done> {
   const app = request.identity.kind === "app";
   const [url] = urls.value;
   if (urls.value.length !== 1 || url === undefined) {
-    return { kind: "failed", reason: `refused: the clone pushes origin to ${urls.value.length} URLs (${urls.value.join(", ")}); it must push to exactly one` };
+    return {
+      kind: "failed",
+      reason: `refused: the clone pushes origin to ${urls.value.length} URLs (${urls.value.join(", ")}); it must push to exactly one`,
+    };
   }
   return pushUrlFits({ url, project: request.project, host: request.host, app })
     ? { kind: "ok" }
-    : { kind: "failed", reason: `refused: the clone pushes to ${url}, which is not ${request.project} on ${app ? "https://github.com" : request.host}` };
+    : {
+        kind: "failed",
+        reason: `refused: the clone pushes to ${url}, which is not ${request.project} on ${app ? "https://github.com" : request.host}`,
+      };
 }
 
 // repoHelpers : refuses, with an App, a credential helper the repo's own config sets.
@@ -154,14 +189,23 @@ async function repoHelpers(request: PushRequest, _seams: Seams): Promise<Done> {
   if (request.identity.kind === "own") {
     return { kind: "ok" };
   }
-  const listed = await git(request, ["config", "--show-scope", "--name-only", "--get-regexp", "^credential\\..*helper$"]);
+  const listed = await git(request, [
+    "config",
+    "--show-scope",
+    "--name-only",
+    "--get-regexp",
+    "^credential\\..*helper$",
+  ]);
   if (listed.kind === "refused" || (listed.kind === "failed" && listed.exitCode !== 1)) {
     return failed("cannot list the repo's credential helpers", listed);
   }
   const own = listed.stdout.split("\n").filter((line) => /^(local|worktree)\t/.test(line));
   return own.length === 0
     ? { kind: "ok" }
-    : { kind: "failed", reason: `refused: the repo's own config sets ${own.map((l) => l.split("\t")[1]).join(", ")}; with an App the push would go out as you. Remove it` };
+    : {
+        kind: "failed",
+        reason: `refused: the repo's own config sets ${own.map((l) => l.split("\t")[1]).join(", ")}; with an App the push would go out as you. Remove it`,
+      };
 }
 
 async function guarded(request: PushRequest, _seams: Seams): Promise<Done> {
@@ -181,13 +225,23 @@ async function send(request: PushRequest): Promise<Done> {
   }
   const ref = `refs/heads/${request.branch}`;
   const expected = request.lease.kind === "sha" ? request.lease.sha : "";
-  const args = ["push", "--porcelain", "--no-verify", `--force-with-lease=${ref}:${expected}`, "origin", `${request.commit}:${ref}`];
+  const args = [
+    "push",
+    "--porcelain",
+    "--no-verify",
+    `--force-with-lease=${ref}:${expected}`,
+    "origin",
+    `${request.commit}:${ref}`,
+  ];
   const pushed = await git(request, args, env.value);
   if (pushed.kind === "ok") {
     return { kind: "ok" };
   }
-  const stale = pushed.kind === "failed" && /stale info|\[rejected\]|fetch first/.test(`${pushed.stdout}${pushed.stderr}`);
-  return stale ? { kind: "failed", reason: `the branch ${request.branch} moved since the run started; nothing was pushed` } : failed("git push failed", pushed);
+  const stale =
+    pushed.kind === "failed" && /stale info|\[rejected\]|fetch first/.test(`${pushed.stdout}${pushed.stderr}`);
+  return stale
+    ? { kind: "failed", reason: `the branch ${request.branch} moved since the run started; nothing was pushed` }
+    : failed("git push failed", pushed);
 }
 
 // hostPush : the writer's commit onto its branch, after every check, as the project's identity.

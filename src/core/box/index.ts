@@ -5,7 +5,20 @@
 import { chooseBox, startGate, type Found, type Opened } from "./choose.js";
 import type { Box, BoxPlace } from "./types.js";
 
-export type { Box, BoxPlace, BoxSpec, Command, Copy, Done, Input, PinnedImage, Probe, Ran, Session, Started } from "./types.js";
+export type {
+  Box,
+  BoxPlace,
+  BoxSpec,
+  Command,
+  Copy,
+  Done,
+  Input,
+  PinnedImage,
+  Probe,
+  Ran,
+  Session,
+  Started,
+} from "./types.js";
 export { chooseBox, pinImage, startGate, type BoxChoice, type Opened, type Pin } from "./choose.js";
 
 async function find(place: BoxPlace, boxes: readonly Box[]): Promise<Found> {
@@ -13,7 +26,10 @@ async function find(place: BoxPlace, boxes: readonly Box[]): Promise<Found> {
   return box === undefined ? { kind: "none" } : { kind: "found", box, probe: await box.probe() };
 }
 
-export async function openBox(input: { readonly env: NodeJS.ProcessEnv; readonly boxes: readonly Box[] }): Promise<Opened> {
+export async function openBox(input: {
+  readonly env: NodeJS.ProcessEnv;
+  readonly boxes: readonly Box[];
+}): Promise<Opened> {
   const choice = chooseBox(input.env);
   const found: Found = choice.kind === "chosen" ? await find(choice.place, input.boxes) : { kind: "none" };
   return startGate({ choice, found });

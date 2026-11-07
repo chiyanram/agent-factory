@@ -132,7 +132,10 @@ function readBlock(lines: readonly string[]): Block {
 // git's rule: the last paragraph is the trailer block when every line in it is a trailer, or when a quarter of it is
 // and one of those is a line git writes. The first paragraph is the subject and never one.
 function trailerBlock(message: string): readonly Trailer[] {
-  const paragraphs = message.replace(/\r\n?/g, "\n").trim().split(/\n[ \t]*\n/);
+  const paragraphs = message
+    .replace(/\r\n?/g, "\n")
+    .trim()
+    .split(/\n[ \t]*\n/);
   if (paragraphs.length < 2) {
     return [];
   }
