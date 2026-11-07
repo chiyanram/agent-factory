@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.3.0](https://github.com/chiyanram/agent-factory/compare/v0.2.0...v0.3.0) (2026-11-07)
+
+### ✨ Features
+
+* **box** — the vm box: factory-box image and a Box over the docker CLI, run under Sysbox · [#113](https://github.com/chiyanram/agent-factory/issues/113) (PR [#160](https://github.com/chiyanram/agent-factory/pull/160))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.3.0`
+
 ## [0.2.0](https://github.com/chiyanram/agent-factory/compare/v0.1.0...v0.2.0) (2026-11-07)
 
 ### Features
