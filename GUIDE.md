@@ -7,6 +7,15 @@ How to set up the factory's identity, configure the scripts and run the loop. Th
 > decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The bash scripts do not follow it
 > yet. Each place where they still differ is marked **Today:**.
 
+## Install a pinned version
+
+```bash
+npm i -g github:chiyanram/agent-factory#v0.1.0
+```
+
+Pick the version from the [releases](https://github.com/chiyanram/agent-factory/releases); `CHANGELOG.md` says what
+each one changed. npm builds the package on install. Never install from `main`: it changes under you (#153).
+
 ## Set up identity
 
 The factory pushes and posts with a forge login that **only code uses**: the dispatcher and the host push. No LLM holds
@@ -97,6 +106,22 @@ stays out of reach either way.
 App's key. The Developer role and the App's permissions limit what a stolen credential can do. It is not a wall.
 **Target:** the writer runs in a box with no forge token ([Q1b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6680836108)). The coordinator is held back by
 deny rules only, because it runs as the same OS user ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S2).
+
+## Set up the box's model login
+
+The box gets one model-only token, never your full login (ADR-0012 S6, #136). `claude setup-token` makes a one-year
+token that "can only make model requests". It needs a Claude Pro, Max, Ultra, Team or Enterprise plan. Copilot follows
+at stage B.
+
+| # | who | step | why |
+|---|---|---|---|
+| 1 | developer | Run `claude setup-token` and approve in the browser. The token prints once; do not paste it anywhere but step 2. | The command does not save the token anywhere. |
+| 2 | developer | Run `agent-factory setup claude` and paste the token at the hidden prompt. On the VM, run it as the user that runs the dispatcher: `sudo -u factory -H agent-factory setup claude`. | macOS keeps it in the login Keychain (passed to `security` on stdin, never in argv). Linux keeps it in `~/.factory/secrets/claude-token`, mode 600, in a folder of mode 700. A GitHub login (`gho_`, `ghp_`, `github_pat_`) is refused. |
+| 3 | developer | Run `agent-factory setup status`. It prints the box, its risks, and the token's days left; exit 0 means a box may start. | A box never starts with an expired token, or one with no expiry on record. |
+| 4 | developer | When `status` warns (7 days before expiry), repeat steps 1 and 2. | The token lasts one year. |
+
+**Today:** the dispatcher (#103) and the vm box (#113) do not read the token yet. When they do, they pass it as
+`CLAUDE_CODE_OAUTH_TOKEN` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers.
 
 ## Settings
 

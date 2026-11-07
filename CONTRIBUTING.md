@@ -95,6 +95,19 @@ trailer.
 
 Pin every GitHub Actions step to a full commit SHA, with the version in a comment.
 
+## Releases
+
+Every push to `main` runs semantic-release (`release.config.mjs`, #153), the same way as chiyanram/skills.
+
+- Pull requests are squash-merged with the PR title as the commit subject, so **the PR title decides the release**.
+  CI fails a title that is not a Conventional Commit, and a title, description or commit that holds a skip-ci marker.
+- `feat` releases a minor version, `fix` and `perf` a patch, and `!` or a `BREAKING CHANGE:` footer a major one.
+  `docs`, `chore`, `ci`, `style`, `refactor`, `test` and `build` release nothing.
+- A release is a tag `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`, which semantic-release writes; do not
+  edit it by hand. Nothing is published to npm.
+- The versions are `0.x` until the pilot (#62) has run; `1.0.0` means the CLI is meant to stay stable.
+- `npm run release:preview` shows the next version without releasing (it needs a GitHub login).
+
 ## Troubleshooting
 
 | symptom | fix |

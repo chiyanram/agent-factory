@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# git worktrees of this repo (Claude Code puts them here); every repo-wide tool must skip them (#148)
+.claude/worktrees/
