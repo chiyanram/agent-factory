@@ -247,8 +247,11 @@ it is a prompt instruction at most.
   control files are also read-only in the box (#110).
 - **Decided: the writer reads only what it is given.** A private home per run; the coordinator gets a deny list on
   secret paths ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
-- **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`, and
-  mentions and closing keywords are put in backticks ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
+- **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
+  `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
+  and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126); the
+  dispatcher (#103) and the writer's exit (#109) will post through it. **Today:** the bash scripts flatten model text
+  but do not span mentions or keywords ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
 - **Decided: the coordinator cannot widen its own wall.** It edits only spec drafts, never its settings or the
   factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)).
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,
