@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseAllowlist } from "../src/core/egress/allowlist.js";
 import { squidConf } from "../src/core/egress/squid.js";
-import { dockerdProxy, proxyEnv } from "../src/core/egress/env.js";
+import { proxyEnv } from "../src/core/egress/env.js";
 
 describe("parseAllowlist", () => {
   it("keeps host names, sorted, and drops one a dotted entry covers", () => {
@@ -96,15 +96,5 @@ describe("proxyEnv", () => {
   it("points every JVM at the proxy", () => {
     expect(env.JAVA_TOOL_OPTIONS).toContain("-Dhttps.proxyHost=factory-egress -Dhttps.proxyPort=3128");
     expect(env.JAVA_TOOL_OPTIONS).toContain("-Dhttp.nonProxyHosts=localhost|127.*|[::1]");
-  });
-
-  it("points the box's own dockerd at the proxy for image pulls", () => {
-    expect(dockerdProxy({ host: "factory-egress", port: 3128 })).toEqual({
-      proxies: {
-        "http-proxy": "http://factory-egress:3128",
-        "https-proxy": "http://factory-egress:3128",
-        "no-proxy": "localhost,127.0.0.1,::1",
-      },
-    });
   });
 });

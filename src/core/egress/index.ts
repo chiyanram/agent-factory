@@ -12,7 +12,7 @@ import { startEgress, type Started } from "./start.js";
 
 export { parseAllowlist, type Allowlist } from "./allowlist.js";
 export { squidConf, PROXY_PORT, type Upstream } from "./squid.js";
-export { dockerdProxy, proxyEnv, type ProxyAddress } from "./env.js";
+export { proxyEnv, type ProxyAddress } from "./env.js";
 export {
   INTERNAL_NETWORK,
   OUTBOUND_NETWORK,

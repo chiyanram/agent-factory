@@ -90,6 +90,12 @@ stays out of reach either way.
   you make such a change in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). Backstop: GitLab, protect every secret variable;
   GitHub, keep secrets in environments that need approval and keep Workflows out of a bot App (step 1). `rules:` in
   `.gitlab-ci.yml` is not a gate: the branch's own copy runs. **Today:** nothing refuses the push.
+- VM (`FACTORY_BOX=vm`): install Sysbox on the VM first ([#158](https://github.com/chiyanram/agent-factory/issues/158)).
+  The box runs its own Docker under `--runtime=sysbox-runc`, so its root is an unprivileged user on the VM. Without
+  Sysbox the box refuses to start; it never falls back to `--privileged` ([decision](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6704930024)).
+  The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the runner CLIs at pinned versions. A
+  project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. **Today:** nothing builds, pins or
+  starts the image; the writer step does (#113).
 - Work laptop (`FACTORY_BOX=laptop`): in Rancher Desktop, share no home folder with its VM. The writer's box is a
   container there, with its own Docker inside ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)).
 - Whoever started the work does not approve it. Write this rule down for the team; a forge on a free plan cannot
@@ -120,8 +126,9 @@ at stage B.
 | 3 | developer | Run `agent-factory setup status`. It prints the box, its risks, and the token's days left; exit 0 means a box may start. | A box never starts with an expired token, or one with no expiry on record. |
 | 4 | developer | When `status` warns (7 days before expiry), repeat steps 1 and 2. | The token lasts one year. |
 
-**Today:** the dispatcher (#103) and the vm box (#113) do not read the token yet. When they do, they pass it as
+**Today:** the dispatcher (#103) does not read the token yet. When it does, it passes it as
 `CLAUDE_CODE_OAUTH_TOKEN` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers.
+The vm box takes each value through the docker CLI's environment (`docker exec --env NAME`), never its command line.
 
 ## Settings
 

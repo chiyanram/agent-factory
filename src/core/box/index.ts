@@ -1,6 +1,6 @@
 // index — opens the box FACTORY_BOX names (#112). Setup (#136) and the dispatcher (#103) call openBox before any run,
 // and a refusal stops them: no run starts with no working box (S7). Each place's Box is passed in, so the vm box (#113)
-// and the laptop box (#129) plug in here without a change to any caller.
+// and the laptop box (#129) plug in here without a change to any caller. vmBox (vm.ts) is the vm one.
 
 import { chooseBox, startGate, type Found, type Opened } from "./choose.js";
 import type { Box, BoxPlace } from "./types.js";
@@ -20,6 +20,8 @@ export type {
   Started,
 } from "./types.js";
 export { chooseBox, pinImage, startGate, type BoxChoice, type Opened, type Pin } from "./choose.js";
+export { vmBox, type Docker, type VmBoxSetup } from "./vm.js";
+export type { Owner } from "./vm-plan.js";
 
 async function find(place: BoxPlace, boxes: readonly Box[]): Promise<Found> {
   const box = boxes.find((b) => b.place === place);
