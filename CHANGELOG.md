@@ -3,6 +3,19 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.7.0](https://github.com/chiyanram/agent-factory/compare/v0.6.0...v0.7.0) (2026-11-07)
+
+### ✨ Features
+
+* **box** — box build, one egress proxy per project, and the vm box on the dispatcher · [#113](https://github.com/chiyanram/agent-factory/issues/113) (PR [#170](https://github.com/chiyanram/agent-factory/pull/170))
+* **push** — the host push refuses any commit that touches CI config · [#115](https://github.com/chiyanram/agent-factory/issues/115) (PR [#169](https://github.com/chiyanram/agent-factory/pull/169))
+
+### 🐛 Fixes
+
+* **git** — hgit and hostGit skip the system config when GIT_CONFIG_NOSYSTEM is set · [#167](https://github.com/chiyanram/agent-factory/issues/167) (PR [#168](https://github.com/chiyanram/agent-factory/pull/168))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.7.0`
+
 ## [0.6.0](https://github.com/chiyanram/agent-factory/compare/v0.5.0...v0.6.0) (2026-11-07)
 
 ### ✨ Features
