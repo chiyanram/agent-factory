@@ -54,7 +54,7 @@ Until the dispatcher exists, you or the coordinator run the trigger table by han
 
 ```mermaid
 flowchart LR
-    H([human]) -- "approve" --> C{{coordinator<br/>approve.sh + prompt}}
+    H([human]) -- "approve" --> C{{coordinator<br/>agent-factory approve + prompt}}
     C -- "/approved, your login" --> F[(forge)]
     F --> D{{dispatcher<br/>code}}
     D -- start --> W[writer<br/>in a box]
@@ -67,7 +67,7 @@ flowchart LR
 ```
 
 1. A human approves a draft MR whose description holds the intent and the acceptance criteria. They type
-   `/approved` on the MR, or say so in the terminal and confirm the harness prompt for `approve.sh`.
+   `/approved` on the MR, or say so in the terminal and confirm the harness prompt for `agent-factory approve`.
 2. The dispatcher claims the MR and starts a fresh **writer** in a box, in its own worktree.
 3. The writer commits, writes `.factory/report.md` and exits. The host pushes and posts the report.
 4. A ready check re-runs the evidence. Then a fresh **reviewer** posts a verdict, plus a script-made box of protected

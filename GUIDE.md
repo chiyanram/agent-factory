@@ -15,7 +15,7 @@ it ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14, [review 
 ```
 work (default)  dispatcher + host push ──▶ your own gh / glab login ──▶ pushes branches, opens MRs, comments
 personal (opt.) dispatcher + host push ──▶ a bot: GitHub App <slug>[bot] or GitLab service account
-human           approve.sh (a local permission) · reviews · merges with your own account
+human           agent-factory approve (a local permission) · reviews · merges with your own account
 ```
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
@@ -110,7 +110,7 @@ The scripts read their settings from the environment.
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
 to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, no LLM) starts. Each does one job on one
 story and goes away. The forge is your only memory. In the target you run only the read commands, `status.sh`,
-questions and status to Jira or the issue, and `approve.sh`; you edit and write only spec drafts in
+questions and status to Jira or the issue, and `agent-factory approve`; you edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.
@@ -138,9 +138,10 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    personal project. **Today:** open the draft MR with it. Done when a stranger with no chat access could build the
    change from the spec alone.
 4. **Design review.** Start a reviewer on the design. It returns ALIGNED, CONFLICT or OPEN per decision. Bring every
-   OPEN to the human. Done when nothing is OPEN and the human approves: they tell you, and you run
-   `approve.sh <ticket>`. The harness shows them the ticket and the spec hash, and only they can confirm. It records a
-   local approval; an edit of the spec makes it stale ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)). **Today:** they type `/approved` on the MR.
+   OPEN to the human. Done when nothing is OPEN and the human approves: run `agent-factory spec <project> <ticket>`,
+   show them the hash, and when they say yes run `agent-factory approve <project> <ticket> <hash>`. The harness shows
+   them the ticket and the hash, and only they can confirm. It records a local approval; an edit of the spec makes it
+   stale, and `agent-factory approval <project> <ticket>` then says so ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)). **Today:** they type `/approved` on the MR.
 5. **Run the queue.** Follow the triggers below. Done when the MR is merged or carries `needs-human`.
 6. **Retro.** After about one merge in ten, turn each lesson into a rule change, strongest fix first: architecture →
    types → lint → test → docs. Read `tokens.sh <mr>` for what each phase cost. In the pilot, compare it with one
@@ -187,7 +188,8 @@ and `#12` for `!12`.
 | `status.sh <mr> <sha> "<line>"` | posts one `[coordinator]` note; refuses when the head is no longer `<sha>` |
 | `ask.sh <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. The target: the writer writes the question to a file and the host posts it |
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash, or every missing part (intent, numbered acceptance criteria, design, lane); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
-| `approve.sh <ticket>` | **planned** ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870)): records a local approval with the spec hash in `~/.factory/approvals/`; the coordinator may run it only through the harness `ask` prompt |
+| `agent-factory approve <project> <ticket> <hash>` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, who and when. The hash on the command line is the one the human saw (12+ characters); a spec that no longer has it is refused. Run it only through the harness `ask` prompt, never from an allow list ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104) |
+| `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1). **Today:** the dispatcher that reads it is not built (#103) |
 | `block.sh <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason> · log: <log>` note, then releases the claim; the label goes first |
 | `lint-edit.sh '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
@@ -263,7 +265,7 @@ it is a prompt instruction at most.
 | term | means |
 |---|---|
 | **Seat** | a job one party owns for one story: human, coordinator, writer, reviewer or gate |
-| **Coordinator** | the one AI session that talks with the human, plans and approves through `approve.sh`; in the target it starts no workers |
+| **Coordinator** | the one AI session that talks with the human, plans and approves through `agent-factory approve`; in the target it starts no workers |
 | **Dispatcher** | code with no LLM that runs the decision table (ADR-0012 S3) and holds the project's forge login: yours or a bot; not built yet |
 | **Box** | where a worker runs: your VM, or a container on Rancher Desktop; no forge token, a private home, network only to the model API and registries (ADR-0012 S8) |
 | **Worker** | a fresh, short-lived AI session that does one job on one story: a writer or a reviewer |
