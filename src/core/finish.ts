@@ -20,7 +20,8 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
 import type { Post } from "./post.js";
-import { hostPush, type Guard, type GuardInput, type PushRequest } from "./push.js";
+import { noCiFiles } from "./ci-files.js";
+import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
 import type { Evidence, Outcome } from "./report.js";
 
 export const NEEDS_HUMAN = "needs-human";
@@ -57,11 +58,6 @@ function gitProblem(what: string, result: Awaited<ReturnType<typeof hostGit>>): 
     kind: "failed",
     reason: `${what}: ${result.kind === "refused" ? result.reason : result.kind === "failed" ? result.stderr.trim() : ""}`,
   };
-}
-
-// the commits the push adds: after the lease, or, for a new branch, those on no remote branch
-function newCommits(input: GuardInput): readonly string[] {
-  return input.lease.kind === "sha" ? [`${input.lease.sha}..${input.commit}`] : [input.commit, "--not", "--remotes"];
 }
 
 // noFactoryFolder : refuses when any commit the push adds touches .factory (as a folder or a file, in any letter case),
@@ -142,7 +138,8 @@ async function pushed(input: FinishInput, mode: "any" | "on-top"): Promise<Done>
     return { kind: "ok" };
   }
   const env = input.push.env;
-  const ours = mode === "on-top" ? [noFactoryFolder(env), fastForwardOnly(env)] : [noFactoryFolder(env)];
+  const always = [noFactoryFolder(env), noCiFiles(env)];
+  const ours = mode === "on-top" ? [...always, fastForwardOnly(env)] : always;
   return (input.pusher ?? hostPush)({ ...input.push, guards: [...ours, ...input.push.guards] });
 }
 
