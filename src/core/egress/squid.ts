@@ -26,8 +26,10 @@ export function squidConf(input: { readonly hosts: readonly string[]; readonly u
     "cache deny all",
     "via off",
     "forwarded_for delete",
-    "access_log stdio:/dev/stdout",
-    "cache_log /dev/stderr",
+    // the files the ubuntu/squid entrypoint tails to `docker logs`: Squid runs as user proxy, which cannot open the
+    // container's /dev/stdout, so a log there stops Squid at start (found on the first live start, #113)
+    "access_log stdio:/var/log/squid/access.log",
+    "cache_log /var/log/squid/cache.log",
     ...upstreamLines(input.upstream),
   ];
   return `${lines.join("\n")}\n`;

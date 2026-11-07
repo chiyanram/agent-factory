@@ -1,7 +1,7 @@
 // project — the project file on this machine (ADR-0014 P3): <FACTORY_HOME>/projects/<project>.json. Never a repo
 // file, so a branch cannot choose its own gate or the programs its evidence may run (ADR-0012 S12; #91). This reader
-// takes only what the ready check and the local verifier need; the plugin fields come with #134, and fields it does
-// not know are left alone.
+// takes only what the ready check, the local verifier and the box's egress need; the plugin fields come with #134, and
+// fields it does not know are left alone.
 //
 //   {
 //     "gate": "forge-ci" | "local",          where the gate's result comes from
@@ -9,7 +9,10 @@
 //     "ready": {
 //       "programs": ["make", "./gradlew"],   the programs an evidence row may start with
 //       "timeoutMinutes": 30                 per command (default 30, at most 240)
-//     }
+//     },
+//     "egress": {
+//       "allow": ["api.anthropic.com"]       the hosts this project's boxes may reach (#130; egress/allowlist.ts);
+//     }                                      none means no box runs for the project
 //   }
 
 import { readFile } from "node:fs/promises";
@@ -17,6 +20,7 @@ import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 import { codeOf, prop } from "./dispatch/records.js";
 import { plainName } from "./spec.js";
+import { parseAllowlist } from "./egress/allowlist.js";
 
 // a command with no shell: argv[0] is the program
 export type Argv = readonly [string, ...string[]];
@@ -30,6 +34,8 @@ export type ProjectRead =
 export type ProjectFile = {
   readonly gate: { readonly kind: "forge-ci" } | { readonly kind: "local"; readonly verify: Argv };
   readonly ready: { readonly programs: readonly string[]; readonly timeoutSeconds: number };
+  // the hosts the project's boxes may reach, checked; empty when the file names none
+  readonly egress: { readonly allow: readonly string[] };
 };
 
 const DEFAULT_MINUTES = 30;
@@ -85,6 +91,26 @@ function readyOf(path: string, raw: unknown): Result<ProjectFile["ready"]> {
     : { kind: "ok", value: { programs: programs.filter(word), timeoutSeconds: minutes * 60 } };
 }
 
+function allowOf(egress: unknown): readonly string[] | "bad" {
+  const allow = prop(egress, "allow");
+  return Array.isArray(allow) && allow.every(word) ? allow.filter(word) : "bad";
+}
+
+function egressOf(path: string, raw: unknown): Result<ProjectFile["egress"]> {
+  const egress = prop(raw, "egress");
+  if (egress === undefined) {
+    return { kind: "ok", value: { allow: [] } };
+  }
+  const allow = allowOf(egress);
+  if (allow === "bad") {
+    return failed(path, `"egress.allow" must list host names, such as ["api.anthropic.com"]`);
+  }
+  const list = parseAllowlist(allow);
+  return list.kind === "ok"
+    ? { kind: "ok", value: { allow: list.hosts } }
+    : failed(path, `"egress.allow": ${list.reason}`);
+}
+
 function parsed(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -106,14 +132,24 @@ async function fileText(path: string): Promise<Result<string> | Extract<ProjectR
   }
 }
 
-// readProjectFile : the project's file, each field checked; a field that is there but not valid is refused
-function fromRaw(path: string, raw: unknown): Result<ProjectFile> {
-  const gate = typeof raw === "object" && raw !== null ? gateOf(path, raw) : failed(path, "is not a JSON object");
+function fields(path: string, raw: object): Result<ProjectFile> {
+  const gate = gateOf(path, raw);
   if (gate.kind === "failed") {
     return gate;
   }
   const ready = readyOf(path, raw);
-  return ready.kind === "ok" ? { kind: "ok", value: { gate: gate.value, ready: ready.value } } : ready;
+  if (ready.kind === "failed") {
+    return ready;
+  }
+  const egress = egressOf(path, raw);
+  return egress.kind === "ok"
+    ? { kind: "ok", value: { gate: gate.value, ready: ready.value, egress: egress.value } }
+    : egress;
+}
+
+// fromRaw : the project's file, each field checked; a field that is there but not valid is refused
+function fromRaw(path: string, raw: unknown): Result<ProjectFile> {
+  return typeof raw === "object" && raw !== null ? fields(path, raw) : failed(path, "is not a JSON object");
 }
 
 export async function readProjectFile(input: {

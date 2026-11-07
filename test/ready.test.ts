@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Box, Ran } from "../src/core/box/types.js";
+import type { Box, PinnedImage, Ran } from "../src/core/box/types.js";
+import type { Started as EgressStarted } from "../src/core/egress/start.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import type { CommitStatus, Forge } from "../src/core/forge/types.js";
 import type { ProjectFile } from "../src/core/project.js";
@@ -23,13 +24,26 @@ beforeEach(() => {
   p.git("checkout", "-q", "main");
 });
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
+beforeEach(() => {
+  egressStarts = 0;
+});
 
 const exited = (code: number): Ran => ({ kind: "exited", code, stdout: "", stderr: "" });
 
 const PROJECT: ProjectFile = {
   gate: { kind: "local", verify: ["make", "verify"] },
   ready: { programs: ["make", "./gradlew"], timeoutSeconds: 60 },
+  egress: { allow: ["repo.maven.apache.org"] },
 };
+
+const EGRESS: EgressStarted = {
+  kind: "started",
+  proxy: { host: "factory-egress-ledger", port: 3128 },
+  network: "factory-int-ledger",
+};
+
+// how many times a box run started the project's egress proxy
+let egressStarts = 0;
 
 // the box sees the worktree only while it runs: record what is in it at each run
 function watched(fake: FakeBox, seen: string[][]): Box {
@@ -43,14 +57,17 @@ function watched(fake: FakeBox, seen: string[][]): Box {
   };
 }
 
-function plan(box: Box, file: ProjectFile = PROJECT): BoxPlan {
+function plan(box: Box, file: ProjectFile = PROJECT, egress: EgressStarted = EGRESS): BoxPlan {
   return {
     kind: "ready",
     project: file,
     setup: {
       box,
       image: { kind: "pinned", ref: `factory/box@sha256:${"0".repeat(64)}` },
-      proxy: { host: "factory-egress", port: 3128 },
+      egress: async () => {
+        egressStarts += 1;
+        return egress;
+      },
       repo: p.clone,
       env: { ...p.env, GITHUB_TOKEN: "host-only" },
       runsDir: join(p.root, "box-runs"),
@@ -108,12 +125,13 @@ describe("the ready check (#91, #138)", () => {
     const start = fake.calls.find((c) => c.op === "start");
     expect(start?.op === "start" ? start.spec : undefined).toMatchObject({
       image: { kind: "pinned" },
-      proxy: "http://factory-egress:3128",
+      proxy: "http://factory-egress-ledger:3128",
+      network: "factory-int-ledger",
     });
     const env = start?.op === "start" ? start.spec.env : {};
     expect(Object.keys(env)).not.toContain("GITHUB_TOKEN");
     expect(Object.keys(env)).not.toContain("PATH");
-    expect(env.HTTPS_PROXY).toBe("http://factory-egress:3128");
+    expect(env.HTTPS_PROXY).toBe("http://factory-egress-ledger:3128");
     // the box is stopped and the copy is gone
     expect(fake.live.size).toBe(0);
     expect(readdirSync(join(p.root, "box-runs"))).toEqual([]);
@@ -238,39 +256,105 @@ describe("the local verifier (#91)", () => {
   });
 });
 
+describe("the box run's egress", () => {
+  it("starts the project's proxy before the box, once per run, and puts the box on the project's network", async () => {
+    const fake = fakeBox({ runs: [exited(0)] });
+    await ready(fake.box, [row("make test")]);
+    expect(egressStarts).toBe(1);
+    expect(fake.calls.map((c) => c.op)).toEqual(["start", "run", "stop"]);
+  });
+
+  it("starts no box when the proxy does not start, and fails the run rather than give a verdict", async () => {
+    const fake = fakeBox({ runs: [exited(0)] });
+    const step = readyStep(plan(fake.box, PROJECT, { kind: "failed", reason: "docker create: no such image" }));
+    const out = step.kind === "available" ? await step.run(input([row("make test")])) : step;
+    expect(out).toEqual({
+      kind: "failed",
+      reason: "the egress proxy did not start: docker create: no such image",
+    });
+    expect(fake.calls.filter((c) => c.op === "start")).toEqual([]);
+  });
+});
+
 describe("boxPlan", () => {
-  it("reads the gate from the project file, and leaves both steps unavailable with no box, no pin or no file", async () => {
-    const home = join(p.root, "home-f");
-    const none = await boxPlan({ env: {}, home, project: "ledger", boxes: [] });
-    expect(none).toMatchObject({
+  const ID = `sha256:${"1".repeat(64)}`;
+  const opens: string[] = [];
+  const openEgress = async (o: { readonly project: string }): Promise<EgressStarted> => {
+    opens.push(o.project);
+    return EGRESS;
+  };
+  let home = "";
+  let images: PinnedImage[] = [];
+  const write = (name: string, value: unknown): void => {
+    mkdirSync(join(home, "projects", "ledger"), { recursive: true });
+    writeFileSync(join(home, "projects", name), JSON.stringify(value));
+  };
+  const LOCAL = { gate: "local", verify: ["make", "verify"], ready: { programs: ["make"] } };
+  const env = { FACTORY_BOX: "vm", FACTORY_REPO: "" };
+  const planFor = (boxes: readonly Box[], more: NodeJS.ProcessEnv = {}) =>
+    boxPlan({
+      env: { ...env, FACTORY_REPO: p.clone, ...more },
+      home,
+      project: "ledger",
+      boxesFor: (image) => {
+        images.push(image);
+        return boxes;
+      },
+      openEgress,
+    });
+  const reason = (text: string) => ({
+    value: { plan: { kind: "unavailable", reason: expect.stringContaining(text) } },
+  });
+
+  beforeEach(() => {
+    home = join(p.root, "home-f");
+    images = [];
+    opens.length = 0;
+  });
+
+  it("reads the gate from the project file, and is unavailable with no file", async () => {
+    expect(await planFor([])).toMatchObject({
       kind: "ok",
       value: { gate: "forge-ci", plan: { kind: "unavailable", reason: expect.stringContaining("no project file") } },
     });
-    mkdirSync(join(home, "projects"), { recursive: true });
-    writeFileSync(
-      join(home, "projects", "ledger.json"),
-      JSON.stringify({ gate: "local", verify: ["make", "verify"], ready: { programs: ["make"] } }),
-    );
-    const env = { FACTORY_BOX: "vm", FACTORY_REPO: p.clone, FACTORY_BOX_IMAGE: `b@sha256:${"1".repeat(64)}` };
-    expect(await boxPlan({ env, home, project: "ledger", boxes: [] })).toMatchObject({
-      value: { gate: "local", plan: { kind: "unavailable", reason: expect.stringContaining("not built yet (#113)") } },
-    });
+  });
+
+  it("is unavailable with no egress list, no box image, no box, or an unpinned egress image", async () => {
     const box = fakeBox({}).box;
-    expect(
-      await boxPlan({ env: { ...env, FACTORY_BOX_IMAGE: "b:latest" }, home, project: "ledger", boxes: [box] }),
-    ).toMatchObject({
-      value: { plan: { kind: "unavailable", reason: expect.stringContaining("not pinned") } },
-    });
-    const ok = await boxPlan({ env, home, project: "ledger", boxes: [box] });
-    expect(ok).toMatchObject({
-      value: { gate: "local", plan: { kind: "ready", setup: { runsDir: join(home, "box-runs") } } },
-    });
-    // a file that is there but refused stops the pass: read as forge CI, the project would lose its local gate
-    writeFileSync(
-      join(home, "projects", "ledger.json"),
-      JSON.stringify({ gate: "locl", ready: { programs: ["make"] } }),
+    write("ledger.json", LOCAL);
+    expect(await planFor([box])).toMatchObject({ value: { gate: "local", ...reason('no "egress.allow"').value } });
+    write("ledger.json", { ...LOCAL, egress: { allow: ["repo.maven.apache.org"] } });
+    expect(await planFor([box])).toMatchObject(reason("run agent-factory box build ledger"));
+    write("ledger/box.json", { image: ID });
+    expect(await planFor([])).toMatchObject(reason("not built yet (#113)"));
+    expect(await planFor([box], { FACTORY_EGRESS_IMAGE: "ubuntu/squid:latest" })).toMatchObject(
+      reason("FACTORY_EGRESS_IMAGE"),
     );
-    expect(await boxPlan({ env, home, project: "ledger", boxes: [box] })).toMatchObject({
+    expect(await planFor([box], { FACTORY_UPSTREAM_PROXY: "http://proxy" })).toMatchObject(
+      reason("FACTORY_UPSTREAM_PROXY"),
+    );
+    write("ledger/box.json", { image: "factory-box:latest" });
+    expect(await planFor([box])).toMatchObject(reason("is not pinned"));
+  });
+
+  it("opens the box for the image box build recorded, and starts no proxy until a box runs", async () => {
+    const box = fakeBox({}).box;
+    write("ledger.json", { ...LOCAL, egress: { allow: ["repo.maven.apache.org"] } });
+    write("ledger/box.json", { image: ID });
+    const ok = await planFor([box], { FACTORY_UPSTREAM_PROXY: "proxy.corp.example:8080" });
+    expect(ok).toMatchObject({
+      value: { gate: "local", plan: { kind: "ready", setup: { image: { ref: ID }, runsDir: join(home, "box-runs") } } },
+    });
+    expect(images).toEqual([{ kind: "pinned", ref: ID }]);
+    expect(opens).toEqual([]);
+    if (ok.kind !== "ok" || ok.value.plan.kind !== "ready") throw new Error("no plan");
+    await ok.value.plan.setup.egress();
+    expect(opens).toEqual(["ledger"]);
+  });
+
+  it("stops the pass on a project file that is there but refused, so a local project never reads as forge CI", async () => {
+    write("ledger.json", { gate: "locl", ready: { programs: ["make"] } });
+    expect(await planFor([fakeBox({}).box])).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining('"gate" must be'),
     });

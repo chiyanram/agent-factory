@@ -169,13 +169,14 @@ The scripts read their settings from the environment.
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `agent-factory review` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
-| `FACTORY_BOX` | **planned** ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs workers in your own VM, with its Docker; `laptop` runs each in a container on Rancher Desktop with its own Docker inside, a private home and filtered egress. The start refuses to run without a box | `laptop` |
+| `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
 | budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
-| `FACTORY_BOX_IMAGE` | the box image the ready check and the local verifier start, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7). **Today:** read until the box (#113) names its own setting | — |
+| `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
+| `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_CURL` | the `curl` that mints the App's token | `curl` |
 | `FACTORY_MAX_TRIES`, `FACTORY_SLEEP` | tries per request on a rate limit, and the wait command | `4`, `sleep` |
@@ -189,7 +190,8 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 {
   "gate": "local",
   "verify": ["make", "verify"],
-  "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30 }
+  "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30 },
+  "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] }
 }
 ```
 
@@ -200,8 +202,35 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
 - `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
   redirect, `$`, glob or backslash); any other row fails the ready check.
+- `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com`, or `.npmjs.org` for a
+  domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
+  `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
+  list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
+  no box runs for the project.
 - With no file, the gate is forge CI and neither the ready check nor the verifier runs. A file that is there but not
   valid stops `dispatch` with the reason, so a typo never turns a local gate into forge CI. `#134` adds the plugin fields to the same file.
+
+### The box image
+
+Each project's box runs an image built on this machine, never pulled (#113):
+
+```bash
+agent-factory box build <project>
+```
+
+It builds the package's base image (`images/factory-box`: Ubuntu 24.04, Docker, Node 22, the agent CLIs), then, if
+`$FACTORY_HOME/projects/<project>/box.Dockerfile` exists, the project's own layer on top of it, and pins the result's
+ID in `$FACTORY_HOME/projects/<project>/box.json`. The dispatcher runs exactly that ID. A project Dockerfile must end
+on the base:
+
+```dockerfile
+ARG BASE
+FROM ${BASE}
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-21-jdk-headless
+```
+
+Run it again after an upgrade of `agent-factory`. Both images are tagged by their ID (`factory-box-base:<12 hex>`,
+`factory-box-<project>:<12 hex>`), so `docker image prune` keeps them.
 
 ## Run the loop
 
@@ -269,8 +298,10 @@ has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the 
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
 which also starts every count afresh. The ready check runs each evidence row of the writer's report again at the head,
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
-proxy; nothing of the branch runs on the host. **Today:** the dispatcher does not open the vm box yet (#113), so the writer, the ready check
-and the verifier say so and wait, and the review step runs only after a ready check, so no run record is ever written;
+project's own proxy; nothing of the branch runs on the host. Each box run starts that proxy afresh, inside the
+project's lock. The dispatcher opens the vm box when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set; otherwise
+the ready check and the verifier say what is missing and wait. **Today:** there is no writer step yet (#113), so no
+run record is written, and the ready check, the verifier and the review step have nothing to run after;
 `dispatch` does only these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
@@ -283,7 +314,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
-| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** dispatch opens no box yet, #113, so run them by hand), then `agent-factory review <mr>` |
+| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** dispatch has no writer step yet, #113, so run them by hand), then `agent-factory review <mr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the evidence fails at the head | `start-writer` again; after 3 failures, label `needs-human` |
 | the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does (**today:** dispatch opens no box yet, #113) |

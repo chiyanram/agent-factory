@@ -21,6 +21,8 @@ export type BoxSpec = {
   readonly env: Readonly<Record<string, string>>;
   // the egress proxy every request leaves through (#130)
   readonly proxy: string;
+  // the project's internal network: no route out but its proxy (one proxy per project, decision on #30, 2026-11-07)
+  readonly network: string;
 };
 
 // One started box. Only the Box that started it can use it.

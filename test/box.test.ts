@@ -43,11 +43,18 @@ describe("pinImage", () => {
     expect(pinImage(ref)).toEqual({ kind: "pinned", ref });
   });
 
+  it("keeps a local image ID, as box build records it", () => {
+    const ref = `sha256:${"0123456789abcdef".repeat(4)}`;
+    expect(pinImage(ref)).toEqual({ kind: "pinned", ref });
+  });
+
   it("refuses a tag alone, a short digest, upper-case hex and spaces", () => {
     expect(pinImage("factory-box:latest").kind).toBe("refused");
     expect(pinImage(`factory-box@sha256:${"a".repeat(63)}`).kind).toBe("refused");
     expect(pinImage(`factory-box@sha256:${"A".repeat(64)}`).kind).toBe("refused");
     expect(pinImage(`factory box@sha256:${"a".repeat(64)}`).kind).toBe("refused");
+    expect(pinImage(`sha256:${"a".repeat(63)}`).kind).toBe("refused");
+    expect(pinImage(`@sha256:${"a".repeat(64)}`).kind).toBe("refused");
   });
 });
 

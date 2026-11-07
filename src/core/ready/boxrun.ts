@@ -2,7 +2,8 @@
 // verifier both come here:
 //   1 the change's branch is fetched into the clone through hostGit, and its tip must be the head the run is for
 //   2 the tree at that head is copied into a private folder with no checkout filter (code.ts); nothing of it runs here
-//   3 a fresh box starts with only that folder mounted, no forge token, and its egress through the proxy (#130)
+//   3 the project's egress proxy starts (#130), then a fresh box with only that folder mounted, no forge token, on the
+//     project's internal network, its egress through that proxy
 //   4 the commands run one by one, each with no shell and a time limit; the first that fails ends the run
 //   5 the box stops and the folder goes, however the run ended
 // A box that cannot start or run is a failure of the run, never a failed command: no verdict comes from it.
@@ -10,7 +11,8 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Box, PinnedImage, Ran, Session } from "../box/index.js";
-import { proxyEnv, type ProxyAddress } from "../egress/env.js";
+import { proxyEnv } from "../egress/env.js";
+import type { Started as EgressStarted } from "../egress/start.js";
 import type { Result } from "../forge/api.js";
 import { hostGit } from "../git.js";
 import type { Argv } from "../project.js";
@@ -20,7 +22,9 @@ import { attempt } from "../review/safe.js";
 export type BoxSetup = {
   readonly box: Box;
   readonly image: PinnedImage;
-  readonly proxy: ProxyAddress;
+  // starts the project's egress proxy, recreated with the allowlist read this pass; a box run calls it inside the
+  // project's dispatch lock, so it never recreates the proxy under a box that is running
+  readonly egress: () => Promise<EgressStarted>;
   // the project's clone (FACTORY_REPO): only git reads it, through hostGit
   readonly repo: string;
   // the host's environment, for hostGit only; the box never sees it
@@ -91,26 +95,40 @@ async function runAll(job: BoxJob, session: Session): Promise<Result<readonly Ro
   return { kind: "ok", value: rows };
 }
 
-// inBox : a fresh box on the tree in `code`; it is stopped whatever happens
-async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>> {
-  const { box, image, proxy } = job.setup;
-  const started = await box.start({
-    image,
+// started : the project's egress proxy, then a fresh box on the tree in `code`, behind it
+async function started(job: BoxJob, code: string): Promise<Result<Session>> {
+  const egress = await job.setup.egress();
+  if (egress.kind === "failed") {
+    return { kind: "failed", reason: `the egress proxy did not start: ${egress.reason}` };
+  }
+  const { proxy, network } = egress;
+  const box = await job.setup.box.start({
+    image: job.setup.image,
     worktree: code,
     // no agent runs here, so there are no settings to hold read-only; the copy is thrown away after
     readOnly: [],
     env: proxyEnv(proxy),
     proxy: `http://${proxy.host}:${proxy.port}`,
+    network,
   });
-  if (started.kind === "failed") {
-    return { kind: "failed", reason: `the box did not start: ${started.reason}` };
+  return box.kind === "started"
+    ? { kind: "ok", value: box.session }
+    : { kind: "failed", reason: `the box did not start: ${box.reason}` };
+}
+
+// inBox : a fresh box on the tree in `code`; it is stopped whatever happens
+async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>> {
+  const { box } = job.setup;
+  const session = await started(job, code);
+  if (session.kind === "failed") {
+    return session;
   }
   // the box seam never throws, so the stop always runs; a box that will not stop fails the run, so it is seen
-  const rows = await runAll(job, started.session);
-  const stopped = await box.stop(started.session);
+  const rows = await runAll(job, session.value);
+  const stopped = await box.stop(session.value);
   return stopped.kind === "ok"
     ? rows
-    : { kind: "failed", reason: `the box ${started.session.id} did not stop: ${stopped.reason}` };
+    : { kind: "failed", reason: `the box ${session.value.id} did not stop: ${stopped.reason}` };
 }
 
 async function inFolder(job: BoxJob, dir: string): Promise<Result<readonly Row[]>> {

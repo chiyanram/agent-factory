@@ -13,7 +13,8 @@ const SPEC: BoxSpec = {
   worktree: "/home/op/.factory/runs/7/repo",
   readOnly: [".claude", "AGENTS.md"],
   env: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },
-  proxy: "http://factory-egress:3128",
+  proxy: "http://factory-egress-ledger:3128",
+  network: "factory-int-ledger",
 };
 const OK: Exit = { code: 0, stdout: "", stderr: "" };
 const RUNTIMES: Exit = { code: 0, stdout: "io.containerd.runc.v2\nrunc\nsysbox-runc\n", stderr: "" };
@@ -105,19 +106,19 @@ describe("vm box: probe", () => {
 });
 
 describe("vm box: start", () => {
-  it("runs the box under Sysbox on the internal network, then gives the box user the owner's ids", async () => {
+  it("runs the box under Sysbox on its project's internal network, then gives the box user the owner's ids", async () => {
     const fake = fakeDocker();
     const started = await box(fake).start(SPEC);
     expect(started).toEqual({ kind: "started", session: { id: "factory-box-1", place: "vm" } });
     expect(argv(fake.calls)).toEqual([
       [
-        "run --detach --name factory-box-1 --runtime sysbox-runc --init --network factory-int",
+        "run --detach --name factory-box-1 --runtime sysbox-runc --init --network factory-int-ledger",
         "--mount type=bind,src=/home/op/.factory/runs/7/repo,dst=/work",
         "--mount type=bind,src=/home/op/.factory/runs/7/repo/.claude,dst=/work/.claude,readonly",
         "--mount type=bind,src=/home/op/.factory/runs/7/repo/AGENTS.md,dst=/work/AGENTS.md,readonly",
         "--mount type=volume,dst=/var/lib/docker",
         "--tmpfs /home/box:rw,nosuid,nodev,mode=0700",
-        "--env HTTP_PROXY=http://factory-egress:3128 --env HTTPS_PROXY=http://factory-egress:3128",
+        "--env HTTP_PROXY=http://factory-egress-ledger:3128 --env HTTPS_PROXY=http://factory-egress-ledger:3128",
         `--env NO_PROXY=localhost,127.0.0.1,::1 ${IMAGE.ref}`,
       ].join(" "),
       "exec --user 0 factory-box-1 groupmod --non-unique --gid 1002 box",
@@ -153,6 +154,8 @@ describe("vm box: start", () => {
     [{ env: { HOME: "/root" } }, '"HOME" is not allowed'],
     [{ env: { "A B": "x" } }, '"A B" is not allowed'],
     [{ proxy: "https://p:3128" }, "is not an http:// URL"],
+    [{ network: "host" }, '"host" is not a docker network name'],
+    [{ network: "factory-int-a --privileged" }, "is not a docker network name"],
   ] as const)("refuses %o before any docker call", async (change, reason) => {
     const fake = fakeDocker();
     expect(await box(fake).start({ ...SPEC, ...change })).toEqual({

@@ -24,6 +24,7 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       gate: "local",
       verify: ["make", "verify"],
       ready: { programs: ["make", "./gradlew"], timeoutMinutes: 10 },
+      egress: { allow: ["repo.maven.apache.org", "api.anthropic.com", ".gradle.org", "services.gradle.org"] },
       capabilities: { forge: "github" },
     });
     expect(await read()).toEqual({
@@ -31,12 +32,18 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       value: {
         gate: { kind: "local", verify: ["make", "verify"] },
         ready: { programs: ["make", "./gradlew"], timeoutSeconds: 600 },
+        // checked as the proxy will use it: sorted, and a host a dotted entry covers dropped
+        egress: { allow: [".gradle.org", "api.anthropic.com", "repo.maven.apache.org"] },
       },
     });
     write({ gate: "forge-ci", ready: { programs: ["make"] } });
     expect(await read()).toEqual({
       kind: "ok",
-      value: { gate: { kind: "forge-ci" }, ready: { programs: ["make"], timeoutSeconds: 1800 } },
+      value: {
+        gate: { kind: "forge-ci" },
+        ready: { programs: ["make"], timeoutSeconds: 1800 },
+        egress: { allow: [] },
+      },
     });
   });
 
@@ -53,6 +60,10 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       [{ gate: "forge-ci", ready: { programs: ["make", ""] } }, '"ready.programs" must list'],
       [{ gate: "forge-ci", ready: { programs: ["make"], timeoutMinutes: 0 } }, '"ready.timeoutMinutes"'],
       [{ gate: "forge-ci", ready: { programs: ["make"], timeoutMinutes: 241 } }, '"ready.timeoutMinutes"'],
+      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: ["a.com"] }, '"egress.allow" must list'],
+      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: [1] } }, '"egress.allow" must list'],
+      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: [] } }, "the egress allowlist is empty"],
+      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: ["*.a.com"] } }, "a wildcard"],
     ];
     for (const [value, reason] of cases) {
       write(value);

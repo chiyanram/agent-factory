@@ -21,6 +21,8 @@ export type {
 } from "./types.js";
 export { chooseBox, pinImage, startGate, type BoxChoice, type Opened, type Pin } from "./choose.js";
 export { vmBox, type Docker, type VmBoxSetup } from "./vm.js";
+export { hostDocker } from "./docker.js";
+export { buildBox, readBoxFile, type Built } from "./built.js";
 export type { Owner } from "./vm-plan.js";
 
 async function find(place: BoxPlace, boxes: readonly Box[]): Promise<Found> {

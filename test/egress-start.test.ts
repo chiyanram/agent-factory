@@ -4,10 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
 import type { PinnedImage } from "../src/core/box/types.js";
-import { openEgress, planNetwork, readNetwork, startEgress } from "../src/core/egress/index.js";
+import {
+  egressNames,
+  openEgress,
+  planNetwork,
+  readNetwork,
+  startEgress,
+  upstreamOf,
+} from "../src/core/egress/index.js";
 
 const IMAGE: PinnedImage = { kind: "pinned", ref: `ubuntu/squid@sha256:${"b".repeat(64)}` };
 const OK: Exit = { code: 0, stdout: "", stderr: "" };
+const NAMES = egressNames("ledger");
 const NO_NETWORK: Exit = { code: 1, stdout: "", stderr: "Error response from daemon: network factory-int not found" };
 
 // a fake docker: answers by the first two arguments and the last, records every call; a network it is not told about
@@ -65,52 +73,68 @@ describe("readNetwork", () => {
 
 describe("startEgress", () => {
   it("creates both networks, then a fresh proxy on both, with the config copied in", async () => {
-    const fake = fakeDocker({ "network inspect factory-int": NO_NETWORK, "network inspect factory-ext": NO_NETWORK });
-    const started = await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/h/egress/squid.conf" });
-    expect(started).toEqual({ kind: "started", proxy: { host: "factory-egress", port: 3128 }, network: "factory-int" });
+    const fake = fakeDocker({
+      "network inspect factory-int-ledger": NO_NETWORK,
+      "network inspect factory-ext": NO_NETWORK,
+    });
+    const started = await startEgress({
+      docker: fake.docker,
+      image: IMAGE,
+      confFile: "/h/egress/squid.conf",
+      names: NAMES,
+    });
+    expect(started).toEqual({
+      kind: "started",
+      proxy: { host: "factory-egress-ledger", port: 3128 },
+      network: "factory-int-ledger",
+    });
     expect(argv(fake.calls)).toEqual([
-      "network inspect --format {{.Internal}} factory-int",
-      "network create --internal factory-int",
+      "network inspect --format {{.Internal}} factory-int-ledger",
+      "network create --internal factory-int-ledger",
       "network inspect --format {{.Internal}} factory-ext",
       "network create factory-ext",
-      "rm --force factory-egress",
-      `create --name factory-egress --network factory-ext --restart unless-stopped ${IMAGE.ref}`,
-      "cp /h/egress/squid.conf factory-egress:/etc/squid/squid.conf",
-      "network connect factory-int factory-egress",
-      "start factory-egress",
+      "rm --force factory-egress-ledger",
+      `create --name factory-egress-ledger --network factory-ext --restart unless-stopped ${IMAGE.ref}`,
+      "cp /h/egress/squid.conf factory-egress-ledger:/etc/squid/squid.conf",
+      "network connect factory-int-ledger factory-egress-ledger",
+      "start factory-egress-ledger",
     ]);
   });
 
   it("keeps networks that exist and are right", async () => {
     const fake = fakeDocker({
-      "network inspect factory-int": { code: 0, stdout: "true\n", stderr: "" },
+      "network inspect factory-int-ledger": { code: 0, stdout: "true\n", stderr: "" },
       "network inspect factory-ext": { code: 0, stdout: "false\n", stderr: "" },
     });
-    expect((await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c" })).kind).toBe("started");
+    expect((await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c", names: NAMES })).kind).toBe(
+      "started",
+    );
     expect(argv(fake.calls).filter((a) => a.startsWith("network create"))).toEqual([]);
   });
 
   it("stops at an internal network that is open, and starts no proxy", async () => {
-    const fake = fakeDocker({ "network inspect factory-int": { code: 0, stdout: "false\n", stderr: "" } });
-    const started = await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c" });
+    const fake = fakeDocker({ "network inspect factory-int-ledger": { code: 0, stdout: "false\n", stderr: "" } });
+    const started = await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c", names: NAMES });
     expect(started.kind).toBe("failed");
-    expect(argv(fake.calls)).toEqual(["network inspect --format {{.Internal}} factory-int"]);
+    expect(argv(fake.calls)).toEqual(["network inspect --format {{.Internal}} factory-int-ledger"]);
   });
 
   it("goes on when there was no old proxy to remove", async () => {
     const fake = fakeDocker({
-      "rm --force factory-egress": {
+      "rm --force factory-egress-ledger": {
         code: 1,
         stdout: "",
-        stderr: "Error response from daemon: No such container: factory-egress",
+        stderr: "Error response from daemon: No such container: factory-egress-ledger",
       },
     });
-    expect((await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c" })).kind).toBe("started");
+    expect((await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c", names: NAMES })).kind).toBe(
+      "started",
+    );
   });
 
   it("stops at the first failed step and names it", async () => {
     const fake = fakeDocker({ cp: { code: 1, stdout: "", stderr: "no such file" } });
-    expect(await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c" })).toEqual({
+    expect(await startEgress({ docker: fake.docker, image: IMAGE, confFile: "/c", names: NAMES })).toEqual({
       kind: "failed",
       reason: "docker cp /c: no such file",
     });
@@ -130,6 +154,7 @@ describe("openEgress", () => {
   it("writes the config from the allowlist and starts the proxy with it", async () => {
     const fake = fakeDocker({});
     const started = await openEgress({
+      project: "ledger",
       allowlist: ["api.anthropic.com"],
       upstream: { kind: "none" },
       image: IMAGE,
@@ -137,15 +162,18 @@ describe("openEgress", () => {
       docker: fake.docker,
     });
     expect(started.kind).toBe("started");
-    expect(readFileSync(join(dir, "egress", "squid.conf"), "utf8")).toContain(
+    expect(readFileSync(join(dir, "egress", "ledger", "squid.conf"), "utf8")).toContain(
       "acl allowed dstdomain -n api.anthropic.com\n",
     );
-    expect(argv(fake.calls)).toContain(`cp ${join(dir, "egress", "squid.conf")} factory-egress:/etc/squid/squid.conf`);
+    expect(argv(fake.calls)).toContain(
+      `cp ${join(dir, "egress", "ledger", "squid.conf")} factory-egress-ledger:/etc/squid/squid.conf`,
+    );
   });
 
   it("refuses a bad allowlist before it calls docker", async () => {
     const fake = fakeDocker({});
     const started = await openEgress({
+      project: "ledger",
       allowlist: ["*.evil.com"],
       upstream: { kind: "none" },
       image: IMAGE,
@@ -154,5 +182,59 @@ describe("openEgress", () => {
     });
     expect(started.kind).toBe("failed");
     expect(fake.calls).toEqual([]);
+  });
+});
+
+describe("egressNames", () => {
+  it("gives each project its own proxy and internal network, so no pass swaps another project's allowlist", () => {
+    expect(egressNames("ledger")).toEqual({ proxy: "factory-egress-ledger", network: "factory-int-ledger" });
+    expect(egressNames("app2")).not.toEqual(egressNames("ledger"));
+  });
+});
+
+describe("openEgress for two projects", () => {
+  let dir = "";
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "egress-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps each project's config in its own file, so one project's list never reaches the other's proxy", async () => {
+    const open = (project: string, host: string) =>
+      openEgress({
+        project,
+        allowlist: [host],
+        upstream: { kind: "none" },
+        image: IMAGE,
+        dir,
+        docker: fakeDocker({}).docker,
+      });
+    await open("ledger", "ledger.example.com");
+    await open("app2", "app2.example.com");
+    expect(readFileSync(join(dir, "ledger", "squid.conf"), "utf8")).not.toContain("app2.example.com");
+    expect(readFileSync(join(dir, "app2", "squid.conf"), "utf8")).not.toContain("ledger.example.com");
+  });
+});
+
+describe("upstreamOf", () => {
+  it("goes direct when FACTORY_UPSTREAM_PROXY is unset or empty", () => {
+    expect(upstreamOf({})).toEqual({ kind: "none" });
+    expect(upstreamOf({ FACTORY_UPSTREAM_PROXY: " " })).toEqual({ kind: "none" });
+  });
+
+  it("reads host:port", () => {
+    expect(upstreamOf({ FACTORY_UPSTREAM_PROXY: "proxy.corp.example:8080" })).toEqual({
+      kind: "proxy",
+      host: "proxy.corp.example",
+      port: 8080,
+    });
+  });
+
+  it("refuses a scheme, a user, a missing port and a port out of range", () => {
+    for (const set of ["http://proxy:8080", "user:pw@proxy:8080", "proxy", "proxy:0", "proxy:70000", "pro xy:80"]) {
+      expect(upstreamOf({ FACTORY_UPSTREAM_PROXY: set }).kind).toBe("refused");
+    }
   });
 });

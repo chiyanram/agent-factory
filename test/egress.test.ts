@@ -55,6 +55,11 @@ describe("squidConf", () => {
   const conf = squidConf({ hosts: [".npmjs.org", "api.anthropic.com"], upstream: { kind: "none" } });
   const lines = conf.split("\n");
 
+  it("logs where its own user can write, never to the container's /dev/stdout, which stops Squid at start", () => {
+    expect(conf).not.toContain("/dev/std");
+    expect(lines.filter((l) => /^(access|cache)_log /.test(l)).every((l) => l.includes("/var/log/squid/"))).toBe(true);
+  });
+
   it("allows the listed hosts by name only, never by reverse DNS", () => {
     expect(lines).toContain("acl allowed dstdomain -n .npmjs.org api.anthropic.com");
   });
