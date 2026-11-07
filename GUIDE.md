@@ -7,6 +7,15 @@ How to set up the factory's identity, configure the scripts and run the loop. Th
 > decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The bash scripts do not follow it
 > yet. Each place where they still differ is marked **Today:**.
 
+## Install a pinned version
+
+```bash
+npm i -g github:chiyanram/agent-factory#v0.1.0
+```
+
+Pick the version from the [releases](https://github.com/chiyanram/agent-factory/releases); `CHANGELOG.md` says what
+each one changed. npm builds the package on install. Never install from `main`: it changes under you (#153).
+
 ## Set up identity
 
 The factory pushes and posts with a forge login that **only code uses**: the dispatcher and the host push. No LLM holds
