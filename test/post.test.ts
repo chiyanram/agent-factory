@@ -49,7 +49,16 @@ describe("cleanField", () => {
   });
 
   it("breaks every mention, wherever it stands", () => {
-    for (const text of ["@alice", "ask @alice", "@group/team", "@all", "fixes #1@octocat", "@a.@octocat", "x(@bob)", "\\@octocat"]) {
+    for (const text of [
+      "@alice",
+      "ask @alice",
+      "@group/team",
+      "@all",
+      "fixes #1@octocat",
+      "@a.@octocat",
+      "x(@bob)",
+      "\\@octocat",
+    ]) {
       inert(cleanField(text));
     }
     expect(cleanField("ask @alice")).toBe(`ask @${J}alice`);
@@ -57,22 +66,39 @@ describe("cleanField", () => {
 
   it("breaks every issue and merge-request reference, so no closing keyword closes anything", () => {
     for (const text of [
-      "fixes #12", "Fix: #1", "closing #1", "fixing #1", "resolving #1", "implementing #1", "Closes issue #1",
-      "Closes otherproject#1", "closes #1, #2", "Closes #1 and #2", "Closes owner/repo#1", "see !42",
-      "resolves https://github.com/o/r/issues/1", "\\fixes #1",
+      "fixes #12",
+      "Fix: #1",
+      "closing #1",
+      "fixing #1",
+      "resolving #1",
+      "implementing #1",
+      "Closes issue #1",
+      "Closes otherproject#1",
+      "closes #1, #2",
+      "Closes #1 and #2",
+      "Closes owner/repo#1",
+      "see !42",
+      "resolves https://github.com/o/r/issues/1",
+      "\\fixes #1",
     ]) {
       inert(cleanField(text));
     }
   });
 
   it("breaks every link: any scheme, www., and an e-mail address", () => {
-    for (const text of ["see https://evil.example/x?a=1", "ftp://evil.example/x", "www.evil.example/p", "a@b.example", "\\https://evil.example/x"]) {
+    for (const text of [
+      "see https://evil.example/x?a=1",
+      "ftp://evil.example/x",
+      "www.evil.example/p",
+      "a@b.example",
+      "\\https://evil.example/x",
+    ]) {
       inert(cleanField(text));
     }
   });
 
   it("escapes HTML and every Markdown and Jira link, image, macro and code-span character", () => {
-    const out = cleanField('<img src=x> ![a](//evil) [b](x) [link|http://x] !image.png! {html} `@x`');
+    const out = cleanField("<img src=x> ![a](//evil) [b](x) [link|http://x] !image.png! {html} `@x`");
     inert(out);
     expect(out).toContain("&lt;img src=x&gt;");
   });
@@ -113,7 +139,9 @@ describe("cleanField", () => {
 
 describe("renderPost", () => {
   it("writes the seat prefix and the title on the first line", () => {
-    expect(text({ seat: "writer", title: "OPEN: which currency?", fields: [], items: [] })).toBe("[writer] OPEN: which currency?");
+    expect(text({ seat: "writer", title: "OPEN: which currency?", fields: [], items: [] })).toBe(
+      "[writer] OPEN: which currency?",
+    );
   });
 
   it("writes each field and item as a list line, cleaned", () => {

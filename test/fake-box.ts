@@ -12,7 +12,12 @@ export type BoxCall =
 
 export type FakeBox = { readonly box: Box; readonly calls: BoxCall[]; readonly live: Set<string> };
 
-export function fakeBox(input: { readonly place?: BoxPlace; readonly probe?: Probe; readonly runs?: readonly Ran[]; readonly copies?: Done }): FakeBox {
+export function fakeBox(input: {
+  readonly place?: BoxPlace;
+  readonly probe?: Probe;
+  readonly runs?: readonly Ran[];
+  readonly copies?: Done;
+}): FakeBox {
   const place = input.place ?? "vm";
   const calls: BoxCall[] = [];
   const live = new Set<string>();
@@ -37,7 +42,9 @@ export function fakeBox(input: { readonly place?: BoxPlace; readonly probe?: Pro
         return { kind: "failed", reason: `fake: box ${session.id} is not running` };
       }
       ran += 1;
-      return input.runs?.[ran - 1] ?? { kind: "failed", reason: `fake: no answer for run ${ran}: ${command.argv.join(" ")}` };
+      return (
+        input.runs?.[ran - 1] ?? { kind: "failed", reason: `fake: no answer for run ${ran}: ${command.argv.join(" ")}` }
+      );
     },
     copyIn: async (copy) => {
       calls.push({ op: "copyIn", copy });

@@ -9,7 +9,7 @@ People start at `README.md`; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
 ## Check
 
 ```bash
-make lint   # every relative link resolves; the root AGENTS.md is under 200 lines
+make lint   # links resolve; AGENTS.md under 200 lines; tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
 make test   # every tests/*.test.sh; no network, glab, gh or claude needed
 ```
 
@@ -30,6 +30,8 @@ CI runs both on every pull request and on push to `main`.
   each place where a script still differs from ADR-0012 with **Today:**, because a reader must not take a decided
   guardrail for an enforced one.
 - Give no LLM seat a forge token or a skip-permissions flag in new code, because ADR-0012 S2, S6 and S11 forbid it.
+- Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
+  comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
 - Commit and push only with the operator's yes; one issue → one branch → one PR. The human merges.
 
 ## Where things go

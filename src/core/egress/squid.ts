@@ -7,7 +7,9 @@
 
 export const PROXY_PORT = 3128;
 
-export type Upstream = { readonly kind: "none" } | { readonly kind: "proxy"; readonly host: string; readonly port: number };
+export type Upstream =
+  | { readonly kind: "none" }
+  | { readonly kind: "proxy"; readonly host: string; readonly port: number };
 
 export function squidConf(input: { readonly hosts: readonly string[]; readonly upstream: Upstream }): string {
   const lines = [

@@ -29,7 +29,12 @@ export type ApprovalRecord = {
 
 export type Where = { readonly home: string } & Ticket;
 
-export type ApproveRequest = { readonly where: Where; readonly seenHash: string; readonly by: string; readonly at: string };
+export type ApproveRequest = {
+  readonly where: Where;
+  readonly seenHash: string;
+  readonly by: string;
+  readonly at: string;
+};
 
 export type Approve = { readonly kind: "approved"; readonly record: ApprovalRecord; readonly path: string } | Refused;
 
@@ -46,32 +51,48 @@ type PathResult = { readonly kind: "path"; readonly path: string } | Refused;
 export function approvalPath(where: Where): PathResult {
   return plainName(where.project) && plainName(where.ticket)
     ? { kind: "path", path: join(where.home, "approvals", where.project, `${where.ticket}.json`) }
-    : { kind: "refused", reason: `a project and a ticket must be plain names, got ${JSON.stringify(where.project)} ${JSON.stringify(where.ticket)}` };
+    : {
+        kind: "refused",
+        reason: `a project and a ticket must be plain names, got ${JSON.stringify(where.project)} ${JSON.stringify(where.ticket)}`,
+      };
 }
 
 type Current = { readonly kind: "spec"; readonly spec: Spec } | { readonly kind: "missing" } | Refused;
 
 async function currentSpec(where: Where): Promise<Current> {
-  const read = await readSpec({ store: { kind: "local", root: join(where.home, "specs") }, project: where.project, ticket: where.ticket });
+  const read = await readSpec({
+    store: { kind: "local", root: join(where.home, "specs") },
+    project: where.project,
+    ticket: where.ticket,
+  });
   if (read.kind !== "found") {
     return read.kind === "missing" ? { kind: "missing" } : read;
   }
   const checked = checkSpec(read.text);
-  return checked.kind === "ok" ? { kind: "spec", spec: checked.spec } : { kind: "refused", reason: `the spec is not ready: ${checked.problems.join("; ")}` };
+  return checked.kind === "ok"
+    ? { kind: "spec", spec: checked.spec }
+    : { kind: "refused", reason: `the spec is not ready: ${checked.problems.join("; ")}` };
 }
 
 // confirmedSpec : the current spec, if it has exactly the hash the human confirmed.
-async function confirmedSpec(request: ApproveRequest): Promise<{ readonly kind: "spec"; readonly spec: Spec } | Refused> {
+async function confirmedSpec(
+  request: ApproveRequest,
+): Promise<{ readonly kind: "spec"; readonly spec: Spec } | Refused> {
   if (!FULL_HASH.test(request.seenHash)) {
     return { kind: "refused", reason: "give the full 64-character spec hash that `agent-factory spec` printed" };
   }
   const current = await currentSpec(request.where);
   if (current.kind !== "spec") {
-    return current.kind === "missing" ? { kind: "refused", reason: `there is no spec for ${request.where.project}/${request.where.ticket}` } : current;
+    return current.kind === "missing"
+      ? { kind: "refused", reason: `there is no spec for ${request.where.project}/${request.where.ticket}` }
+      : current;
   }
   return current.spec.hash === request.seenHash
     ? current
-    : { kind: "refused", reason: `the spec's hash is now ${current.spec.hash}, not the one you confirmed: it changed; look at it again` };
+    : {
+        kind: "refused",
+        reason: `the spec's hash is now ${current.spec.hash}, not the one you confirmed: it changed; look at it again`,
+      };
 }
 
 // writeRecord : the record, through a temp file and a rename so a reader never sees half of it. A failure is a
@@ -84,8 +105,11 @@ async function writeRecord(path: string, record: ApprovalRecord): Promise<Approv
     await rename(temp, path);
     return { kind: "approved", record, path };
   } catch (error: unknown) {
-    await rm(temp, { force: true }).catch(() => undefined);   // best effort: the temp may never have been made
-    return { kind: "refused", reason: `cannot write ${path}: ${error instanceof Error ? error.message : String(error)}` };
+    await rm(temp, { force: true }).catch(() => undefined); // best effort: the temp may never have been made
+    return {
+      kind: "refused",
+      reason: `cannot write ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -100,7 +124,14 @@ export async function approve(request: ApproveRequest): Promise<Approve> {
     return confirmed;
   }
   const { project, ticket } = request.where;
-  return writeRecord(path.path, { version: 1, project, ticket, spec_hash: confirmed.spec.hash, by: request.by, at: request.at });
+  return writeRecord(path.path, {
+    version: 1,
+    project,
+    ticket,
+    spec_hash: confirmed.spec.hash,
+    by: request.by,
+    at: request.at,
+  });
 }
 
 // The fields a record must hold, and the value each must have, so isRecord is a table, not a chain of conditions.
@@ -116,7 +147,11 @@ function recordProblems(r: Readonly<Record<string, unknown>>, where: Where): rea
 }
 
 function isRecord(value: unknown, where: Where): value is ApprovalRecord {
-  return typeof value === "object" && value !== null && recordProblems(value as Record<string, unknown>, where).every(Boolean);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    recordProblems(value as Record<string, unknown>, where).every(Boolean)
+  );
 }
 
 type Stored = { readonly kind: "record"; readonly record: ApprovalRecord } | { readonly kind: "missing" } | Refused;
@@ -124,7 +159,9 @@ type Stored = { readonly kind: "record"; readonly record: ApprovalRecord } | { r
 function parseRecord(text: string, path: string, where: Where): Stored {
   try {
     const parsed: unknown = JSON.parse(text);
-    return isRecord(parsed, where) ? { kind: "record", record: parsed } : { kind: "refused", reason: `${path} is not an approval record for ${where.project}/${where.ticket}` };
+    return isRecord(parsed, where)
+      ? { kind: "record", record: parsed }
+      : { kind: "refused", reason: `${path} is not an approval record for ${where.project}/${where.ticket}` };
   } catch {
     return { kind: "refused", reason: `${path} is not valid JSON` };
   }
@@ -141,7 +178,9 @@ async function readRecord(path: string, where: Where): Promise<Stored> {
 
 function compare(record: ApprovalRecord, current: Current, where: Where): ApprovalState {
   if (current.kind !== "spec") {
-    return current.kind === "missing" ? { kind: "refused", reason: `${where.project}/${where.ticket} is approved, but its spec is gone` } : current;
+    return current.kind === "missing"
+      ? { kind: "refused", reason: `${where.project}/${where.ticket} is approved, but its spec is gone` }
+      : current;
   }
   return current.spec.hash === record.spec_hash
     ? { kind: "approved", record, spec: current.spec }

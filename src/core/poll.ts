@@ -26,7 +26,10 @@ import type { Changes, Forge, OpenChange, Person, Pipeline } from "./forge/types
 
 // stopped: the /stop's time, as ISO 8601 UTC; undated: a /stop whose time did not parse, which holds the change until a
 // human looks, since no approval can be shown to be newer.
-export type Stop = { readonly kind: "none" } | { readonly kind: "stopped"; readonly at: string } | { readonly kind: "undated" };
+export type Stop =
+  | { readonly kind: "none" }
+  | { readonly kind: "stopped"; readonly at: string }
+  | { readonly kind: "undated" };
 
 export type OpenLine = {
   readonly kind: "open";
@@ -61,14 +64,21 @@ function firstLine(body: string): string {
 }
 
 // stop : a maintainer's last /stop. An agent note never counts: the template never starts a post with "/".
-export function stop(input: { readonly comments: readonly Note[]; readonly readers: Readers; readonly maintainers: ReadonlySet<string> }): Stop {
+export function stop(input: {
+  readonly comments: readonly Note[];
+  readonly readers: Readers;
+  readonly maintainers: ReadonlySet<string>;
+}): Stop {
   const stops = input.comments.filter(
     (note) =>
       firstLine(note.body) === "/stop" &&
       input.maintainers.has(note.author.name.toLowerCase()) &&
       classify({ note, readers: input.readers }).kind === "person",
   );
-  const last = stops.reduce<Note | "none">((best, note) => (best === "none" || instant(note.at) >= instant(best.at) ? note : best), "none");
+  const last = stops.reduce<Note | "none">(
+    (best, note) => (best === "none" || instant(note.at) >= instant(best.at) ? note : best),
+    "none",
+  );
   if (last === "none") {
     return { kind: "none" };
   }
@@ -91,9 +101,16 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
 }
 
 // decide : the lines for what the forge answered, in change-number order.
-export function decide(input: { readonly changes: Changes; readonly label: string; readonly factory: string }): readonly PollLine[] {
+export function decide(input: {
+  readonly changes: Changes;
+  readonly label: string;
+  readonly factory: string;
+}): readonly PollLine[] {
   const { changes, label } = input;
-  const readers: Readers = { factory: input.factory, members: names(changes.team, (p) => !p.bot && p.level !== "guest") };
+  const readers: Readers = {
+    factory: input.factory,
+    members: names(changes.team, (p) => !p.bot && p.level !== "guest"),
+  };
   const maintainers = names(changes.team, (p) => !p.bot && p.level === "maintainer");
   const lines: PollLine[] = [
     ...changes.open.map((c) => openLine(c, label, readers, maintainers)),
@@ -126,7 +143,10 @@ export function format(input: { readonly line: PollLine; readonly mark: string }
 
 // poll : the forge's open and merged changes, decided. The factory's login comes from the forge, or with an App from its
 // token (src/core/identity.ts).
-export async function poll(input: { readonly forge: Forge; readonly label: string }): Promise<Result<readonly PollLine[]>> {
+export async function poll(input: {
+  readonly forge: Forge;
+  readonly label: string;
+}): Promise<Result<readonly PollLine[]>> {
   const me = await input.forge.me();
   if (me.kind === "failed") {
     return me;

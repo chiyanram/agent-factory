@@ -40,7 +40,12 @@ describe("openForge", () => {
       calls.push(call.env);
       return { code: 0, stdout: 'HTTP/2.0 200 OK\r\n\r\n{"default_branch":"main"}', stderr: "" };
     };
-    const app: Identity = { kind: "app", token: "ghs_0123456789abcdefghij", login: "ledger-factory[bot]", expiresAt: "2026-11-07T06:00:00Z" };
+    const app: Identity = {
+      kind: "app",
+      token: "ghs_0123456789abcdefghij",
+      login: "ledger-factory[bot]",
+      expiresAt: "2026-11-07T06:00:00Z",
+    };
     const r = open({ FACTORY_FORGE: "github", FACTORY_PROJECT: "a/b" }, run, app).result;
     if (r.kind !== "ok") {
       throw new Error(r.reason);
@@ -66,12 +71,33 @@ describe("openForge", () => {
     const calls: { bin: string; args: readonly string[] }[] = [];
     const run: Runner = async (call) => {
       calls.push({ bin: call.bin, args: call.args });
-      return { code: 0, stdout: JSON.stringify({ token: "ghs_0123456789abcdefghij", login: "ledger-factory[bot]", expiresAt: "2099-01-01T00:00:00Z" }), stderr: "" };
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          token: "ghs_0123456789abcdefghij",
+          login: "ledger-factory[bot]",
+          expiresAt: "2099-01-01T00:00:00Z",
+        }),
+        stderr: "",
+      };
     };
-    const opened = await openProject({ env: { FACTORY_FORGE: "github", FACTORY_PROJECT: "chiyanram/ledger", FACTORY_IDENTITY: "app" }, log: () => undefined, run });
+    const opened = await openProject({
+      env: { FACTORY_FORGE: "github", FACTORY_PROJECT: "chiyanram/ledger", FACTORY_IDENTITY: "app" },
+      log: () => undefined,
+      run,
+    });
     expect(opened.kind === "ok" ? opened.value.identity.kind : "").toBe("app");
-    expect(calls).toEqual([{ bin: "sudo", args: ["-n", "-u", "factory", "--", "/usr/local/bin/agent-factory-app-token", "chiyanram/ledger"] }]);
-    const gitlab = await openProject({ env: { FACTORY_PROJECT: "a/b", FACTORY_IDENTITY: "app" }, log: () => undefined, run });
+    expect(calls).toEqual([
+      {
+        bin: "sudo",
+        args: ["-n", "-u", "factory", "--", "/usr/local/bin/agent-factory-app-token", "chiyanram/ledger"],
+      },
+    ]);
+    const gitlab = await openProject({
+      env: { FACTORY_PROJECT: "a/b", FACTORY_IDENTITY: "app" },
+      log: () => undefined,
+      run,
+    });
     expect(gitlab).toMatchObject({ kind: "failed", reason: expect.stringContaining("GitHub App") });
   });
 
@@ -81,7 +107,16 @@ describe("openForge", () => {
       throw new Error(result.reason);
     }
     const f = result.value;
-    const change = { number: 3, state: "opened", sha: "h", sourceBranch: "x", targetBranch: "main", labels: [], description: "", anchor: { kind: "gitlab", base: "b", start: "s", head: "h" } } as const;
+    const change = {
+      number: 3,
+      state: "opened",
+      sha: "h",
+      sourceBranch: "x",
+      targetBranch: "main",
+      labels: [],
+      description: "",
+      anchor: { kind: "gitlab", base: "b", start: "s", head: "h" },
+    } as const;
     const post = { seat: "coordinator", title: "claimed", fields: [], items: [] } as const;
     expect(await f.addLabel({ number: 3, label: "agent::claimed" })).toEqual({ kind: "ok" });
     expect(await f.removeLabel({ number: 3, label: "agent::claimed" })).toEqual({ kind: "ok" });
@@ -99,7 +134,10 @@ describe("openForge", () => {
   it("FACTORY_FORGE_HOST is github.com or gitlab.com unless set, and must be a plain host name", () => {
     expect(forgeHost({}, "github")).toEqual({ kind: "ok", value: "github.com" });
     expect(forgeHost({}, "gitlab")).toEqual({ kind: "ok", value: "gitlab.com" });
-    expect(forgeHost({ FACTORY_FORGE_HOST: "gitlab.example.com" }, "gitlab")).toEqual({ kind: "ok", value: "gitlab.example.com" });
+    expect(forgeHost({ FACTORY_FORGE_HOST: "gitlab.example.com" }, "gitlab")).toEqual({
+      kind: "ok",
+      value: "gitlab.example.com",
+    });
     for (const host of ["", "gitlab", "evil.example/x", "user@host.com", "host.com:22", ".example.com"]) {
       expect(forgeHost({ FACTORY_FORGE_HOST: host }, "gitlab")).toMatchObject({ kind: "failed" });
     }

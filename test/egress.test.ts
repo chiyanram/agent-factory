@@ -5,7 +5,9 @@ import { dockerdProxy, proxyEnv } from "../src/core/egress/env.js";
 
 describe("parseAllowlist", () => {
   it("keeps host names, sorted, and drops one a dotted entry covers", () => {
-    expect(parseAllowlist([" api.anthropic.com ", ".npmjs.org", "registry.npmjs.org", "npmjs.org", "repo1.maven.org", ""])).toEqual({
+    expect(
+      parseAllowlist([" api.anthropic.com ", ".npmjs.org", "registry.npmjs.org", "npmjs.org", "repo1.maven.org", ""]),
+    ).toEqual({
       kind: "ok",
       hosts: [".npmjs.org", "api.anthropic.com", "repo1.maven.org"],
     });
@@ -16,7 +18,10 @@ describe("parseAllowlist", () => {
   });
 
   it("keeps a name listed twice once", () => {
-    expect(parseAllowlist(["api.anthropic.com", "api.anthropic.com"])).toEqual({ kind: "ok", hosts: ["api.anthropic.com"] });
+    expect(parseAllowlist(["api.anthropic.com", "api.anthropic.com"])).toEqual({
+      kind: "ok",
+      hosts: ["api.anthropic.com"],
+    });
   });
 
   it("refuses an empty list", () => {
@@ -31,9 +36,10 @@ describe("parseAllowlist", () => {
     ["API.Anthropic.com", "lower-case host name"],
     ["localhost", "lower-case host name"],
   ])("refuses %s and says why", (entry, why) => {
-    const result = parseAllowlist(["api.anthropic.com", entry]);
-    expect(result.kind).toBe("refused");
-    if (result.kind === "refused") expect(result.reason).toContain(why);
+    expect(parseAllowlist(["api.anthropic.com", entry])).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining(why),
+    });
   });
 
   it("names every bad entry at once", () => {
@@ -55,7 +61,12 @@ describe("squidConf", () => {
 
   it("refuses plain HTTP and every port but 443 before it allows a host, and refuses the rest", () => {
     const access = lines.filter((l) => l.startsWith("http_access"));
-    expect(access).toEqual(["http_access deny !CONNECT", "http_access deny !tls", "http_access allow allowed", "http_access deny all"]);
+    expect(access).toEqual([
+      "http_access deny !CONNECT",
+      "http_access deny !tls",
+      "http_access allow allowed",
+      "http_access deny all",
+    ]);
   });
 
   it("goes direct when there is no upstream", () => {
@@ -63,7 +74,10 @@ describe("squidConf", () => {
   });
 
   it("sends every request through the corporate proxy when there is one", () => {
-    const work = squidConf({ hosts: ["api.anthropic.com"], upstream: { kind: "proxy", host: "proxy.corp.example", port: 8080 } });
+    const work = squidConf({
+      hosts: ["api.anthropic.com"],
+      upstream: { kind: "proxy", host: "proxy.corp.example", port: 8080 },
+    });
     expect(work).toContain("cache_peer proxy.corp.example parent 8080 0 no-query default\n");
     expect(work).toContain("never_direct allow all\n");
   });
@@ -86,7 +100,11 @@ describe("proxyEnv", () => {
 
   it("points the box's own dockerd at the proxy for image pulls", () => {
     expect(dockerdProxy({ host: "factory-egress", port: 3128 })).toEqual({
-      proxies: { "http-proxy": "http://factory-egress:3128", "https-proxy": "http://factory-egress:3128", "no-proxy": "localhost,127.0.0.1,::1" },
+      proxies: {
+        "http-proxy": "http://factory-egress:3128",
+        "https-proxy": "http://factory-egress:3128",
+        "no-proxy": "localhost,127.0.0.1,::1",
+      },
     });
   });
 });
