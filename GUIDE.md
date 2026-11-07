@@ -85,6 +85,10 @@ stays out of reach either way.
 ### Both forges
 
 - Every agent post starts with its seat: `[coordinator]`, `[writer]` or `[reviewer]`.
+- A ticket's first writer run opens its change: after the first push of `factory/<ticket>`, the host opens a draft
+  change onto the default branch, as the project's identity. Its title is the spec's title and its body names the
+  ticket; the spec's text stays local. A change already open from that branch is reused, never doubled; two are left
+  to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). **Today:** the writer step (#113) does not call it yet.
 - On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses
   commits that touch `.gitlab-ci.yml` (and the files it includes), `.github/workflows/**` or `.github/actions/**`, and
   you make such a change in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). Backstop: GitLab, protect every secret variable;

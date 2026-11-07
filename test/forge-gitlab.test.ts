@@ -311,3 +311,43 @@ describe("single calls", () => {
     });
   });
 });
+
+describe("openChange (#164)", () => {
+  const request = {
+    branch: "factory/T-7",
+    base: "main",
+    title: "/merge the ledger row",
+    body: { seat: "coordinator", title: "T-7", fields: [], items: [] },
+  } as const;
+  const listed = (iid: number, source = 5, target = 5) => ({
+    iid,
+    source_project_id: source,
+    target_project_id: target,
+  });
+
+  it("opens a draft merge request when none is open from the branch", async () => {
+    const f = fake("gitlab", [ok([]), { status: 201, body: { iid: 81 } }]);
+    expect(await gitlab(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 81 });
+    expect(f.calls[0]?.args[2]).toBe(`${base}/merge_requests?state=opened&source_branch=factory%2FT-7&per_page=100`);
+    expect(JSON.parse(f.calls[1]?.stdin ?? "")).toEqual({
+      source_branch: "factory/T-7",
+      target_branch: "main",
+      title: "Draft: \\/merge the ledger row",
+      description: "[coordinator] T-7",
+    });
+  });
+
+  it("reuses the merge request already open from the branch, and leaves a fork's out", async () => {
+    const f = fake("gitlab", [ok([listed(12), listed(13, 99, 5)])]);
+    expect(await gitlab(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 12 });
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it("leaves two open merge requests to a person", async () => {
+    const f = fake("gitlab", [ok([listed(12), listed(14)])]);
+    expect(await gitlab(f.client, project).openChange(request)).toEqual({
+      kind: "failed",
+      reason: "2 changes are open from factory/T-7: !12, !14; a person decides",
+    });
+  });
+});

@@ -185,6 +185,7 @@ function statusForge(posted: CommitStatus[]): Forge {
     me: notUsed,
     change: notUsed,
     defaultBranch: notUsed,
+    openChange: notUsed,
     addLabel: notUsed,
     removeLabel: notUsed,
     note: notUsed,
