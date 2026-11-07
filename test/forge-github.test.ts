@@ -104,7 +104,7 @@ describe("changes", () => {
     expect(field(f.calls[2], "number")).toBe("3");
   });
 
-  it("an App's comment carries its [bot] login, as REST and FACTORY_LOGIN name it", async () => {
+  it("an App's comment carries its [bot] login, as REST and app-token name it", async () => {
     const f = fake("github", [collaborators([]), open([pr(5, { comments: [comment("[writer] OPEN: x", "2026-11-01T00:00:00Z", "ledger-factory", "Bot")] })]), merged([])]);
     const result = await github(f.client, project).changes({ label: "l" });
     expect(result.kind === "ok" ? result.value.open[0]!.comments[0]!.author : {}).toEqual({ name: "ledger-factory[bot]" });
@@ -192,7 +192,7 @@ describe("single calls", () => {
 
   it("me names the App hint when gh has no user", async () => {
     const f = fake("github", [{ status: 403, body: { message: "Resource not accessible by integration" } }]);
-    expect(await github(f.client, project).me()).toMatchObject({ kind: "failed", reason: expect.stringContaining("FACTORY_LOGIN") });
+    expect(await github(f.client, project).me()).toMatchObject({ kind: "failed", reason: expect.stringContaining("FACTORY_IDENTITY=app") });
     const g = fake("github", [ok({ login: "chiyanram" })]);
     expect(await github(g.client, project).me()).toEqual({ kind: "ok", value: "chiyanram" });
   });

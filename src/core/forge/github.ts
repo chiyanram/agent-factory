@@ -55,7 +55,7 @@ function byState(state: "opened" | "merged"): string {
     pageInfo { hasNextPage endCursor } nodes { number } } } }`;
 }
 
-// GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and FACTORY_LOGIN use "ledger-factory[bot]".
+// GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and app-token use "ledger-factory[bot]".
 // The seam always gives the [bot] form, so the factory's own notes match its login whichever way they were read. A
 // deleted account leaves the author null: a person who is no member and not the factory.
 function author(r: ReturnType<typeof reader>, node: unknown): string {
@@ -175,7 +175,7 @@ export function github(client: Client, project: GithubProject): Forge {
     async me() {
       const answer = await rest(client, { path: "user", method: "GET", body: { kind: "none" } });
       if (answer.kind === "failed") {
-        return { kind: "failed", reason: `${answer.reason} (a GitHub App token has no user: set FACTORY_LOGIN to <app-slug>[bot])` };
+        return { kind: "failed", reason: `${answer.reason} (a GitHub App token has no user: with an App, set FACTORY_IDENTITY=app)` };
       }
       const r = reader("github user");
       return r.done(r.text(answer.value, "login"));

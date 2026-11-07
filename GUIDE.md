@@ -20,12 +20,15 @@ human           agent-factory approve (a local permission) · reviews · merges 
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
 and agent commits carry an `Agent: <seat>` trailer. **Today:** no script writes the trailer yet; `src/core/notes.ts`
-reads it, and the writer's box (#108, #109) will add it. With your own login there is nothing more to set up; the steps
-below are for a project that uses a bot. A bot's key belongs to a separate `factory` OS user on the VM, never to a file
-your own user can read.
+reads it, and the writer's report (#109) will add it. With your own login (`FACTORY_IDENTITY=own`, the default) there
+is nothing more to set up; the steps below are for a project that uses a bot. A bot's key belongs to a separate
+`factory` OS user on the VM, never to a file your own user can read.
 
-**Today:** each developer sets up one bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)), the
-coordinator and the writer both act as it, and step 2 below keeps the App's key in your home folder.
+**Today:** the bash scripts (`claim`, `release`, `status`, `ask`, `block`, `reconcile`, `start-writer`,
+`start-reviewer`) still act only as a bot ([ADR-0006](docs/adr/0006-identity-service-account-per-developer.md)): on
+GitHub through `scripts/github-app.sh`, which reads the App's key from your own home (`FACTORY_GH_APP_ID`,
+`FACTORY_GH_APP_KEY`). `agent-factory` (`poll`, the host push) follows the steps below. Each script moves over when it
+is ported (#103, #138).
 
 ### GitLab
 
@@ -41,16 +44,28 @@ coordinator and the writer both act as it, and step 2 below keeps the App's key 
 ### GitHub
 
 On GitHub the bot is a **GitHub App** that the developer's own account owns. It posts as `<slug>[bot]` and has no
-login, email or password.
+login, email or password. Its private key belongs to the `factory` OS user. Your user gets a one-hour token through one
+sudo rule, and never reads the key ([#108](https://github.com/chiyanram/agent-factory/issues/108)).
+
+```
+dispatcher, poll, host push (your user)
+  └─ sudo -n -u factory -- /usr/local/bin/agent-factory app-token <owner/name>
+       └─ factory user: reads ~factory/.config/agent-factory/github-app.json and the .pem (mode 600)
+          signs a JWT, mints a token scoped to that one repository, caches it mode 600
+  ◀─ {"token", "login": "<slug>[bot]", "expiresAt"}: held in memory; given to one gh call (GH_TOKEN) or one
+     git push (a credential helper for https://github.com only, every other helper dropped)
+```
 
 | # | who | step | why |
 |---|---|---|---|
-| 1 | developer | Create the App: Settings → Developer settings → GitHub Apps → New. Turn the webhook off. Repository permissions: Contents, Issues and Pull requests read and write; Checks, Commit statuses and Metadata read. Leave Workflows out. Install it on: only this account. | Without Workflows the bot cannot change CI. |
-| 2 | developer | Note the App ID. Generate a private key, move the `.pem` to `~/.config/agent-factory/`, and run `chmod 600` on it. | The key mints a one-hour token on demand (`scripts/github-app.sh`). No token is stored in a file or an environment variable. |
-| 3 | developer | Install the App on the project's repository only. | The scripts refuse an App that is not installed on `FACTORY_PROJECT`. |
-| 4 | repo owner | Add a ruleset on `main`: restrict updates, require a pull request with one approval, block force pushes and deletion. Make the repository admin the only bypass actor, for pull requests only. | Only the owner can merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
-| 5 | developer | In `FACTORY_REPO`: clone over `https://github.com/`; set `git config factory.ghAppId <id>`, `factory.ghAppKey <pem path>` and `factory.project <owner/name>`; add an empty credential helper and then the App's: `git config --add credential.https://github.com.helper ""` and `git config --add credential.https://github.com.helper "!<agent-factory>/scripts/github-app.sh git-credential"`; set `user.name <slug>[bot]` and `user.email <bot-id>+<slug>[bot]@users.noreply.github.com` (`gh api "users/<slug>[bot]" --jq .id` gives the id). | `start-writer` refuses a clone without each of these. The empty helper stops a global helper from answering with the person's login. |
-| 6 | developer | For the coordinator scripts, set `FACTORY_FORGE=github`, `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY`, `FACTORY_PROJECT` and `FACTORY_LOGIN=<slug>[bot]`. | The scripts refuse any token that is not the App's. An App has no user to ask, so `poll` learns the factory's own login from `FACTORY_LOGIN`, and without it refuses to run. |
+| 1 | developer | Create the App: Settings → Developer settings → GitHub Apps → New. Turn the webhook off. Repository permissions: Contents, Issues and Pull requests read and write; Checks, Commit statuses and Metadata read. Leave Workflows out. Install it on: only this account. Note the App ID and generate a private key. | Without Workflows the bot cannot change CI. |
+| 2 | developer | Install the App on the project's repository only. | A token is minted for that one repository; `app-token` fails on any other. |
+| 3 | developer | Add a ruleset on `main`: restrict updates, require a pull request with one approval, block force pushes and deletion. Make the repository admin the only bypass actor, for pull requests only. | Only the owner can merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
+| 4 | developer, on the VM | Create the user and hand it the key: `sudo useradd --system --create-home --shell /usr/sbin/nologin factory`; `sudo install -d -m 700 -o factory -g factory ~factory/.config ~factory/.config/agent-factory`; `sudo install -m 600 -o factory -g factory <key>.pem ~factory/.config/agent-factory/app.pem`; then delete the `.pem` from your own folders. | Your user, and anything it runs, can never read the key. |
+| 5 | developer, on the VM | Write `~factory/.config/agent-factory/github-app.json`, mode 600, owned by `factory`: `{"appId": "<id>", "key": "/home/factory/.config/agent-factory/app.pem"}` (use the real home of `factory`). | `app-token` refuses a file of another user's, or one others can read. |
+| 6 | developer, on the VM | Install the package for everyone: `sudo npm install -g @chiyanram/agent-factory`, so `/usr/local/bin/agent-factory` exists and only root can change it. | The sudo rule names that path; a copy your user can edit would be a way around it. |
+| 7 | developer, on the VM | Add the rule with `sudo visudo -f /etc/sudoers.d/agent-factory`, one line per project: `<you> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory app-token <owner/name>`. Check it with `sudo -n -u factory -- /usr/local/bin/agent-factory app-token <owner/name> \| jq .login`, which prints `"<slug>[bot]"`. | sudo matches the whole command line, so the rule allows that one command and nothing else. Never print the token itself. |
+| 8 | developer | Set `FACTORY_FORGE=github`, `FACTORY_PROJECT=<owner/name>` and `FACTORY_IDENTITY=app`. Clone `FACTORY_REPO` over `https://github.com/`, with no credential helper in the clone's own config. | The host push refuses an App push from a clone that sets its own helper: git would fall back to your login. |
 
 ### Both forges
 
@@ -87,9 +102,10 @@ The scripts read their settings from the environment.
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` | — |
 | `FACTORY_REPO` | a local clone of that project; worktrees, packs and run files go in its `.claude/` | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
-| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `scripts/bin/gh`, `claude`. **Today:** `gh` is the GitHub App's wrapper for `agent-factory` and the bash scripts alike, and the bash scripts refuse a person's login; #108 moves both to your own login by default (ADR-0012 S14) |
-| `FACTORY_LOGIN` | the login the factory posts as, when the CLI cannot say who it is (a GitHub App: `<app-slug>[bot]`); `poll` tells the factory's notes by it | the CLI's own login |
-| `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | the GitHub App's ID and its private key file | git config `factory.ghAppId`, `factory.ghAppKey` |
+| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude`. **Today:** the bash scripts default `FACTORY_GH` to `scripts/bin/gh`, the App |
+| `FACTORY_IDENTITY` | who `agent-factory` acts as on the forge: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
+| `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the `agent-factory` its sudo rule names | `factory`, `/usr/local/bin/agent-factory` |
+| `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | **Today:** the bash scripts only: the GitHub App's ID and its private key file in your own home; `agent-factory` reads neither | git config `factory.ghAppId`, `factory.ghAppKey` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |

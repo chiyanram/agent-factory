@@ -145,3 +145,14 @@ describe("agent-factory poll", () => {
     expect(down.err).toContain("no HTTP status");
   });
 });
+
+describe("agent-factory app-token", () => {
+  it("prints its usage without exactly one project (64), and fails when this user holds no App (1)", async () => {
+    expect((await cli(["app-token"])).code).toBe(64);
+    expect((await cli(["app-token", "a/b", "c/d"])).code).toBe(64);
+    const run = await cli(["app-token", "chiyanram/ledger"]);
+    expect(run.code).toBe(1);
+    expect(run.out).toBe("");
+    expect(run.err).toContain("github-app.json");
+  });
+});

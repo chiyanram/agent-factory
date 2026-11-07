@@ -7,10 +7,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
-import { openForge } from "./core/forge/index.js";
+import { openProject } from "./core/forge/index.js";
 import { checkSpec, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
+import { mint, readAppConfig, realHttp } from "./core/app-token.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -22,6 +23,8 @@ commands:
                                record the human's approval of the spec with exactly that hash (all 64 characters,
                                as spec printed it); run it only behind the harness ask prompt, never from an allow list
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
+  app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
+                               repository, as JSON {token, login, expiresAt}
 
 options:
   --help      show this help
@@ -33,8 +36,8 @@ settings:
   FACTORY_FORGE        gitlab (default) or github
   FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
   FACTORY_CLAIM_LABEL  the label a claimed change carries (default agent::claimed)
-  FACTORY_GH           the gh to call (default scripts/bin/gh, the GitHub App); FACTORY_GLAB the glab (default glab)
-  FACTORY_LOGIN        the login the factory posts as, when the CLI cannot say (a GitHub App: <slug>[bot])
+  FACTORY_GH           the gh to call (default gh); FACTORY_GLAB the glab to call (default glab)
+  FACTORY_IDENTITY     own (default: your gh or glab login) or app (a GitHub App whose key the factory user holds)
 `;
 
 type Args = { readonly json: boolean; readonly template: boolean; readonly positionals: readonly string[]; readonly io: Io };
@@ -65,17 +68,18 @@ async function poll({ json, io }: Args): Promise<number> {
     io.err("agent-factory poll: FACTORY_CLAIM_LABEL is set but empty\n");
     return 1;
   }
-  const forge = openForge({ env: io.env, log: (line) => io.err(`${line}\n`) });
-  if (forge.kind === "failed") {
-    io.err(`agent-factory poll: ${forge.reason}\n`);
+  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  if (opened.kind === "failed") {
+    io.err(`agent-factory poll: ${opened.reason}\n`);
     return 1;
   }
-  const result = await pollForge({ forge: forge.value, label });
+  const forge = opened.value.forge;
+  const result = await pollForge({ forge, label });
   if (result.kind === "failed") {
     io.err(`agent-factory poll: ${result.reason}\n`);
     return 1;
   }
-  const mark = forge.value.mark;
+  const mark = forge.mark;
   const out = result.value.map((line) => (json ? JSON.stringify(line) : format({ line, mark })));
   io.out(out.map((line) => `${line}\n`).join(""));
   return 0;
@@ -178,11 +182,33 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
 
 type Command = { readonly name: string; readonly run: (args: Args) => Promise<number> };
 
+// app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the
+// developer's host process that called it through sudo; nothing else is printed there.
+async function appTokenCommand({ positionals, io }: Args): Promise<number> {
+  const [project] = positionals;
+  if (project === undefined || positionals.length !== 1) {
+    io.err("usage: agent-factory app-token <owner/name>\n");
+    return 64;
+  }
+  const me = userInfo();
+  const config = await readAppConfig({ home: me.homedir, me: { uid: me.uid } });
+  const minted = config.kind === "ok"
+    ? await mint({ config: config.value, project, http: realHttp, now: Math.floor(Date.now() / 1000), cacheDir: join(me.homedir, ".cache", "agent-factory") })
+    : config;
+  if (minted.kind === "failed") {
+    io.err(`agent-factory app-token: ${minted.reason}\n`);
+    return 1;
+  }
+  io.out(`${JSON.stringify(minted.value)}\n`);
+  return 0;
+}
+
 const COMMANDS: readonly Command[] = [
   { name: "poll", run: poll },
   { name: "spec", run: spec },
   { name: "approve", run: approveCommand },
   { name: "approval", run: approvalCommand },
+  { name: "app-token", run: appTokenCommand },
 ];
 
 export async function runCli(argv: readonly string[], io: Io): Promise<number> {

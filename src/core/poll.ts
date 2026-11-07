@@ -124,7 +124,8 @@ export function format(input: { readonly line: PollLine; readonly mark: string }
   );
 }
 
-// poll : the forge's open and merged changes, decided. The factory's login comes from the forge (or FACTORY_LOGIN).
+// poll : the forge's open and merged changes, decided. The factory's login comes from the forge, or with an App from its
+// token (src/core/identity.ts).
 export async function poll(input: { readonly forge: Forge; readonly label: string }): Promise<Result<readonly PollLine[]>> {
   const me = await input.forge.me();
   if (me.kind === "failed") {
