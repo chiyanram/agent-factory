@@ -36,9 +36,10 @@ describe("parseAllowlist", () => {
     ["API.Anthropic.com", "lower-case host name"],
     ["localhost", "lower-case host name"],
   ])("refuses %s and says why", (entry, why) => {
-    const result = parseAllowlist(["api.anthropic.com", entry]);
-    expect(result.kind).toBe("refused");
-    if (result.kind === "refused") expect(result.reason).toContain(why);
+    expect(parseAllowlist(["api.anthropic.com", entry])).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining(why),
+    });
   });
 
   it("names every bad entry at once", () => {

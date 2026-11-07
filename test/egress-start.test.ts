@@ -3,11 +3,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
-import { pinImage } from "../src/core/box/choose.js";
 import type { PinnedImage } from "../src/core/box/types.js";
 import { openEgress, planNetwork, readNetwork, startEgress } from "../src/core/egress/index.js";
 
-const IMAGE = pinImage(`ubuntu/squid@sha256:${"b".repeat(64)}`) as PinnedImage;
+const IMAGE: PinnedImage = { kind: "pinned", ref: `ubuntu/squid@sha256:${"b".repeat(64)}` };
 const OK: Exit = { code: 0, stdout: "", stderr: "" };
 const NO_NETWORK: Exit = { code: 1, stdout: "", stderr: "Error response from daemon: network factory-int not found" };
 
@@ -20,13 +19,10 @@ function fakeDocker(answers: Readonly<Record<string, Exit>>): {
   const calls: Call[] = [];
   const run: Runner = async (c) => {
     calls.push(c);
-    const name = c.args.at(-1) ?? "";
-    return (
-      answers[`${c.args.slice(0, 2).join(" ")} ${name}`] ??
-      answers[c.args.slice(0, 2).join(" ")] ??
-      answers[c.args[0] ?? ""] ??
-      (c.args[1] === "inspect" ? NO_NETWORK : OK)
-    );
+    const first = c.args.slice(0, 2).join(" ");
+    const keys = [`${first} ${c.args.at(-1) ?? ""}`, first, c.args[0] ?? ""];
+    const hit = keys.map((k) => answers[k]).find((e) => e !== undefined);
+    return hit ?? (c.args[1] === "inspect" ? NO_NETWORK : OK);
   };
   return { calls, docker: { run, bin: "docker", env: {} } };
 }
@@ -42,9 +38,10 @@ describe("planNetwork", () => {
   });
 
   it("refuses an internal network that is not --internal, so no box joins an open network", () => {
-    const plan = planNetwork({ name: "factory-int", state: { kind: "present", internal: false }, internal: true });
-    expect(plan.kind).toBe("refused");
-    if (plan.kind === "refused") expect(plan.reason).toContain("docker network rm factory-int");
+    expect(planNetwork({ name: "factory-int", state: { kind: "present", internal: false }, internal: true })).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining("docker network rm factory-int"),
+    });
   });
 });
 

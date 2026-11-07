@@ -41,5 +41,5 @@ export function parseAllowlist(entries: readonly string[]): Allowlist {
     return { kind: "refused", reason: bad.join("; ") };
   }
   const unique = [...new Set(trimmed)];
-  return { kind: "ok", hosts: unique.filter((h) => !covered(h, unique)).sort() };
+  return { kind: "ok", hosts: unique.filter((h) => !covered(h, unique)).toSorted() };
 }

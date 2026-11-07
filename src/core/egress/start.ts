@@ -75,23 +75,29 @@ async function step(
     : { kind: "failed", reason: `docker ${args.slice(0, 2).join(" ")}: ${exit.stderr.trim()}` };
 }
 
+async function act(
+  docker: Docker,
+  name: string,
+  internal: boolean,
+  state: NetworkState,
+): Promise<{ readonly kind: "ok" } | { readonly kind: "failed"; readonly reason: string }> {
+  const plan = planNetwork({ name, state, internal });
+  switch (plan.kind) {
+    case "keep":
+      return { kind: "ok" };
+    case "refused":
+      return { kind: "failed", reason: plan.reason };
+    case "create":
+      return step(docker, ["network", "create", ...(internal ? ["--internal"] : []), name]);
+  }
+}
+
 function ensureNetwork(name: string, internal: boolean): Step {
   return async (docker) => {
     const state = readNetwork(
       await docker.run(call(docker, ["network", "inspect", "--format", "{{.Internal}}", name])),
     );
-    if (state.kind === "failed") {
-      return state;
-    }
-    const plan = planNetwork({ name, state, internal });
-    switch (plan.kind) {
-      case "keep":
-        return { kind: "ok" };
-      case "refused":
-        return { kind: "failed", reason: plan.reason };
-      case "create":
-        return step(docker, ["network", "create", ...(internal ? ["--internal"] : []), name]);
-    }
+    return state.kind === "failed" ? state : act(docker, name, internal, state);
   };
 }
 
