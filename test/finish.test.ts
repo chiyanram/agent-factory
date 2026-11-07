@@ -29,6 +29,8 @@ function forge(log: Log, fail: { readonly label?: boolean; readonly note?: boole
     return r.kind === "ok" ? r.text : `refused: ${r.reason}`;
   };
   return {
+    defaultBranch: async () => ({ kind: "ok", value: "main" }),
+    ciConfig: async () => ({ kind: "ok", value: { kind: "file", path: ".gitlab-ci.yml" } }),
     addLabel: async ({ label }: { readonly label: string }): Promise<Done> => (
       log.push(`label ${label}`), fail.label ? { kind: "failed", reason: "github: HTTP 502" } : { kind: "ok" }
     ),
@@ -70,7 +72,7 @@ describe("finishRun", () => {
     });
     expect(next).toEqual({ kind: "ok", value: { kind: "ready-check", head: B, evidence } });
     expect(log).toEqual([
-      "push bbbb guards=1",
+      "push bbbb guards=2",
       "note [writer] done at bbbbbbbb\n\n- AC1 refuses a reserved loan · make test · 142 passed",
     ]);
   });
@@ -111,7 +113,7 @@ describe("finishRun", () => {
       pusher: pusher(log),
     });
     expect(next).toEqual({ kind: "ok", value: { kind: "needs-human", reason: "the run exited 2" } });
-    expect(log).toEqual([`label ${NEEDS_HUMAN}`, "push bbbb guards=2", "note [coordinator] blocked: the run exited 2"]);
+    expect(log).toEqual([`label ${NEEDS_HUMAN}`, "push bbbb guards=3", "note [coordinator] blocked: the run exited 2"]);
   });
 
   it("the writer's own blocker is posted in the writer's seat", async () => {
@@ -140,7 +142,7 @@ describe("finishRun", () => {
       value: { kind: "needs-human", reason: "the push failed: the branch feat/x moved since the run started" },
     });
     expect(log).toEqual([
-      "push bbbb guards=1",
+      "push bbbb guards=2",
       `label ${NEEDS_HUMAN}`,
       "note [coordinator] blocked: the push failed: the branch feat/x moved since the run started",
     ]);

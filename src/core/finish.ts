@@ -20,7 +20,8 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
 import type { Post } from "./post.js";
-import { hostPush, type Guard, type GuardInput, type PushRequest } from "./push.js";
+import { noCiFiles, type CiSetup } from "./ci-files.js";
+import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
 import type { Evidence, Outcome } from "./report.js";
 
 export const NEEDS_HUMAN = "needs-human";
@@ -59,19 +60,16 @@ function gitProblem(what: string, result: Awaited<ReturnType<typeof hostGit>>): 
   };
 }
 
-// the commits the push adds: after the lease, or, for a new branch, those on no remote branch
-function newCommits(input: GuardInput): readonly string[] {
-  return input.lease.kind === "sha" ? [`${input.lease.sha}..${input.commit}`] : [input.commit, "--not", "--remotes"];
-}
-
 // noFactoryFolder : refuses when any commit the push adds touches .factory (as a folder or a file, in any letter case),
 // so a report committed and then deleted still never leaves.
 export function noFactoryFolder(env: NodeJS.ProcessEnv): Guard {
   return async (input) => {
-    const listed = await git(env, input.repo, [
+    // a merge's own changes count too (first parent), and replace refs never stand in for the commits sent
+    const listed = await git({ ...env, GIT_NO_REPLACE_OBJECTS: "1" }, input.repo, [
       "log",
       "--format=%H",
       "--name-only",
+      "--diff-merges=first-parent",
       ...newCommits(input),
       "--",
       ":(icase).factory",
@@ -136,13 +134,30 @@ function unchanged(push: PushRequest): boolean {
   return push.lease.kind === "sha" && push.lease.sha === push.commit;
 }
 
+// ciSetup : what the CI-file guard compares against: the default branch, and the CI file the project runs
+async function ciSetup(input: FinishInput): Promise<Result<CiSetup>> {
+  const branch = await input.forge.defaultBranch();
+  const config = branch.kind === "ok" ? await input.forge.ciConfig() : branch;
+  return branch.kind === "ok" && config.kind === "ok"
+    ? { kind: "ok", value: { env: input.push.env, defaultBranch: branch.value, config: config.value } }
+    : {
+        kind: "failed",
+        reason: `cannot tell which CI files to guard, so nothing is pushed: ${config.kind === "failed" ? config.reason : ""}`,
+      };
+}
+
 // pushed : the writer's commits on the branch. Work in progress (a blocked run) only ever goes on top of the branch.
 async function pushed(input: FinishInput, mode: "any" | "on-top"): Promise<Done> {
   if (unchanged(input.push)) {
     return { kind: "ok" };
   }
   const env = input.push.env;
-  const ours = mode === "on-top" ? [noFactoryFolder(env), fastForwardOnly(env)] : [noFactoryFolder(env)];
+  const ci = await ciSetup(input);
+  if (ci.kind === "failed") {
+    return ci;
+  }
+  const always = [noFactoryFolder(env), noCiFiles(ci.value)];
+  const ours = mode === "on-top" ? [...always, fastForwardOnly(env)] : always;
   return (input.pusher ?? hostPush)({ ...input.push, guards: [...ours, ...input.push.guards] });
 }
 

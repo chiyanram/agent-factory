@@ -24,6 +24,7 @@ import {
   type RawOpen,
 } from "./shared.js";
 import type {
+  CiConfig,
   CommitStatus,
   Change,
   ChangeRequest,
@@ -105,6 +106,17 @@ function oneLabel(label: string): Done {
   return label.includes(",")
     ? { kind: "failed", reason: `gitlab: a label must not contain a comma, got ${JSON.stringify(label)}` }
     : { kind: "ok" };
+}
+
+// ciConfigOf : the CI file a GitLab project runs, from its ci_config_path setting
+export function ciConfigOf(setting: string): CiConfig {
+  const path = setting.trim().replace(/^\/+/, "");
+  if (path === "") {
+    return { kind: "file", path: ".gitlab-ci.yml" };
+  }
+  return path.includes("@") || /^[a-z]+:\/\//i.test(path)
+    ? { kind: "none", why: `the CI config is kept outside this repository (${path})` }
+    : { kind: "file", path };
 }
 
 export function gitlab(client: Client, project: string): Forge {
@@ -356,6 +368,13 @@ export function gitlab(client: Client, project: string): Forge {
       return login.kind === "ok" ? { kind: "ok", value: String(login.value) } : login;
     },
     change,
+    // ci_config_path: empty for .gitlab-ci.yml; "path@group/project" or a URL for a file kept outside this repository
+    async ciConfig() {
+      const set = await get(base, "gitlab project", (v, r) =>
+        r.absent(v, "ci_config_path") ? "" : r.text(v, "ci_config_path"),
+      );
+      return set.kind === "ok" ? { kind: "ok", value: ciConfigOf(String(set.value)) } : set;
+    },
     async defaultBranch() {
       const branch = await get(base, "gitlab project", (v, r) => r.text(v, "default_branch"));
       return branch.kind === "ok" ? { kind: "ok", value: String(branch.value) } : branch;

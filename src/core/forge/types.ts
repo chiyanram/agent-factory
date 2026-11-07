@@ -61,6 +61,12 @@ export type MergedChange = { readonly number: number; readonly branch: string; r
 
 export type LineFinding = { readonly file: string; readonly line: number };
 
+// The CI config file the forge runs for the project (#115): a file in this repository, or none here (GitHub reads
+// .github/workflows only; a GitLab project can run a file kept in another project).
+export type CiConfig =
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "none"; readonly why: string };
+
 // A commit status the factory posts at a head (#91): the local verifier's result, read back by poll as the pipeline.
 export type StatusState = "pending" | "success" | "failed";
 export type CommitStatus = {
@@ -104,6 +110,8 @@ export type Forge = {
   lineFinding(input: { readonly change: Change; readonly at: LineFinding; readonly post: Post }): Promise<Done>;
   // one commit status at a head; posting the same context again replaces it
   status(input: CommitStatus): Promise<Done>;
+  // the CI config file the forge runs for this project, as the project's settings say
+  ciConfig(): Promise<Result<CiConfig>>;
   // the numbers of the changes in that state that carry the label
   claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>>;
   // the change open from this branch of the repository itself, or a new draft one; two or more fail, so a person decides

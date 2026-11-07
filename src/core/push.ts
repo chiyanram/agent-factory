@@ -25,6 +25,12 @@ export type Lease = { readonly kind: "sha"; readonly sha: string } | { readonly 
 export type GuardInput = { readonly repo: string; readonly commit: string; readonly lease: Lease };
 export type Guard = (input: GuardInput) => Promise<Done>;
 
+// newCommits : the git log range of the commits the push adds: after the lease, or, for a new branch, those on no remote
+// branch
+export function newCommits(input: GuardInput): readonly string[] {
+  return input.lease.kind === "sha" ? [`${input.lease.sha}..${input.commit}`] : [input.commit, "--not", "--remotes"];
+}
+
 export type PushRequest = {
   // the clone or worktree that holds the commit
   readonly repo: string;
