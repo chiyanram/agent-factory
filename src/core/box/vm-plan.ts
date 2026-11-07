@@ -2,7 +2,7 @@
 // the docker arguments for each step, and how each docker answer reads. vm.ts runs them. Nothing here calls docker.
 //
 //   docker run --runtime sysbox-runc   the box's own Docker engine, with no --privileged (Sysbox decision on #30)
-//   --network factory-int              the egress proxy is its only way out (#130)
+//   --network factory-int-<project>    its project's egress proxy is its only way out (#130)
 //   /work                              the run's clone, the only folder mounted; the agent's settings read-only (Q1)
 //   user box, the host owner's uid     every command runs as box, never as root (Q3)
 //   docker exec --env NAME             a value goes in through the docker CLI's environment, never its argv, so a token
@@ -10,7 +10,6 @@
 
 import { join } from "node:path";
 import type { Exit } from "../forge/api.js";
-import { INTERNAL_NETWORK } from "../egress/start.js";
 import type { BoxSpec, Command, Probe, Ran } from "./types.js";
 
 export const RUNTIME = "sysbox-runc";
@@ -44,6 +43,8 @@ export function insideWorktree(path: string): boolean {
 // names the docker CLI reads itself, or the box sets: passing one would change docker, not the run
 const RESERVED = /^(DOCKER_|HOME$)/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// a name, never an option or a network mode such as host
+const NETWORK = /^factory-int-[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const SPEC_RULES: readonly ((spec: BoxSpec) => Check)[] = [
   (s) =>
@@ -63,6 +64,7 @@ const SPEC_RULES: readonly ((spec: BoxSpec) => Check)[] = [
       ),
     ),
   (s) => (/^http:\/\/[^\s,]+$/.test(s.proxy) ? OK : refuse(`proxy ${JSON.stringify(s.proxy)} is not an http:// URL`)),
+  (s) => (NETWORK.test(s.network) ? OK : refuse(`network ${JSON.stringify(s.network)} is not a docker network name`)),
 ];
 
 // checkSpec : whether a spec can start a box; the first rule it breaks is the reason
@@ -126,7 +128,7 @@ export function runArgs(input: { readonly name: string; readonly spec: BoxSpec }
     RUNTIME,
     "--init",
     "--network",
-    INTERNAL_NETWORK,
+    spec.network,
     ...mounts.flatMap((m) => ["--mount", m]),
     // the engine's own storage: on the box's overlay filesystem, the engine cannot mount its image layers (overlay on
     // overlay); stop removes this volume with the box

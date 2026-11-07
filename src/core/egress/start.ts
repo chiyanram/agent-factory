@@ -1,23 +1,31 @@
 // start — creates the egress networks and starts the proxy container, through the docker CLI (#130; decision B on #30,
-// 2026-11-07). The box (#113) joins only the internal network, so the proxy is its only way out. Nothing here throws.
+// 2026-11-07). The box (#113) joins only its project's internal network, so the proxy is its only way out. Nothing
+// here throws.
 //
-//   factory-int     docker network create --internal: no route out (Docker sets no default route and drops traffic to
-//                   other networks)
-//   factory-ext     a plain bridge: the proxy's way out
-//   factory-egress  the Squid container, on both networks
+//   factory-int-<project>     docker network create --internal: no route out (Docker sets no default route and drops
+//                             traffic to other networks, so one project's box cannot reach another project's proxy)
+//   factory-ext               a plain bridge, shared: the proxies' way out; it holds no policy
+//   factory-egress-<project>  the project's Squid container, on both networks, with only that project's allowlist
 //
-// An internal network of that name that is not --internal is refused, never reused: a box on it would have an open
-// network. The proxy is created again on every start, so it always runs the config rendered now. The config goes in
-// with `docker cp`, not a bind mount, because Rancher Desktop shares no $HOME with its VM (ADR-0012 S8).
+// One proxy per project (decision on #30, 2026-11-07): two projects' passes run at once, and a shared proxy would let
+// one pass swap the allowlist under the other's box. An internal network of that name that is not --internal is
+// refused, never reused: a box on it would have an open network. The proxy is created again on every start, so it
+// always runs the config rendered now; the project's dispatch lock keeps that from happening under a running box. The
+// config goes in with `docker cp`, not a bind mount, because Rancher Desktop shares no $HOME with its VM (ADR-0012 S8).
 
 import type { Call, Exit, Runner } from "../forge/api.js";
 import type { PinnedImage } from "../box/types.js";
 import { PROXY_PORT } from "./squid.js";
 import type { ProxyAddress } from "./env.js";
 
-export const INTERNAL_NETWORK = "factory-int";
 export const OUTBOUND_NETWORK = "factory-ext";
-export const PROXY_CONTAINER = "factory-egress";
+
+// the project's proxy container and the internal network its boxes join; the project is a plain name (spec.ts)
+export type EgressNames = { readonly proxy: string; readonly network: string };
+
+export function egressNames(project: string): EgressNames {
+  return { proxy: `factory-egress-${project}`, network: `factory-int-${project}` };
+}
 
 export type Started =
   | { readonly kind: "started"; readonly proxy: ProxyAddress; readonly network: string }
@@ -102,36 +110,40 @@ function ensureNetwork(name: string, internal: boolean): Step {
 }
 
 // removeProxy : succeeds when no proxy container is left, even if there was none
-const removeProxy: Step = async (docker) => {
-  const exit = await docker.run(call(docker, ["rm", "--force", PROXY_CONTAINER]));
-  return exit.code === 0 || /no such container/i.test(exit.stderr)
-    ? { kind: "ok" }
-    : { kind: "failed", reason: `docker rm: ${exit.stderr.trim()}` };
-};
+function removeProxy(name: string): Step {
+  return async (docker) => {
+    const exit = await docker.run(call(docker, ["rm", "--force", name]));
+    return exit.code === 0 || /no such container/i.test(exit.stderr)
+      ? { kind: "ok" }
+      : { kind: "failed", reason: `docker rm: ${exit.stderr.trim()}` };
+  };
+}
 
 export async function startEgress(input: {
   readonly docker: Docker;
   readonly image: PinnedImage;
   readonly confFile: string;
+  readonly names: EgressNames;
 }): Promise<Started> {
+  const { proxy, network } = input.names;
   const steps: readonly Step[] = [
-    ensureNetwork(INTERNAL_NETWORK, true),
+    ensureNetwork(network, true),
     ensureNetwork(OUTBOUND_NETWORK, false),
-    removeProxy,
+    removeProxy(proxy),
     (d) =>
       step(d, [
         "create",
         "--name",
-        PROXY_CONTAINER,
+        proxy,
         "--network",
         OUTBOUND_NETWORK,
         "--restart",
         "unless-stopped",
         input.image.ref,
       ]),
-    (d) => step(d, ["cp", input.confFile, `${PROXY_CONTAINER}:/etc/squid/squid.conf`]),
-    (d) => step(d, ["network", "connect", INTERNAL_NETWORK, PROXY_CONTAINER]),
-    (d) => step(d, ["start", PROXY_CONTAINER]),
+    (d) => step(d, ["cp", input.confFile, `${proxy}:/etc/squid/squid.conf`]),
+    (d) => step(d, ["network", "connect", network, proxy]),
+    (d) => step(d, ["start", proxy]),
   ];
   for (const s of steps) {
     const done = await s(input.docker);
@@ -139,5 +151,5 @@ export async function startEgress(input: {
       return done;
     }
   }
-  return { kind: "started", proxy: { host: PROXY_CONTAINER, port: PROXY_PORT }, network: INTERNAL_NETWORK };
+  return { kind: "started", proxy: { host: proxy, port: PROXY_PORT }, network };
 }

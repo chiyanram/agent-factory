@@ -13,7 +13,8 @@ import { checkSpec, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
-import { chooseBox } from "./core/box/index.js";
+import { buildBox, chooseBox, hostDocker, vmBox, type Built } from "./core/box/index.js";
+import { openEgress } from "./core/egress/index.js";
 import {
   claudeTokenStatus,
   openStore,
@@ -53,6 +54,9 @@ commands:
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
                                at the hidden prompt; it is never printed (#136)
   setup status                 the box chosen, its risks, and whether the claude token is valid
+  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+                               if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
+                               after an upgrade
 ${LOOP_HELP}
 options:
   --help      show this help
@@ -67,6 +71,10 @@ settings:
   FACTORY_CLAIM_LABEL  the label a claimed change carries (default agent::claimed)
   FACTORY_GH           the gh to call (default gh); FACTORY_GLAB the glab to call (default glab)
   FACTORY_IDENTITY     own (default: your gh or glab login) or app (a GitHub App whose key the factory user holds)
+  FACTORY_BOX          where a box runs: vm (Docker with Sysbox on this host)
+  FACTORY_REPO         dispatch: the project's clone on this host, an absolute path
+  FACTORY_EGRESS_IMAGE   the egress proxy's Squid image, name@sha256:<digest> (default: a pinned ubuntu/squid)
+  FACTORY_UPSTREAM_PROXY at work: the corporate proxy, host:port, every box request leaves through
 `;
 
 type Args = {
@@ -87,7 +95,12 @@ export type Io = {
   // all of stdin, for the lint-edit hook
   readonly readStdin: () => Promise<string>;
   // the machine setup stores tokens on; a test passes linux and its own uid, so it never touches a Keychain
-  readonly system: { readonly platform: NodeJS.Platform; readonly uid: number; readonly run: CliRunner };
+  readonly system: {
+    readonly platform: NodeJS.Platform;
+    readonly uid: number;
+    readonly gid: number;
+    readonly run: CliRunner;
+  };
 };
 
 type Home = { readonly kind: "home"; readonly path: string } | { readonly kind: "refused"; readonly reason: string };
@@ -271,8 +284,15 @@ type Planned = { readonly gate: Gate; readonly steps: Steps };
 
 // stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
 async function stepsFor(io: Io, forge: Forge, home: string, project: string): Promise<Result<Planned>> {
-  // the dispatcher does not open the vm box yet (#113): with none to open, the ready check and the verifier wait
-  const planned = await boxPlan({ env: io.env, home, project, boxes: [] });
+  const docker = hostDocker(io.env, io.system.run);
+  const planned = await boxPlan({
+    env: io.env,
+    home,
+    project,
+    // the laptop box comes with #129
+    boxesFor: (image) => [vmBox({ docker, image: image.ref, owner: { uid: io.system.uid, gid: io.system.gid } })],
+    openEgress: (o) => openEgress({ ...o, dir: join(home, "egress"), docker }),
+  });
   if (planned.kind === "failed") {
     return planned;
   }
@@ -503,6 +523,54 @@ async function setupStatus({ store, io }: { readonly store: TokenStore; readonly
   return box.kind === "chosen" && token.ok ? 0 : 1;
 }
 
+// the package's own box image: images/factory-box, next to dist/ (or src/ in a test)
+function baseDir(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "images", "factory-box");
+}
+
+function builtLine(project: string, b: Built): string {
+  return b.layer === "project"
+    ? `box ${project}: ${b.image} (base ${b.base}, with box.Dockerfile)`
+    : `box ${project}: ${b.image} (the base; no box.Dockerfile)`;
+}
+
+// box build : the project's box image, built here and pinned by its ID (#113 Q1)
+type BoxArgs = { readonly kind: "build"; readonly project: string } | { readonly kind: "usage" };
+
+function boxArgs(positionals: readonly string[]): BoxArgs {
+  const [sub, project] = positionals;
+  return sub === "build" && project !== undefined && positionals.length === 2
+    ? { kind: "build", project }
+    : { kind: "usage" };
+}
+
+async function boxCommand({ positionals, io }: Args): Promise<number> {
+  const parsed = boxArgs(positionals);
+  if (parsed.kind === "usage") {
+    io.err("usage: agent-factory box build <project>\n");
+    return 64;
+  }
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    io.err(`agent-factory box: ${home.reason}\n`);
+    return 1;
+  }
+  io.err("building the box image; the first build takes some minutes\n");
+  const { project } = parsed;
+  const built = await buildBox({
+    docker: hostDocker(io.env, io.system.run),
+    home: home.path,
+    project,
+    baseDir: baseDir(),
+  });
+  if (built.kind === "failed") {
+    io.err(`agent-factory box: ${built.reason}\n`);
+    return 1;
+  }
+  io.out(`${builtLine(project, built.value)}\n`);
+  return 0;
+}
+
 const SETUP: readonly SetupStep[] = [
   { name: "claude", run: setupClaude },
   { name: "status", run: setupStatus },
@@ -542,6 +610,7 @@ const COMMANDS: readonly Command[] = [
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
   { name: "setup", run: setupCommand },
+  { name: "box", run: boxCommand },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
     run: ({ positionals, io }: Args) => Promise.resolve(run(positionals, io)),

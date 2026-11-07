@@ -9,6 +9,8 @@ const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
 
 let home = "";
+// this test's own ids: a test never runs as root, and the platform is linux so no Keychain is touched
+const ME = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 type Run = { readonly code: number; readonly out: string; readonly err: string };
 async function cli(
   argv: readonly string[],
@@ -25,7 +27,7 @@ async function cli(
     readStdin: async () => pasted,
     system: {
       platform: "linux",
-      uid: process.getuid?.() ?? -1,
+      ...ME,
       run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
     },
   });
@@ -347,5 +349,19 @@ describe("agent-factory loop commands (#138)", () => {
       out: "",
       err: "",
     });
+  });
+});
+
+describe("agent-factory box (#113)", () => {
+  it("prints its usage for anything but box build <project>", async () => {
+    for (const argv of [["box"], ["box", "build"], ["box", "make", "ledger"], ["box", "build", "a", "b"]]) {
+      expect(await cli(argv)).toMatchObject({ code: 64, err: "usage: agent-factory box build <project>\n" });
+    }
+  });
+
+  it("fails with docker's own words when the build fails, and writes no box file", async () => {
+    const run = await cli(["box", "build", "ledger"]);
+    expect(run.code).toBe(1);
+    expect(run.err).toContain("agent-factory box: docker build: no CLI in this test");
   });
 });

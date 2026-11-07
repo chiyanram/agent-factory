@@ -37,13 +37,18 @@ export function chooseBox(env: NodeJS.ProcessEnv): BoxChoice {
 
 export type Pin = PinnedImage | { readonly kind: "refused"; readonly reason: string };
 
-const DIGEST = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
+// name@sha256:<digest> from a registry, or sha256:<id> of an image built on this host (agent-factory box build)
+const DIGEST = /^([^\s@]+@)?sha256:[0-9a-f]{64}$/;
 
-// pinImage : an image named by its sha256 digest; a tag alone can change under the factory, so it is refused (S7)
+// pinImage : an image named by its sha256 digest or local image ID; a tag alone can change under the factory, so it
+// is refused (S7)
 export function pinImage(ref: string): Pin {
   return DIGEST.test(ref)
     ? { kind: "pinned", ref }
-    : { kind: "refused", reason: `image ${JSON.stringify(ref)} is not pinned by digest (name@sha256:<64 hex>)` };
+    : {
+        kind: "refused",
+        reason: `image ${JSON.stringify(ref)} is not pinned (name@sha256:<64 hex>, or sha256:<64 hex> from box build)`,
+      };
 }
 
 export type Opened =

@@ -13,6 +13,7 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
     readOnly: [],
     env: {},
     proxy: "http://proxy:3128",
+    network: "factory-int-ledger",
     ...spec,
   };
 

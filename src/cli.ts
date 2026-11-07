@@ -17,7 +17,12 @@ runCli(process.argv.slice(2), {
     }
     return Buffer.concat(chunks).toString("utf8");
   },
-  system: { platform: process.platform, uid: process.getuid?.() ?? -1, run: runProcess },
+  system: {
+    platform: process.platform,
+    uid: process.getuid?.() ?? -1,
+    gid: process.getgid?.() ?? -1,
+    run: runProcess,
+  },
 }).then(
   (code) => process.exit(code),
   (error: unknown) => {
