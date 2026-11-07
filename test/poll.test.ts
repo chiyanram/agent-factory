@@ -5,9 +5,10 @@ import { renderPost } from "../src/core/post.js";
 
 // At work the factory posts as the developer: "ram" writes both the agents' notes and their own replies.
 const team = [
-  { name: "ram", level: "maintainer" },
-  { name: "lee", level: "developer" },
-  { name: "gus", level: "guest" },
+  { name: "ram", level: "maintainer", bot: false },
+  { name: "lee", level: "developer", bot: false },
+  { name: "gus", level: "guest", bot: false },
+  { name: "ci-bot", level: "maintainer", bot: true },
 ] as const;
 const agent = (seat: "writer" | "coordinator", title: string): string => {
   const r = renderPost({ seat, title, fields: [], items: [] });
@@ -36,6 +37,7 @@ describe("decide", () => {
     const ask = n("ram", agent("writer", "OPEN: which currency?"), "2026-11-02T10:00:00Z");
     expect(one(change(1, { comments: [ask] })).asks).toBe(1);
     expect(one(change(1, { comments: [ask, n("gus", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(1);
+    expect(one(change(1, { comments: [ask, n("ci-bot", "pipeline passed", "2026-11-02T11:00:00Z")] })).asks).toBe(1);
     expect(one(change(1, { comments: [ask, n("Lee", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(0);
     expect(one(change(1, { comments: [ask, n("ram", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(0);
   });
@@ -52,7 +54,17 @@ describe("stop", () => {
 
   it("is a maintainer's last /stop, as the first line, even under the factory's login", () => {
     const comments = [n("ram", "/stop", "2026-11-02T10:00:00Z"), n("ram", " /stop \nwait for me", "2026-11-02T12:00:00Z")];
-    expect(stop({ comments, readers, maintainers })).toEqual({ kind: "stopped", at: "2026-11-02T12:00:00Z" });
+    expect(stop({ comments, readers, maintainers })).toEqual({ kind: "stopped", at: "2026-11-02T12:00:00.000Z" });
+  });
+
+  it("gives the time in ISO 8601 UTC, and a time that does not parse as undated, which still stops", () => {
+    expect(stop({ comments: [n("ram", "/stop", "2026-11-02T11:00:00+01:00")], readers, maintainers })).toEqual({ kind: "stopped", at: "2026-11-02T10:00:00.000Z" });
+    expect(stop({ comments: [n("ram", "/stop", "2026-11-02T10:00:00Z"), n("ram", "/stop", "last tuesday")], readers, maintainers })).toEqual({ kind: "undated" });
+  });
+
+  it("a bot's /stop never stops, whatever its access", () => {
+    const line = decide({ changes: changes([change(1, { comments: [n("ci-bot", "/stop", "2026-11-02T10:00:00Z")] })]), label: "l", factory: "ram" })[0] as OpenLine;
+    expect(line.stop).toEqual({ kind: "none" });
   });
 
   it("a developer's /stop, a /stop later in a note, or a stop word in a post does not count", () => {
@@ -64,7 +76,8 @@ describe("stop", () => {
 describe("format", () => {
   it("writes one line per change, with the forge's mark", () => {
     const line = one(change(12, { labels: ["agent::claimed"], comments: [n("ram", "/stop", "2026-11-02T10:00:00Z")] }));
-    expect(format({ line, mark: "!" })).toBe("!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00Z asks=0");
+    expect(format({ line, mark: "!" })).toBe("!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00.000Z asks=0");
+    expect(format({ line: { ...line, stop: { kind: "undated" } }, mark: "!" })).toContain(" stop=undated ");
     expect(format({ line: { kind: "merged", number: 9 }, mark: "#" })).toBe("#9 merged claimed=yes");
   });
 

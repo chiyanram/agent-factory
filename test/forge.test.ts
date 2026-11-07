@@ -58,6 +58,17 @@ describe("openForge", () => {
     expect(await f.me()).toMatchObject({ kind: "failed", reason: expect.stringContaining("a call was made") });
   });
 
+  it("defaults gh to the package's App wrapper, as the bash scripts do until #108", async () => {
+    let bin = "";
+    const run: Runner = async (call) => {
+      bin = call.bin;
+      return { code: 0, stdout: 'HTTP/2.0 200 OK\r\n\r\n{"login":"x"}', stderr: "" };
+    };
+    const r = open({ FACTORY_FORGE: "github", FACTORY_PROJECT: "a/b" }, run).result;
+    await (r.kind === "ok" ? r.value.me() : undefined);
+    expect(bin).toMatch(/scripts\/bin\/gh$/);
+  });
+
   it("calls the CLI with no update notice and no prompt", async () => {
     let seen: NodeJS.ProcessEnv = {};
     const run: Runner = async (call) => {

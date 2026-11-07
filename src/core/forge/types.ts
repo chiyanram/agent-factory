@@ -31,9 +31,10 @@ export type Change = {
 };
 
 // A person's access to the project. maintainer: GitLab Maintainer or more, GitHub write access or more. developer:
-// GitLab Developer. guest: any lower access.
+// GitLab Developer. guest: any lower access. bot: a GitLab bot account (a project or group access token, a service
+// account); a GitHub collaborator is always a user.
 export type Level = "maintainer" | "developer" | "guest";
-export type Person = { readonly name: string; readonly level: Level };
+export type Person = { readonly name: string; readonly level: Level; readonly bot: boolean };
 
 export type OpenChange = {
   readonly number: number;

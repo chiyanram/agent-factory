@@ -2,8 +2,9 @@
 //
 //   FACTORY_FORGE      gitlab (default) or github
 //   FACTORY_PROJECT    the project: owner/name on GitHub, the full path on GitLab (for example aruvii/agent-platform)
-//   FACTORY_GH         the gh the factory acts through (default: gh, the developer's own login). A project with a
-//                      GitHub App points it at scripts/bin/gh, which mints the App's token.
+//   FACTORY_GH         the gh the factory acts through (default: scripts/bin/gh, which mints the GitHub App's token,
+//                      the same default as the bash scripts until #108 moves both to the developer's own login, S14).
+//                      An App has no user to ask, so with it set FACTORY_LOGIN to <app-slug>[bot].
 //   FACTORY_GLAB       the glab the factory acts through (default: glab)
 //   FACTORY_LOGIN      the login the factory posts as, when the CLI cannot say (a GitHub App: <app-slug>[bot])
 //   FACTORY_MAX_TRIES  calls per request while the forge answers with a rate limit (default: 4)
@@ -11,6 +12,8 @@
 //
 // No setting is guessed: a value that is set but not valid is refused, never replaced by the default.
 
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { realSleep, runProcess, type Client, type Result, type Runner, type Sleeper } from "./api.js";
 import { github } from "./github.js";
 import { gitlab } from "./gitlab.js";
@@ -34,8 +37,13 @@ function maxTries(value: string | undefined): Result<number> {
   return /^[1-9]\d{0,2}$/.test(value) ? { kind: "ok", value: Number(value) } : { kind: "failed", reason: `FACTORY_MAX_TRIES must be a whole number from 1, got ${JSON.stringify(value)}` };
 }
 
+// the App's gh wrapper in this package: src/core/forge or dist/core/forge, three folders below the package root
+export function appGh(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "scripts", "bin", "gh");
+}
+
 function client(setup: ForgeSetup, name: "github" | "gitlab", tries: number): Client {
-  const bin = name === "github" ? setup.env.FACTORY_GH ?? "gh" : setup.env.FACTORY_GLAB ?? "glab";
+  const bin = name === "github" ? setup.env.FACTORY_GH ?? appGh() : setup.env.FACTORY_GLAB ?? "glab";
   return {
     name,
     bin,

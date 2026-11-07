@@ -8,21 +8,25 @@
 //   pipeline     the head's pipeline: success, failed, running, canceled, skipped, manual, none, or unknown:<what the
 //                forge said> (#124)
 //   needs_human  the change carries needs-human
-//   stop         the time of a maintainer's last "/stop" (a note whose first line is exactly that), else no. The
-//                dispatcher holds the change while that stop is newer than the ticket's local approval, so approving
-//                again lifts it.
+//   stop         the time of a maintainer's last "/stop" (a note whose first line is exactly that), in ISO 8601 UTC,
+//                else no; "undated" when its time does not parse. The dispatcher holds the change while that stop is
+//                newer than the ticket's local approval, so approving again lifts it.
 //   asks         [coordinator] OPEN: and [writer] OPEN: notes with no note from a project member after them (#128)
 //
 // There is no approved field: an approval is a local permission (`agent-factory approve`, ADR-0012 S1), never a note.
 // Who wrote a note is told by notes.ts: the factory's login AND a seat prefix make an agent note; everything else is a
 // person's. A project member is a GitLab Developer or more, or a GitHub collaborator with write access; a maintainer is
-// a GitLab Maintainer or more, or a GitHub collaborator with write access.
+// a GitLab Maintainer or more, or a GitHub collaborator with write access. A bot account is neither, whatever its
+// access: a CI bot's note never answers an ask, and its "/stop" never stops. Only the PR's conversation is read, not
+// review comments or review bodies.
 
 import { classify, openAsks, type Note, type Readers } from "./notes.js";
 import type { Result } from "./forge/api.js";
 import type { Changes, Forge, OpenChange, Person, Pipeline } from "./forge/types.js";
 
-export type Stop = { readonly kind: "none" } | { readonly kind: "stopped"; readonly at: string };
+// stopped: the /stop's time, as ISO 8601 UTC; undated: a /stop whose time did not parse, which holds the change until a
+// human looks, since no approval can be shown to be newer.
+export type Stop = { readonly kind: "none" } | { readonly kind: "stopped"; readonly at: string } | { readonly kind: "undated" };
 
 export type OpenLine = {
   readonly kind: "open";
@@ -65,7 +69,11 @@ export function stop(input: { readonly comments: readonly Note[]; readonly reade
       classify({ note, readers: input.readers }).kind === "person",
   );
   const last = stops.reduce<Note | "none">((best, note) => (best === "none" || instant(note.at) >= instant(best.at) ? note : best), "none");
-  return last === "none" ? { kind: "none" } : { kind: "stopped", at: last.at };
+  if (last === "none") {
+    return { kind: "none" };
+  }
+  const time = instant(last.at);
+  return Number.isFinite(time) ? { kind: "stopped", at: new Date(time).toISOString() } : { kind: "undated" };
 }
 
 function openLine(change: OpenChange, label: string, readers: Readers, maintainers: ReadonlySet<string>): OpenLine {
@@ -85,8 +93,8 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
 // decide : the lines for what the forge answered, in change-number order.
 export function decide(input: { readonly changes: Changes; readonly label: string; readonly factory: string }): readonly PollLine[] {
   const { changes, label } = input;
-  const readers: Readers = { factory: input.factory, members: names(changes.team, (p) => p.level !== "guest") };
-  const maintainers = names(changes.team, (p) => p.level === "maintainer");
+  const readers: Readers = { factory: input.factory, members: names(changes.team, (p) => !p.bot && p.level !== "guest") };
+  const maintainers = names(changes.team, (p) => !p.bot && p.level === "maintainer");
   const lines: PollLine[] = [
     ...changes.open.map((c) => openLine(c, label, readers, maintainers)),
     ...changes.merged.map((number): MergedLine => ({ kind: "merged", number })),
@@ -109,7 +117,7 @@ export function format(input: { readonly line: PollLine; readonly mark: string }
   if (line.kind === "merged") {
     return `${mark}${line.number} merged claimed=yes`;
   }
-  const stopped = line.stop.kind === "stopped" ? line.stop.at : "no";
+  const stopped = line.stop.kind === "stopped" ? line.stop.at : line.stop.kind === "undated" ? "undated" : "no";
   return (
     `${mark}${line.number} head=${line.head.slice(0, 8)} draft=${yn(line.draft)} claimed=${yn(line.claimed)}` +
     ` pipeline=${pipelineWord(line.pipeline)} needs_human=${yn(line.needsHuman)} stop=${stopped} asks=${line.asks}`

@@ -10,7 +10,7 @@ const post: Post = { seat: "reviewer", title: "Act on F1", fields: [], items: []
 const page = (hasNextPage: boolean, endCursor = "c1") => ({ hasNextPage, endCursor: hasNextPage ? endCursor : null });
 const collaborators = (edges: readonly [string, string][], more = false) =>
   ok({ data: { repository: { collaborators: { pageInfo: page(more), edges: edges.map(([login, permission]) => ({ permission, node: { login } })) } } } });
-const comment = (body: string, at: string, login: string | null = "chiyanram") => ({ body, createdAt: at, author: login === null ? null : { login } });
+const comment = (body: string, at: string, login: string | null = "chiyanram", type = "User") => ({ body, createdAt: at, author: login === null ? null : { login, __typename: type } });
 type PrOptions = { readonly rollup?: unknown; readonly labels?: readonly string[]; readonly comments?: readonly unknown[]; readonly older?: string };
 const pr = (number: number, o: PrOptions = {}) => ({
   number,
@@ -50,9 +50,9 @@ describe("changes", () => {
       kind: "ok",
       value: {
         team: [
-          { name: "chiyanram", level: "maintainer" },
-          { name: "dev2", level: "maintainer" },
-          { name: "ann", level: "guest" },
+          { name: "chiyanram", level: "maintainer", bot: false },
+          { name: "dev2", level: "maintainer", bot: false },
+          { name: "ann", level: "guest", bot: false },
         ],
         open: [
           {
@@ -102,6 +102,13 @@ describe("changes", () => {
     expect(result.kind === "ok" ? result.value.open[0]!.comments.map((c) => c.body) : []).toEqual(["[writer] OPEN: x", "thanks"]);
     expect(field(f.calls[2], "before")).toBe("s1");
     expect(field(f.calls[2], "number")).toBe("3");
+  });
+
+  it("an App's comment carries its [bot] login, as REST and FACTORY_LOGIN name it", async () => {
+    const f = fake("github", [collaborators([]), open([pr(5, { comments: [comment("[writer] OPEN: x", "2026-11-01T00:00:00Z", "ledger-factory", "Bot")] })]), merged([])]);
+    const result = await github(f.client, project).changes({ label: "l" });
+    expect(result.kind === "ok" ? result.value.open[0]!.comments[0]!.author : {}).toEqual({ name: "ledger-factory[bot]" });
+    expect(f.calls[1]!.args.join(" ")).toContain("author { login __typename }");
   });
 
   it("a deleted author is a person with no name", async () => {

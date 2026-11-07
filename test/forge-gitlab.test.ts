@@ -9,8 +9,8 @@ const base = "projects/aruvii%2Fagent-platform";
 const post: Post = { seat: "reviewer", title: "Act on F1", fields: [], items: [] };
 
 const page = (hasNextPage: boolean, endCursor = "c1") => ({ hasNextPage, endCursor: hasNextPage ? endCursor : null });
-const members = (nodes: readonly [string | null, number][], more = false) =>
-  ok({ data: { project: { projectMembers: { pageInfo: page(more), nodes: nodes.map(([u, a]) => ({ user: u === null ? null : { username: u }, accessLevel: { integerValue: a } })) } } } });
+const members = (nodes: readonly [string | null, number, boolean?][], more = false) =>
+  ok({ data: { project: { projectMembers: { pageInfo: page(more), nodes: nodes.map(([u, a, bot]) => ({ user: u === null ? null : { username: u, bot: bot === true }, accessLevel: { integerValue: a } })) } } } });
 const note = (body: string, at: string, username = "ram") => ({ body, createdAt: at, author: { username } });
 type MrOptions = { readonly pipeline?: unknown; readonly labels?: readonly string[]; readonly notes?: readonly unknown[]; readonly older?: string };
 const mr = (iid: number, o: MrOptions = {}) => ({
@@ -25,7 +25,7 @@ const open = (nodes: readonly unknown[], more = false) => ok({ data: { project: 
 
 describe("pipeline (#124)", () => {
   it("maps every GitLab status, in any case", () => {
-    const at = (status: string) => pipeline({ kind: "pipeline", status, sha: "h" }, "h").kind;
+    const at = (status: string) => pipeline({ kind: "pipeline", status }).kind;
     for (const s of ["CREATED", "WAITING_FOR_RESOURCE", "PREPARING", "WAITING_FOR_CALLBACK", "PENDING", "RUNNING", "SCHEDULED"]) {
       expect(at(s)).toBe("running");
     }
@@ -37,18 +37,17 @@ describe("pipeline (#124)", () => {
     expect(at("MANUAL")).toBe("manual");
   });
 
-  it("no pipeline, or one for an older commit, is none; an unknown status is unknown", () => {
-    expect(pipeline({ kind: "none" }, "h")).toEqual({ kind: "none" });
-    expect(pipeline({ kind: "pipeline", status: "SUCCESS", sha: "old" }, "h")).toEqual({ kind: "none" });
-    expect(pipeline({ kind: "pipeline", status: "WAITING", sha: "h" }, "h")).toEqual({ kind: "unknown", raw: "WAITING" });
+  it("no pipeline is none; an unknown status is unknown, never none", () => {
+    expect(pipeline({ kind: "none" })).toEqual({ kind: "none" });
+    expect(pipeline({ kind: "pipeline", status: "WAITING" })).toEqual({ kind: "unknown", raw: "WAITING" });
   });
 });
 
 describe("changes", () => {
   it("reads members by access level, open merge requests and merged claims", async () => {
     const f = fake("gitlab", [
-      members([["ann", 50], ["dev", 30], ["rep", 20], [null, 40]]),
-      open([mr(4, { pipeline: { status: "RUNNING", sha: "aaaa1111aaaa1111" }, labels: ["agent::claimed"], notes: [note("[writer] OPEN: which port?", "2026-11-02T12:00:00Z")] })]),
+      members([["ann", 50], ["dev", 30], ["rep", 20], [null, 40], ["project_1_bot", 40, true]]),
+      open([mr(4, { pipeline: { status: "RUNNING" }, labels: ["agent::claimed"], notes: [note("[writer] OPEN: which port?", "2026-11-02T12:00:00Z")] })]),
       ok([{ iid: 9 }]),
     ]);
     const result = await gitlab(f.client, project).changes({ label: "agent::claimed" });
@@ -56,9 +55,10 @@ describe("changes", () => {
       kind: "ok",
       value: {
         team: [
-          { name: "ann", level: "maintainer" },
-          { name: "dev", level: "developer" },
-          { name: "rep", level: "guest" },
+          { name: "ann", level: "maintainer", bot: false },
+          { name: "dev", level: "developer", bot: false },
+          { name: "rep", level: "guest", bot: false },
+          { name: "project_1_bot", level: "maintainer", bot: true },
         ],
         open: [
           {
@@ -74,6 +74,7 @@ describe("changes", () => {
       },
     });
     expect(field(f.calls[0], "project")).toBe(project);
+    expect(f.calls[0]!.args.join(" ")).toContain("relations: [DIRECT, INHERITED, INVITED_GROUPS, SHARED_INTO_ANCESTORS]");
     expect(f.calls[1]!.args.join(" ")).toContain("filter: ONLY_COMMENTS");
     expect(f.calls[2]!.args[2]).toBe(`${base}/merge_requests?state=merged&labels=agent%3A%3Aclaimed&per_page=100&page=1`);
   });

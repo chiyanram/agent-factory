@@ -41,8 +41,16 @@ describe("rest", () => {
       expect(await rest(f.client, GET)).toEqual({ kind: "ok", value: [] });
       expect(f.slept).toHaveLength(1);
     }
-    expect(waitSeconds(new Map([["x-ratelimit-reset", "1000030"]]), 1_000_000)).toBe(30);
     expect(waitSeconds(new Map(), 1_000_000)).toBe(60);
+  });
+
+  it("waits for the reset only when no requests are left, at least a minute otherwise, and never past 5 minutes (#71)", () => {
+    const at = (h: Record<string, string>) => waitSeconds(new Map(Object.entries(h)), 1_000_000);
+    expect(at({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000030" })).toBe(30);
+    // a secondary limit: requests are left, and the reset is a second away
+    expect(at({ "x-ratelimit-remaining": "4000", "x-ratelimit-reset": "1000001" })).toBe(60);
+    expect(at({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1003600" })).toBe(300);
+    expect(at({ "retry-after": "7200" })).toBe(300);
   });
 
   it("any other error fails at once and names the status", async () => {

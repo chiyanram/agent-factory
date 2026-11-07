@@ -50,7 +50,7 @@ login, email or password.
 | 3 | developer | Install the App on the project's repository only. | The scripts refuse an App that is not installed on `FACTORY_PROJECT`. |
 | 4 | repo owner | Add a ruleset on `main`: restrict updates, require a pull request with one approval, block force pushes and deletion. Make the repository admin the only bypass actor, for pull requests only. | Only the owner can merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
 | 5 | developer | In `FACTORY_REPO`: clone over `https://github.com/`; set `git config factory.ghAppId <id>`, `factory.ghAppKey <pem path>` and `factory.project <owner/name>`; add an empty credential helper and then the App's: `git config --add credential.https://github.com.helper ""` and `git config --add credential.https://github.com.helper "!<agent-factory>/scripts/github-app.sh git-credential"`; set `user.name <slug>[bot]` and `user.email <bot-id>+<slug>[bot]@users.noreply.github.com` (`gh api "users/<slug>[bot]" --jq .id` gives the id). | `start-writer` refuses a clone without each of these. The empty helper stops a global helper from answering with the person's login. |
-| 6 | developer | For the coordinator scripts, set `FACTORY_FORGE=github`, `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` and `FACTORY_PROJECT`. | The scripts refuse any token that is not the App's. |
+| 6 | developer | For the coordinator scripts, set `FACTORY_FORGE=github`, `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY`, `FACTORY_PROJECT` and `FACTORY_LOGIN=<slug>[bot]`. | The scripts refuse any token that is not the App's. An App has no user to ask, so `poll` learns the factory's own login from `FACTORY_LOGIN`, and without it refuses to run. |
 
 ### Both forges
 
@@ -87,7 +87,7 @@ The scripts read their settings from the environment.
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` | — |
 | `FACTORY_REPO` | a local clone of that project; worktrees, packs and run files go in its `.claude/` | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
-| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries. `agent-factory` acts with the CLI's own login (ADR-0012 S14); a project with a GitHub App points `FACTORY_GH` at `scripts/bin/gh` | `glab`, `gh`, `claude`; **Today:** the bash scripts default `FACTORY_GH` to `scripts/bin/gh` and refuse a person's login (#108) |
+| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `scripts/bin/gh`, `claude`. **Today:** `gh` is the GitHub App's wrapper for `agent-factory` and the bash scripts alike, and the bash scripts refuse a person's login; #108 moves both to your own login by default (ADR-0012 S14) |
 | `FACTORY_LOGIN` | the login the factory posts as, when the CLI cannot say who it is (a GitHub App: `<app-slug>[bot]`); `poll` tells the factory's notes by it | the CLI's own login |
 | `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | the GitHub App's ID and its private key file | git config `factory.ghAppId`, `factory.ghAppKey` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
@@ -204,7 +204,10 @@ pages every list to its end, and waits out a rate limit. It does not read approv
 seat prefix (`src/core/notes.ts`, #128); every other note is a person's. `asks` counts each `[coordinator] OPEN:` or
 `[writer] OPEN:` note with no note after it from a project member: a GitLab Developer or more, or a GitHub
 collaborator with write access. `stop` is the time of a maintainer's last note whose first line is exactly `/stop`
-(a GitLab Maintainer or more, or a GitHub collaborator with write access). `pipeline` is `success`, `failed`,
+(a GitLab Maintainer or more, or a GitHub collaborator with write access), in UTC, or `undated` when its time does
+not parse. A bot account is neither a member nor a maintainer, whatever its access, so a CI bot never answers an
+ask or stops a change. `poll` reads the MR's conversation only: an answer or a `/stop` in a review comment or a review
+body is not seen. `pipeline` is `success`, `failed`,
 `running`, `canceled`, `skipped`, `manual`, `none`, or `unknown:<state>` for a state the forge sends that `poll` does
 not know (#124); stand off an unknown one and tell the human. GitLab's own activity notes ("added ~label") are not
 counted. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).

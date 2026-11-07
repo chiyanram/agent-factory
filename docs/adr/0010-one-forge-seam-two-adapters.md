@@ -65,3 +65,10 @@ By [ADR-0013](0013-typescript-package-cli-first.md) ([integration rule](https://
   own login ([gap 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681534148)).
 - The writer gets no `gh` or App path (ADR-0012 S6). The "a writer's session … can act only as the App" cell is the
   current script behaviour, which ADR-0012 replaces.
+
+## Ported 2026-11-07
+
+The seam is in the TypeScript package (`src/core/forge/`, #102), and `poll` is `agent-factory poll`. It no longer
+decides `approved`: an approval is local (ADR-0012 S1), so the `/approved` gate above and the body edits are gone. It
+tells the factory's notes from people's by login and seat prefix (ADR-0012 S14, #128). `scripts/lib/forge.sh` stays
+only until its last bash caller is ported (#138).

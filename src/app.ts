@@ -33,7 +33,7 @@ settings:
   FACTORY_FORGE        gitlab (default) or github
   FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
   FACTORY_CLAIM_LABEL  the label a claimed change carries (default agent::claimed)
-  FACTORY_GH           the gh to call (default gh); FACTORY_GLAB the glab to call (default glab)
+  FACTORY_GH           the gh to call (default scripts/bin/gh, the GitHub App); FACTORY_GLAB the glab (default glab)
   FACTORY_LOGIN        the login the factory posts as, when the CLI cannot say (a GitHub App: <slug>[bot])
 `;
 

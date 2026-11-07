@@ -8,7 +8,8 @@
 //   - a GitHub 403 with Retry-After, with x-ratelimit-remaining: 0, or whose message names a rate limit (a secondary
 //     limit can come with no header at all, #71)
 //   - a GraphQL answer of 200 with an error of type RATE_LIMITED (#71)
-// The wait is Retry-After, else the time until x-ratelimit-reset, else 60 seconds. Any other status fails at once and
+// The wait is Retry-After, else the time until x-ratelimit-reset when no requests are left, else 60 seconds, and never
+// more than 5 minutes. Any other status fails at once and
 // names it. Nothing here throws: every outcome is a sealed result.
 
 import { execFile } from "node:child_process";
@@ -101,14 +102,17 @@ export function limited(answer: Answer): boolean {
   return answer.status === 403 && (h.has("retry-after") || h.get("x-ratelimit-remaining") === "0" || limitedBody(answer.body));
 }
 
-// waitSeconds : Retry-After wins; else the time until x-ratelimit-reset; else 60.
+// The longest one wait may be: a poll that waits longer is better failing loudly after its tries.
+export const MAX_WAIT = 300;
+
+// waitSeconds : Retry-After wins; else, when no requests are left, the time until x-ratelimit-reset; else 60 (GitHub
+// sends x-ratelimit-reset on every answer, and a secondary limit asks for at least a minute). Never above MAX_WAIT.
 export function waitSeconds(headers: ReadonlyMap<string, string>, now: number): number {
   const after = Number.parseInt(headers.get("retry-after") ?? "", 10);
-  if (Number.isFinite(after) && after >= 0) {
-    return after;
-  }
   const reset = Number.parseInt(headers.get("x-ratelimit-reset") ?? "", 10);
-  return Number.isFinite(reset) ? Math.max(reset - now, 1) : 60;
+  const empty = headers.get("x-ratelimit-remaining") === "0" && Number.isFinite(reset);
+  const wait = Number.isFinite(after) && after >= 0 ? after : empty ? Math.max(reset - now, 1) : 60;
+  return Math.min(wait, MAX_WAIT);
 }
 
 // graphqlLimited : a 200 whose errors say RATE_LIMITED.

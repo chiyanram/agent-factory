@@ -32,7 +32,7 @@ function level(permission: string): Level {
   return ["ADMIN", "MAINTAIN", "WRITE"].includes(permission) ? "maintainer" : "guest";
 }
 
-const COMMENT = "body createdAt author { login }";
+const COMMENT = "body createdAt author { login __typename }";
 
 const COLLABORATORS = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   collaborators(first: 100, after: $after) { pageInfo { hasNextPage endCursor } edges { permission node { login } } } } }`;
@@ -55,10 +55,19 @@ function byState(state: "opened" | "merged"): string {
     pageInfo { hasNextPage endCursor } nodes { number } } } }`;
 }
 
+// GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and FACTORY_LOGIN use "ledger-factory[bot]".
+// The seam always gives the [bot] form, so the factory's own notes match its login whichever way they were read. A
+// deleted account leaves the author null: a person who is no member and not the factory.
+function author(r: ReturnType<typeof reader>, node: unknown): string {
+  if (r.absent(node, "author")) {
+    return "";
+  }
+  const login = r.text(node, "author.login");
+  return r.at(node, "author.__typename") === "Bot" && !login.endsWith("[bot]") ? `${login}[bot]` : login;
+}
+
 function comment(r: ReturnType<typeof reader>, node: unknown): Note {
-  // a deleted account leaves author null: a person who is no member and not the factory
-  const name = r.absent(node, "author") ? "" : r.text(node, "author.login");
-  return { body: r.text(node, "body"), author: { name }, at: r.text(node, "createdAt") };
+  return { body: r.text(node, "body"), author: { name: author(r, node) }, at: r.text(node, "createdAt") };
 }
 
 export function github(client: Client, project: GithubProject): Forge {
@@ -109,7 +118,7 @@ export function github(client: Client, project: GithubProject): Forge {
   async function team(): Promise<Result<readonly Person[]>> {
     return pages((cursor) =>
       query(COLLABORATORS, after(cursor), (data, r): Page<Person> => ({
-        items: r.list(data, "repository.collaborators.edges").map((e) => ({ name: r.text(e, "node.login"), level: level(r.text(e, "permission")) })),
+        items: r.list(data, "repository.collaborators.edges").map((e) => ({ name: r.text(e, "node.login"), level: level(r.text(e, "permission")), bot: false })),
         next: nextCursor(r, data, "repository.collaborators.pageInfo"),
       })),
     );

@@ -29,14 +29,12 @@ const STATUS: Readonly<Record<string, Pipeline>> = {
   MANUAL: { kind: "manual" },
 };
 
-export type HeadPipeline = { readonly kind: "none" } | { readonly kind: "pipeline"; readonly status: string; readonly sha: string };
+export type HeadPipeline = { readonly kind: "none" } | { readonly kind: "pipeline"; readonly status: string };
 
-// pipeline : the status of the head pipeline. A pipeline for an older commit says nothing about this head: none.
-export function pipeline(head: HeadPipeline, diffHead: string): Pipeline {
-  if (head.kind === "none" || head.sha !== diffHead) {
-    return { kind: "none" };
-  }
-  return STATUS[head.status.toUpperCase()] ?? { kind: "unknown", raw: head.status };
+// pipeline : the status of the head pipeline. GitLab already gives only a pipeline for the diff head: its sha is the
+// head, or for a merged-results or merge-train pipeline the merge ref with the head as source_sha.
+export function pipeline(head: HeadPipeline): Pipeline {
+  return head.kind === "none" ? { kind: "none" } : (STATUS[head.status.toUpperCase()] ?? { kind: "unknown", raw: head.status });
 }
 
 // GitLab's access levels: 40 Maintainer, 50 Owner; 30 Developer; lower is a guest or less.
@@ -49,15 +47,15 @@ const STATES: Readonly<Record<string, ChangeState>> = { opened: "opened", locked
 const COMMENT = "body createdAt author { username }";
 
 const MEMBERS = `query($project: ID!, $after: String) { project(fullPath: $project) {
-  projectMembers(relations: [DIRECT, INHERITED], first: 100, after: $after) {
-    pageInfo { hasNextPage endCursor } nodes { user { username } accessLevel { integerValue } } } } }`;
+  projectMembers(relations: [DIRECT, INHERITED, INVITED_GROUPS, SHARED_INTO_ANCESTORS], first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor } nodes { user { username bot } accessLevel { integerValue } } } } }`;
 
 const OPEN = `query($project: ID!, $after: String) { project(fullPath: $project) {
   mergeRequests(state: opened, first: 50, after: $after, sort: CREATED_ASC) {
     pageInfo { hasNextPage endCursor }
     nodes { iid draft diffHeadSha
       labels(first: 100) { pageInfo { hasNextPage } nodes { title } }
-      headPipeline { status sha }
+      headPipeline { status }
       notes(filter: ONLY_COMMENTS, last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
 
 const EARLIER = `query($project: ID!, $iid: String!, $before: String) { project(fullPath: $project) {
@@ -145,7 +143,7 @@ export function gitlab(client: Client, project: string): Forge {
     const all = await pages((cursor) =>
       query(MEMBERS, after(cursor), (data, r): Page<Person | "none"> => ({
         items: r.list(data, "project.projectMembers.nodes").map((n) =>
-          r.absent(n, "user") ? "none" : { name: r.text(n, "user.username"), level: level(r.int(n, "accessLevel.integerValue")) },
+          r.absent(n, "user") ? "none" : { name: r.text(n, "user.username"), level: level(r.int(n, "accessLevel.integerValue")), bot: r.at(n, "user.bot") === true },
         ),
         next: nextCursor(r, data, "project.projectMembers.pageInfo"),
       })),
@@ -157,14 +155,14 @@ export function gitlab(client: Client, project: string): Forge {
     const head = r.text(node, "diffHeadSha");
     const headPipeline: HeadPipeline = r.absent(node, "headPipeline")
       ? { kind: "none" }
-      : { kind: "pipeline", status: r.text(node, "headPipeline.status"), sha: r.text(node, "headPipeline.sha") };
+      : { kind: "pipeline", status: r.text(node, "headPipeline.status") };
     return {
       change: {
         number: r.int(node, "iid"),
         head,
         draft: r.bool(node, "draft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "title")),
-        pipeline: pipeline(headPipeline, head),
+        pipeline: pipeline(headPipeline),
         comments: r.list(node, "notes.nodes").map((n) => comment(r, n)),
       },
       more: r.bool(node, "notes.pageInfo.hasPreviousPage"),
