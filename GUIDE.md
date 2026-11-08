@@ -236,7 +236,9 @@ each request, so it needs no setting and no token. A project opts in with its pr
 { "plugins": { "forge.read": "github", "forge.write": "github" } }
 ```
 
-Run `agent-factory plugin add github` once. Then `dispatch <project>` makes every forge call of its pass through the
+Run `agent-factory plugin add github` once. The bundled plugins start with `#!/usr/bin/env node`, so `node` must be in
+a `PATH` folder only its owner can write; where it is not (some CI tool caches), `describe` exits 127, and a link to
+`node` in such a folder, put first on the `PATH`, fixes it. Then `dispatch <project>` makes every forge call of its pass through the
 plugin, and reads each answer back in the seam's own shapes, so a plugin that answers anything else fails that call.
 A forge call has the built-in adapter's room: an answer of up to 64 MiB, and time to wait out a rate limit on every
 try. `FACTORY_DRY_RUN` still holds every write back, opening a change too. Without the mapping, the built-in adapter
