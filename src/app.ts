@@ -14,6 +14,7 @@ import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, vmBox, type Built } from "./core/box/index.js";
+import { npmPacker } from "./core/box/pack.js";
 import { openEgress } from "./core/egress/index.js";
 import {
   claudeTokenStatus,
@@ -569,9 +570,14 @@ async function setupStatus({ store, io }: { readonly store: TokenStore; readonly
   return box.kind === "chosen" && token.ok ? 0 : 1;
 }
 
-// the package's own box image: images/factory-box, next to dist/ (or src/ in a test)
+// this package's folder: next to dist/ (or src/ in a test)
+function packageDir(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+// the package's own box image: images/factory-box
 function baseDir(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "images", "factory-box");
+  return join(packageDir(), "images", "factory-box");
 }
 
 function builtLine(project: string, b: Built): string {
@@ -608,6 +614,7 @@ async function boxCommand({ positionals, io }: Args): Promise<number> {
     home: home.path,
     project,
     baseDir: baseDir(),
+    pack: npmPacker({ run: io.system.run, env: io.env, pkg: packageDir() }),
   });
   if (built.kind === "failed") {
     io.err(`agent-factory box: ${built.reason}\n`);

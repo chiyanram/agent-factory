@@ -366,3 +366,61 @@ describe("openChange (#164)", () => {
     expect(await gitlab(elsewhere.client, project).ciConfig()).toMatchObject({ value: { kind: "none" } });
   });
 });
+
+describe("failedJobs (#171)", () => {
+  it("reads the merge request's head pipeline, its failed jobs, and the end of each trace, plain", async () => {
+    const trace = `${Array.from({ length: 250 }, (_, i) => `line ${i + 1}`).join("\n")}\n\u001b[31;1mERROR: Job failed\u001b[0m\n`;
+    const f = fake("gitlab", [
+      ok({ iid: 7, head_pipeline: { id: 900 } }),
+      ok([{ id: 51, name: "test" }]),
+      { status: 200, body: trace },
+    ]);
+    const out = await gitlab(f.client, project).failedJobs({ number: 7, head: "aaaa1111" });
+    // 251 lines in all: the last 200 start at line 52, with the colour codes gone
+    expect(out).toEqual({
+      kind: "ok",
+      value: [
+        {
+          name: "test",
+          log: { kind: "tail", text: expect.stringMatching(/^line 52\n[\s\S]*\nline 250\nERROR: Job failed$/) },
+        },
+      ],
+    });
+    expect(JSON.stringify(out).split("\\n")).toHaveLength(200);
+    expect(f.calls.map((c) => c.args[2])).toEqual([
+      `${base}/merge_requests/7`,
+      `${base}/pipelines/900/jobs?scope[]=failed&per_page=100`,
+      `${base}/jobs/51/trace`,
+    ]);
+  });
+
+  it("reads at most 3 traces, and names every failed job", async () => {
+    const jobs = [1, 2, 3, 4].map((id) => ({ id, name: `job-${id}` }));
+    const f = fake("gitlab", [ok({ head_pipeline: { id: 9 } }), ok(jobs), ok("a"), ok("b"), ok("c")]);
+    const out = await gitlab(f.client, project).failedJobs({ number: 7, head: "aaaa1111" });
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: [
+        { name: "job-1", log: { kind: "tail" } },
+        { name: "job-2", log: { kind: "tail" } },
+        { name: "job-3", log: { kind: "tail" } },
+        { name: "job-4", log: { kind: "none", why: "only the first 3 logs are read" } },
+      ],
+    });
+    expect(f.calls).toHaveLength(5);
+  });
+
+  it("gives no jobs when the merge request has no pipeline, and a trace it cannot read as no log with the reason", async () => {
+    const none = fake("gitlab", [ok({ head_pipeline: null })]);
+    expect(await gitlab(none.client, project).failedJobs({ number: 7, head: "a" })).toEqual({ kind: "ok", value: [] });
+    const gone = fake("gitlab", [
+      ok({ head_pipeline: { id: 9 } }),
+      ok([{ id: 5, name: "lint" }]),
+      { status: 404, body: "" },
+    ]);
+    expect(await gitlab(gone.client, project).failedJobs({ number: 7, head: "a" })).toMatchObject({
+      kind: "ok",
+      value: [{ name: "lint", log: { kind: "none", why: expect.stringContaining("HTTP 404") } }],
+    });
+  });
+});

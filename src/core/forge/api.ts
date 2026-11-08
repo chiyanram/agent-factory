@@ -188,6 +188,12 @@ async function send(client: Client, args: readonly string[], stdin: string): Pro
   }
 }
 
+// restText : one GET whose answer is plain text, such as a CI job's log; a redirect is followed by the CLI.
+export async function restText(client: Client, path: string): Promise<Result<string>> {
+  const sent = await send(client, [path, "-X", "GET"], "");
+  return sent.kind === "ok" ? { kind: "ok", value: sent.value.body } : sent;
+}
+
 // rest : one REST request; the body goes in on stdin, so no value is ever read as a CLI field.
 export async function rest(client: Client, request: RestRequest): Promise<Result<unknown>> {
   const input = request.body.kind === "json" ? ["--input", "-"] : [];

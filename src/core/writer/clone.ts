@@ -5,8 +5,8 @@
 //   2 a new repo in a private folder fetches that one ref from the clone: no hardlink to the clone's objects, so the
 //     writer can never change them (git clone --no-hardlinks gives the same)
 //   3 origin is the project's forge URL, so the host can push from it; the commits get the writer's author name
-//   4 .factory holds the approved spec and the rulebook; the agent's settings, the spec, the rulebook and the repo's git
-//     config and hooks are mounted read-only (ADR-0012 S12)
+//   4 .factory holds the approved spec, the rulebook and, for a rework or CI run, the task (task.ts); the agent's
+//     settings, those files and the repo's git config and hooks are mounted read-only (ADR-0012 S12)
 // A branch that holds .factory, or a symlink where a read-only path goes, is refused: the host writes into .factory,
 // and docker would mount a symlink's target from the host. Nothing here throws.
 
@@ -20,6 +20,11 @@ import { attempt } from "../review/safe.js";
 export const AUTHOR = { name: "agent-factory writer", email: "writer@agent-factory.invalid" };
 export const SPEC_FILE = ".factory/spec.md";
 export const RULEBOOK_DIR = ".factory/rulebook";
+export const TASK_FILE = ".factory/task.md";
+
+// a file the host may write into .factory: the task of a rework or CI run (task.ts), the writer's settings (tools.ts)
+export type FileText = { readonly kind: "none" } | { readonly kind: "text"; readonly text: string };
+export const SETTINGS_FILE = ".factory/settings.json";
 
 // paths the writer may read but not change, when the checkout has them
 const SETTINGS = [".claude", ".agents", "AGENTS.md", "CLAUDE.md"] as const;
@@ -134,19 +139,38 @@ async function readOnlyPaths(repo: string): Promise<Result<readonly string[]>> {
   return { kind: "ok", value: found.filter((f) => f.entry.kind === "plain").map((f) => f.path) };
 }
 
-// factoryFiles : the approved spec and the rulebook in .factory, which the branch must not hold
-async function factoryFiles(repo: string, spec: string, rulebook: string): Promise<Result<readonly string[]>> {
+type Files = {
+  readonly spec: string;
+  readonly rulebook: string;
+  readonly task: FileText;
+  readonly settings: FileText;
+};
+
+// the optional files the host writes, each by its path
+function optional(files: Files): readonly { readonly path: string; readonly text: string }[] {
+  return [
+    ...(files.task.kind === "text" ? [{ path: TASK_FILE, text: files.task.text }] : []),
+    ...(files.settings.kind === "text" ? [{ path: SETTINGS_FILE, text: files.settings.text }] : []),
+  ];
+}
+
+// factoryFiles : the approved spec, the rulebook and the task in .factory, which the branch must not hold
+async function factoryFiles(repo: string, files: Files): Promise<Result<readonly string[]>> {
   if ((await entry(join(repo, ".factory"))).kind !== "absent") {
     return { kind: "failed", reason: "the branch holds .factory; a person removes it" };
   }
   return attempt(
     async () => {
       await mkdir(join(repo, ".factory"), { mode: 0o755 });
-      await writeFile(join(repo, SPEC_FILE), spec, { mode: 0o644 });
-      await cp(rulebook, join(repo, RULEBOOK_DIR), { recursive: true });
-      return [SPEC_FILE, RULEBOOK_DIR];
+      await writeFile(join(repo, SPEC_FILE), files.spec, { mode: 0o644 });
+      await cp(files.rulebook, join(repo, RULEBOOK_DIR), { recursive: true });
+      const more = optional(files);
+      for (const file of more) {
+        await writeFile(join(repo, file.path), file.text, { mode: 0o644 });
+      }
+      return [SPEC_FILE, RULEBOOK_DIR, ...more.map((f) => f.path)];
     },
-    `cannot write the spec and the rulebook into ${join(repo, ".factory")}`,
+    `cannot write the spec, the rulebook, the task and the settings into ${join(repo, ".factory")}`,
   );
 }
 
@@ -170,7 +194,7 @@ type Checkout = { readonly repo: string; readonly start: string };
 
 async function prepared(
   setup: CloneSetup,
-  input: { readonly dir: string; readonly start: Start; readonly spec: string; readonly rulebook: string },
+  input: Files & { readonly dir: string; readonly start: Start },
 ): Promise<Result<Clone>> {
   const out = await checkedOut(setup, input.dir, input.start);
   if (out.kind === "failed") {
@@ -181,7 +205,7 @@ async function prepared(
   if (own.kind === "failed") {
     return own;
   }
-  const files = await factoryFiles(repo, input.spec, input.rulebook);
+  const files = await factoryFiles(repo, input);
   if (files.kind === "failed") {
     return files;
   }
@@ -201,10 +225,7 @@ export async function removeClone(dir: string): Promise<Result<string>> {
 }
 
 // makeClone : a run folder with the writer's clone in it; a folder that could not be set up is removed again
-export async function makeClone(
-  setup: CloneSetup,
-  input: { readonly start: Start; readonly spec: string; readonly rulebook: string },
-): Promise<Result<Clone>> {
+export async function makeClone(setup: CloneSetup, input: Files & { readonly start: Start }): Promise<Result<Clone>> {
   const dir = await attempt(async () => {
     await mkdir(setup.runsDir, { recursive: true, mode: 0o700 });
     return mkdtemp(join(setup.runsDir, "writer-"));

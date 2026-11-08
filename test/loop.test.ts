@@ -67,6 +67,7 @@ function forge(
     openChange: notUsed,
     claimed: async ({ state }): Promise<Result<readonly number[]>> => ({ kind: "ok", value: lists[state] }),
     changes: notUsed,
+    failedJobs: notUsed,
   };
 }
 

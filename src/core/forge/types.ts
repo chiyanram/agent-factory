@@ -69,6 +69,11 @@ export type CiConfig =
 
 // A commit status the factory posts at a head (#91): the local verifier's result, read back by poll as the pipeline.
 export type StatusState = "pending" | "success" | "failed";
+// One failed CI job at a change's head (#171), for a CI run of the writer: its name, and the end of its log when the
+// forge keeps one the factory can read.
+export type JobLog = { readonly kind: "tail"; readonly text: string } | { readonly kind: "none"; readonly why: string };
+export type FailedJob = { readonly name: string; readonly log: JobLog };
+
 export type CommitStatus = {
   readonly sha: string;
   // the change's branch: GitLab ties the status to the merge request's pipeline through it
@@ -118,4 +123,6 @@ export type Forge = {
   openChange(input: ChangeRequest): Promise<Result<number>>;
   // everything poll decides on, in as few calls as paging allows
   changes(input: { readonly label: string }): Promise<Result<Changes>>;
+  // the failed CI jobs at the change's head: every name, and the log's last lines for the first few (#171)
+  failedJobs(input: { readonly number: number; readonly head: string }): Promise<Result<readonly FailedJob[]>>;
 };

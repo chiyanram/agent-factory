@@ -5,17 +5,22 @@ import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import type { Box, BoxSpec, Command, Ran } from "../src/core/box/types.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
-import type { WriterMode } from "../src/core/dispatch/records.js";
+import type { Task } from "../src/core/dispatch/records.js";
+import { keepText, recordsDirOf } from "../src/core/kept.js";
+import { VERIFY_FILE } from "../src/core/ready/steps.js";
+import { keepActOn } from "../src/core/review/act-on.js";
+import type { Sorted } from "../src/core/review/verdicts.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
 import type { Pusher } from "../src/core/finish.js";
 import type { Result } from "../src/core/forge/api.js";
-import type { ChangeRequest, Forge, OpenChange } from "../src/core/forge/types.js";
+import type { ChangeRequest, FailedJob, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv } from "../src/core/writer/run.js";
 import { minutesOf } from "../src/core/writer/settings.js";
 import { promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
 
@@ -69,7 +74,7 @@ beforeEach(async () => {
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
 // what a writer does in its box: what it saw, then a commit and a report
-type Seen = { readonly spec: string; readonly files: readonly string[] };
+type Seen = { readonly spec: string; readonly task: string; readonly files: readonly string[] };
 type Act = { readonly commit: boolean; readonly report: unknown; readonly exit: number };
 
 // git as the writer runs it in the box: no author in the environment, so the clone's own author name applies
@@ -84,7 +89,8 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
     run: async (call) => {
       const start = fake.calls.findLast((c) => c.op === "start");
       const dir = start?.op === "start" ? start.spec.worktree : "";
-      seen.push({ spec: readFileSync(join(dir, ".factory", "spec.md"), "utf8"), files: readdirSync(dir).toSorted() });
+      const read = (file: string) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file), "utf8") : "none");
+      seen.push({ spec: read(".factory/spec.md"), task: read(".factory/task.md"), files: readdirSync(dir).toSorted() });
       if (act.commit) {
         writeFileSync(join(dir, "Renewal.java"), "class Renewal {}\n");
         boxGit(dir, "add", "-A");
@@ -101,7 +107,7 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
 type Told = { readonly log: string[]; readonly opened: ChangeRequest[]; readonly forge: Forge };
 
 // a forge that records what the host told it, in order
-function forge(): Told {
+function forge(jobs: readonly FailedJob[] = []): Told {
   const log: string[] = [];
   const opened: ChangeRequest[] = [];
   const text = (post: Post) => {
@@ -136,6 +142,7 @@ function forge(): Told {
       return { kind: "ok", value: 41 };
     },
     changes: async () => unused("changes"),
+    failedJobs: async () => ({ kind: "ok", value: jobs }),
   };
   return { log, opened, forge: f };
 }
@@ -169,7 +176,12 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       runsDir: join(p.root, "box-runs"),
     },
     settings: { rulebook, timeoutSeconds: 3600, claude: { maxUsd: "2", model: "" } },
-    prompts: { fix: "fix {{ticket}} on {{branch}} at {{head}}", testFirst: "test {{ticket}}" },
+    prompts: {
+      fix: "fix {{ticket}} on {{branch}} at {{head}}",
+      testFirst: "test {{ticket}}",
+      rework: "rework {{ticket}}",
+      ci: "ci {{ticket}}",
+    },
     forge: told.forge,
     push: { forge: "github", host: "github.com", project: "o/r", identity: { kind: "own" }, env: p.env },
     home,
@@ -203,11 +215,13 @@ const openLine = (over: Partial<OpenChange> = {}): RunInput["change"] => ({
   },
 });
 
-async function run(s: WriterSetup, mode: WriterMode, change: RunInput["change"] = { kind: "none" }) {
+async function run(s: WriterSetup, task: Task, change: RunInput["change"] = { kind: "none" }) {
   const step = writerStep({ kind: "ok", value: s });
   if (step.kind !== "available") throw new Error("unavailable");
-  return step.run({ ticket: "PROJ-1", change, head: change.kind === "open" ? change.line.head : "", mode });
+  return step.run({ ticket: "PROJ-1", change, head: change.kind === "open" ? change.line.head : "", task });
 }
+
+const FIX: Task = { kind: "fix" };
 
 const origin = (ref: string): string =>
   execFileSync("git", ["rev-parse", ref], { cwd: join(p.root, "origin.git"), encoding: "utf8" }).trim();
@@ -236,12 +250,12 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const told = forge();
     const pushes: { lease: string; branch: string }[] = [];
     const seen: Seen[] = [];
-    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), told, pushes), "fix");
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), told, pushes), FIX);
 
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", evidence: DONE.evidence } });
     const { head, patch } = valueOf(out);
     // the writer saw the approved spec and the tree of main, and its commit is on the new branch on the forge
-    expect(seen).toEqual([{ spec: SPEC, files: expect.arrayContaining(["AGENTS.md", ".factory"]) }]);
+    expect(seen).toEqual([{ spec: SPEC, task: "none", files: expect.arrayContaining(["AGENTS.md", ".factory"]) }]);
     expect(origin("refs/heads/factory/PROJ-1")).toBe(head);
     expect(origin(`${head}^`)).toBe(origin("refs/heads/main"));
     expect(patch).toMatch(/^[0-9a-f]{40}$/);
@@ -269,7 +283,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
 
   it("gives the box only the model login, holds the settings and git config read-only, and leaves no run folder", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
-    await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), "fix");
+    await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
     const spec = started(fake);
     expect(spec.readOnly).toEqual(["AGENTS.md", ".git/config", ".git/hooks", ".factory/spec.md", ".factory/rulebook"]);
     expect(spec.network).toBe("factory-int-ledger");
@@ -293,7 +307,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
   it("opens no change when the run committed nothing, so a person looks", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();
-    const out = await run(setup(writer(fake, { commit: false, report: DONE, exit: 0 }, []), told, []), "fix");
+    const out = await run(setup(writer(fake, { commit: false, report: DONE, exit: 0 }, []), told, []), FIX);
     expect(out).toMatchObject({ kind: "ok", value: { patch: "", outcome: "done" } });
     expect(told.log).toEqual([]);
   });
@@ -301,7 +315,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
   it("reads a run that did not exit 0 as blocked, whatever its report says, and pushes the work in progress", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();
-    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 1 }, []), told, []), "fix");
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 1 }, []), told, []), FIX);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
     expect(told.log).toContain("label 41 needs-human");
     expect(told.log.at(-1)).toMatch(/note 41 .*blocked: the run exited 1/);
@@ -313,7 +327,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
       stop: async () => ({ kind: "failed", reason: "docker rm timed out" }),
     };
     const told = forge();
-    const out = await run(setup(box, told, []), "fix");
+    const out = await run(setup(box, told, []), FIX);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", evidence: [] } });
     expect(told.log.at(-1)).toMatch(/note 41 .*the box did not stop: docker rm timed out/);
   });
@@ -326,7 +340,7 @@ describe("the writer step: a later run on the change", () => {
     const pushes: { lease: string; branch: string }[] = [];
     const out = await run(
       setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), told, pushes),
-      "fix",
+      FIX,
       openLine(),
     );
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
@@ -337,7 +351,7 @@ describe("the writer step: a later run on the change", () => {
 
   it("refuses to run when the head moved, and starts no box", async () => {
     const fake = fakeBox({});
-    const out = await run(setup(fake.box, forge(), []), "fix", openLine({ head: p.head1 }));
+    const out = await run(setup(fake.box, forge(), []), FIX, openLine({ head: p.head1 }));
     expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the head moved") });
     expect(fake.calls).toEqual([]);
   });
@@ -357,44 +371,212 @@ describe("the writer step: a later run on the change", () => {
       p.git("reset", "-q", "--hard", "HEAD^");
       p.git("checkout", "-q", "main");
       const fake = fakeBox({});
-      const out = await run(setup(fake.box, forge(), []), "fix", openLine({ head }));
+      const out = await run(setup(fake.box, forge(), []), FIX, openLine({ head }));
       expect(out).toMatchObject({ kind: "failed", reason: expect.stringMatching(/\.factory|symlink at AGENTS\.md/) });
       expect(fake.calls).toEqual([]);
       expect(readdirSync(join(p.root, "box-runs"))).toEqual([]);
     }
   });
 
-  it("does not run rework yet: says it needs agent-factory issue 171 on the change, labelled needs-human, and starts no box", async () => {
-    const fake = fakeBox({});
-    const told = forge();
-    const out = await run(setup(fake.box, told, []), "rework", openLine());
-    expect(out).toEqual({ kind: "ok", value: { head: p.head2, outcome: "blocked", patch: "", evidence: [] } });
+  it("hands a CI run the failed jobs and their logs' ends, and a person the change when the forge names none", async () => {
+    const jobs: readonly FailedJob[] = [
+      { name: "test", log: { kind: "tail", text: "FAIL RenewalTest > refuses a reserved loan" } },
+      { name: "sonar", log: { kind: "none", why: "not a GitHub Actions job" } },
+    ];
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const out = await run(
+      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(jobs), []),
+      { kind: "ci-red", head: p.head2 },
+      openLine(),
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+    expect(seen[0]?.task).toContain(
+      "## test\n\nThe end of its log:\n\n```text\nFAIL RenewalTest > refuses a reserved loan\n```",
+    );
+    expect(seen[0]?.task).toContain("## sonar\n\nNo log: not a GitHub Actions job");
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^ci PROJ-1/) });
+
+    const none = fakeBox({});
+    const told = forge([]);
+    const handed = await run(setup(none.box, told, []), { kind: "ci-red", head: p.head2 }, openLine());
+    expect(handed).toEqual({ kind: "ok", value: { head: p.head2, outcome: "blocked", patch: "", evidence: [] } });
     expect(told.log).toEqual([
       "label 12 needs-human",
-      expect.stringMatching(/note 12 .*rework run is not built yet \(agent-factory issue 171\)/),
+      expect.stringMatching(/note 12 .*the forge names no failed job at the head/),
     ]);
-    expect(fake.calls).toEqual([]);
+    expect(none.calls).toEqual([]);
   });
 
   it("refuses a ticket whose spec is no longer approved", async () => {
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
     const fake = fakeBox({});
-    const out = await run(setup(fake.box, forge(), []), "fix");
+    const out = await run(setup(fake.box, forge(), []), FIX);
     expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("not approved (stale)") });
     expect(existsSync(join(p.root, "box-runs"))).toBe(false);
+  });
+});
+
+const FINDING: Sorted = {
+  id: "F-1",
+  axis: "standards",
+  kind: "logic",
+  file: "src/Renewal.java",
+  line: 7,
+  rule: "R-3",
+  severity: "blocker",
+  finding: "a reserved loan still renews",
+  fix: "refuse it with 409",
+  bucket: "act_on",
+  why: "the code renews it",
+};
+
+describe("the writer step: a rework run (#171)", () => {
+  it("hands the writer the factory's own Act on findings at the head, in .factory/task.md, read-only", async () => {
+    const kept = await keepActOn({
+      recordsDir: recordsDirOf(p.clone),
+      change: 12,
+      head: p.head2,
+      sorted: [FINDING, { ...FINDING, id: "F-2", bucket: "consider", finding: "a name could be clearer" }],
+    });
+    expect(kept.kind).toBe("ok");
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const pushes: { lease: string; branch: string }[] = [];
+    const out = await run(
+      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), pushes),
+      { kind: "act-on", head: p.head2 },
+      openLine(),
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+    expect(seen[0]?.task).toContain("## F-1 · src/Renewal.java:7 · R-3 (blocker)");
+    expect(seen[0]?.task).toContain("Fix: refuse it with 409");
+    expect(seen[0]?.task).not.toContain("F-2");
+    expect(started(fake).readOnly).toContain(".factory/task.md");
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^rework PROJ-1/) });
+    expect(pushes).toEqual([{ lease: p.head2, branch: "feat/x" }]);
+  });
+
+  it("hands the writer the evidence row the ready check saw fail", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    await run(
+      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []),
+      { kind: "ready-failed", why: "AC1 `make test` exited 2" },
+      openLine(),
+    );
+    expect(seen[0]?.task).toContain("This one failed:\n\nAC1 `make test` exited 2");
+  });
+
+  it("gives a person the change when no Act on findings are kept at the head, and starts no box", async () => {
+    const fake = fakeBox({});
+    const told = forge();
+    const out = await run(setup(fake.box, told, []), { kind: "act-on", head: p.head2 }, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(told.log).toEqual([
+      "label 12 needs-human",
+      expect.stringMatching(/note 12 .*the rework run has no task: no Act on findings kept at .*act-on\.json/),
+    ]);
+    expect(fake.calls).toEqual([]);
+  });
+});
+
+describe("the writer step: a CI run on a local gate (#171)", () => {
+  it("hands the writer the local verifier's kept output, and a person the change when none is kept", async () => {
+    const at = { recordsDir: recordsDirOf(p.clone), change: 12, head: p.head2 };
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const none = fakeBox({});
+    const told = forge();
+    const missing = await run(setup(none.box, told, []), { kind: "verify-failed", head: p.head2 }, openLine());
+    expect(missing).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(told.log.at(-1)).toMatch(/the CI run has no task: nothing kept at .*verify\.txt/);
+    expect(none.calls).toEqual([]);
+
+    expect((await keepText(at, VERIFY_FILE, "# The local verifier failed\n\nmake verify exited 2\n")).kind).toBe("ok");
+    const out = await run(
+      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []),
+      { kind: "verify-failed", head: p.head2 },
+      openLine(),
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+    expect(seen[0]?.task).toBe("# The local verifier failed\n\nmake verify exited 2\n");
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^ci PROJ-1/) });
+  });
+});
+
+describe("the writer's lint hook in the box (#171 Q3)", () => {
+  // commands.md on a branch of the origin, as a person pushed it
+  function commands(branch: string, text: string): void {
+    p.git("checkout", "-q", branch);
+    p.write("docs/agents/commands.md", text);
+    p.commitAll(`commands on ${branch}`);
+    p.git("push", "-q", "origin", branch);
+    p.git("checkout", "-q", "main");
+  }
+
+  it("reads lint-file from the default branch, mounts the hook read-only, and runs claude with --settings", async () => {
+    commands("main", "# Commands\n\nlint-file: `npx biome lint`\ntest-touched: npm test --\n");
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []), FIX);
+    expect(started(fake).readOnly).toContain(".factory/settings.json");
+    expect(command(fake).argv.slice(-2)).toEqual(["--settings", ".factory/settings.json"]);
+    expect(command(fake).stdin).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("Each file you edit is linted at once with: npx biome lint."),
+    });
+  });
+
+  it("never takes the hook from the change's branch", async () => {
+    commands("feat/x", "lint-file: touch /tmp/owned\n");
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    await run(
+      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []),
+      FIX,
+      openLine({ head: p.git("rev-parse", "origin/feat/x") }),
+    );
+    expect(started(fake).readOnly).not.toContain(".factory/settings.json");
+    expect(command(fake).argv).not.toContain("--settings");
+  });
+
+  it("reads each tool's first line, unwraps a code span, and quotes the lint for the hook's shell", () => {
+    expect(toolsOf("lint-file: `make lint FILE=`\r\nlint-file: other\n")).toEqual({
+      lint: "make lint FILE=",
+      quick: "",
+    });
+    expect(toolsOf("no tools here\n")).toEqual({ lint: "", quick: "" });
+    expect(quoted("it's")).toBe("'it'\\''s'");
+    expect(settingsOf({ lint: "", quick: "npm test" })).toEqual({ kind: "none" });
+    const hook = settingsOf({ lint: "eslint --fix", quick: "" });
+    expect(hook.kind === "text" ? JSON.parse(hook.text) : {}).toEqual({
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|MultiEdit|Write",
+            hooks: [{ type: "command", command: "agent-factory lint-edit 'eslint --fix'" }],
+          },
+        ],
+      },
+    });
   });
 });
 
 describe("the writer's words and settings", () => {
   it("fills the prompt with the run's names, then the report's schema", () => {
     const text = promptFor({
-      prompts: { fix: "fix {{ticket}} on {{branch}} at {{head}} ({{ticket}})", testFirst: "test" },
+      prompts: { fix: "fix {{ticket}} on {{branch}} at {{head}} ({{ticket}})", testFirst: "t", rework: "r", ci: "c" },
       mode: "fix",
       ticket: "PROJ-1",
       branch: "factory/PROJ-1",
       head: "abc",
+      tools: ["Each file you edit is linted at once with: make lint-file."],
     });
-    expect(text.startsWith("fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n")).toBe(true);
+    expect(
+      text.startsWith(
+        "fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\nEach file you edit is linted at once with: make lint-file.\n\n",
+      ),
+    ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
   });
 

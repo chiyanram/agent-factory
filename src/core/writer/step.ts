@@ -4,15 +4,16 @@
 //   2 the writer's clone (clone.ts), the run in a fresh box (run.ts), the outcome from its report
 //   3 the host pushes and posts (finish.ts): on a first run it pushes, opens the draft change (#164) and claims it
 //   4 the run folder goes, however the run ended
-// It runs test-first and fix. A rework or CI run needs forge context the writer cannot read; until #171 the host
-// says so on the change, labelled needs-human (decided on #30, 2026-11-08).
+// It runs test-first, fix, rework and CI (#171). A rework or CI run gets its task in .factory/task.md (task.ts): the
+// failed evidence row, the factory's own Act on findings, or the failed CI jobs and their logs' ends. A task the host
+// cannot read goes to a person: the host says why on the change, labelled needs-human.
 
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { approvalState } from "../approval.js";
 import type { BoxToken } from "../token/rules.js";
-import type { WriterMode } from "../dispatch/records.js";
+import type { Task } from "../dispatch/records.js";
 import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/tick.js";
 import { fastForwardOnly, finishFirst, finishRun, type Next, type Pusher } from "../finish.js";
 import type { Result } from "../forge/api.js";
@@ -22,15 +23,32 @@ import type { PushRequest } from "../push.js";
 import { REPORT_INSTRUCTIONS, type Evidence, type Outcome } from "../report.js";
 import type { Spec } from "../spec.js";
 import type { BoxSetup } from "../ready/boxrun.js";
-import { makeClone, removeClone, type Clone, type Start } from "./clone.js";
+import { readKept, recordsDirOf } from "../kept.js";
+import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start, type FileText } from "./clone.js";
+import { readTools, settingsOf, toolLines } from "./tools.js";
 import { writerRun, type Ended } from "./run.js";
+import { ciText, taskText, verifyText } from "./task.js";
+import { VERIFY_FILE } from "../ready/steps.js";
 import type { WriterSettings } from "./settings.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 // named in words: a "#171" on the project's forge would be read as the project's own issue
-export const LATER_TICKET = "agent-factory issue 171";
 
-export type Prompts = { readonly fix: string; readonly testFirst: string };
+export type Prompts = {
+  readonly fix: string;
+  readonly testFirst: string;
+  readonly rework: string;
+  readonly ci: string;
+};
+
+// the modes this step runs, each with its prompt
+export type RunMode = "test-first" | "fix" | "rework" | "ci";
+const PROMPT_FILES = {
+  fix: "writer.md",
+  testFirst: "writer-test-first.md",
+  rework: "writer-rework.md",
+  ci: "writer-ci.md",
+};
 
 // where the host pushes to, and as whom (#108)
 export type PushTarget = {
@@ -58,7 +76,7 @@ export type WriterSetup = {
   readonly pusher: Pusher;
 };
 
-type Input = RunInput & { readonly mode: WriterMode };
+type Input = RunInput & { readonly task: Task };
 export type WriterOut = {
   readonly head: string;
   readonly outcome: "done" | "asked" | "blocked";
@@ -69,31 +87,43 @@ export type WriterOut = {
 // readPrompts : the package's writer prompts
 export async function readPrompts(): Promise<Result<Prompts>> {
   try {
-    const [fix, testFirst] = await Promise.all(
-      ["writer.md", "writer-test-first.md"].map((f) => readFile(join(PROMPTS, f), "utf8")),
-    );
-    return fix === undefined || testFirst === undefined
-      ? { kind: "failed", reason: "the writer prompts are missing" }
-      : { kind: "ok", value: { fix, testFirst } };
+    const read = (file: string) => readFile(join(PROMPTS, file), "utf8");
+    const [fix, testFirst, rework, ci] = await Promise.all([
+      read(PROMPT_FILES.fix),
+      read(PROMPT_FILES.testFirst),
+      read(PROMPT_FILES.rework),
+      read(PROMPT_FILES.ci),
+    ]);
+    return { kind: "ok", value: { fix, testFirst, rework, ci } };
   } catch {
     return { kind: "failed", reason: `cannot read the writer prompts in ${PROMPTS}` };
   }
 }
 
+const TEMPLATE: Readonly<Record<RunMode, keyof Prompts>> = {
+  "test-first": "testFirst",
+  fix: "fix",
+  rework: "rework",
+  ci: "ci",
+};
+
 // promptFor : the mode's prompt with the run's names, then the report's schema. Pure.
 export function promptFor(input: {
   readonly prompts: Prompts;
-  readonly mode: "test-first" | "fix";
+  readonly mode: RunMode;
   readonly ticket: string;
   readonly branch: string;
   readonly head: string;
+  // what the prompt says of the project's quick tools (tools.ts)
+  readonly tools: readonly string[];
 }): string {
-  const template = input.mode === "test-first" ? input.prompts.testFirst : input.prompts.fix;
+  const template = input.prompts[TEMPLATE[input.mode]];
   const filled = template
     .replaceAll("{{ticket}}", input.ticket)
     .replaceAll("{{branch}}", input.branch)
     .replaceAll("{{head}}", input.head);
-  return `${filled.trimEnd()}\n\n${REPORT_INSTRUCTIONS}\n`;
+  const tools = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
+  return `${filled.trimEnd()}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
 }
 
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
@@ -238,21 +268,29 @@ async function finished(
   return first.kind === "ok" ? { kind: "ok", value: outOf(ended, first.value.next) } : first;
 }
 
-async function inClone(
-  setup: WriterSetup,
-  input: Input & { readonly mode: "test-first" | "fix" },
-  p: Prepared,
-): Promise<Result<WriterOut>> {
-  const clone = await makeClone(setup.box, { start: p.start, spec: p.spec.text, rulebook: setup.settings.rulebook });
+// what one run does: its prompt's mode, and the task the host hands it
+type Work = { readonly mode: RunMode; readonly task: FileText };
+
+async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
+  const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
+  const settings = settingsOf(tools);
+  const clone = await makeClone(setup.box, {
+    start: p.start,
+    spec: p.spec.text,
+    rulebook: setup.settings.rulebook,
+    task: work.task,
+    settings,
+  });
   if (clone.kind === "failed") {
     return clone;
   }
   const prompt = promptFor({
     prompts: setup.prompts,
-    mode: input.mode,
+    mode: work.mode,
     ticket: input.ticket,
     branch: clone.value.branch,
     head: clone.value.start,
+    tools: toolLines(tools),
   });
   const ended = await writerRun({
     setup: setup.box,
@@ -261,22 +299,19 @@ async function inClone(
     login: p.login,
     timeoutSeconds: setup.settings.timeoutSeconds,
     claude: setup.settings.claude,
+    settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
   });
   const out = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
   const removed = await removeClone(clone.value.dir);
   return removed.kind === "ok" ? out : removed;
 }
 
-// later : a mode this step does not run yet; the host says so on the change, labelled needs-human
-async function later(setup: WriterSetup, input: Input): Promise<Result<WriterOut>> {
+// handOver : a run the host does not start; it says why on the change, labelled needs-human
+async function handOver(setup: WriterSetup, input: Input, reason: string): Promise<Result<WriterOut>> {
   if (input.change.kind !== "open") {
-    return { kind: "failed", reason: `a ${input.mode} run needs an open change` };
+    return { kind: "failed", reason: `${reason}; and there is no open change to say so on` };
   }
-  const outcome: Outcome = {
-    kind: "blocked",
-    reason: `the writer's ${input.mode} run is not built yet (${LATER_TICKET}); a person takes it`,
-    by: "host",
-  };
+  const outcome: Outcome = { kind: "blocked", reason, by: "host" };
   const head = input.change.line.head;
   const next = await finishRun({
     outcome,
@@ -296,13 +331,96 @@ async function later(setup: WriterSetup, input: Input): Promise<Result<WriterOut
   return next.kind === "ok" ? { kind: "ok", value: { head, outcome: "blocked", patch: "", evidence: [] } } : next;
 }
 
+type Planned = { readonly kind: "run"; readonly work: Work } | { readonly kind: "hand-over"; readonly reason: string };
+
+// reworkPlan : the task a rework run gets, or why a person takes it
+async function reworkPlan(
+  setup: WriterSetup,
+  input: Input,
+  task: Extract<Task, { readonly kind: "ready-failed" | "act-on" }>,
+): Promise<Planned> {
+  if (input.change.kind !== "open") {
+    return { kind: "hand-over", reason: "a rework run needs an open change" };
+  }
+  const text = await taskText(task, { recordsDir: recordsDirOf(setup.box.repo), change: input.change.line.number });
+  return text.kind === "ok"
+    ? { kind: "run", work: { mode: "rework", task: { kind: "text", text: text.value } } }
+    : { kind: "hand-over", reason: `the rework run has no task: ${text.reason}; a person takes it` };
+}
+
+// ciPlan : the failed jobs a CI run gets, or why a person takes it
+async function ciPlan(
+  setup: WriterSetup,
+  input: Input,
+  task: Extract<Task, { readonly kind: "ci-red" }>,
+): Promise<Planned> {
+  if (input.change.kind !== "open") {
+    return { kind: "hand-over", reason: "a CI run needs an open change" };
+  }
+  const jobs = await setup.forge.failedJobs({ number: input.change.line.number, head: task.head });
+  if (jobs.kind === "failed") {
+    return { kind: "hand-over", reason: `the CI run has no task: ${jobs.reason}; a person takes it` };
+  }
+  return jobs.value.length === 0
+    ? { kind: "hand-over", reason: "CI is red, but the forge names no failed job at the head; a person takes it" }
+    : { kind: "run", work: { mode: "ci", task: { kind: "text", text: ciText(jobs.value) } } };
+}
+
+// verifyPlan : the local verifier's kept output, for a CI run, or why a person takes it
+async function verifyPlan(
+  setup: WriterSetup,
+  input: Input,
+  task: Extract<Task, { readonly kind: "verify-failed" }>,
+): Promise<Planned> {
+  if (input.change.kind !== "open") {
+    return { kind: "hand-over", reason: "a CI run needs an open change" };
+  }
+  const at = { recordsDir: recordsDirOf(setup.box.repo), change: input.change.line.number, head: task.head };
+  const kept = await readKept(at, VERIFY_FILE);
+  return kept.kind === "ok"
+    ? { kind: "run", work: { mode: "ci", task: { kind: "text", text: verifyText(kept.value) } } }
+    : { kind: "hand-over", reason: `the CI run has no task: ${kept.reason}; a person takes it` };
+}
+
+const plain = (mode: "test-first" | "fix"): Promise<Planned> =>
+  Promise.resolve({ kind: "run", work: { mode, task: { kind: "none" } } });
+
+// each task by its kind, so a planner per kind is typed without an assertion, and a new kind fails to compile here
+type TaskMap = { readonly [T in Task as T["kind"]]: T };
+type Planners = {
+  readonly [K in keyof TaskMap]: (setup: WriterSetup, input: Input, task: TaskMap[K]) => Promise<Planned>;
+};
+
+const PLANNERS: Planners = {
+  "test-first": () => plain("test-first"),
+  fix: () => plain("fix"),
+  "ready-failed": reworkPlan,
+  "act-on": reworkPlan,
+  "ci-red": ciPlan,
+  "verify-failed": verifyPlan,
+};
+
+function planOn<K extends keyof TaskMap>(
+  kind: K,
+  setup: WriterSetup,
+  input: Input,
+  task: TaskMap[K],
+): Promise<Planned> {
+  return PLANNERS[kind](setup, input, task);
+}
+
+// planned : what this run does, from its task
+function planned(setup: WriterSetup, input: Input): Promise<Planned> {
+  return planOn(input.task.kind, setup, input, input.task);
+}
+
 async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOut>> {
-  const { mode } = input;
-  if (mode !== "test-first" && mode !== "fix") {
-    return later(setup, input);
+  const plan = await planned(setup, input);
+  if (plan.kind === "hand-over") {
+    return handOver(setup, input, plan.reason);
   }
   const p = await prepare(setup, input);
-  return p.kind === "ok" ? inClone(setup, { ...input, mode }, p.value) : p;
+  return p.kind === "ok" ? inClone(setup, input, p.value, plan.work) : p;
 }
 
 // writerStep : the dispatcher's writer, or why it cannot run here
