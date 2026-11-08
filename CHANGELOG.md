@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.13.0](https://github.com/chiyanram/agent-factory/compare/v0.12.0...v0.13.0) (2026-11-08)
+
+### ✨ Features
+
+* **plugin** — the forge as a plugin, and the kit's write-fidelity check ([#134](https://github.com/chiyanram/agent-factory/issues/134) part C) · PR [#194](https://github.com/chiyanram/agent-factory/pull/194)
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.13.0`
+
 ## [0.12.0](https://github.com/chiyanram/agent-factory/compare/v0.11.0...v0.12.0) (2026-11-08)
 
 ### ✨ Features
