@@ -51,6 +51,22 @@ worktree_path() {
 }
 
 # remove_worktree PATH : removes a run's worktree and anything left in it.
+# unlanded_in PATH : why a dead run's worktree must not be removed, or nothing when it holds nothing to land: git never
+# climbs out of the worktrees folder, so a folder that is not a worktree is never read as the clone above it (#189)
+unlanded_in() {
+  ul_top=$(export GIT_CEILING_DIRECTORIES="$(dirname "$1")"; hgit -C "$1" rev-parse --show-toplevel 2> /dev/null) || ul_top=''
+  if [ -z "$ul_top" ] || [ "$ul_top" != "$(cd "$1" && pwd -P)" ]; then
+    echo "is not a worktree git can check"
+    return 0
+  fi
+  ul_files=$(export GIT_CEILING_DIRECTORIES="$(dirname "$1")"; hgit -C "$1" status --porcelain --untracked-files=all) \
+    || { echo "cannot be checked"; return 0; }
+  [ -z "$ul_files" ] || { echo "holds uncommitted files"; return 0; }
+  ul_commits=$(export GIT_CEILING_DIRECTORIES="$(dirname "$1")"; hgit -C "$1" rev-list HEAD --not --remotes) \
+    || { echo "cannot be checked"; return 0; }
+  [ -z "$ul_commits" ] || echo "holds commits that no remote branch has"
+}
+
 remove_worktree() {
   hgit -C "$FACTORY_REPO" worktree remove --force "$1" > /dev/null 2>&1 || rm -rf "$1"
   hgit -C "$FACTORY_REPO" worktree prune

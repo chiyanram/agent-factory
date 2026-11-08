@@ -436,15 +436,13 @@ describe("reconcile keeps a writer's unlanded work (#189)", () => {
       value: expect.arrayContaining([expect.stringContaining("not pushed: a commit touches .factory")]),
     });
     expect(p.git("ls-remote", "origin", "refs/heads/factory/PROJ-1").split("\t")[0]).toBe(pushed);
+    // the marker of what a person was told: the next reconcile tells them once
+    const marker = join(p.clone, ".claude", "runs", "reconcile-writer-12.txt");
+    rmSync(marker);
     const unset = await run([], pushed, { landing: landing({ kind: "failed", reason: "FACTORY_PROJECT is not set" }) });
     expect(unset).toMatchObject({
       kind: "ok",
       value: expect.arrayContaining([expect.stringContaining("not pushed: FACTORY_PROJECT is not set")]),
-    });
-    const merged = await run([], pushed, { state: "merged" });
-    expect(merged).toMatchObject({
-      kind: "ok",
-      value: expect.arrayContaining([expect.stringContaining("not pushed: the change is merged")]),
     });
     expect(existsSync(join(dir(), "writer-12"))).toBe(true);
   });
@@ -457,11 +455,115 @@ describe("reconcile keeps a writer's unlanded work (#189)", () => {
     expect(out).toMatchObject({
       kind: "ok",
       value: expect.arrayContaining([
-        "kept worktree writer-15 (cannot fetch, so cannot tell whether it holds unlanded work)",
+        expect.stringMatching(
+          /^kept worktree writer-15 \(cannot fetch \(.+\), so cannot tell whether it holds unlanded work\)$/,
+        ),
       ]),
     });
     expect(existsSync(join(dir(), "writer-15"))).toBe(true);
     expect(log.filter((l) => l.startsWith("+"))).toEqual([]);
+  });
+});
+
+describe("reconcile tells a person once, and never mistakes what it cannot check (#189 review)", () => {
+  let p: Project;
+  const pushes: PushRequest[] = [];
+  beforeEach(() => {
+    p = project();
+    pushes.length = 0;
+  });
+  afterEach(() => rmSync(p.root, { recursive: true, force: true }));
+
+  const dir = () => join(p.clone, ".claude", "worktrees");
+  const inTree = (name: string, ...args: string[]) =>
+    execFileSync("git", args, { cwd: join(dir(), name), env: p.env, encoding: "utf8" }).trim();
+  const landing: Reconcile["landing"] = {
+    target: {
+      kind: "ok",
+      value: { forge: "gitlab", host: "gitlab.com", project: "a/b", identity: { kind: "own" }, env: {} },
+    },
+    pusher: async (request) => {
+      pushes.push(request);
+      return { kind: "ok" };
+    },
+  };
+  const run = (log: string[], change: Partial<Change>) =>
+    reconcile({
+      forge: forge(log, { change: { sourceBranch: "factory/PROJ-1", ...change } }),
+      label: LABEL,
+      repo: p.clone,
+      env: p.env,
+      dryRun: false,
+      landing,
+      sessions: async () => ({ kind: "ok", value: [] }),
+    });
+
+  // writer-12 on factory/PROJ-1, pushed, then one commit more: its sha before that commit
+  function onBranch(): string {
+    p.git("worktree", "add", "-q", "-b", "factory/PROJ-1", join(dir(), "writer-12"));
+    inTree("writer-12", "push", "-q", "origin", "factory/PROJ-1");
+    const pushed = inTree("writer-12", "rev-parse", "HEAD");
+    writeFileSync(join(dir(), "writer-12", "fix.txt"), "fix\n");
+    inTree("writer-12", "add", "fix.txt");
+    inTree("writer-12", "commit", "-q", "-m", "fix");
+    return pushed;
+  }
+
+  it("labels and notes once: a second reconcile on the same work tells no one again", async () => {
+    p.git("worktree", "add", "-q", "--detach", join(dir(), "writer-14"));
+    writeFileSync(join(dir(), "writer-14", "notes.txt"), "half done\n");
+    const log: string[] = [];
+    await run(log, {});
+    const second = await run(log, {});
+    expect(second).toEqual({
+      kind: "ok",
+      value: ["kept worktree writer-14 (0 unlanded commits, 1 uncommitted file; handed to a person already)"],
+    });
+    expect(log.filter((l) => l.startsWith("+") || l.startsWith("note"))).toHaveLength(2);
+    // new work is news again
+    writeFileSync(join(dir(), "writer-14", "more.txt"), "more\n");
+    await run(log, {});
+    expect(log.filter((l) => l.startsWith("note"))).toHaveLength(2);
+  });
+
+  it("labels nothing on a merged change, even when its branch is gone and its commits read as unlanded", async () => {
+    const pushed = onBranch();
+    p.git("push", "-q", "origin", "--delete", "factory/PROJ-1");
+    const log: string[] = [];
+    const out = await run(log, { sha: pushed, state: "merged" });
+    expect(out).toEqual({
+      kind: "ok",
+      value: [
+        "kept worktree writer-12 (1 unlanded commit, 0 uncommitted files; the change is merged, so nothing is labelled or pushed)",
+      ],
+    });
+    expect(log).toEqual([]);
+    expect(pushes).toEqual([]);
+  });
+
+  it("does not push when the branch moved since the writer started; says so", async () => {
+    onBranch();
+    const moved = "1111111111111111111111111111111111111111";
+    const log: string[] = [];
+    const out = await run(log, { sha: moved });
+    expect(out).toMatchObject({ kind: "ok", value: [expect.stringContaining("not pushed: ")] });
+    expect(pushes).toEqual([]);
+    expect(log).toContain("+needs-human !12");
+  });
+
+  it("keeps a folder that is not a worktree, and never reads the clone above it as one", async () => {
+    // the clone has its own uncommitted work; a writer-13 folder with no .git sits inside it
+    p.write("operator.txt", "the operator's own edit\n");
+    mkdirSync(join(dir(), "writer-13"), { recursive: true });
+    writeFileSync(join(dir(), "writer-13", "work.txt"), "work\n");
+    const log: string[] = [];
+    const out = await run(log, {});
+    expect(out).toEqual({
+      kind: "ok",
+      value: [expect.stringMatching(/^kept worktree writer-13 \(.*not one of the clone's worktrees/)],
+    });
+    expect(existsSync(join(dir(), "writer-13", "work.txt"))).toBe(true);
+    expect(log).toEqual([]);
   });
 });
 

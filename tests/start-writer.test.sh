@@ -73,9 +73,28 @@ expect_eq "and its worktree is removed" no "$([ -d "$worktree" ] && echo yes || 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
 mkdir -p "$worktree" && echo old > "$worktree/left-by-a-dead-run"
-"$REPO_ROOT/scripts/start-writer.sh" 12 > /dev/null 2>&1
-expect_eq "a worktree left by a dead run is replaced, never reused" no \
-  "$([ -f "$worktree/left-by-a-dead-run" ] && echo yes || echo no)"
+expect_fail "a folder left by a dead run that git cannot check stops the start (#189)" "is not a worktree git can check" \
+  "$REPO_ROOT/scripts/start-writer.sh" 12
+expect_eq "and what is in it stays" yes "$([ -f "$worktree/left-by-a-dead-run" ] && echo yes || echo no)"
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+git -C "$FACTORY_REPO" worktree add -q --detach "$worktree" "origin/feat/x"
+echo half > "$worktree/half-done"
+expect_fail "a dead run's worktree with uncommitted files stops the start (#189)" "holds uncommitted files" \
+  "$REPO_ROOT/scripts/start-writer.sh" 12
+expect_eq "and the files stay" yes "$([ -f "$worktree/half-done" ] && echo yes || echo no)"
+rm "$worktree/half-done"
+(cd "$worktree" && echo fix > fix && git add fix && git -c user.name=t -c user.email=t@t commit -q -m fix)
+respond "$FACTORY_GLAB" 2 200 "$(mr "$head" '["agent::claimed"]')"
+expect_fail "one with a commit no remote branch has stops it too" "no remote branch has" \
+  "$REPO_ROOT/scripts/start-writer.sh" 12
+
+setup
+respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
+git -C "$FACTORY_REPO" worktree add -q --detach "$worktree" "origin/feat/x"
+expect_eq "a dead run's clean worktree, all of it on the remote, is replaced, never reused" \
+  "writer started !12 at ${head:0:8}: started abc123" "$("$REPO_ROOT/scripts/start-writer.sh" 12 2> /dev/null)"
 
 setup
 respond "$FACTORY_GLAB" 1 200 "$(mr "$head" '["agent::claimed"]')"
