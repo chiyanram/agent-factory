@@ -187,6 +187,26 @@ project's `.env`, and to edit a file of the package and a project's `.claude/set
 - The dispatcher does not yet refuse to start when these settings are loosened (ADR-0012 S2; #105).
 - Jira and Dynatrace reads, and questions to Jira, come with their plugins (#134).
 
+## Plugins
+
+Every outside tool is reached through a plugin ([ADR-0014](docs/adr/0014-plugin-model.md), #134). A plugin is an
+executable: `<exe> describe` prints one JSON object (its protocol, capabilities, declared writes and the env names it
+needs), and `<exe> call` reads one JSON request on stdin and prints one JSON result, a sealed case of that
+capability, on stdout; its logs go to stderr. The core runs it with no shell, a timeout, an output cap, and only the
+trusted `PATH`, `HOME`, `LANG` and the names it declared, never a model login (`src/core/plugin/`).
+
+| command | does |
+|---|---|
+| `agent-factory plugin add <path\|name>` | runs `describe`, shows the capabilities and writes, and records the absolute path and sha256 in `$FACTORY_HOME/plugins.json` (mode 600). A name is a plugin bundled with the package; nothing is fetched from the network |
+| `agent-factory plugin update <name> [--yes]` | runs `describe` again and shows the writes a new version adds; records it only with `--yes` (exit 3 without) |
+| `agent-factory plugin test <path\|name>` | the contract test kit: handshake, each `fixtures/<capability>/<case>.in.json` against its `.out.json`, bad input, an unknown op, one JSON object on stdout, an env canary, and no token in any answer |
+| `agent-factory plugin list` | the registered plugins, with their writes and hashes |
+
+Each call hashes the file again; a file that changed since `add` or `update` is refused. The coordinator may not run
+`plugin` or edit `plugins.json` (#106). **Today:** no plugin is bundled yet and nothing calls one: the project file's
+capability mapping, the write policy with `request` and `confirm` (#134 PR B), and the forge as a plugin (PR C) come
+next. The kit's write-fidelity check, the text a plugin sends its CLI byte for byte, comes with the forge plugins.
+
 ## Settings
 
 The scripts read their settings from the environment.

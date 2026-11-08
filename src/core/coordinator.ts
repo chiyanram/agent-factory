@@ -64,6 +64,7 @@ const DENY_BASH = [
   "agent-factory ask",
   "agent-factory app-token",
   "agent-factory lint-edit",
+  "agent-factory plugin",
 ];
 
 // the secret paths of review issue 6, under the person's home
@@ -143,6 +144,7 @@ function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${home}/review-runs/**)`,
     `Edit(${home}/box-runs/**)`,
     `Edit(${home}/egress/**)`,
+    `Edit(${home}/plugins.json)`,
   ];
 }
 

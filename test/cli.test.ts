@@ -388,3 +388,48 @@ describe("agent-factory setup coordinator and coordinator (#106)", () => {
     });
   });
 });
+
+describe("agent-factory plugin (#134)", () => {
+  it("lists none, adds a plugin by path, tests it, and records an update only with --yes", async () => {
+    expect(await cli(["plugin"])).toMatchObject({ code: 64 });
+    expect(await cli(["plugin", "list"])).toMatchObject({ code: 0, out: "no plugins\n" });
+    expect(await cli(["plugin", "add", "nope"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("neither an absolute path nor a bundled plugin"),
+    });
+    const path = join(home, "echo", "plugin");
+    mkdirSync(join(home, "echo"));
+    const described = {
+      protocol: 1,
+      name: "echo",
+      version: "1.0.0",
+      capabilities: [{ name: "notify" }],
+      writes: ["notify"],
+    };
+    writeFileSync(
+      path,
+      `#!${process.execPath}\nif (process.argv[2] === "describe") { process.stdout.write(${JSON.stringify(JSON.stringify(described))}); } else { let t = ""; process.stdin.on("data", (d) => (t += d)); process.stdin.on("end", () => process.stdout.write(JSON.stringify({ kind: "unsupported" }))); }\n`,
+      { mode: 0o755 },
+    );
+    const env = { FACTORY_HOME: home, PATH: process.env.PATH };
+    expect(await cli(["plugin", "add", path], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("added echo 1.0.0"),
+    });
+    expect(await cli(["plugin", "list"], env)).toMatchObject({
+      out: expect.stringContaining("echo 1.0.0 (protocol 1): notify"),
+    });
+    expect(await cli(["plugin", "test", path], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("ok   handshake"),
+    });
+    expect(await cli(["plugin", "update", "echo"], env)).toMatchObject({
+      code: 3,
+      out: expect.stringContaining("--yes"),
+    });
+    expect(await cli(["plugin", "update", "echo", "--yes"], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("updated echo"),
+    });
+  });
+});

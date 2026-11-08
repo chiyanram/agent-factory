@@ -123,6 +123,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "/home/ram/.factory/review-runs/x/pack.md",
       "/home/ram/.factory/box-runs/x/code/Makefile",
       "/home/ram/.factory/egress/ledger/squid.conf",
+      "/home/ram/.factory/plugins.json",
     ]) {
       expect({ path, v: verdict("Edit", path) }).toEqual({ path, v: "deny" });
     }
@@ -177,6 +178,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "sudo -n -u factory -- /usr/local/bin/agent-factory-app-token o/r",
       "agent-factory-app-token o/r",
       "agent-factory app-token o/r",
+      "agent-factory plugin add /tmp/x",
       "agent-factory ask 12 aaaa1111 q",
       "security find-generic-password -s x",
       "chmod 644 /home/ram/.factory/coordinator/.claude/settings.json",
