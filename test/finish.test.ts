@@ -9,6 +9,7 @@ import {
   finishRun,
   noFactoryFolder,
   NEEDS_HUMAN,
+  seatOnEvery,
   type Pusher,
 } from "../src/core/finish.js";
 import type { Done } from "../src/core/forge/api.js";
@@ -264,6 +265,36 @@ describe("noFactoryFolder", () => {
       kind: "failed",
       reason: "the run rewrote the branch's history",
     });
+  });
+
+  it("seatOnEvery refuses a commit on the branch's own line without the seat's Agent trailer (#128)", async () => {
+    const base = commit("a.txt", "a\n");
+    const signed = (path: string, message: string) => {
+      writeFileSync(join(repo, path), path);
+      git("add", path);
+      git("commit", "-q", "-m", message);
+      return git("rev-parse", "HEAD");
+    };
+    const ok = signed("b.txt", "feat: b\n\nAgent: writer");
+    const guard = seatOnEvery(env(), { since: base, seat: "writer" });
+    expect(await guard({ repo, commit: ok, lease: { kind: "absent" } })).toEqual({ kind: "ok" });
+    // a person's commits brought in by a merge are not on the branch's own line
+    git("switch", "-q", "-c", "main-side", base);
+    signed("c.txt", "fix: a person's fix");
+    git("switch", "-q", "-");
+    git("merge", "-q", "--no-ff", "main-side", "-m", "merge main\n\nAgent: writer");
+    const merged = git("rev-parse", "HEAD");
+    expect(await guard({ repo, commit: merged, lease: { kind: "absent" } })).toEqual({ kind: "ok" });
+    const bare = signed("d.txt", "feat: d");
+    expect(await guard({ repo, commit: bare, lease: { kind: "absent" } })).toEqual({
+      kind: "failed",
+      reason: `commit ${bare.slice(0, 8)} has no "Agent: writer" trailer: every commit of the writer carries it`,
+    });
+    // another seat, or the trailer in a paragraph git does not read as trailers, is not the writer's
+    const other = signed("e.txt", "feat: e\n\nAgent: reviewer");
+    expect(await guard({ repo, commit: other, lease: { kind: "sha", sha: bare } })).toMatchObject({ kind: "failed" });
+    const prose = signed("f.txt", "feat: f\n\nAgent: writer\nsaid in prose");
+    expect(await guard({ repo, commit: prose, lease: { kind: "sha", sha: other } })).toMatchObject({ kind: "failed" });
   });
 
   it("excludeFactory keeps .factory out of git add, once", async () => {
