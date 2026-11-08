@@ -2,15 +2,19 @@
 // file runs the agent in it and reads how it ended:
 //   1 the project's egress proxy, then the box, with the clone mounted and only the model login and the proxy settings
 //   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), the rulebook as a plugin
-//   3 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the exit
+//   3 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the exit.
+//     While the writer runs, the host polls the clone for a report the schema accepts. Once one is there, the writer
+//     has a 60 s completion window: an agent whose child (gh, an MCP server) keeps stdout open never exits on its own,
+//     so at the window's end the host stops the box and the run ends hungAfterReport, decided from the report read
+//     again after the stop (#182; ADR-0012 S13). A run with no valid report waits out its timeout, as before.
 //   4 the branch's tip, and the patch-id of everything since the start, which the dispatcher compares run to run
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { Argv } from "../project.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
-import { decide, loadReport, type Outcome, type RunEnd } from "../report.js";
-import type { Ran } from "../box/index.js";
+import { decide, endingOf, loadReport, validReport, type Ending, type Outcome, type RunEnd } from "../report.js";
+import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { RULEBOOK_DIR, type Clone } from "./clone.js";
 
@@ -20,6 +24,12 @@ export type Claude = {
   // "" for Claude's default (FACTORY_WRITER_MODEL)
   readonly model: string;
 };
+
+// the completion window (#182): how often the host looks for the report while the writer runs, and how long the writer
+// may keep running after a valid one
+export type Completion = { readonly pollMs: number; readonly windowMs: number };
+
+export const COMPLETION: Completion = { pollMs: 5000, windowMs: 60_000 };
 
 // the writer's settings file in the clone, for claude --settings (tools.ts), or none
 export type SettingsArg = { readonly kind: "none" } | { readonly kind: "file"; readonly path: string };
@@ -33,9 +43,15 @@ export type WriterRun = {
   readonly timeoutSeconds: number;
   readonly claude: Claude;
   readonly settings: SettingsArg;
+  readonly completion: Completion;
 };
 
-export type Ended = { readonly outcome: Outcome; readonly tip: string; readonly patch: string };
+export type Ended = {
+  readonly outcome: Outcome;
+  readonly ending: Ending;
+  readonly tip: string;
+  readonly patch: string;
+};
 
 // only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
 const QUIET: Readonly<Record<string, string>> = {
@@ -82,7 +98,7 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
   if (session.kind === "failed") {
     return { kind: "failed", reason: session.reason };
   }
-  const ran = await run.setup.box.run({
+  const running = run.setup.box.run({
     session: session.value,
     command: {
       argv: claudeArgv(run.claude, run.settings),
@@ -90,9 +106,55 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
       timeoutSeconds: run.timeoutSeconds,
     },
   });
-  const stopped = await run.setup.box.stop(session.value);
-  // a box that did not stop may still be writing: its report is never read
-  return stopped.kind === "ok" ? runEnd(ran) : { kind: "failed", reason: `the box did not stop: ${stopped.reason}` };
+  const end = await watched(run, running);
+  return stoppedEnd(run, session.value, running, end);
+}
+
+// stoppedEnd : the box stopped, then the run's end; a box that did not stop may still be writing: its report is never
+// read
+async function stoppedEnd(run: WriterRun, session: Session, running: Promise<Ran>, end: Watched): Promise<RunEnd> {
+  const stopped = await run.setup.box.stop(session);
+  if (stopped.kind === "failed") {
+    return { kind: "failed", reason: `the box did not stop: ${stopped.reason}` };
+  }
+  if (end.kind === "ran") {
+    return runEnd(end.ran);
+  }
+  // the stop ends the hung command; its own end says nothing more
+  await running;
+  return { kind: "hungAfterReport", windowSeconds: Math.round(run.completion.windowMs / 1000) };
+}
+
+type Watched = { readonly kind: "ran"; readonly ran: Ran } | { readonly kind: "hung" };
+
+const TICK: unique symbol = Symbol("tick");
+
+function after(ms: number): Promise<typeof TICK> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(TICK), ms).unref();
+  });
+}
+
+async function settled(running: Promise<Ran>, ms: number): Promise<Ran | typeof TICK> {
+  return Promise.race([running, after(ms)]);
+}
+
+// watched : the run's own end, or "hung" when it is still running a window after a valid report appeared
+async function watched(run: WriterRun, running: Promise<Ran>): Promise<Watched> {
+  for (;;) {
+    const ran = await settled(running, run.completion.pollMs);
+    if (ran !== TICK) {
+      return { kind: "ran", ran };
+    }
+    if (validReport(await loadReport({ worktree: run.clone.repo }))) {
+      return inWindow(run, running);
+    }
+  }
+}
+
+async function inWindow(run: WriterRun, running: Promise<Ran>): Promise<Watched> {
+  const ran = await settled(running, run.completion.windowMs);
+  return ran === TICK ? { kind: "hung" } : { kind: "ran", ran };
 }
 
 function said(result: GitResult): string {
@@ -140,8 +202,8 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
     end,
     file: end.kind === "failed" ? { kind: "missing" } : await loadReport({ worktree: run.clone.repo }),
   });
-  const after = await committed(run);
-  return after.kind === "ok"
-    ? { kind: "ok", value: { outcome, ...after.value } }
-    : { kind: "failed", reason: `cannot read what the run committed: ${after.reason}` };
+  const tip = await committed(run);
+  return tip.kind === "ok"
+    ? { kind: "ok", value: { outcome, ending: endingOf(end), ...tip.value } }
+    : { kind: "failed", reason: `cannot read what the run committed: ${tip.reason}` };
 }

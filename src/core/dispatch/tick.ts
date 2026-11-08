@@ -36,6 +36,8 @@ export type Steps = {
       readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
       readonly evidence: readonly Evidence[];
+      // the writer hung after its report, and the host stopped it after the completion window (#182)
+      readonly hung: boolean;
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed

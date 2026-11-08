@@ -9,12 +9,13 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { maxUsd } from "../review/settings.js";
-import type { Claude } from "./run.js";
+import { COMPLETION, type Claude, type Completion } from "./run.js";
 
 export type WriterSettings = {
   readonly rulebook: string;
   readonly timeoutSeconds: number;
   readonly claude: Claude;
+  readonly completion: Completion;
 };
 
 const DEFAULT_MINUTES = 60;
@@ -60,6 +61,7 @@ export async function writerSettings(env: NodeJS.ProcessEnv): Promise<Result<Wri
           rulebook: rulebook.value,
           timeoutSeconds: timeout.value,
           claude: { maxUsd: usd.value, model: env.FACTORY_WRITER_MODEL ?? "" },
+          completion: COMPLETION,
         },
       }
     : usd;

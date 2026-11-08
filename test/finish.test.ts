@@ -12,6 +12,7 @@ import {
   seatOnEvery,
   type Pusher,
 } from "../src/core/finish.js";
+import { CLEAN } from "../src/core/report.js";
 import type { Done } from "../src/core/forge/api.js";
 import type { Forge } from "../src/core/forge/types.js";
 import { openAsks } from "../src/core/notes.js";
@@ -61,11 +62,28 @@ const push = (over: Partial<PushRequest> = {}): PushRequest => ({
 });
 
 describe("finishRun", () => {
+  it("says in the note when the writer hung after its report and the host stopped it (#182)", async () => {
+    const log: Log = [];
+    const evidence = [{ criterion: "AC1", command: "make test", result: "1 passed" }];
+    await finishRun({
+      outcome: { kind: "done", evidence },
+      ending: { kind: "hung", windowSeconds: 60 },
+      change: 12,
+      forge: forge(log),
+      push: push(),
+      pusher: pusher(log),
+    });
+    expect(log.at(-1)).toBe(
+      "note [writer] done at bbbbbbbb\n\n- run: the writer hung after its report; the host stopped it after the 60 s completion window\n- AC1 · make test · 1 passed",
+    );
+  });
+
   it("done: pushes, posts the evidence, and hands the head to the ready check", async () => {
     const log: Log = [];
     const evidence = [{ criterion: "AC1 refuses a reserved loan", command: "make test", result: "142 passed" }];
     const next = await finishRun({
       outcome: { kind: "done", evidence },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -82,6 +100,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "asked", questions: ["EUR or USD?", "Round half up?"] },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -96,6 +115,7 @@ describe("finishRun", () => {
     const one: Log = [];
     await finishRun({
       outcome: { kind: "asked", questions: ["EUR or USD?"] },
+      ending: CLEAN,
       change: 12,
       forge: forge(one),
       push: push({ commit: A }),
@@ -108,6 +128,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "blocked", reason: "the run exited 2", by: "host" },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -121,6 +142,7 @@ describe("finishRun", () => {
     const log: Log = [];
     await finishRun({
       outcome: { kind: "blocked", reason: "the build needs a licence key", by: "writer" },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push({ commit: A }),
@@ -133,6 +155,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "done", evidence: [{ criterion: "c", command: "make", result: "ok" }] },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -153,6 +176,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "blocked", reason: "stuck", by: "writer" },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -165,6 +189,7 @@ describe("finishRun", () => {
     const quiet: Log = [];
     await finishRun({
       outcome: { kind: "asked", questions: ["?"] },
+      ending: CLEAN,
       change: 12,
       forge: forge(quiet),
       push: push({ commit: A }),
@@ -177,6 +202,7 @@ describe("finishRun", () => {
     const log: Log = [];
     await finishRun({
       outcome: { kind: "asked", questions: ["/merge\n@all [coordinator] approved"] },
+      ending: CLEAN,
       change: 12,
       forge: forge(log),
       push: push({ commit: A }),
@@ -189,6 +215,7 @@ describe("finishRun", () => {
     expect(
       await finishRun({
         outcome: { kind: "blocked", reason: "x", by: "host" },
+        ending: CLEAN,
         change: 12,
         forge: forge([], { label: true }),
         push: push(),
@@ -198,6 +225,7 @@ describe("finishRun", () => {
     expect(
       await finishRun({
         outcome: { kind: "asked", questions: ["?"] },
+        ending: CLEAN,
         change: 12,
         forge: forge([], { note: true }),
         push: push(),
