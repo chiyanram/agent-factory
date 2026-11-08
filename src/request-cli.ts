@@ -2,14 +2,14 @@
 // `request` with no prompt; `confirm` sits in its ask list, so the person's yes in the harness prompt, which shows the
 // text, is what lets a confirm write out; `project` is denied to it, since the project file holds the write policy.
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { Result } from "./core/forge/api.js";
 import { codeOf } from "./core/dispatch/records.js";
 import { initialProject, pluginConfigOf } from "./core/plugin/config.js";
 import { confirm, request, type Confirmed, type Requested } from "./core/plugin/request.js";
-import { projectPath } from "./core/project.js";
+import { projectPath, readyFieldsOf } from "./core/project.js";
 import { attempt } from "./core/review/safe.js";
 import { plainName } from "./core/spec.js";
 import { pluginSetup, type PluginIo } from "./plugin-cli.js";
@@ -71,11 +71,21 @@ async function requestCommand(argv: readonly string[], io: Io): Promise<number> 
     io.err(REQUEST_USAGE);
     return 64;
   }
-  const draft = await attempt(() => readFile(words.file, "utf8"), `cannot read ${words.file}`);
+  const draft = await draftText(io.home, words.file);
   if (draft.kind === "failed") {
     return fail(io, "request", draft.reason);
   }
   return said(io, "request", await request(await pluginSetup(io.home, io.env), words.capability, draft.value));
+}
+
+// draftText : a draft from the spec drafts folder only, where the coordinator writes, so request reads no other file
+async function draftText(home: string, file: string): Promise<Result<string>> {
+  const specs = await realpath(join(home, "specs")).catch(() => "");
+  const real = await realpath(file).catch(() => "");
+  const inside = specs !== "" && real.startsWith(`${specs}${sep}`);
+  return inside
+    ? attempt(() => readFile(real, "utf8"), `cannot read ${file}`)
+    : refused(`a draft is read only from ${join(home, "specs")}, got ${JSON.stringify(file)}`);
 }
 
 function requestWords(argv: readonly string[]): { readonly capability: string; readonly file: string } | "bad" {
@@ -119,14 +129,16 @@ function parsedObject(text: string): object | "bad" {
   }
 }
 
-// checkedTemplate : a team's template, copied only when its plugin fields read; the core never reads it again
+// checkedTemplate : a team's template, copied only when its plugin fields and its ready fields read, so the file it
+// becomes never stops a dispatcher pass; the core never reads the template again
 function checkedTemplate(path: string, text: string): Result<string> {
   const raw = parsedObject(text);
   if (raw === "bad") {
-    return { kind: "failed", reason: `${path} is not a JSON object` };
+    return refused(`${path} is not a JSON object`);
   }
   const config = pluginConfigOf(path, raw);
-  return config.kind === "ok" ? { kind: "ok", value: text } : config;
+  const ready = config.kind === "ok" ? readyFieldsOf(path, raw) : config;
+  return ready.kind === "failed" ? ready : { kind: "ok", value: text };
 }
 
 async function written(path: string, text: string): Promise<Result<string>> {

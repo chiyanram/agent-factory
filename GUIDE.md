@@ -228,15 +228,18 @@ run `plugin` or edit `plugins.json` or the store (#106). **Today:**
 The coordinator holds no login, so it never writes to a tracker or a chat itself. It asks, and code performs the write
 (ADR-0014 P5, P6; `src/core/plugin/request.ts`):
 
-1. It writes a draft, as JSON, among the spec drafts: `{"project": "ledger", "ticket": "PROJ-1", "text": "…"}`, with
-   `"items": ["…"]` for a list (not for `notify`), and a `"title"` for `tracker.create`. No other field is read.
+1. It writes a draft, as JSON, among the spec drafts in `$FACTORY_HOME/specs/` (`request` reads a draft from nowhere
+   else): `{"project": "ledger", "ticket": "PROJ-1", "text": "…"}`, with `"items": ["…"]` for a list (not for
+   `notify`), and a `"title"` for `tracker.create`. A draft with any other field is refused.
 2. It runs `agent-factory request <tracker.comment|tracker.create|notify> --file <draft.json>`. The core checks the
    draft, cleans every text field with the posting template (`[coordinator] …`, so no line starts a quick action, a
    mention, a reference or a link), and applies the policy.
 3. `allow`: the write goes out at once through the plugin the project file maps it to (exit 0). `confirm`: it is kept
    in `$FACTORY_HOME/pending/`, nothing goes out, and `request` prints a command (exit 3):
    `agent-factory confirm <project>/<ticket>/<capability>/<id> '<the text>'`. The coordinator runs it, and the harness
-   prompt shows you where the write goes and its exact text; your yes sends it. `deny`: refused (exit 1).
+   prompt shows you where the write goes and its exact text; your yes sends it. Say yes only when the prompt spells
+   the text out in single quotes: a `confirm` whose text comes from `$(…)`, a backtick or a variable would match
+   and go out, while the prompt showed you only the command that makes the text. `deny`: refused (exit 1).
 
 A write goes out only when all of these hold, at `request` and again at `confirm`:
 
@@ -248,7 +251,9 @@ A write goes out only when all of these hold, at `request` and again at `confirm
   cleaning puts after `@`, `#` and `!` (no one can see them to check them), and the kept request is unchanged.
 
 Each write is logged in `$FACTORY_HOME/writes/<project>/<ticket>.jsonl` before it is sent, then its outcome; one
-ticket's writes run one at a time. A plugin answers a write with `{"kind": "done", "url": "…"}`; any other kind is a
+ticket's writes run one at a time behind `<ticket>.lock`, which holds its process ID, so a lock left by a process
+that was killed is taken over. Cleaning drops every control and invisible format character (bidi controls and
+isolates, tag characters, the soft hyphen, variation selectors), so what the prompt shows is what is sent. A plugin answers a write with `{"kind": "done", "url": "…"}`; any other kind is a
 failure. `forge.write` is the dispatcher's alone, and no Jira status, assignee or field change has a capability.
 **Today:**
 
@@ -256,6 +261,8 @@ failure. `forge.write` is the dispatcher's alone, and no Jira status, assignee o
   but a command its Bash rules do not name could still change them; they move to the `factory` OS user with the
   approvals (ADR-0012 S2).
 - No tracker or chat plugin is bundled yet, so a write needs a plugin you add yourself.
+- Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
+  `pending/` until you remove it.
 
 ## Settings
 
@@ -308,7 +315,8 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 ```
 
 `agent-factory project init <project> [--template <file>]` writes it: from a team's template, copied once and never
-read again, or with no plugin and the default policy. It never replaces a file that is there.
+read again and only when its fields read, or with no plugin and the default policy. It never replaces a file that is
+there.
 
 - `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
   runs `verify` once at each head, and the dispatcher decides from its own record of that run, never from the forge,
@@ -328,7 +336,9 @@ read again, or with no plugin and the default policy. It never replaces a file t
   (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
   `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3. A `forge.write` policy is refused.
 - With no file, the gate is forge CI and neither the ready check nor the verifier runs, and no write goes out. A file
-  that is there but not valid stops `dispatch` with the reason, so a typo never turns a local gate into forge CI.
+  with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
+  for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
+  turns a local gate into forge CI.
 
 ### The box image
 

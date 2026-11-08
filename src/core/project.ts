@@ -181,9 +181,18 @@ export async function readProjectFile(input: {
   readonly home: string;
   readonly project: string;
 }): Promise<ProjectRead> {
-  const raw = await readProjectRaw(
-    input,
-    "write one (gate, verify, ready.programs) before the ready check or the verifier runs",
-  );
-  return raw.kind === "ok" ? fields(raw.path, raw.value) : raw;
+  const raw = await readProjectRaw(input, NO_GATE);
+  return raw.kind === "ok" ? readyFieldsOf(raw.path, raw.value) : raw;
+}
+
+const NO_GATE = "write gate, verify and ready.programs before the ready check or the verifier runs";
+const READY_KEYS = ["gate", "verify", "ready", "egress"];
+
+// readyFieldsOf : the ready check's fields of one project file's JSON. A file with none of them, such as one that
+// `project init` wrote for the plugin fields alone, reads as no ready settings, the same as no file; once any is there,
+// each is checked, so a typo never turns a local gate into forge CI.
+export function readyFieldsOf(path: string, raw: object): ProjectRead {
+  return READY_KEYS.some((k) => Object.hasOwn(raw, k))
+    ? fields(path, raw)
+    : { kind: "missing", reason: `${path}: no gate yet; ${NO_GATE}` };
 }

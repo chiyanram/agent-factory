@@ -16,7 +16,8 @@ import { approve } from "../src/core/approval.js";
 import { DEFAULT_POLICY, pluginConfigOf, readPluginConfig } from "../src/core/plugin/config.js";
 import { callPlugin, addPlugin, type Setup } from "../src/core/plugin/registry.js";
 import { confirm, quoted, request, shown } from "../src/core/plugin/request.js";
-import { readLog } from "../src/core/plugin/writes.js";
+import { onTicket, readLog } from "../src/core/plugin/writes.js";
+import { readProjectFile } from "../src/core/project.js";
 import { specHash } from "../src/core/spec.js";
 import { REQUEST_COMMANDS } from "../src/request-cli.js";
 
@@ -326,6 +327,21 @@ describe("request and confirm: a confirm write waits for the person (#134; ADR-0
     expect(sentRequests()).toHaveLength(1);
   });
 
+  it("keeps and confirms a comment and a notify too", async () => {
+    await ready({ "tracker.comment": { mode: "confirm", cap: 2 }, notify: { mode: "confirm", cap: 2 } });
+    for (const [capability, value] of [
+      ["tracker.comment", { text: "a note", items: ["one"] }],
+      ["notify", { text: "a ping" }],
+    ] as const) {
+      const r = await request(setup(), capability, draft(value));
+      if (r.kind !== "pending") {
+        throw new Error(JSON.stringify(r));
+      }
+      expect(await confirm(setup(), r.id, shown(r.text))).toMatchObject({ kind: "done", count: 1 });
+    }
+    expect(sentRequests().map((c) => c.op)).toEqual(["comment", "send"]);
+  });
+
   it("refuses a second create past the cap of 1, at confirm", async () => {
     await ready();
     const first = await kept("one");
@@ -362,6 +378,19 @@ describe("request and confirm: a confirm write waits for the person (#134; ADR-0
       reason: expect.stringContaining("not a request id"),
     });
     expect(sentRequests()).toHaveLength(0);
+  });
+
+  it("takes over a lock its process left behind, and refuses one a live process holds", async () => {
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const lock = join(home, "writes", "ledger", "PROJ-1.lock");
+    mkdirSync(join(home, "writes", "ledger"), { recursive: true });
+    const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+    writeFileSync(lock, String(gone));
+    const ran = async () => ({ kind: "ok" as const, value: "ran" });
+    expect(await onTicket(where, ran)).toEqual({ kind: "ok", value: "ran" });
+    expect(existsSync(lock)).toBe(false);
+    writeFileSync(lock, String(process.pid));
+    expect(await onTicket(where, ran)).toMatchObject({ kind: "failed", reason: expect.stringContaining("is running") });
   });
 
   it("quotes the text so a shell passes it through byte for byte", () => {
@@ -407,9 +436,17 @@ describe("the request, confirm and project commands (#134)", () => {
     expect(await run("project", ["init", "ledger"], o)).toBe(1);
     expect(o.err.join("")).toContain("there already");
     const template = join(root, "team.json");
+    expect(await readProjectFile({ home, project: "ledger" })).toMatchObject({ kind: "missing" });
     writeFileSync(template, JSON.stringify({ gate: "forge-ci", plugins: { notify: "discord" } }));
+    expect(await run("project", ["init", "web", "--template", template], o)).toBe(1);
+    expect(o.err.join("")).toContain("ready.programs");
+    writeFileSync(
+      template,
+      JSON.stringify({ gate: "forge-ci", ready: { programs: ["make"] }, plugins: { notify: "discord" } }),
+    );
     expect(await run("project", ["init", "web", "--template", template], o)).toBe(0);
     expect(readFileSync(join(home, "projects", "web.json"), "utf8")).toBe(readFileSync(template, "utf8"));
+    expect(await readProjectFile({ home, project: "web" })).toMatchObject({ kind: "ok" });
     writeFileSync(template, JSON.stringify({ policy: { "forge.write": { mode: "allow", cap: 1 } } }));
     expect(await run("project", ["init", "api", "--template", template], o)).toBe(1);
     expect(await run("project", ["init", "api", "--template", "team.json"], o)).toBe(1);
@@ -420,7 +457,11 @@ describe("the request, confirm and project commands (#134)", () => {
   it("request prints the confirm command and exits 3; confirm sends it and exits 0", async () => {
     const o = io();
     await ready();
-    const file = join(root, "draft.json");
+    const outside = join(root, "draft.json");
+    writeFileSync(outside, draft({ text: "x" }));
+    expect(await run("request", ["notify", "--file", outside], o)).toBe(1);
+    expect(o.err.join("")).toContain("a draft is read only from");
+    const file = join(home, "specs", "ledger", "PROJ-1", "follow-up.json");
     writeFileSync(file, draft({ title: "Follow up", text: "it's done" }));
     expect(await run("request", ["tracker.create", "--file", file], o)).toBe(3);
     const printed = o.out.join("");

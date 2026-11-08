@@ -340,6 +340,13 @@ export function quoted(text: string): string {
   return `'${text.replace(/'/g, "'\\''")}'`;
 }
 
+// the draft as its capability's schema holds it, so confirm reads it back with the same check
+const STORED: Readonly<Record<PolicyPoint, (d: Draft) => object>> = {
+  "tracker.comment": (d) => ({ project: d.project, ticket: d.ticket, text: d.text, items: d.items }),
+  "tracker.create": (d) => ({ project: d.project, ticket: d.ticket, title: d.title, text: d.text, items: d.items }),
+  notify: (d) => ({ project: d.project, ticket: d.ticket, text: d.text }),
+};
+
 function idOf(plan: Plan, hex: string): string {
   return `${plan.where.project}/${plan.where.ticket}/${plan.capability}/${hex}`;
 }
@@ -352,7 +359,13 @@ async function kept(plan: Plan, draft: Draft, write: Built): Promise<Requested> 
   const hex = randomBytes(6).toString("hex");
   const id = idOf(plan, hex);
   const file = pendingFile(plan.where.home, hex);
-  const record: Pending = { id, plugin: plan.plugin, approval: plan.approval, draft, text: write.text };
+  const record: Pending = {
+    id,
+    plugin: plan.plugin,
+    approval: plan.approval,
+    draft: STORED[plan.capability](draft),
+    text: write.text,
+  };
   const saved = await attempt(async () => {
     await mkdir(join(plan.where.home, "pending"), { recursive: true, mode: 0o700 });
     await writeFile(file, `${JSON.stringify({ version: 1, ...record, at: now() }, null, 2)}\n`, {

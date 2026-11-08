@@ -130,13 +130,60 @@ export function appendLine(where: Where, line: Line): Promise<Done> {
   }, `cannot write ${file}`);
 }
 
-// onTicket : the change, while no other write on the same ticket runs; the lock file is the guard
-export async function onTicket<T>(where: Where, change: () => Promise<Result<T>>): Promise<Result<T>> {
-  const lock = join(where.home, "writes", where.project, `${where.ticket}.lock`);
-  const took = await attempt(async () => {
+type Take =
+  | { readonly kind: "took" }
+  | { readonly kind: "held" }
+  | { readonly kind: "failed"; readonly reason: string };
+
+async function takeLock(lock: string): Promise<Take> {
+  try {
     await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
     await writeFile(lock, String(process.pid), { flag: "wx", mode: 0o600 });
-  }, `another write on ${where.project}/${where.ticket} is running (${lock}); remove that file if none is`);
+    return { kind: "took" };
+  } catch (error) {
+    return codeOf(error) === "EEXIST" ? { kind: "held" } : failed(`cannot write ${lock}`);
+  }
+}
+
+// alive : whether the process a lock names still runs; a lock whose process is gone (killed mid-write) is stale
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return codeOf(error) !== "ESRCH";
+  }
+}
+
+async function stale(lock: string): Promise<boolean> {
+  const held = await readFile(lock, "utf8").catch(() => "");
+  const pid = Number(held.trim());
+  return Number.isSafeInteger(pid) && pid > 0 && !alive(pid);
+}
+
+// locked : the lock, taken once more after a stale one is removed. Two processes that both find the same stale lock
+// could each take it, and so go one write past the cap; that needs a killed write and then two more at once on the
+// same ticket.
+async function locked(lock: string, where: Where): Promise<Done> {
+  const first = await takeLock(lock);
+  const again = first.kind === "held" && (await stale(lock)) ? await retaken(lock) : first;
+  if (again.kind === "held") {
+    return failed(
+      `another write on ${where.project}/${where.ticket} is running (${lock}); remove that file if none is`,
+    );
+  }
+  return again.kind === "took" ? { kind: "ok" } : again;
+}
+
+async function retaken(lock: string): Promise<Take> {
+  await rm(lock, { force: true }).catch(() => undefined);
+  return takeLock(lock);
+}
+
+// onTicket : the change, while no other write on the same ticket runs; the lock file, holding its pid, is the guard
+export async function onTicket<T>(where: Where, change: () => Promise<Result<T>>): Promise<Result<T>> {
+  const lock = join(where.home, "writes", where.project, `${where.ticket}.lock`);
+  const took = await locked(lock, where);
   if (took.kind === "failed") {
     return took;
   }
