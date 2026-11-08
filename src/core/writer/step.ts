@@ -14,7 +14,7 @@ import { approvalState } from "../approval.js";
 import type { BoxToken } from "../token/rules.js";
 import type { WriterMode } from "../dispatch/records.js";
 import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/tick.js";
-import { fastForwardOnly, finishFirst, finishRun, type Next, type Pusher } from "../finish.js";
+import { fastForwardOnly, finishFirst, finishRun, seatOnEvery, type Next, type Pusher } from "../finish.js";
 import type { Result } from "../forge/api.js";
 import type { Forge, ForgeName } from "../forge/types.js";
 import type { Identity } from "../identity.js";
@@ -172,8 +172,9 @@ function pushOf(setup: WriterSetup, p: Prepared, clone: Clone, tip: string): Pus
     commit: tip,
     lease: p.start.kind === "branch" ? { kind: "sha", sha: clone.start } : { kind: "absent" },
     protectedBranches: [p.base],
-    // test-first and fix only add commits: no run of theirs rewrites the branch (a rebase run would, #171)
-    guards: [fastForwardOnly(setup.push.env)],
+    // test-first and fix only add commits: no run of theirs rewrites the branch (a rebase run would, #171); each one
+    // carries the writer's seat, which the clone's hook adds (#128)
+    guards: [fastForwardOnly(setup.push.env), seatOnEvery(setup.push.env, { since: clone.start, seat: "writer" })],
   };
 }
 
