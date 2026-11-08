@@ -3,12 +3,15 @@
 // and never its own settings. The rules are built here, once, for Claude Code (settings.json) and for Copilot CLI
 // (flags), and `agent-factory setup coordinator` writes them where `agent-factory coordinator` starts the session.
 //
-//   allow   the factory's read commands and `agent-factory status`
-//   ask     `agent-factory approve` (the person's yes in the harness prompt is the approval), and, Today, the start
+//   allow   the factory's read commands, `agent-factory status`, and `agent-factory request`, which the project's
+//           policy checks, caps and cleans in code (#134)
+//   ask     `agent-factory approve` (the person's yes in the harness prompt is the approval), `agent-factory confirm`
+//           (the prompt shows the exact text of a kept write; the yes sends it), and, Today, the start
 //           commands, so nothing starts without a yes; they become deny once the dispatcher runs the writer (#113)
 //   deny    raw forge and network clients, git push, a second interpreter or shell (a Read deny does not stop a program
 //           that opens files itself), sudo and the App token's wrapper; editing any .claude/, the package, the
-//           approvals, the project files, the secrets and the run records; reading the secret paths
+//           approvals, the project files, the secrets, the run records, the pending writes and the write log, and the
+//           plugins; `agent-factory plugin` and `agent-factory project`; reading the secret paths
 //
 // A deny in any settings scope cannot be loosened by another scope, and the session starts with --setting-sources
 // project, so the person's own user settings add no allow rule. Bash deny rules match a command as typed; the docs say
@@ -25,8 +28,9 @@ export type CoordinatorPlaces = {
   readonly botHome: string;
 };
 
-// the commands the coordinator may run with no prompt: they read, or post one templated status line
-const READS = ["poll", "spec", "approval", "status", "--help", "--version"];
+// the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
+// that the policy decides in code
+const READS = ["poll", "spec", "approval", "status", "request", "--help", "--version"];
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
@@ -65,6 +69,7 @@ const DENY_BASH = [
   "agent-factory app-token",
   "agent-factory lint-edit",
   "agent-factory plugin",
+  "agent-factory project",
 ];
 
 // the secret paths of review issue 6, under the person's home
@@ -146,6 +151,8 @@ function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${home}/egress/**)`,
     `Edit(${home}/plugins.json)`,
     `Edit(${home}/plugins/**)`,
+    `Edit(${home}/pending/**)`,
+    `Edit(${home}/writes/**)`,
   ];
 }
 
@@ -162,6 +169,7 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
       allow: [...READS.flatMap((c) => exact(`agent-factory ${c}`)), `Edit(${specs}/**)`, `Read(${specs}/**)`],
       ask: [
         ...exact("agent-factory approve"),
+        ...exact("agent-factory confirm"),
         ...STARTS.flatMap((c) => exact(`agent-factory ${c}`)),
         bash(`${p.pkg}/scripts/start-writer.sh`),
       ],

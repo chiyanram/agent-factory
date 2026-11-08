@@ -37,9 +37,11 @@ export type RenderResult =
 export const DEFAULT_FIELD_LIMIT = 500;
 
 const JOIN = "\u2060";
-// Every C0 and C1 control character, the invisible format characters a field could use to undo a break (zero-width
-// spaces and joiners, bidi controls, the word joiner itself, the BOM), and the line and paragraph separators.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\ufeff]/g;
+// Every control character (Cc), every invisible format character (Cf) and every default-ignorable one: zero-width
+// spaces and joiners, the bidi controls and isolates that can reorder what a person sees, the word joiner itself, the
+// soft hyphen, the BOM, the variation selectors, the blank Hangul fillers, and the tag characters that can carry text
+// no one sees; then the line and paragraph separators.
+const CONTROL = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 const LABEL = /^[A-Za-z0-9 ()_.,'-]+$/;
 
 function cut(text: string, limit: number): string {

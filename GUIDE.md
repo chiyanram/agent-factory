@@ -161,13 +161,16 @@ sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issue
 
 The wall (`src/core/coordinator.ts`):
 
-- **Runs with no prompt:** `agent-factory poll`, `spec`, `approval` and `status`.
-- **Asks you first:** `agent-factory approve`, whose yes in the prompt is your approval. **Today:** the start commands
+- **Runs with no prompt:** `agent-factory poll`, `spec`, `approval` and `status`, and `agent-factory request`, whose
+  write the project's policy decides in code ([Writes](#writes)).
+- **Asks you first:** `agent-factory approve`, whose yes in the prompt is your approval, and `agent-factory confirm`,
+  whose prompt shows the exact text of a kept write; your yes sends it. **Today:** the start commands
   too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`, `start-writer.sh`), since the loop is
   still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
 - **Denied:** `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
-  `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod` and `chown`. Editing any
-  `.claude/`, the package, `$FACTORY_HOME/approvals`, `projects`, `runs`, `secrets` and `coordinator`. Reading the
+  `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
+  `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
+  `projects`, `runs`, `secrets`, `coordinator`, `pending`, `writes`, `plugins.json` and `plugins`. Reading the
   secret paths: `~/.ssh`, `~/.gnupg`, the gh and glab logins, `~/.git-credentials`, `~/.netrc`, the cloud logins,
   `~/.docker/config.json`, `~/.npmrc`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, the Keychain and the
   browser profiles, the factory user's home (`FACTORY_BOT_HOME`, default `/home/factory`) and every `.env*`.
@@ -187,7 +190,7 @@ project's `.env`, and to edit a file of the package and a project's `.claude/set
   the file with a command its Bash rules do not name. The wall holds once the folder belongs to the `factory` OS user
   (ADR-0012 S2) or the sandbox is on (#114).
 - The dispatcher does not yet refuse to start when these settings are loosened (ADR-0012 S2; #105).
-- Jira and Dynatrace reads, and questions to Jira, come with their plugins (#134).
+- Jira and Dynatrace reads come with their plugins (#134); writes to them go through `request` ([Writes](#writes)).
 
 ## Plugins
 
@@ -217,9 +220,49 @@ run `plugin` or edit `plugins.json` or the store (#106). **Today:**
 - The pin covers the plugin's folder, not the interpreter a script names (`#!/usr/bin/env node` takes the first
   `node` on that `PATH`) nor the CLI it calls; folders your own user can write, such as `~/.local/bin`, stay on the
   `PATH`, since most CLIs live there.
-- No plugin is bundled yet and nothing calls one. The project file's capability mapping, the write policy with
-  `request` and `confirm` (#134 PR B), and the forge as a plugin (PR C) come next; so does the kit's write-fidelity
-  check, the text a plugin sends its CLI byte for byte.
+- No plugin is bundled yet. The forge as a plugin (#134 PR C) comes next; so does the kit's write-fidelity check,
+  the text a plugin sends its CLI byte for byte.
+
+### Writes
+
+The coordinator holds no login, so it never writes to a tracker or a chat itself. It asks, and code performs the write
+(ADR-0014 P5, P6; `src/core/plugin/request.ts`):
+
+1. It writes a draft, as JSON, among the spec drafts in `$FACTORY_HOME/specs/` (`request` reads a draft from nowhere
+   else): `{"project": "ledger", "ticket": "PROJ-1", "text": "…"}`, with `"items": ["…"]` for a list (not for
+   `notify`), and a `"title"` for `tracker.create`. A draft with any other field is refused.
+2. It runs `agent-factory request <tracker.comment|tracker.create|notify> --file <draft.json>`. The core checks the
+   draft, cleans every text field with the posting template (`[coordinator] …`, so no line starts a quick action, a
+   mention, a reference or a link), and applies the policy.
+3. `allow`: the write goes out at once through the plugin the project file maps it to (exit 0). `confirm`: it is kept
+   in `$FACTORY_HOME/pending/`, nothing goes out, and `request` prints a command (exit 3):
+   `agent-factory confirm <project>/<ticket>/<capability>/<id> '<the text>'`. The coordinator runs it, and the harness
+   prompt shows you where the write goes and its exact text; your yes sends it. Say yes only when the prompt spells
+   the text out in single quotes: a `confirm` whose text comes from `$(…)`, a backtick or a variable would match
+   and go out, while the prompt showed you only the command that makes the text. `deny`: refused (exit 1).
+
+A write goes out only when all of these hold, at `request` and again at `confirm`:
+
+- the ticket's approval is current (`agent-factory approval` says `approved`); a ticket with none gets no write;
+- the project file maps the capability to a plugin, and that plugin declared the write in its `describe`;
+- the cap has room: it counts the writes since the ticket's latest approval, so approving again starts afresh. A write
+  the plugin failed still counts, since it may have gone out;
+- at `confirm`, the text you were shown is the kept text, byte for byte, leaving out the invisible word joiners the
+  cleaning puts after `@`, `#` and `!` (no one can see them to check them), and the kept request is unchanged.
+
+Each write is logged in `$FACTORY_HOME/writes/<project>/<ticket>.jsonl` before it is sent, then its outcome; one
+ticket's writes run one at a time behind `<ticket>.lock`, which holds its process ID, so a lock left by a process
+that was killed is taken over. Cleaning drops every control and invisible format character (bidi controls and
+isolates, tag characters, the soft hyphen, variation selectors), so what the prompt shows is what is sent. A plugin answers a write with `{"kind": "done", "url": "…"}`; any other kind is a
+failure. `forge.write` is the dispatcher's alone, and no Jira status, assignee or field change has a capability.
+**Today:**
+
+- The pending requests and the write log belong to your own user, so the coordinator's settings deny editing them,
+  but a command its Bash rules do not name could still change them; they move to the `factory` OS user with the
+  approvals (ADR-0012 S2).
+- No tracker or chat plugin is bundled yet, so a write needs a plugin you add yourself.
+- Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
+  `pending/` until you remove it.
 
 ## Settings
 
@@ -265,9 +308,15 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   "gate": "local",
   "verify": ["make", "verify"],
   "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30 },
-  "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] }
+  "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] },
+  "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
+  "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
 }
 ```
+
+`agent-factory project init <project> [--template <file>]` writes it: from a team's template, copied once and never
+read again and only when its fields read, or with no plugin and the default policy. It never replaces a file that is
+there.
 
 - `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
   runs `verify` once at each head, and the dispatcher decides from its own record of that run, never from the forge,
@@ -282,8 +331,14 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
   no box runs for the project.
-- With no file, the gate is forge CI and neither the ready check nor the verifier runs. A file that is there but not
-  valid stops `dispatch` with the reason, so a typo never turns a local gate into forge CI. `#134` adds the plugin fields to the same file.
+- `plugins`: which registered plugin serves each extension point ([Plugins](#plugins)).
+- `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
+  (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
+  `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3. A `forge.write` policy is refused.
+- With no file, the gate is forge CI and neither the ready check nor the verifier runs, and no write goes out. A file
+  with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
+  for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
+  turns a local gate into forge CI.
 
 ### The box image
 
@@ -312,7 +367,8 @@ Run it again after an upgrade of `agent-factory`. Both images are tagged by thei
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
 to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, no LLM) starts. Each does one job on one
 story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
-questions and status to Jira or the issue, and `agent-factory approve`; you edit and write only spec drafts in
+questions and status to Jira or the issue through `agent-factory request` ([Writes](#writes)), and
+`agent-factory approve` and `agent-factory confirm` behind the person's yes; you edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.
@@ -422,6 +478,8 @@ and `#12` for `!12`.
 | `agent-factory ask -- <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The target: the writer writes the question to `report.json` and the host posts it |
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash, or every missing part (intent, numbered acceptance criteria, design, lane); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
 | `agent-factory approve <project> <ticket> <hash>` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, who and when. The hash on the command line is the full hash the human saw, as `agent-factory spec` printed it; a spec that no longer has exactly that hash is refused. Run it only through the harness `ask` prompt, never from an allow list ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104) |
+| `agent-factory request <capability> --file <draft.json>` | asks for a `tracker.comment`, `tracker.create` or `notify` write on an approved ticket; the project's policy performs it at once (0), keeps it for `confirm` and prints that command (3), or refuses it (1) ([Writes](#writes)) |
+| `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory dispatch <project> --once [--dry-run]` | one pass of the dispatcher's table over the project (see Triggers); exit 0, 1 when it cannot run, 2 when an action failed |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |

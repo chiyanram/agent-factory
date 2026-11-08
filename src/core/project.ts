@@ -1,7 +1,7 @@
 // project — the project file on this machine (ADR-0014 P3): <FACTORY_HOME>/projects/<project>.json. Never a repo
 // file, so a branch cannot choose its own gate or the programs its evidence may run (ADR-0012 S12; #91). This reader
-// takes only what the ready check, the local verifier and the box's egress need; the plugin fields come with #134, and
-// fields it does not know are left alone.
+// takes only what the ready check, the local verifier and the box's egress need; the plugin fields, "plugins" and
+// "policy", are read by plugin/config.ts (#134), and fields it does not know are left alone.
 //
 //   {
 //     "gate": "forge-ci" | "local",          where the gate's result comes from
@@ -119,17 +119,47 @@ function parsed(text: string): unknown {
   }
 }
 
-async function fileText(path: string): Promise<Result<string> | Extract<ProjectRead, { kind: "missing" }>> {
+type Missing = { readonly kind: "missing"; readonly reason: string };
+
+async function fileText(path: string, missing: string): Promise<Result<string> | Missing> {
   try {
     return { kind: "ok", value: await readFile(path, "utf8") };
   } catch (error) {
     return codeOf(error) === "ENOENT"
-      ? {
-          kind: "missing",
-          reason: `${path}: no project file; write one (gate, verify, ready.programs) before the ready check or the verifier runs`,
-        }
+      ? { kind: "missing", reason: `${path}: no project file; ${missing}` }
       : failed(path, "cannot read the project file");
   }
+}
+
+export function projectPath(home: string, project: string): string {
+  return join(home, "projects", `${project}.json`);
+}
+
+// a read of the file as JSON, not yet checked: its path and its value, none at all, or one that is refused
+export type RawRead =
+  | { readonly kind: "ok"; readonly path: string; readonly value: object }
+  | Missing
+  | { readonly kind: "failed"; readonly reason: string };
+
+// readProjectRaw : the project's file as one JSON object; `missing` says what the caller needs it for
+export async function readProjectRaw(
+  input: { readonly home: string; readonly project: string },
+  missing: string,
+): Promise<RawRead> {
+  if (!plainName(input.project)) {
+    return { kind: "failed", reason: `${JSON.stringify(input.project)} is not a plain project name` };
+  }
+  const path = projectPath(input.home, input.project);
+  const read = await fileText(path, missing);
+  if (read.kind !== "ok") {
+    return read;
+  }
+  const raw = parsed(read.value);
+  return isObject(raw) ? { kind: "ok", path, value: raw } : failed(path, "is not a JSON object");
+}
+
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function fields(path: string, raw: object): Result<ProjectFile> {
@@ -147,19 +177,22 @@ function fields(path: string, raw: object): Result<ProjectFile> {
     : egress;
 }
 
-// fromRaw : the project's file, each field checked; a field that is there but not valid is refused
-function fromRaw(path: string, raw: unknown): Result<ProjectFile> {
-  return typeof raw === "object" && raw !== null ? fields(path, raw) : failed(path, "is not a JSON object");
-}
-
 export async function readProjectFile(input: {
   readonly home: string;
   readonly project: string;
 }): Promise<ProjectRead> {
-  if (!plainName(input.project)) {
-    return { kind: "failed", reason: `${JSON.stringify(input.project)} is not a plain project name` };
-  }
-  const path = join(input.home, "projects", `${input.project}.json`);
-  const read = await fileText(path);
-  return read.kind === "ok" ? fromRaw(path, parsed(read.value)) : read;
+  const raw = await readProjectRaw(input, NO_GATE);
+  return raw.kind === "ok" ? readyFieldsOf(raw.path, raw.value) : raw;
+}
+
+const NO_GATE = "write gate, verify and ready.programs before the ready check or the verifier runs";
+const READY_KEYS = ["gate", "verify", "ready", "egress"];
+
+// readyFieldsOf : the ready check's fields of one project file's JSON. A file with none of them, such as one that
+// `project init` wrote for the plugin fields alone, reads as no ready settings, the same as no file; once any is there,
+// each is checked, so a typo never turns a local gate into forge CI.
+export function readyFieldsOf(path: string, raw: object): ProjectRead {
+  return READY_KEYS.some((k) => Object.hasOwn(raw, k))
+    ? fields(path, raw)
+    : { kind: "missing", reason: `${path}: no gate yet; ${NO_GATE}` };
 }

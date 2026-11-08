@@ -124,6 +124,9 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "/home/ram/.factory/box-runs/x/code/Makefile",
       "/home/ram/.factory/egress/ledger/squid.conf",
       "/home/ram/.factory/plugins.json",
+      "/home/ram/.factory/plugins/abc/plugin",
+      "/home/ram/.factory/pending/0123456789ab.json",
+      "/home/ram/.factory/writes/ledger/PROJ-1.jsonl",
     ]) {
       expect({ path, v: verdict("Edit", path) }).toEqual({ path, v: "deny" });
     }
@@ -134,18 +137,21 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(verdict("Edit", "/work/project/src/app.ts")).toBe("prompt");
   });
 
-  it("runs the read commands and status with no prompt; approve and every start command ask", () => {
+  it("runs the read commands, status and request with no prompt; approve, confirm and every start command ask", () => {
     for (const command of [
       "agent-factory poll",
       "agent-factory poll --json",
       "agent-factory spec ledger PROJ-1",
       "agent-factory approval ledger PROJ-1",
       'agent-factory status 12 aaaa1111 "writer started"',
+      "agent-factory request tracker.comment --file /home/ram/.factory/specs/ledger/PROJ-1/comment.json",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "allow" });
     }
     for (const command of [
       `agent-factory approve ledger PROJ-1 ${"a".repeat(64)}`,
+      "agent-factory confirm ledger/PROJ-1/tracker.create/0123456789ab '[coordinator] a follow-up'",
+      "agent-factory request notify --file d.json && agent-factory confirm ledger/PROJ-1/notify/0123456789ab x",
       "agent-factory claim 12",
       "agent-factory release 12",
       "agent-factory block 12 why",
@@ -179,6 +185,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory-app-token o/r",
       "agent-factory app-token o/r",
       "agent-factory plugin add /tmp/x",
+      "agent-factory project init ledger",
       "agent-factory ask 12 aaaa1111 q",
       "security find-generic-password -s x",
       "chmod 644 /home/ram/.factory/coordinator/.claude/settings.json",
@@ -207,7 +214,10 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(args).toContain("shell(gh)");
     expect(args).toContain("shell(sudo)");
     expect(args).toContain("shell(agent-factory poll)");
+    expect(args).toContain("shell(agent-factory request)");
+    expect(args).toContain("shell(agent-factory project)");
     expect(args.join(" ")).not.toContain("shell(agent-factory approve)");
+    expect(args.join(" ")).not.toContain("shell(agent-factory confirm)");
     expect(args.slice(0, 2)).toEqual(["--add-dir", "/home/ram/.factory/specs"]);
   });
 });

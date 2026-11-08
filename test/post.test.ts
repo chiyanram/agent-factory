@@ -38,6 +38,11 @@ function inert(text: string): void {
 }
 
 describe("cleanField", () => {
+  it("drops every invisible format character: bidi isolates, tags, the soft hyphen, variation selectors", () => {
+    const hidden = "pay \u2066evil\u2069 \u{e0041}\u{e0042} so\u00adft x\ufe0f \u200d\u061c\u180e\u{e0100}end";
+    expect(cleanField(hidden)).toBe("pay evil so ft x end");
+  });
+
   it("puts a multi-line field on one line", () => {
     expect(cleanField("first\nsecond\r\n\tthird")).toBe("first second third");
   });

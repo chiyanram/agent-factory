@@ -24,7 +24,6 @@
   "src/core/notes.ts typescript(no-unsafe-type-assertion)": 1,
   "src/core/notes.ts unicorn(no-array-sort)": 1,
   "src/core/poll.ts unicorn(no-array-sort)": 1,
-  "src/core/post.ts eslint(no-control-regex)": 1,
   "src/core/post.ts typescript(no-non-null-assertion)": 1,
   "src/core/push.ts eslint(complexity)": 4,
   "src/core/report.ts eslint(complexity)": 2,
