@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.14.1](https://github.com/chiyanram/agent-factory/compare/v0.14.0...v0.14.1) (2026-11-08)
+
+### 🐛 Fixes
+
+* **loop** — reconcile keeps a writer's worktree that holds unlanded work · [#189](https://github.com/chiyanram/agent-factory/issues/189) (PR [#201](https://github.com/chiyanram/agent-factory/pull/201))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.14.1`
+
 ## [0.14.0](https://github.com/chiyanram/agent-factory/compare/v0.13.0...v0.14.0) (2026-11-08)
 
 ### ✨ Features

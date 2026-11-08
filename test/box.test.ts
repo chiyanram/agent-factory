@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chooseBox, openBox, pinImage } from "../src/core/box/index.js";
-import { boxContract } from "./box-contract.js";
+import { boxContract, type Handed } from "./box-contract.js";
 import { fakeBox } from "./fake-box.js";
 
 const EXIT_0 = { kind: "exited", code: 0, stdout: "", stderr: "" } as const;
@@ -93,4 +93,14 @@ describe("openBox", () => {
   });
 });
 
-boxContract("fake", () => fakeBox({ runs: [EXIT_0, EXIT_0, EXIT_0, EXIT_0] }).box);
+// a fake box hands on only what it is given: each spec's env, and each command's argv
+boxContract("fake", () => {
+  const fake = fakeBox({ runs: [EXIT_0, EXIT_0, EXIT_0, EXIT_0] });
+  return {
+    box: fake.box,
+    handed: (): readonly Handed[] =>
+      fake.calls.flatMap((c): readonly Handed[] =>
+        c.op === "start" ? [{ argv: [], env: c.spec.env }] : c.op === "run" ? [{ argv: c.command.argv, env: {} }] : [],
+      ),
+  };
+});
