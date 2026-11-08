@@ -416,6 +416,7 @@ describe("the request, confirm and project commands (#134)", () => {
         home,
         out: (t) => out.push(t),
         err: (t) => err.push(t),
+        secrets: async () => ({ kind: "ok", value: {} }),
       },
     };
   }

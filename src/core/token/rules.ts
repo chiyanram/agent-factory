@@ -2,7 +2,8 @@
 // make model requests" (Claude: `claude setup-token`, one year). Nothing here sees a real token except as a Secret,
 // which never prints: String(), JSON and a template all give "[secret]".
 
-export type Runner = "claude";
+// what the store keeps: the box's model-only token, and the Discord webhook the dispatcher pings through (#119)
+export type Runner = "claude" | "discord";
 
 export type Secret = {
   readonly kind: "secret";
@@ -103,4 +104,25 @@ export function boxToken(input: { readonly token: Secret; readonly meta: Meta; r
     case "unknown":
       return { kind: "refused", reason: `the claude token's age is unknown (${age.reason}); ${RENEW}` };
   }
+}
+
+// A Discord webhook URL (#119): whoever holds it can post to its channel, so it is kept like a token. Only Discord's own
+// hosts, an id and a token: no query, no fragment, nothing else a pasted text could carry.
+const WEBHOOK = /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api\/webhooks\/\d{1,30}\/[A-Za-z0-9_-]{20,200}$/;
+
+// checkWebhook : the pasted text, trimmed, as a Discord webhook URL; the reason never quotes the text
+export function checkWebhook(pasted: string): Checked {
+  const text = pasted.trim();
+  return WEBHOOK.test(text)
+    ? { kind: "ok", token: secret(text) }
+    : {
+        kind: "refused",
+        reason:
+          "it is not a Discord webhook URL (https://discord.com/api/webhooks/<id>/<token>); copy it from the channel's Integrations",
+      };
+}
+
+// webhookMeta : a webhook does not expire; it holds until someone deletes it in Discord
+export function webhookMeta(now: Date): Meta {
+  return { madeAt: now.toISOString(), expiresAt: "9999-12-31T00:00:00.000Z" };
 }

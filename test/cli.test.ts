@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
@@ -248,6 +248,19 @@ describe("agent-factory setup", () => {
     expect(run.code).toBe(0);
     expect(run.out).toMatch(/^stored the claude token in .*secrets; made 20\d\d-.*, expires 20\d\d-/);
     expect(run.out + run.err).not.toContain(TOKEN);
+  });
+
+  it("stores the Discord webhook at a hidden prompt, 0600, never printed; refuses anything else (#119)", async () => {
+    const hook = "https://discord.com/api/webhooks/1234567890/abcdefghijklmnopqrstuvwxyz_-0123";
+    const run = await cli(["setup", "discord"], { FACTORY_HOME: home }, `${hook}\n`);
+    expect(run).toMatchObject({ code: 0, out: expect.stringContaining("stored the Discord webhook") });
+    expect(run.out + run.err).not.toContain(hook);
+    const file = join(home, "secrets", "discord-token");
+    expect(readFileSync(file, "utf8").trim()).toBe(hook);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const bad = await cli(["setup", "discord"], { FACTORY_HOME: home }, "https://evil.example/hook");
+    expect(bad).toMatchObject({ code: 1, err: expect.stringContaining("not a Discord webhook URL") });
+    expect(bad.err).not.toContain("evil.example");
   });
 
   it("refuses a GitHub login and stores nothing", async () => {

@@ -1,0 +1,6 @@
+{
+  "op": "send",
+  "input": {
+    "text": "[coordinator] hello"
+  }
+}

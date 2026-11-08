@@ -1,0 +1,7 @@
+{
+  "op": "send",
+  "input": {
+    "text": "[coordinator] hello",
+    "webhook": "https://discord.com/api/webhooks/1234567890/abcdefghijklmnopqrstuvwxyz_-0123"
+  }
+}

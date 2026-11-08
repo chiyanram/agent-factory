@@ -22,6 +22,7 @@ import {
 } from "./contract.js";
 import { DEFAULT_LIMITS, runPlugin, type Exec, type Limits, type Ran } from "./exec.js";
 import { sourceOf, store, treeHash, type Source } from "./pin.js";
+import type { Secret } from "../token/rules.js";
 
 // source: the file the person named, as its real path; path: the pinned copy that runs
 export type Entry = Described & { readonly source: string; readonly path: string; readonly sha256: string };
@@ -34,7 +35,12 @@ export type Setup = {
   readonly path: string;
   readonly exec?: Exec;
   readonly limits?: Limits;
+  // the secrets a call of this plugin's capability carries in its input, on stdin only: never in env, argv or a file
+  // the plugin did not make (the Discord webhook, #119); none when not set
+  readonly secrets?: Secrets;
 };
+
+export type Secrets = (plugin: string, capability: ExtensionPoint) => Promise<Result<Readonly<Record<string, Secret>>>>;
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -345,10 +351,29 @@ export async function callPlugin(setup: Setup, call: Call): Promise<Result<Plugi
   if (entry.kind === "failed") {
     return entry;
   }
-  const ran = await runCall(setup, entry.value, call);
-  const out = stdoutOf(ran);
-  const result = out.kind === "ok" ? readResult(out.value) : out;
+  const result = await answered(setup, entry.value, call);
   return result.kind === "ok" ? result : failed(`the plugin ${call.plugin}: ${result.reason}`);
+}
+
+// answered : the call, with its secrets, run and read
+async function answered(setup: Setup, entry: Entry, call: Call): Promise<Result<PluginResult>> {
+  const input = await withSecrets(setup, call);
+  const ran = input.kind === "ok" ? stdoutOf(await runCall(setup, entry, { ...call, input: input.value })) : input;
+  return ran.kind === "ok" ? readResult(ran.value) : ran;
+}
+
+// withSecrets : the call's input with the secrets its plugin and capability carry, revealed only here, into the request
+async function withSecrets(setup: Setup, call: Call): Promise<Result<unknown>> {
+  if (setup.secrets === undefined) {
+    return { kind: "ok", value: call.input };
+  }
+  const secrets = await setup.secrets(call.plugin, call.capability);
+  return secrets.kind === "ok" ? { kind: "ok", value: merged(call.input, secrets.value) } : secrets;
+}
+
+function merged(input: unknown, secrets: Readonly<Record<string, Secret>>): unknown {
+  const revealed = Object.fromEntries(Object.entries(secrets).map(([k, v]) => [k, v.reveal()]));
+  return Object.keys(revealed).length === 0 ? input : { ...Object(input), ...revealed };
 }
 
 // runCall : the request in the plugin's own protocol major, so a plugin on N−1 is spoken to as it expects

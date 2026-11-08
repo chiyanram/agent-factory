@@ -20,6 +20,7 @@ import {
   claudeTokenStatus,
   openStore,
   saveClaudeToken,
+  saveDiscordWebhook,
   type Age,
   type Meta,
   type Status,
@@ -40,6 +41,7 @@ import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
+import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
@@ -62,6 +64,7 @@ commands:
                                repository, as JSON {token, login, expiresAt}
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
                                at the hidden prompt; it is never printed (#136)
+  setup discord                store the Discord webhook the dispatcher pings through, at a hidden prompt (#119)
   setup status                 the box chosen, its risks, and whether the claude token is valid
   setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
                                <home>/coordinator
@@ -367,6 +370,10 @@ async function pass(
   if (planned.kind === "failed") {
     return planned;
   }
+  const notify = await notifierFor(io, settings.home, project, forge.mark);
+  if (notify.kind === "failed") {
+    return notify;
+  }
   return tick({
     home: settings.home,
     project,
@@ -377,7 +384,22 @@ async function pass(
     quietMinutes: settings.quiet,
     dryRun,
     log: (line) => io.out(`${line}\n`),
+    notify: notify.value,
   });
+}
+
+// notifierFor : the pings of a pass (#119): through the notify plugin the project file maps, with the webhook from the
+// token store; none when it maps none; printed instead of sent under FACTORY_DRY_RUN=1
+async function notifierFor(io: Io, home: string, project: string, mark: string): Promise<Result<Notify>> {
+  const plugin = await notifyPluginOf({ home, project });
+  if (plugin.kind === "failed" || plugin.value === "") {
+    return plugin.kind === "failed" ? plugin : { kind: "ok", value: NO_NOTIFY };
+  }
+  if (io.env.FACTORY_DRY_RUN === "1") {
+    return { kind: "ok", value: dryNotify((line) => io.err(`${line}\n`)) };
+  }
+  const setup = await pluginSetup(home, io.env, webhookSecrets(tokenStore(io, home)));
+  return { kind: "ok", value: pluginNotify({ setup, plugin: plugin.value, project, mark }) };
 }
 
 async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
@@ -531,6 +553,17 @@ type SetupStep = {
 
 const PASTE = "Paste the token that `claude setup-token` printed (it stays hidden), then Enter: ";
 
+async function setupDiscord({ store, io }: { readonly store: TokenStore; readonly io: Io }): Promise<number> {
+  const pasted = await io.readSecret("Paste the Discord webhook URL (it is not shown, and never printed): ");
+  const saved = await saveDiscordWebhook({ store, pasted, now: new Date() });
+  if (saved.kind === "refused") {
+    io.err(`agent-factory setup discord: ${saved.reason}\n`);
+    return 1;
+  }
+  io.out(`stored the Discord webhook in ${saved.where}; map notify to the discord plugin in the project file\n`);
+  return 0;
+}
+
 async function setupClaude({ store, io }: { readonly store: TokenStore; readonly io: Io }): Promise<number> {
   const saved = await saveClaudeToken({ store, pasted: await io.readSecret(PASTE), now: new Date() });
   if (saved.kind === "refused") {
@@ -656,6 +689,7 @@ async function setupCoordinator({ io }: { readonly io: Io }): Promise<number> {
 
 const SETUP: readonly SetupStep[] = [
   { name: "claude", run: setupClaude },
+  { name: "discord", run: setupDiscord },
   { name: "status", run: setupStatus },
 ];
 
@@ -708,7 +742,7 @@ async function setupStep({
 }): Promise<number> {
   const step = SETUP.find((s) => s.name === positionals[0]);
   if (step === undefined) {
-    io.err("usage: agent-factory setup claude | status | coordinator\n");
+    io.err("usage: agent-factory setup claude | discord | status | coordinator\n");
     return 64;
   }
   const home = factoryHome(io.env);
@@ -760,7 +794,13 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
     io.err(`agent-factory ${name}: ${home.reason}\n`);
     return Promise.resolve(1);
   }
-  return run(argv.slice(1), { env: io.env, out: io.out, err: io.err, home: home.path });
+  return run(argv.slice(1), {
+    env: io.env,
+    out: io.out,
+    err: io.err,
+    home: home.path,
+    secrets: webhookSecrets(tokenStore(io, home.path)),
+  });
 }
 
 export function runCli(argv: readonly string[], io: Io): Promise<number> {

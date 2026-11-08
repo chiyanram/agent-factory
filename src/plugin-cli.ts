@@ -8,7 +8,15 @@ import { isAbsolute, join } from "node:path";
 import type { Result } from "./core/forge/api.js";
 import { PLUGIN_NAME } from "./core/plugin/contract.js";
 import { testPlugin, type Check } from "./core/plugin/kit.js";
-import { addPlugin, applyUpdate, planUpdate, readRegistry, type Entry, type Setup } from "./core/plugin/registry.js";
+import {
+  addPlugin,
+  applyUpdate,
+  planUpdate,
+  readRegistry,
+  type Entry,
+  type Secrets,
+  type Setup,
+} from "./core/plugin/registry.js";
 
 export type PluginIo = {
   readonly env: NodeJS.ProcessEnv;
@@ -31,8 +39,9 @@ async function ownersOnly(dir: string): Promise<boolean> {
 }
 
 // pluginSetup : what a plugin runs with: the factory's home, the environment it picks from, and the trusted PATH
-export async function pluginSetup(home: string, env: NodeJS.ProcessEnv): Promise<Setup> {
-  return { home, env, path: await pluginPath(env.PATH ?? "") };
+export async function pluginSetup(home: string, env: NodeJS.ProcessEnv, secrets?: Secrets): Promise<Setup> {
+  const path = await pluginPath(env.PATH ?? "");
+  return secrets === undefined ? { home, env, path } : { home, env, path, secrets };
 }
 
 function setupOf(io: PluginIo): Promise<Setup> {

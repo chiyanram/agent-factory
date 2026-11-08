@@ -13,7 +13,7 @@
 //                 or a JWT
 //
 //   write fidelity  a plugin that writes names the programs it runs in describe's cli; each write fixture that carries a
-//                 text (input.text, or a post in input.post or input.body, rendered as post.ts renders it), and once
+//                 text and expects the write to go out (its .out.json is not failed, refused or unsupported) (input.text, or a post in input.post or input.body, rendered as post.ts renders it), and once
 //                 more with a tricky text, must hand that text to the CLI byte for byte and whole: an argv word, stdin,
 //                 or a string in JSON on either that is the text itself; and it may call the CLI no more often than
 //                 the fixture's <case>.cli.json lists answers
@@ -265,6 +265,14 @@ async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown
   );
 }
 
+// isFidelityCase : a write fixture that carries a text and expects the write to go out; one that expects a refusal
+// (no webhook, a bad input) never reaches the CLI, so it has no text to check
+function isFidelityCase(entry: Entry, f: Fixture): boolean {
+  const expected = field(parsed(f.expected), "kind");
+  const goesOut = typeof expected !== "string" || !SOFT.has(expected);
+  return goesOut && entry.writes.some((w) => w === f.capability) && textsOf(field(parsed(f.input), "input")).length > 0;
+}
+
 // fidelity : each write fixture that carries a text, and the first once more with TRICKY
 async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]): Promise<readonly Check[]> {
   if (entry.writes.length === 0) {
@@ -273,9 +281,7 @@ async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]
   if (entry.cli.length === 0) {
     return [check("write fidelity", false, "the plugin writes but names no program in describe's cli")];
   }
-  const writes = fixtures.filter(
-    (f) => entry.writes.some((w) => w === f.capability) && textsOf(field(parsed(f.input), "input")).length > 0,
-  );
+  const writes = fixtures.filter((f) => isFidelityCase(entry, f));
   const [first] = writes;
   if (first === undefined) {
     return [check("write fidelity", false, "no write fixture carries a text (input.text, input.post or input.body)")];

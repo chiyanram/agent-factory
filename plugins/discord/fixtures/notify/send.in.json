@@ -1,0 +1,7 @@
+{
+  "op": "send",
+  "input": {
+    "text": "[coordinator] ledger PROJ-1 needs you: the ready check failed 3 times",
+    "webhook": "https://discord.com/api/webhooks/1234567890/abcdefghijklmnopqrstuvwxyz_-0123"
+  }
+}

@@ -259,6 +259,27 @@ A setting the plugin cannot honour stops the pass instead of being dropped witho
   setting; so does one whose `gh` or `glab` login comes from a token in the environment.
 - The plugin tries a rate-limited request 4 times; `FACTORY_MAX_TRIES` does not reach it.
 
+### Pings
+
+The dispatcher pings you on Discord when a ticket needs you (#119), through the bundled `discord` notify plugin:
+- every hand-over to `needs-human`: CI red twice, a cap, a blocked run, the ready check's failures, any stop;
+- a writer's question that waits on your answer;
+- a change ready for you to review and merge (the gate is green).
+
+Each goes once per event and head, as its forge note does. To set it up:
+1. In the Discord channel, Integrations → Webhooks → New Webhook, and copy its URL.
+2. `agent-factory setup discord` and paste it at the hidden prompt. It is kept like the claude token: the login
+   Keychain on macOS, `~/.factory/secrets/discord-token` (mode 600) on Linux, never printed. On the VM run it as the
+   user that runs the dispatcher.
+3. `agent-factory plugin add discord`, and map `"notify": "discord"` in the project file's `plugins`.
+
+The core hands the webhook to the plugin inside the request on stdin, never in env or argv; the plugin's `curl` reads
+it from a 0600 config file it removes after, and the message from stdin. The text is a posting template, and every
+mention is switched off, so nothing pings `@everyone`. A ping only informs: one that fails never stops the pass or
+the ticket (the pass prints why, the forge note is the record) and is not tried again, and a reply in Discord is
+never an approval. `FACTORY_DRY_RUN=1` prints each ping instead. The coordinator's `request notify` goes through the
+same plugin, within its policy and cap ([Writes](#writes)).
+
 ### Writes
 
 The coordinator holds no login, so it never writes to a tracker or a chat itself. It asks, and code performs the write

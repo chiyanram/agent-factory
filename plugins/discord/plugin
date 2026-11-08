@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// the bundled discord notify plugin (#119; ADR-0014 P1). One op, notify send: the text, as the core cleaned it, goes to
+// the Discord webhook the core hands over in the request on stdin (agent-factory setup discord keeps it), never in env
+// or argv. curl reads the webhook from a 0600 config file this plugin makes and removes, and the message from stdin as
+// JSON, with every mention switched off, so no @everyone or role ever pings. A ping only informs: a Discord reply is
+// never an approval. Nothing is printed but the one JSON answer; the webhook never appears in it.
+
+import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const WEBHOOK = /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api\/webhooks\/\d{1,30}\/[A-Za-z0-9_-]{20,200}$/;
+// Discord's limit on a message's content
+const MAX_TEXT = 2000;
+
+const DESCRIBE = {
+  protocol: 1,
+  name: "discord",
+  version: "1.0.0",
+  capabilities: [{ name: "notify" }],
+  writes: ["notify"],
+  env: [],
+  cli: ["curl"],
+};
+
+const out = (value) => process.stdout.write(JSON.stringify(value));
+
+function stdinText() {
+  return new Promise((resolve) => {
+    let text = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (d) => (text += d));
+    process.stdin.on("end", () => resolve(text));
+    process.stdin.on("error", () => resolve(text));
+  });
+}
+
+function parsed(text) {
+  try {
+    const value = JSON.parse(text);
+    return typeof value === "object" && value !== null ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// curl : the message posted; its exit code and the last line it wrote on stderr
+function curl(config, body) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "curl",
+      [
+        "--silent",
+        "--show-error",
+        "--fail-with-body",
+        "--max-time",
+        "20",
+        "--config",
+        config,
+        "--header",
+        "Content-Type: application/json",
+        "--data-binary",
+        "@-",
+        "--output",
+        "/dev/null",
+      ],
+      { stdio: ["pipe", "ignore", "pipe"] },
+    );
+    let err = "";
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", (e) => resolve({ code: 127, err: e.message }));
+    child.on("close", (code) => resolve({ code: code ?? 1, err }));
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(body);
+  });
+}
+
+async function send(input) {
+  const text = input?.text;
+  const webhook = input?.webhook;
+  if (typeof text !== "string" || text.trim() === "" || text.length > MAX_TEXT) {
+    return { kind: "failed", reason: `the text must be 1 to ${MAX_TEXT} characters` };
+  }
+  if (typeof webhook !== "string" || !WEBHOOK.test(webhook)) {
+    return { kind: "failed", reason: "no Discord webhook came with the request; run agent-factory setup discord" };
+  }
+  const dir = await mkdtemp(join(tmpdir(), "factory-discord-"));
+  try {
+    const config = join(dir, "curl.conf");
+    await writeFile(config, `url = "${webhook}"\n`, { mode: 0o600 });
+    const ran = await curl(config, JSON.stringify({ content: text, allowed_mentions: { parse: [] } }));
+    const why = ran.err.trim().split("\n").at(-1)?.replaceAll(webhook, "[webhook]") ?? "";
+    return ran.code === 0 ? { kind: "done" } : { kind: "failed", reason: `curl exited ${ran.code}: ${why}` };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function answer(request) {
+  if (request === undefined) {
+    return { kind: "failed", reason: "the request is not one JSON object" };
+  }
+  if (request.op !== "send") {
+    return { kind: "unsupported", op: String(request.op) };
+  }
+  return request.capability === "notify"
+    ? send(request.input)
+    : { kind: "refused", reason: `send is notify, not ${String(request.capability)}` };
+}
+
+const [verb] = process.argv.slice(2);
+if (verb === "describe") {
+  out(DESCRIBE);
+} else if (verb === "call") {
+  out(await answer(parsed(await stdinText())));
+} else {
+  process.exitCode = 64;
+}
