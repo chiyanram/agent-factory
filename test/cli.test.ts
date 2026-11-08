@@ -9,6 +9,7 @@ const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
 
 let home = "";
+const started: { readonly bin: string; readonly args: readonly string[]; readonly cwd: string }[] = [];
 // this test's own ids: a test never runs as root, and the platform is linux so no Keychain is touched
 const ME = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 type Run = { readonly code: number; readonly out: string; readonly err: string };
@@ -29,6 +30,7 @@ async function cli(
       platform: "linux",
       ...ME,
       run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
+      interactive: async (call) => (started.push(call), 0),
     },
   });
   return { code, out, err };
@@ -363,5 +365,26 @@ describe("agent-factory box (#113)", () => {
     const run = await cli(["box", "build", "ledger"]);
     expect(run.code).toBe(1);
     expect(run.err).toContain("agent-factory box: docker build: no CLI in this test");
+  });
+});
+
+describe("agent-factory setup coordinator and coordinator (#106)", () => {
+  it("writes the wall into <home>/coordinator, then starts the session there with only its settings", async () => {
+    expect(await cli(["coordinator", "x"])).toMatchObject({ code: 64 });
+    expect(await cli(["coordinator"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("setup coordinator first"),
+    });
+    const setup = await cli(["setup", "coordinator"]);
+    expect(setup).toMatchObject({ code: 0, out: expect.stringContaining(join(home, "coordinator")) });
+    started.length = 0;
+    expect(await cli(["coordinator"])).toMatchObject({ code: 0 });
+    expect(started).toMatchObject([
+      { bin: "claude", args: ["--setting-sources", "project"], cwd: join(home, "coordinator") },
+    ]);
+    expect(await cli(["setup", "coordinator"], { FACTORY_HOME: home, FACTORY_BOT_HOME: "factory" })).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("FACTORY_BOT_HOME must be an absolute path"),
+    });
   });
 });
