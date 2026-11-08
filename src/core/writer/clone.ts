@@ -5,7 +5,9 @@
 //   2 a new repo in a private folder fetches that one ref from the clone: no hardlink to the clone's objects, so the
 //     writer can never change them (git clone --no-hardlinks gives the same)
 //   3 origin is the project's forge URL, so the host can push from it; the commits get the writer's author name
-//   4 .factory holds the approved spec, the rulebook and, for a rework or CI run, the task (task.ts); the agent's
+//   4 a prepare-commit-msg hook gives every commit the writer makes its "Agent: writer" trailer (#128); the host's push
+//     refuses a commit without it, so a commit made past the hook never leaves
+//   5 .factory holds the approved spec, the rulebook and, for a rework or CI run, the task (task.ts); the agent's
 //     settings, those files and the repo's git config and hooks are mounted read-only (ADR-0012 S12)
 // A branch that holds .factory, or a symlink where a read-only path goes, is refused: the host writes into .factory,
 // and docker would mount a symlink's target from the host. Nothing here throws.
@@ -15,6 +17,7 @@ import { join } from "node:path";
 import { excludeFactory } from "../finish.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult, type RepoTarget } from "../git.js";
+import { agentTrailer } from "../notes.js";
 import { attempt } from "../review/safe.js";
 
 export const AUTHOR = { name: "agent-factory writer", email: "writer@agent-factory.invalid" };
@@ -25,6 +28,14 @@ export const TASK_FILE = ".factory/task.md";
 // a file the host may write into .factory: the task of a rework or CI run (task.ts), the writer's settings (tools.ts)
 export type FileText = { readonly kind: "none" } | { readonly kind: "text"; readonly text: string };
 export const SETTINGS_FILE = ".factory/settings.json";
+
+// the hook git runs on every commit, merge and amend; --no-verify does not skip it. The host's own git never runs it.
+const TRAILER_HOOK = [
+  "#!/bin/sh",
+  "# agent-factory: every commit of the writer carries its seat (#128)",
+  `exec git interpret-trailers --in-place --if-exists replace --trailer "${agentTrailer({ seat: "writer" })}" "$1"`,
+  "",
+].join("\n");
 
 // paths the writer may read but not change, when the checkout has them
 const SETTINGS = [".claude", ".agents", "AGENTS.md", "CLAUDE.md"] as const;
@@ -118,6 +129,16 @@ async function fill(setup: CloneSetup, repo: string, ref: string, branch: string
   return git(setup.env, repo, ["rev-parse", "HEAD"]);
 }
 
+// trailerHook : the clone's prepare-commit-msg hook, in .git/hooks, which the box mounts read-only
+async function trailerHook(repo: string): Promise<Result<string>> {
+  const hooks = join(repo, ".git", "hooks");
+  return attempt(async () => {
+    await mkdir(hooks, { recursive: true });
+    await writeFile(join(hooks, "prepare-commit-msg"), TRAILER_HOOK, { mode: 0o755 });
+    return hooks;
+  }, `cannot write the trailer hook into ${hooks}`);
+}
+
 type Entry = { readonly kind: "absent" } | { readonly kind: "plain" } | { readonly kind: "symlink" };
 
 async function entry(path: string): Promise<Entry> {
@@ -187,7 +208,11 @@ async function checkedOut(setup: CloneSetup, dir: string, start: Start): Promise
     return made;
   }
   const head = await fill(setup, repo, ref, start.branch);
-  return head.kind === "ok" ? { kind: "ok", value: { repo, start: head.value } } : head;
+  if (head.kind === "failed") {
+    return head;
+  }
+  const hook = await trailerHook(repo);
+  return hook.kind === "ok" ? { kind: "ok", value: { repo, start: head.value } } : hook;
 }
 
 type Checkout = { readonly repo: string; readonly start: string };

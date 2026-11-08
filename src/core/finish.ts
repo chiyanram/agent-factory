@@ -20,7 +20,8 @@ import type { Forge } from "./forge/types.js";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
-import type { Post } from "./post.js";
+import { agentTrailer, commitKind } from "./notes.js";
+import type { Post, Seat } from "./post.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
 import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
 import type { Evidence, Outcome } from "./report.js";
@@ -98,6 +99,38 @@ export function fastForwardOnly(env: NodeJS.ProcessEnv): Guard {
       ? { kind: "failed", reason: "the run rewrote the branch's history" }
       : gitProblem("cannot compare the commits", checked);
   };
+}
+
+// seatOnEvery : refuses when a commit on the branch's own line since `since` lacks the seat's "Agent:" trailer, read as
+// git reads trailers (#128). The first-parent line leaves out the commits a merge brings in, which are people's work.
+export function seatOnEvery(env: NodeJS.ProcessEnv, request: { readonly since: string; readonly seat: Seat }): Guard {
+  return async (input) => {
+    const plain = { ...env, GIT_NO_REPLACE_OBJECTS: "1" };
+    const listed = await git(plain, input.repo, ["rev-list", "--first-parent", `${request.since}..${input.commit}`]);
+    if (listed.kind !== "ok") {
+      return gitProblem(`cannot list the commits of ${short(input.commit)}`, listed);
+    }
+    for (const sha of listed.stdout.split("\n").filter((line) => line !== "")) {
+      const read = await git(plain, input.repo, ["log", "-1", "--format=%B", sha]);
+      if (read.kind !== "ok") {
+        return gitProblem(`cannot read commit ${short(sha)}`, read);
+      }
+      if (!carries(read.stdout, request.seat)) {
+        const trailer = agentTrailer({ seat: request.seat });
+        return {
+          kind: "failed",
+          reason: `commit ${short(sha)} has no "${trailer}" trailer: every commit of the ${request.seat} carries it`,
+        };
+      }
+    }
+    return { kind: "ok" };
+  };
+}
+
+// carries : the message's trailer names this seat. Pure.
+function carries(message: string, seat: Seat): boolean {
+  const kind = commitKind({ message });
+  return kind.kind === "agent" && kind.seat === seat;
 }
 
 // excludeFactory : adds /.factory/ to the clone's shared info/exclude once, so `git add -A` in any worktree leaves the

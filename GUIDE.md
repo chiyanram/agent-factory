@@ -28,8 +28,9 @@ human           agent-factory approve (a local permission) · reviews · merges 
 ```
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
-and agent commits carry an `Agent: <seat>` trailer. **Today:** no script writes the trailer yet; `src/core/notes.ts`
-reads it, and the writer's report (#109) will add it. With your own login (`FACTORY_IDENTITY=own`, the default) there
+and agent commits carry an `Agent: <seat>` trailer. The dispatcher's writer gets it from a `prepare-commit-msg` hook in
+its clone, mounted read-only, and the host push refuses a writer commit without it (#128). **Today:** the bash
+`start-writer` writes no trailer. With your own login (`FACTORY_IDENTITY=own`, the default) there
 is nothing more to set up; the steps below are for a project that uses a bot. A bot's key belongs to a separate
 `factory` OS user on the VM, never to a file your own user can read.
 

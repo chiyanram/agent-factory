@@ -75,7 +75,8 @@ afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
 // what a writer does in its box: what it saw, then a commit and a report
 type Seen = { readonly spec: string; readonly task: string; readonly files: readonly string[] };
-type Act = { readonly commit: boolean; readonly report: unknown; readonly exit: number };
+// skipHook: the writer commits past the trailer hook, as `git -c core.hooksPath=/dev/null commit` would
+type Act = { readonly commit: boolean; readonly report: unknown; readonly exit: number; readonly skipHook?: boolean };
 
 // git as the writer runs it in the box: no author in the environment, so the clone's own author name applies
 function boxGit(dir: string, ...args: string[]): string {
@@ -94,7 +95,8 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
       if (act.commit) {
         writeFileSync(join(dir, "Renewal.java"), "class Renewal {}\n");
         boxGit(dir, "add", "-A");
-        boxGit(dir, "commit", "-q", "-m", "feat: refuse a reserved loan");
+        const hooks = act.skipHook === true ? ["-c", "core.hooksPath=/dev/null"] : [];
+        boxGit(dir, ...hooks, "commit", "-q", "-m", "feat: refuse a reserved loan");
       }
       writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(act.report));
       await fake.box.run(call);
@@ -264,6 +266,12 @@ describe("the writer step: a ticket's first run (#113)", () => {
       encoding: "utf8",
     }).trim();
     expect(author).toBe("agent-factory writer");
+    // the clone's hook gave the writer's commit its seat (#128)
+    const message = execFileSync("git", ["log", "-1", "--format=%B", head], {
+      cwd: join(p.root, "origin.git"),
+      encoding: "utf8",
+    });
+    expect(message).toBe("feat: refuse a reserved loan\n\nAgent: writer\n\n");
     expect(pushes).toEqual([{ lease: "absent", branch: "factory/PROJ-1" }]);
     // pushed first, then opened, claimed, and the evidence posted on the new change
     expect(told.log).toEqual([
@@ -347,6 +355,21 @@ describe("the writer step: a later run on the change", () => {
     expect(pushes).toEqual([{ lease: p.head2, branch: "feat/x" }]);
     expect(told.opened).toEqual([]);
     expect(told.log).toEqual([expect.stringMatching(/^note 12 .*done at/)]);
+  });
+
+  it("pushes nothing when a commit got past the trailer hook, and blocks the change for a person (#128)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge();
+    const pushes: { lease: string; branch: string }[] = [];
+    const act = { commit: true, report: DONE, exit: 0, skipHook: true };
+    const out = await run(setup(writer(fake, act, []), told, pushes), FIX, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(pushes).toEqual([]);
+    expect(origin("refs/heads/feat/x")).toBe(p.head2);
+    expect(told.log).toEqual([
+      "label 12 needs-human",
+      expect.stringMatching(/^note 12 .*blocked: the push failed: commit [0-9a-f]{8} has no "Agent: writer" trailer/),
+    ]);
   });
 
   it("refuses to run when the head moved, and starts no box", async () => {
