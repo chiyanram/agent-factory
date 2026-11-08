@@ -15,6 +15,7 @@ import {
   pluginEnv,
   readDescribe,
   readResult,
+  WRITE_POINTS,
   type Described,
   type ExtensionPoint,
   type PluginResult,
@@ -326,10 +327,14 @@ async function checked(setup: Setup, call: Call): Promise<Result<Entry>> {
   return same.kind === "ok" ? declares(entry.value, call) : same;
 }
 
+// declares : the capability is the plugin's, and a write is one it declared (ADR-0014 P5)
 function declares(entry: Entry, call: Call): Result<Entry> {
-  return entry.capabilities.some((c) => c.name === call.capability)
-    ? { kind: "ok", value: entry }
-    : failed(`the plugin ${call.plugin} does not declare ${call.capability}`);
+  if (!entry.capabilities.some((c) => c.name === call.capability)) {
+    return failed(`the plugin ${call.plugin} does not declare ${call.capability}`);
+  }
+  return WRITE_POINTS.includes(call.capability) && !entry.writes.includes(call.capability)
+    ? failed(`the plugin ${call.plugin} did not declare the write ${call.capability}; it may not perform it`)
+    : { kind: "ok", value: entry };
 }
 
 // callPlugin : one call of a registered plugin; a changed copy, an undeclared capability or a broken answer is refused

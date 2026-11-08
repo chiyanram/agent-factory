@@ -39,6 +39,7 @@ import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 import { pluginCommand } from "./plugin-cli.js";
+import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 
@@ -68,7 +69,7 @@ commands:
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
   plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
   plugin list                  the registered plugins
-  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${LOOP_HELP}
@@ -735,7 +736,27 @@ const COMMANDS: readonly Command[] = [
   })),
 ];
 
-export async function runCli(argv: readonly string[], io: Io): Promise<number> {
+// ownOptions : request, confirm and project read their own options (--file, --template <file>, a text that is one
+// word), so the main command line never parses their words
+function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefined {
+  const [name = ""] = argv;
+  const run = Object.hasOwn(REQUEST_COMMANDS, name) ? REQUEST_COMMANDS[name] : undefined;
+  if (run === undefined) {
+    return undefined;
+  }
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    io.err(`agent-factory ${name}: ${home.reason}\n`);
+    return Promise.resolve(1);
+  }
+  return run(argv.slice(1), { env: io.env, out: io.out, err: io.err, home: home.path });
+}
+
+export function runCli(argv: readonly string[], io: Io): Promise<number> {
+  return ownOptions(argv, io) ?? mainCli(argv, io);
+}
+
+async function mainCli(argv: readonly string[], io: Io): Promise<number> {
   const { values, positionals } = parseArgs({
     args: [...argv],
     allowPositionals: true,

@@ -30,8 +30,13 @@ async function ownersOnly(dir: string): Promise<boolean> {
   return s !== undefined && s.isDirectory() && (s.mode & 0o022) === 0;
 }
 
-async function setupOf(io: PluginIo): Promise<Setup> {
-  return { home: io.home, env: io.env, path: await pluginPath(io.env.PATH ?? "") };
+// pluginSetup : what a plugin runs with: the factory's home, the environment it picks from, and the trusted PATH
+export async function pluginSetup(home: string, env: NodeJS.ProcessEnv): Promise<Setup> {
+  return { home, env, path: await pluginPath(env.PATH ?? "") };
+}
+
+function setupOf(io: PluginIo): Promise<Setup> {
+  return pluginSetup(io.home, io.env);
 }
 
 // located : the plugin file a word names: an absolute path, or a bundled plugin's name
