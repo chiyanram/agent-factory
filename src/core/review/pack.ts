@@ -13,7 +13,7 @@ import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 import type { Change } from "../forge/types.js";
 import { hostGit } from "../git.js";
-import { plainBranch } from "../push.js";
+import { plainBranch } from "../branch.js";
 import { fence } from "./fence.js";
 import { agentsChain, readRules, type Pointer } from "./rules.js";
 

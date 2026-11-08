@@ -16,6 +16,7 @@
 // The App's token reaches git only as the credential helper's answer for https://github.com, from an environment variable
 // of that one git process; an empty credential.helper first drops every other helper, so no other login answers.
 
+import { plainBranch } from "./branch.js";
 import { hostGit, type GitResult } from "./git.js";
 import type { Identity } from "./identity.js";
 import type { Done, Result } from "./forge/api.js";
@@ -55,12 +56,7 @@ const TOKEN_VARIABLE = "FACTORY_PUSH_TOKEN";
 // git runs this helper with "get", "store" or "erase"; it answers only "get", from the variable above
 const HELPER = `!f() { test "$1" = get && printf 'username=x-access-token\\npassword=%s\\n' "$${TOKEN_VARIABLE}"; }; f`;
 
-// plainBranch : a branch name git accepts and no option or refspec can hide in.
-export function plainBranch(branch: string): boolean {
-  const shape = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch);
-  const bad = /\.\.|\/\/|\/\.|@\{|\.lock$|\/$|\.$/.test(branch);
-  return shape && !bad && branch !== "HEAD";
-}
+export { plainBranch };
 
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

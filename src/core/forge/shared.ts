@@ -2,7 +2,7 @@
 
 import type { Note } from "../notes.js";
 import { cleanField, renderPost, type Post } from "../post.js";
-import { plainBranch } from "../push.js";
+import { plainBranch } from "../branch.js";
 import type { Done, Failed, Result, Variable } from "./api.js";
 import type { Reader } from "./read.js";
 import type { ChangeRequest, OpenChange } from "./types.js";

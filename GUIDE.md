@@ -196,8 +196,8 @@ project's `.env`, and to edit a file of the package and a project's `.claude/set
 ## Plugins
 
 Every outside tool is reached through a plugin ([ADR-0014](docs/adr/0014-plugin-model.md), #134). A plugin is an
-executable: `<exe> describe` prints one JSON object (its protocol, capabilities, declared writes and the env names it
-needs), and `<exe> call` reads one JSON request on stdin and prints one JSON result, a sealed case of that
+executable: `<exe> describe` prints one JSON object (its protocol, capabilities, declared writes, the env names it
+needs, and the programs it runs by name, `cli`), and `<exe> call` reads one JSON request on stdin and prints one JSON result, a sealed case of that
 capability, on stdout; its logs go to stderr. The core runs it with no shell, in a process group of its own that the
 timeout, the output cap and the end of the call kill whole, and with only `PATH`, `HOME`, `LANG` and the names it
 declared. A plugin may not declare a model or cloud login, a forge token, a `FACTORY_*` setting or a loader variable
@@ -212,7 +212,7 @@ folder that someone else could write to, or a symlink inside the folder, is refu
 |---|---|
 | `agent-factory plugin add <path\|name>` | inspects a plugin and pins it, as above; a name is a plugin bundled with the package, and nothing is fetched from the network. A name already added is refused: use `update` |
 | `agent-factory plugin update <name> [<sha256>]` | runs the test kit on the plugin's folder as it is now and shows its hash and the writes it adds (exit 3, nothing recorded); with that hash, records it, if it is still the same |
-| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer |
+| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer; and write fidelity: each write fixture's text (`input.text`, or a post in `input.post` or `input.body`, as the posting template renders it), and once more a tricky one, must reach the CLI byte for byte. A plugin that writes must name its programs in `cli`; the kit then runs every check with a recording fake of each first on the plugin's `PATH`, answering from the fixture's `<case>.cli.json`, so it never reaches the real CLI or the network |
 | `agent-factory plugin list` | the registered plugins, with their writes and hashes |
 
 A plugin's `PATH` is yours without relative folders and without folders others can write to. The coordinator may not
@@ -221,8 +221,30 @@ run `plugin` or edit `plugins.json` or the store (#106). **Today:**
 - The pin covers the plugin's folder, not the interpreter a script names (`#!/usr/bin/env node` takes the first
   `node` on that `PATH`) nor the CLI it calls; folders your own user can write, such as `~/.local/bin`, stay on the
   `PATH`, since most CLIs live there.
-- No plugin is bundled yet. The forge as a plugin (#134 PR C) comes next; so does the kit's write-fidelity check,
-  the text a plugin sends its CLI byte for byte.
+- The fakes stand in for a program the plugin finds by name on its `PATH`; one it runs by an absolute path is not
+  seen, and the write fidelity check passes only when the text reaches a fake.
+
+### The forge as a plugin
+
+The package bundles two plugins, `github` and `gitlab`: the factory's own forge adapters, built into
+`plugins/<name>/lib/` from the compiled package, so the pinned folder holds every module it runs. Each declares
+`forge.read` and `forge.write` and runs `gh` or `glab` from its `PATH` with that CLI's own login; the project comes in
+each request, so it needs no setting and no token. A project opts in with its project file:
+
+```json
+{ "plugins": { "forge.read": "github", "forge.write": "github" } }
+```
+
+Run `agent-factory plugin add github` once. Then `dispatch <project>` makes every forge call of its pass through the
+plugin, and reads each answer back in the seam's own shapes, so a plugin that answers anything else fails that call.
+`FACTORY_DRY_RUN` still holds every write back. Without the mapping, the built-in adapter runs, as before.
+**Today:**
+
+- Only `dispatch` opts in; `review`, `poll`, `status` and the loop commands still use the built-in adapter.
+- `FACTORY_IDENTITY=app` with a forge plugin is refused: the App's token would have to reach the plugin, and none may
+  hold one (ADR-0014 P11). App projects keep the built-in adapter.
+- A plugin gets no `GH_HOST` or `GITLAB_HOST`, so `gh` and `glab` use their default host; a project on GitHub
+  Enterprise or a self-managed GitLab keeps the built-in adapter.
 
 ### Writes
 

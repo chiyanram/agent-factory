@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
-import { openProject } from "./core/forge/index.js";
+import { openProject, openProjectForge } from "./core/forge/index.js";
 import type { Forge } from "./core/forge/types.js";
 import { checkSpec, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
@@ -38,7 +38,7 @@ import { writerStep } from "./core/writer/step.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
-import { pluginCommand } from "./plugin-cli.js";
+import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
@@ -380,7 +380,11 @@ async function pass(
 }
 
 async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
-  const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+  // the project file may map the forge to a plugin (#134); then every forge call of the pass goes through it
+  const opened = await openProjectForge(
+    { env: io.env, log: (line) => io.err(`${line}\n`) },
+    { home: settings.home, project, plugins: await pluginSetup(settings.home, io.env) },
+  );
   const passed = opened.kind === "ok" ? await pass(project, dryRun, io, settings, opened.value) : opened;
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);

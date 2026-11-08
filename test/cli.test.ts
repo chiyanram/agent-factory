@@ -390,6 +390,18 @@ describe("agent-factory setup coordinator and coordinator (#106)", () => {
 });
 
 describe("agent-factory plugin (#134)", () => {
+  it("adds and tests a bundled forge plugin by its name, with the kit's fake gh in place of the real one", async () => {
+    const env = { FACTORY_HOME: home, PATH: process.env.PATH, HOME: home };
+    expect(await cli(["plugin", "test", "github"], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("ok   write fidelity forge.write/note (tricky text)"),
+    });
+    expect(await cli(["plugin", "add", "gitlab"], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("added gitlab"),
+    });
+  });
+
   it("lists none, adds a plugin by path, tests it, and records an update only for the hash it showed", async () => {
     expect(await cli(["plugin"])).toMatchObject({ code: 64 });
     expect(await cli(["plugin", "list"])).toMatchObject({ code: 0, out: "no plugins\n" });
@@ -404,7 +416,7 @@ describe("agent-factory plugin (#134)", () => {
       name: "echo",
       version: "1.0.0",
       capabilities: [{ name: "notify" }],
-      writes: ["notify"],
+      writes: [],
     };
     writeFileSync(
       path,

@@ -32,7 +32,9 @@ import type {
   Pipeline,
 } from "./types.js";
 
-export type GithubProject = { readonly owner: string; readonly name: string };
+import type { GithubProject } from "./target.js";
+
+export type { GithubProject };
 
 // Every check rollup state GitHub defines (StatusState). Anything else is unknown, never "none" (#124).
 const ROLLUP: Readonly<Record<string, Pipeline>> = {

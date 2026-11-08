@@ -1,7 +1,8 @@
 // contract — what a plugin is and says (#134; ADR-0014 P1, P8, P11). A plugin is an executable:
 //
 //   <exe> describe   prints one JSON object: { protocol, name, version, capabilities: [{ name, mandatory? }],
-//                    writes: [capability…], env: [NAME…] }
+//                    writes: [capability…], env: [NAME…], cli: [program…] }; cli (a protocol 1 minor, optional)
+//                    names the programs it runs by name on its PATH, so the test kit can stand in for them
 //   <exe> call       reads one JSON request on stdin: { protocol, capability, op, input }, and prints one JSON result
 //                    on stdout: { kind, … }, a sealed case of that capability; logs go to stderr
 //
@@ -36,6 +37,8 @@ const FORBIDDEN_ENV =
   /^(ANTHROPIC_|CLAUDE_|COPILOT_|GITHUB_COPILOT|OPENAI_|AWS_|AZURE_|GOOGLE_|GCLOUD_|CLOUDSDK_|FACTORY_|GH_|GITHUB_|GITLAB_|GLAB_|CI_JOB_TOKEN$|LD_|DYLD_|NODE_|NPM_CONFIG_|PYTHON|PERL|RUBY|JAVA_TOOL_OPTIONS$|BASH_ENV$|ENV$|IFS$|PATH$|HOME$|LANG$|SHELL$)/;
 const ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 export const PLUGIN_NAME = /^[a-z][a-z0-9-]{0,62}$/;
+// a program found on the PATH by its bare name: no slash, so never a path
+const CLI_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 const MAX_VERSION = 64;
 
 export type Capability = { readonly name: ExtensionPoint; readonly mandatory: boolean };
@@ -47,6 +50,8 @@ export type Described = {
   readonly capabilities: readonly Capability[];
   readonly writes: readonly ExtensionPoint[];
   readonly env: readonly string[];
+  // the programs it runs from its PATH, such as gh; none when it says nothing
+  readonly cli: readonly string[];
 };
 
 export type Request = {
@@ -116,16 +121,30 @@ type Parts = {
   readonly capabilities: readonly Capability[];
   readonly writes: readonly ExtensionPoint[];
   readonly env: readonly string[];
+  readonly cli: readonly string[];
 };
 
+function cliName(value: unknown): string | Bad {
+  return typeof value === "string" && CLI_NAME.test(value) ? value : BAD;
+}
+
 const SHAPE =
-  "describe must list capabilities, at least one [{name, mandatory?}] of the known extension points, writes among them, and env names that are not a login, a factory setting or a loader variable, none twice";
+  "describe must list capabilities, at least one [{name, mandatory?}] of the known extension points, writes among them, env names that are not a login, a factory setting or a loader variable, and cli program names with no slash, none twice";
+
+// optional : an optional list, none when it is not there
+function optional<T>(value: unknown, each: (v: unknown) => T | Bad): readonly T[] | Bad {
+  return listOf(value ?? [], each);
+}
 
 function listsOf(raw: Readonly<Record<string, unknown>>): Parts | Bad {
   const capabilities = listOf(raw.capabilities, capabilityOf);
   const writes = listOf(raw.writes, writeOf);
-  const env = listOf(raw.env ?? [], envName);
-  return capabilities === BAD || writes === BAD || env === BAD ? BAD : { capabilities, writes, env };
+  if (capabilities === BAD || writes === BAD) {
+    return BAD;
+  }
+  const env = optional(raw.env, envName);
+  const cli = optional(raw.cli, cliName);
+  return env === BAD || cli === BAD ? BAD : { capabilities, writes, env, cli };
 }
 
 function partsOf(raw: Readonly<Record<string, unknown>>): Result<Parts> {
