@@ -1,7 +1,9 @@
 // built — the project's box image, built on this host and pinned by its local ID (#113 Q1, decided on #30,
 // 2026-11-07): `agent-factory box build <project>`. No registry: the image never leaves the host that runs it.
 //
-//   1 the base image, from the package's images/factory-box, tagged factory-box-base:<12 hex of its ID>
+//   1 the base image, from the package's images/factory-box, tagged factory-box-base:<12 hex of its ID>; its build
+//     context holds this package itself (npm pack), so the box runs the host's own agent-factory (#171 Q3): the
+//     writer's lint hook is agent-factory lint-edit
 //   2 the project's own layer, if <home>/projects/<p>/box.Dockerfile exists: FROM ${BASE} (that tag), tagged
 //     factory-box-<p>:<12 hex of its ID>; with none, the project runs the base
 //   3 the image's ID, sha256:<64 hex>, written to <home>/projects/<p>/box.json; the dispatcher runs exactly that ID
@@ -12,7 +14,7 @@
 
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { codeOf, prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
@@ -23,6 +25,11 @@ import type { Docker } from "./vm.js";
 
 export const BOX_FILE = "box.json";
 export const PROJECT_DOCKERFILE = "box.Dockerfile";
+// the name the base Dockerfile copies this package in by
+export const PACKAGE_FILE = "agent-factory.tgz";
+
+// packs this package into a folder: the tarball's path, or why it cannot (box/pack.ts; a test passes its own)
+export type Packer = (dest: string) => Promise<Result<string>>;
 
 // a read of box.json: the image, none built yet, or a file that is there but refused
 export type BoxFileRead =
@@ -81,13 +88,13 @@ export function tagOf(name: string, id: string): string {
 
 // the base builds from its folder's own Dockerfile; a project layer from its file, on the base's tag
 export type Source =
-  | { readonly kind: "base"; readonly context: string }
+  | { readonly kind: "base"; readonly context: string; readonly dockerfile: string }
   | { readonly kind: "layer"; readonly context: string; readonly dockerfile: string; readonly base: string };
 
 function sourceArgs(source: Source): readonly string[] {
   switch (source.kind) {
     case "base":
-      return [source.context];
+      return ["--file", source.dockerfile, source.context];
     case "layer":
       return ["--file", source.dockerfile, "--build-arg", `BASE=${source.base}`, source.context];
   }
@@ -98,7 +105,22 @@ export function buildArgs(idFile: string, source: Source): readonly string[] {
   return ["build", "--quiet", "--iidfile", idFile, ...sourceArgs(source)];
 }
 
-type Build = { readonly docker: Docker; readonly scratch: string };
+type Build = { readonly docker: Docker; readonly scratch: string; readonly pack: Packer };
+
+// baseContext : a build folder that holds this package as PACKAGE_FILE
+async function baseContext(b: Build): Promise<Result<string>> {
+  const dir = join(b.scratch, "base");
+  const made = await attempt(() => mkdir(dir, { recursive: true, mode: 0o700 }), `cannot make ${dir}`);
+  const packed = made.kind === "ok" ? await b.pack(dir) : made;
+  if (packed.kind === "failed") {
+    return packed;
+  }
+  const renamed = await attempt(
+    () => rename(packed.value, join(dir, PACKAGE_FILE)),
+    `cannot rename ${basename(packed.value)}`,
+  );
+  return renamed.kind === "ok" ? { kind: "ok", value: dir } : renamed;
+}
 
 async function docker(d: Docker, args: readonly string[]): Promise<Result<string>> {
   const exit = await d.run({ bin: d.bin, args, stdin: "", env: d.env });
@@ -167,7 +189,15 @@ async function buildAll(
   b: Build,
   input: { readonly baseDir: string; readonly dir: string; readonly project: string },
 ): Promise<Result<Built>> {
-  const base = await buildOne(b, "factory-box-base", { kind: "base", context: input.baseDir });
+  const context = await baseContext(b);
+  const base =
+    context.kind === "ok"
+      ? await buildOne(b, "factory-box-base", {
+          kind: "base",
+          context: context.value,
+          dockerfile: join(input.baseDir, "Dockerfile"),
+        })
+      : context;
   const image = base.kind === "ok" ? await layered(b, input.dir, input.project, base.value) : base;
   return image.kind === "ok" ? record(input.dir, image.value) : image;
 }
@@ -179,6 +209,7 @@ export async function buildBox(input: {
   readonly project: string;
   // the package's images/factory-box folder
   readonly baseDir: string;
+  readonly pack: Packer;
 }): Promise<Result<Built>> {
   if (!plainName(input.project)) {
     return { kind: "failed", reason: `${JSON.stringify(input.project)} is not a plain project name` };
@@ -191,7 +222,7 @@ export async function buildBox(input: {
   if (scratch.kind === "failed") {
     return scratch;
   }
-  const result = await buildAll({ docker: input.docker, scratch: scratch.value }, { ...input, dir });
+  const result = await buildAll({ docker: input.docker, scratch: scratch.value, pack: input.pack }, { ...input, dir });
   await rm(scratch.value, { recursive: true, force: true }).catch(() => undefined);
   return result;
 }

@@ -38,7 +38,7 @@
 
 import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
-import type { Summary, WriterMode } from "./records.js";
+import type { Summary, Task } from "./records.js";
 
 export type ApprovalView =
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
@@ -68,7 +68,7 @@ export type TicketState = {
 
 export type Action =
   | { readonly kind: "wait"; readonly why: string }
-  | { readonly kind: "writer"; readonly mode: WriterMode; readonly why: string }
+  | { readonly kind: "writer"; readonly task: Task; readonly why: string }
   | { readonly kind: "ready"; readonly head: string }
   | { readonly kind: "review"; readonly head: string }
   | { readonly kind: "verify"; readonly head: string }
@@ -163,9 +163,9 @@ const noChange: Rule = (s) =>
     : "next";
 
 // a bug's fix waits for its failing test, however the test-first run ended
-function nextMode(s: TicketState): WriterMode {
+function nextTask(s: TicketState): Task {
   const bug = s.approval.kind === "approved" && s.approval.lane === "bug";
-  return bug && !s.runs.testFirstDone ? "test-first" : "fix";
+  return { kind: bug && !s.runs.testFirstDone ? "test-first" : "fix" };
 }
 
 const AGAIN: Readonly<Record<"asked" | "blocked", string>> = {
@@ -176,15 +176,17 @@ const AGAIN: Readonly<Record<"asked" | "blocked", string>> = {
 // after : the writer's next run once the last one ended; "next" when it finished its work
 function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): Action | "next" {
   if (w.outcome !== "done") {
-    return { kind: "writer", mode: nextMode(s), why: AGAIN[w.outcome] };
+    return { kind: "writer", task: nextTask(s), why: AGAIN[w.outcome] };
   }
-  return w.mode === "test-first" ? { kind: "writer", mode: "fix", why: "the failing test is in; now the fix" } : "next";
+  return w.mode === "test-first"
+    ? { kind: "writer", task: { kind: "fix" }, why: "the failing test is in; now the fix" }
+    : "next";
 }
 
 // the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
-  return w.kind === "none" ? { kind: "writer", mode: nextMode(s), why: "approved; no run yet" } : after(s, w);
+  return w.kind === "none" ? { kind: "writer", task: nextTask(s), why: "approved; no run yet" } : after(s, w);
 };
 
 function writerHead(s: TicketState): string {
@@ -222,7 +224,11 @@ const ready: Rule = (s) => {
   }
   return s.runs.readyFailures >= MAX_READY_FAILURES
     ? { kind: "needs-human", why: `the ready check failed ${s.runs.readyFailures} times` }
-    : { kind: "writer", mode: "rework", why: `the ready check failed at this head: ${r.why}` };
+    : {
+        kind: "writer",
+        task: { kind: "ready-failed", why: r.why },
+        why: `the ready check failed at this head: ${r.why}`,
+      };
 };
 
 // the review at this head, or "none" when there is none yet
@@ -248,7 +254,7 @@ const review: Rule = (s) => {
   }
   return actOn === "none"
     ? { kind: "review", head: writerHead(s) }
-    : { kind: "writer", mode: "rework", why: `${actOn} Act on finding(s)` };
+    : { kind: "writer", task: { kind: "act-on", head: writerHead(s) }, why: `${actOn} Act on finding(s)` };
 };
 
 const WAITS: Readonly<Record<string, string>> = {
@@ -260,10 +266,15 @@ const WAITS: Readonly<Record<string, string>> = {
 
 const RED = new Set(["failed", "canceled"]);
 
-function red(s: TicketState): Action {
-  return s.runs.ciRounds >= MAX_CI_ROUNDS
-    ? { kind: "needs-human", why: `CI is still red after ${s.runs.ciRounds} CI rounds` }
-    : { kind: "writer", mode: "ci", why: "CI is red at this head" };
+// red : the writer's CI run, for the check that failed, or a person after the last round
+function red(s: TicketState, failed: "forge" | "verifier"): Action {
+  const head = writerHead(s);
+  if (s.runs.ciRounds >= MAX_CI_ROUNDS) {
+    return { kind: "needs-human", why: `CI is still red after ${s.runs.ciRounds} CI rounds` };
+  }
+  return failed === "forge"
+    ? { kind: "writer", task: { kind: "ci-red", head }, why: "CI is red at this head" }
+    : { kind: "writer", task: { kind: "verify-failed", head }, why: "the local verifier failed at this head" };
 }
 
 function green(s: TicketState): Action {
@@ -289,7 +300,10 @@ const localGate: Rule = (s) => {
   if (passed === "none") {
     return { kind: "verify", head: writerHead(s) };
   }
-  return passed && !forgeRed(s) ? green(s) : red(s);
+  if (!passed) {
+    return red(s, "verifier");
+  }
+  return forgeRed(s) ? red(s, "forge") : green(s);
 };
 
 // forgeRed : a check on the forge is red at this head, whatever the gate
@@ -302,7 +316,7 @@ const gate: Rule = (s) => {
   const line = open(s);
   const pipeline = line === "none" ? "none" : line.pipeline.kind;
   if (RED.has(pipeline)) {
-    return red(s);
+    return red(s, "forge");
   }
   return pipeline === "success" ? green(s) : { kind: "wait", why: WAITS[pipeline] ?? "waiting for CI" };
 };

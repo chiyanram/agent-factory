@@ -361,10 +361,11 @@ describe("agent-factory box (#113)", () => {
     }
   });
 
-  it("fails with docker's own words when the build fails, and writes no box file", async () => {
+  it("fails with the tool's own words when the build fails, and writes no box file", async () => {
     const run = await cli(["box", "build", "ledger"]);
     expect(run.code).toBe(1);
-    expect(run.err).toContain("agent-factory box: docker build: no CLI in this test");
+    // the first step packs this package for the base image (#171)
+    expect(run.err).toContain("agent-factory box: npm pack: no CLI in this test");
   });
 });
 

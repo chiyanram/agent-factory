@@ -21,6 +21,9 @@ export type Claude = {
   readonly model: string;
 };
 
+// the writer's settings file in the clone, for claude --settings (tools.ts), or none
+export type SettingsArg = { readonly kind: "none" } | { readonly kind: "file"; readonly path: string };
+
 export type WriterRun = {
   readonly setup: BoxSetup;
   readonly clone: Clone;
@@ -29,6 +32,7 @@ export type WriterRun = {
   readonly login: Readonly<Record<string, string>>;
   readonly timeoutSeconds: number;
   readonly claude: Claude;
+  readonly settings: SettingsArg;
 };
 
 export type Ended = { readonly outcome: Outcome; readonly tip: string; readonly patch: string };
@@ -39,8 +43,9 @@ const QUIET: Readonly<Record<string, string>> = {
   DISABLE_AUTOUPDATER: "1",
 };
 
-// claudeArgv : the writer's command. Pure. The prompt goes on stdin; the plugin path is relative to the clone.
-export function claudeArgv(claude: Claude): Argv {
+// claudeArgv : the writer's command. Pure. The prompt goes on stdin; the plugin and settings paths are relative to the
+// clone.
+export function claudeArgv(claude: Claude, settings: SettingsArg = { kind: "none" }): Argv {
   return [
     "claude",
     "-p",
@@ -51,6 +56,7 @@ export function claudeArgv(claude: Claude): Argv {
     "json",
     ...(claude.maxUsd === "" ? [] : ["--max-budget-usd", claude.maxUsd]),
     ...(claude.model === "" ? [] : ["--model", claude.model]),
+    ...(settings.kind === "file" ? ["--settings", settings.path] : []),
   ];
 }
 
@@ -79,7 +85,7 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
   const ran = await run.setup.box.run({
     session: session.value,
     command: {
-      argv: claudeArgv(run.claude),
+      argv: claudeArgv(run.claude, run.settings),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
     },

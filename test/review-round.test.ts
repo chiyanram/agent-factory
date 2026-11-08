@@ -1,3 +1,4 @@
+import { readActOn } from "../src/core/review/act-on.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -112,6 +113,7 @@ function forge(
     removeLabel: failed,
     claimed: failed,
     changes: failed,
+    failedJobs: failed,
   };
 }
 
@@ -519,6 +521,48 @@ describe("pass records", () => {
       .trim()
       .split("\n");
     expect(kept.map((l) => JSON.parse(l).usage.input_tokens)).toEqual([7000, 10]);
+  });
+
+  it("keeps the round's Act on findings with the head, for a rework run, and the Consider ones not (#171)", async () => {
+    const other = { ...FINDING, id: "F2", finding: "a name could be clearer" };
+    const m = model(
+      [
+        findAnswer([FINDING, other]),
+        verdicts([
+          { id: "F1", bucket: "act_on", why: "real" },
+          { id: "F2", bucket: "consider", why: "judgment" },
+        ]),
+      ],
+      [],
+    );
+    await reviewRound(setup(forge(fresh()), m));
+    const kept = await readActOn({ recordsDir: join(p.root, "records"), change: 12, head: p.head2 });
+    expect(kept).toEqual({
+      kind: "ok",
+      value: [
+        {
+          id: "F1",
+          // as the repo names it: the reviewer's copy sits under code/
+          file: "svc/Main.java",
+          line: FINDING.line,
+          rule: FINDING.rule,
+          severity: FINDING.severity,
+          finding: FINDING.finding,
+          fix: FINDING.fix,
+        },
+      ],
+    });
+  });
+
+  it("posts nothing when it cannot keep the Act on findings", async () => {
+    const log = fresh();
+    writeFileSync(join(p.root, "records"), "a file where the folder goes");
+    const m = model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "real" }])], []);
+    expect(await reviewRound(setup(forge(log), m))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringMatching(/cannot keep .*act-on\.json/),
+    });
+    expect(log.threads).toEqual([]);
   });
 
   it("readAnswer gives back the CLI's answer on a failure, and never throws on one that is not JSON", () => {

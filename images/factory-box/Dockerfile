@@ -9,6 +9,9 @@
 # owner's uid at start and runs every command as `box` (Q3).
 #
 # Base images are pinned by digest (ADR-0012 S7). apt packages follow the Ubuntu 24.04 archive at build time.
+#
+# `agent-factory box build` puts this package in the build context as agent-factory.tgz (npm pack of the host's own
+# copy, #171), so the writer's lint hook runs the same agent-factory as the host. Build it through box build only.
 
 FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS node
 
@@ -30,6 +33,11 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@github/copilot@${COPILOT_VERSION}" \
       "opencode-ai@${OPENCODE_VERSION}" \
+ && npm cache clean --force
+
+COPY agent-factory.tgz /tmp/agent-factory.tgz
+RUN npm install --global --no-fund --no-audit /tmp/agent-factory.tgz \
+ && rm /tmp/agent-factory.tgz \
  && npm cache clean --force
 
 # Ubuntu's image has a user `ubuntu` at uid 1000; the box user takes its place, and joins the engine's group.

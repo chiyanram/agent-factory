@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
-import { buildBox, checkLayer, readBoxFile } from "../src/core/box/built.js";
+import { buildBox, checkLayer, PACKAGE_FILE, readBoxFile, type Packer } from "../src/core/box/built.js";
+import { packedOf } from "../src/core/box/pack.js";
 import { hostDocker } from "../src/core/box/docker.js";
 
 const BASE_ID = `sha256:${"a".repeat(64)}`;
@@ -37,16 +38,37 @@ beforeEach(() => {
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 const docker = (run: Runner) => ({ run, bin: "docker", env: {} });
-const build = (run: Runner, project = "ledger") =>
-  buildBox({ docker: docker(run), home, project, baseDir: "/pkg/images/factory-box" });
-const argv = (calls: readonly Call[]): string[] => calls.map((c) => c.args.join(" ").replace(/\S+\.id /, "<id> "));
+
+// a fake npm pack: writes a tarball into the folder it is given, and records each folder
+function packer(packed: string[] = [], fail = ""): Packer {
+  return async (dest) => {
+    if (fail !== "") {
+      return { kind: "failed", reason: fail };
+    }
+    packed.push(dest);
+    const path = join(dest, "chiyanram-agent-factory-0.10.0.tgz");
+    writeFileSync(path, "tarball");
+    return { kind: "ok", value: path };
+  };
+}
+
+const build = (run: Runner, project = "ledger", pack: Packer = packer()) =>
+  buildBox({ docker: docker(run), home, project, baseDir: "/pkg/images/factory-box", pack });
+// a build's scratch folder changes each run: name it <base>
+const argv = (calls: readonly Call[]): string[] =>
+  calls.map((c) =>
+    c.args
+      .join(" ")
+      .replace(/\S+\.id /, "<id> ")
+      .replace(/\S+factory-box-build-\w+\/base/, "<base>"),
+  );
 
 describe("box build (#113 Q1)", () => {
   it("builds the base, tags it by its ID, and pins that ID in box.json when the project has no Dockerfile", async () => {
     const fake = fakeDocker([BASE_ID]);
     expect(await build(fake.run)).toEqual({ kind: "ok", value: { base: BASE_ID, image: BASE_ID, layer: "none" } });
     expect(argv(fake.calls)).toEqual([
-      "build --quiet --iidfile <id> /pkg/images/factory-box",
+      "build --quiet --iidfile <id> --file /pkg/images/factory-box/Dockerfile <base>",
       `tag ${BASE_ID} factory-box-base:aaaaaaaaaaaa`,
     ]);
     expect(await readBoxFile({ home, project: "ledger" })).toEqual({
@@ -99,6 +121,47 @@ describe("box build (#113 Q1)", () => {
     const fake = fakeDocker([BASE_ID]);
     expect(await build(fake.run, "../x")).toMatchObject({ kind: "failed", reason: expect.stringContaining("plain") });
     expect(fake.calls).toEqual([]);
+  });
+});
+
+describe("this package in the base image (#171 Q3)", () => {
+  it("builds the base from a folder that holds this package as agent-factory.tgz, and removes the folder after", async () => {
+    const packed: string[] = [];
+    const seen: boolean[] = [];
+    const fake = fakeDocker([BASE_ID]);
+    const run: Runner = async (c) => {
+      if (c.args[0] === "build") {
+        seen.push(existsSync(join(c.args.at(-1) ?? "", PACKAGE_FILE)));
+      }
+      return fake.run(c);
+    };
+    expect(await build(run, "ledger", packer(packed))).toMatchObject({ kind: "ok" });
+    expect(seen).toEqual([true]);
+    expect(packed).toHaveLength(1);
+    expect(existsSync(packed[0] ?? "")).toBe(false);
+  });
+
+  it("builds nothing when the package cannot be packed", async () => {
+    const fake = fakeDocker([BASE_ID]);
+    expect(await build(fake.run, "ledger", packer([], "npm pack: no npm"))).toEqual({
+      kind: "failed",
+      reason: "npm pack: no npm",
+    });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("reads the tarball npm wrote, and refuses a package with no built CLI", () => {
+    const answer = (paths: readonly string[]) =>
+      JSON.stringify([{ filename: "chiyanram-agent-factory-0.10.0.tgz", files: paths.map((path) => ({ path })) }]);
+    expect(packedOf(answer(["package.json", "dist/cli.js"]), "/ctx")).toEqual({
+      kind: "ok",
+      value: "/ctx/chiyanram-agent-factory-0.10.0.tgz",
+    });
+    expect(packedOf(answer(["package.json"]), "/ctx")).toEqual({
+      kind: "failed",
+      reason: "the package has no dist/cli.js: run npm run build in it first",
+    });
+    expect(packedOf("npm WARN", "/ctx")).toEqual({ kind: "failed", reason: "npm pack named no tarball" });
   });
 });
 

@@ -8,7 +8,8 @@ import type { CommitStatus, Forge } from "../src/core/forge/types.js";
 import type { ProjectFile } from "../src/core/project.js";
 import type { Evidence } from "../src/core/report.js";
 import { boxPlan } from "../src/core/ready/plan.js";
-import { readyStep, verifyStep, VERIFY_CONTEXT, type BoxPlan } from "../src/core/ready/steps.js";
+import { recordsDirOf, readKept } from "../src/core/kept.js";
+import { readyStep, verifyStep, VERIFY_CONTEXT, VERIFY_FILE, type BoxPlan } from "../src/core/ready/steps.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
 
@@ -212,6 +213,7 @@ function statusForge(posted: CommitStatus[]): Forge {
     ciConfig: notUsed,
     claimed: notUsed,
     changes: notUsed,
+    failedJobs: notUsed,
     status: async (s) => (posted.push(s), { kind: "ok" }),
   };
 }
@@ -244,6 +246,45 @@ describe("the local verifier (#91)", () => {
     );
     expect(broken.kind === "available" ? await broken.run(input([])) : broken).toMatchObject({ kind: "failed" });
     expect(posted.at(-1)).toMatchObject({ state: "pending", description: expect.stringContaining("could not run") });
+  });
+
+  it("keeps a failed run's output with the head before it posts, for the writer's CI run (#171)", async () => {
+    const posted: CommitStatus[] = [];
+    const ran: Ran = {
+      kind: "exited",
+      code: 2,
+      stdout: "> Task :test\nRenewalTest > refuses a reserved loan FAILED\n",
+      stderr: "\u001b[31mBUILD FAILED\u001b[0m\n",
+    };
+    const step = verifyStep(plan(fakeBox({ runs: [ran] }).box), statusForge(posted));
+    if (step.kind !== "available") throw new Error(step.reason);
+    expect(await step.run(input([]))).toEqual({ kind: "ok", value: { passed: false } });
+    const kept = await readKept({ recordsDir: recordsDirOf(p.clone), change: 12, head }, VERIFY_FILE);
+    expect(kept).toEqual({
+      kind: "ok",
+      value: [
+        "# The local verifier failed",
+        "",
+        "`make verify exited 2` at your head, in a fresh box.",
+        "",
+        "stdout, its last lines:",
+        "",
+        "```text",
+        "> Task :test\nRenewalTest > refuses a reserved loan FAILED",
+        "```",
+        "",
+        "stderr, its last lines:",
+        "",
+        "```text",
+        "BUILD FAILED",
+        "```",
+        "",
+      ].join("\n"),
+    });
+    const passing = verifyStep(plan(fakeBox({ runs: [exited(0)] }).box), statusForge([]));
+    if (passing.kind !== "available") throw new Error(passing.reason);
+    await passing.run(input([], "f".repeat(40)));
+    expect(existsSync(join(recordsDirOf(p.clone), "12", "f".repeat(40)))).toBe(false);
   });
 
   it("is unavailable when the project's gate is forge CI, or when there is no box", () => {

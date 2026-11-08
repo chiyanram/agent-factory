@@ -7,12 +7,13 @@
 // comments only: system notes are left out everywhere.
 
 import type { Note } from "../notes.js";
-import { graphql, rest, type Client, type Done, type Result } from "./api.js";
+import { graphql, rest, restText, type Client, type Done, type Result } from "./api.js";
 import { reader, type Reader } from "./read.js";
 import {
   after,
   completeAll,
   done,
+  logOf,
   nextCursor,
   nextPage,
   openOnce,
@@ -20,6 +21,7 @@ import {
   rendered,
   text,
   unanchored,
+  withLogs,
   type Page,
   type RawOpen,
 } from "./shared.js";
@@ -30,6 +32,7 @@ import type {
   ChangeRequest,
   ChangeState,
   Changes,
+  FailedJob,
   Forge,
   Level,
   MergedChange,
@@ -359,6 +362,39 @@ export function gitlab(client: Client, project: string): Forge {
     });
   }
 
+  type Job = { readonly id: number; readonly name: string };
+
+  // failedOf : the failed jobs of one pipeline (a retried job counts once, as its latest try)
+  async function failedOf(id: number): Promise<Result<readonly Job[]>> {
+    const path = `${base}/pipelines/${id}/jobs?scope[]=failed&per_page=100`;
+    const answer = await rest(client, { path, method: "GET", body: none });
+    if (answer.kind === "failed") {
+      return answer;
+    }
+    const r = reader("gitlab jobs");
+    return r.done(r.list(answer.value, "").map((j): Job => ({ id: r.int(j, "id"), name: r.text(j, "name") })));
+  }
+
+  // failedJobs : the failed jobs of the merge request's head pipeline, each with its trace's end; none with no pipeline
+  async function failedJobs(input: { readonly number: number }): Promise<Result<readonly FailedJob[]>> {
+    const headId = await get(`${base}/merge_requests/${input.number}`, "gitlab merge request", (v, r) =>
+      r.absent(v, "head_pipeline") ? 0 : r.int(v, "head_pipeline.id"),
+    );
+    if (headId.kind === "failed" || headId.value === 0) {
+      return headId.kind === "failed" ? headId : { kind: "ok", value: [] };
+    }
+    const jobs = await failedOf(Number(headId.value));
+    if (jobs.kind === "failed") {
+      return jobs;
+    }
+    const traced = await withLogs(
+      jobs.value,
+      (j) => j.name,
+      async (j) => logOf(await restText(client, `${base}/jobs/${j.id}/trace`)),
+    );
+    return { kind: "ok", value: traced };
+  }
+
   return {
     name: "gitlab",
     mark: "!",
@@ -368,6 +404,7 @@ export function gitlab(client: Client, project: string): Forge {
       return login.kind === "ok" ? { kind: "ok", value: String(login.value) } : login;
     },
     change,
+    failedJobs,
     // ci_config_path: empty for .gitlab-ci.yml; "path@group/project" or a URL for a file kept outside this repository
     async ciConfig() {
       const set = await get(base, "gitlab project", (v, r) =>

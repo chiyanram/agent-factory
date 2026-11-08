@@ -117,6 +117,38 @@ describe("the forge as a plugin (#134 PR C)", () => {
     }
   });
 
+  it("carries the failed jobs at a head, a log's end and a job with no log, as the built-in adapter does (#171)", async () => {
+    const sha = "b".repeat(40);
+    const { setup, fakes } = await bundled([
+      http("200 OK", {
+        check_runs: [
+          { id: 7, name: "lint", conclusion: "failure", app: { slug: "github-actions" } },
+          { id: 8, name: "external", conclusion: "failure", app: { slug: "circleci" } },
+        ],
+      }),
+      http("200 OK", { statuses: [] }),
+      { code: 0, stdout: "HTTP/2.0 200 OK\r\nContent-Type: text/plain\r\n\r\nstep 1\nFAIL lint", stderr: "" },
+    ]);
+    try {
+      const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+      expect(await forge.failedJobs({ number: 5, head: sha })).toEqual({
+        kind: "ok",
+        value: [
+          { name: "lint", log: { kind: "tail", text: "step 1\nFAIL lint" } },
+          { name: "external", log: { kind: "none", why: "not a GitHub Actions job: its log is on its own site" } },
+        ],
+      });
+      const calls = await fakes.calls();
+      expect(calls.map((c) => c.argv[2])).toEqual([
+        `repos/chiyanram/ledger/commits/${sha}/check-runs?filter=latest&per_page=100`,
+        `repos/chiyanram/ledger/commits/${sha}/status?per_page=100`,
+        "repos/chiyanram/ledger/actions/jobs/7/logs",
+      ]);
+    } finally {
+      await fakes.remove();
+    }
+  });
+
   it("fails a call the forge refuses, with the CLI's reason, and never retries a plain failure", async () => {
     const { setup, fakes } = await bundled([http("404 Not Found", { message: "Not Found" })]);
     const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });

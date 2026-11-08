@@ -3,12 +3,13 @@
 // into the query text. Only branches in the repository itself are supported: the writer pushes there.
 
 import type { Note } from "../notes.js";
-import { graphql, rest, type Client, type Done, type Result } from "./api.js";
+import { graphql, rest, restText, type Client, type Done, type Result } from "./api.js";
 import { reader } from "./read.js";
 import {
   after,
   completeAll,
   done,
+  logOf,
   nextCursor,
   nextPage,
   openOnce,
@@ -16,6 +17,7 @@ import {
   rendered,
   text,
   unanchored,
+  withLogs,
   type Page,
   type RawOpen,
 } from "./shared.js";
@@ -24,6 +26,7 @@ import type {
   ChangeRequest,
   Changes,
   CommitStatus,
+  FailedJob,
   Forge,
   Level,
   MergedChange,
@@ -104,8 +107,70 @@ function comment(r: ReturnType<typeof reader>, node: unknown): Note {
   return { body: r.text(node, "body"), author: { name: author(r, node) }, at: r.text(node, "createdAt") };
 }
 
+// the check-run conclusions that make the rollup red (ROLLUP above: FAILURE, ERROR)
+const RED_CHECKS = new Set(["failure", "timed_out", "cancelled", "startup_failure", "action_required"]);
+const RED_STATUSES = new Set(["failure", "error"]);
+
+type RedCheck = { readonly id: number; readonly name: string; readonly actions: boolean };
+
+// redChecks : the failed check runs at a head; only a GitHub Actions run has a job log the API gives. Pure.
+export function redChecks(answer: unknown, r: ReturnType<typeof reader>): readonly RedCheck[] {
+  return r
+    .list(answer, "check_runs")
+    .filter((c) => RED_CHECKS.has(String(r.at(c, "conclusion"))))
+    .map((c) => ({ id: r.int(c, "id"), name: r.text(c, "name"), actions: r.at(c, "app.slug") === "github-actions" }));
+}
+
+// redStatuses : the failed commit statuses at a head, which carry a description and no log. Pure.
+export function redStatuses(answer: unknown, r: ReturnType<typeof reader>): readonly FailedJob[] {
+  return r
+    .list(answer, "statuses")
+    .filter((s) => RED_STATUSES.has(String(r.at(s, "state"))))
+    .map((s) => ({
+      name: r.text(s, "context"),
+      log: {
+        kind: "none",
+        why: `a commit status, with no log: ${r.absent(s, "description") ? "" : r.text(s, "description")}`,
+      },
+    }));
+}
+
 export function github(client: Client, project: GithubProject): Forge {
   const repo = `repos/${project.owner}/${project.name}`;
+
+  async function getJson<T>(path: string, context: string, pick: (v: unknown, r: ReturnType<typeof reader>) => T) {
+    const answer = await rest(client, { path, method: "GET", body: { kind: "none" } });
+    if (answer.kind === "failed") {
+      return answer;
+    }
+    const r = reader(context);
+    return r.done(pick(answer.value, r));
+  }
+
+  // failedJobs : the head's failed check runs, each Actions run with its log's end, then its failed commit statuses
+  async function failedJobs(input: { readonly head: string }): Promise<Result<readonly FailedJob[]>> {
+    const checks = await getJson(
+      `${repo}/commits/${input.head}/check-runs?filter=latest&per_page=100`,
+      "github check runs",
+      redChecks,
+    );
+    const statuses =
+      checks.kind === "ok"
+        ? await getJson(`${repo}/commits/${input.head}/status?per_page=100`, "github status", redStatuses)
+        : checks;
+    if (checks.kind === "failed" || statuses.kind === "failed") {
+      return statuses.kind === "failed" ? statuses : { kind: "failed", reason: "github: cannot read the check runs" };
+    }
+    const jobs = await withLogs(
+      checks.value,
+      (c) => c.name,
+      async (c) =>
+        c.actions
+          ? logOf(await restText(client, `${repo}/actions/jobs/${c.id}/logs`))
+          : { kind: "none", why: "not a GitHub Actions job: its log is on its own site" },
+    );
+    return { kind: "ok", value: [...jobs, ...statuses.value] };
+  }
   const where = { owner: text(project.owner), name: text(project.name) };
 
   async function query<T>(
@@ -293,6 +358,7 @@ export function github(client: Client, project: GithubProject): Forge {
       return r.done(r.text(answer.value, "login"));
     },
     change,
+    failedJobs,
     // GitHub runs .github/workflows only, which the guard always covers
     async ciConfig() {
       return { kind: "ok", value: { kind: "none", why: "GitHub runs .github/workflows" } };

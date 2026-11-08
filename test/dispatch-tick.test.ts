@@ -79,6 +79,7 @@ function forge(changes: Changes, log: string[]): Forge {
     ciConfig: notUsed,
     claimed: notUsed,
     changes: async () => ({ kind: "ok", value: changes }),
+    failedJobs: notUsed,
     addLabel: async ({ number, label }) => {
       log.push(`label +${label} #${number}`);
       return { kind: "ok" };
