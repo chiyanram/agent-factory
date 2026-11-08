@@ -442,7 +442,10 @@ exists yet, so you run the triggers below by hand.
   host looks for a report the schema accepts every 5 s; once one is there, the writer has a 60 s completion window. A
   writer still running at its end (a child such as `gh` or an MCP server can keep it from exiting) is stopped, and the
   run is decided from its report, read again after the stop; its note then says the writer hung, and so does the run
-  record (#182). A run with no valid report waits out its timeout and is `blocked`.
+  record (#182). The box's own timeout firing inside the window counts the same. A run with no valid report waits out
+  its timeout and is `blocked`; past the timeout and a 30 s grace the host stops the box itself, since the box's
+  timeout stops counting once `claude` exits and a child holding stdout open would keep the pass waiting. The window's
+  edge is not exact: a run that exits as the window closes may still read as hung.
   **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the
   report replaces that once the writer starts through the box and the dispatcher (#103, #138).
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.

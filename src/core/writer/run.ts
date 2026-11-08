@@ -25,11 +25,13 @@ export type Claude = {
   readonly model: string;
 };
 
-// the completion window (#182): how often the host looks for the report while the writer runs, and how long the writer
-// may keep running after a valid one
-export type Completion = { readonly pollMs: number; readonly windowMs: number };
+// the completion window (#182): how often the host looks for the report while the writer runs, how long the writer may
+// keep running after a valid one, and the grace past the run's timeout and past a stop after which the host waits no
+// more: the box's own timeout stops counting once claude exits, and a grandchild that holds stdout open would keep
+// docker exec, and the dispatcher's locked pass, waiting forever
+export type Completion = { readonly pollMs: number; readonly windowMs: number; readonly graceMs: number };
 
-export const COMPLETION: Completion = { pollMs: 5000, windowMs: 60_000 };
+export const COMPLETION: Completion = { pollMs: 5000, windowMs: 60_000, graceMs: 30_000 };
 
 // the writer's settings file in the clone, for claude --settings (tools.ts), or none
 export type SettingsArg = { readonly kind: "none" } | { readonly kind: "file"; readonly path: string };
@@ -120,18 +122,22 @@ async function stoppedEnd(run: WriterRun, session: Session, running: Promise<Ran
   if (end.kind === "ran") {
     return runEnd(end.ran);
   }
-  // the stop ends the hung command; its own end says nothing more
-  await running;
-  return { kind: "hungAfterReport", windowSeconds: Math.round(run.completion.windowMs / 1000) };
+  // the stop ends the command; its own end says nothing more, and the host waits for it only so long
+  await settled(running, run.completion.graceMs);
+  return end.kind === "hung"
+    ? { kind: "hungAfterReport", windowSeconds: Math.round(run.completion.windowMs / 1000) }
+    : { kind: "timedOut", seconds: run.timeoutSeconds };
 }
 
-type Watched = { readonly kind: "ran"; readonly ran: Ran } | { readonly kind: "hung" };
+// Watched : the run's own end; "hung", still running after a valid report and its window; or "overdue", still
+// running past its timeout and the grace with no valid report
+type Watched = { readonly kind: "ran"; readonly ran: Ran } | { readonly kind: "hung" } | { readonly kind: "overdue" };
 
 const TICK: unique symbol = Symbol("tick");
 
 function after(ms: number): Promise<typeof TICK> {
   return new Promise((resolve) => {
-    setTimeout(() => resolve(TICK), ms).unref();
+    setTimeout(() => resolve(TICK), Math.max(0, ms)).unref();
   });
 }
 
@@ -139,12 +145,17 @@ async function settled(running: Promise<Ran>, ms: number): Promise<Ran | typeof 
   return Promise.race([running, after(ms)]);
 }
 
-// watched : the run's own end, or "hung" when it is still running a window after a valid report appeared
+// watched : the run, watched until it ends, a valid report's window closes, or the host's deadline passes. A poll only
+// starts the window: the run is decided from the report read after the box stopped.
 async function watched(run: WriterRun, running: Promise<Ran>): Promise<Watched> {
+  const deadline = Date.now() + run.timeoutSeconds * 1000 + run.completion.graceMs;
   for (;;) {
-    const ran = await settled(running, run.completion.pollMs);
+    const ran = await settled(running, Math.min(run.completion.pollMs, deadline - Date.now()));
     if (ran !== TICK) {
       return { kind: "ran", ran };
+    }
+    if (Date.now() >= deadline) {
+      return { kind: "overdue" };
     }
     if (validReport(await loadReport({ worktree: run.clone.repo }))) {
       return inWindow(run, running);
@@ -152,9 +163,11 @@ async function watched(run: WriterRun, running: Promise<Ran>): Promise<Watched> 
   }
 }
 
+// inWindow : the window after a valid report; the box's own timeout firing in it is a hang after that report too, so
+// the outcome never depends on when in the run the report came
 async function inWindow(run: WriterRun, running: Promise<Ran>): Promise<Watched> {
   const ran = await settled(running, run.completion.windowMs);
-  return ran === TICK ? { kind: "hung" } : { kind: "ran", ran };
+  return ran === TICK || ran.kind === "timedOut" ? { kind: "hung" } : { kind: "ran", ran };
 }
 
 function said(result: GitResult): string {

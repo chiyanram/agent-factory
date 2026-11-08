@@ -11,8 +11,9 @@
 // schema does not name, a non-zero exit, a timeout, a cap hit, or a box that failed. No outcome is guessed.
 //
 // The writer controls its worktree, so the read is careful: .factory and the report must be a real folder and a real
-// regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Read it only once the box has
-// stopped: nothing of the writer's may still run and swap .factory between the checks and the open. A reason never
+// regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Decide from it only once the
+// box has stopped: nothing of the writer's may still run and swap .factory between the checks and the open. A read
+// while the writer runs only starts the completion window (#182). A reason never
 // quotes the file, not even a key name, since it is posted on the change and a report could hold anything.
 
 import { constants } from "node:fs";
@@ -305,8 +306,9 @@ async function openReport(worktree: string, before: Dir): Promise<ReportFile> {
   }
 }
 
-// loadReport : the report in a worktree, read without following a symlink and at most MAX_REPORT_BYTES. Call it only
-// after the box has stopped.
+// loadReport : the report in a worktree, read without following a symlink and at most MAX_REPORT_BYTES. Decide a run
+// only from a read after the box has stopped: while the writer runs, a read (run.ts's poll) only starts the completion
+// window, since the writer can still change the folder between the checks and the open.
 export async function loadReport(input: { readonly worktree: string }): Promise<ReportFile> {
   const dir = await realDir(join(input.worktree, ".factory"));
   if (dir.kind !== "dir") {

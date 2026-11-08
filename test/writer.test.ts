@@ -107,7 +107,7 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
 }
 
 // the completion window, shortened for the tests (#182)
-const FAST = { pollMs: 20, windowMs: 150 };
+const FAST = { pollMs: 20, windowMs: 150, graceMs: 200 };
 
 // a writer that does its work and writes its report, then never exits on its own: a child keeps its stdout open. The
 // host's stop ends it.
@@ -374,6 +374,73 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", evidence: DONE.evidence, hung: true } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
     expect(told.log.at(-1)).toMatch(/note 41 \[writer\] done at/);
+  });
+
+  // a box whose run writes the work and the report, then does `then` with the report's folder after `ms`
+  function after(fake: FakeBox, ms: number, then: (dir: string) => Ran | "never"): Box {
+    const base = writer(fake, { commit: true, report: DONE, exit: 0 }, []);
+    return {
+      ...base,
+      run: async (call) => {
+        await base.run(call);
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const dir = start?.op === "start" ? start.spec.worktree : "";
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        const ran = then(dir);
+        return ran === "never" ? new Promise<Ran>(() => undefined) : ran;
+      },
+    };
+  }
+
+  it("leaves a run that exits inside the window as it was: no hang", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const box = after(fake, 50, () => ({ kind: "exited", code: 0, stdout: "", stderr: "" }));
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", hung: false } });
+  });
+
+  it("reads the box's own timeout inside the window as a hang after the report, decided from it", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const box = after(fake, 60, () => ({ kind: "timedOut", seconds: 3600 }));
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", hung: true } });
+  });
+
+  it("decides from the report read after the stop: one the writer spoiled in the window is blocked", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const spoiled = after(fake, 60, (dir) => {
+      writeFileSync(join(dir, ".factory", "report.json"), "not json");
+      return "never";
+    });
+    const box: Box = { ...spoiled, stop: async (session) => fake.box.stop(session) };
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: true } });
+  });
+
+  it("ends a run that never ends and wrote no valid report at the host's deadline: timed out, blocked", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const silent: Box = {
+      ...writer(fake, { commit: true, report: {}, exit: 0 }, []),
+      run: () => new Promise<Ran>(() => undefined),
+    };
+    const s = setup(silent, forge(), []);
+    const began = Date.now();
+    const out = await run({ ...s, settings: { ...s.settings, timeoutSeconds: 0 } }, FIX);
+    expect(Date.now() - began).toBeLessThan(5000);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+    expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
+  });
+
+  it("never reads the report of a hung run whose box does not stop, and does not wait for it", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const box: Box = {
+      ...after(fake, 0, () => "never"),
+      stop: async () => ({ kind: "failed", reason: "docker rm timed out" }),
+    };
+    const told = forge();
+    const out = await run(setup(box, told, []), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+    expect(told.log.at(-1)).toMatch(/the box did not stop: docker rm timed out/);
   });
 
   it("keeps a writer with no valid report to its own end: a timeout is blocked, as before", async () => {
