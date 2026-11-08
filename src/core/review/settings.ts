@@ -30,7 +30,7 @@ function absolute(env: NodeJS.ProcessEnv, name: string): Result<string> {
     : { kind: "failed", reason: `${name} must be an absolute path, got ${JSON.stringify(value)}` };
 }
 
-function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
+export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
   const value = env.FACTORY_MAX_USD ?? "";
   return value === "" || /^\d+(\.\d+)?$/.test(value)
     ? { kind: "ok", value }

@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.9.0](https://github.com/chiyanram/agent-factory/compare/v0.8.0...v0.9.0) (2026-11-08)
+
+### ✨ Features
+
+* **writer** — the dispatcher's writer runs test-first and fix in the box, and the host pushes and posts · [#113](https://github.com/chiyanram/agent-factory/issues/113) (PR [#173](https://github.com/chiyanram/agent-factory/pull/173))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.9.0`
+
 ## [0.8.0](https://github.com/chiyanram/agent-factory/compare/v0.7.0...v0.8.0) (2026-11-08)
 
 ### ✨ Features
