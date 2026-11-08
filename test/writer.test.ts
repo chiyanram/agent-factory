@@ -19,7 +19,7 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv } from "../src/core/writer/run.js";
 import { minutesOf } from "../src/core/writer/settings.js";
-import { PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
@@ -768,10 +768,19 @@ describe("the writer's words and settings", () => {
     });
     expect(
       text.startsWith(
-        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
+        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
       ),
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
+  });
+
+  it("tells the writer of every mode to keep its subagents and commands in the foreground (#192)", () => {
+    const prompts = { fix: "f", testFirst: "t", rework: "r", ci: "c" };
+    const modes = ["fix", "test-first", "rework", "ci"] as const;
+    const texts = modes.map((mode) =>
+      promptFor({ prompts, mode, ticket: "PROJ-1", branch: "b", head: "h", tools: [] }),
+    );
+    expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
   });
 
   it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, the cap and model only when set", () => {
