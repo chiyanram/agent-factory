@@ -95,19 +95,26 @@ async function runAll(job: BoxJob, session: Session): Promise<Result<readonly Ro
   return { kind: "ok", value: rows };
 }
 
-// started : the project's egress proxy, then a fresh box on the tree in `code`, behind it
-async function started(job: BoxJob, code: string): Promise<Result<Session>> {
-  const egress = await job.setup.egress();
+// what one box run mounts and sees, beyond the image, the proxy and the network the setup gives
+export type RunSpec = {
+  readonly worktree: string;
+  readonly readOnly: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+};
+
+// startBox : the project's egress proxy, then a fresh box on `spec.worktree`, behind it. The ready check and the
+// writer (#113) both start their boxes here.
+export async function startBox(setup: BoxSetup, spec: RunSpec): Promise<Result<Session>> {
+  const egress = await setup.egress();
   if (egress.kind === "failed") {
     return { kind: "failed", reason: `the egress proxy did not start: ${egress.reason}` };
   }
   const { proxy, network } = egress;
-  const box = await job.setup.box.start({
-    image: job.setup.image,
-    worktree: code,
-    // no agent runs here, so there are no settings to hold read-only; the copy is thrown away after
-    readOnly: [],
-    env: proxyEnv(proxy),
+  const box = await setup.box.start({
+    image: setup.image,
+    worktree: spec.worktree,
+    readOnly: spec.readOnly,
+    env: { ...proxyEnv(proxy), ...spec.env },
     proxy: `http://${proxy.host}:${proxy.port}`,
     network,
   });
@@ -119,7 +126,8 @@ async function started(job: BoxJob, code: string): Promise<Result<Session>> {
 // inBox : a fresh box on the tree in `code`; it is stopped whatever happens
 async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>> {
   const { box } = job.setup;
-  const session = await started(job, code);
+  // no agent runs here, so there are no settings to hold read-only; the copy is thrown away after
+  const session = await startBox(job.setup, { worktree: code, readOnly: [], env: {} });
   if (session.kind === "failed") {
     return session;
   }

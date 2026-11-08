@@ -13,6 +13,7 @@
 // keeps the folder out of `git add` in the first place.
 //
 // finishRun keeps no record of its own: the dispatcher (#103) calls it once per run end and keeps the per-head record.
+// On a ticket's first run there is no change yet: finishFirst pushes first, opens the change (#164), then finishes.
 
 import type { Done, Result } from "./forge/api.js";
 import type { Forge } from "./forge/types.js";
@@ -134,8 +135,10 @@ function unchanged(push: PushRequest): boolean {
   return push.lease.kind === "sha" && push.lease.sha === push.commit;
 }
 
+type Sending = Pick<FinishInput, "forge" | "push" | "pusher">;
+
 // ciSetup : what the CI-file guard compares against: the default branch, and the CI file the project runs
-async function ciSetup(input: FinishInput): Promise<Result<CiSetup>> {
+async function ciSetup(input: Sending): Promise<Result<CiSetup>> {
   const branch = await input.forge.defaultBranch();
   const config = branch.kind === "ok" ? await input.forge.ciConfig() : branch;
   return branch.kind === "ok" && config.kind === "ok"
@@ -147,7 +150,7 @@ async function ciSetup(input: FinishInput): Promise<Result<CiSetup>> {
 }
 
 // pushed : the writer's commits on the branch. Work in progress (a blocked run) only ever goes on top of the branch.
-async function pushed(input: FinishInput, mode: "any" | "on-top"): Promise<Done> {
+async function pushed(input: Sending, mode: "any" | "on-top"): Promise<Done> {
   if (unchanged(input.push)) {
     return { kind: "ok" };
   }
@@ -212,4 +215,26 @@ export async function finishRun(input: FinishInput): Promise<Result<Next>> {
     return blocked(input, { reason: `the push failed: ${sent.reason}`, by: "host", pushFirst: false });
   }
   return outcome.kind === "done" ? done(input, outcome.evidence) : asked(input, outcome.questions);
+}
+
+// finishFirst : a ticket's first run: push the new branch with every guard, open its change, then finish on it. A push
+// or an open that fails is the host's failure: there is no change yet to post it on.
+export async function finishFirst(
+  input: Omit<FinishInput, "change"> & { readonly open: () => Promise<Result<number>> },
+): Promise<Result<{ readonly change: number; readonly next: Next }>> {
+  const sent = await pushed(input, "any");
+  if (sent.kind === "failed") {
+    return { kind: "failed", reason: `the first push failed: ${sent.reason}` };
+  }
+  const change = await input.open();
+  if (change.kind === "failed") {
+    return { kind: "failed", reason: `pushed, but the change did not open: ${change.reason}` };
+  }
+  // the branch is now at the commit: finishRun has nothing more to push, only to post
+  const next = await finishRun({
+    ...input,
+    change: change.value,
+    push: { ...input.push, lease: { kind: "sha", sha: input.push.commit } },
+  });
+  return next.kind === "ok" ? { kind: "ok", value: { change: change.value, next: next.value } } : next;
 }
