@@ -40,7 +40,12 @@ export type Setup = {
   readonly secrets?: Secrets;
 };
 
-export type Secrets = (plugin: string, capability: ExtensionPoint) => Promise<Result<Readonly<Record<string, Secret>>>>;
+// the source is the real path of the plugin's file as it was added, so a secret goes to one plugin, never to a name
+export type Secrets = (call: {
+  readonly plugin: string;
+  readonly capability: ExtensionPoint;
+  readonly source: string;
+}) => Promise<Result<Readonly<Record<string, Secret>>>>;
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -357,23 +362,29 @@ export async function callPlugin(setup: Setup, call: Call): Promise<Result<Plugi
 
 // answered : the call, with its secrets, run and read
 async function answered(setup: Setup, entry: Entry, call: Call): Promise<Result<PluginResult>> {
-  const input = await withSecrets(setup, call);
+  const input = await withSecrets(setup, call, entry.source);
   const ran = input.kind === "ok" ? stdoutOf(await runCall(setup, entry, { ...call, input: input.value })) : input;
   return ran.kind === "ok" ? readResult(ran.value) : ran;
 }
 
 // withSecrets : the call's input with the secrets its plugin and capability carry, revealed only here, into the request
-async function withSecrets(setup: Setup, call: Call): Promise<Result<unknown>> {
+async function withSecrets(setup: Setup, call: Call, source: string): Promise<Result<unknown>> {
   if (setup.secrets === undefined) {
     return { kind: "ok", value: call.input };
   }
-  const secrets = await setup.secrets(call.plugin, call.capability);
-  return secrets.kind === "ok" ? { kind: "ok", value: merged(call.input, secrets.value) } : secrets;
+  const secrets = await setup.secrets({ plugin: call.plugin, capability: call.capability, source });
+  return secrets.kind === "ok" ? merged(call.input, secrets.value) : secrets;
 }
 
-function merged(input: unknown, secrets: Readonly<Record<string, Secret>>): unknown {
+// merged : the input with the secrets revealed into it; only an input that is one plain object can carry them
+function merged(input: unknown, secrets: Readonly<Record<string, Secret>>): Result<unknown> {
   const revealed = Object.fromEntries(Object.entries(secrets).map(([k, v]) => [k, v.reveal()]));
-  return Object.keys(revealed).length === 0 ? input : { ...Object(input), ...revealed };
+  if (Object.keys(revealed).length === 0) {
+    return { kind: "ok", value: input };
+  }
+  return typeof input === "object" && input !== null && !Array.isArray(input)
+    ? { kind: "ok", value: { ...input, ...revealed } }
+    : failed("a call that carries a secret needs an input that is one object");
 }
 
 // runCall : the request in the plugin's own protocol major, so a plugin on N−1 is spoken to as it expects

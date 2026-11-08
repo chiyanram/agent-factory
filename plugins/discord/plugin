@@ -51,9 +51,11 @@ function curl(config, body) {
     const child = spawn(
       "curl",
       [
+        // first, so no ~/.curlrc is read: one could trace or proxy the request, and so write the webhook down
+        "--disable",
         "--silent",
         "--show-error",
-        "--fail-with-body",
+        "--fail",
         "--max-time",
         "20",
         "--config",
@@ -76,6 +78,13 @@ function curl(config, body) {
   });
 }
 
+// scrubbed : an error line with the webhook taken out: the whole URL, its path, and its token alone
+function scrubbed(line, webhook) {
+  const path = new URL(webhook).pathname;
+  const token = path.split("/").at(-1) ?? "";
+  return [webhook, path, token].filter((s) => s.length > 0).reduce((l, s) => l.replaceAll(s, "[webhook]"), line);
+}
+
 async function send(input) {
   const text = input?.text;
   const webhook = input?.webhook;
@@ -90,7 +99,7 @@ async function send(input) {
     const config = join(dir, "curl.conf");
     await writeFile(config, `url = "${webhook}"\n`, { mode: 0o600 });
     const ran = await curl(config, JSON.stringify({ content: text, allowed_mentions: { parse: [] } }));
-    const why = ran.err.trim().split("\n").at(-1)?.replaceAll(webhook, "[webhook]") ?? "";
+    const why = scrubbed(ran.err.trim().split("\n").at(-1) ?? "", webhook);
     return ran.code === 0 ? { kind: "done" } : { kind: "failed", reason: `curl exited ${ran.code}: ${why}` };
   } finally {
     await rm(dir, { recursive: true, force: true });

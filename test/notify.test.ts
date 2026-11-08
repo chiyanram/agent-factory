@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Result } from "../src/core/forge/api.js";
@@ -67,14 +67,24 @@ describe("the Discord webhook in the token store (#119)", () => {
       meta: { expiresAt: "9999-12-31T00:00:00.000Z" },
     });
     expect(held.discord).toBe(HOOK);
-    const secrets = webhookSecrets(ok(store));
-    const given = await secrets("discord", "notify");
+    const secrets = webhookSecrets(ok(store), BUNDLED);
+    const real = realpathSync(BUNDLED);
+    const given = await secrets({ plugin: "discord", capability: "notify", source: real });
     expect(given.kind === "ok" && given.value.webhook?.reveal()).toBe(HOOK);
     // a Secret never prints
     expect(given.kind === "ok" && JSON.stringify(given.value)).toBe('{"webhook":"[secret]"}');
-    expect(await secrets("github", "forge.write")).toEqual({ kind: "ok", value: {} });
-    expect(await secrets("discord", "context.read")).toEqual({ kind: "ok", value: {} });
-    expect(await webhookSecrets(ok(memoryStore()))("discord", "notify")).toMatchObject({
+    expect(await secrets({ plugin: "discord", capability: "context.read", source: real })).toEqual({
+      kind: "ok",
+      value: {},
+    });
+    // a plugin of any name added from another file is never handed it, though it calls itself discord
+    expect(await secrets({ plugin: "discord", capability: "notify", source: "/home/x/discord/plugin" })).toEqual({
+      kind: "ok",
+      value: {},
+    });
+    expect(
+      await webhookSecrets(ok(memoryStore()), BUNDLED)({ plugin: "discord", capability: "notify", source: real }),
+    ).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("setup discord"),
     });
@@ -108,7 +118,7 @@ describe("the pings (#119)", () => {
         home,
         env: { HOME: root, LANG: "C" },
         path: `${fakes.value.dir}:${NODE_DIR}`,
-        secrets: webhookSecrets(ok(memoryStore({ discord: HOOK }))),
+        secrets: webhookSecrets(ok(memoryStore({ discord: HOOK })), BUNDLED),
       };
       expect((await addPlugin(setup, BUNDLED)).kind).toBe("ok");
       const notify = pluginNotify({ setup, plugin: "discord", ...WHERE });
@@ -118,6 +128,7 @@ describe("the pings (#119)", () => {
       expect(calls).toHaveLength(1);
       const [call] = calls;
       expect(JSON.parse(String(call?.stdin))).toEqual({ content: rendered(ping), allowed_mentions: { parse: [] } });
+      expect(call?.argv[0]).toBe("--disable");
       expect(call?.argv).toContain("--config");
       expect(JSON.stringify(call)).not.toContain(HOOK);
     } finally {
@@ -126,7 +137,10 @@ describe("the pings (#119)", () => {
   });
 
   it("fail with the reason, never the webhook, when there is none or curl fails", async () => {
-    const fakes = await makeFakes(["curl"], [{ code: 22, stdout: "", stderr: `curl: (22) ${HOOK} returned 404\n` }]);
+    const fakes = await makeFakes(
+      ["curl"],
+      [{ code: 22, stdout: "", stderr: `curl: (22) POST ${new URL(HOOK).pathname} returned 404\n` }],
+    );
     if (fakes.kind === "failed") {
       throw new Error(fakes.reason);
     }
@@ -134,7 +148,7 @@ describe("the pings (#119)", () => {
       const base = { home, env: { HOME: root, LANG: "C" }, path: `${fakes.value.dir}:${NODE_DIR}` };
       expect((await addPlugin(base, BUNDLED)).kind).toBe("ok");
       const none = pluginNotify({
-        setup: { ...base, secrets: webhookSecrets(ok(memoryStore())) },
+        setup: { ...base, secrets: webhookSecrets(ok(memoryStore()), BUNDLED) },
         plugin: "discord",
         ...WHERE,
       });
@@ -144,13 +158,14 @@ describe("the pings (#119)", () => {
       });
       const held = { discord: HOOK };
       const refused = pluginNotify({
-        setup: { ...base, secrets: webhookSecrets(ok(memoryStore(held))) },
+        setup: { ...base, secrets: webhookSecrets(ok(memoryStore(held)), BUNDLED) },
         plugin: "discord",
         ...WHERE,
       });
       const sent = await refused({ kind: "asked", ticket: "PROJ-1", change: 12 });
       expect(sent).toMatchObject({ kind: "failed", reason: expect.stringContaining("curl exited 22") });
       expect(JSON.stringify(sent)).not.toContain(HOOK);
+      expect(JSON.stringify(sent)).not.toContain("abcdefghijklmnopqrstuvwxyz_-0123");
     } finally {
       await fakes.value.remove();
     }

@@ -8,6 +8,7 @@
 // record, and the ping is not tried again. A reply in Discord is never an approval. The text is a post.ts template, so
 // no @everyone, mention, reference or link forms; the plugin switches every mention off as well.
 
+import { realpath } from "node:fs/promises";
 import type { Done, Result } from "./forge/api.js";
 import { pluginConfigOf } from "./plugin/config.js";
 import { callPlugin, type Secrets, type Setup } from "./plugin/registry.js";
@@ -110,11 +111,12 @@ export async function notifyPluginOf(files: {
   return config.kind === "ok" ? { kind: "ok", value: config.value.plugins.get("notify") ?? "" } : config;
 }
 
-// webhookSecrets : the Discord webhook, from the token store, for a notify call of the plugin named discord only; any
-// other plugin or capability gets no secret
-export function webhookSecrets(store: Result<TokenStore>): Secrets {
-  return async (plugin, capability) => {
-    if (plugin !== "discord" || capability !== "notify") {
+// webhookSecrets : the Discord webhook, from the token store, for a notify call of the bundled discord plugin only:
+// the file the registry added must be the package's own plugins/discord/plugin, so no other plugin that calls itself
+// discord is ever handed it; any other plugin or capability gets no secret
+export function webhookSecrets(store: Result<TokenStore>, bundled: string): Secrets {
+  return async (call) => {
+    if (call.capability !== "notify" || !(await sameFile(call.source, bundled))) {
       return { kind: "ok", value: {} };
     }
     const stored = store.kind === "ok" ? await store.value.get("discord") : store;
@@ -122,4 +124,9 @@ export function webhookSecrets(store: Result<TokenStore>): Secrets {
       ? { kind: "ok", value: { webhook: stored.token } }
       : { kind: "failed", reason: `no Discord webhook: ${stored.reason}` };
   };
+}
+
+async function sameFile(source: string, bundled: string): Promise<boolean> {
+  const real = await realpath(bundled).catch(() => "");
+  return real !== "" && real === source;
 }

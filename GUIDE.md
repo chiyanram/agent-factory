@@ -262,8 +262,9 @@ A setting the plugin cannot honour stops the pass instead of being dropped witho
 ### Pings
 
 The dispatcher pings you on Discord when a ticket needs you (#119), through the bundled `discord` notify plugin:
-- every hand-over to `needs-human`: CI red twice, a cap, a blocked run, the ready check's failures, any stop;
-- a writer's question that waits on your answer;
+- each hand-over its table makes on a change: CI red twice, the ready check's failures, the same patch twice, a run
+  that never ended, and its other stops;
+- a writer run that ended blocked, or with a question that waits on your answer;
 - a change ready for you to review and merge (the gate is green).
 
 Each goes once per event and head, as its forge note does. To set it up:
@@ -278,7 +279,13 @@ it from a 0600 config file it removes after, and the message from stdin. The tex
 mention is switched off, so nothing pings `@everyone`. A ping only informs: one that fails never stops the pass or
 the ticket (the pass prints why, the forge note is the record) and is not tried again, and a reply in Discord is
 never an approval. `FACTORY_DRY_RUN=1` prints each ping instead. The coordinator's `request notify` goes through the
-same plugin, within its policy and cap ([Writes](#writes)).
+same plugin, within its policy and cap ([Writes](#writes)). The webhook goes only to the package's own
+`plugins/discord/plugin`, matched by its real path, never to another plugin that calls itself `discord`. **Today:**
+
+- A stop the reviewer makes itself (open Act on findings, an empty change, a protected file, its round limit) and a
+  hand-over with no change to label ping no one yet; the forge note or the pass's error is the record.
+- The plugin runs `curl` with no proxy setting, so a host that reaches Discord only through a proxy sends no ping.
+- The text is the forge's posting template, so `&` and `<` show as `&amp;` and `&lt;` in Discord.
 
 ### Writes
 

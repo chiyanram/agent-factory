@@ -107,7 +107,8 @@ export function keychainVault(run: Cli, env: NodeJS.ProcessEnv): Vault {
   return {
     where: "the macOS login Keychain",
     write: async (runner, token) => {
-      // checkToken allows only [A-Za-z0-9._-], so the line needs no quoting
+      // checkToken allows only [A-Za-z0-9._-] and checkWebhook a Discord URL of letters, digits, ".", "/", ":", "_"
+      // and "-": neither holds a space, a quote or a backslash, so the line needs no quoting
       const exit = await run({
         bin: "security",
         args: ["-i"],

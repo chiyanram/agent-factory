@@ -398,7 +398,7 @@ async function notifierFor(io: Io, home: string, project: string, mark: string):
   if (io.env.FACTORY_DRY_RUN === "1") {
     return { kind: "ok", value: dryNotify((line) => io.err(`${line}\n`)) };
   }
-  const setup = await pluginSetup(home, io.env, webhookSecrets(tokenStore(io, home)));
+  const setup = await pluginSetup(home, io.env, webhookSecrets(tokenStore(io, home), BUNDLED_DISCORD));
   return { kind: "ok", value: pluginNotify({ setup, plugin: plugin.value, project, mark }) };
 }
 
@@ -699,6 +699,10 @@ function runnerOf(positionals: readonly string[]): "claude" | "copilot" | "bad" 
   return positionals.length > 1 ? "bad" : known;
 }
 
+// the package's own folder, and its bundled discord plugin: the only plugin the Discord webhook is ever handed to (#119)
+const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
+const BUNDLED_DISCORD = join(PKG, "plugins", "discord", "plugin");
+
 // plugin : register, update, test and list plugins (#134)
 async function pluginCli({ positionals, io }: Args): Promise<number> {
   const home = factoryHome(io.env);
@@ -706,8 +710,7 @@ async function pluginCli({ positionals, io }: Args): Promise<number> {
     io.err(`agent-factory plugin: ${home.reason}\n`);
     return 1;
   }
-  const pkg = join(dirname(fileURLToPath(import.meta.url)), "..");
-  return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg });
+  return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg: PKG });
 }
 
 // coordinator : the coordinator's session, in its own folder with its own settings (#106)
@@ -799,7 +802,7 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
     out: io.out,
     err: io.err,
     home: home.path,
-    secrets: webhookSecrets(tokenStore(io, home.path)),
+    secrets: webhookSecrets(tokenStore(io, home.path), BUNDLED_DISCORD),
   });
 }
 
