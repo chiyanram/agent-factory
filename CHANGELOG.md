@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.8.0](https://github.com/chiyanram/agent-factory/compare/v0.7.0...v0.8.0) (2026-11-08)
+
+### ✨ Features
+
+* **coordinator** — the coordinator's wall as harness settings, set up and started by agent-factory · [#106](https://github.com/chiyanram/agent-factory/issues/106) (PR [#172](https://github.com/chiyanram/agent-factory/pull/172))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.8.0`
+
 ## [0.7.0](https://github.com/chiyanram/agent-factory/compare/v0.6.0...v0.7.0) (2026-11-07)
 
 ### ✨ Features
