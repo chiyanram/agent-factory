@@ -8,15 +8,23 @@
 //   FACTORY_MAX_TRIES  calls per request while the forge answers with a rate limit (default: 4)
 //   FACTORY_DRY_RUN    1: every write is printed instead of made; reads still go to the forge (ADR-0011 D14)
 //
+// A project whose file maps forge.read and forge.write to a plugin is served by that plugin (openProjectForge, #134).
+//
 // No setting is guessed: a value that is set but not valid is refused, never replaced by the default.
 
-import { identitySetting, resolveIdentity, type Identity } from "../identity.js";
-import { realSleep, runProcess, type Client, type Result, type Runner, type Sleeper } from "./api.js";
+import { identitySetting, resolveIdentity, type Identity, type IdentitySetting } from "../identity.js";
+import { realSleep, runProcess, type Client, type Done, type Result, type Runner, type Sleeper } from "./api.js";
 import { github } from "./github.js";
 import { gitlab } from "./gitlab.js";
-import type { Forge } from "./types.js";
+import { pluginConfigOf } from "../plugin/config.js";
+import type { Setup } from "../plugin/registry.js";
+import { readProjectRaw } from "../project.js";
+import { pluginForge, type PluginTarget } from "./plugin.js";
+import { forgeName, githubProject, gitlabProject } from "./target.js";
+import type { Forge, ForgeName } from "./types.js";
 
 export type { Forge } from "./types.js";
+export { forgeName };
 
 export type ForgeSetup = {
   readonly env: NodeJS.ProcessEnv;
@@ -60,26 +68,21 @@ function client(setup: ForgeSetup, name: "github" | "gitlab", tries: number): Cl
 
 function adapter(setup: ForgeSetup, tries: number): Result<Forge> {
   const project = setup.env.FACTORY_PROJECT ?? "";
-  const kind = setup.env.FACTORY_FORGE ?? "gitlab";
-  if (kind === "github") {
-    // every segment starts with a letter or a digit, so "." and ".." never reach an API path
-    const parts = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9][A-Za-z0-9_.-]*)$/.exec(project);
-    return parts === null
-      ? {
-          kind: "failed",
-          reason: `FACTORY_PROJECT must be owner/name (for example chiyanram/ledger), got ${JSON.stringify(project)}`,
-        }
-      : { kind: "ok", value: github(client(setup, "github", tries), { owner: parts[1]!, name: parts[2]! }) };
+  const kind = forgeName(setup.env);
+  if (kind.kind === "failed") {
+    return kind;
   }
-  if (kind === "gitlab") {
-    return /^[A-Za-z0-9][A-Za-z0-9_.-]*(\/[A-Za-z0-9][A-Za-z0-9_.-]*)+$/.test(project)
-      ? { kind: "ok", value: gitlab(client(setup, "gitlab", tries), project) }
-      : {
-          kind: "failed",
-          reason: `FACTORY_PROJECT must be the project's full path (for example aruvii/agent-platform), got ${JSON.stringify(project)}`,
-        };
-  }
-  return { kind: "failed", reason: `FACTORY_FORGE must be gitlab or github, got ${JSON.stringify(kind)}` };
+  return kind.value === "github" ? githubAdapter(setup, tries, project) : gitlabAdapter(setup, tries, project);
+}
+
+function githubAdapter(setup: ForgeSetup, tries: number, project: string): Result<Forge> {
+  const where = githubProject(project);
+  return where.kind === "ok" ? { kind: "ok", value: github(client(setup, "github", tries), where.value) } : where;
+}
+
+function gitlabAdapter(setup: ForgeSetup, tries: number, project: string): Result<Forge> {
+  const where = gitlabProject(project);
+  return where.kind === "ok" ? { kind: "ok", value: gitlab(client(setup, "gitlab", tries), where.value) } : where;
 }
 
 // withLogin : an App has no user to ask; its login came with its token.
@@ -96,6 +99,11 @@ function dryRun(forge: Forge, log: (line: string) => void): Forge {
     removeLabel: async (i) => (log(`DRY RUN: remove the label ${i.label} from ${m}${i.number}`), { kind: "ok" }),
     note: async (i) => (log(`DRY RUN: note on ${m}${i.number}: [${i.post.seat}] ${i.post.title}`), { kind: "ok" }),
     status: async (i) => (log(`DRY RUN: status ${i.context} ${i.state} at ${i.sha.slice(0, 8)}`), { kind: "ok" }),
+    // a dry run opens no change, so there is no number to give back: the caller stops there
+    openChange: async (i) => (
+      log(`DRY RUN: open a draft change from ${i.branch} into ${i.base}`),
+      { kind: "failed", reason: "a dry run opens no change" }
+    ),
     lineFinding: async (i) => (
       log(`DRY RUN: finding on ${m}${i.change.number} at ${i.at.file}:${i.at.line}`), { kind: "ok" }
     ),
@@ -128,21 +136,15 @@ export function openForge(setup: ForgeSetup): Result<Forge> {
   return opened.kind === "ok" ? settled(setup, opened.value) : opened;
 }
 
+const DEFAULT_HOST: Readonly<Record<ForgeName, string>> = { github: "github.com", gitlab: "gitlab.com" };
+
 // forgeHost : the forge's host, FACTORY_FORGE_HOST, checked: github.com and gitlab.com unless set. The host push sends a
 // branch only to a URL on this host.
 export function forgeHost(env: NodeJS.ProcessEnv, forge: "github" | "gitlab"): Result<string> {
-  const host = env.FACTORY_FORGE_HOST ?? (forge === "github" ? "github.com" : "gitlab.com");
+  const host = env.FACTORY_FORGE_HOST ?? DEFAULT_HOST[forge];
   return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)
     ? { kind: "ok", value: host }
     : { kind: "failed", reason: `FACTORY_FORGE_HOST must be a host name, got ${JSON.stringify(host)}` };
-}
-
-// forgeName : FACTORY_FORGE, checked.
-export function forgeName(env: NodeJS.ProcessEnv): Result<"github" | "gitlab"> {
-  const kind = env.FACTORY_FORGE ?? "gitlab";
-  return kind === "github" || kind === "gitlab"
-    ? { kind: "ok", value: kind }
-    : { kind: "failed", reason: `FACTORY_FORGE must be gitlab or github, got ${JSON.stringify(kind)}` };
 }
 
 // openProject : the forge for the project in the settings, acting as the project's identity. With an App, this asks the
@@ -168,4 +170,118 @@ export async function openProject(
   }
   const forge = openForge({ ...setup, identity: identity.value });
   return forge.kind === "ok" ? { kind: "ok", value: { forge: forge.value, identity: identity.value } } : forge;
+}
+
+// the plugin a project file maps the forge to, or none: forge.read and forge.write must name the same one, since one
+// Forge serves both
+async function forgePluginOf(files: { readonly home: string; readonly project: string }): Promise<Result<string>> {
+  const raw = await readProjectRaw(files, "");
+  if (raw.kind !== "ok") {
+    return raw.kind === "missing" ? { kind: "ok", value: "" } : raw;
+  }
+  const config = pluginConfigOf(raw.path, raw.value);
+  return config.kind === "ok" ? oneForgePlugin(raw.path, config.value.plugins) : config;
+}
+
+function oneForgePlugin(path: string, plugins: ReadonlyMap<string, string>): Result<string> {
+  const [read, write] = ["forge.read", "forge.write"].map((p) => plugins.get(p) ?? "");
+  return read === write
+    ? { kind: "ok", value: read ?? "" }
+    : { kind: "failed", reason: `${path}: "plugins" must map forge.read and forge.write to the same plugin` };
+}
+
+// pluginTarget : the forge plugin's target, under the own identity only: the App's token never reaches a plugin
+// (ADR-0014 P11)
+function pluginTarget(env: NodeJS.ProcessEnv, plugin: string, setup: Setup): Result<PluginTarget> {
+  const name = forgeName(env);
+  if (name.kind === "failed") {
+    return name;
+  }
+  const setting = identitySetting({ env, forge: name.value });
+  const own = setting.kind === "ok" ? ownOnly(setting.value, plugin) : setting;
+  const plain = own.kind === "ok" ? plainSettings(env, name.value, plugin) : own;
+  return plain.kind === "ok" ? targetFor(name.value, env, plugin, setup) : plain;
+}
+
+function ownOnly(setting: IdentitySetting, plugin: string): Done {
+  return setting.kind === "app"
+    ? {
+        kind: "failed",
+        reason: `the project maps the forge to the plugin ${plugin}, but FACTORY_IDENTITY=app gives gh the App's token, which no plugin may hold; use FACTORY_IDENTITY=own or unmap forge.read and forge.write`,
+      }
+    : { kind: "ok" };
+}
+
+// settings a forge plugin cannot honour, since it runs with only PATH, HOME and LANG: another CLI, a token, a host
+const DROPPED = [
+  "FACTORY_GH",
+  "FACTORY_GLAB",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GH_HOST",
+  "GITLAB_TOKEN",
+  "GITLAB_HOST",
+];
+
+function droppedSetting(env: NodeJS.ProcessEnv, forge: ForgeName): string | undefined {
+  const set = DROPPED.find((name) => (env[name] ?? "") !== "");
+  const host = env.FACTORY_FORGE_HOST ?? DEFAULT_HOST[forge];
+  return set ?? (host === DEFAULT_HOST[forge] ? undefined : "FACTORY_FORGE_HOST");
+}
+
+// plainSettings : the plugin serves the forge it is named for, on its default host, as the CLI's own login; a setting
+// it would drop without a word is refused, so a write never goes to another forge, host or account
+function plainSettings(env: NodeJS.ProcessEnv, forge: ForgeName, plugin: string): Done {
+  if (plugin !== forge) {
+    return {
+      kind: "failed",
+      reason: `FACTORY_FORGE is ${forge}, but the project maps the forge to the plugin ${plugin}`,
+    };
+  }
+  const set = droppedSetting(env, forge);
+  return set === undefined
+    ? { kind: "ok" }
+    : {
+        kind: "failed",
+        reason: `${set} is set, which the forge plugin cannot honour (it runs ${forge === "github" ? "gh" : "glab"} with its own login on ${DEFAULT_HOST[forge]}); unset it or unmap forge.read and forge.write`,
+      };
+}
+
+function targetFor(forge: ForgeName, env: NodeJS.ProcessEnv, plugin: string, setup: Setup): Result<PluginTarget> {
+  const project = env.FACTORY_PROJECT ?? "";
+  const where = forge === "github" ? githubProject(project) : gitlabProject(project);
+  return where.kind === "ok" ? { kind: "ok", value: { setup, plugin, forge, project } } : where;
+}
+
+export type ProjectFiles = {
+  readonly home: string;
+  // the factory's name for the project: its file is <home>/projects/<project>.json
+  readonly project: string;
+  // what a plugin runs with (the trusted PATH)
+  readonly plugins: Setup;
+};
+
+// openProjectForge : the project's forge: the forge plugin its project file maps forge.read and forge.write to, or the
+// built-in adapter when it maps none (#134 PR C), with FACTORY_DRY_RUN applied either way
+export async function openProjectForge(
+  setup: Omit<ForgeSetup, "identity">,
+  files: ProjectFiles,
+): Promise<Result<{ readonly forge: Forge; readonly identity: Identity }>> {
+  const plugin = await forgePluginOf(files);
+  if (plugin.kind === "failed") {
+    return plugin;
+  }
+  return plugin.value === "" ? openProject(setup) : servedBy(setup, plugin.value, files.plugins);
+}
+
+function servedBy(
+  setup: Omit<ForgeSetup, "identity">,
+  plugin: string,
+  plugins: Setup,
+): Result<{ readonly forge: Forge; readonly identity: Identity }> {
+  const target = pluginTarget(setup.env, plugin, plugins);
+  const identity: Identity = { kind: "own" };
+  const forge = target.kind === "ok" ? settled({ ...setup, identity }, pluginForge(target.value)) : target;
+  return forge.kind === "ok" ? { kind: "ok", value: { forge: forge.value, identity } } : forge;
 }

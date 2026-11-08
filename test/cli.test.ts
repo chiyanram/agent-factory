@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
@@ -390,6 +390,23 @@ describe("agent-factory setup coordinator and coordinator (#106)", () => {
 });
 
 describe("agent-factory plugin (#134)", () => {
+  it("adds and tests a bundled forge plugin by its name, with the kit's fake gh in place of the real one", async () => {
+    // the plugin's #!/usr/bin/env node needs node in a PATH folder only its owner can write (pluginPath); a CI runner's
+    // tool cache may not be one, so the test gives it a link to this node in such a folder
+    const bin = join(home, "bin");
+    mkdirSync(bin, { mode: 0o755 });
+    symlinkSync(process.execPath, join(bin, "node"));
+    const env = { FACTORY_HOME: home, PATH: `${bin}:/usr/bin:/bin`, HOME: home };
+    expect(await cli(["plugin", "test", "github"], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("ok   write fidelity forge.write/note (tricky text)"),
+    });
+    expect(await cli(["plugin", "add", "gitlab"], env)).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("added gitlab"),
+    });
+  });
+
   it("lists none, adds a plugin by path, tests it, and records an update only for the hash it showed", async () => {
     expect(await cli(["plugin"])).toMatchObject({ code: 64 });
     expect(await cli(["plugin", "list"])).toMatchObject({ code: 0, out: "no plugins\n" });
@@ -404,7 +421,7 @@ describe("agent-factory plugin (#134)", () => {
       name: "echo",
       version: "1.0.0",
       capabilities: [{ name: "notify" }],
-      writes: ["notify"],
+      writes: [],
     };
     writeFileSync(
       path,

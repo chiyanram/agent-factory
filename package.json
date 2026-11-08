@@ -18,7 +18,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-plugins.mjs",
     "lint": "tsc -p tsconfig.json --noEmit",
     "format": "biome format --write .",
     "release": "semantic-release",

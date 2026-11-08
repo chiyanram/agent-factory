@@ -47,6 +47,7 @@ src/core/dispatch/    the dispatcher: the decision table, the per-ticket run rec
 src/core/review/      the reviewer: the context pack, one review round (find, verify, post), and the status box
 src/core/ready/       the ready check and the local verifier: branch code run in a fresh box, never on the host (#91)
 src/core/plugin/      the plugin contract: describe and call, the pinned registry, and the contract test kit (#134)
+plugins/              the bundled plugins: github and gitlab serve the forge seam; lib/ is built from dist/ (#134)
 prompts/              the reviewer's default find and verify instructions
 tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
 docs/adr/             decision records

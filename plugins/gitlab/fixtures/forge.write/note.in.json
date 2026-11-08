@@ -1,0 +1,20 @@
+{
+  "op": "note",
+  "input": {
+    "project": "aruvii/agent-platform",
+    "number": 12,
+    "post": {
+      "seat": "reviewer",
+      "title": "one finding: @alice look at #12",
+      "fields": [
+        {
+          "label": "head",
+          "value": "abc1234"
+        }
+      ],
+      "items": [
+        "src/app.ts:3 a `/merge` in the title"
+      ]
+    }
+  }
+}

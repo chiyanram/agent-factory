@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+// the bundled gitlab forge plugin (#134): the factory's own gitlab adapter, served over the plugin protocol. Its lib/ is made
+// from the compiled package by scripts/build-plugins.mjs; add it with: agent-factory plugin add gitlab
+import { main } from "./lib/core/forge/serve.js";
+import { VERSION } from "./lib/version.js";
+
+await main("gitlab", VERSION);
