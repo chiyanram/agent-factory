@@ -4,17 +4,20 @@
 //   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), the rulebook as a plugin, and
 //     no settings from the branch: --setting-sources user drops its .claude/settings.json, hooks, env and .mcp.json,
 //     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08)
-//   3 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the exit
-//   4 the branch's tip, and the patch-id of everything since the start, which the dispatcher compares run to run
+//   3 while it runs, the host looks for an accepted report; once there is one, the writer has the completion window to
+//     exit, or the host stops the box (window.ts, #182)
+//   4 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the end
+//   5 the branch's tip, and the patch-id of everything since the start, which the dispatcher compares run to run
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { Argv } from "../project.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
-import { decide, loadReport, type Outcome, type RunEnd } from "../report.js";
+import { accepted, decide, loadReport, stopOf, type Outcome, type RunEnd, type Stop } from "../report.js";
 import type { Ran } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { RULEBOOK_DIR, type Clone } from "./clone.js";
+import { watched, WINDOW_SECONDS } from "./window.js";
 
 export type Claude = {
   // "" for no cap (FACTORY_MAX_USD)
@@ -35,9 +38,11 @@ export type WriterRun = {
   readonly timeoutSeconds: number;
   readonly claude: Claude;
   readonly settings: SettingsArg;
+  // waits the milliseconds given, while the host watches for the report: realWait; a test passes its own
+  readonly wait: (ms: number) => Promise<void>;
 };
 
-export type Ended = { readonly outcome: Outcome; readonly tip: string; readonly patch: string };
+export type Ended = { readonly outcome: Outcome; readonly tip: string; readonly patch: string; readonly stop: Stop };
 
 // only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
 const QUIET: Readonly<Record<string, string>> = {
@@ -86,7 +91,7 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
   if (session.kind === "failed") {
     return { kind: "failed", reason: session.reason };
   }
-  const ran = await run.setup.box.run({
+  const running = run.setup.box.run({
     session: session.value,
     command: {
       argv: claudeArgv(run.claude, run.settings),
@@ -94,9 +99,18 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
       timeoutSeconds: run.timeoutSeconds,
     },
   });
+  const seen = await watched({
+    running,
+    reported: async () => accepted(await loadReport({ worktree: run.clone.repo })),
+    wait: run.wait,
+  });
+  // stopping the box also ends a writer that hung after its report
   const stopped = await run.setup.box.stop(session.value);
-  // a box that did not stop may still be writing: its report is never read
-  return stopped.kind === "ok" ? runEnd(ran) : { kind: "failed", reason: `the box did not stop: ${stopped.reason}` };
+  if (stopped.kind === "failed") {
+    // a box that did not stop may still be writing: its report is never read
+    return { kind: "failed", reason: `the box did not stop: ${stopped.reason}` };
+  }
+  return seen.kind === "ended" ? runEnd(seen.value) : { kind: "hungAfterReport", seconds: WINDOW_SECONDS };
 }
 
 function said(result: GitResult): string {
@@ -146,6 +160,6 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
   });
   const after = await committed(run);
   return after.kind === "ok"
-    ? { kind: "ok", value: { outcome, ...after.value } }
+    ? { kind: "ok", value: { outcome, stop: stopOf(end), ...after.value } }
     : { kind: "failed", reason: `cannot read what the run committed: ${after.reason}` };
 }

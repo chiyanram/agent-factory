@@ -34,12 +34,22 @@ export type Outcome =
   // by: the writer said so, or the host decided it from how the run ended
   | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" };
 
-// How the run ended, as the box (src/core/box) and the dispatcher's caps saw it.
+// How the run ended, as the box (src/core/box) and the dispatcher's caps saw it. hungAfterReport: the writer wrote a
+// report the schema accepts, then did not exit within the completion window, so the host stopped the box (#182).
 export type RunEnd =
   | { readonly kind: "exited"; readonly code: number }
+  | { readonly kind: "hungAfterReport"; readonly seconds: number }
   | { readonly kind: "timedOut"; readonly seconds: number }
   | { readonly kind: "cap"; readonly what: string }
   | { readonly kind: "failed"; readonly reason: string };
+
+// how the writer's process ended, as its post and the run record say it (#182)
+export type Stop = { readonly kind: "exited" } | { readonly kind: "hung"; readonly seconds: number };
+
+// stopOf : the stop a run end shows. Pure.
+export function stopOf(end: RunEnd): Stop {
+  return end.kind === "hungAfterReport" ? { kind: "hung", seconds: end.seconds } : { kind: "exited" };
+}
 
 export type ReportFile =
   | { readonly kind: "text"; readonly text: string }
@@ -183,6 +193,8 @@ function ended(end: RunEnd): string {
   switch (end.kind) {
     case "exited":
       return `the run exited ${end.code}`;
+    case "hungAfterReport":
+      return `the writer hung after its report and was stopped after ${end.seconds}s`;
     case "timedOut":
       return `the run was stopped after ${end.seconds}s`;
     case "cap":
@@ -192,9 +204,25 @@ function ended(end: RunEnd): string {
   }
 }
 
-// decide : the outcome of one writer run. A run that did not exit 0 is blocked whatever its report says.
+// decidedByReport : the run ended so that its report decides it: a clean exit, or a hang after a valid report (#182)
+function decidedByReport(end: RunEnd): boolean {
+  return (end.kind === "exited" && end.code === 0) || end.kind === "hungAfterReport";
+}
+
+// accepted : the report is one the schema takes, the writer's own blocked included; the completion window starts on
+// one (#182). Pure.
+export function accepted(file: ReportFile): boolean {
+  if (file.kind !== "text") {
+    return false;
+  }
+  const outcome = parseReport(file.text);
+  return outcome.kind !== "blocked" || outcome.by === "writer";
+}
+
+// decide : the outcome of one writer run. A run that did not exit 0 is blocked whatever its report says, except that a
+// valid report followed by a hang past the completion window is decided from the report (ADR-0012 S13, #182).
 export function decide(input: { readonly end: RunEnd; readonly file: ReportFile }): Outcome {
-  if (input.end.kind !== "exited" || input.end.code !== 0) {
+  if (!decidedByReport(input.end)) {
     return hostBlocked(ended(input.end));
   }
   switch (input.file.kind) {

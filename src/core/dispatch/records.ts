@@ -57,6 +57,8 @@ export type Event =
       readonly mode: WriterMode;
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked";
+      // hung: the writer did not exit after its report, and the host stopped it (#182); a record from before has none
+      readonly stop: "exited" | "hung";
       readonly patch: string;
       // the rows the ready check runs again; none unless the outcome is done
       readonly evidence: readonly Evidence[];
@@ -130,6 +132,12 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
 const PHASES = ["writer", "ready", "review", "verify"] as const;
 const MODES = ["test-first", "fix", "rework", "ci", "rebase"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
+const STOPS = ["exited", "hung"] as const;
+
+// stopOf : how a writer run ended; a record written before #182 has no stop, and its writer exited
+function stopOf(raw: unknown): (typeof STOPS)[number] | Bad {
+  return prop(raw, "stop") === undefined ? "exited" : oneOf(raw, "stop", STOPS);
+}
 
 // each event by its kind, so a handler per kind is typed without an assertion (TypeScript's correlated unions)
 type EventMap = { readonly [E in Event as E["kind"]]: E };
@@ -162,13 +170,19 @@ function evidenceOf(raw: unknown): readonly Evidence[] | Bad {
   return read.includes(BAD) ? BAD : read.filter((r): r is Evidence => r !== BAD);
 }
 
-type WriterParts = { readonly head: string; readonly patch: string; readonly evidence: readonly Evidence[] };
+type WriterParts = {
+  readonly head: string;
+  readonly patch: string;
+  readonly evidence: readonly Evidence[];
+  readonly stop: (typeof STOPS)[number];
+};
 
 function writerParts(raw: unknown): WriterParts | Bad {
   const head = str(raw, "head");
   const patch = str(raw, "patch");
   const evidence = evidenceOf(raw);
-  return head === BAD || patch === BAD || evidence === BAD ? BAD : { head, patch, evidence };
+  const stop = stopOf(raw);
+  return head === BAD || patch === BAD || evidence === BAD || stop === BAD ? BAD : { head, patch, evidence, stop };
 }
 
 function writerEndedOf(raw: unknown, at: string): Event | Bad {

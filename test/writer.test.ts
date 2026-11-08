@@ -19,7 +19,7 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv } from "../src/core/writer/run.js";
 import { minutesOf } from "../src/core/writer/settings.js";
-import { PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
@@ -122,11 +122,42 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
   };
 }
 
-type Told = { readonly log: string[]; readonly opened: ChangeRequest[]; readonly forge: Forge };
+// log: the first line of each post; bodies: each note in full
+// a writer that never exits by itself (#182): the box's stop ends it, or the box's own timeout after `polls` waits
+function stuck(fake: FakeBox, act: Act, polls: number | "never") {
+  const waited: number[] = [];
+  let end: (ran: Ran) => void = () => {};
+  const running = new Promise<Ran>((resolve) => {
+    end = resolve;
+  });
+  const wait = async (ms: number) => {
+    waited.push(ms);
+    if (waited.length === polls) end({ kind: "timedOut", seconds: 3600 });
+    // a watch that polls this often has missed its window: it fails by name, not by running out of memory
+    if (waited.length > 100) throw new Error("still watching after 100 polls");
+  };
+  const box: Box = {
+    ...writer(fake, act, []),
+    run: async (call) => {
+      await writer(fake, act, []).run(call);
+      return running;
+    },
+    stop: async (session) => (end({ kind: "exited", code: 137, stdout: "", stderr: "" }), fake.box.stop(session)),
+  };
+  return { box, wait, waited };
+}
+
+type Told = {
+  readonly log: string[];
+  readonly bodies: string[];
+  readonly opened: ChangeRequest[];
+  readonly forge: Forge;
+};
 
 // a forge that records what the host told it, in order
 function forge(jobs: readonly FailedJob[] = []): Told {
   const log: string[] = [];
+  const bodies: string[] = [];
   const opened: ChangeRequest[] = [];
   const text = (post: Post) => {
     const r = renderPost(post);
@@ -147,6 +178,8 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     removeLabel: async () => unused("removeLabel"),
     note: async ({ number, post }) => {
       log.push(`note ${number} ${text(post)}`);
+      const r = renderPost(post);
+      bodies.push(r.kind === "ok" ? r.text : "");
       return { kind: "ok" };
     },
     notes: async () => unused("notes"),
@@ -162,7 +195,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     changes: async () => unused("changes"),
     failedJobs: async () => ({ kind: "ok", value: jobs }),
   };
-  return { log, opened, forge: f };
+  return { log, bodies, opened, forge: f };
 }
 
 // the host push, run for real against the local origin, after every guard the host passes
@@ -183,7 +216,12 @@ function pusher(pushes: { lease: string; branch: string }[]): Pusher {
   };
 }
 
-function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]): WriterSetup {
+function setup(
+  box: Box,
+  told: Told,
+  pushes: { lease: string; branch: string }[],
+  wait: (ms: number) => Promise<void> = async () => {},
+): WriterSetup {
   return {
     box: {
       box,
@@ -211,6 +249,7 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       notice: { kind: "none" },
     }),
     pusher: pusher(pushes),
+    wait,
   };
 }
 
@@ -344,6 +383,27 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(told.log).toContain("label 41 needs-human");
     expect(told.log.at(-1)).toMatch(/note 41 .*blocked: the run exited 1/);
   });
+  it("decides a run that hung after a done report from that report, and says in the note that it hung (#182)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const s = stuck(fake, { commit: true, report: DONE, exit: 0 }, "never");
+    const told = forge();
+    const out = await run(setup(s.box, told, [], s.wait), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", stop: "hung" } });
+    expect(s.waited.at(-1)).toBe(60_000);
+    expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
+    expect(told.bodies.at(-1)).toContain("the writer hung after its report; the host stopped it after 60s");
+  });
+
+  it("waits out the full timeout for a run with no report the schema accepts, and reads it as blocked (#182)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const s = stuck(fake, { commit: true, report: "none", exit: 0 }, 4);
+    const told = forge();
+    const out = await run(setup(s.box, told, [], s.wait), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", stop: "exited" } });
+    expect(s.waited).not.toContain(60_000);
+    expect(told.log.at(-1)).toMatch(/note 41 .*blocked: the run was stopped after 3600s/);
+  });
+
   it("reads a box that did not stop as blocked and never reads its report, which it may still be writing", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const box: Box = {
@@ -456,7 +516,10 @@ describe("the writer step: a later run on the change", () => {
     const none = fakeBox({});
     const told = forge([]);
     const handed = await run(setup(none.box, told, []), { kind: "ci-red", head: p.head2 }, openLine());
-    expect(handed).toEqual({ kind: "ok", value: { head: p.head2, outcome: "blocked", patch: "", evidence: [] } });
+    expect(handed).toEqual({
+      kind: "ok",
+      value: { head: p.head2, outcome: "blocked", stop: "exited", patch: "", evidence: [] },
+    });
     expect(told.log).toEqual([
       "label 12 needs-human",
       expect.stringMatching(/note 12 .*the forge names no failed job at the head/),
@@ -630,10 +693,19 @@ describe("the writer's words and settings", () => {
     });
     expect(
       text.startsWith(
-        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
+        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
       ),
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
+  });
+
+  it("tells the writer of every mode to keep its subagents and commands in the foreground (#192)", () => {
+    const prompts = { fix: "f", testFirst: "t", rework: "r", ci: "c" };
+    const modes = ["fix", "test-first", "rework", "ci"] as const;
+    const texts = modes.map((mode) =>
+      promptFor({ prompts, mode, ticket: "PROJ-1", branch: "b", head: "h", tools: [] }),
+    );
+    expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
   });
 
   it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, the cap and model only when set", () => {

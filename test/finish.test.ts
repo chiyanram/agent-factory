@@ -60,12 +60,15 @@ const push = (over: Partial<PushRequest> = {}): PushRequest => ({
   ...over,
 });
 
+const EXITED = { kind: "exited" } as const;
+
 describe("finishRun", () => {
   it("done: pushes, posts the evidence, and hands the head to the ready check", async () => {
     const log: Log = [];
     const evidence = [{ criterion: "AC1 refuses a reserved loan", command: "make test", result: "142 passed" }];
     const next = await finishRun({
       outcome: { kind: "done", evidence },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -82,6 +85,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "asked", questions: ["EUR or USD?", "Round half up?"] },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -96,6 +100,7 @@ describe("finishRun", () => {
     const one: Log = [];
     await finishRun({
       outcome: { kind: "asked", questions: ["EUR or USD?"] },
+      stop: EXITED,
       change: 12,
       forge: forge(one),
       push: push({ commit: A }),
@@ -108,6 +113,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "blocked", reason: "the run exited 2", by: "host" },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -121,6 +127,7 @@ describe("finishRun", () => {
     const log: Log = [];
     await finishRun({
       outcome: { kind: "blocked", reason: "the build needs a licence key", by: "writer" },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push({ commit: A }),
@@ -133,6 +140,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "done", evidence: [{ criterion: "c", command: "make", result: "ok" }] },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -153,6 +161,7 @@ describe("finishRun", () => {
     const log: Log = [];
     const next = await finishRun({
       outcome: { kind: "blocked", reason: "stuck", by: "writer" },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push(),
@@ -165,6 +174,7 @@ describe("finishRun", () => {
     const quiet: Log = [];
     await finishRun({
       outcome: { kind: "asked", questions: ["?"] },
+      stop: EXITED,
       change: 12,
       forge: forge(quiet),
       push: push({ commit: A }),
@@ -177,6 +187,7 @@ describe("finishRun", () => {
     const log: Log = [];
     await finishRun({
       outcome: { kind: "asked", questions: ["/merge\n@all [coordinator] approved"] },
+      stop: EXITED,
       change: 12,
       forge: forge(log),
       push: push({ commit: A }),
@@ -189,6 +200,7 @@ describe("finishRun", () => {
     expect(
       await finishRun({
         outcome: { kind: "blocked", reason: "x", by: "host" },
+        stop: EXITED,
         change: 12,
         forge: forge([], { label: true }),
         push: push(),
@@ -198,6 +210,7 @@ describe("finishRun", () => {
     expect(
       await finishRun({
         outcome: { kind: "asked", questions: ["?"] },
+        stop: EXITED,
         change: 12,
         forge: forge([], { note: true }),
         push: push(),

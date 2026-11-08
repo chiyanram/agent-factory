@@ -25,7 +25,7 @@ import type { Post, Seat } from "./post.js";
 import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
 import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
-import type { Evidence, Outcome } from "./report.js";
+import type { Evidence, Outcome, Stop } from "./report.js";
 
 export const NEEDS_HUMAN = "needs-human";
 
@@ -38,6 +38,8 @@ export type Pusher = (request: PushRequest) => Promise<Done>;
 
 export type FinishInput = {
   readonly outcome: Outcome;
+  // how the writer's process ended: a hang after its report is said in the post (#182)
+  readonly stop: Stop;
   // the change the run worked on
   readonly change: number;
   readonly forge: Forge;
@@ -221,16 +223,33 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
   const said = await post(input, {
     seat: block.by === "writer" ? "writer" : "coordinator",
     title: `blocked: ${why}`,
-    fields: [],
+    fields: stopFields(input.stop),
     items: [],
   });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
 }
 
+// stopFields : what the post says of how the run ended; nothing for a plain exit. Pure.
+export function stopFields(stop: Stop): Post["fields"] {
+  switch (stop.kind) {
+    case "exited":
+      return [];
+    case "hung":
+      return [
+        { label: "stopped", value: `the writer hung after its report; the host stopped it after ${stop.seconds}s` },
+      ];
+  }
+}
+
 async function done(input: FinishInput, evidence: readonly Evidence[]): Promise<Result<Next>> {
   const head = input.push.commit;
   const items = evidence.map((e) => `${e.criterion} · ${e.command} · ${e.result}`);
-  const said = await post(input, { seat: "writer", title: `done at ${short(head)}`, fields: [], items });
+  const said = await post(input, {
+    seat: "writer",
+    title: `done at ${short(head)}`,
+    fields: stopFields(input.stop),
+    items,
+  });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "ready-check", head, evidence } } : said;
 }
 
@@ -238,8 +257,13 @@ async function asked(input: FinishInput, questions: readonly string[]): Promise<
   const [only] = questions;
   const ask: Post =
     questions.length === 1 && only !== undefined
-      ? { seat: "writer", title: `OPEN: ${only}`, fields: [], items: [] }
-      : { seat: "writer", title: `OPEN: ${questions.length} questions`, fields: [], items: questions };
+      ? { seat: "writer", title: `OPEN: ${only}`, fields: stopFields(input.stop), items: [] }
+      : {
+          seat: "writer",
+          title: `OPEN: ${questions.length} questions`,
+          fields: stopFields(input.stop),
+          items: questions,
+        };
   const said = await post(input, ask);
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }

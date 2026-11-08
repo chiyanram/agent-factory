@@ -74,12 +74,16 @@ export type WriterSetup = {
   readonly login: () => Promise<BoxToken>;
   // the host push: hostPush; a test passes its own
   readonly pusher: Pusher;
+  // the wait while the host watches for the report (#182): realWait; a test passes its own
+  readonly wait: (ms: number) => Promise<void>;
 };
 
 type Input = RunInput & { readonly task: Task };
 export type WriterOut = {
   readonly head: string;
   readonly outcome: "done" | "asked" | "blocked";
+  // the run record keeps a hang after the report (#182)
+  readonly stop: "exited" | "hung";
   readonly patch: string;
   readonly evidence: readonly Evidence[];
 };
@@ -109,6 +113,11 @@ const TEMPLATE: Readonly<Record<RunMode, keyof Prompts>> = {
 
 // the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
 // reads them as it reads the code
+// every mode's run ends when the model stops: a subagent or command left in the background is lost, or holds the
+// process open (#192; the completion window, #182, is the net behind it)
+export const FOREGROUND =
+  "Run every subagent and command in the foreground and wait for it to finish. This run ends when you stop, so anything left in the background is lost.";
+
 export const PROJECT_INSTRUCTIONS = [
   "This project's instructions are not loaded for you. Before you change anything, read AGENTS.md and CLAUDE.md at the",
   "root, and the AGENTS.md or CLAUDE.md of each folder you change, and follow them. The project's skills are in",
@@ -116,8 +125,8 @@ export const PROJECT_INSTRUCTIONS = [
   ".claude and .agents: the push refuses a commit that does.",
 ].join("\n");
 
-// promptFor : the mode's prompt with the run's names, the project's instructions and tools, then the report's schema.
-// Pure.
+// promptFor : the mode's prompt with the run's names, the foreground rule, the project's instructions and tools, then the
+// report's schema. Pure.
 export function promptFor(input: {
   readonly prompts: Prompts;
   readonly mode: RunMode;
@@ -133,12 +142,12 @@ export function promptFor(input: {
     .replaceAll("{{branch}}", input.branch)
     .replaceAll("{{head}}", input.head);
   const tools = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
-  return `${filled.trimEnd()}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
+  return `${filled.trimEnd()}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
 }
 
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
-  const base = { head: ended.tip, patch: ended.patch };
+  const base = { head: ended.tip, patch: ended.patch, stop: ended.stop.kind };
   switch (next.kind) {
     case "ready-check":
       return { ...base, outcome: "done", evidence: next.evidence };
@@ -258,6 +267,7 @@ async function finished(
   if (input.change.kind === "open") {
     const next = await finishRun({
       outcome,
+      stop: ended.stop,
       change: input.change.line.number,
       forge: setup.forge,
       push,
@@ -267,10 +277,14 @@ async function finished(
   }
   if (ended.tip === clone.start) {
     // nothing to push and no change to post on: the record says the run changed nothing, and a person looks
-    return { kind: "ok", value: { head: ended.tip, outcome: outcome.kind, patch: "", evidence: [] } };
+    return {
+      kind: "ok",
+      value: { head: ended.tip, outcome: outcome.kind, stop: ended.stop.kind, patch: "", evidence: [] },
+    };
   }
   const first = await finishFirst({
     outcome,
+    stop: ended.stop,
     forge: setup.forge,
     push,
     pusher: setup.pusher,
@@ -311,6 +325,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     timeoutSeconds: setup.settings.timeoutSeconds,
     claude: setup.settings.claude,
     settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
+    wait: setup.wait,
   });
   const out = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
   const removed = await removeClone(clone.value.dir);
@@ -326,6 +341,8 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
   const head = input.change.line.head;
   const next = await finishRun({
     outcome,
+    // no run started: there is no end to tell
+    stop: { kind: "exited" },
     change: input.change.line.number,
     forge: setup.forge,
     push: {
@@ -339,7 +356,9 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
       guards: [],
     },
   });
-  return next.kind === "ok" ? { kind: "ok", value: { head, outcome: "blocked", patch: "", evidence: [] } } : next;
+  return next.kind === "ok"
+    ? { kind: "ok", value: { head, outcome: "blocked", stop: "exited", patch: "", evidence: [] } }
+    : next;
 }
 
 type Planned = { readonly kind: "run"; readonly work: Work } | { readonly kind: "hand-over"; readonly reason: string };

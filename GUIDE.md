@@ -439,6 +439,13 @@ exists yet, so you run the triggers below by hand.
   other field, a non-zero exit, a timeout, a cap or a failed box is `blocked` with the reason; a reason never quotes
   the report. The host reads the report only after the box has stopped, never through a symlink, and refuses to push
   when any new commit touches `.factory` (`excludeFactory` keeps it out of `git add`).
+  **The completion window** (#182, `src/core/writer/window.ts`). A writer can finish while a child it started keeps the
+  process open. While the writer runs, the host looks for a report the schema accepts every 2 seconds. Once one is
+  there, the writer has 60 seconds to exit. If it is still running then, the host stops the box and decides the run
+  from the report, read again after the stop. The note gets a `stopped` field, "the writer hung after its report; the
+  host stopped it after 60s", and the run record keeps `stop: "hung"`. A run with no accepted report waits out
+  `FACTORY_WRITER_MINUTES`, as before. Every writer prompt also says to run subagents and commands in the foreground
+  (#192, `FOREGROUND` in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
   **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the
   report replaces that once the writer starts through the box and the dispatcher (#103, #138).
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.

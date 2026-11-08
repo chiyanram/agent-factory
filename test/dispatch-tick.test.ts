@@ -133,6 +133,7 @@ describe("records", () => {
         mode: "ci",
         head: H,
         outcome: "done",
+        stop: "exited",
         patch: "p",
         evidence: [],
       },
@@ -187,6 +188,19 @@ describe("records: evidence", () => {
   });
 });
 
+describe("records: how the writer stopped (#182)", () => {
+  it("keeps a hang after the report; a line from before has none and its writer exited; an unknown stop fails the read", async () => {
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const hung = { at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done" } as const;
+    expect(await record({ where, event: { ...hung, stop: "hung", patch: "p", evidence: [] } })).toEqual({ kind: "ok" });
+    const file = join(home, "runs", "ledger", "PROJ-1.jsonl");
+    writeFileSync(file, `${JSON.stringify({ ...hung, patch: "p" })}\n`, { flag: "a" });
+    expect(await readRecords(where)).toMatchObject({ kind: "ok", value: [{ stop: "hung" }, { stop: "exited" }] });
+    writeFileSync(file, `${JSON.stringify({ ...hung, stop: "crashed", patch: "p" })}\n`, { flag: "a" });
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+  });
+});
+
 describe("tick", () => {
   it("today the writer's step is not built: the pass says so and records nothing, so the next pass decides the same", async () => {
     await approved();
@@ -209,7 +223,8 @@ describe("tick", () => {
       writer: {
         kind: "available",
         run: async (input) => (
-          runs.push(input.ticket), { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [] } }
+          runs.push(input.ticket),
+          { kind: "ok", value: { head: H, outcome: "done", stop: "exited", patch: "p1", evidence: [] } }
         ),
       },
     };
@@ -255,6 +270,7 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        stop: "exited",
         patch: "p",
         evidence: [],
       },
@@ -295,6 +311,7 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        stop: "exited",
         patch: "p",
         evidence,
       },
@@ -397,6 +414,7 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        stop: "exited",
         patch: "",
         evidence: [],
       },
@@ -425,6 +443,7 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        stop: "exited",
         patch: "p",
         evidence: [],
       },
@@ -439,7 +458,8 @@ describe("tick", () => {
       writer: {
         kind: "available",
         run: async () => (
-          log.push("writer runs"), { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [] } }
+          log.push("writer runs"),
+          { kind: "ok", value: { head: H, outcome: "done", stop: "exited", patch: "p1", evidence: [] } }
         ),
       },
     };

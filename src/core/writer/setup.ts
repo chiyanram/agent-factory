@@ -10,6 +10,7 @@ import type { Pusher } from "../finish.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import type { BoxPlan } from "../ready/steps.js";
 import { writerSettings } from "./settings.js";
+import { realWait } from "./window.js";
 import { readPrompts, type PushTarget, type WriterSetup } from "./step.js";
 
 export type WriterInput = {
@@ -79,6 +80,7 @@ export async function writerSetup(input: WriterInput): Promise<Result<WriterSetu
           label: input.label,
           login: () => boxTokenFrom({ store, now: new Date() }),
           pusher: input.pusher,
+          wait: realWait,
         },
       }
     : prompts;

@@ -34,6 +34,7 @@ export type Steps = {
     {
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked";
+      readonly stop: "exited" | "hung";
       readonly patch: string;
       readonly evidence: readonly Evidence[];
     }
