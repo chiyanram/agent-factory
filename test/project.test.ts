@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readProjectFile } from "../src/core/project.js";
 import { commandArgv } from "../src/core/ready/command.js";
+import { TEST_FILES } from "../src/core/ready/floor.js";
 
 let home = "";
 beforeEach(() => {
@@ -19,6 +20,15 @@ function write(value: unknown): void {
 const read = () => readProjectFile({ home, project: "ledger" });
 
 describe("readProjectFile (ADR-0014 P3, #91)", () => {
+  it("reads the floor guard's own test globs, which replace the built-in ones; refuses a list that is not one (#190)", async () => {
+    write({ gate: "forge-ci", ready: { programs: ["make"], testFiles: ["checks/**"] } });
+    expect(await read()).toMatchObject({ kind: "ok", value: { ready: { testFiles: ["checks/**"] } } });
+    for (const testFiles of [[], "checks/**", [""]]) {
+      write({ gate: "forge-ci", ready: { programs: ["make"], testFiles } });
+      expect(await read()).toMatchObject({ kind: "failed", reason: expect.stringContaining('"ready.testFiles"') });
+    }
+  });
+
   it("reads a file with only the plugin fields as no ready settings; once one ready field is there, it checks them all", async () => {
     write({ plugins: { notify: "discord" }, policy: {} });
     expect(await read()).toMatchObject({ kind: "missing", reason: expect.stringContaining("no gate yet") });
@@ -40,7 +50,7 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       kind: "ok",
       value: {
         gate: { kind: "local", verify: ["make", "verify"] },
-        ready: { programs: ["make", "./gradlew"], timeoutSeconds: 600 },
+        ready: { programs: ["make", "./gradlew"], timeoutSeconds: 600, testFiles: TEST_FILES },
         // checked as the proxy will use it: sorted, and a host a dotted entry covers dropped
         egress: { allow: [".gradle.org", "api.anthropic.com", "repo.maven.apache.org"] },
       },
@@ -50,7 +60,7 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       kind: "ok",
       value: {
         gate: { kind: "forge-ci" },
-        ready: { programs: ["make"], timeoutSeconds: 1800 },
+        ready: { programs: ["make"], timeoutSeconds: 1800, testFiles: TEST_FILES },
         egress: { allow: [] },
       },
     });

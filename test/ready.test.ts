@@ -9,6 +9,7 @@ import type { ProjectFile } from "../src/core/project.js";
 import type { Evidence } from "../src/core/report.js";
 import { boxPlan } from "../src/core/ready/plan.js";
 import { recordsDirOf, readKept } from "../src/core/kept.js";
+import { TEST_FILES } from "../src/core/ready/floor.js";
 import { readyStep, verifyStep, VERIFY_CONTEXT, VERIFY_FILE, type BoxPlan } from "../src/core/ready/steps.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
@@ -33,7 +34,7 @@ const exited = (code: number): Ran => ({ kind: "exited", code, stdout: "", stder
 
 const PROJECT: ProjectFile = {
   gate: { kind: "local", verify: ["make", "verify"] },
-  ready: { programs: ["make", "./gradlew"], timeoutSeconds: 60 },
+  ready: { programs: ["make", "./gradlew"], timeoutSeconds: 60, testFiles: TEST_FILES },
   egress: { allow: ["repo.maven.apache.org"] },
 };
 
@@ -104,7 +105,7 @@ function input(evidence: readonly Evidence[], at = head): RunInput & { readonly 
 const row = (command: string, criterion = "AC1"): Evidence => ({ criterion, command, result: "ok" });
 
 async function ready(box: Box, evidence: readonly Evidence[], at = head) {
-  const step = readyStep(plan(box));
+  const step = readyStep(plan(box), statusForge([]));
   return step.kind === "available" ? step.run(input(evidence, at)) : step;
 }
 
@@ -203,7 +204,7 @@ function statusForge(posted: CommitStatus[]): Forge {
     mark: "#",
     me: notUsed,
     change: notUsed,
-    defaultBranch: notUsed,
+    defaultBranch: async () => ({ kind: "ok", value: "main" }),
     openChange: notUsed,
     addLabel: notUsed,
     removeLabel: notUsed,
@@ -297,6 +298,30 @@ describe("the local verifier (#91)", () => {
   });
 });
 
+describe("the floor guard in the ready check (#190)", () => {
+  it("fails the check before any box runs when the diff adds a skip, with its file:line", async () => {
+    p.git("checkout", "-q", "feat/x");
+    p.write("src/test/OrderTest.java", "class OrderTest {\n  @Disabled\n  void total() {}\n}\n");
+    const skipped = p.commitAll("skip the failing test");
+    p.git("push", "-q", "origin", "feat/x");
+    p.git("checkout", "-q", "main");
+    const fake = fakeBox({ runs: [exited(0)] });
+    const out = await ready(fake.box, [row("make test")], skipped);
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: { passed: false, why: expect.stringContaining("src/test/OrderTest.java:2 adds a skip marker") },
+    });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("fails the step, never passes, when the guard cannot read the diff", async () => {
+    const fake = fakeBox({ runs: [exited(0)] });
+    const out = await ready(fake.box, [row("make test")], "0".repeat(40));
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the head moved") });
+    expect(fake.calls).toEqual([]);
+  });
+});
+
 describe("the box run's egress", () => {
   it("starts the project's proxy before the box, once per run, and puts the box on the project's network", async () => {
     const fake = fakeBox({ runs: [exited(0)] });
@@ -307,7 +332,10 @@ describe("the box run's egress", () => {
 
   it("starts no box when the proxy does not start, and fails the run rather than give a verdict", async () => {
     const fake = fakeBox({ runs: [exited(0)] });
-    const step = readyStep(plan(fake.box, PROJECT, { kind: "failed", reason: "docker create: no such image" }));
+    const step = readyStep(
+      plan(fake.box, PROJECT, { kind: "failed", reason: "docker create: no such image" }),
+      statusForge([]),
+    );
     const out = step.kind === "available" ? await step.run(input([row("make test")])) : step;
     expect(out).toEqual({
       kind: "failed",

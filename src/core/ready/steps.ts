@@ -1,8 +1,11 @@
 // steps — the ready check and the local verifier as the dispatcher's steps (#91; #138). Both run branch code, so both
 // run only in a fresh box (boxrun.ts), and both read their commands from the project file, never from the branch.
 //
-//   ready    each evidence row of the writer's report runs again at the head. A row whose command needs a shell, or
-//            starts with a program the project file does not list, fails the check: the writer is sent back to fix it.
+//   ready    first the floor guard (floor.ts) reads the diff on the host: a skip, a deleted test, a removed assertion,
+//            a suppression with no reason or an empty catch fails the check at once, with its file:line, and no box
+//            runs; a guard that cannot read the diff fails the step, so a person looks. Then each evidence row of the
+//            writer's report runs again at the head. A row whose command needs a shell, or starts with a program the
+//            project file does not list, fails the check: the writer is sent back to fix it.
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
 //            as the commit status agent-factory/verify, for people and branch protection. The dispatcher decides from
 //            its own record of the run, never from the forge, where any other check could read as green. It posts
@@ -17,6 +20,7 @@ import type { Argv, ProjectFile } from "../project.js";
 import type { Evidence } from "../report.js";
 import { commandArgv } from "./command.js";
 import { rowLine, runInBox, type BoxSetup, type Row } from "./boxrun.js";
+import { floorGuard, hitsLine } from "./floor.js";
 
 export const VERIFY_CONTEXT = "agent-factory/verify";
 
@@ -62,14 +66,50 @@ function verdict(evidence: readonly Evidence[], rows: readonly Row[]): Checked {
   return { passed: false, why: `row ${i + 1} (${evidence[i]?.criterion ?? ""}): ${rowLine(bad)}` };
 }
 
+// floor : the floor guard on the change's diff, before any box runs; none is a pass
+async function floor(plan: ReadyPlan, forge: Forge, open: Open, head: string): Promise<Result<Checked>> {
+  const base = await forge.defaultBranch();
+  const hits =
+    base.kind === "ok"
+      ? await floorGuard({
+          repo: plan.setup.repo,
+          env: plan.setup.env,
+          base: base.value,
+          branch: open.branch,
+          head,
+          testFiles: plan.project.ready.testFiles,
+        })
+      : base;
+  if (hits.kind === "failed") {
+    return hits;
+  }
+  return {
+    kind: "ok",
+    value: hits.value.length === 0 ? { passed: true, why: "" } : { passed: false, why: hitsLine(hits.value) },
+  };
+}
+
 async function check(
   plan: ReadyPlan,
+  forge: Forge,
   open: Open,
   input: RunInput & { readonly evidence: readonly Evidence[] },
 ): Promise<Result<Checked>> {
   if (input.evidence.length === 0) {
     return { kind: "ok", value: { passed: false, why: "the writer gave no evidence rows to run again" } };
   }
+  const guarded = await floor(plan, forge, open, input.head);
+  if (guarded.kind === "failed" || !guarded.value.passed) {
+    return guarded;
+  }
+  return rerun(plan, open, input);
+}
+
+async function rerun(
+  plan: ReadyPlan,
+  open: Open,
+  input: RunInput & { readonly evidence: readonly Evidence[] },
+): Promise<Result<Checked>> {
   const parsed = argvs(input.evidence, plan.project.ready.programs);
   if (parsed.kind === "failed") {
     return { kind: "ok", value: { passed: false, why: parsed.reason } };
@@ -86,7 +126,7 @@ async function check(
 }
 
 // readyStep : the ready check, when there is a box and a project file
-export function readyStep(plan: BoxPlan): Steps["ready"] {
+export function readyStep(plan: BoxPlan, forge: Forge): Steps["ready"] {
   if (plan.kind === "unavailable") {
     return plan;
   }
@@ -94,7 +134,7 @@ export function readyStep(plan: BoxPlan): Steps["ready"] {
     kind: "available",
     run: async (input) => {
       const open = openOf(input);
-      return open === "none" ? { kind: "failed", reason: "no open change to check" } : check(plan, open, input);
+      return open === "none" ? { kind: "failed", reason: "no open change to check" } : check(plan, forge, open, input);
     },
   };
 }

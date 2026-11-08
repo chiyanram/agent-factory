@@ -343,7 +343,7 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 {
   "gate": "local",
   "verify": ["make", "verify"],
-  "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30 },
+  "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30, "testFiles": ["src/test/**", "**/*Spec.groovy"] },
   "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] },
   "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
   "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
@@ -361,6 +361,9 @@ there.
   **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
 - `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
   redirect, `$`, glob or backslash); any other row fails the ready check.
+- `ready.testFiles`: the globs the floor guard reads as test files; they replace the built-in list (`src/test/**`,
+  `test/**`, `tests/**`, `__tests__/**`, `*Test.java`, `*Spec.groovy`, `*.test.*`, `*.spec.*`, `test_*.py`,
+  `*_test.go` and the like; `src/core/ready/floor.ts`).
 - `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
   `.npmjs.org` for a
   domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
@@ -465,7 +468,18 @@ ended goes to a person. A ticket's change is the one on `factory/<ticket>` in th
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
-which also starts every count afresh. The ready check runs each evidence row of the writer's report again at the head,
+which also starts every count afresh. The ready check first runs the floor guard (#190): it reads the change's diff
+from its merge base with the default branch, on the host and with git only, and fails the check at once, with each
+`file:line`, when the diff lowers the bar (VB6, CR4):
+- a skip marker added in a test file (`@Disabled`, `@Ignore`, `.skip(`, `xit(`, `pytest.mark.skip` and the like);
+- a test file deleted (a moved one is followed);
+- more assertion lines removed than added in a test file, every line of a Spock `then:` or `expect:` block counting;
+- a suppression added with no reason comment on the line above (`@SuppressWarnings`, `eslint-disable`,
+  `@ts-ignore`, `NOSONAR`, `noqa` and the like), in any file;
+- an empty `catch` block, or `except: pass`.
+
+To keep one on purpose, the writer reports `asked` with why. A guard that cannot read the diff fails the step, so the
+check is never passed and a person looks. Then it runs each evidence row of the writer's report again at the head,
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
 project's own proxy; nothing of the branch runs on the host. Each box run starts that proxy afresh, inside the
 project's lock. The dispatcher opens the vm box when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set; otherwise
@@ -476,7 +490,7 @@ and posts what it committed. A `rework` or `ci` run (#171) works the same way, w
 
 | the run is for | `.factory/task.md` holds |
 |---|---|
-| a failed ready check | the evidence row that failed at the head |
+| a failed ready check | the evidence row that failed at the head, or the floor guard's `file:line` hits |
 | an open Act on | the review's own Act on findings, kept at `.claude/runs/<change>/<head>/act-on.json` before it posts them; never a forge thread |
 | red forge CI | each failed job's name and the last 200 lines of its log, for the first 3 jobs (GitHub check runs and statuses, GitLab pipeline jobs) |
 | a failed local verifier | the verifier's own output, kept at `.claude/runs/<change>/<head>/verify.txt` before it posts the status |
