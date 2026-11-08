@@ -10,9 +10,9 @@ import type { Limits } from "../plugin/exec.js";
 import { MAX_WAIT, type Done, type Result } from "./api.js";
 import { FORGE_OPS, type ForgeOp } from "./ops.js";
 import { reader, type Reader } from "./read.js";
-import { changeOf, changesOf, ciConfigOf, notesOf, numbersOf } from "./shapes.js";
+import { changeOf, changesOf, ciConfigOf, failedJobsOf, notesOf, numbersOf } from "./shapes.js";
 import { markOf } from "./target.js";
-import type { Change, Changes, CiConfig, Forge, ForgeName } from "./types.js";
+import type { Change, Changes, CiConfig, FailedJob, Forge, ForgeName } from "./types.js";
 
 export type PluginTarget = {
   readonly setup: Setup;
@@ -112,5 +112,6 @@ export function pluginForge(target: PluginTarget): Forge {
     claimed: (i) => read(target, "claimed", i, numbersOf),
     openChange: (i) => opened(target, i),
     changes: (i): Promise<Result<Changes>> => read(target, "changes", i, changesOf),
+    failedJobs: (i): Promise<Result<readonly FailedJob[]>> => read(target, "failedJobs", i, failedJobsOf),
   };
 }

@@ -17,6 +17,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
+import { recordsDirOf } from "../kept.js";
 import { claudeSessions, type Sessions } from "./live.js";
 import { claudeModel, runInFolder, type Model } from "./model.js";
 import type { ReviewSetup } from "./round.js";
@@ -169,7 +170,7 @@ export function reviewSetup(input: {
     env,
     rulebook: p.rulebook,
     packDir: join(p.repo, ".claude", "packs"),
-    recordsDir: join(p.repo, ".claude", "runs"),
+    recordsDir: recordsDirOf(p.repo),
     runsDir: join(p.home, "review-runs"),
     prompts: prompts(env),
     models: models(env),

@@ -19,7 +19,7 @@ import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Post } from "../post.js";
 import { plainName } from "../spec.js";
 import type { Evidence } from "../report.js";
-import { codeOf, readRecords, record, summarize, type WriterMode } from "./records.js";
+import { codeOf, modeOf, readRecords, record, summarize, type Task } from "./records.js";
 import { decide, type Action, type ApprovalView, type ChangeView, type Gate, type TicketState } from "./table.js";
 
 export const BRANCH_PREFIX = "factory/";
@@ -30,7 +30,7 @@ export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly ru
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 export type Steps = {
   readonly writer: Step<
-    RunInput & { readonly mode: WriterMode },
+    RunInput & { readonly task: Task },
     {
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked";
@@ -279,12 +279,13 @@ function headOf(state: TicketState): string {
   return state.change.kind === "open" ? state.change.line.head : "";
 }
 
-async function runWriter(setup: TickSetup, state: TicketState, mode: WriterMode): Promise<Done | Unavailable> {
+async function runWriter(setup: TickSetup, state: TicketState, task: Task): Promise<Done | Unavailable> {
   const step = setup.steps.writer;
   if (step.kind === "unavailable") {
     return step;
   }
   const place = where(setup, state);
+  const mode = modeOf(task);
   // the start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to
   // a person, never a claim with no record, which would look like someone else's
   const started = await record({
@@ -295,7 +296,7 @@ async function runWriter(setup: TickSetup, state: TicketState, mode: WriterMode)
   if (claimed.kind === "failed") {
     return claimed;
   }
-  const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), mode });
+  const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task });
   // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person
   return ran.kind === "ok"
     ? record({ where: place, event: { at: at(setup), kind: "writer-ended", mode, ...ran.value } })
@@ -365,7 +366,7 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
 
 // the actions that start a run; "none" for the rest
 const RUN: Handler<Promise<Done | Unavailable> | "none"> = {
-  writer: (setup, state, a) => runWriter(setup, state, a.mode),
+  writer: (setup, state, a) => runWriter(setup, state, a.task),
   ready: (setup, state, a) => runReady(setup, state, a.head),
   review: (setup, state, a) => runReview(setup, state, a.head),
   verify: (setup, state, a) => runVerify(setup, state, a.head),
@@ -386,7 +387,7 @@ const DESCRIBE: Describe = {
   wait: (a) => `wait: ${a.why}`,
   "needs-human": (a) => `needs-human: ${a.why}`,
   release: (a) => `release: ${a.why}`,
-  writer: (a) => `writer (${a.mode}): ${a.why}`,
+  writer: (a) => `writer (${modeOf(a.task)}): ${a.why}`,
   ready: (a) => `ready at ${a.head.slice(0, 8)}`,
   review: (a) => `review at ${a.head.slice(0, 8)}`,
   verify: (a) => `local verifier at ${a.head.slice(0, 8)}`,

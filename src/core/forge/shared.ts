@@ -1,11 +1,13 @@
-// shared — what both adapters do the same way: paging, posting through the template, and the line-finding fallback.
+// shared — what both adapters do the same way: paging, posting through the template, the line-finding fallback, and
+// the end of a failed CI job's log.
 
+import { tailOf } from "../kept.js";
 import type { Note } from "../notes.js";
 import { cleanField, renderPost, type Post } from "../post.js";
 import { plainBranch } from "../branch.js";
 import type { Done, Failed, Result, Variable } from "./api.js";
 import type { Reader } from "./read.js";
-import type { ChangeRequest, OpenChange } from "./types.js";
+import type { ChangeRequest, FailedJob, JobLog, OpenChange } from "./types.js";
 
 // A page of a list, and where the next one starts.
 export type Cursor = { readonly kind: "start" } | { readonly kind: "after"; readonly cursor: string };
@@ -197,4 +199,29 @@ function act(
     case "failed":
       return decided;
   }
+}
+
+// the logs read per CI run (#171 Q2); each keeps its last MAX_LOG_LINES lines (kept.ts)
+export const MAX_JOB_LOGS = 3;
+
+// withLogs : each failed job, with its log read for the first MAX_JOB_LOGS only
+export async function withLogs<T>(
+  jobs: readonly T[],
+  name: (job: T) => string,
+  log: (job: T) => Promise<JobLog>,
+): Promise<readonly FailedJob[]> {
+  return Promise.all(
+    jobs.map(async (job, i) => ({
+      name: name(job),
+      log:
+        i < MAX_JOB_LOGS
+          ? await log(job)
+          : ({ kind: "none", why: `only the first ${MAX_JOB_LOGS} logs are read` } as const),
+    })),
+  );
+}
+
+// logOf : a log read as text, as a job's log
+export function logOf(read: Result<string>): JobLog {
+  return read.kind === "ok" ? { kind: "tail", text: tailOf(read.value) } : { kind: "none", why: read.reason };
 }

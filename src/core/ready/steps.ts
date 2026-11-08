@@ -6,9 +6,11 @@
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
 //            as the commit status agent-factory/verify, for people and branch protection. The dispatcher decides from
 //            its own record of the run, never from the forge, where any other check could read as green. It posts
-//            "pending" first, so a run that dies leaves no green status.
+//            "pending" first, so a run that dies leaves no green status. A failed run keeps the end of its output with
+//            the head (kept.ts), which a CI run of the writer reads (#171).
 
 import type { Result } from "../forge/api.js";
+import { keepText, recordsDirOf, tailOf } from "../kept.js";
 import type { Forge, StatusState } from "../forge/types.js";
 import type { RunInput, Steps } from "../dispatch/tick.js";
 import type { Argv, ProjectFile } from "../project.js";
@@ -103,16 +105,49 @@ function post(v: Verifying, state: StatusState, description: string): ReturnType
   return v.forge.status({ sha: v.head, ref: v.open.branch, state, context: VERIFY_CONTEXT, description });
 }
 
+export const VERIFY_FILE = "verify.txt";
+
+function stream(name: string, text: string): readonly string[] {
+  return text.trim() === ""
+    ? []
+    : [`${name}, its last lines:`, "", "```text", tailOf(text).replaceAll("```", "` ` `"), "```", ""];
+}
+
+// verifyOutput : what a failed verifier run printed, as the writer reads it. Pure.
+export function verifyOutput(row: Row): string {
+  const out =
+    row.ran.kind === "exited" ? [...stream("stdout", row.ran.stdout), ...stream("stderr", row.ran.stderr)] : [];
+  return [`# The local verifier failed`, "", `\`${rowLine(row)}\` at your head, in a fresh box.`, "", ...out].join(
+    "\n",
+  );
+}
+
+// kept : a failed run's output, kept with the head before the status is posted; a run that cannot keep it posts nothing
+async function kept(plan: ReadyPlan, v: Verifying, bad: Row | "none"): Promise<Result<string>> {
+  if (bad === "none") {
+    return { kind: "ok", value: "" };
+  }
+  const at = { recordsDir: recordsDirOf(plan.setup.repo), change: v.open.number, head: v.head };
+  return keepText(at, VERIFY_FILE, verifyOutput(bad));
+}
+
 // report : the verifier's result as the status at the head
-async function report(v: Verifying, verify: Argv, rows: readonly Row[]): Promise<Result<{ readonly passed: boolean }>> {
+async function report(
+  plan: ReadyPlan,
+  v: Verifying,
+  verify: Argv,
+  rows: readonly Row[],
+): Promise<Result<{ readonly passed: boolean }>> {
   const bad = failedRow(rows);
   const passed = bad === "none" && rows.length === 1;
-  const posted = await post(
-    v,
-    passed ? "success" : "failed",
-    bad === "none" ? `${verify.join(" ")} passed` : rowLine(bad),
-  );
+  const output = await kept(plan, v, bad);
+  const posted = output.kind === "ok" ? await post(v, passed ? "success" : "failed", described(verify, bad)) : output;
   return posted.kind === "ok" ? { kind: "ok", value: { passed } } : posted;
+}
+
+// described : the status's one line. Pure.
+function described(verify: Argv, bad: Row | "none"): string {
+  return bad === "none" ? `${verify.join(" ")} passed` : rowLine(bad);
 }
 
 async function verifyRun(plan: ReadyPlan, v: Verifying, verify: Argv): Promise<Result<{ readonly passed: boolean }>> {
@@ -132,7 +167,7 @@ async function verifyRun(plan: ReadyPlan, v: Verifying, verify: Argv): Promise<R
     await post(v, "pending", `the local verifier could not run; a person looks: ${rows.reason}`);
     return rows;
   }
-  return report(v, verify, rows.value);
+  return report(plan, v, verify, rows.value);
 }
 
 async function verifyAt(plan: ReadyPlan, v: Verifying): Promise<Result<{ readonly passed: boolean }>> {

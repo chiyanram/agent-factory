@@ -125,8 +125,10 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   `.claude/worktrees/`, `.claude/runs/` and `.claude/packs/` to the project's `.gitignore`.
 - Give the writer its quick tools in `docs/agents/commands.md` on the default branch, one plain line each (a fence
   around them is fine): `lint-file: <command>` runs on each file the writer edits, with the file as its last word,
-  and `test-touched: <command>` runs the tests it touched. Either may be left out. The file is read from the MR's
-  target branch, never from the MR, because the lint runs as a hook with no permission prompt.
+  and `test-touched: <command>` runs the tests it touched. Either may be left out. The file is read from the default
+  branch, never from the change's branch, because the lint runs as a hook with no permission prompt. The host writes
+  the hook into a read-only `.factory/settings.json` in the clone and starts `claude` with `--settings` on it; the hook
+  runs `agent-factory lint-edit`, which the box has because `box build` installs this package in it.
 
 **Known gap (today).** Agents run as the developer's OS user, so they can read the token in glab's config or the
 App's key. The Developer role and the App's permissions limit what a stolen credential can do. It is not a wall.
@@ -382,7 +384,8 @@ Each project's box runs an image built on this machine, never pulled (#113):
 agent-factory box build <project>
 ```
 
-It builds the package's base image (`images/factory-box`: Ubuntu 24.04, Docker, Node 22, the agent CLIs), then, if
+It packs this package with `npm pack` and builds the base image with it installed (`images/factory-box`: Ubuntu
+24.04, Docker, Node 22, the agent CLIs, `agent-factory`), then, if
 `$FACTORY_HOME/projects/<project>/box.Dockerfile` exists, the project's own layer on top of it, and pins the result's
 ID in `$FACTORY_HOME/projects/<project>/box.json`. The dispatcher runs exactly that ID. A project Dockerfile must end
 on the base:
@@ -393,7 +396,8 @@ FROM ${BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends openjdk-21-jdk-headless
 ```
 
-Run it again after an upgrade of `agent-factory`. Both images are tagged by their ID (`factory-box-base:<12 hex>`,
+Run it again after an upgrade of `agent-factory`, so the box runs the same version as the host. In a checkout, run
+`npm run build` first: a package with no `dist/cli.js` is refused. Both images are tagged by their ID (`factory-box-base:<12 hex>`,
 `factory-box-<project>:<12 hex>`), so `docker image prune` keeps them.
 
 ## Run the loop
@@ -467,8 +471,18 @@ project's own proxy; nothing of the branch runs on the host. Each box run starts
 project's lock. The dispatcher opens the vm box when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set; otherwise
 the writer, the ready check and the verifier say what is missing and wait. The writer runs a ticket's `test-first` and
 `fix` runs in the box, on a fresh clone of the branch (or of the default branch on a first run), and the host pushes
-and posts what it committed. **Today:** a `rework` or `ci` run is not built yet (agent-factory issue 171): the host
-says so on the change and labels it `needs-human`. `dispatch` also does these rows: reconcile a merged claim,
+and posts what it committed. A `rework` or `ci` run (#171) works the same way, with its task in a read-only
+`.factory/task.md` of at most 20,000 characters, all from the host, because the box has no forge login:
+
+| the run is for | `.factory/task.md` holds |
+|---|---|
+| a failed ready check | the evidence row that failed at the head |
+| an open Act on | the review's own Act on findings, kept at `.claude/runs/<change>/<head>/act-on.json` before it posts them; never a forge thread |
+| red forge CI | each failed job's name and the last 200 lines of its log, for the first 3 jobs (GitHub check runs and statuses, GitLab pipeline jobs) |
+| a failed local verifier | the verifier's own output, kept at `.claude/runs/<change>/<head>/verify.txt` before it posts the status |
+
+When the host cannot build the task (nothing kept at the head, or red CI with no failed job named), it says so on the
+change and labels it `needs-human`. `dispatch` also does these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
 start. Run the table below by hand for the rest. There is no merge-conflict row yet.

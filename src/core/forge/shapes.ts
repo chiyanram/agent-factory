@@ -13,6 +13,7 @@ import type {
   Changes,
   CiConfig,
   CommitStatus,
+  FailedJob,
   LineFinding,
   MergedChange,
   OpenChange,
@@ -143,6 +144,17 @@ export function changeRequestOf(r: Reader, value: unknown): ChangeRequest {
 
 export function lineFindingOf(r: Reader, value: unknown): LineFinding {
   return { file: r.text(value, "file"), line: r.int(value, "line") };
+}
+
+// failedJobsOf : the failed jobs at a head (#171); task.ts caps what reaches the writer, whatever the plugin sends
+export function failedJobsOf(r: Reader, value: unknown): readonly FailedJob[] {
+  return r.list(value, "").map((j) => ({
+    name: r.text(j, "name"),
+    log:
+      r.word(j, "log.kind", ["tail", "none"]) === "tail"
+        ? { kind: "tail", text: r.text(j, "log.text") }
+        : { kind: "none", why: r.text(j, "log.why") },
+  }));
 }
 
 export function numbersOf(r: Reader, value: unknown): readonly number[] {

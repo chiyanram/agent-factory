@@ -16,6 +16,33 @@ export type Phase = "writer" | "ready" | "review" | "verify";
 // what the writer was started for
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase";
 
+// what one writer run is for, and so what the host hands the writer (#171). The record keeps only its mode.
+export type Task =
+  | { readonly kind: "test-first" }
+  | { readonly kind: "fix" }
+  // the ready check failed at the writer's head; why names the first row that failed
+  | { readonly kind: "ready-failed"; readonly why: string }
+  // the factory's review at this head left Act on findings
+  | { readonly kind: "act-on"; readonly head: string }
+  // CI is red at this head
+  | { readonly kind: "ci-red"; readonly head: string }
+  // the local verifier failed at this head (a local gate, #91); its output is kept with the head (kept.ts)
+  | { readonly kind: "verify-failed"; readonly head: string };
+
+const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
+  "test-first": "test-first",
+  fix: "fix",
+  "ready-failed": "rework",
+  "act-on": "rework",
+  "ci-red": "ci",
+  "verify-failed": "ci",
+};
+
+// modeOf : the mode a task is recorded as. Pure.
+export function modeOf(task: Task): WriterMode {
+  return MODE_OF[task.kind];
+}
+
 export type Event =
   | {
       readonly at: string;

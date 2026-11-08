@@ -84,6 +84,12 @@ const RUN: Readonly<Record<ForgeOp, Run>> = {
       (r, v) => ({ label: r.text(v, "label") }),
       async (x) => value(await f.changes(x)),
     ),
+  failedJobs: (f, i) =>
+    withInput(
+      i,
+      (r, v) => ({ number: r.int(v, "number"), head: r.text(v, "head") }),
+      async (x) => value(await f.failedJobs(x)),
+    ),
   addLabel: (f, i) => withInput(i, labelOf, async (x) => done(await f.addLabel(x))),
   removeLabel: (f, i) => withInput(i, labelOf, async (x) => done(await f.removeLabel(x))),
   note: (f, i) =>

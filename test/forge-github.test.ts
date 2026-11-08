@@ -425,3 +425,51 @@ describe("openChange (#164)", () => {
     expect(opened).toEqual({ kind: "failed", reason: expect.stringContaining("No commits between") });
   });
 });
+
+describe("failedJobs (#171)", () => {
+  const H = "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111";
+  const run = (id: number, name: string, conclusion: string, slug = "github-actions") => ({
+    id,
+    name,
+    conclusion,
+    app: { slug },
+  });
+
+  it("reads the head's failed check runs, an Actions job's log end, and a failed commit status by its description", async () => {
+    const f = fake("github", [
+      ok({
+        check_runs: [run(11, "test", "failure"), run(12, "lint", "success"), run(13, "sonar", "failure", "sonarcloud")],
+      }),
+      ok({ statuses: [{ context: "agent-factory/verify", state: "failure", description: "make verify failed" }] }),
+      { status: 200, body: "2026-11-08T05:21:14Z ##[error]Process completed with exit code 2.\n" },
+    ]);
+    const out = await github(f.client, project).failedJobs({ number: 4, head: H });
+    expect(out).toEqual({
+      kind: "ok",
+      value: [
+        {
+          name: "test",
+          log: { kind: "tail", text: "2026-11-08T05:21:14Z ##[error]Process completed with exit code 2." },
+        },
+        { name: "sonar", log: { kind: "none", why: "not a GitHub Actions job: its log is on its own site" } },
+        {
+          name: "agent-factory/verify",
+          log: { kind: "none", why: "a commit status, with no log: make verify failed" },
+        },
+      ],
+    });
+    expect(f.calls.map((c) => c.args[2])).toEqual([
+      `repos/${project.owner}/${project.name}/commits/${H}/check-runs?filter=latest&per_page=100`,
+      `repos/${project.owner}/${project.name}/commits/${H}/status?per_page=100`,
+      `repos/${project.owner}/${project.name}/actions/jobs/11/logs`,
+    ]);
+  });
+
+  it("fails with the reason when the check runs cannot be read", async () => {
+    const f = fake("github", [{ status: 404, body: { message: "Not Found" } }]);
+    expect(await github(f.client, project).failedJobs({ number: 4, head: H })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("HTTP 404"),
+    });
+  });
+});

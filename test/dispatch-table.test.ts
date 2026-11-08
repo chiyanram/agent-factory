@@ -172,18 +172,18 @@ describe("decide: one row each", () => {
   it("approved with no run yet starts the writer; a bug starts the test-first writer first, then the fix", () => {
     expect(decide(state({ change: { kind: "none" }, runs: EMPTY }))).toEqual({
       kind: "writer",
-      mode: "fix",
+      task: { kind: "fix" },
       why: "approved; no run yet",
     });
     const bug = { kind: "approved", at: APPROVED_AT, lane: "bug" } as const;
     expect(decide(state({ approval: bug, change: { kind: "none" }, runs: EMPTY }))).toMatchObject({
       kind: "writer",
-      mode: "test-first",
+      task: { kind: "test-first" },
     });
     const testIn = wrote({
       lastWriter: { kind: "ended", mode: "test-first", head: H, outcome: "done", patch: "t1", evidence: [] },
     });
-    expect(decide(state({ approval: bug, runs: testIn }))).toMatchObject({ kind: "writer", mode: "fix" });
+    expect(decide(state({ approval: bug, runs: testIn }))).toMatchObject({ kind: "writer", task: { kind: "fix" } });
   });
 
   it("the writer again once a person answered its question, or removed needs-human after it was blocked", () => {
@@ -223,7 +223,10 @@ describe("decide: one row each", () => {
     const asked = wrote({
       lastWriter: { kind: "ended", mode: "test-first", head: H, outcome: "asked", patch: "t", evidence: [] },
     });
-    expect(decide(state({ approval: bug, runs: asked }))).toMatchObject({ kind: "writer", mode: "test-first" });
+    expect(decide(state({ approval: bug, runs: asked }))).toMatchObject({
+      kind: "writer",
+      task: { kind: "test-first" },
+    });
   });
 
   it("a head that is not the writer's means a person pushed: stand off", () => {
@@ -260,7 +263,7 @@ describe("decide: one row each", () => {
     const failed = { lastReady: { kind: "ended", head: H, passed: false, why: "x" } } as const;
     expect(decide(state({ runs: wrote({ ...failed, readyFailures: 1 }) }))).toMatchObject({
       kind: "writer",
-      mode: "rework",
+      task: { kind: "ready-failed", why: "x" },
     });
     expect(decide(state({ runs: wrote({ ...failed, readyFailures: MAX_READY_FAILURES }) }))).toMatchObject({
       kind: "needs-human",
@@ -278,7 +281,7 @@ describe("decide: one row each", () => {
   it("Act on findings send the writer back, and stop after 3 rounds", () => {
     expect(decide(state({ runs: wrote(reviewed(2, 1)) }))).toEqual({
       kind: "writer",
-      mode: "rework",
+      task: { kind: "act-on", head: H },
       why: "2 Act on finding(s)",
     });
     expect(decide(state({ runs: wrote(reviewed(1, MAX_REVIEW_ROUNDS)) }))).toMatchObject({
@@ -289,14 +292,14 @@ describe("decide: one row each", () => {
 
   it("CI red sends the writer back, and stops after 2 CI rounds", () => {
     const red = { kind: "open", line: line({ pipeline: { kind: "failed" } }) } as const;
-    expect(decide(state({ change: red }))).toMatchObject({ kind: "writer", mode: "ci" });
+    expect(decide(state({ change: red }))).toMatchObject({ kind: "writer", task: { kind: "ci-red", head: H } });
     expect(decide(state({ change: red, runs: wrote({ ...reviewed(0), ciRounds: MAX_CI_ROUNDS }) }))).toMatchObject({
       kind: "needs-human",
       why: expect.stringContaining("CI rounds"),
     });
     expect(decide(state({ change: { kind: "open", line: line({ pipeline: { kind: "canceled" } }) } }))).toMatchObject({
       kind: "writer",
-      mode: "ci",
+      task: { kind: "ci-red", head: H },
     });
   });
 
@@ -320,10 +323,17 @@ describe("decide: one row each", () => {
     const passed = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H, passed: true } });
     expect(decide(state({ gate: "local", change: none, runs: passed }))).toEqual({ kind: "ping", head: H });
     const red = { kind: "open", line: line({ pipeline: { kind: "failed" } }) } as const;
-    expect(decide(state({ gate: "local", change: red, runs: passed }))).toMatchObject({ kind: "writer", mode: "ci" });
+    expect(decide(state({ gate: "local", change: red, runs: passed }))).toMatchObject({
+      kind: "writer",
+      task: { kind: "ci-red", head: H },
+    });
     // failed here: the writer goes back, and after 2 CI rounds a person decides
     const failed = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H, passed: false } });
-    expect(decide(state({ gate: "local", runs: failed }))).toMatchObject({ kind: "writer", mode: "ci" });
+    expect(decide(state({ gate: "local", runs: failed }))).toEqual({
+      kind: "writer",
+      task: { kind: "verify-failed", head: H },
+      why: "the local verifier failed at this head",
+    });
     expect(decide(state({ gate: "local", runs: { ...failed, ciRounds: MAX_CI_ROUNDS } }))).toMatchObject({
       kind: "needs-human",
     });

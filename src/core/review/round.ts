@@ -18,6 +18,7 @@ import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
+import { keepActOn } from "./act-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
@@ -464,6 +465,16 @@ async function post(
   const box = await boxFor(ctx, pack);
   if (box.kind === "failed") {
     return box;
+  }
+  // kept before anything is posted: a rework run reads these, so a round that cannot keep them posts nothing
+  const kept = await keepActOn({
+    recordsDir: ctx.setup.recordsDir,
+    change: ctx.setup.number,
+    head: pack.head,
+    sorted: result.sorted,
+  });
+  if (kept.kind === "failed") {
+    return kept;
   }
   const labelled = await threadsAndLabel(ctx, box.value, result.sorted);
   if (labelled.kind === "failed") {
