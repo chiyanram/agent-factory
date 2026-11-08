@@ -471,15 +471,20 @@ has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the 
 which also starts every count afresh. The ready check first runs the floor guard (#190): it reads the change's diff
 from its merge base with the default branch, on the host and with git only, and fails the check at once, with each
 `file:line`, when the diff lowers the bar (VB6, CR4):
-- a skip marker added in a test file (`@Disabled`, `@Ignore`, `.skip(`, `xit(`, `pytest.mark.skip` and the like);
-- a test file deleted (a moved one is followed);
-- more assertion lines removed than added in a test file, every line of a Spock `then:` or `expect:` block counting;
+- a skip or focus marker added in a test file (`@Disabled…`, `@Ignore…`, `@Requires({ false })`, `.skip`, `.only`,
+  `xit(`, `fit(`, `pytest.mark.skip`, `xfail`, `t.Skip` and the like);
+- a test file deleted, or moved out of the test files (a move inside them is followed);
+- more assertion lines removed than added in a test file (`assert…`, `expect(`, `assertThat`, `verify(`, Go's
+  `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting;
 - a suppression added with no reason comment on the line above (`@SuppressWarnings`, `eslint-disable`,
   `@ts-ignore`, `NOSONAR`, `noqa` and the like), in any file;
-- an empty `catch` block, or `except: pass`.
+- a `catch` or `except` left empty: added so, or with its body removed.
 
-To keep one on purpose, the writer reports `asked` with why. A guard that cannot read the diff fails the step, so the
-check is never passed and a person looks. Then it runs each evidence row of the writer's report again at the head,
+A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
+fails the step, so the check is never passed and a person looks. **Today:** there is no waiver: a hit a person
+agrees with still fails the check, so the change goes to them after the ready check's 3 failures and they land it by
+hand. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
+fools it or fails it; and Spock `where:` rows are not counted. Then it runs each evidence row of the writer's report again at the head,
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
 project's own proxy; nothing of the branch runs on the host. Each box run starts that proxy afresh, inside the
 project's lock. The dispatcher opens the vm box when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set; otherwise

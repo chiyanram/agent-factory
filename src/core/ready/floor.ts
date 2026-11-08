@@ -12,8 +12,9 @@
 //             type: ignore, nolint
 //   catch     an empty catch block added: catch (…) {} or a catch whose next line closes it, or except: pass
 //
-// To keep one of these on purpose the writer reports `asked` with why (VB6: "fix the code, or ask"). A guard that
-// cannot read the diff fails, so the ready check is never passed on a diff no one read. Nothing here throws.
+// Today there is no waiver: a hit a person agrees with still fails the check, so such a change goes to a person after
+// the ready check's 3 failures, and the person lands it by hand. A guard that cannot read the diff fails, so the ready
+// check is never passed on a diff no one read. Nothing here throws.
 
 import type { Result } from "../forge/api.js";
 import { globRegex } from "../ci-files.js";
@@ -50,17 +51,38 @@ export const TEST_FILES: readonly string[] = [
   "**/test_*.py",
   "**/*_test.py",
   "**/*_test.go",
+  "**/spec/**",
+  "**/e2e/**",
+  "**/src/integrationTest/**",
+  "**/*_spec.rb",
+  "**/*Tests.groovy",
+  "**/*IT.groovy",
+  "**/*Spec.kt",
+  "**/*.cy.*",
 ];
 
+// skip markers, and the focus markers that skip every other test: JUnit and Spock annotations, bare or qualified;
+// Spock's @Requires({ false }); the .skip and .only of Jest, Vitest and Mocha in all their forms; xit, xtest,
+// xdescribe, fit, fdescribe; pytest and unittest skips and xfail; Go's t.Skip
 const SKIP =
-  /@Disabled\b|@Ignore\b|@IgnoreIf\b|@Requires\s*\(\s*false|@PendingFeature\b|\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|pytest\.mark\.skip|\bt\.Skip\s*\(/;
-const ASSERT = /\bassert\b|\bexpect\s*\(|\bassertThat\b|\bverify\s*\(/;
+  /@(?:[\w.]+\.)?(?:Disabled|Ignore)\w*|@PendingFeature\b|@Requires\s*\(\s*\{?\s*false|\.(?:skip|only)\w*\s*[.(]|\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|pytest\.mark\.(?:skip\w*|xfail)|\.skipTest\s*\(|unittest\.skip\w*|\bt\.Skip(?:Now|f)?\s*\(/;
+// assertion calls: assert and every assertX( of JUnit, unittest and the like, assert_eq! and friends, expect(,
+// assertThat, verify(, and Go's t.Error and t.Fatal
+const ASSERT =
+  /\bassert\b|\bassert\w*\s*[(!]|\bexpect\s*\(|\bassertThat\b|\bverify\s*\(|\b[tb]\.(?:Error|Fatal)f?\s*\(/;
 const SUPPRESS =
   /@SuppressWarnings\b|NOSONAR|\bnoinspection\b|eslint-disable|oxlint-disable|biome-ignore|@ts-ignore|@ts-expect-error|#\s*noqa\b|#\s*type:\s*ignore|\bnolint\b/;
 const COMMENT = /^\s*(\/\/|#|\/\*|\*|--)\s*\S/;
+// a reason: a comment with at least one word in it, so a bare "/**/" or "*/" is none
+const REASON = /^\s*(?:\/\/|#|\/\*|\*|--).*[\p{L}\p{N}]/u;
 const EMPTY_CATCH = /\bcatch\b[^{]*\{\s*\}/;
 const OPEN_CATCH = /\bcatch\b[^{]*\{\s*$/;
-const EXCEPT = /^\s*except\b[^:]*:\s*(pass)?\s*$/;
+const EXCEPT = /^\s*except\b[^:]*:\s*(pass)?\s*(#.*)?$/;
+// a line with no code of its own: braces and punctuation only
+const BRACES = /^[\s{}()[\];,]*$/;
+// a method or feature boundary in a Spock spec: a Spock block never runs past one
+const METHOD = /^\s*(?:def|void|public|protected|private|static)\b.*\(/;
+const SPECIFICATION = /\bextends\s+(?:spock\.lang\.)?Specification\b/;
 const SPOCK_LABEL = /^\s*(given|setup|when|then|expect|where|cleanup|and)\s*:/;
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
@@ -71,7 +93,8 @@ function git(input: FloorInput, args: readonly string[]): Promise<GitResult> {
   return hostGit({
     args,
     repo: { kind: "repo", path: input.repo },
-    env: { ...input.env, GIT_NO_REPLACE_OBJECTS: "1" },
+    // a path is a path, never a pattern that matches another file's lines
+    env: { ...input.env, GIT_NO_REPLACE_OBJECTS: "1", GIT_LITERAL_PATHSPECS: "1" },
     ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
@@ -148,8 +171,13 @@ function changeOf(status: string, first: string, second: string): Change {
     : { kind: status === "A" ? "added" : "modified", path: first };
 }
 
-// Lines : the lines a file's diff removed (by their number in the old file) and added (in the new one)
-type Lines = { readonly removed: readonly number[]; readonly added: readonly number[] };
+// Lines : the lines a file's diff removed (by their number in the old file) and added (in the new one), and where in
+// the new file each hunk that only removed lines left its gap
+type Lines = {
+  readonly removed: readonly number[];
+  readonly added: readonly number[];
+  readonly gaps: readonly number[];
+};
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -168,6 +196,8 @@ function linesOf(diff: string): Lines {
   return {
     removed: hunks.flatMap((m) => range(m[1], m[2])),
     added: hunks.flatMap((m) => range(m[3], m[4])),
+    // "+c,0": the lines went after line c of the new file
+    gaps: hunks.flatMap((m) => (m[4] === "0" ? [Number(m[3]), Number(m[3]) + 1] : [])),
   };
 }
 
@@ -191,26 +221,42 @@ function hit(file: string, line: number, what: string): Hit {
   return { file, line, what };
 }
 
+// fresh : the added lines that are new, not a line the same diff removed and put back (moved or re-indented)
+function fresh(f: File): readonly number[] {
+  const removed = new Set(f.lines.removed.map((n) => at(f.before, n).trim()));
+  return f.lines.added.filter((n) => !removed.has(at(f.after, n).trim()));
+}
+
 function skips(f: File): readonly Hit[] {
   return f.test
-    ? f.lines.added.filter((n) => SKIP.test(at(f.after, n))).map((n) => hit(f.change.path, n, "adds a skip marker"))
+    ? fresh(f)
+        .filter((n) => SKIP.test(at(f.after, n)))
+        .map((n) => hit(f.change.path, n, "adds a skip marker"))
     : [];
 }
 
 function reasonless(f: File): readonly Hit[] {
-  return f.lines.added
+  return fresh(f)
     .filter((n) => SUPPRESS.test(at(f.after, n)) && !reasoned(f.after, n))
     .map((n) => hit(f.change.path, n, "adds a suppression with no reason on the line above"));
 }
 
-// reasoned : the line above is a comment with words in it, and is not itself a suppression
+// reasoned : the line above is a comment with a word in it, and is not itself a suppression
 function reasoned(text: readonly string[], line: number): boolean {
   const above = at(text, line - 1);
-  return COMMENT.test(above) && !SUPPRESS.test(above);
+  return REASON.test(above) && !SUPPRESS.test(above);
 }
 
+// emptyCatches : a catch or except the diff left empty: one it added, or one whose body it emptied, since a catch
+// line next to a changed line or a removal's gap is checked too
 function emptyCatches(f: File): readonly Hit[] {
-  return f.lines.added.filter((n) => emptyCatchAt(f.after, n)).map((n) => hit(f.change.path, n, "adds an empty catch"));
+  const added = fresh(f);
+  const moved = new Set(f.lines.added.filter((n) => !added.includes(n)));
+  const near = [...added, ...f.lines.gaps].flatMap((n) => [n - 1, n]).filter((n) => n >= 1 && !moved.has(n));
+  return [...new Set(near)]
+    .toSorted((a, b) => a - b)
+    .filter((n) => emptyCatchAt(f.after, n))
+    .map((n) => hit(f.change.path, n, "leaves an empty catch"));
 }
 
 function emptyCatchAt(text: readonly string[], line: number): boolean {
@@ -229,28 +275,35 @@ function exceptPass(here: string, next: string): boolean {
   return EXCEPT.test(here) && (here.trim().endsWith("pass") || next === "pass");
 }
 
-// spockBlock : the Spock block a line sits in: the label above it, where "and:" keeps the block it continues
+// spockBlock : the Spock block a line sits in: the label above it, where "and:" keeps the block it continues; a
+// method or feature line above ends the search, so a block never runs into the next method
 function spockBlock(text: readonly string[], line: number): string {
   for (let n = line; n >= 1; n -= 1) {
-    const label = SPOCK_LABEL.exec(at(text, n))?.[1];
-    if (label !== undefined && label !== "and") {
+    const label = labelAt(text, n);
+    if (label !== "and" && label !== "") {
       return label;
     }
   }
   return "";
 }
 
-function isSpock(path: string): boolean {
-  return path.endsWith("Spec.groovy");
+// labelAt : the Spock label on a line, "method" on a method line, "" on any other
+function labelAt(text: readonly string[], n: number): string {
+  const line = at(text, n);
+  return METHOD.test(line) ? "method" : (SPOCK_LABEL.exec(line)?.[1] ?? "");
+}
+
+function isSpock(path: string, text: readonly string[]): boolean {
+  return path.endsWith("Spec.groovy") || text.some((l) => SPECIFICATION.test(l));
 }
 
 // statement : a line of code, not a blank, a comment or a Spock label
 function statement(code: string): boolean {
-  return code !== "" && !COMMENT.test(code) && !SPOCK_LABEL.test(code);
+  return !BRACES.test(code) && !COMMENT.test(code) && !SPOCK_LABEL.test(code);
 }
 
 function inSpockCheck(text: readonly string[], line: number, path: string): boolean {
-  return isSpock(path) && ["then", "expect"].includes(spockBlock(text, line));
+  return isSpock(path, text) && ["then", "expect"].includes(spockBlock(text, line));
 }
 
 // asserting : a line that asserts: an assertion call, or in a Spock spec any statement of a then: or expect: block
@@ -276,7 +329,7 @@ function assertions(f: File): readonly Hit[] {
 const CHECKS: readonly ((f: File) => readonly Hit[])[] = [skips, assertions, reasonless, emptyCatches];
 
 function textAt(input: FloorInput, commit: string, path: string): Promise<Result<readonly string[]>> {
-  return git(input, ["show", `${commit}:${path}`]).then((r) => {
+  return git(input, ["cat-file", "blob", `${commit}:${path}`]).then((r) => {
     const read = out(r, `read ${path}`);
     return read.kind === "ok" ? { kind: "ok", value: read.value.split("\n") } : read;
   });
@@ -292,7 +345,9 @@ async function diffOf(input: FloorInput, base: string, change: Change): Promise<
     await git(input, [
       "diff",
       "-U0",
+      "--inter-hunk-context=0",
       "-M",
+      "--text",
       "--no-color",
       "--no-ext-diff",
       "--no-textconv",
@@ -331,6 +386,14 @@ function okLines(lines: readonly string[]): Result<readonly string[]> {
   return { kind: "ok", value: lines };
 }
 
+// movedOut : a test file moved to a path that is not a test file: as good as deleted
+function movedOut(input: FloorInput, change: Change): readonly Hit[] {
+  const leaves = change.kind === "renamed" && !isTestFile(change.path, input.testFiles);
+  return leaves && isTestFile(change.from, input.testFiles)
+    ? [hit(change.from, 0, `moves a test file out of the test files, to ${change.path}`)]
+    : [];
+}
+
 async function hitsIn(input: FloorInput, base: string, change: Change): Promise<Result<readonly Hit[]>> {
   if (change.kind === "deleted") {
     return {
@@ -339,7 +402,9 @@ async function hitsIn(input: FloorInput, base: string, change: Change): Promise<
     };
   }
   const file = await fileOf(input, base, change);
-  return file.kind === "ok" ? { kind: "ok", value: CHECKS.flatMap((c) => c(file.value)) } : file;
+  return file.kind === "ok"
+    ? { kind: "ok", value: [...movedOut(input, change), ...CHECKS.flatMap((c) => c(file.value))] }
+    : file;
 }
 
 // floorGuard : every move in the diff that lowers the bar, in file order; none is a pass
@@ -349,7 +414,16 @@ export async function floorGuard(input: FloorInput): Promise<Result<readonly Hit
     return base;
   }
   const listed = out(
-    await git(input, ["diff", "--name-status", "-M", "-z", "--no-color", base.value, input.head]),
+    await git(input, [
+      "diff",
+      "--name-status",
+      "-M",
+      "-z",
+      "--no-color",
+      "--ignore-submodules=all",
+      base.value,
+      input.head,
+    ]),
     "list the files the change touches",
   );
   if (listed.kind === "failed") {
@@ -372,5 +446,5 @@ const MAX_SHOWN = 10;
 export function hitsLine(hits: readonly Hit[]): string {
   const shown = hits.slice(0, MAX_SHOWN).map((h) => `${h.file}${h.line > 0 ? `:${h.line}` : ""} ${h.what}`);
   const more = hits.length > MAX_SHOWN ? `; and ${hits.length - MAX_SHOWN} more` : "";
-  return `the floor guard: ${shown.join("; ")}${more}. Fix the code, or report asked with why the change must lower the bar (VB6)`;
+  return `the floor guard: ${shown.join("; ")}${more}. Fix the code (VB6); one that must stay goes to a person, who lands it by hand`;
 }

@@ -135,7 +135,141 @@ describe("the floor guard (#190)", () => {
     });
   });
 
-  it("says the hits in one line, the first ten, and how to keep one on purpose", () => {
+  it("counts every assertion style: assertEquals, self.assertEqual, assert_eq!, Go's t.Errorf", async () => {
+    p.write("src/test/java/CalcTest.java", "class CalcTest {\n  void a() {\n    assertEquals(1, a());\n  }\n}\n");
+    p.write("svc/test_calc.py", "def test_a(self):\n    self.assertEqual(a(), 1)\n");
+    p.write("lib/calc_test.go", 'func TestA(t *testing.T) {\n\tif a() != 1 {\n\t\tt.Errorf("bad")\n\t}\n}\n');
+    p.write("tests/calc.rs", "fn a() {\n    assert_eq!(a(), 1);\n}\n");
+    p.commitAll("more tests");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    p.git("checkout", "-q", "main");
+    p.git("merge", "-q", "--ff-only", "factory/PROJ-1");
+    p.git("push", "-q", "origin", "main");
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write("src/test/java/CalcTest.java", "class CalcTest {\n  void a() {\n  }\n}\n");
+    p.write("svc/test_calc.py", "def test_a(self):\n    a()\n");
+    p.write("lib/calc_test.go", "func TestA(t *testing.T) {\n\tif a() != 1 {\n\t}\n}\n");
+    p.write("tests/calc.rs", "fn a() {\n    a();\n}\n");
+    expect((await hits()).map((h) => h.file)).toEqual([
+      "lib/calc_test.go",
+      "src/test/java/CalcTest.java",
+      "svc/test_calc.py",
+      "tests/calc.rs",
+    ]);
+  });
+
+  it("finds a test moved out of the test files, and the common skip and focus markers", async () => {
+    p.git("mv", "src/test/java/OldNameTest.java", "docs/OldName.txt");
+    p.write(
+      "web/more.test.ts",
+      "it.skipIf(ci)('a', () => {});\ndescribe.skip.each([1])('b', () => {});\nxtest('c');\ntest.only('d');\nfit('e');\n",
+    );
+    p.write(
+      "src/test/java/MoreTest.java",
+      "class MoreTest {\n  @DisabledOnOs(OS.MAC)\n  @org.junit.Ignore\n  void a() {}\n}\n",
+    );
+    p.write(
+      "src/test/groovy/MoreSpec.groovy",
+      "class MoreSpec extends Specification {\n  @Requires({ false })\n  @IgnoreRest\n  def 'a'() {}\n}\n",
+    );
+    p.write("svc/test_more.py", "@pytest.mark.xfail\ndef test_a(self):\n    self.skipTest('later')\n");
+    p.write("lib/more_test.go", "func TestB(t *testing.T) {\n\tt.SkipNow()\n}\n");
+    const found = await hits();
+    expect(found.find((h) => h.file === "src/test/java/OldNameTest.java")?.what).toContain("moves a test file out");
+    expect(found.filter((h) => h.what === "adds a skip marker").map((h) => `${h.file}:${h.line}`)).toEqual([
+      "lib/more_test.go:2",
+      "src/test/groovy/MoreSpec.groovy:2",
+      "src/test/groovy/MoreSpec.groovy:3",
+      "src/test/java/MoreTest.java:2",
+      "src/test/java/MoreTest.java:3",
+      "svc/test_more.py:1",
+      "svc/test_more.py:3",
+      "web/more.test.ts:1",
+      "web/more.test.ts:2",
+      "web/more.test.ts:3",
+      "web/more.test.ts:4",
+      "web/more.test.ts:5",
+    ]);
+  });
+
+  it("reads through a .gitattributes that marks the files binary, and a path that looks like a pattern", async () => {
+    p.write(".gitattributes", "*.java -diff\n");
+    p.write(
+      "src/test/java/OrderTest.java",
+      java("    @Disabled\n    assertThat(total()).isEqualTo(3);\n    assertThat(count()).isEqualTo(2);\n"),
+    );
+    expect((await hits()).map((h) => `${h.file}:${h.line}`)).toEqual(["src/test/java/OrderTest.java:3"]);
+  });
+
+  it("keeps a Spock block inside its method, and finds a spec by what it extends", async () => {
+    p.write(
+      "src/test/groovy/OrderSpec.groovy",
+      "class OrderSpec extends Specification {\n  def 'totals'() {\n    when:\n    def t = order.total()\n    then:\n    t == 3\n  }\n\n  def helper() {\n    return 1\n  }\n}\n",
+    );
+    p.write(
+      "src/test/groovy/CartTest.groovy",
+      "class CartTest extends spock.lang.Specification {\n  def 'a'() {\n    expect:\n    1 == 1\n  }\n}\n",
+    );
+    p.commitAll("cart");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    p.git("checkout", "-q", "main");
+    p.git("merge", "-q", "--ff-only", "factory/PROJ-1");
+    p.git("push", "-q", "origin", "main");
+    p.git("checkout", "-q", "factory/PROJ-1");
+    // the then: line goes, a helper's lines come: they are no assertions; the CartTest spec loses its expect: line
+    p.write(
+      "src/test/groovy/OrderSpec.groovy",
+      "class OrderSpec extends Specification {\n  def 'totals'() {\n    when:\n    def t = order.total()\n    then:\n  }\n\n  def helper() {\n    return 1\n  }\n\n  def other() {\n    return 2\n  }\n}\n",
+    );
+    p.write(
+      "src/test/groovy/CartTest.groovy",
+      "class CartTest extends spock.lang.Specification {\n  def 'a'() {\n    expect:\n  }\n}\n",
+    );
+    expect((await hits()).map((h) => `${h.file}:${h.line}`)).toEqual([
+      "src/test/groovy/CartTest.groovy:4",
+      "src/test/groovy/OrderSpec.groovy:6",
+    ]);
+  });
+
+  it("finds a catch whose body the diff emptied, a raise turned into pass, and no reason in a bare comment", async () => {
+    p.write(
+      "src/main/Pay.java",
+      "class Pay {\n  void a() {\n    try {\n      go();\n    } catch (IOException e) {\n      throw new PayFailed(e);\n    }\n  }\n}\n",
+    );
+    p.write("svc/pay.py", "try:\n    go()\nexcept ValueError:  # bad input\n    raise\n");
+    p.commitAll("pay");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    p.git("checkout", "-q", "main");
+    p.git("merge", "-q", "--ff-only", "factory/PROJ-1");
+    p.git("push", "-q", "origin", "main");
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write(
+      "src/main/Pay.java",
+      "class Pay {\n  void a() {\n    try {\n      go();\n    } catch (IOException e) {\n    }\n  }\n}\n",
+    );
+    p.write("svc/pay.py", "try:\n    go()\nexcept ValueError:  # bad input\n    pass\n");
+    p.write("src/main/Raw.java", 'class Raw {\n  /**/\n  @SuppressWarnings("rawtypes")\n  void a() {}\n}\n');
+    expect((await hits()).map((h) => `${h.file}:${h.line} ${h.what}`)).toEqual([
+      "src/main/Pay.java:5 leaves an empty catch",
+      "src/main/Raw.java:3 adds a suppression with no reason on the line above",
+      "svc/pay.py:3 leaves an empty catch",
+    ]);
+  });
+
+  it("is silent on a line only moved or re-indented, and on a submodule bump", async () => {
+    p.write("src/main/Old.java", 'class Old {\n@SuppressWarnings("all")\nvoid a() {}\n}\n');
+    p.commitAll("old");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    p.git("checkout", "-q", "main");
+    p.git("merge", "-q", "--ff-only", "factory/PROJ-1");
+    p.git("push", "-q", "origin", "main");
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write("src/main/Old.java", 'class Old {\n    @SuppressWarnings("all")\n    void a() {}\n}\n');
+    p.git("update-index", "--add", "--cacheinfo", `160000,${p.git("rev-parse", "HEAD")},vendor/lib`);
+    expect(await hits()).toEqual([]);
+  });
+
+  it("says the hits in one line, the first ten, and that one which must stay goes to a person", () => {
     const many = Array.from({ length: 12 }, (_, i) => ({
       file: `t${i}.test.ts`,
       line: i + 1,
@@ -144,6 +278,6 @@ describe("the floor guard (#190)", () => {
     const line = hitsLine(many);
     expect(line).toContain("t0.test.ts:1 adds a skip marker");
     expect(line).toContain("and 2 more");
-    expect(line).toContain("report asked");
+    expect(line).toContain("goes to a person");
   });
 });
