@@ -54,7 +54,15 @@ tip=$(hgit -C "$FACTORY_REPO" rev-parse "origin/$branch")
 
 name=writer-$iid
 path=$(worktree_path "$name")
-[ ! -e "$path" ] || remove_worktree "$path"   # left by a dead run: never reuse it
+# left by a dead run: never reused, and removed only when it holds nothing to land (#189); else a person decides
+if [ -e "$path" ]; then
+  left=$(unlanded_in "$path")
+  [ -z "$left" ] || {
+    echo "$mark$iid: $path, left by a dead run, $left; not started: run agent-factory reconcile, which hands it to a person" >&2
+    exit 1
+  }
+  remove_worktree "$path"
+fi
 mkdir -p "$(dirname "$path")"
 hgit -C "$FACTORY_REPO" worktree add -q --track -B "$branch" "$path" "origin/$branch" \
   || { echo "cannot make the worktree $path" >&2; exit 1; }
