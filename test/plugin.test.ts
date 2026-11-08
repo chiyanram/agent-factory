@@ -377,10 +377,38 @@ describe("the contract test kit: agent-factory plugin test (#134)", () => {
       expect.stringContaining("the CLI never got"),
       expect.stringContaining("the CLI never got"),
     ]);
+    const tail = await testPlugin(setup(), relay("tail", `(t) => t + "\\n/merge"`));
+    expect(tail.filter((c) => !c.ok).map((c) => c.detail)).toEqual([
+      expect.stringContaining("whole"),
+      expect.stringContaining("whole"),
+    ]);
     const silent = await testPlugin(setup(), plugin("silent", ECHO, { ...DESCRIBE, name: "silent" }));
     expect(silent.filter((c) => !c.ok)).toMatchObject([
       { name: "write fidelity", detail: expect.stringContaining("names no program") },
     ]);
+  });
+
+  it("fails a plugin that calls its CLI more often than the fixture planned for", async () => {
+    const path = relay("twice");
+    const body = readFileSync(path, "utf8").replace(
+      'out({ kind: r.status === 0 ? "done" : "failed" });',
+      'require("node:child_process").spawnSync("chat", ["delete-channel", "general"]); out({ kind: "done" });',
+    );
+    writeFileSync(path, body);
+    const checks = await testPlugin(setup(), path);
+    expect(checks.filter((c) => !c.ok).map((c) => c.detail)).toEqual([
+      expect.stringContaining("called 2 times"),
+      expect.stringContaining("called 2 times"),
+    ]);
+  });
+
+  it("refuses an interpreter as a cli: a fake of it would stand in for the plugin itself", () => {
+    expect(readDescribe(JSON.stringify({ ...DESCRIBE, cli: ["node"] }))).toMatchObject({ kind: "failed" });
+    expect(readDescribe(JSON.stringify({ ...DESCRIBE, cli: ["/usr/bin/gh"] }))).toMatchObject({ kind: "failed" });
+    expect(readDescribe(JSON.stringify({ ...DESCRIBE, cli: ["gh"] }))).toMatchObject({
+      kind: "ok",
+      value: { cli: ["gh"] },
+    });
   });
 
   it("stops at the handshake when describe is not valid", async () => {

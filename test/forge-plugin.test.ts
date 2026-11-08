@@ -71,6 +71,52 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
+  it("carries a status and a line finding, and an answer past 1 MiB, as the built-in adapter does", async () => {
+    const big = "x".repeat(2 * 1024 * 1024);
+    const comment = { body: big, user: { login: "alice", type: "User" }, created_at: "2026-11-08T00:00:00Z" };
+    const { setup, fakes } = await bundled([
+      http("201 Created", { id: 1 }),
+      http("201 Created", { id: 2 }),
+      http("200 OK", [comment]),
+    ]);
+    try {
+      const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+      const sha = "a".repeat(40);
+      expect(
+        await forge.status({
+          sha,
+          ref: "factory/P-1",
+          state: "success",
+          context: "agent-factory/verify",
+          description: "ok",
+        }),
+      ).toEqual({ kind: "ok" });
+      const change: Change = {
+        number: 5,
+        state: "opened",
+        sha,
+        sourceBranch: "factory/P-1",
+        targetBranch: "main",
+        labels: [],
+        description: "",
+        anchor: { kind: "github", head: sha },
+      };
+      expect(await forge.lineFinding({ change, at: { file: "src/a.ts", line: 3 }, post: POST })).toEqual({
+        kind: "ok",
+      });
+      const notes = await forge.notes({ number: 5 });
+      expect(notes.kind === "ok" && notes.value[0]?.body.length).toBe(big.length);
+      const calls = await fakes.calls();
+      expect(calls.map((c) => c.argv[2])).toEqual([
+        `repos/chiyanram/ledger/statuses/${sha}`,
+        "repos/chiyanram/ledger/pulls/5/comments",
+        expect.stringContaining("repos/chiyanram/ledger/issues/5/comments"),
+      ]);
+    } finally {
+      await fakes.remove();
+    }
+  });
+
   it("fails a call the forge refuses, with the CLI's reason, and never retries a plain failure", async () => {
     const { setup, fakes } = await bundled([http("404 Not Found", { message: "Not Found" })]);
     const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
@@ -126,6 +172,13 @@ describe("serve: the plugin side (#134 PR C)", () => {
   const io = { argv: [], stdin: async () => "", env: {}, out: () => undefined };
   const ask = (request: unknown) => answer("github", io, JSON.stringify(request));
 
+  it("refuses a request for another forge", async () => {
+    expect(await ask({ capability: "forge.read", op: "me", input: { project: "a/b", forge: "gitlab" } })).toEqual({
+      kind: "refused",
+      reason: 'this plugin serves github, not "gitlab"',
+    });
+  });
+
   it("refuses a write sent as a read, does not know other ops, and answers a bad input or project", async () => {
     expect(await ask({ capability: "forge.read", op: "note", input: {} })).toMatchObject({ kind: "refused" });
     expect(await ask({ capability: "forge.write", op: "merge", input: {} })).toEqual({
@@ -162,7 +215,7 @@ describe("serve: the plugin side (#134 PR C)", () => {
 describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)", () => {
   function projectFile(value: unknown): void {
     mkdirSync(join(home, "projects"), { recursive: true });
-    writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify(value));
+    writeFileSync(join(home, "projects", "ledger.json"), typeof value === "string" ? value : JSON.stringify(value));
   }
 
   const open = (env: NodeJS.ProcessEnv, log: (l: string) => void = () => undefined) =>
@@ -170,6 +223,13 @@ describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)",
       { env: { FACTORY_FORGE: "github", FACTORY_PROJECT: "chiyanram/ledger", ...env }, log },
       { home, project: "ledger", plugins: { home, env: {}, path: NODE_DIR } },
     );
+
+  it("stops on a project file that is there but does not read", async () => {
+    projectFile("not json");
+    expect(await open({})).toMatchObject({ kind: "failed", reason: expect.stringContaining("not a JSON object") });
+    projectFile({ policy: { "forge.write": { mode: "allow", cap: 1 } } });
+    expect(await open({})).toMatchObject({ kind: "failed", reason: expect.stringContaining("dispatcher's") });
+  });
 
   it("uses the built-in adapter when the project maps no forge plugin, or has no file", async () => {
     expect(await open({})).toMatchObject({ kind: "ok", value: { identity: { kind: "own" } } });
@@ -185,6 +245,22 @@ describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)",
       kind: "failed",
       reason: expect.stringContaining("no plugin may hold"),
     });
+    expect(await open({ FACTORY_FORGE: "gitlab", FACTORY_PROJECT: "a/b" })).toMatchObject({
+      kind: "failed",
+      reason: "FACTORY_FORGE is gitlab, but the project maps the forge to the plugin github",
+    });
+    for (const [name, value] of [
+      ["FACTORY_FORGE_HOST", "ghe.corp.example"],
+      ["GH_HOST", "ghe.corp.example"],
+      ["GH_TOKEN", "t"],
+      ["FACTORY_GH", "/opt/gh"],
+    ] as const) {
+      expect(await open({ [name]: value })).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining(`${name} is set, which the forge plugin cannot honour`),
+      });
+    }
+    expect(await open({ FACTORY_FORGE_HOST: "github.com" })).toMatchObject({ kind: "ok" });
     expect(await open({ FACTORY_PROJECT: "nope" })).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("owner/name"),
@@ -200,7 +276,18 @@ describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)",
     }
     expect(opened.value.forge).toMatchObject({ name: "github", mark: "#" });
     expect(await opened.value.forge.addLabel({ number: 2, label: "agent::claimed" })).toEqual({ kind: "ok" });
-    expect(logged).toEqual(["DRY RUN: add the label agent::claimed to #2"]);
+    expect(
+      await opened.value.forge.openChange({
+        branch: "factory/P-1",
+        base: "main",
+        title: "t",
+        body: { seat: "writer", title: "t", fields: [], items: [] },
+      }),
+    ).toMatchObject({ kind: "failed", reason: "a dry run opens no change" });
+    expect(logged).toEqual([
+      "DRY RUN: add the label agent::claimed to #2",
+      "DRY RUN: open a draft change from factory/P-1 into main",
+    ]);
     // no plugin is registered here, so a read reaches the registry and is refused there
     expect(await opened.value.forge.me()).toMatchObject({
       kind: "failed",

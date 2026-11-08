@@ -14,8 +14,9 @@
 //
 //   write fidelity  a plugin that writes names the programs it runs in describe's cli; each write fixture that carries a
 //                 text (input.text, or a post in input.post or input.body, rendered as post.ts renders it), and once
-//                 more with a tricky text, must hand that text to the CLI byte for byte, in an argv word, on stdin, or
-//                 as a string in JSON on either
+//                 more with a tricky text, must hand that text to the CLI byte for byte and whole: an argv word, stdin,
+//                 or a string in JSON on either that is the text itself; and it may call the CLI no more often than
+//                 the fixture's <case>.cli.json lists answers
 //
 // A plugin that names a cli runs every check with the kit's fakes first on its PATH (fakes.ts), so the kit never reaches
 // the real CLI or the network; a fixture's <case>.cli.json lists the fakes' answers, in order. The caps and the timeout
@@ -238,20 +239,29 @@ function tricky(input: unknown): unknown {
   );
 }
 
+// got : a text the CLI got whole: an argv word, stdin, or a string in JSON on either that is the text itself, so text
+// sent with more around it (a line added after it) does not count
 function got(calls: readonly FakeCall[], text: string): boolean {
-  return calls.some((c) => stringsIn(c).some((s) => s.includes(text)));
+  return calls.some((c) => stringsIn(c).includes(text));
+}
+
+// fidelityProblem : what the CLI got wrong: a call the fixture did not plan for, or a text it never got whole
+function fidelityProblem(answer: Answer, f: Fixture, texts: readonly string[]): string {
+  if (answer.calls.length > f.answers.length) {
+    return `the CLI was called ${answer.calls.length} times; ${f.name}.cli.json lists ${f.answers.length} answers`;
+  }
+  const missed = texts.find((t) => !got(answer.calls, t));
+  return missed === undefined ? "" : `the CLI never got ${JSON.stringify(missed.slice(0, 60))} whole`;
 }
 
 async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown, name: string): Promise<Check> {
   const inner = field(input, "input");
   const answer = await call(setup, entry, request(f.capability, opOf(input), inner), f.answers);
-  const missed = textsOf(inner).find((t) => !got(answer.calls, t));
+  const problem = fidelityProblem(answer, f, textsOf(inner));
   return check(
     `write fidelity ${name}`,
-    missed === undefined,
-    missed === undefined
-      ? "the CLI got every text byte for byte"
-      : `the CLI never got ${JSON.stringify(missed.slice(0, 60))}`,
+    problem === "",
+    problem === "" ? "the CLI got every text byte for byte" : problem,
   );
 }
 

@@ -61,8 +61,19 @@ async function callsIn(state: string): Promise<readonly FakeCall[]> {
 
 // makeFakes : one fake for each program, answering from `answers`
 export async function makeFakes(clis: readonly string[], answers: readonly FakeAnswer[]): Promise<Result<Fakes>> {
+  const state = await attempt(() => mkdtemp(join(tmpdir(), "factory-kit-")), "cannot make the kit's fake CLIs");
+  if (state.kind === "failed") {
+    return state;
+  }
+  const made = await filled(state.value, clis, answers);
+  if (made.kind === "failed") {
+    await rm(state.value, { recursive: true, force: true }).catch(() => undefined);
+  }
+  return made;
+}
+
+function filled(state: string, clis: readonly string[], answers: readonly FakeAnswer[]): Promise<Result<Fakes>> {
   return attempt(async () => {
-    const state = await mkdtemp(join(tmpdir(), "factory-kit-"));
     const dir = join(state, "bin");
     await writeFile(join(state, "answers.json"), JSON.stringify(answers));
     await mkdir(dir);

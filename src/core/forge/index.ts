@@ -12,8 +12,8 @@
 //
 // No setting is guessed: a value that is set but not valid is refused, never replaced by the default.
 
-import { identitySetting, resolveIdentity, type Identity } from "../identity.js";
-import { realSleep, runProcess, type Client, type Result, type Runner, type Sleeper } from "./api.js";
+import { identitySetting, resolveIdentity, type Identity, type IdentitySetting } from "../identity.js";
+import { realSleep, runProcess, type Client, type Done, type Result, type Runner, type Sleeper } from "./api.js";
 import { github } from "./github.js";
 import { gitlab } from "./gitlab.js";
 import { pluginConfigOf } from "../plugin/config.js";
@@ -99,6 +99,11 @@ function dryRun(forge: Forge, log: (line: string) => void): Forge {
     removeLabel: async (i) => (log(`DRY RUN: remove the label ${i.label} from ${m}${i.number}`), { kind: "ok" }),
     note: async (i) => (log(`DRY RUN: note on ${m}${i.number}: [${i.post.seat}] ${i.post.title}`), { kind: "ok" }),
     status: async (i) => (log(`DRY RUN: status ${i.context} ${i.state} at ${i.sha.slice(0, 8)}`), { kind: "ok" }),
+    // a dry run opens no change, so there is no number to give back: the caller stops there
+    openChange: async (i) => (
+      log(`DRY RUN: open a draft change from ${i.branch} into ${i.base}`),
+      { kind: "failed", reason: "a dry run opens no change" }
+    ),
     lineFinding: async (i) => (
       log(`DRY RUN: finding on ${m}${i.change.number} at ${i.at.file}:${i.at.line}`), { kind: "ok" }
     ),
@@ -131,10 +136,12 @@ export function openForge(setup: ForgeSetup): Result<Forge> {
   return opened.kind === "ok" ? settled(setup, opened.value) : opened;
 }
 
+const DEFAULT_HOST: Readonly<Record<ForgeName, string>> = { github: "github.com", gitlab: "gitlab.com" };
+
 // forgeHost : the forge's host, FACTORY_FORGE_HOST, checked: github.com and gitlab.com unless set. The host push sends a
 // branch only to a URL on this host.
 export function forgeHost(env: NodeJS.ProcessEnv, forge: "github" | "gitlab"): Result<string> {
-  const host = env.FACTORY_FORGE_HOST ?? (forge === "github" ? "github.com" : "gitlab.com");
+  const host = env.FACTORY_FORGE_HOST ?? DEFAULT_HOST[forge];
   return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)
     ? { kind: "ok", value: host }
     : { kind: "failed", reason: `FACTORY_FORGE_HOST must be a host name, got ${JSON.stringify(host)}` };
@@ -191,18 +198,58 @@ function pluginTarget(env: NodeJS.ProcessEnv, plugin: string, setup: Setup): Res
     return name;
   }
   const setting = identitySetting({ env, forge: name.value });
-  if (setting.kind === "failed") {
-    return setting;
-  }
-  return setting.value.kind === "app"
+  const own = setting.kind === "ok" ? ownOnly(setting.value, plugin) : setting;
+  const plain = own.kind === "ok" ? plainSettings(env, name.value, plugin) : own;
+  return plain.kind === "ok" ? targetFor(name.value, env, plugin, setup) : plain;
+}
+
+function ownOnly(setting: IdentitySetting, plugin: string): Done {
+  return setting.kind === "app"
     ? {
         kind: "failed",
         reason: `the project maps the forge to the plugin ${plugin}, but FACTORY_IDENTITY=app gives gh the App's token, which no plugin may hold; use FACTORY_IDENTITY=own or unmap forge.read and forge.write`,
       }
-    : targetFor(name.value, env.FACTORY_PROJECT ?? "", plugin, setup);
+    : { kind: "ok" };
 }
 
-function targetFor(forge: ForgeName, project: string, plugin: string, setup: Setup): Result<PluginTarget> {
+// settings a forge plugin cannot honour, since it runs with only PATH, HOME and LANG: another CLI, a token, a host
+const DROPPED = [
+  "FACTORY_GH",
+  "FACTORY_GLAB",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GH_HOST",
+  "GITLAB_TOKEN",
+  "GITLAB_HOST",
+];
+
+function droppedSetting(env: NodeJS.ProcessEnv, forge: ForgeName): string | undefined {
+  const set = DROPPED.find((name) => (env[name] ?? "") !== "");
+  const host = env.FACTORY_FORGE_HOST ?? DEFAULT_HOST[forge];
+  return set ?? (host === DEFAULT_HOST[forge] ? undefined : "FACTORY_FORGE_HOST");
+}
+
+// plainSettings : the plugin serves the forge it is named for, on its default host, as the CLI's own login; a setting
+// it would drop without a word is refused, so a write never goes to another forge, host or account
+function plainSettings(env: NodeJS.ProcessEnv, forge: ForgeName, plugin: string): Done {
+  if (plugin !== forge) {
+    return {
+      kind: "failed",
+      reason: `FACTORY_FORGE is ${forge}, but the project maps the forge to the plugin ${plugin}`,
+    };
+  }
+  const set = droppedSetting(env, forge);
+  return set === undefined
+    ? { kind: "ok" }
+    : {
+        kind: "failed",
+        reason: `${set} is set, which the forge plugin cannot honour (it runs ${forge === "github" ? "gh" : "glab"} with its own login on ${DEFAULT_HOST[forge]}); unset it or unmap forge.read and forge.write`,
+      };
+}
+
+function targetFor(forge: ForgeName, env: NodeJS.ProcessEnv, plugin: string, setup: Setup): Result<PluginTarget> {
+  const project = env.FACTORY_PROJECT ?? "";
   const where = forge === "github" ? githubProject(project) : gitlabProject(project);
   return where.kind === "ok" ? { kind: "ok", value: { setup, plugin, forge, project } } : where;
 }

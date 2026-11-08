@@ -212,7 +212,7 @@ folder that someone else could write to, or a symlink inside the folder, is refu
 |---|---|
 | `agent-factory plugin add <path\|name>` | inspects a plugin and pins it, as above; a name is a plugin bundled with the package, and nothing is fetched from the network. A name already added is refused: use `update` |
 | `agent-factory plugin update <name> [<sha256>]` | runs the test kit on the plugin's folder as it is now and shows its hash and the writes it adds (exit 3, nothing recorded); with that hash, records it, if it is still the same |
-| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer; and write fidelity: each write fixture's text (`input.text`, or a post in `input.post` or `input.body`, as the posting template renders it), and once more a tricky one, must reach the CLI byte for byte. A plugin that writes must name its programs in `cli`; the kit then runs every check with a recording fake of each first on the plugin's `PATH`, answering from the fixture's `<case>.cli.json`, so it never reaches the real CLI or the network |
+| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer; and write fidelity: each write fixture's text (`input.text`, or a post in `input.post` or `input.body`, as the posting template renders it), and once more a tricky one, must reach the CLI byte for byte and whole (an argv word, stdin, or a JSON string that is the text itself), with no more calls than the fixture's `<case>.cli.json` lists answers. A plugin that writes must name its programs in `cli` (never an interpreter such as `node`); the kit then runs every call with a recording fake of each first on the plugin's `PATH`, answering from `<case>.cli.json`, so a named program is never the real one |
 | `agent-factory plugin list` | the registered plugins, with their writes and hashes |
 
 A plugin's `PATH` is yours without relative folders and without folders others can write to. The coordinator may not
@@ -221,8 +221,9 @@ run `plugin` or edit `plugins.json` or the store (#106). **Today:**
 - The pin covers the plugin's folder, not the interpreter a script names (`#!/usr/bin/env node` takes the first
   `node` on that `PATH`) nor the CLI it calls; folders your own user can write, such as `~/.local/bin`, stay on the
   `PATH`, since most CLIs live there.
-- The fakes stand in for a program the plugin finds by name on its `PATH`; one it runs by an absolute path is not
-  seen, and the write fidelity check passes only when the text reaches a fake.
+- The fakes stand in only for the programs named in `cli`, found by name on the `PATH`: `describe` runs with the real
+  `PATH`, and a program not named, one run by an absolute path, or the network reached from the plugin's own code is
+  not held back by the kit.
 
 ### The forge as a plugin
 
@@ -237,14 +238,21 @@ each request, so it needs no setting and no token. A project opts in with its pr
 
 Run `agent-factory plugin add github` once. Then `dispatch <project>` makes every forge call of its pass through the
 plugin, and reads each answer back in the seam's own shapes, so a plugin that answers anything else fails that call.
-`FACTORY_DRY_RUN` still holds every write back. Without the mapping, the built-in adapter runs, as before.
-**Today:**
+A forge call has the built-in adapter's room: an answer of up to 64 MiB, and time to wait out a rate limit on every
+try. `FACTORY_DRY_RUN` still holds every write back, opening a change too. Without the mapping, the built-in adapter
+runs, as before.
+
+The plugin's name must be the forge's (`FACTORY_FORGE`), and each request names its forge, which the plugin checks.
+A setting the plugin cannot honour stops the pass instead of being dropped without a word: `FACTORY_GH`,
+`FACTORY_GLAB`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GH_HOST`, `GITLAB_TOKEN`, `GITLAB_HOST`, and a
+`FACTORY_FORGE_HOST` other than github.com or gitlab.com. **Today:**
 
 - Only `dispatch` opts in; `review`, `poll`, `status` and the loop commands still use the built-in adapter.
 - `FACTORY_IDENTITY=app` with a forge plugin is refused: the App's token would have to reach the plugin, and none may
   hold one (ADR-0014 P11). App projects keep the built-in adapter.
-- A plugin gets no `GH_HOST` or `GITLAB_HOST`, so `gh` and `glab` use their default host; a project on GitHub
-  Enterprise or a self-managed GitLab keeps the built-in adapter.
+- A project on GitHub Enterprise or a self-managed GitLab keeps the built-in adapter, since the plugin gets no host
+  setting; so does one whose `gh` or `glab` login comes from a token in the environment.
+- The plugin tries a rate-limited request 4 times; `FACTORY_MAX_TRIES` does not reach it.
 
 ### Writes
 

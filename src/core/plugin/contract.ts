@@ -124,12 +124,15 @@ type Parts = {
   readonly cli: readonly string[];
 };
 
+// an interpreter the plugin itself may run on: a fake of it would stand in for the plugin, so the kit would test the fake
+const INTERPRETERS = /^(node|nodejs|deno|bun|python[0-9.]*|perl|ruby|sh|bash|zsh|dash|ksh|fish|env)$/;
+
 function cliName(value: unknown): string | Bad {
-  return typeof value === "string" && CLI_NAME.test(value) ? value : BAD;
+  return typeof value === "string" && CLI_NAME.test(value) && !INTERPRETERS.test(value) ? value : BAD;
 }
 
 const SHAPE =
-  "describe must list capabilities, at least one [{name, mandatory?}] of the known extension points, writes among them, env names that are not a login, a factory setting or a loader variable, and cli program names with no slash, none twice";
+  "describe must list capabilities, at least one [{name, mandatory?}] of the known extension points, writes among them, env names that are not a login, a factory setting or a loader variable, and cli program names with no slash and no interpreter, none twice";
 
 // optional : an optional list, none when it is not there
 function optional<T>(value: unknown, each: (v: unknown) => T | Bad): readonly T[] | Bad {

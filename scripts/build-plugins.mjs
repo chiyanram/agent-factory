@@ -11,11 +11,13 @@ const ROOT = join(import.meta.dirname, "..");
 const DIST = join(ROOT, "dist");
 const PLUGINS = ["github", "gitlab"];
 const ENTRY = join(DIST, "core", "forge", "serve.js");
-const IMPORT = /(?:^|[\s;])(?:import|export)\s[^"']*?from\s*["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)/g;
+// `import … from "x"`, `export … from "x"`, a bare `import "x"`, and `import("x")`
+const IMPORT =
+  /(?:^|[\s;])(?:import|export)\s[^"';]*?from\s*["']([^"']+)["']|(?:^|[\s;])import\s*["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)/g;
 
 // imported : the modules one file imports by relative path; a package imported by name stops the build
 function imported(file) {
-  const specs = [...readFileSync(file, "utf8").matchAll(IMPORT)].map((m) => m[1] ?? m[2]);
+  const specs = [...readFileSync(file, "utf8").matchAll(IMPORT)].map((m) => m[1] ?? m[2] ?? m[3]);
   const named = specs.find((s) => !s.startsWith(".") && !s.startsWith("node:"));
   if (named !== undefined) {
     throw new Error(`${relative(ROOT, file)} imports ${named}; a bundled plugin holds only the package's own modules`);

@@ -146,8 +146,8 @@ function requestOf(text: string): Request | "bad" {
   }
 }
 
-function projectIn(input: unknown): unknown {
-  return typeof input === "object" && input !== null ? Reflect.get(input, "project") : undefined;
+function fieldIn(input: unknown, name: string): unknown {
+  return typeof input === "object" && input !== null ? Reflect.get(input, name) : undefined;
 }
 
 // answer : one request's answer: unsupported for an op it does not know, refused for an op sent under the other
@@ -160,11 +160,21 @@ export async function answer(forge: ForgeName, io: ServeIo, text: string): Promi
   if (!isForgeOp(request.op)) {
     return { kind: "unsupported", op: request.op };
   }
-  if (FORGE_OPS[request.op] !== request.capability) {
-    return { kind: "refused", reason: `${request.op} is ${FORGE_OPS[request.op]}, not ${request.capability}` };
+  const refusal = refusalOf(forge, request.op, request);
+  if (refusal !== "") {
+    return { kind: "refused", reason: refusal };
   }
-  const adapter = opened(forge, io, projectIn(request.input));
+  const adapter = opened(forge, io, fieldIn(request.input, "project"));
   return adapter.kind === "ok" ? RUN[request.op](adapter.value, request.input) : failed(adapter.reason);
+}
+
+// refusalOf : why the plugin refuses a known op: sent under the other capability, or for another forge; "" for none
+function refusalOf(forge: ForgeName, op: ForgeOp, request: Request): string {
+  if (FORGE_OPS[op] !== request.capability) {
+    return `${op} is ${FORGE_OPS[op]}, not ${request.capability}`;
+  }
+  const asked = fieldIn(request.input, "forge");
+  return asked === undefined || asked === forge ? "" : `this plugin serves ${forge}, not ${JSON.stringify(asked)}`;
 }
 
 // serve : the plugin's whole run: describe or call; exit 0 with one JSON object, 64 for any other verb

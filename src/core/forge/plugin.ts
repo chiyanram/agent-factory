@@ -6,7 +6,8 @@
 import type { Note } from "../notes.js";
 import type { PluginResult } from "../plugin/contract.js";
 import { callPlugin, type Setup } from "../plugin/registry.js";
-import type { Done, Result } from "./api.js";
+import type { Limits } from "../plugin/exec.js";
+import { MAX_WAIT, type Done, type Result } from "./api.js";
 import { FORGE_OPS, type ForgeOp } from "./ops.js";
 import { reader, type Reader } from "./read.js";
 import { changeOf, changesOf, ciConfigOf, notesOf, numbersOf } from "./shapes.js";
@@ -32,13 +33,20 @@ function reasonOf(target: PluginTarget, op: string, answer: PluginResult): strin
     : `${target.plugin} ${op} answered ${answer.kind}${why}`;
 }
 
+// a forge call's limits are the built-in adapter's: an answer of up to 64 MiB, and time to wait out a rate limit on
+// every try (api.ts), not the 1 MiB and the minute of any other plugin call
+export const FORGE_LIMITS: Limits = { timeoutMs: (MAX_WAIT * 4 + 120) * 1000, maxBytes: 64 * 1024 * 1024 };
+
 function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<PluginResult>> {
-  return callPlugin(target.setup, {
-    plugin: target.plugin,
-    capability: FORGE_OPS[op],
-    op,
-    input: { ...input, project: target.project },
-  });
+  return callPlugin(
+    { ...target.setup, limits: target.setup.limits ?? FORGE_LIMITS },
+    {
+      plugin: target.plugin,
+      capability: FORGE_OPS[op],
+      op,
+      input: { ...input, project: target.project, forge: target.forge },
+    },
+  );
 }
 
 // read : a read op's value, in the shape the Forge interface says
