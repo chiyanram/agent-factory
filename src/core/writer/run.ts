@@ -1,7 +1,9 @@
 // run — one writer run in a fresh box (#113; ADR-0012 S5, S11, S13). The host has made the clone (clone.ts); this
 // file runs the agent in it and reads how it ended:
 //   1 the project's egress proxy, then the box, with the clone mounted and only the model login and the proxy settings
-//   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), the rulebook as a plugin
+//   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), the rulebook as a plugin, and
+//     no settings from the branch: --setting-sources user drops its .claude/settings.json, hooks, env and .mcp.json,
+//     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08)
 //   3 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the exit
 //   4 the branch's tip, and the patch-id of everything since the start, which the dispatcher compares run to run
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
@@ -49,6 +51,8 @@ export function claudeArgv(claude: Claude, settings: SettingsArg = { kind: "none
   return [
     "claude",
     "-p",
+    "--setting-sources",
+    "user",
     "--dangerously-skip-permissions",
     "--plugin-dir",
     RULEBOOK_DIR,

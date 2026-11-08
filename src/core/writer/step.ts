@@ -107,7 +107,17 @@ const TEMPLATE: Readonly<Record<RunMode, keyof Prompts>> = {
   ci: "ci",
 };
 
-// promptFor : the mode's prompt with the run's names, then the report's schema. Pure.
+// the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
+// reads them as it reads the code
+export const PROJECT_INSTRUCTIONS = [
+  "This project's instructions are not loaded for you. Before you change anything, read AGENTS.md and CLAUDE.md at the",
+  "root, and the AGENTS.md or CLAUDE.md of each folder you change, and follow them. The project's skills are in",
+  ".claude/skills and .agents/skills: read the one that fits a task before you do it. Never change these files, or",
+  ".claude and .agents: the push refuses a commit that does.",
+].join("\n");
+
+// promptFor : the mode's prompt with the run's names, the project's instructions and tools, then the report's schema.
+// Pure.
 export function promptFor(input: {
   readonly prompts: Prompts;
   readonly mode: RunMode;
@@ -123,7 +133,7 @@ export function promptFor(input: {
     .replaceAll("{{branch}}", input.branch)
     .replaceAll("{{head}}", input.head);
   const tools = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
-  return `${filled.trimEnd()}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
+  return `${filled.trimEnd()}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
 }
 
 // outOf : what the dispatcher records, from what the host did with the run. Pure.

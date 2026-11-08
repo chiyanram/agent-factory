@@ -12,6 +12,7 @@
 // A branch that holds .factory, or a symlink where a read-only path goes, is refused: the host writes into .factory,
 // and docker would mount a symlink's target from the host. Nothing here throws.
 
+import { AGENT_SETTINGS } from "../agent-settings.js";
 import { cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { excludeFactory } from "../finish.js";
@@ -37,8 +38,8 @@ const TRAILER_HOOK = [
   "",
 ].join("\n");
 
-// paths the writer may read but not change, when the checkout has them
-const SETTINGS = [".claude", ".agents", "AGENTS.md", "CLAUDE.md"] as const;
+// paths the writer may read but not change, when the checkout has them; the push refuses the rest (agent-settings.ts)
+const SETTINGS = AGENT_SETTINGS;
 const GIT_OWN = [".git/config", ".git/hooks"] as const;
 
 // where the run starts: a change's branch at its head, or a ticket's first run on the default branch
