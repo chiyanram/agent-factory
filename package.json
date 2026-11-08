@@ -1,6 +1,6 @@
 {
   "name": "@chiyanram/agent-factory",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "The agent factory as a TypeScript package that calls CLIs (ADR-0013).",
   "private": true,
   "license": "MIT",
@@ -19,7 +19,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-plugins.mjs",
     "lint": "tsc -p tsconfig.json --noEmit",
     "format": "biome format --write .",
     "release": "semantic-release",

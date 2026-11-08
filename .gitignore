@@ -1,4 +1,6 @@
 node_modules/
 dist/
+# made by scripts/build-plugins.mjs from dist/ (#134)
+plugins/*/lib/
 # git worktrees of this repo (Claude Code puts them here); every repo-wide tool must skip them (#148)
 .claude/worktrees/

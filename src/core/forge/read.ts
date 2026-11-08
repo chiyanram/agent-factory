@@ -11,6 +11,8 @@ export type Reader = {
   int(value: unknown, path: string): number;
   bool(value: unknown, path: string): boolean;
   list(value: unknown, path: string): readonly unknown[];
+  // one of the words given; the first is the placeholder after a failure
+  word<T extends string>(value: unknown, path: string, words: readonly [T, ...T[]]): T;
   // true when JSON has null (or nothing) at path: a ghost author, a commit with no checks
   absent(value: unknown, path: string): boolean;
   done<T>(value: T): Result<T>;
@@ -41,6 +43,11 @@ export function reader(context: string): Reader {
     },
     bool: (value, path) => check(walk(value, path), path, "true or false", (v) => typeof v === "boolean", false),
     list: (value, path) => check(walk(value, path), path, "a list", Array.isArray, []),
+    word: (value, path, words) => {
+      const found = walk(value, path);
+      const hit = words.find((w) => w === found);
+      return hit ?? check(found, path, `one of ${words.join(", ")}`, () => false, words[0]);
+    },
     absent: (value, path) => walk(value, path) === null || walk(value, path) === undefined,
     done: (value) => (problem === "" ? { kind: "ok", value } : { kind: "failed", reason: problem }),
   };

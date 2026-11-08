@@ -12,13 +12,24 @@
 //   no token out  no answer holds a token: ghp_, gho_, ghu_, ghs_, ghr_, github_pat_, glpat-, ATATT, xox?-, sk-ant-,
 //                 or a JWT
 //
-// The caps and the timeout are the core's own (exec.ts), so every plugin has them. Write fidelity, the text sent to the
-// CLI byte for byte, needs stub CLIs; it comes with the forge plugins (#134 PR C).
+//   write fidelity  a plugin that writes names the programs it runs in describe's cli; each write fixture that carries a
+//                 text (input.text, or a post in input.post or input.body, rendered as post.ts renders it), and once
+//                 more with a tricky text, must hand that text to the CLI byte for byte and whole: an argv word, stdin,
+//                 or a string in JSON on either that is the text itself; and it may call the CLI no more often than
+//                 the fixture's <case>.cli.json lists answers
+//
+// A plugin that names a cli runs every check with the kit's fakes first on its PATH (fakes.ts), so the kit never reaches
+// the real CLI or the network; a fixture's <case>.cli.json lists the fakes' answers, in order. The caps and the timeout
+// are the core's own (exec.ts), so every plugin has them.
 
 import { randomBytes } from "node:crypto";
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { reader } from "../forge/read.js";
+import { postOf } from "../forge/shapes.js";
+import { renderPost } from "../post.js";
 import { PROTOCOL, pluginEnv, readResult } from "./contract.js";
+import { makeFakes, stringsIn, type FakeAnswer, type FakeCall } from "./fakes.js";
 import { DEFAULT_LIMITS, runPlugin, type Ran } from "./exec.js";
 import { inspect, type Entry, type Setup } from "./registry.js";
 
@@ -28,21 +39,35 @@ const TOKENS =
   /(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|ATATT|xox[abeprs]-|sk-ant-)[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./;
 const SOFT = new Set(["failed", "refused", "unsupported"]);
 
-type Answer = { readonly ran: Ran; readonly request: string };
+type Answer = { readonly ran: Ran; readonly request: string; readonly calls: readonly FakeCall[] };
 
 function check(name: string, ok: boolean, detail: string): Check {
   return { name, ok, detail };
 }
 
-async function call(setup: Setup, entry: Entry, stdin: string): Promise<Answer> {
-  const ran = await (setup.exec ?? runPlugin)({
+function runOnce(setup: Setup, entry: Entry, stdin: string, path: string): Promise<Ran> {
+  return (setup.exec ?? runPlugin)({
     path: entry.path,
     args: ["call"],
     stdin,
-    env: pluginEnv(setup.env, entry.env, setup.path),
+    env: pluginEnv(setup.env, entry.env, path),
     limits: setup.limits ?? DEFAULT_LIMITS,
   });
-  return { ran, request: stdin };
+}
+
+// call : one request; with the kit's fakes first on the PATH when the plugin names a cli, and what they were sent
+async function call(setup: Setup, entry: Entry, stdin: string, answers: readonly FakeAnswer[] = []): Promise<Answer> {
+  if (entry.cli.length === 0) {
+    return { ran: await runOnce(setup, entry, stdin, setup.path), request: stdin, calls: [] };
+  }
+  const fakes = await makeFakes(entry.cli, answers);
+  if (fakes.kind === "failed") {
+    return { ran: { kind: "failed", reason: fakes.reason }, request: stdin, calls: [] };
+  }
+  const ran = await runOnce(setup, entry, stdin, [fakes.value.dir, setup.path].filter((p) => p !== "").join(":"));
+  const calls = await fakes.value.calls();
+  await fakes.value.remove().catch(() => undefined);
+  return { ran, request: stdin, calls };
 }
 
 function request(capability: string, op: string, input: unknown): string {
@@ -69,7 +94,24 @@ type Fixture = {
   readonly capability: string;
   readonly input: string;
   readonly expected: string;
+  readonly answers: readonly FakeAnswer[];
 };
+
+function answerOf(value: unknown): FakeAnswer {
+  const code = field(value, "code");
+  const stdout = field(value, "stdout");
+  const stderr = field(value, "stderr");
+  return {
+    code: Number.isSafeInteger(code) ? Number(code) : 1,
+    stdout: typeof stdout === "string" ? stdout : "",
+    stderr: typeof stderr === "string" ? stderr : "",
+  };
+}
+
+function answersOf(text: string): readonly FakeAnswer[] {
+  const list = parsed(text);
+  return Array.isArray(list) ? list.map(answerOf) : [];
+}
 
 async function fixturesIn(dir: string): Promise<readonly Fixture[]> {
   const capabilities = await readdir(dir).catch(() => [] as string[]);
@@ -80,7 +122,8 @@ async function fixturesIn(dir: string): Promise<readonly Fixture[]> {
       const stem = file.slice(0, -".in.json".length);
       const input = await readFile(join(dir, capability, file), "utf8").catch(() => "");
       const expected = await readFile(join(dir, capability, `${stem}.out.json`), "utf8").catch(() => "");
-      found.push({ name: `${capability}/${stem}`, capability, input, expected });
+      const answers = answersOf(await readFile(join(dir, capability, `${stem}.cli.json`), "utf8").catch(() => ""));
+      found.push({ name: `${capability}/${stem}`, capability, input, expected, answers });
     }
   }
   return found;
@@ -112,7 +155,7 @@ function opOf(input: unknown): string {
 
 async function fixtureCheck(setup: Setup, entry: Entry, f: Fixture): Promise<{ check: Check; answer: Answer }> {
   const input = parsed(f.input);
-  const answer = await call(setup, entry, request(f.capability, opOf(input), field(input, "input")));
+  const answer = await call(setup, entry, request(f.capability, opOf(input), field(input, "input")), f.answers);
   const actual = answer.ran.kind === "exited" ? parsed(answer.ran.stdout) : undefined;
   const ok = subset(parsed(f.expected), actual);
   return { check: check(`fixture ${f.name}`, ok, ok ? kindOf(answer) : `got ${kindOf(answer)}`), answer };
@@ -154,6 +197,95 @@ function leakedIn(setup: Setup, text: string): boolean {
   return Object.values(setup.env).some((v) => typeof v === "string" && v.startsWith("canary-") && text.includes(v));
 }
 
+// a text no quoting, escaping or encoding step may change: quotes, a $, a backtick, a backslash, letters outside ASCII,
+// an emoji, a mention, a reference, a link and a line that would be a quick action
+const TRICKY = 'it\'s "q" $HOME `x` \\ ünï 😀 @team #1 www.example.com\n/approve';
+
+// rendered : a post as post.ts renders it, or none when the value is not a post
+function rendered(value: unknown): readonly string[] {
+  const r = reader("post");
+  const post = r.done(postOf(r, value));
+  const text = post.kind === "ok" ? renderPost(post.value) : undefined;
+  return text?.kind === "ok" ? [text.text] : [];
+}
+
+// textsOf : the texts a write's input carries, as the CLI must get them
+function textsOf(input: unknown): readonly string[] {
+  const text = field(input, "text");
+  return [
+    ...(typeof text === "string" ? [text] : []),
+    ...rendered(field(input, "post")),
+    ...rendered(field(input, "body")),
+  ];
+}
+
+function swapped(value: unknown, key: string, swap: (v: unknown) => unknown): unknown {
+  return typeof value === "object" && value !== null && Object.hasOwn(value, key)
+    ? { ...value, [key]: swap(field(value, key)) }
+    : value;
+}
+
+// tricky : the input with every text it carries replaced by TRICKY
+function tricky(input: unknown): unknown {
+  const title = (post: unknown) => swapped(post, "title", () => TRICKY);
+  return swapped(
+    swapped(
+      swapped(input, "text", () => TRICKY),
+      "post",
+      title,
+    ),
+    "body",
+    title,
+  );
+}
+
+// got : a text the CLI got whole: an argv word, stdin, or a string in JSON on either that is the text itself, so text
+// sent with more around it (a line added after it) does not count
+function got(calls: readonly FakeCall[], text: string): boolean {
+  return calls.some((c) => stringsIn(c).includes(text));
+}
+
+// fidelityProblem : what the CLI got wrong: a call the fixture did not plan for, or a text it never got whole
+function fidelityProblem(answer: Answer, f: Fixture, texts: readonly string[]): string {
+  if (answer.calls.length > f.answers.length) {
+    return `the CLI was called ${answer.calls.length} times; ${f.name}.cli.json lists ${f.answers.length} answers`;
+  }
+  const missed = texts.find((t) => !got(answer.calls, t));
+  return missed === undefined ? "" : `the CLI never got ${JSON.stringify(missed.slice(0, 60))} whole`;
+}
+
+async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown, name: string): Promise<Check> {
+  const inner = field(input, "input");
+  const answer = await call(setup, entry, request(f.capability, opOf(input), inner), f.answers);
+  const problem = fidelityProblem(answer, f, textsOf(inner));
+  return check(
+    `write fidelity ${name}`,
+    problem === "",
+    problem === "" ? "the CLI got every text byte for byte" : problem,
+  );
+}
+
+// fidelity : each write fixture that carries a text, and the first once more with TRICKY
+async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]): Promise<readonly Check[]> {
+  if (entry.writes.length === 0) {
+    return [];
+  }
+  if (entry.cli.length === 0) {
+    return [check("write fidelity", false, "the plugin writes but names no program in describe's cli")];
+  }
+  const writes = fixtures.filter(
+    (f) => entry.writes.some((w) => w === f.capability) && textsOf(field(parsed(f.input), "input")).length > 0,
+  );
+  const [first] = writes;
+  if (first === undefined) {
+    return [check("write fidelity", false, "no write fixture carries a text (input.text, input.post or input.body)")];
+  }
+  const each = writes.map((f) => fidelityOf(setup, entry, f, parsed(f.input), f.name));
+  const input = parsed(first.input);
+  const hard = fidelityOf(setup, entry, first, swapped(input, "input", tricky), `${first.name} (tricky text)`);
+  return Promise.all([...each, hard]);
+}
+
 async function run(setup: Setup, entry: Entry, dir: string): Promise<readonly Check[]> {
   const caps: readonly string[] = entry.capabilities.map((c) => c.name);
   const fixtures = await fixturesIn(join(dir, "fixtures"));
@@ -178,6 +310,7 @@ async function run(setup: Setup, entry: Entry, dir: string): Promise<readonly Ch
     hygiene(answers),
     check("env canary", !leaked, leaked ? "an answer printed a canary it was given" : "no canary printed"),
     check("no token out", !TOKENS.test(text), TOKENS.test(text) ? "an answer holds a token" : "none"),
+    ...(await fidelity(setup, entry, fixtures)),
   ];
 }
 
