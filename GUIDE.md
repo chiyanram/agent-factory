@@ -77,10 +77,9 @@ dispatcher, poll, host push (your user)
 | 7 | developer, on the VM | Add the rule with `sudo visudo -f /etc/sudoers.d/agent-factory`, one line per project: `<you> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory-app-token <owner/name>`. Check it with `sudo -n -u factory -- /usr/local/bin/agent-factory-app-token <owner/name> \| jq .login`, which prints `"<slug>[bot]"`. | sudo matches the whole command line, so the rule allows that one command for that one repository. Never print the token itself. |
 | 8 | developer | Set `FACTORY_FORGE=github`, `FACTORY_PROJECT=<owner/name>` and `FACTORY_IDENTITY=app`. Clone `FACTORY_REPO` over `https://github.com/`, with no credential helper in the clone's own config, and with no global `url.*.insteadOf` that rewrites `https://github.com/`. | The host push checks the one URL git will really push to: for an App it must be `https://github.com/<owner/name>`, and a clone that sets its own helper is refused, since git would fall back to your login. |
 
-**Today:** any process of your user can run the same sudo line and get a token, the coordinator's Bash tool included.
-The coordinator's deny list ([#106](https://github.com/chiyanram/agent-factory/issues/106)) must deny `sudo`; until it
-does, do not leave a coordinator session running unattended on a project with `FACTORY_IDENTITY=app`. The key itself
-stays out of reach either way.
+Any process of your user can run the same sudo line and get a token. The coordinator's settings
+([#106](https://github.com/chiyanram/agent-factory/issues/106), "Set up the coordinator") deny `sudo` and the wrapper,
+so start the coordinator only with `agent-factory coordinator`. The key itself stays out of reach either way.
 
 
 ### Both forges
@@ -147,6 +146,40 @@ at stage B.
 **Today:** the dispatcher (#103) does not read the token yet. When it does, it passes it as
 `CLAUDE_CODE_OAUTH_TOKEN` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers.
 The vm box takes each value through the docker CLI's environment (`docker exec --env NAME`), never its command line.
+
+## Set up the coordinator
+
+The coordinator runs in its own folder, with its own settings, so it cannot widen its own wall and your other Claude
+sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issues/106), ADR-0012 S2).
+
+1. `agent-factory setup coordinator` writes `$FACTORY_HOME/coordinator/.claude/settings.json` and a `CLAUDE.md` that
+   points at this guide, both read-only. Run it again after each upgrade of the package.
+2. `agent-factory coordinator` starts Claude Code there with `--setting-sources project`, so the allow rules of your
+   own user settings do not apply; `agent-factory coordinator copilot` starts Copilot CLI with the same rules as flags.
+
+The wall (`src/core/coordinator.ts`):
+
+- **Runs with no prompt:** `agent-factory poll`, `spec`, `approval` and `status`.
+- **Asks you first:** `agent-factory approve`, whose yes in the prompt is your approval. **Today:** the start commands
+  too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`, `start-writer.sh`), since the loop is
+  still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
+- **Denied:** `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+  `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod` and `chown`. Editing any
+  `.claude/`, the package, `$FACTORY_HOME/approvals`, `projects`, `runs`, `secrets` and `coordinator`. Reading the
+  secret paths: `~/.ssh`, `~/.gnupg`, the gh and glab logins, `~/.git-credentials`, `~/.netrc`, the cloud logins,
+  `~/.docker/config.json`, `~/.npmrc`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, the Keychain and the
+  browser profiles, the factory user's home (`FACTORY_BOT_HOME`, default `/home/factory`) and every `.env*`.
+- **Edits with no prompt** only spec drafts in `$FACTORY_HOME/specs`; any other edit asks you.
+- Bypass and auto mode are switched off.
+
+Check it once after setup: in the coordinator's session, ask it to read `~/.ssh/canary` (make an empty one first) and
+to edit a file of the package; both must be refused. **Today:**
+
+- Bash deny rules match a command as typed, and Claude Code's docs say they are no security boundary; the OS-level
+  sandbox is not switched on, since `agent-factory status` posts with your own `gh` or `glab` login, which it would
+  block (#114). A program the coordinator may run that reads files itself is not held by the Read rules.
+- The Copilot flags are not yet tried against a live Copilot CLI.
+- Jira and Dynatrace reads, and questions to Jira, come with their plugins (#134).
 
 ## Settings
 
@@ -390,8 +423,8 @@ it is a prompt instruction at most.
 - **Code goes to a writer, always.** The coordinator never edits code. (A prompt rule today; the target allow-list
   enforces it.)
 - **Approval and merge are the human's.** An approval is `agent-factory approve`, which records the spec's full hash;
-  a note on the MR approves nothing, and the bot cannot merge the protected branch. **Today:** the harness `ask` rule
-  that keeps `approve` from the coordinator is not set up yet (#106).
+  a note on the MR approves nothing, and the bot cannot merge the protected branch. In the coordinator's settings
+  `approve` is an `ask` rule, so it runs only on your yes in the harness prompt (#106).
 - **Today: the writer pushes only its own branch**, with `--force-with-lease` after a rebase. On GitHub its session
   gets an empty `GH_CONFIG_DIR` and no system or global git config, so it cannot act as the person. This is a prompt
   rule plus a missing login, not a wall; the target removes the forge token from the writer.
@@ -426,8 +459,8 @@ it is a prompt instruction at most.
   the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)). **Today:** the bash
   writer still holds a forge login, writes its evidence into the MR description itself and marks the MR ready; none of
   that goes through the template until the writer runs in the box (#109, #113).
-- **Decided: the coordinator cannot widen its own wall.** It edits only spec drafts, never its settings or the
-  factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)).
+- **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
+  `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106). **Today:** an edit elsewhere asks you rather than being refused.
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,
   which the PR body records once there is code.
 

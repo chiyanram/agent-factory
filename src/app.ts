@@ -34,6 +34,8 @@ import { boxPlan } from "./core/ready/plan.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
+import type { CoordinatorPlaces } from "./core/coordinator.js";
+import { installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -54,6 +56,9 @@ commands:
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
                                at the hidden prompt; it is never printed (#136)
   setup status                 the box chosen, its risks, and whether the claude token is valid
+  setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
+                               <home>/coordinator
+  coordinator [copilot]        start the coordinator's session there, with only those settings (#106)
   box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
@@ -100,6 +105,8 @@ export type Io = {
     readonly uid: number;
     readonly gid: number;
     readonly run: CliRunner;
+    // a program on this terminal, for the coordinator's session
+    readonly interactive: Interactive;
   };
 };
 
@@ -571,16 +578,64 @@ async function boxCommand({ positionals, io }: Args): Promise<number> {
   return 0;
 }
 
+// placesOf : where the coordinator's rules point: this package, the factory home, the factory user's home
+function placesOf(io: Io): Result<CoordinatorPlaces> {
+  const home = factoryHome(io.env);
+  const bot = io.env.FACTORY_BOT_HOME ?? "/home/factory";
+  if (home.kind === "refused") {
+    return { kind: "failed", reason: home.reason };
+  }
+  return isAbsolute(bot)
+    ? {
+        kind: "ok",
+        value: { pkg: join(dirname(fileURLToPath(import.meta.url)), ".."), factoryHome: home.path, botHome: bot },
+      }
+    : { kind: "failed", reason: `FACTORY_BOT_HOME must be an absolute path, got ${JSON.stringify(bot)}` };
+}
+
+async function setupCoordinator({ io }: { readonly io: Io }): Promise<number> {
+  const places = placesOf(io);
+  const dir = places.kind === "ok" ? await installCoordinator(places.value) : places;
+  if (dir.kind === "failed") {
+    io.err(`agent-factory setup coordinator: ${dir.reason}\n`);
+    return 1;
+  }
+  io.out(`coordinator settings in ${dir.value}; start the session with agent-factory coordinator\n`);
+  return 0;
+}
+
 const SETUP: readonly SetupStep[] = [
   { name: "claude", run: setupClaude },
   { name: "status", run: setupStatus },
+  { name: "coordinator", run: setupCoordinator },
 ];
+
+function runnerOf(positionals: readonly string[]): "claude" | "copilot" | "bad" {
+  const [runner = "claude"] = positionals;
+  const known = runner === "claude" || runner === "copilot" ? runner : "bad";
+  return positionals.length > 1 ? "bad" : known;
+}
+
+// coordinator : the coordinator's session, in its own folder with its own settings (#106)
+async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
+  const runner = runnerOf(positionals);
+  if (runner === "bad") {
+    io.err("usage: agent-factory coordinator [copilot]\n");
+    return 64;
+  }
+  const places = placesOf(io);
+  if (places.kind === "failed") {
+    io.err(`agent-factory coordinator: ${places.reason}\n`);
+    return 1;
+  }
+  return startCoordinator(places.value, runner, { ...io, interactive: io.system.interactive });
+}
 
 // setup : make and keep the box's model-only token (#136), and say whether a box may start
 async function setupCommand({ positionals, io }: Args): Promise<number> {
   const step = SETUP.find((s) => s.name === positionals[0]);
   if (step === undefined) {
-    io.err("usage: agent-factory setup claude | status\n");
+    io.err("usage: agent-factory setup claude | status | coordinator\n");
     return 64;
   }
   const home = factoryHome(io.env);
@@ -610,6 +665,7 @@ const COMMANDS: readonly Command[] = [
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
   { name: "setup", run: setupCommand },
+  { name: "coordinator", run: coordinatorCommand },
   { name: "box", run: boxCommand },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
