@@ -31,6 +31,10 @@ import { reviewRound, type Outcome } from "./core/review/round.js";
 import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
 import { reviewStep } from "./core/review/step.js";
 import { boxPlan } from "./core/ready/plan.js";
+import type { Identity } from "./core/identity.js";
+import { writerSetup } from "./core/writer/setup.js";
+import { hostPush } from "./core/push.js";
+import { writerStep } from "./core/writer/step.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
@@ -289,8 +293,23 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
 
 type Planned = { readonly gate: Gate; readonly steps: Steps };
 
+type Project = { readonly forge: Forge; readonly identity: Identity };
+
+// tokenStore : where the box's model login is kept (#136), as a result
+function tokenStore(io: Io, home: string): Result<TokenStore> {
+  const opened = openStore({
+    platform: io.system.platform,
+    home,
+    owner: { uid: io.system.uid },
+    run: io.system.run,
+    env: io.env,
+  });
+  return opened.kind === "store" ? { kind: "ok", value: opened.store } : { kind: "failed", reason: opened.reason };
+}
+
 // stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
-async function stepsFor(io: Io, forge: Forge, home: string, project: string): Promise<Result<Planned>> {
+async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
+  const { forge, identity } = opened;
   const docker = hostDocker(io.env, io.system.run);
   const planned = await boxPlan({
     env: io.env,
@@ -304,8 +323,21 @@ async function stepsFor(io: Io, forge: Forge, home: string, project: string): Pr
     return planned;
   }
   const { gate, plan } = planned.value;
+  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  const writer = await writerSetup({
+    env: io.env,
+    home,
+    project,
+    label,
+    plan,
+    forge,
+    identity,
+    store: tokenStore(io, home),
+    pusher: hostPush,
+  });
   const steps: Steps = {
     ...STEPS_TODAY,
+    writer: writerStep(writer),
     ready: readyStep(plan),
     review: await reviewStepFor(io.env, forge),
     verify: verifyStep(plan, forge),
@@ -321,9 +353,10 @@ async function pass(
   dryRun: boolean,
   io: Io,
   settings: PassSettings,
-  forge: Forge,
+  opened: Project,
 ): Promise<ReturnType<typeof tick>> {
-  const planned = await stepsFor(io, forge, settings.home, project);
+  const { forge } = opened;
+  const planned = await stepsFor(io, opened, settings.home, project);
   if (planned.kind === "failed") {
     return planned;
   }
@@ -342,7 +375,7 @@ async function pass(
 
 async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
   const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
-  const passed = opened.kind === "ok" ? await pass(project, dryRun, io, settings, opened.value.forge) : opened;
+  const passed = opened.kind === "ok" ? await pass(project, dryRun, io, settings, opened.value) : opened;
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);
     return 1;

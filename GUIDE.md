@@ -88,7 +88,8 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
 - A ticket's first writer run opens its change: after the first push of `factory/<ticket>`, the host opens a draft
   change onto the default branch, as the project's identity. Its title is the spec's title and its body names the
   ticket; the spec's text stays local. A change already open from that branch is reused, never doubled; two are left
-  to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). **Today:** the writer step (#113) does not call it yet.
+  to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). The writer step (#113) does this on a first run that
+  committed; a first run that committed nothing opens no change, and the run's record says so.
 - On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses it, and
   the work is blocked with "touches CI config" and the files named (`src/core/ci-files.ts`, #115). The CI files are
   `.github/workflows/**`, `.github/actions/**`, `.gitlab-ci.yml` or the file the project's GitLab settings name
@@ -97,8 +98,8 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   default branch's, so a merge or rebase onto the default branch passes, and an edited merge or a reset does not. A CI
   file that does not parse, an include it cannot read, or one that names a variable is refused. You make a CI change
   in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). `rules:` in `.gitlab-ci.yml` is not a gate: the branch's own copy runs.
-  **Today:** the bash writer still pushes itself, so the refusal applies once the writer runs in the box and the host
-  pushes (#113).
+  The dispatcher's writer (#113) runs in the box and the host pushes, so the refusal applies there. **Today:** the bash
+  `start-writer` still pushes itself, and the refusal does not apply to it.
 - The backstop, in case a CI change gets through anyway; set it up once per project:
   - GitLab: mark every secret CI/CD variable **Protected**, so a pipeline on an agent branch never sees it. Optional:
     point Settings → CI/CD → General pipelines → CI/CD configuration file at a file in a separate project you
@@ -111,8 +112,8 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   The box runs its own Docker under `--runtime=sysbox-runc`, so its root is an unprivileged user on the VM. Without
   Sysbox the box refuses to start; it never falls back to `--privileged` ([decision](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6704930024)).
   The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the runner CLIs at pinned versions. A
-  project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. **Today:** nothing builds, pins or
-  starts the image; the writer step does (#113).
+  project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. `agent-factory box build` builds and
+  pins it ([The box image](#the-box-image)).
 - Work laptop (`FACTORY_BOX=laptop`): in Rancher Desktop, share no home folder with its VM. The writer's box is a
   container there, with its own Docker inside ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)).
 - Whoever started the work does not approve it. Write this rule down for the team; a forge on a free plan cannot
@@ -143,8 +144,9 @@ at stage B.
 | 3 | developer | Run `agent-factory setup status`. It prints the box, its risks, and the token's days left; exit 0 means a box may start. | A box never starts with an expired token, or one with no expiry on record. |
 | 4 | developer | When `status` warns (7 days before expiry), repeat steps 1 and 2. | The token lasts one year. |
 
-**Today:** the dispatcher (#103) does not read the token yet. When it does, it passes it as
-`CLAUDE_CODE_OAUTH_TOKEN` with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers.
+The dispatcher's writer reads it before each run and passes it as `CLAUDE_CODE_OAUTH_TOKEN` with
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers. No other secret goes into the
+box: no forge token, no `PATH` or `HOME` of yours.
 The vm box takes each value through the docker CLI's environment (`docker exec --env NAME`), never its command line.
 
 ## Set up the coordinator
@@ -205,14 +207,15 @@ The scripts read their settings from the environment.
 | `FACTORY_GH_APP_ID`, `FACTORY_GH_APP_KEY` | **Today:** the bash scripts only: the GitHub App's ID and its private key file in your own home; `agent-factory` reads neither | git config `factory.ghAppId`, `factory.ghAppKey` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
-| `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and a writer in `print` mode (the CLI does not cap a background run) | no cap |
+| `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, every run of the dispatcher's writer, and a bash writer in `print` mode (the CLI does not cap a background run) | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `agent-factory review` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
 | budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
+| `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
-| `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path | — |
+| `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path. The dispatcher's writer needs it too: it must hold `.claude-plugin/plugin.json`, and the host copies it into the writer's clone as `.factory/rulebook`, read-only, loaded with `claude --plugin-dir` | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
@@ -241,7 +244,8 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
 - `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
   redirect, `$`, glob or backslash); any other row fails the ready check.
-- `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com`, or `.npmjs.org` for a
+- `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
+  `.npmjs.org` for a
   domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
   `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
@@ -339,9 +343,10 @@ which also starts every count afresh. The ready check runs each evidence row of 
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
 project's own proxy; nothing of the branch runs on the host. Each box run starts that proxy afresh, inside the
 project's lock. The dispatcher opens the vm box when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set; otherwise
-the ready check and the verifier say what is missing and wait. **Today:** there is no writer step yet (#113), so no
-run record is written, and the ready check, the verifier and the review step have nothing to run after;
-`dispatch` does only these rows: reconcile a merged claim,
+the writer, the ready check and the verifier say what is missing and wait. The writer runs a ticket's `test-first` and
+`fix` runs in the box, on a fresh clone of the branch (or of the default branch on a first run), and the host pushes
+and posts what it committed. **Today:** a `rework` or `ci` run is not built yet (agent-factory issue 171): the host
+says so on the change and labels it `needs-human`. `dispatch` also does these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
 start. Run the table below by hand for the rest. There is no merge-conflict row yet.
@@ -353,10 +358,10 @@ heavy run (a build, an IT suite or a deploy) per machine.
 |---|---|
 | the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `claim`, `start-writer`, `status "writer started"`; for a bug, `start-writer --test-first` first |
 | a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `start-writer` for the fix |
-| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box (**today:** dispatch has no writer step yet, #113, so run them by hand), then `agent-factory review <mr>` |
+| the writer's report is `done` and the host pushed and posted it (**today:** the bash writer marks the MR ready instead) | the ready check runs its evidence rows at the head in a box, then `agent-factory review <mr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | `start-writer` again; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
 | the evidence fails at the head | `start-writer` again; after 3 failures, label `needs-human` |
-| the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does (**today:** dispatch opens no box yet, #113) |
+| the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
@@ -420,7 +425,8 @@ Read each line as a claim. **Enforced** means a script stops it today. **Decided
 it is a prompt instruction at most.
 
 - **Decided: workers run in a box.** No forge token, network only to the model API and registries; the host pushes
-  and posts ([Q1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6680836108)). **Today:** the writer runs unsandboxed, as you, with the bot's login.
+  and posts ([Q1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6680836108)). The dispatcher's writer runs so (#113). **Today:** the bash `start-writer` still runs
+  unsandboxed, as you, with the bot's login.
 - **Decided: no skip-permissions on the laptop**, an allow-list instead; config never from the branch
   ([Q6, Q7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370)).
 - **Decided: zero findings is never green.** Only a human undrafts. Every PR gets a script-made box of protected files
@@ -436,8 +442,8 @@ it is a prompt instruction at most.
   rule plus a missing login, not a wall; the target removes the forge token from the writer.
 - **Decided: ready is checked, not reported.** No review starts until code has run the change's evidence commands
   again at its head, in a fresh box ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S5, #91), with no
-  shell and only the programs the project file lists. **Today:** it is built on the box seam, but the dispatcher opens no box yet
-  (#113), so the dispatcher waits for it, and by hand you run the evidence yourself first.
+  shell and only the programs the project file lists. The dispatcher runs it in the vm box once the box and `egress.allow` are
+  set up; until then it waits, and by hand you run the evidence yourself first.
 - **The reviewer reads, and the script posts.** It runs in a throwaway folder (under `$FACTORY_HOME/review-runs/`,
   private to you) with the pack and a copy of the whole code at the head. It may report code the diff does not touch only when this change breaks it.
   Every `CLAUDE.md`, `AGENTS.md`, `.claude/` and `.agents/` is removed from that copy, so the MR cannot choose the
