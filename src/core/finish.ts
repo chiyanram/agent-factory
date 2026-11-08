@@ -21,11 +21,11 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
 import { agentTrailer, commitKind } from "./notes.js";
-import type { Post, Seat } from "./post.js";
+import type { Post, PostField, Seat } from "./post.js";
 import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
 import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
-import type { Evidence, Outcome } from "./report.js";
+import { hungLine, type Ending, type Evidence, type Outcome } from "./report.js";
 
 export const NEEDS_HUMAN = "needs-human";
 
@@ -43,6 +43,8 @@ export type FinishInput = {
   readonly forge: Forge;
   // the push of the writer's head: commit is the worktree's HEAD after the run, lease the branch before it
   readonly push: PushRequest;
+  // how the run ended: on its own, or stopped after its completion window (#182); a hung run's post says so
+  readonly ending: Ending;
   readonly pusher?: Pusher;
 };
 
@@ -204,6 +206,11 @@ export function pushOnTop(input: Sending): Promise<Done> {
   return pushed(input, "on-top");
 }
 
+// runFields : a hung run's one field, so a person sees a writer that does not exit (#182); none for a clean end
+function runFields(ending: Ending): readonly PostField[] {
+  return ending.kind === "hung" ? [{ label: "run", value: hungLine(ending) }] : [];
+}
+
 async function post(input: FinishInput, post: Post): Promise<Done> {
   return input.forge.note({ number: input.change, post });
 }
@@ -221,7 +228,7 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
   const said = await post(input, {
     seat: block.by === "writer" ? "writer" : "coordinator",
     title: `blocked: ${why}`,
-    fields: [],
+    fields: runFields(input.ending),
     items: [],
   });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
@@ -230,7 +237,12 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
 async function done(input: FinishInput, evidence: readonly Evidence[]): Promise<Result<Next>> {
   const head = input.push.commit;
   const items = evidence.map((e) => `${e.criterion} · ${e.command} · ${e.result}`);
-  const said = await post(input, { seat: "writer", title: `done at ${short(head)}`, fields: [], items });
+  const said = await post(input, {
+    seat: "writer",
+    title: `done at ${short(head)}`,
+    fields: runFields(input.ending),
+    items,
+  });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "ready-check", head, evidence } } : said;
 }
 
@@ -238,8 +250,13 @@ async function asked(input: FinishInput, questions: readonly string[]): Promise<
   const [only] = questions;
   const ask: Post =
     questions.length === 1 && only !== undefined
-      ? { seat: "writer", title: `OPEN: ${only}`, fields: [], items: [] }
-      : { seat: "writer", title: `OPEN: ${questions.length} questions`, fields: [], items: questions };
+      ? { seat: "writer", title: `OPEN: ${only}`, fields: runFields(input.ending), items: [] }
+      : {
+          seat: "writer",
+          title: `OPEN: ${questions.length} questions`,
+          fields: runFields(input.ending),
+          items: questions,
+        };
   const said = await post(input, ask);
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }

@@ -11,8 +11,9 @@
 // schema does not name, a non-zero exit, a timeout, a cap hit, or a box that failed. No outcome is guessed.
 //
 // The writer controls its worktree, so the read is careful: .factory and the report must be a real folder and a real
-// regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Read it only once the box has
-// stopped: nothing of the writer's may still run and swap .factory between the checks and the open. A reason never
+// regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Decide from it only once the
+// box has stopped: nothing of the writer's may still run and swap .factory between the checks and the open. A read
+// while the writer runs only starts the completion window (#182). A reason never
 // quotes the file, not even a key name, since it is posted on the change and a report could hold anything.
 
 import { constants } from "node:fs";
@@ -37,9 +38,38 @@ export type Outcome =
 // How the run ended, as the box (src/core/box) and the dispatcher's caps saw it.
 export type RunEnd =
   | { readonly kind: "exited"; readonly code: number }
+  // the writer wrote a valid report, then kept running past the completion window, and the host stopped its box
+  // (#182): decided from the report, like a clean exit
+  | { readonly kind: "hungAfterReport"; readonly windowSeconds: number }
   | { readonly kind: "timedOut"; readonly seconds: number }
   | { readonly kind: "cap"; readonly what: string }
   | { readonly kind: "failed"; readonly reason: string };
+
+// how a run decided from its report ended: on its own, or stopped by the host after the completion window
+export type Ending = { readonly kind: "clean" } | { readonly kind: "hung"; readonly windowSeconds: number };
+
+export const CLEAN: Ending = { kind: "clean" };
+
+// endingOf : the ending a run end gives the outcome. Pure.
+export function endingOf(end: RunEnd): Ending {
+  return end.kind === "hungAfterReport" ? { kind: "hung", windowSeconds: end.windowSeconds } : CLEAN;
+}
+
+// hungLine : what a person reads about a hung run. Pure.
+export function hungLine(ending: Ending): string {
+  return ending.kind === "hung"
+    ? `the writer hung after its report; the host stopped it after the ${ending.windowSeconds} s completion window`
+    : "";
+}
+
+// validReport : a report the schema accepts, as the writer wrote it; the host's own refusals are not one
+export function validReport(file: ReportFile): boolean {
+  if (file.kind !== "text") {
+    return false;
+  }
+  const outcome = parseReport(file.text);
+  return outcome.kind !== "blocked" || outcome.by === "writer";
+}
 
 export type ReportFile =
   | { readonly kind: "text"; readonly text: string }
@@ -183,6 +213,8 @@ function ended(end: RunEnd): string {
   switch (end.kind) {
     case "exited":
       return `the run exited ${end.code}`;
+    case "hungAfterReport":
+      return `the writer hung after its report for ${end.windowSeconds} s`;
     case "timedOut":
       return `the run was stopped after ${end.seconds}s`;
     case "cap":
@@ -192,9 +224,15 @@ function ended(end: RunEnd): string {
   }
 }
 
-// decide : the outcome of one writer run. A run that did not exit 0 is blocked whatever its report says.
+// cleanEnd : a run decided from its report: it exited 0, or it hung after a valid report (#182; ADR-0012 S13)
+function cleanEnd(end: RunEnd): boolean {
+  return (end.kind === "exited" && end.code === 0) || end.kind === "hungAfterReport";
+}
+
+// decide : the outcome of one writer run. A run that did not exit 0 is blocked whatever its report says, unless it
+// hung after a valid report: that one is decided from the report, read again after the box stopped.
 export function decide(input: { readonly end: RunEnd; readonly file: ReportFile }): Outcome {
-  if (input.end.kind !== "exited" || input.end.code !== 0) {
+  if (!cleanEnd(input.end)) {
     return hostBlocked(ended(input.end));
   }
   switch (input.file.kind) {
@@ -268,8 +306,9 @@ async function openReport(worktree: string, before: Dir): Promise<ReportFile> {
   }
 }
 
-// loadReport : the report in a worktree, read without following a symlink and at most MAX_REPORT_BYTES. Call it only
-// after the box has stopped.
+// loadReport : the report in a worktree, read without following a symlink and at most MAX_REPORT_BYTES. Decide a run
+// only from a read after the box has stopped: while the writer runs, a read (run.ts's poll) only starts the completion
+// window, since the writer can still change the folder between the checks and the open.
 export async function loadReport(input: { readonly worktree: string }): Promise<ReportFile> {
   const dir = await realDir(join(input.worktree, ".factory"));
   if (dir.kind !== "dir") {

@@ -20,7 +20,7 @@ import type { Result } from "../forge/api.js";
 import type { Forge, ForgeName } from "../forge/types.js";
 import type { Identity } from "../identity.js";
 import type { PushRequest } from "../push.js";
-import { REPORT_INSTRUCTIONS, type Evidence, type Outcome } from "../report.js";
+import { CLEAN, REPORT_INSTRUCTIONS, type Evidence, type Outcome } from "../report.js";
 import type { Spec } from "../spec.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { readKept, recordsDirOf } from "../kept.js";
@@ -82,6 +82,8 @@ export type WriterOut = {
   readonly outcome: "done" | "asked" | "blocked";
   readonly patch: string;
   readonly evidence: readonly Evidence[];
+  // the writer hung after its report and the host stopped it after the completion window (#182)
+  readonly hung: boolean;
 };
 
 // readPrompts : the package's writer prompts
@@ -138,7 +140,7 @@ export function promptFor(input: {
 
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
-  const base = { head: ended.tip, patch: ended.patch };
+  const base = { head: ended.tip, patch: ended.patch, hung: ended.ending.kind === "hung" };
   switch (next.kind) {
     case "ready-check":
       return { ...base, outcome: "done", evidence: next.evidence };
@@ -258,6 +260,7 @@ async function finished(
   if (input.change.kind === "open") {
     const next = await finishRun({
       outcome,
+      ending: ended.ending,
       change: input.change.line.number,
       forge: setup.forge,
       push,
@@ -267,10 +270,14 @@ async function finished(
   }
   if (ended.tip === clone.start) {
     // nothing to push and no change to post on: the record says the run changed nothing, and a person looks
-    return { kind: "ok", value: { head: ended.tip, outcome: outcome.kind, patch: "", evidence: [] } };
+    return {
+      kind: "ok",
+      value: { head: ended.tip, outcome: outcome.kind, patch: "", evidence: [], hung: ended.ending.kind === "hung" },
+    };
   }
   const first = await finishFirst({
     outcome,
+    ending: ended.ending,
     forge: setup.forge,
     push,
     pusher: setup.pusher,
@@ -311,6 +318,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     timeoutSeconds: setup.settings.timeoutSeconds,
     claude: setup.settings.claude,
     settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
+    completion: setup.settings.completion,
   });
   const out = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
   const removed = await removeClone(clone.value.dir);
@@ -326,6 +334,7 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
   const head = input.change.line.head;
   const next = await finishRun({
     outcome,
+    ending: CLEAN,
     change: input.change.line.number,
     forge: setup.forge,
     push: {
@@ -339,7 +348,9 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
       guards: [],
     },
   });
-  return next.kind === "ok" ? { kind: "ok", value: { head, outcome: "blocked", patch: "", evidence: [] } } : next;
+  return next.kind === "ok"
+    ? { kind: "ok", value: { head, outcome: "blocked", patch: "", evidence: [], hung: false } }
+    : next;
 }
 
 type Planned = { readonly kind: "run"; readonly work: Work } | { readonly kind: "hand-over"; readonly reason: string };

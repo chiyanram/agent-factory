@@ -135,6 +135,7 @@ describe("records", () => {
         outcome: "done",
         patch: "p",
         evidence: [],
+        hung: false,
       },
     ];
     for (const event of events) {
@@ -209,7 +210,8 @@ describe("tick", () => {
       writer: {
         kind: "available",
         run: async (input) => (
-          runs.push(input.ticket), { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [] } }
+          runs.push(input.ticket),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
         ),
       },
     };
@@ -257,6 +259,7 @@ describe("tick", () => {
         outcome: "done",
         patch: "p",
         evidence: [],
+        hung: false,
       },
     });
     await record({
@@ -297,6 +300,7 @@ describe("tick", () => {
         outcome: "done",
         patch: "p",
         evidence,
+        hung: false,
       },
     });
     const given: unknown[] = [];
@@ -399,6 +403,7 @@ describe("tick", () => {
         outcome: "done",
         patch: "",
         evidence: [],
+        hung: false,
       },
     });
     const changes = { team, open: [open()], merged: [] };
@@ -427,6 +432,7 @@ describe("tick", () => {
         outcome: "done",
         patch: "p",
         evidence: [],
+        hung: false,
       },
       { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
       { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
@@ -439,7 +445,8 @@ describe("tick", () => {
       writer: {
         kind: "available",
         run: async () => (
-          log.push("writer runs"), { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [] } }
+          log.push("writer runs"),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
         ),
       },
     };

@@ -9,6 +9,7 @@ import {
   MAX_REPORT_BYTES,
   parseReport,
   REPORT_INSTRUCTIONS,
+  validReport,
   type ReportFile,
 } from "../src/core/report.js";
 
@@ -21,6 +22,28 @@ const DONE = {
   status: "done",
   evidence: [{ criterion: "AC1 a reserved loan is refused", command: "make test", result: "142 passed" }],
 };
+
+describe("a writer that hung after its report (#182)", () => {
+  const hung = { kind: "hungAfterReport", windowSeconds: 60 } as const;
+
+  it("is decided from the report, like a clean exit", () => {
+    expect(decide({ end: hung, file: file(DONE) })).toEqual({ kind: "done", evidence: DONE.evidence });
+    expect(decide({ end: hung, file: file({ status: "blocked", blocker: "no access" }) })).toMatchObject({
+      kind: "blocked",
+      by: "writer",
+    });
+    // the report is read again after the stop: one that went bad in the window is blocked
+    expect(decide({ end: hung, file: { kind: "missing" } })).toMatchObject({ kind: "blocked", by: "host" });
+  });
+
+  it("opens the window only on a report the schema accepts", () => {
+    expect(validReport(file(DONE))).toBe(true);
+    expect(validReport(file({ status: "blocked", blocker: "no access" }))).toBe(true);
+    expect(validReport(file({ status: "done" }))).toBe(false);
+    expect(validReport(file("not json"))).toBe(false);
+    expect(validReport({ kind: "missing" })).toBe(false);
+  });
+});
 
 describe("decide (#109 done-when)", () => {
   it("a missing report is blocked", () => {

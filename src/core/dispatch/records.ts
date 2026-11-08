@@ -60,6 +60,8 @@ export type Event =
       readonly patch: string;
       // the rows the ready check runs again; none unless the outcome is done
       readonly evidence: readonly Evidence[];
+      // the writer hung after its report and was stopped after the completion window (#182); false on older lines
+      readonly hung: boolean;
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -162,13 +164,31 @@ function evidenceOf(raw: unknown): readonly Evidence[] | Bad {
   return read.includes(BAD) ? BAD : read.filter((r): r is Evidence => r !== BAD);
 }
 
-type WriterParts = { readonly head: string; readonly patch: string; readonly evidence: readonly Evidence[] };
+type WriterParts = {
+  readonly head: string;
+  readonly patch: string;
+  readonly evidence: readonly Evidence[];
+  readonly hung: boolean;
+};
+
+// hungOf : whether the writer hung after its report; a line written before #182 says nothing, which is false
+function hungOf(raw: unknown): boolean | Bad {
+  const hung = prop(raw, "hung");
+  if (hung === undefined) {
+    return false;
+  }
+  return typeof hung === "boolean" ? hung : BAD;
+}
 
 function writerParts(raw: unknown): WriterParts | Bad {
   const head = str(raw, "head");
   const patch = str(raw, "patch");
   const evidence = evidenceOf(raw);
-  return head === BAD || patch === BAD || evidence === BAD ? BAD : { head, patch, evidence };
+  const hung = hungOf(raw);
+  if (head === BAD || patch === BAD) {
+    return BAD;
+  }
+  return evidence === BAD || hung === BAD ? BAD : { head, patch, evidence, hung };
 }
 
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
