@@ -624,6 +624,14 @@ it is a prompt instruction at most.
 - **No progress stops the loop.** When a writer round leaves the change empty, or the patch unchanged while its last
   verdict still has Act on findings, `agent-factory review` reuses the verdict and labels the MR `needs-human`.
 - **Decided: an agent never changes CI.** The host push refuses CI-file changes ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)).
+- **Enforced: the writer loads no settings from the branch, and never changes them** (#110). Its `claude -p` runs with
+  `--setting-sources user`, so the branch's `.claude/settings.json` (hooks, `env`, permissions), `.mcp.json`,
+  `CLAUDE.md` and skills are not loaded; the rulebook (`--plugin-dir`) and the host's `.factory/settings.json` are. The
+  writer's prompt tells it to read the project's `AGENTS.md`, `CLAUDE.md` and skills as it reads the code. The root
+  `.claude/`, `.agents/`, `AGENTS.md` and `CLAUDE.md` are read-only in the box when the branch has them, and the host
+  push refuses a commit that adds or changes one ("touches the agent's settings", `src/core/agent-settings.ts`). As
+  for CI, a version equal to the default branch's passes, so a merge of main is fine. A person makes that change in
+  their own commit.
 - **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
   `hgit` (`scripts/lib/git.sh`), and every one the TypeScript package makes through `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
   and the rest come from your own system and global config only, never from the repo's. A repo whose own config

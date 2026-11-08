@@ -8,17 +8,25 @@
 //   every file those include in this repository (`local:` or a bare path), at any depth, child pipelines too
 //     (`trigger: include:`), followed into each included file; a glob follows GitLab's rules (** crosses folders)
 //
-// The trees are compared, not the commits: for every CI file, the pushed commit's version must be the branch's version
-// before the push (the lease) or the default branch's version, freshly fetched. So an edited merge, a reset past the
-// lease or a branch started elsewhere is caught, and a merge or rebase onto the default branch, which only brings its
-// CI, passes. A CI file that does not parse, an include it cannot read, or one that names a variable is refused: when
-// in doubt, a person looks. Replace refs are ignored (GIT_NO_REPLACE_OBJECTS), so git reads the commits that are sent.
+// The trees are compared, not the commits (protected.ts): a CI file must be the lease's version or the default
+// branch's, so a merge or rebase onto the default branch, which only brings its CI, passes. A CI file that does not
+// parse, an include it cannot read, or one that names a variable is refused: when in doubt, a person looks.
 
 import { parse } from "yaml";
-import type { Done, Result } from "./forge/api.js";
+import type { Result } from "./forge/api.js";
 import type { CiConfig } from "./forge/types.js";
-import { hostGit } from "./git.js";
-import type { Guard, GuardInput } from "./push.js";
+import type { Guard } from "./push.js";
+import {
+  failed,
+  git,
+  protectedFiles,
+  treesOf,
+  why,
+  type Found,
+  type Heads,
+  type ProtectedSetup,
+  type Tree,
+} from "./protected.js";
 
 export const GITLAB_CI = ".gitlab-ci.yml";
 const FIXED_DIRS = [".github/workflows/", ".github/actions/"];
@@ -26,55 +34,7 @@ const OUTSIDE_KEYS = ["project", "remote", "template", "component"];
 // the most CI files followed, so a loop of includes ends; past it, the push is refused
 const MAX_FILES = 200;
 
-// path → "<mode> <blob>": a mode or content change both count
-export type Tree = ReadonlyMap<string, string>;
-
-export type CiSetup = {
-  readonly env: NodeJS.ProcessEnv;
-  // the project's default branch, fetched fresh as the base the CI files may equal
-  readonly defaultBranch: string;
-  readonly config: CiConfig;
-};
-
-type Found = Result<readonly string[]>;
-
-function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
-  return { kind: "failed", reason };
-}
-
-function git(env: NodeJS.ProcessEnv, repo: string, args: readonly string[]): ReturnType<typeof hostGit> {
-  return hostGit({
-    args,
-    repo: { kind: "repo", path: repo },
-    env: { ...env, GIT_NO_REPLACE_OBJECTS: "1" },
-    ownHelper: { kind: "none" },
-    stdin: { kind: "none" },
-  });
-}
-
-function why(ran: Awaited<ReturnType<typeof hostGit>>): string {
-  return ran.kind === "refused" ? ran.reason : ran.kind === "failed" ? ran.stderr.trim() : "";
-}
-
-// treeOf : `git ls-tree -r -z` as a map
-export function treeOf(listing: string): Tree {
-  const entries = listing
-    .split("\u0000")
-    .filter((l) => l !== "")
-    .map((l): [string, string] => {
-      const tab = l.indexOf("\t");
-      const [mode = "", , sha = ""] = l.slice(0, tab).split(" ");
-      return [l.slice(tab + 1), `${mode} ${sha}`];
-    });
-  return new Map(entries);
-}
-
-async function treeAt(env: NodeJS.ProcessEnv, repo: string, rev: string): Promise<Result<Tree>> {
-  const listed = await git(env, repo, ["ls-tree", "-r", "-z", "--full-tree", rev]);
-  return listed.kind === "ok"
-    ? { kind: "ok", value: treeOf(listed.stdout) }
-    : failed(`cannot list the files at ${rev.slice(0, 8)}: ${why(listed)}`);
-}
+export type CiSetup = ProtectedSetup & { readonly config: CiConfig };
 
 // --- GitLab includes ---------------------------------------------------------------------------------------------
 
@@ -225,43 +185,6 @@ export async function ciFilesIn(tree: Tree, config: CiConfig, read: Reader): Pro
 
 // --- the guard -----------------------------------------------------------------------------------------------------
 
-type Heads = { readonly commit: Tree; readonly base: Tree; readonly lease: Tree | "none" };
-
-async function baseOf(setup: CiSetup, repo: string): Promise<Result<string>> {
-  const ref = "refs/factory/ci-base";
-  const fetched = await git(setup.env, repo, ["fetch", "-q", "origin", `+refs/heads/${setup.defaultBranch}:${ref}`]);
-  if (fetched.kind !== "ok") {
-    return failed(`cannot fetch ${setup.defaultBranch} to compare the CI files with: ${why(fetched)}`);
-  }
-  const sha = await git(setup.env, repo, ["rev-parse", ref]);
-  return sha.kind === "ok" ? { kind: "ok", value: sha.stdout.trim() } : failed(why(sha));
-}
-
-async function leaseTree(setup: CiSetup, input: GuardInput): Promise<Result<Tree | "none">> {
-  return input.lease.kind === "sha" ? treeAt(setup.env, input.repo, input.lease.sha) : { kind: "ok", value: "none" };
-}
-
-async function baseTreeOf(setup: CiSetup, repo: string): Promise<Result<Tree>> {
-  const base = await baseOf(setup, repo);
-  return base.kind === "ok" ? treeAt(setup.env, repo, base.value) : base;
-}
-
-async function heads(setup: CiSetup, input: GuardInput): Promise<Result<Heads>> {
-  const baseTree = await baseTreeOf(setup, input.repo);
-  if (baseTree.kind === "failed") {
-    return baseTree;
-  }
-  const commit = await treeAt(setup.env, input.repo, input.commit);
-  const lease = commit.kind === "ok" ? await leaseTree(setup, input) : commit;
-  return commit.kind === "ok" && lease.kind === "ok"
-    ? { kind: "ok", value: { commit: commit.value, base: baseTree.value, lease: lease.value } }
-    : failedOf(lease);
-}
-
-function failedOf(r: Result<unknown>): { readonly kind: "failed"; readonly reason: string } {
-  return r.kind === "failed" ? r : failed("cannot read the trees");
-}
-
 function readerFor(setup: CiSetup, repo: string): Reader {
   return async (blob) => {
     const shown = await git(setup.env, repo, ["cat-file", "blob", blob]);
@@ -269,39 +192,18 @@ function readerFor(setup: CiSetup, repo: string): Reader {
   };
 }
 
-// changedFiles : the CI files whose version at the commit is neither the lease's nor the base's
-function changedFiles(h: Heads, files: readonly string[]): readonly string[] {
-  const now = (p: string) => h.commit.get(p) ?? "";
-  const kept = (p: string) => h.lease !== "none" && (h.lease.get(p) ?? "") === now(p);
-  return [...new Set(files)].filter((p) => now(p) !== (h.base.get(p) ?? "") && !kept(p)).toSorted();
-}
-
 async function ciFilesOfAll(setup: CiSetup, h: Heads, repo: string): Promise<Found> {
   const read = readerFor(setup, repo);
-  const trees = h.lease === "none" ? [h.commit, h.base] : [h.commit, h.base, h.lease];
-  return all(await Promise.all(trees.map((t) => ciFilesIn(t, setup.config, read))));
-}
-
-function verdict(changed: readonly string[]): Done {
-  return changed.length === 0
-    ? { kind: "ok" }
-    : failed(
-        `touches CI config (${changed.join(", ")}): an agent never changes CI; a person makes that change in their own commit`,
-      );
-}
-
-async function check(setup: CiSetup, input: GuardInput): Promise<Done> {
-  const h = await heads(setup, input);
-  if (h.kind === "failed") {
-    return failed(`cannot check the CI files, so nothing is pushed: ${h.reason}`);
-  }
-  const files = await ciFilesOfAll(setup, h.value, input.repo);
-  return files.kind === "ok"
-    ? verdict(changedFiles(h.value, files.value))
-    : failed(`cannot check the CI files, so nothing is pushed: ${files.reason}`);
+  return all(await Promise.all(treesOf(h).map((t) => ciFilesIn(t, setup.config, read))));
 }
 
 // noCiFiles : refuses a push that changes a CI file; the work is then blocked with the files named
 export function noCiFiles(setup: CiSetup): Guard {
-  return (input) => check(setup, input);
+  return protectedFiles(setup, {
+    name: "ci",
+    what: "the CI files",
+    filesIn: (h, repo) => ciFilesOfAll(setup, h, repo),
+    refusal: (changed) =>
+      `touches CI config (${changed.join(", ")}): an agent never changes CI; a person makes that change in their own commit`,
+  });
 }
