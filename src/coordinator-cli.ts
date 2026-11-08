@@ -5,7 +5,7 @@
 //   <FACTORY_HOME>/coordinator/CLAUDE.md               "follow GUIDE.md", read-only
 //   FACTORY_BOT_HOME                                   the factory user's home on the VM (default /home/factory)
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Done, Result } from "./core/forge/api.js";
 import { claudeArgv, claudeMd, claudeSettings, copilotArgs, type CoordinatorPlaces } from "./core/coordinator.js";
@@ -29,19 +29,42 @@ export function coordinatorDir(factoryHome: string): string {
   return join(factoryHome, "coordinator");
 }
 
-// readOnly : the file with this text, mode 0444; an earlier copy is made writable first, so setup can run again
+async function isLink(path: string): Promise<boolean> {
+  return lstat(path).then(
+    (s) => s.isSymbolicLink(),
+    () => false,
+  );
+}
+
+// noLinks : refuses when any of these paths is a symlink, so setup never writes through one to another place
+async function noLinks(paths: readonly string[]): Promise<Done> {
+  for (const path of paths) {
+    if (await isLink(path)) {
+      return { kind: "failed", reason: `${path} is a symlink; remove it, then run setup again` };
+    }
+  }
+  return { kind: "ok" };
+}
+
+// readOnly : the file with this text, mode 0444, written beside it and renamed over it, so a link put in its place is
+// replaced, never followed
 async function readOnly(path: string, text: string): Promise<Done> {
   return attempt(async () => {
-    await chmod(path, 0o644).catch(() => undefined);
-    await writeFile(path, text, { mode: 0o444 });
-    await chmod(path, 0o444);
+    const next = `${path}.new`;
+    await writeFile(next, text, { mode: 0o444 });
+    await chmod(next, 0o444);
+    await rename(next, path);
   }, `cannot write ${path}`);
 }
 
 // installCoordinator : the settings and the instructions, in the coordinator's own folder
 export async function installCoordinator(places: CoordinatorPlaces): Promise<Result<string>> {
   const dir = coordinatorDir(places.factoryHome);
-  const made = await attempt(() => mkdir(join(dir, ".claude"), { recursive: true, mode: 0o755 }), `cannot make ${dir}`);
+  const links = await noLinks([dir, join(dir, ".claude")]);
+  const made =
+    links.kind === "ok"
+      ? await attempt(() => mkdir(join(dir, ".claude"), { recursive: true, mode: 0o755 }), `cannot make ${dir}`)
+      : links;
   if (made.kind === "failed") {
     return made;
   }

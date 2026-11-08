@@ -2,6 +2,7 @@
 // agent-factory — binds the command line (src/app.ts) to this process (#101).
 
 import { spawn } from "node:child_process";
+import { constants } from "node:os";
 import { runCli } from "./app.js";
 import { runProcess } from "./core/forge/api.js";
 import { readHidden } from "./core/token/index.js";
@@ -25,12 +26,23 @@ runCli(process.argv.slice(2), {
     run: runProcess,
     interactive: ({ bin, args, cwd, env }) =>
       new Promise((resolve) => {
+        // Ctrl-C reaches the session, which uses it to stop a turn; the launcher waits for the session to end
+        const ignore = (): void => undefined;
+        process.on("SIGINT", ignore);
+        process.on("SIGQUIT", ignore);
+        const done = (code: number): void => {
+          process.off("SIGINT", ignore);
+          process.off("SIGQUIT", ignore);
+          resolve(code);
+        };
         const child = spawn(bin, [...args], { cwd, env, stdio: "inherit" });
         child.on("error", (error) => {
           process.stderr.write(`agent-factory: cannot start ${bin}: ${error.message}\n`);
-          resolve(127);
+          done(127);
         });
-        child.on("exit", (code) => resolve(code ?? 1));
+        child.on("exit", (code, signal) =>
+          done(code ?? 128 + (signal === null ? 0 : (constants.signals[signal] ?? 0))),
+        );
       }),
   },
 }).then(

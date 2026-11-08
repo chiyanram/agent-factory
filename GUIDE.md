@@ -153,9 +153,9 @@ The coordinator runs in its own folder, with its own settings, so it cannot wide
 sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issues/106), ADR-0012 S2).
 
 1. `agent-factory setup coordinator` writes `$FACTORY_HOME/coordinator/.claude/settings.json` and a `CLAUDE.md` that
-   points at this guide, both read-only. Run it again after each upgrade of the package.
+   points at this guide, both mode 0444, and refuses a symlink in their place. Run it again after each upgrade.
 2. `agent-factory coordinator` starts Claude Code there with `--setting-sources project`, so the allow rules of your
-   own user settings do not apply; `agent-factory coordinator copilot` starts Copilot CLI with the same rules as flags.
+   own user settings do not apply; `agent-factory coordinator copilot` starts Copilot CLI with its command rules as flags (see Today below).
 
 The wall (`src/core/coordinator.ts`):
 
@@ -172,13 +172,19 @@ The wall (`src/core/coordinator.ts`):
 - **Edits with no prompt** only spec drafts in `$FACTORY_HOME/specs`; any other edit asks you.
 - Bypass and auto mode are switched off.
 
-Check it once after setup: in the coordinator's session, ask it to read `~/.ssh/canary` (make an empty one first) and
-to edit a file of the package; both must be refused. **Today:**
+Check it once after setup: in the coordinator's session, ask it to read `~/.ssh/canary` (make an empty one first), a
+project's `.env`, and to edit a file of the package and a project's `.claude/settings.json`; each must be refused. **Today:**
 
 - Bash deny rules match a command as typed, and Claude Code's docs say they are no security boundary; the OS-level
   sandbox is not switched on, since `agent-factory status` posts with your own `gh` or `glab` login, which it would
   block (#114). A program the coordinator may run that reads files itself is not held by the Read rules.
-- The Copilot flags are not yet tried against a live Copilot CLI.
+- Copilot CLI has no read or edit rule by path, so under `agent-factory coordinator copilot` none of the Read or
+  Edit denies above hold; only the command denies, and its folder plus `--add-dir`, do. The flags are not yet tried
+  against a live Copilot CLI. Use Claude Code for the coordinator until they are.
+- The read-only mode of the settings is no wall: your own user owns the folder, so the session could rename or replace
+  the file with a command its Bash rules do not name. The wall holds once the folder belongs to the `factory` OS user
+  (ADR-0012 S2) or the sandbox is on (#114).
+- The dispatcher does not yet refuse to start when these settings are loosened (ADR-0012 S2; #105).
 - Jira and Dynatrace reads, and questions to Jira, come with their plugins (#134).
 
 ## Settings

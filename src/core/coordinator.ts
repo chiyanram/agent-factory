@@ -124,7 +124,8 @@ function readDenies(p: CoordinatorPlaces): readonly string[] {
     ...SECRET_HOME.map((s) => `Read(~/${s})`),
     `Read(${absolute(p.factoryHome)}/secrets/**)`,
     `Read(${absolute(p.botHome)}/**)`,
-    "Read(**/.env*)",
+    // a rule with no //, ~/ or / is relative to the session's folder: these must reach every project
+    "Read(//**/.env*)",
   ];
 }
 
@@ -132,13 +133,16 @@ function editDenies(p: CoordinatorPlaces): readonly string[] {
   const home = absolute(p.factoryHome);
   return [
     "Edit(~/.claude/**)",
-    "Edit(**/.claude/**)",
+    "Edit(//**/.claude/**)",
     `Edit(${absolute(p.pkg)}/**)`,
     `Edit(${home}/approvals/**)`,
     `Edit(${home}/projects/**)`,
     `Edit(${home}/runs/**)`,
     `Edit(${home}/secrets/**)`,
     `Edit(${home}/coordinator/**)`,
+    `Edit(${home}/review-runs/**)`,
+    `Edit(${home}/box-runs/**)`,
+    `Edit(${home}/egress/**)`,
   ];
 }
 
@@ -178,8 +182,11 @@ export function copilotArgs(p: CoordinatorPlaces): readonly string[] {
 }
 
 // the session's instructions: GUIDE.md is the coordinator's, from the installed package
+// (an @import cannot hold a space, so a package path with one gets the sentence only)
 export function claudeMd(p: CoordinatorPlaces): string {
-  return `# Coordinator\n\nYou are the factory's coordinator. Follow ${p.pkg}/GUIDE.md, "Run the loop", as your instructions.\n\n@${p.pkg}/GUIDE.md\n`;
+  const guide = `${p.pkg}/GUIDE.md`;
+  const importLine = /\s/.test(guide) ? "" : `\n@${guide}\n`;
+  return `# Coordinator\n\nYou are the factory's coordinator. Follow ${guide}, "Run the loop", as your instructions.\n${importLine}`;
 }
 
 export function claudeArgv(): Argv {

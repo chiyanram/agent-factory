@@ -607,7 +607,6 @@ async function setupCoordinator({ io }: { readonly io: Io }): Promise<number> {
 const SETUP: readonly SetupStep[] = [
   { name: "claude", run: setupClaude },
   { name: "status", run: setupStatus },
-  { name: "coordinator", run: setupCoordinator },
 ];
 
 function runnerOf(positionals: readonly string[]): "claude" | "copilot" | "bad" {
@@ -633,6 +632,19 @@ async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
 
 // setup : make and keep the box's model-only token (#136), and say whether a box may start
 async function setupCommand({ positionals, io }: Args): Promise<number> {
+  return positionals[0] === "coordinator" && positionals.length === 1
+    ? // the coordinator's settings need no token store
+      setupCoordinator({ io })
+    : setupStep({ positionals, io });
+}
+
+async function setupStep({
+  positionals,
+  io,
+}: {
+  readonly positionals: readonly string[];
+  readonly io: Io;
+}): Promise<number> {
   const step = SETUP.find((s) => s.name === positionals[0]);
   if (step === undefined) {
     io.err("usage: agent-factory setup claude | status | coordinator\n");
