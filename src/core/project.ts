@@ -8,7 +8,8 @@
 //     "verify": ["make", "verify"],          the local verifier's one command, run with no shell (gate local only)
 //     "ready": {
 //       "programs": ["make", "./gradlew"],   the programs an evidence row may start with
-//       "timeoutMinutes": 30                 per command (default 30, at most 240)
+//       "timeoutMinutes": 30,                per command (default 30, at most 240)
+//       "testFiles": ["src/test/**"]         the floor guard's test files (default: ready/floor.ts TEST_FILES)
 //     },
 //     "egress": {
 //       "allow": ["api.anthropic.com"]       the hosts this project's boxes may reach (#130; egress/allowlist.ts);
@@ -21,6 +22,7 @@ import type { Result } from "./forge/api.js";
 import { codeOf, prop } from "./dispatch/records.js";
 import { plainName } from "./spec.js";
 import { parseAllowlist } from "./egress/allowlist.js";
+import { TEST_FILES } from "./ready/floor.js";
 
 // a command with no shell: argv[0] is the program
 export type Argv = readonly [string, ...string[]];
@@ -33,7 +35,12 @@ export type ProjectRead =
 
 export type ProjectFile = {
   readonly gate: { readonly kind: "forge-ci" } | { readonly kind: "local"; readonly verify: Argv };
-  readonly ready: { readonly programs: readonly string[]; readonly timeoutSeconds: number };
+  readonly ready: {
+    readonly programs: readonly string[];
+    readonly timeoutSeconds: number;
+    // the globs the floor guard reads as test files (#190)
+    readonly testFiles: readonly string[];
+  };
   // the hosts the project's boxes may reach, checked; empty when the file names none
   readonly egress: { readonly allow: readonly string[] };
 };
@@ -79,16 +86,31 @@ function minutesOf(value: unknown): number | "bad" {
   return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= MAX_MINUTES ? Number(value) : "bad";
 }
 
+function programsOf(value: unknown): readonly string[] | "bad" {
+  return Array.isArray(value) && value.length > 0 && value.every(word) ? value.filter(word) : "bad";
+}
+
 function readyOf(path: string, raw: unknown): Result<ProjectFile["ready"]> {
   const ready = prop(raw, "ready");
-  const programs = prop(ready, "programs");
-  if (!Array.isArray(programs) || programs.length === 0 || !programs.every(word)) {
+  const programs = programsOf(prop(ready, "programs"));
+  if (programs === "bad") {
     return failed(path, `"ready.programs" must list the programs an evidence row may start with, such as ["make"]`);
   }
   const minutes = minutesOf(prop(ready, "timeoutMinutes"));
+  const testFiles = testFilesOf(prop(ready, "testFiles"));
+  if (testFiles === "bad") {
+    return failed(path, `"ready.testFiles" must list globs, such as ["src/test/**", "**/*Spec.groovy"]`);
+  }
   return minutes === "bad"
     ? failed(path, `"ready.timeoutMinutes" must be a whole number from 1 to ${MAX_MINUTES}`)
-    : { kind: "ok", value: { programs: programs.filter(word), timeoutSeconds: minutes * 60 } };
+    : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles } };
+}
+
+function testFilesOf(value: unknown): readonly string[] | "bad" {
+  if (value === undefined) {
+    return TEST_FILES;
+  }
+  return Array.isArray(value) && value.length > 0 && value.every(word) ? value.filter(word) : "bad";
 }
 
 function allowOf(egress: unknown): readonly string[] | "bad" {

@@ -345,7 +345,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   const steps: Steps = {
     ...STEPS_TODAY,
     writer: writerStep(writer),
-    ready: readyStep(plan),
+    ready: readyStep(plan, forge),
     review: await reviewStepFor(io.env, forge),
     verify: verifyStep(plan, forge),
   };
