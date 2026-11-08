@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
 import { agentTrailer, commitKind } from "./notes.js";
 import type { Post, PostField, Seat } from "./post.js";
+import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
 import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
 import { hungLine, type Ending, type Evidence, type Outcome } from "./report.js";
@@ -194,7 +195,7 @@ async function pushed(input: Sending, mode: "any" | "on-top"): Promise<Done> {
   if (ci.kind === "failed") {
     return ci;
   }
-  const always = [noFactoryFolder(env), noCiFiles(ci.value)];
+  const always = [noFactoryFolder(env), noCiFiles(ci.value), noAgentSettings(ci.value)];
   const ours = mode === "on-top" ? [...always, fastForwardOnly(env)] : always;
   return (input.pusher ?? hostPush)({ ...input.push, guards: [...ours, ...input.push.guards] });
 }

@@ -19,7 +19,7 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv } from "../src/core/writer/run.js";
 import { minutesOf } from "../src/core/writer/settings.js";
-import { promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import { PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
@@ -76,12 +76,31 @@ afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 // what a writer does in its box: what it saw, then a commit and a report
 type Seen = { readonly spec: string; readonly task: string; readonly files: readonly string[] };
 // skipHook: the writer commits past the trailer hook, as `git -c core.hooksPath=/dev/null commit` would
-type Act = { readonly commit: boolean; readonly report: unknown; readonly exit: number; readonly skipHook?: boolean };
+// plant: a file the writer also commits, as a run that writes the agent's settings would (#110)
+type Act = {
+  readonly commit: boolean;
+  readonly report: unknown;
+  readonly exit: number;
+  readonly skipHook?: boolean;
+  readonly plant?: string;
+};
 
 // git as the writer runs it in the box: no author in the environment, so the clone's own author name applies
 function boxGit(dir: string, ...args: string[]): string {
   const env = { PATH: process.env.PATH, HOME: p.env.HOME, GIT_CONFIG_NOSYSTEM: "1" };
   return execFileSync("git", args, { cwd: dir, env, encoding: "utf8" }).trim();
+}
+
+// the writer's commit in the box: its code, and the planted file when there is one
+function commitWork(dir: string, act: Act): void {
+  writeFileSync(join(dir, "Renewal.java"), "class Renewal {}\n");
+  if (act.plant !== undefined) {
+    mkdirSync(join(dir, act.plant, ".."), { recursive: true });
+    writeFileSync(join(dir, act.plant), '{ "hooks": {} }\n');
+  }
+  boxGit(dir, "add", "-A");
+  const hooks = act.skipHook === true ? ["-c", "core.hooksPath=/dev/null"] : [];
+  boxGit(dir, ...hooks, "commit", "-q", "-m", "feat: refuse a reserved loan");
 }
 
 function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
@@ -93,10 +112,7 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
       const read = (file: string) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file), "utf8") : "none");
       seen.push({ spec: read(".factory/spec.md"), task: read(".factory/task.md"), files: readdirSync(dir).toSorted() });
       if (act.commit) {
-        writeFileSync(join(dir, "Renewal.java"), "class Renewal {}\n");
-        boxGit(dir, "add", "-A");
-        const hooks = act.skipHook === true ? ["-c", "core.hooksPath=/dev/null"] : [];
-        boxGit(dir, ...hooks, "commit", "-q", "-m", "feat: refuse a reserved loan");
+        commitWork(dir, act);
       }
       writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(act.report));
       await fake.box.run(call);
@@ -507,6 +523,23 @@ describe("the writer step: a later run on the change", () => {
     ]);
   });
 
+  it("pushes nothing when the writer commits the agent's settings, and blocks the change for a person (#110)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge();
+    const pushes: { lease: string; branch: string }[] = [];
+    const act = { commit: true, report: DONE, exit: 0, plant: ".claude/settings.json" };
+    const out = await run(setup(writer(fake, act, []), told, pushes), FIX, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(pushes).toEqual([]);
+    expect(origin("refs/heads/feat/x")).toBe(p.head2);
+    expect(told.log).toEqual([
+      "label 12 needs-human",
+      expect.stringMatching(
+        /^note 12 .*blocked: the push failed: touches the agent's settings \(\.claude\/settings\.json\)/,
+      ),
+    ]);
+  });
+
   it("refuses to run when the head moved, and starts no box", async () => {
     const fake = fakeBox({});
     const out = await run(setup(fake.box, forge(), []), FIX, openLine({ head: p.head1 }));
@@ -724,7 +757,7 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
 });
 
 describe("the writer's words and settings", () => {
-  it("fills the prompt with the run's names, then the report's schema", () => {
+  it("fills the prompt with the run's names, then the project's instructions and tools, then the report's schema", () => {
     const text = promptFor({
       prompts: { fix: "fix {{ticket}} on {{branch}} at {{head}} ({{ticket}})", testFirst: "t", rework: "r", ci: "c" },
       mode: "fix",
@@ -735,16 +768,20 @@ describe("the writer's words and settings", () => {
     });
     expect(
       text.startsWith(
-        "fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\nEach file you edit is linted at once with: make lint-file.\n\n",
+        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
       ),
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
   });
 
-  it("runs claude with skip-all, the rulebook as a plugin, and the cap and model only when set", () => {
+  it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, the cap and model only when set", () => {
+    // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
+    // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
     expect(claudeArgv({ maxUsd: "", model: "" })).toEqual([
       "claude",
       "-p",
+      "--setting-sources",
+      "user",
       "--dangerously-skip-permissions",
       "--plugin-dir",
       ".factory/rulebook",

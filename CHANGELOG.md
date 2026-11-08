@@ -3,6 +3,22 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.15.1](https://github.com/chiyanram/agent-factory/compare/v0.15.0...v0.15.1) (2026-11-08)
+
+### 🐛 Fixes
+
+* **writer** — the writer loads no settings from the branch, and the push refuses a change to them · [#110](https://github.com/chiyanram/agent-factory/issues/110) (PR [#207](https://github.com/chiyanram/agent-factory/pull/207))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.15.1`
+
+## [0.15.0](https://github.com/chiyanram/agent-factory/compare/v0.14.1...v0.15.0) (2026-11-08)
+
+### ✨ Features
+
+* **ready** — the floor guard: a diff that weakens tests or silences a checker fails the ready check · [#190](https://github.com/chiyanram/agent-factory/issues/190) (PR [#203](https://github.com/chiyanram/agent-factory/pull/203))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.15.0`
+
 ## [0.14.1](https://github.com/chiyanram/agent-factory/compare/v0.14.0...v0.14.1) (2026-11-08)
 
 ### 🐛 Fixes
