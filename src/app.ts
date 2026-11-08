@@ -38,6 +38,7 @@ import { writerStep } from "./core/writer/step.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
+import { pluginCommand } from "./plugin-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 
@@ -63,6 +64,10 @@ commands:
   setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
                                <home>/coordinator
   coordinator [copilot]        start the coordinator's session there, with only those settings (#106)
+  plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
+  plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
+  plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
+  plugin list                  the registered plugins
   box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
@@ -648,6 +653,17 @@ function runnerOf(positionals: readonly string[]): "claude" | "copilot" | "bad" 
   return positionals.length > 1 ? "bad" : known;
 }
 
+// plugin : register, update, test and list plugins (#134)
+async function pluginCli({ positionals, io }: Args): Promise<number> {
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    io.err(`agent-factory plugin: ${home.reason}\n`);
+    return 1;
+  }
+  const pkg = join(dirname(fileURLToPath(import.meta.url)), "..");
+  return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg });
+}
+
 // coordinator : the coordinator's session, in its own folder with its own settings (#106)
 async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
   const runner = runnerOf(positionals);
@@ -711,6 +727,7 @@ const COMMANDS: readonly Command[] = [
   { name: "review", run: reviewCommand },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
+  { name: "plugin", run: pluginCli },
   { name: "box", run: boxCommand },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
