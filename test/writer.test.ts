@@ -8,7 +8,7 @@ import type { RunInput } from "../src/core/dispatch/tick.js";
 import type { WriterMode } from "../src/core/dispatch/records.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
 import type { Pusher } from "../src/core/finish.js";
-import type { Done, Result } from "../src/core/forge/api.js";
+import type { Result } from "../src/core/forge/api.js";
 import type { ChangeRequest, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
@@ -64,7 +64,7 @@ beforeEach(async () => {
     by: "ram",
     at: "2026-11-08T08:00:00Z",
   });
-  expect(done.kind).toBe("approved");
+  if (done.kind !== "approved") throw new Error(`the test spec was not approved: ${done.kind}`);
 });
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
@@ -108,24 +108,35 @@ function forge(): Told {
     const r = renderPost(post);
     return r.kind === "ok" ? r.text.split("\n")[0] : `refused: ${r.reason}`;
   };
-  const f = {
+  // a call the writer step must never make fails the test's run with its name
+  const unused = async (what: string) => ({ kind: "failed" as const, reason: `the writer step called ${what}` });
+  const f: Forge = {
     name: "github",
+    mark: "#",
+    me: async () => unused("me"),
+    change: async () => unused("change"),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
+    addLabel: async ({ number, label }) => {
+      log.push(`label ${number} ${label}`);
+      return { kind: "ok" };
+    },
+    removeLabel: async () => unused("removeLabel"),
+    note: async ({ number, post }) => {
+      log.push(`note ${number} ${text(post)}`);
+      return { kind: "ok" };
+    },
+    notes: async () => unused("notes"),
+    lineFinding: async () => unused("lineFinding"),
+    status: async () => unused("status"),
     ciConfig: async () => ({ kind: "ok", value: { kind: "file", path: ".gitlab-ci.yml" } }),
-    openChange: async (request: ChangeRequest): Promise<Result<number>> => {
+    claimed: async () => unused("claimed"),
+    openChange: async (request) => {
       opened.push(request);
       log.push(`open ${request.branch}`);
       return { kind: "ok", value: 41 };
     },
-    addLabel: async ({ number, label }: { number: number; label: string }): Promise<Done> => {
-      log.push(`label ${number} ${label}`);
-      return { kind: "ok" };
-    },
-    note: async ({ number, post }: { number: number; post: Post }): Promise<Done> => {
-      log.push(`note ${number} ${text(post)}`);
-      return { kind: "ok" };
-    },
-  } as unknown as Forge;
+    changes: async () => unused("changes"),
+  };
   return { log, opened, forge: f };
 }
 
