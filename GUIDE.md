@@ -400,6 +400,16 @@ Run it again after an upgrade of `agent-factory`, so the box runs the same versi
 `npm run build` first: a package with no `dist/cli.js` is refused. Both images are tagged by their ID (`factory-box-base:<12 hex>`,
 `factory-box-<project>:<12 hex>`), so `docker image prune` keeps them.
 
+After the first build on the VM, prove that no host variable reaches the box (#181). In a checkout of this package, as
+the user that runs the dispatcher, run:
+
+```bash
+FACTORY_TEST_BOX_IMAGE="$(jq -r .image "$FACTORY_HOME/projects/<project>/box.json")" npx vitest run test/vm-box-real.test.ts
+```
+
+It plants a canary and a `GH_TOKEN` in the host environment, runs `env` in a real box, and fails if either one, or any
+secret-like name the box was not given, is there. Where there is no image or no Sysbox, it is skipped and says why.
+
 ## Run the loop
 
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks

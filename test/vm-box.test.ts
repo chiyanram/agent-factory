@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
 import type { BoxSpec, PinnedImage } from "../src/core/box/types.js";
+import { hostDocker } from "../src/core/box/docker.js";
 import { vmBox } from "../src/core/box/vm.js";
 import { checkSpec, readRan } from "../src/core/box/vm-plan.js";
 import { boxContract } from "./box-contract.js";
@@ -64,7 +65,18 @@ function box(fake: { readonly run: Runner }, now: () => number = () => 0) {
 const argv = (calls: readonly Call[]): string[] => calls.map((c) => c.args.join(" "));
 const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
 
-boxContract("vm on a fake docker", () => box(fakeDocker()));
+// the docker CLI as app.ts makes it, from the host's environment, on a fake docker that records each call
+boxContract("vm on a fake docker", (host) => {
+  const fake = fakeDocker();
+  let n = 0;
+  const made = vmBox({
+    docker: hostDocker(host, fake.run),
+    image: IMAGE.ref,
+    owner: OWNER,
+    newName: () => `factory-box-${++n}`,
+  });
+  return { box: made, handed: () => fake.calls.map((c) => ({ argv: c.args, env: c.env })) };
+});
 
 describe("vm box: probe", () => {
   it("is ready when docker answers, Sysbox is installed and the image is here", async () => {
