@@ -29,10 +29,14 @@ export type ExtensionPoint = (typeof EXTENSION_POINTS)[number];
 // the extension points that change something outside: a plugin may only perform the ones it declares
 export const WRITE_POINTS: readonly ExtensionPoint[] = ["tracker.comment", "tracker.create", "forge.write", "notify"];
 
-// Names a plugin may never ask for: the model's login and the factory's own push token (ADR-0012 S6).
-const FORBIDDEN_ENV = /^(ANTHROPIC_|CLAUDE_CODE_|CLAUDE_|COPILOT_|GITHUB_COPILOT|FACTORY_PUSH_TOKEN$|OPENAI_)/;
+// Names a plugin may never ask for (ADR-0012 S6, ADR-0014 P11): the model's login and the cloud logins a model runs
+// on, the factory's own settings and tokens, the forge tokens (a plugin uses its CLI's own login), and the variables
+// that make a program load other code.
+const FORBIDDEN_ENV =
+  /^(ANTHROPIC_|CLAUDE_|COPILOT_|GITHUB_COPILOT|OPENAI_|AWS_|AZURE_|GOOGLE_|GCLOUD_|CLOUDSDK_|FACTORY_|GH_|GITHUB_|GITLAB_|GLAB_|CI_JOB_TOKEN$|LD_|DYLD_|NODE_|NPM_CONFIG_|PYTHON|PERL|RUBY|JAVA_TOOL_OPTIONS$|BASH_ENV$|ENV$|IFS$|PATH$|HOME$|LANG$|SHELL$)/;
 const ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
-const PLUGIN_NAME = /^[a-z][a-z0-9-]{0,62}$/;
+export const PLUGIN_NAME = /^[a-z][a-z0-9-]{0,62}$/;
+const MAX_VERSION = 64;
 
 export type Capability = { readonly name: ExtensionPoint; readonly mandatory: boolean };
 
@@ -90,12 +94,14 @@ function capabilityOf(value: unknown): Capability | Bad {
   return typeof mandatory === "boolean" ? { name: value.name, mandatory } : BAD;
 }
 
+// listOf : every item read, with no item twice (by its JSON)
 function listOf<T>(value: unknown, each: (v: unknown) => T | Bad): readonly T[] | Bad {
   if (!Array.isArray(value)) {
     return BAD;
   }
   const read = value.map(each);
-  return read.includes(BAD) ? BAD : read.filter((r): r is T => r !== BAD);
+  const unique = new Set(read.map((r) => (r === BAD ? "" : JSON.stringify(r)))).size === read.length;
+  return read.includes(BAD) || !unique ? BAD : read.filter((r): r is T => r !== BAD);
 }
 
 function envName(value: unknown): string | Bad {
@@ -113,7 +119,7 @@ type Parts = {
 };
 
 const SHAPE =
-  "describe must list capabilities [{name, mandatory?}] of the known extension points, writes among them, and env names that are not a model login";
+  "describe must list capabilities, at least one [{name, mandatory?}] of the known extension points, writes among them, and env names that are not a login, a factory setting or a loader variable, none twice";
 
 function listsOf(raw: Readonly<Record<string, unknown>>): Parts | Bad {
   const capabilities = listOf(raw.capabilities, capabilityOf);
@@ -124,7 +130,7 @@ function listsOf(raw: Readonly<Record<string, unknown>>): Parts | Bad {
 
 function partsOf(raw: Readonly<Record<string, unknown>>): Result<Parts> {
   const parts = listsOf(raw);
-  if (parts === BAD) {
+  if (parts === BAD || parts.capabilities.length === 0) {
     return failed(SHAPE);
   }
   const undeclared = parts.writes.find((w) => !parts.capabilities.some((c) => c.name === w));
@@ -144,7 +150,7 @@ function nameOf(value: unknown): string | Bad {
 }
 
 function versionOf(value: unknown): string | Bad {
-  return typeof value === "string" && value !== "" ? value : BAD;
+  return typeof value === "string" && value !== "" && value.length <= MAX_VERSION && !/\s/.test(value) ? value : BAD;
 }
 
 function headerOf(raw: Readonly<Record<string, unknown>>): Result<Header> {
@@ -190,7 +196,7 @@ export function readResult(stdout: string): Result<PluginResult> {
 
 // pluginEnv : the environment a plugin runs with: the trusted PATH, HOME and LANG, and the names it declared
 export function pluginEnv(parent: NodeJS.ProcessEnv, declared: readonly string[], path: string): NodeJS.ProcessEnv {
-  const named = [...declared, "HOME", "LANG"].filter((n) => !FORBIDDEN_ENV.test(n));
+  const named = [...declared.filter((n) => !FORBIDDEN_ENV.test(n)), "HOME", "LANG"];
   const picked = Object.fromEntries(named.flatMap((n) => (parent[n] === undefined ? [] : [[n, parent[n]]])));
   return { ...picked, PATH: path };
 }

@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pluginEnv, readDescribe } from "../src/core/plugin/contract.js";
 import { testPlugin } from "../src/core/plugin/kit.js";
 import {
@@ -53,6 +63,15 @@ const ECHO = `
   if (req.op === "send") { out({ kind: "sent" }); return; }
   out({ kind: "unsupported", op: req.op });`;
 
+function okValue<T>(
+  r: { readonly kind: "ok"; readonly value: T } | { readonly kind: "failed"; readonly reason: string },
+): T {
+  if (r.kind === "failed") {
+    throw new Error(r.reason);
+  }
+  return r.value;
+}
+
 const setup = (over: Partial<Setup> = {}): Setup => ({
   home: join(root, "home"),
   env: { HOME: "/home/x", LANG: "C", ECHO_SITE: "s", GH_TOKEN: "secret", ANTHROPIC_API_KEY: "sk-ant-x" },
@@ -72,8 +91,15 @@ describe("the plugin contract (#134; ADR-0014 P1, P8, P11)", () => {
       [{ ...DESCRIBE, capabilities: [{ name: "shell" }] }, "capabilities"],
       [{ ...DESCRIBE, writes: ["tracker.create"] }, "not one of its capabilities"],
       [{ ...DESCRIBE, writes: ["context.read"] }, "capabilities"],
-      [{ ...DESCRIBE, env: ["ANTHROPIC_API_KEY"] }, "model login"],
-      [{ ...DESCRIBE, env: ["CLAUDE_CODE_OAUTH_TOKEN"] }, "model login"],
+      [{ ...DESCRIBE, env: ["ANTHROPIC_API_KEY"] }, "not a login"],
+      [{ ...DESCRIBE, env: ["CLAUDE_CODE_OAUTH_TOKEN"] }, "not a login"],
+      [{ ...DESCRIBE, env: ["GH_TOKEN"] }, "not a login"],
+      [{ ...DESCRIBE, env: ["FACTORY_GH_APP_KEY"] }, "not a login"],
+      [{ ...DESCRIBE, env: ["LD_PRELOAD"] }, "not a login"],
+      [{ ...DESCRIBE, env: ["AWS_SECRET_ACCESS_KEY"] }, "not a login"],
+      [{ ...DESCRIBE, capabilities: [] }, "at least one"],
+      [{ ...DESCRIBE, capabilities: [{ name: "notify" }, { name: "notify" }] }, "none twice"],
+      [{ ...DESCRIBE, version: "x".repeat(65) }, "version"],
       ["not an object", "one JSON object"],
     ];
     for (const [value, reason] of bad) {
@@ -95,41 +121,68 @@ describe("the plugin contract (#134; ADR-0014 P1, P8, P11)", () => {
   });
 });
 
-describe("the registry: pinned by path and sha256 (#134; ADR-0014 P2)", () => {
-  it("adds a plugin, calls it, and refuses it once its file changes", async () => {
+describe("the registry: pinned by its folder's sha256, run from a private copy (#134; ADR-0014 P2)", () => {
+  const call = { plugin: "echo", capability: "context.read", op: "read", input: { ref: "PROJ-1" } } as const;
+
+  it("adds a plugin, copies its folder into the store and runs the copy; a change to the copy is refused", async () => {
     const path = plugin("echo", ECHO);
     const added = await addPlugin(setup(), path);
-    expect(added).toMatchObject({ kind: "ok", value: { name: "echo", path, writes: ["notify"] } });
-    const file = join(root, "home", "plugins.json");
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    const call = { plugin: "echo", capability: "context.read", op: "read", input: { ref: "PROJ-1" } } as const;
+    expect(added).toMatchObject({ kind: "ok", value: { name: "echo", source: path, writes: ["notify"] } });
+    const entry = okValue(added);
+    expect(entry.path.startsWith(join(root, "home", "plugins", entry.sha256))).toBe(true);
+    expect(statSync(join(root, "home", "plugins.json")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(root, "home", "plugins", entry.sha256)).mode & 0o777).toBe(0o700);
     const found = await callPlugin(setup(), call);
     expect(found).toMatchObject({ kind: "ok", value: { kind: "found", fields: { text: "PROJ-1" } } });
     // its env held only what it may have
-    expect(found.kind === "ok" ? found.value.fields.env : []).toEqual(["ECHO_SITE", "HOME", "LANG", "PATH"]);
+    expect(okValue(found).fields.env).toEqual(["ECHO_SITE", "HOME", "LANG", "PATH"]);
+    // the person's folder can change after review: the pinned copy still runs
     writeFileSync(path, `${readFileSync(path, "utf8")}\n// changed\n`);
+    expect(await callPlugin(setup(), call)).toMatchObject({ kind: "ok" });
+    // the copy itself changed: refused
+    writeFileSync(join(dirname(entry.path), "extra.js"), "x");
     expect(await callPlugin(setup(), call)).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("changed since it was added"),
     });
   });
 
-  it("refuses a capability it did not declare, an unknown plugin, and a name another file holds", async () => {
+  it("never replaces a plugin on add: a second add of the same name, from any path, is refused", async () => {
+    const path = plugin("echo", ECHO);
+    await addPlugin(setup(), path);
+    plugin("echo", ECHO, {
+      ...DESCRIBE,
+      capabilities: [...DESCRIBE.capabilities, { name: "forge.write" }],
+      writes: ["notify", "forge.write"],
+    });
+    expect(await addPlugin(setup(), path)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("plugin update echo"),
+    });
+    expect(await addPlugin(setup(), plugin("other", ECHO))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("added already"),
+    });
+  });
+
+  it("refuses a capability it did not declare, an unknown plugin, and names that live on Object's prototype", async () => {
     await addPlugin(setup(), plugin("echo", ECHO));
     expect(
       await callPlugin(setup(), { plugin: "echo", capability: "tracker.create", op: "x", input: {} }),
     ).toMatchObject({ kind: "failed", reason: expect.stringContaining("does not declare tracker.create") });
-    expect(await callPlugin(setup(), { plugin: "nope", capability: "notify", op: "x", input: {} })).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("no plugin named nope"),
-    });
-    expect(await addPlugin(setup(), plugin("other", ECHO))).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("already"),
+    for (const name of ["nope", "constructor", "toString", "__proto__"]) {
+      expect(await callPlugin(setup(), { plugin: name, capability: "notify", op: "x", input: {} })).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining(`no plugin named ${name}`),
+      });
+      expect(await planUpdate(setup(), name)).toMatchObject({ kind: "failed" });
+    }
+    expect(await addPlugin(setup(), plugin("constructor", ECHO, { ...DESCRIBE, name: "constructor" }))).toMatchObject({
+      kind: "ok",
     });
   });
 
-  it("refuses a relative path, a file that is not executable, and a plugins file that does not read", async () => {
+  it("refuses a relative path, a file that is not executable, a folder others can write, a symlink inside, and a broken plugins file", async () => {
     expect(await addPlugin(setup(), "echo/plugin")).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("absolute"),
@@ -140,15 +193,40 @@ describe("the registry: pinned by path and sha256 (#134; ADR-0014 P2)", () => {
       kind: "failed",
       reason: expect.stringContaining("not executable"),
     });
-    mkdirSync(join(root, "home"), { recursive: true });
-    writeFileSync(join(root, "home", "plugins.json"), "{broken");
-    expect(await readRegistry(join(root, "home"))).toMatchObject({
+    chmodSync(path, 0o755);
+    chmodSync(dirname(path), 0o777);
+    expect(await addPlugin(setup(), path)).toMatchObject({
       kind: "failed",
-      reason: expect.stringContaining("not JSON"),
+      reason: expect.stringContaining("writable by someone else"),
+    });
+    chmodSync(dirname(path), 0o755);
+    symlinkSync("/etc/hostname", join(dirname(path), "link"));
+    expect(await addPlugin(setup(), path)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("symlink"),
+    });
+    mkdirSync(join(root, "home"), { recursive: true });
+    for (const text of ["{broken", "5", '{"plugins":[]}']) {
+      writeFileSync(join(root, "home", "plugins.json"), text);
+      expect(await readRegistry(join(root, "home"))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("not a plugins file"),
+      });
+    }
+  });
+
+  it("names a symlinked plugin by its real file, and refuses a second change while one runs", async () => {
+    const path = plugin("echo", ECHO);
+    symlinkSync(path, join(root, "link-to-echo"));
+    expect(await addPlugin(setup(), join(root, "link-to-echo"))).toMatchObject({ kind: "ok", value: { source: path } });
+    writeFileSync(join(root, "home", "plugins.json.lock"), "123");
+    expect(await addPlugin(setup(), plugin("two", ECHO, { ...DESCRIBE, name: "two" }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("another plugin change is running"),
     });
   });
 
-  it("update shows the writes a new version adds, and records only when applied", async () => {
+  it("update records the new version only for the hash that was shown", async () => {
     const path = plugin("echo", ECHO);
     await addPlugin(setup(), path);
     plugin("echo", ECHO, {
@@ -162,29 +240,34 @@ describe("the registry: pinned by path and sha256 (#134; ADR-0014 P2)", () => {
       kind: "ok",
       value: { writesAdded: ["tracker.create"], after: { version: "2.0.0" } },
     });
-    // not applied yet: the old pin still stands, so the changed file is refused
-    expect(await callPlugin(setup(), { plugin: "echo", capability: "notify", op: "send", input: {} })).toMatchObject({
+    const shown = change.kind === "ok" ? change.value.after.sha256 : "";
+    // the file changes again after it was shown: refused
+    writeFileSync(join(dirname(path), "later.js"), "x");
+    expect(await applyUpdate(setup(), "echo", shown)).toMatchObject({
       kind: "failed",
+      reason: expect.stringContaining("you saw"),
     });
-    const applied = change.kind === "ok" ? await applyUpdate(setup(), change.value) : change;
-    expect(applied).toEqual({ kind: "ok" });
-    expect(await callPlugin(setup(), { plugin: "echo", capability: "notify", op: "send", input: {} })).toMatchObject({
+    rmSync(join(dirname(path), "later.js"));
+    expect(await applyUpdate(setup(), "echo", shown)).toMatchObject({ kind: "ok", value: { version: "2.0.0" } });
+    expect(
+      await callPlugin(setup(), { plugin: "echo", capability: "tracker.create", op: "x", input: {} }),
+    ).toMatchObject({
       kind: "ok",
-      value: { kind: "sent" },
+      value: { kind: "unsupported" },
     });
   });
 
-  it("a plugin that crashes, runs too long, prints too much or prints no JSON gives no result", async () => {
-    const cases: readonly [string, string, string][] = [
-      ["crash", "process.exit(3);", "exited 3"],
-      ["slow", "setTimeout(() => out({ kind: 'sent' }), 5000);", "ran out of time"],
-      ["huge", "process.stdout.write('x'.repeat(200000));", "printed more than"],
-      ["noisy", "process.stdout.write('log line\\n'); out({ kind: 'sent' });", "not one JSON object"],
-      ["nokind", "out({ ok: true });", "no kind"],
+  it("a plugin that crashes, runs too long, prints too much, prints no JSON or is killed gives no result", async () => {
+    const cases: readonly [string, string, string, number][] = [
+      ["crash", "process.exit(3);", "exited 3", 30_000],
+      ["slow", "setTimeout(() => out({ kind: 'sent' }), 20000);", "ran out of time", 1500],
+      ["huge", "process.stdout.write('x'.repeat(200000));", "printed more than", 30_000],
+      ["noisy", "process.stdout.write('log line\\n'); out({ kind: 'sent' });", "not one JSON object", 30_000],
+      ["nokind", "out({ ok: true });", "no kind", 30_000],
+      ["killed", "process.kill(process.pid, 'SIGKILL');", "killed by SIGKILL", 30_000],
     ];
-    for (const [name, body, reason] of cases) {
-      const home = join(root, `home-${name}`);
-      const s = setup({ home, limits: { timeoutMs: 1000, maxBytes: 100_000 } });
+    for (const [name, body, reason, timeoutMs] of cases) {
+      const s = setup({ home: join(root, `home-${name}`), limits: { timeoutMs, maxBytes: 100_000 } });
       await addPlugin(s, plugin(name, body, { ...DESCRIBE, name }));
       expect({
         name,
@@ -194,6 +277,20 @@ describe("the registry: pinned by path and sha256 (#134; ADR-0014 P2)", () => {
         out: { kind: "failed", reason: expect.stringContaining(reason) },
       });
     }
+  });
+
+  it("a timeout kills every process the plugin started, so no write goes on after it", async () => {
+    const marker = join(root, "late-write");
+    const late = `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(marker)}, "x"), 1500)`;
+    const body = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(late)}], { stdio: "ignore" }); setTimeout(() => out({ kind: "sent" }), 20000);`;
+    const s = setup({ limits: { timeoutMs: 500, maxBytes: 100_000 } });
+    await addPlugin(s, plugin("forker", body, { ...DESCRIBE, name: "forker" }));
+    expect(await callPlugin(s, { plugin: "forker", capability: "notify", op: "send", input: {} })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("ran out of time"),
+    });
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(existsSync(marker)).toBe(false);
   });
 });
 
@@ -208,6 +305,7 @@ describe("the contract test kit: agent-factory plugin test (#134)", () => {
     expect(checks.filter((c) => !c.ok)).toEqual([]);
     expect(checks.map((c) => c.name)).toEqual([
       "handshake",
+      "fixtures name declared capabilities",
       "fixture context.read/ticket",
       "bad input",
       "unknown op",

@@ -192,20 +192,32 @@ project's `.env`, and to edit a file of the package and a project's `.claude/set
 Every outside tool is reached through a plugin ([ADR-0014](docs/adr/0014-plugin-model.md), #134). A plugin is an
 executable: `<exe> describe` prints one JSON object (its protocol, capabilities, declared writes and the env names it
 needs), and `<exe> call` reads one JSON request on stdin and prints one JSON result, a sealed case of that
-capability, on stdout; its logs go to stderr. The core runs it with no shell, a timeout, an output cap, and only the
-trusted `PATH`, `HOME`, `LANG` and the names it declared, never a model login (`src/core/plugin/`).
+capability, on stdout; its logs go to stderr. The core runs it with no shell, in a process group of its own that the
+timeout, the output cap and the end of the call kill whole, and with only `PATH`, `HOME`, `LANG` and the names it
+declared. A plugin may not declare a model or cloud login, a forge token, a `FACTORY_*` setting or a loader variable
+(`LD_*`, `DYLD_*`, `NODE_*` and the like); each uses its own CLI's login (`src/core/plugin/`).
+
+A plugin is the folder its file sits in. `plugin add` takes the sha256 of every file in that folder, copies the
+folder into `$FACTORY_HOME/plugins/<sha256>/` (mode 700) and records it in `$FACTORY_HOME/plugins.json` (mode 600);
+every call hashes the copy again and runs it, so a change to your own folder after review changes nothing. A file or
+folder that someone else could write to, or a symlink inside the folder, is refused.
 
 | command | does |
 |---|---|
-| `agent-factory plugin add <path\|name>` | runs `describe`, shows the capabilities and writes, and records the absolute path and sha256 in `$FACTORY_HOME/plugins.json` (mode 600). A name is a plugin bundled with the package; nothing is fetched from the network |
-| `agent-factory plugin update <name> [--yes]` | runs `describe` again and shows the writes a new version adds; records it only with `--yes` (exit 3 without) |
-| `agent-factory plugin test <path\|name>` | the contract test kit: handshake, each `fixtures/<capability>/<case>.in.json` against its `.out.json`, bad input, an unknown op, one JSON object on stdout, an env canary, and no token in any answer |
+| `agent-factory plugin add <path\|name>` | inspects a plugin and pins it, as above; a name is a plugin bundled with the package, and nothing is fetched from the network. A name already added is refused: use `update` |
+| `agent-factory plugin update <name> [<sha256>]` | runs the test kit on the plugin's folder as it is now and shows its hash and the writes it adds (exit 3, nothing recorded); with that hash, records it, if it is still the same |
+| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer |
 | `agent-factory plugin list` | the registered plugins, with their writes and hashes |
 
-Each call hashes the file again; a file that changed since `add` or `update` is refused. The coordinator may not run
-`plugin` or edit `plugins.json` (#106). **Today:** no plugin is bundled yet and nothing calls one: the project file's
-capability mapping, the write policy with `request` and `confirm` (#134 PR B), and the forge as a plugin (PR C) come
-next. The kit's write-fidelity check, the text a plugin sends its CLI byte for byte, comes with the forge plugins.
+A plugin's `PATH` is yours without relative folders and without folders others can write to. The coordinator may not
+run `plugin` or edit `plugins.json` or the store (#106). **Today:**
+
+- The pin covers the plugin's folder, not the interpreter a script names (`#!/usr/bin/env node` takes the first
+  `node` on that `PATH`) nor the CLI it calls; folders your own user can write, such as `~/.local/bin`, stay on the
+  `PATH`, since most CLIs live there.
+- No plugin is bundled yet and nothing calls one. The project file's capability mapping, the write policy with
+  `request` and `confirm` (#134 PR B), and the forge as a plugin (PR C) come next; so does the kit's write-fidelity
+  check, the text a plugin sends its CLI byte for byte.
 
 ## Settings
 

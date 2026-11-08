@@ -61,7 +61,7 @@ commands:
                                <home>/coordinator
   coordinator [copilot]        start the coordinator's session there, with only those settings (#106)
   plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
-  plugin update <name> [--yes] show what a new version of a plugin declares; record it only with --yes
+  plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
   plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
   plugin list                  the registered plugins
   box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
@@ -92,7 +92,6 @@ type Args = {
   readonly template: boolean;
   readonly once: boolean;
   readonly dryRun: boolean;
-  readonly yes: boolean;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -622,14 +621,14 @@ function runnerOf(positionals: readonly string[]): "claude" | "copilot" | "bad" 
 }
 
 // plugin : register, update, test and list plugins (#134)
-async function pluginCli({ positionals, yes, io }: Args): Promise<number> {
+async function pluginCli({ positionals, io }: Args): Promise<number> {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {
     io.err(`agent-factory plugin: ${home.reason}\n`);
     return 1;
   }
   const pkg = join(dirname(fileURLToPath(import.meta.url)), "..");
-  return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg, yes });
+  return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg });
 }
 
 // coordinator : the coordinator's session, in its own folder with its own settings (#106)
@@ -714,7 +713,6 @@ export async function runCli(argv: readonly string[], io: Io): Promise<number> {
       once: { type: "boolean" },
       "dry-run": { type: "boolean" },
       template: { type: "boolean" },
-      yes: { type: "boolean" },
     },
   });
   if (values.version === true) {
@@ -731,7 +729,6 @@ export async function runCli(argv: readonly string[], io: Io): Promise<number> {
     template: values.template === true,
     once: values.once === true,
     dryRun: values["dry-run"] === true,
-    yes: values.yes === true,
     positionals: positionals.slice(1),
     io,
   });

@@ -1,8 +1,8 @@
-// exec — runs one plugin command (#134; ADR-0014 P1): execFile, never a shell, so no word of a request is ever parsed
+// exec — runs one plugin command (#134; ADR-0014 P1): spawned, never through a shell, so no word of a request is ever parsed
 // as a command; a timeout, after which the plugin is killed; and a cap on what it prints, past which it is killed too.
 // The request goes in on stdin as one JSON object. Nothing here throws.
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 
 export type Limits = { readonly timeoutMs: number; readonly maxBytes: number };
 
@@ -22,46 +22,67 @@ export type Exec = (input: {
   readonly limits: Limits;
 }) => Promise<Ran>;
 
-function field(error: unknown, name: string): unknown {
-  return typeof error === "object" && error !== null ? (Reflect.get(error, name) as unknown) : undefined;
-}
-
-// why : a non-exit end of the run: over the cap, killed for time, or a plugin that never started
-function why(error: unknown, limits: Limits): Ran {
-  const code = field(error, "code");
-  if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
-    return { kind: "overCap", bytes: limits.maxBytes };
+// killGroup : the plugin and every process it started; a plugin never outlives its call, so no write goes on after a
+// timeout or a cut
+function killGroup(pid: number | undefined): void {
+  if (pid === undefined) {
+    return;
   }
-  return field(error, "killed") === true
-    ? { kind: "timedOut", ms: limits.timeoutMs }
-    : { kind: "failed", reason: `cannot start the plugin: ${typeof code === "string" ? code : "unknown error"}` };
-}
-
-function ended(error: unknown, out: { stdout: string; stderr: string }, limits: Limits): Ran {
-  if (error === null) {
-    return { kind: "exited", code: 0, ...out };
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // the group is gone already
   }
-  const code = field(error, "code");
-  const killed = field(error, "killed") === true;
-  return typeof code === "number" && !killed ? { kind: "exited", code, ...out } : why(error, limits);
 }
 
-// runPlugin : the plugin's answer, or why there is none
+type End = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
+
+function finished(end: End, out: { stdout: string; stderr: string }): Ran {
+  return end.code === null
+    ? { kind: "failed", reason: `the plugin was killed by ${end.signal ?? "a signal"}` }
+    : { kind: "exited", code: end.code, ...out };
+}
+
+// runPlugin : the plugin's answer, or why there is none. spawn with no shell, in a process group of its own, so the
+// timeout, the cap and the end of the call kill all of it; stdout and stderr together may hold at most maxBytes.
 export const runPlugin: Exec = (input) =>
   new Promise((resolve) => {
-    const child = execFile(
-      input.path,
-      [...input.args],
-      {
-        env: input.env,
-        timeout: input.limits.timeoutMs,
-        killSignal: "SIGKILL",
-        maxBuffer: input.limits.maxBytes,
-        encoding: "utf8",
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => resolve(ended(error, { stdout, stderr }, input.limits)),
-    );
-    child.stdin?.on("error", () => undefined);
-    child.stdin?.end(input.stdin);
+    const out = { stdout: "", stderr: "" };
+    let size = 0;
+    let stop: Ran | "none" = "none";
+    const child = spawn(input.path, [...input.args], {
+      env: input.env,
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const halt = (why: Ran): void => {
+      stop = stop === "none" ? why : stop;
+      killGroup(child.pid);
+    };
+    const timer = setTimeout(() => halt({ kind: "timedOut", ms: input.limits.timeoutMs }), input.limits.timeoutMs);
+    const take = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > input.limits.maxBytes) {
+        halt({ kind: "overCap", bytes: input.limits.maxBytes });
+        return;
+      }
+      out[stream] += chunk.toString("utf8");
+    };
+    child.stdout.on("data", take("stdout"));
+    child.stderr.on("data", take("stderr"));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({
+        kind: "failed",
+        reason: `cannot start the plugin: ${"code" in error ? String(error.code) : error.message}`,
+      });
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      killGroup(child.pid);
+      resolve(stop === "none" ? finished({ code, signal }, out) : stop);
+    });
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(input.stdin);
   });

@@ -145,6 +145,7 @@ function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${home}/box-runs/**)`,
     `Edit(${home}/egress/**)`,
     `Edit(${home}/plugins.json)`,
+    `Edit(${home}/plugins/**)`,
   ];
 }
 
