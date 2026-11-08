@@ -9,15 +9,20 @@
 //   block      needs-human first, then one "[coordinator] blocked: <reason>" note, then the claim released (ADR-0011
 //              D14): a note without the label would leave the change in the queue
 //   reconcile  after a restart: a claim with no live run, or left on a merged change, is released; a run's worktree
-//              with no live run is removed (#39)
+//              with no live run is removed (#39), but never a writer's that holds unlanded work (#189): its commits
+//              that no remote branch holds are pushed on top of the change's branch, as a blocked run's are, the
+//              change is labelled needs-human with a note that names them and every uncommitted file, and the
+//              worktree is kept for a person. Uncommitted files are never committed. A reviewer runs read-only, so
+//              its worktree is removed as before.
 
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { NEEDS_HUMAN } from "./finish.js";
+import { NEEDS_HUMAN, pushOnTop, type Pusher } from "./finish.js";
 import type { Done, Result } from "./forge/api.js";
 import type { Change, Forge } from "./forge/types.js";
 import { hostGit } from "./git.js";
-import type { Post, Seat } from "./post.js";
+import { renderPost, type Post, type Seat } from "./post.js";
+import type { PushTarget } from "./writer/step.js";
 import { liveRuns, type Sessions } from "./review/live.js";
 import { attempt } from "./review/safe.js";
 
@@ -176,6 +181,9 @@ export type Reconcile = {
   readonly sessions: Sessions;
   // a dry run removes no worktree: it says which it would
   readonly dryRun: boolean;
+  // where a writer's unlanded commits are pushed, and the push itself (hostPush; a test passes its own); a target that
+  // is not set keeps such a worktree unpushed, and says why
+  readonly landing: { readonly target: Result<PushTarget>; readonly pusher: Pusher };
 };
 
 const RUN = /^(writer|reviewer)-(\d+)$/;
@@ -237,20 +245,187 @@ async function removeWorktree(input: Reconcile, path: string): Promise<Done> {
   return pruned.kind === "ok" ? { kind: "ok" } : failed(`cannot prune the worktrees of ${input.repo}`);
 }
 
+function inWorktree(input: Reconcile, path: string, args: readonly string[]): ReturnType<typeof hostGit> {
+  return hostGit({
+    args,
+    repo: { kind: "repo", path },
+    env: input.env,
+    ownHelper: { kind: "none" },
+    stdin: { kind: "none" },
+  });
+}
+
+function out(result: Awaited<ReturnType<typeof hostGit>>, what: string): Result<string> {
+  return result.kind === "ok" ? { kind: "ok", value: result.stdout } : failed(`cannot ${what}`);
+}
+
+// Left : what a dead writer left in its worktree: commits no remote branch holds, and files git has not committed
+type Left = { readonly head: string; readonly commits: readonly string[]; readonly files: readonly string[] };
+
+async function leftIn(input: Reconcile, path: string): Promise<Result<Left>> {
+  const fetched = await inWorktree(input, path, ["fetch", "--quiet", "--prune", "origin"]);
+  if (fetched.kind !== "ok") {
+    return failed("cannot fetch, so cannot tell whether it holds unlanded work");
+  }
+  const head = out(await inWorktree(input, path, ["rev-parse", "HEAD"]), "read its head");
+  const commits = out(await inWorktree(input, path, ["rev-list", "HEAD", "--not", "--remotes"]), "list its commits");
+  const files = out(
+    await inWorktree(input, path, ["status", "--porcelain", "--no-renames", "--untracked-files=all", "-z"]),
+    "read its status",
+  );
+  const bad = [head, commits, files].find((r) => r.kind === "failed");
+  return bad?.kind === "failed" ? bad : { kind: "ok", value: leftOf(head, commits, files) };
+}
+
+function textOf(r: Result<string>): string {
+  return r.kind === "ok" ? r.value : "";
+}
+
+function leftOf(head: Result<string>, commits: Result<string>, files: Result<string>): Left {
+  return {
+    head: textOf(head).trim(),
+    commits: textOf(commits)
+      .split("\n")
+      .filter((l) => l !== ""),
+    // each entry of `status -z` is "XY path"
+    files: textOf(files)
+      .split("\0")
+      .filter((e) => e.length > 3)
+      .map((e) => e.slice(3)),
+  };
+}
+
+function nothingLeft(left: Left): boolean {
+  return left.commits.length === 0 && left.files.length === 0;
+}
+
+function summary(left: Left): string {
+  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+  return `${n(left.commits.length, "unlanded commit")}, ${n(left.files.length, "uncommitted file")}`;
+}
+
+type Onto = { readonly change: Change; readonly base: string; readonly target: PushTarget };
+
+async function openChangeOf(forge: Forge, number: number): Promise<Result<Change>> {
+  const change = await forge.change({ number });
+  if (change.kind === "failed") {
+    return change;
+  }
+  return change.value.state === "opened" ? change : failed(`the change is ${change.value.state}`);
+}
+
+// onto : the change's open branch, the default branch, and where to push, or why the commits cannot go there
+async function onto(input: Reconcile, number: number): Promise<Result<Onto>> {
+  const { target } = input.landing;
+  if (target.kind === "failed") {
+    return target;
+  }
+  const change = await openChangeOf(input.forge, number);
+  if (change.kind === "failed") {
+    return change;
+  }
+  const base = await input.forge.defaultBranch();
+  return base.kind === "ok"
+    ? { kind: "ok", value: { change: change.value, base: base.value, target: target.value } }
+    : base;
+}
+
+// landed : the writer's unlanded commits pushed on top of the change's open branch, or why they were not
+async function landed(input: Reconcile, path: string, number: number, left: Left): Promise<string> {
+  if (left.commits.length === 0) {
+    return "nothing to push";
+  }
+  const to = await onto(input, number);
+  if (to.kind === "failed") {
+    return `not pushed: ${to.reason}`;
+  }
+  const { change, base, target } = to.value;
+  const done = await pushOnTop({
+    forge: input.forge,
+    pusher: input.landing.pusher,
+    push: {
+      ...target,
+      repo: path,
+      branch: change.sourceBranch,
+      commit: left.head,
+      lease: { kind: "sha", sha: change.sha },
+      protectedBranches: [base],
+      guards: [],
+    },
+  });
+  return done.kind === "ok"
+    ? `pushed ${left.commits.length} on top of ${change.sourceBranch}`
+    : `not pushed: ${done.reason}`;
+}
+
+function keptPost(name: string, pushed: string, left: Left): Post {
+  return {
+    seat: "coordinator",
+    title: `reconcile found unlanded work in ${name}, and kept it for a person`,
+    fields: [
+      { label: "unlanded commits", value: left.commits.map((c) => c.slice(0, 8)).join(", ") || "none" },
+      { label: "push", value: pushed },
+      { label: "uncommitted files, never committed by reconcile", value: String(left.files.length) },
+    ],
+    items: left.files.slice(0, 20),
+  };
+}
+
+// kept : needs-human first, so nothing hands the change out again; then the push; then one note that names it all
+async function kept(input: Reconcile, name: string, number: number, left: Left): Promise<Result<string>> {
+  const labelled = await input.forge.addLabel({ number, label: NEEDS_HUMAN });
+  if (labelled.kind === "failed") {
+    return labelled;
+  }
+  const path = join(input.repo, ".claude", "worktrees", name);
+  const pushed = await landed(input, path, number, left);
+  const post = keptPost(name, pushed, left);
+  const noted = renderPost(post).kind === "ok" ? await input.forge.note({ number, post }) : failed("no note");
+  const note = noted.kind === "ok" ? "" : `; the note failed: ${noted.reason}`;
+  return {
+    kind: "ok",
+    value: `kept worktree ${name} (${summary(left)}; ${pushed}); ${at(input.forge, number)} is ${NEEDS_HUMAN}${note}`,
+  };
+}
+
+// writerWorktree : a dead writer's worktree: removed when it holds nothing to land, else kept and handed to a person
+async function writerWorktree(input: Reconcile, name: string, number: number): Promise<Result<string>> {
+  const path = join(input.repo, ".claude", "worktrees", name);
+  const left = await leftIn(input, path);
+  if (left.kind === "failed") {
+    return { kind: "ok", value: `kept worktree ${name} (${left.reason})` };
+  }
+  if (nothingLeft(left.value)) {
+    return removedOne(input, name);
+  }
+  return input.dryRun
+    ? { kind: "ok", value: `would keep worktree ${name} (${summary(left.value)})` }
+    : kept(input, name, number, left.value);
+}
+
+async function removedOne(input: Reconcile, name: string): Promise<Result<string>> {
+  if (input.dryRun) {
+    return { kind: "ok", value: `would remove worktree ${name} (no live run)` };
+  }
+  const removed = await removeWorktree(input, join(input.repo, ".claude", "worktrees", name));
+  return removed.kind === "ok" ? { kind: "ok", value: `removed worktree ${name} (no live run)` } : removed;
+}
+
+function oneWorktree(input: Reconcile, name: string): Promise<Result<string>> {
+  const [, seat, number] = RUN.exec(name) ?? [];
+  return seat === "writer" ? writerWorktree(input, name, Number(number)) : removedOne(input, name);
+}
+
 async function worktrees(input: Reconcile, runs: readonly string[]): Promise<Result<string[]>> {
   const dir = join(input.repo, ".claude", "worktrees");
   const names = await readdir(dir).catch(() => [] as string[]);
   const lines: string[] = [];
   for (const name of names.filter((n) => RUN.test(n) && !runs.includes(n)).toSorted()) {
-    if (input.dryRun) {
-      lines.push(`would remove worktree ${name} (no live run)`);
-      continue;
+    const done = await oneWorktree(input, name);
+    if (done.kind === "failed") {
+      return done;
     }
-    const removed = await removeWorktree(input, join(dir, name));
-    if (removed.kind === "failed") {
-      return removed;
-    }
-    lines.push(`removed worktree ${name} (no live run)`);
+    lines.push(done.value);
   }
   return { kind: "ok", value: lines };
 }

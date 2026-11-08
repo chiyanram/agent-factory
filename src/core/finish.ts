@@ -168,7 +168,7 @@ function unchanged(push: PushRequest): boolean {
   return push.lease.kind === "sha" && push.lease.sha === push.commit;
 }
 
-type Sending = Pick<FinishInput, "forge" | "push" | "pusher">;
+export type Sending = Pick<FinishInput, "forge" | "push" | "pusher">;
 
 // ciSetup : what the CI-file guard compares against: the default branch, and the CI file the project runs
 async function ciSetup(input: Sending): Promise<Result<CiSetup>> {
@@ -195,6 +195,12 @@ async function pushed(input: Sending, mode: "any" | "on-top"): Promise<Done> {
   const always = [noFactoryFolder(env), noCiFiles(ci.value)];
   const ours = mode === "on-top" ? [...always, fastForwardOnly(env)] : always;
   return (input.pusher ?? hostPush)({ ...input.push, guards: [...ours, ...input.push.guards] });
+}
+
+// pushOnTop : work in progress pushed only on top of the branch, with every guard a blocked run's push has; reconcile
+// lands what a dead run left behind this way (#189)
+export function pushOnTop(input: Sending): Promise<Done> {
+  return pushed(input, "on-top");
 }
 
 async function post(input: FinishInput, post: Post): Promise<Done> {

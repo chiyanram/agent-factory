@@ -519,7 +519,7 @@ and `#12` for `!12`.
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
-| `agent-factory reconcile` | removes each claim and run worktree with no live run, and each claim left on a merged MR; a live-run list it cannot read releases nothing |
+| `agent-factory reconcile` | removes each claim and run worktree with no live run, and each claim left on a merged MR; a live-run list it cannot read releases nothing. A writer's worktree that holds unlanded work is never removed (#189): its commits that no remote branch holds go on top of the MR's branch through the host push, with a blocked run's guards (fast-forward only, no `.factory`, no CI file); the MR gets `needs-human` and one note naming the commits, the push and every uncommitted file, which reconcile never commits; the worktree stays for you. One it cannot check (a fetch that fails) is kept and labelled nothing. A reviewer's worktree is removed as before. `FACTORY_DRY_RUN=1` says which it would keep |
 
 `poll` keeps no state, so a restart re-reads everything. It reads the forge through its CLI (`gh api`, `glab api`),
 pages every list to its end, and waits out a rate limit. It does not read approvals: an approval is the local

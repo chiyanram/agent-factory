@@ -4,7 +4,10 @@
 
 import { isAbsolute } from "node:path";
 import type { Result } from "./core/forge/api.js";
-import { openProject } from "./core/forge/index.js";
+import { forgeHost, openProject } from "./core/forge/index.js";
+import type { Identity } from "./core/identity.js";
+import { hostPush } from "./core/push.js";
+import type { PushTarget } from "./core/writer/step.js";
 import type { Forge } from "./core/forge/types.js";
 import { lintEdit } from "./core/lint-edit.js";
 import { ask, block, claim, reconcile, release, status, type AtHead } from "./core/loop.js";
@@ -20,7 +23,7 @@ export type LoopIo = {
   readonly readStdin: () => Promise<string>;
 };
 
-type Act = (forge: Forge, label: string) => Promise<Result<string | readonly string[]>>;
+type Act = (forge: Forge, label: string, identity: Identity) => Promise<Result<string | readonly string[]>>;
 
 const USAGE: Readonly<Record<string, string>> = {
   claim: "claim <number>",
@@ -50,19 +53,21 @@ function lines(value: string | readonly string[], dry: string): string {
 }
 
 // forgeOf : the project's forge and its claim label
-async function forgeOf(io: LoopIo): Promise<Result<{ readonly forge: Forge; readonly label: string }>> {
+async function forgeOf(
+  io: LoopIo,
+): Promise<Result<{ readonly forge: Forge; readonly label: string; readonly identity: Identity }>> {
   const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
   if (label.trim() === "") {
     return { kind: "failed", reason: "FACTORY_CLAIM_LABEL is set but empty" };
   }
   const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
-  return opened.kind === "ok" ? { kind: "ok", value: { forge: opened.value.forge, label } } : opened;
+  return opened.kind === "ok" ? { kind: "ok", value: { ...opened.value, label } } : opened;
 }
 
 // onForge : the action on the project's forge; its lines on stdout, or why it failed on stderr
 async function onForge(name: string, io: LoopIo, act: Act): Promise<number> {
   const opened = await forgeOf(io);
-  const done = opened.kind === "ok" ? await act(opened.value.forge, opened.value.label) : opened;
+  const done = opened.kind === "ok" ? await act(opened.value.forge, opened.value.label, opened.value.identity) : opened;
   if (done.kind === "failed") {
     io.err(`agent-factory ${name}: ${done.reason}\n`);
     return 1;
@@ -109,9 +114,29 @@ function reconciled(positionals: readonly string[], io: LoopIo): Promise<number>
     return 1;
   }
   const sessions = claudeSessions({ bin: io.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(io.env) });
-  return onForge("reconcile", io, (forge, label) =>
-    reconcile({ forge, label, repo, env: io.env, sessions, dryRun: io.env.FACTORY_DRY_RUN === "1" }),
+  return onForge("reconcile", io, (forge, label, identity) =>
+    reconcile({
+      forge,
+      label,
+      repo,
+      env: io.env,
+      sessions,
+      dryRun: io.env.FACTORY_DRY_RUN === "1",
+      landing: { target: landingTarget(io.env, forge, identity), pusher: hostPush },
+    }),
   );
+}
+
+// landingTarget : where a dead writer's unlanded commits go: the project on its forge's host, as its identity
+function landingTarget(env: NodeJS.ProcessEnv, forge: Forge, identity: Identity): Result<PushTarget> {
+  const host = forgeHost(env, forge.name);
+  const project = env.FACTORY_PROJECT ?? "";
+  if (host.kind === "failed") {
+    return host;
+  }
+  return project === ""
+    ? { kind: "failed", reason: "FACTORY_PROJECT is not set" }
+    : { kind: "ok", value: { forge: forge.name, host: host.value, project, identity, env } };
 }
 
 async function linted(positionals: readonly string[], io: LoopIo): Promise<number> {
@@ -146,6 +171,7 @@ export const LOOP_HELP = `  claim <number>               add the claim label to 
   block <number> "<reason>" [<log>]
                                label needs-human, post one [coordinator] blocked: note, then release the claim
   reconcile                    release each claim with no live run or on a merged change; remove each run's worktree
-                               with no live run (FACTORY_REPO)
+                               with no live run (FACTORY_REPO), but keep a writer's that holds unlanded work: push its
+                               commits on top of the change's branch and label the change needs-human
   lint-edit '<lint command>'   the writer's PostToolUse hook: lint the file an Edit or Write changed, no shell
 `;
