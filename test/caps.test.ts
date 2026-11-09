@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capsOf, NO_CAPS, projectStop, ticketCapped } from "../src/core/dispatch/caps.js";
+import { capsOf, heldWords, NO_CAPS, projectStop, roomAt, ticketCapped } from "../src/core/dispatch/caps.js";
 import { hoursOf, openAt, within } from "../src/core/dispatch/hours.js";
 import { keyById } from "../src/core/settings/keys.js";
 import { claudeArgv } from "../src/core/writer/run.js";
@@ -139,6 +139,28 @@ describe("the project's stop: the day cap, then the window share, then the machi
     const caps = { ...NO_CAPS, day: { usd: "none" as const, tokens: 1 } };
     const unmeasured: Spent = { project: "ledger", ticket: "PROJ-1", at: "2026-11-09T11:00:00Z", spend: "unmeasured" };
     expect(projectStop({ project: [unmeasured], machine: [], now: NOW, caps })).toEqual({ kind: "go" });
+  });
+
+  it("says when a run may start again: the next UTC day, or when the window's oldest runs leave it (#305)", () => {
+    const day = { ...NO_CAPS, day: { usd: 5, tokens: "none" as const } };
+    const stop = projectStop({ project: [run("2026-11-09T01:00:00Z", 5, 0)], machine: [], now: NOW, caps: day });
+    expect(stop).toMatchObject({ period: "day", until: Date.parse("2026-11-10T00:00:00Z") });
+    expect(stop.kind === "stop" ? heldWords(stop, "ledger") : "").toBe(
+      "the project-day cap is reached: today (2026-11-09, UTC) the project spent $5.00 and 0 tokens, at the cap of $5 (FACTORY_MAX_USD_DAY); run `agent-factory dispatch ledger` again tomorrow",
+    );
+    const share = { ...NO_CAPS, window: { tokens: 100, machineTokens: "none" as const }, windowHours: 2 };
+    // 60 + 50 + 30 in the window: it has room (80 under 100) once the first has left it, at 10:20 + 2 h
+    const runs = [
+      run("2026-11-09T10:20:00Z", 0, 60),
+      run("2026-11-09T10:40:00Z", 0, 50),
+      run("2026-11-09T11:00:00Z", 0, 30),
+    ];
+    const full = projectStop({ project: runs, machine: [], now: NOW, caps: share });
+    expect(full).toMatchObject({ period: "window", until: Date.parse("2026-11-09T12:20:00Z") });
+    expect(full.kind === "stop" ? heldWords(full, "ledger") : "").toMatch(
+      /^the window is full until 12:20 UTC: in the last 2 h .*; run `agent-factory dispatch ledger` again then$/,
+    );
+    expect(roomAt({ runs, from: 0, hours: 2, limit: 50, unit: "tokens" })).toBe(Date.parse("2026-11-09T12:40:00Z"));
   });
 });
 
