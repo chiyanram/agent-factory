@@ -10,8 +10,10 @@ import type { Evidence } from "../src/core/report.js";
 import { boxPlan } from "../src/core/ready/plan.js";
 import { MAX_LOG_CHARS, MAX_LOG_LINES, recordsDirOf, readKept, tailOf } from "../src/core/kept.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
+import { capped, MAX_TASK_CHARS } from "../src/core/writer/task.js";
 import {
   READY_FILE,
+  readyOutput,
   readyStep,
   verifyStep,
   VERIFY_CONTEXT,
@@ -280,6 +282,24 @@ describe("the ready check's kept output (#199)", () => {
     writeFileSync(recordsDirOf(p.clone), "not a folder");
     const out = await ready(fakeBox({ runs: [exited(2)] }).box, [row("make test")]);
     expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("cannot keep") });
+  });
+
+  it("fits the writer's task cap when both streams are long, keeping the last line of each and saying what it cut", async () => {
+    const long = (name: string) =>
+      `${Array.from({ length: 150 }, (_, i) => `${name} ${i} ${"z".repeat(120)}`).join("\n")}\n${name}: the last line\n`;
+    const ran: Ran = { kind: "exited", code: 1, stdout: long("out"), stderr: long("err") };
+    const why = `row 1 (${"a criterion ".repeat(400)}): make test exited 1`;
+    const kept = readyOutput(why, { argv: ["make", "test"], ran });
+    expect(kept.length).toBeLessThanOrEqual(MAX_TASK_CHARS);
+    expect(capped(kept)).toBe(kept);
+    expect(kept).toContain("out: the last line\n```");
+    expect(kept).toContain("err: the last line\n```");
+    expect(kept).toContain("make test exited 1");
+    expect(kept.match(/\(…\d+ earlier characters cut\)/g)).toHaveLength(3);
+    const out = await ready(fakeBox({ runs: [ran] }).box, [row("make test")]);
+    expect(out).toMatchObject({ value: { passed: false } });
+    const read = await keptAt();
+    expect(read.kind === "ok" ? read.value.length : Infinity).toBeLessThanOrEqual(MAX_TASK_CHARS);
   });
 
   it("bounds a tail by lines and by characters, however long its lines", () => {

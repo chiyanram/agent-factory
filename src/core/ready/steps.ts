@@ -135,11 +135,38 @@ async function rerun(
   return rows.kind === "ok" ? { kind: "ok", value: verdict(input.evidence, rows.value) } : rows;
 }
 
+// The writer's task file is cut at 20,000 characters from its end (writer/task.ts, MAX_TASK_CHARS), so a kept file
+// fits it by construction: the reason and each stream are cut from the front, where the least useful lines are, and
+// the headings take the rest. A test holds the sum under the cap (#199).
+const MOST_REASON_CHARS = 2_000;
+const MOST_STREAM_CHARS = 8_500;
+
+// cutNote : what cutting a text to its last `most` characters drops, as a line; none when nothing is cut. Pure.
+function cutNote(text: string, most: number): readonly string[] {
+  return text.length <= most ? [] : [`(…${text.length - most} earlier characters cut)`];
+}
+
+// lastChars : the end of a text, at most `most` characters, after a line saying how much went before it. Pure.
+function lastChars(text: string, most: number): readonly string[] {
+  return [...cutNote(text, most), text.slice(-most)];
+}
+
 // stream : one stream's last lines, plain and fenced; none when it printed nothing. Pure.
 function stream(name: string, text: string): readonly string[] {
-  return text.trim() === ""
-    ? []
-    : [`${name}, its last lines:`, "", "```text", tailOf(text).replaceAll("```", "` ` `"), "```", ""];
+  if (text.trim() === "") {
+    return [];
+  }
+  const plain = tailOf(text).replaceAll("```", "` ` `");
+  const note = cutNote(plain, MOST_STREAM_CHARS);
+  return [
+    `${name}, its last lines:`,
+    "",
+    ...(note.length === 0 ? [] : [...note, ""]),
+    "```text",
+    plain.slice(-MOST_STREAM_CHARS),
+    "```",
+    "",
+  ];
 }
 
 // printed : a row's stdout and stderr tails; none for a row that ran out of time. Pure.
@@ -156,7 +183,7 @@ export function readyOutput(why: string, row: Row | "none"): string {
     "",
     "The host checked your head, and ran your evidence rows again there in a fresh box. It failed:",
     "",
-    why,
+    ...lastChars(why, MOST_REASON_CHARS),
     "",
     ...(row === "none" ? [] : printed(row)),
   ].join("\n");
