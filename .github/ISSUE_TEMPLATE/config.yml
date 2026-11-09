@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Build map
+    url: https://github.com/chiyanram/agent-factory/issues/30
+    about: Decisions so far and the order of work. Check it before opening a new ticket.
+  - name: Report a security vulnerability
+    url: https://github.com/chiyanram/agent-factory/security/advisories/new
+    about: Report privately, never in a public issue.
