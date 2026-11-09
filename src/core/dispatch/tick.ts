@@ -49,6 +49,7 @@ import {
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
 import type { Spend } from "./spend.js";
+import type { Acted } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
@@ -114,6 +115,7 @@ export type Steps = {
           | Result<{
               readonly actOn: number;
               readonly spend: Spend;
+              readonly acted?: Acted;
               // per lens that ran, its verified findings no other lens reported; none for a round that ran no lens
               readonly lenses?: Readonly<Record<string, number>>;
             }>
@@ -741,7 +743,12 @@ function reviewEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly actOn: number; readonly spend: Spend; readonly lenses?: Readonly<Record<string, number>> },
+  value: {
+    readonly actOn: number;
+    readonly spend: Spend;
+    readonly acted?: Acted;
+    readonly lenses?: Readonly<Record<string, number>>;
+  },
 ): Promise<Done> {
   return record({
     where: where(setup, state),
@@ -751,6 +758,7 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
+      ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
