@@ -1,6 +1,7 @@
 // kept — what the factory keeps per change and head in the project's clone, <FACTORY_REPO>/.claude/runs/<change>/<head>/
-// (ADR-0011 D16): the review's pass answers and Act on findings, and the local verifier's output (#171). A writer run
-// reads its task from here, the factory's own record, before it would read the forge. Nothing here throws.
+// (ADR-0011 D16): the review's pass answers and Act on findings, the local verifier's output (#171), and why a ready
+// check failed (#199). A writer run reads its task from here, the factory's own record, before it would read the forge.
+// Nothing here throws.
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,6 +10,8 @@ import { attempt } from "./review/safe.js";
 
 // the lines kept of a log: enough to see a failure, never a whole build (#171 Q2)
 export const MAX_LOG_LINES = 200;
+// and the characters kept of those lines, so a log of a few huge lines is bounded too (#199)
+export const MAX_LOG_CHARS = 20_000;
 
 export type At = { readonly recordsDir: string; readonly change: number; readonly head: string };
 
@@ -48,6 +51,6 @@ const UNSEEN = /[^\n\t -~\u0080-￿]/g;
 // tailOf : the last lines of a log, plain. Pure.
 export function tailOf(log: string): string {
   const plain = log.replace(/\r\n?/g, "\n").replace(ESCAPE, "").replace(UNSEEN, "");
-  const lines = plain.trimEnd().split("\n");
-  return lines.slice(-MAX_LOG_LINES).join("\n");
+  const tail = plain.trimEnd().split("\n").slice(-MAX_LOG_LINES).join("\n");
+  return tail.length <= MAX_LOG_CHARS ? tail : tail.slice(-MAX_LOG_CHARS);
 }
