@@ -64,11 +64,19 @@ const status = (claimed: readonly number[] | "down") =>
     line: "posted #12 at aaaa1111",
   });
 
-describe("status: when the orchestrator last ran (#103)", () => {
+// an orchestrator loop meant to be running for the project: its loop file (#305)
+function loopFor(project: string): void {
+  mkdirSync(join(home, "runs", project), { recursive: true });
+  writeFileSync(join(home, "runs", project, "loop.pid"), "999999999:x");
+}
+
+describe("status: when the orchestrator last ran, while a loop is meant to be running (#103, #305)", () => {
+  beforeEach(() => loopFor("ledger"));
+
   it("flags the line when the last poll is older than three intervals while a ticket is claimed", async () => {
     expect((await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(16) } })).kind).toBe("ok");
     expect(await status([12])).toBe(
-      "LATE: orchestrator last ran 16 min ago, over 3 poll intervals of 5 min, while 1 change is claimed; check its cron or launchd job; posted #12 at aaaa1111",
+      "LATE: orchestrator last ran 16 min ago, over 3 poll intervals of 5 min, while 1 change is claimed; the loop has stopped: run `agent-factory dispatch ledger`; posted #12 at aaaa1111",
     );
   });
 
@@ -89,11 +97,53 @@ describe("status: when the orchestrator last ran (#103)", () => {
     );
   });
 
-  it("flags an orchestrator that never ran while a ticket is claimed", async () => {
-    expect(await status([12])).toMatch(/^LATE: the orchestrator has never run here, while 1 change is claimed; /);
-    expect(await status([])).toBe("orchestrator has not run here yet; posted #12 at aaaa1111");
+  it("names a broken last-poll file, never reading it as never ran", async () => {
+    writeFileSync(join(home, "runs", "ledger", "last-poll.json"), "{");
+    expect(await status([12])).toMatch(
+      /^orchestrator last ran: cannot tell: .*last-poll\.json is not a last-poll record/,
+    );
+    expect(lastPollOf(JSON.stringify({ ...POLL, pollMinutes: 0 }))).toBe("bad");
+    expect(lastPollOf(JSON.stringify({ ...POLL, forge: "bitbucket" }))).toBe("bad");
+    expect(
+      livenessLine({
+        last: { kind: "failed", reason: "x" },
+        now: NOW,
+        claimed: { kind: "count", count: 0 },
+        loop: { meant: true, project: "ledger" },
+      }),
+    ).toBe("orchestrator last ran: cannot tell: x");
+  });
+});
+
+describe("status: with no orchestrator loop meant to be running (#305)", () => {
+  it("is never LATE: it says no loop runs, and names the command while a change is claimed", async () => {
+    await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(600) } });
+    expect(await status([12])).toBe(
+      "no orchestrator loop running; run `agent-factory dispatch ledger`; posted #12 at aaaa1111",
+    );
+    expect(await status("down")).toMatch(/^no orchestrator loop running; run `agent-factory dispatch ledger`; /);
+    expect(await status([])).toBe("no orchestrator loop running; posted #12 at aaaa1111");
   });
 
+  it("names no project when no pass has run here, and reads another repository's loop as none", async () => {
+    expect(await status([12])).toBe(
+      "no orchestrator loop running; run `agent-factory dispatch <project>`; posted #12 at aaaa1111",
+    );
+    await writeLastPoll({ home, project: "other", poll: { ...POLL, repo: "chiyanram/other" } });
+    loopFor("other");
+    expect(await status([12])).toMatch(/^no orchestrator loop running; /);
+  });
+
+  it("shows the loop as meant to run from its file, and as gone once the file is", async () => {
+    await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(30) } });
+    loopFor("ledger");
+    expect(await status([12])).toMatch(/^LATE: orchestrator last ran 30 min ago, /);
+    rmSync(join(home, "runs", "ledger", "loop.pid"));
+    expect(await status([12])).toMatch(/^no orchestrator loop running; /);
+  });
+});
+
+describe("status: the newest pass", () => {
   it("reads the newest pass for this git host and repository, and never another's", async () => {
     await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(50) } });
     await writeLastPoll({ home, project: "ledger-2", poll: { ...POLL, at: ago(2) } });
@@ -103,17 +153,27 @@ describe("status: when the orchestrator last ran (#103)", () => {
     expect(read).toEqual({ kind: "ok", value: { ...POLL, at: ago(2) } });
   });
 
-  it("names a broken last-poll file, never reading it as never ran", async () => {
-    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
-    writeFileSync(join(home, "runs", "ledger", "last-poll.json"), "{");
-    expect(await status([12])).toMatch(
-      /^orchestrator last ran: cannot tell: .*last-poll\.json is not a last-poll record/,
-    );
-    expect(lastPollOf(JSON.stringify({ ...POLL, pollMinutes: 0 }))).toBe("bad");
-    expect(lastPollOf(JSON.stringify({ ...POLL, forge: "bitbucket" }))).toBe("bad");
+  it("flags a loop that never ran while a ticket is claimed", async () => {
+    // a loop file with no pass yet cannot be tied to the repository, so none is meant to be running
+    expect(await status([12])).toMatch(/^no orchestrator loop running; /);
     expect(
-      livenessLine({ last: { kind: "failed", reason: "x" }, now: NOW, claimed: { kind: "count", count: 0 } }),
-    ).toBe("orchestrator last ran: cannot tell: x");
+      livenessLine({
+        last: { kind: "ok", value: "none" },
+        now: NOW,
+        claimed: { kind: "count", count: 1 },
+        loop: { meant: true, project: "ledger" },
+      }),
+    ).toBe(
+      "LATE: the orchestrator loop has never run here, while 1 change is claimed; run `agent-factory dispatch ledger`",
+    );
+    expect(
+      livenessLine({
+        last: { kind: "ok", value: "none" },
+        now: NOW,
+        claimed: { kind: "count", count: 0 },
+        loop: { meant: true, project: "ledger" },
+      }),
+    ).toBe("orchestrator has not run here yet");
   });
 });
 
