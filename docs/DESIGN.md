@@ -153,7 +153,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 | PR body | `.factory/pr.md`, written by the implementer and posted by the host (who owns it is open, see section 9) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
-| finding | id, lens, axis, kind, file, line, rule, severity, evidence (`cited`, `walked` or `ran`), fix |
+| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), evidence (`cited`, `walked` or `ran`), fix |
 | verdict | id, bucket (`act_on`, `consider`, `noted`, `dismissed`), why |
 
 **Tests are judged twice:**
@@ -270,7 +270,8 @@ ADR-0006 (a service account per developer) is already replaced by 0012 S14.
 | 1, alongside | fixes found on the way | #185 #199 #200 #138 | `make lint` and `make test` |
 | 2 | plugins, role cards, the new runs and settings | #229 #232 #236 (with chiyanram/skills#237) | a run with no plugin, with the rulebook, and with a stand-in team plugin |
 | 3 | **ledger pilot**, with project setup by the onboarder | #235 #62 (with #158, #130 on the VM) | the targets in section 6 |
-| 4 | aruvii: tiny and docs tickets first, then bug, then feature | #233 #234 #237 #35 #38 #40 #41 #42 #43 #44; the automated review changes of ADR-0015 #218–#221 | the same targets |
+| 3b | **release 1.0** | #240 | the pilot passed; the docs match what 1.0 does |
+| 4 | aruvii, after 1.0: agent-platform changes made locally and tested, then pushed and moved to the Contabo VM; tiny and docs tickets first, then bug, then feature. It adopts the crq plugin (#40); the Verifier stays as its gate (#234), and the cutover retires only the old fleet (#44) | #233 #234 #237 #35 #38 #40 #42 #43 #44; #41 (backup gate, optional); the automated review changes of ADR-0015 #218–#221 | the same targets |
 | 5 | work laptop | #162 #114 #198 | the same targets on the small laptop; specs never in git |
 | 6 | colleagues | Jira approval · spec PR · team template | the same targets with 2–3 colleagues |
 | later | web app (#120) · signed approvals on laptops · scheduled extra tasks · the RCA agent | — | — |
