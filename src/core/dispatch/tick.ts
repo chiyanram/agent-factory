@@ -18,6 +18,7 @@
 // project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or none>", for
 // people to see. It never starts anything: the orchestrator decides only from the local records.
 
+import type { PluginHash } from "../process/use.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { needsApproval, oneWayDoorPathsOf, plannedCheck } from "../lane.js";
+import { needsApproval, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
@@ -48,6 +49,8 @@ import { writeLastPoll } from "./last-poll.js";
 import type { Spend } from "./spend.js";
 import type { Acted } from "../review/acted-on.js";
 import { projectStop, type Caps, type Stop } from "./caps.js";
+import { openAt } from "./hours.js";
+import { settingName } from "../settings/machine.js";
 import { readSpends } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
@@ -85,6 +88,8 @@ export type Steps = {
       readonly hung: boolean;
       // what the run spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // each cite of the project's brief that went stale (#235)
+      readonly stale?: readonly string[];
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
@@ -113,7 +118,7 @@ export type Steps = {
 export const STEPS_TODAY: Steps = {
   writer: { kind: "unavailable", reason: "the writer's box is not built yet (#113)" },
   ready: { kind: "unavailable", reason: "the ready check needs a box (#113) and the project file" },
-  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and FACTORY_RULEBOOK" },
+  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and a plugin that holds its references" },
   verify: { kind: "unavailable", reason: "the local verifier needs a box (#113) and the project file" },
 };
 
@@ -136,6 +141,10 @@ export type TickSetup = {
   readonly log: (line: string) => void;
   // a person's ping when a ticket needs them (#119); NO_NOTIFY when the project maps no notify plugin
   readonly notify: Notify;
+  // the plugins this pass's runs use, each with its hash, for the run records (#232); none when it lists none
+  readonly plugins?: readonly PluginHash[];
+  // the project's lanes, from its process plugin or the built-in process (#232); the default lanes when absent
+  readonly lanes?: readonly LaneProps[];
   // the ticket, day and window caps (#131)
   readonly caps: Caps;
 };
@@ -184,7 +193,7 @@ async function startedView(
     return { kind: "unwritten" };
   }
   const { lane } = spec.spec;
-  if (!needsApproval(lane)) {
+  if (!needsApproval(lane, setup.lanes)) {
     return { kind: "started", at: started.at, lane };
   }
   return stale ? { kind: "stale" } : { kind: "unapproved", lane };
@@ -507,7 +516,7 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
   // a person, never a claim with no record, which would look like someone else's
   const started = await record({
     where: place,
-    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) },
+    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state), plugins: usedBy(setup) },
   });
   const claimed = started.kind === "ok" ? await claim(setup, state) : started;
   if (claimed.kind === "failed") {
@@ -538,6 +547,11 @@ async function writerEnded(
   return ended.kind === "ok" && message !== "none" ? informed(setup, message) : ended;
 }
 
+// usedBy : the plugins and hashes a run of this pass records
+function usedBy(setup: TickSetup): readonly PluginHash[] {
+  return setup.plugins ?? [];
+}
+
 // startCheck : the "started" line of a ready check or a review, or why it cannot start
 async function startCheck(
   setup: TickSetup,
@@ -545,7 +559,10 @@ async function startCheck(
   phase: "ready" | "review" | "verify",
   head: string,
 ): Promise<Done> {
-  return record({ where: where(setup, state), event: { at: at(setup), kind: "started", phase, mode: "none", head } });
+  return record({
+    where: where(setup, state),
+    event: { at: at(setup), kind: "started", phase, mode: "none", head, plugins: usedBy(setup) },
+  });
 }
 
 // failedAt : a failed check's nextTry, as a field to spread; n counts this failure (#228)
@@ -826,17 +843,61 @@ async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Pro
   return true;
 }
 
-// runPass : the first run that can start, and no other: runs at once is 1; none while the project is at a cap
+// what a run held outside the run hours is recorded with; the orchestrator loop ends on it (runHoursEnd)
+const OUTSIDE_HOURS = "held: outside";
+
+// runHoursEnd : after a pass that held a run outside the run hours, what to tell the human; "none" otherwise. The
+// orchestrator loop ends then, with this line, and never waits for the hours (#299; no job runs in the background):
+// the held runs stay in the records, so the next dispatch picks them up. Pure.
+export function runHoursEnd(setup: Pick<TickSetup, "project" | "caps">, ran: readonly Ran[]): string {
+  const hours = setup.caps.runHours;
+  const held = ran.some((r) => r.result.kind === "unavailable" && r.result.reason.startsWith(OUTSIDE_HOURS));
+  return held && hours !== "any"
+    ? `run hours are ${hours.text} UTC; run \`agent-factory dispatch ${setup.project}\` again then`
+    : "none";
+}
+
+// closed : every run held while the hour is outside the run hours (hours.ts); nothing is stopped, and the tickets stay
+// in flight, so a dispatch started inside the hours runs them (runHoursEnd)
+function closed(setup: TickSetup, runs: readonly Later[], ran: Ran[]): boolean {
+  const hours = setup.caps.runHours;
+  if (runs.length === 0 || hours === "any" || openAt(hours, setup.now())) {
+    return false;
+  }
+  const why = `the run hours ${hours.text} (UTC, ${settingName("runHours")})`;
+  setup.log(`no new runs: outside ${why}`);
+  for (const { state, action } of runs) {
+    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `${OUTSIDE_HOURS} ${why}` } });
+  }
+  return true;
+}
+
+// runPass : up to runs at once of the runs that can start, one after another; none outside the run hours, and none
+// while the project is at a cap, checked again before each run after the first
 async function runPass(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
   const runs = later.filter((l) => RUN_KINDS.has(l.action.kind));
-  if (!(await paused(setup, runs, ran))) {
-    await firstRun(setup, later, ran);
+  if (closed(setup, runs, ran)) {
+    return;
+  }
+  await someRuns(setup, later, ran, setup.caps.runsAtOnce);
+}
+
+// someRuns : up to `most` runs from `later`, the caps checked before each
+async function someRuns(setup: TickSetup, later: readonly Later[], ran: Ran[], most: number): Promise<void> {
+  const pending = later.filter((l) => RUN_KINDS.has(l.action.kind));
+  if (most < 1 || pending.length === 0 || (await paused(setup, pending, ran))) {
+    return;
+  }
+  const next = await firstRun(setup, later, ran);
+  if (next !== "none") {
+    await someRuns(setup, later.slice(next + 1), ran, most - 1);
   }
 }
 
-// firstRun : the first run that can start; an unavailable step lets the next one try
-async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
-  for (const { state, action } of later) {
+// firstRun : the first run that can start, and the index of its entry in `later`, or "none"; an unavailable step
+// lets the next one try
+async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<number | "none"> {
+  for (const [i, { state, action }] of later.entries()) {
     const pending = runAction(setup, state, action);
     const result = pending === "none" ? "none" : await pending;
     if (result === "none") {
@@ -845,9 +906,10 @@ async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): 
     ran.push({ ticket: state.ticket, action, result });
     logResult(setup, state.ticket, result);
     if (result.kind !== "unavailable") {
-      return;
+      return i;
     }
   }
+  return "none";
 }
 
 async function actAll(setup: TickSetup, decided: readonly Decided[]): Promise<readonly Ran[]> {

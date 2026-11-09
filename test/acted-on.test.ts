@@ -33,6 +33,7 @@ const sorted = (over: Partial<Sorted>): Sorted => ({
   file: "a.ts",
   line: 10,
   rule: "R1",
+  category: "bug",
   severity: "warning",
   finding: "x",
   fix: "y",
@@ -67,13 +68,13 @@ describe("acted on, the parts", () => {
   it("tracks Act on and Consider findings only, by the finder that found them", () => {
     const all = [
       sorted({ id: "F1" }),
-      sorted({ id: "F2", bucket: "consider", kind: "logic" }),
+      sorted({ id: "F2", bucket: "consider", kind: "logic", category: "test_gap" }),
       sorted({ id: "F3", bucket: "noted" }),
       sorted({ id: "F4", bucket: "dismissed" }),
     ];
     expect(trackedOf(all)).toEqual([
-      { id: "F1", lens: "rule", bucket: "act_on", file: "a.ts", line: 10 },
-      { id: "F2", lens: "logic", bucket: "consider", file: "a.ts", line: 10 },
+      { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 10 },
+      { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 10 },
     ]);
   });
 
@@ -88,7 +89,14 @@ describe("acted on, the parts", () => {
   });
 
   it("counts a finding acted on within REGION lines of a changed span, and not one line further", () => {
-    const at = (file: string, line: number): Tracked => ({ id: "F", lens: "rule", bucket: "act_on", file, line });
+    const at = (file: string, line: number): Tracked => ({
+      id: "F",
+      lens: "rule",
+      category: "bug",
+      bucket: "act_on",
+      file,
+      line,
+    });
     const spans = changedSpans(DIFF);
     const rows = actedRows(
       [at("a.ts", 11 + REGION), at("a.ts", 12 + REGION), at("a.ts", 10 - REGION), at("gone.ts", 2), at("b.ts", 10)],
@@ -101,6 +109,7 @@ describe("acted on, the parts", () => {
     const row = (lens: "rule" | "logic", bucket: "act_on" | "consider", acted: boolean) => ({
       id: "F",
       lens,
+      category: lens === "rule" ? ("bug" as const) : ("security" as const),
       bucket,
       file: "a.ts",
       line: 1,
@@ -111,11 +120,13 @@ describe("acted on, the parts", () => {
     ).toEqual({
       all: { acted: 2, of: 3 },
       lens: { logic: { acted: 1, of: 1 }, rule: { acted: 1, of: 2 } },
+      category: { bug: { acted: 1, of: 2 }, security: { acted: 1, of: 1 } },
       bucket: { act_on: { acted: 2, of: 2 }, consider: { acted: 0, of: 1 } },
     });
     expect(isActedRow(row("rule", "act_on", true))).toBe(true);
     expect(isActedRow({ ...row("rule", "act_on", true), bucket: "noted" })).toBe(false);
     expect(isActedRow({ ...row("rule", "act_on", true), acted: "yes" })).toBe(false);
+    expect(isActedRow({ ...row("rule", "act_on", true), category: "vibes" })).toBe(false);
   });
 
   it("diffs the round's head with the head now in a real clone; none when the round kept nothing", async () => {
@@ -145,8 +156,8 @@ describe("acted on, the parts", () => {
     expect(await actedSince(input)).toEqual({
       since,
       rows: [
-        { id: "F1", lens: "rule", bucket: "act_on", file: "a.ts", line: 3, acted: true },
-        { id: "F2", lens: "rule", bucket: "consider", file: "a.ts", line: 25, acted: false },
+        { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 3, acted: true },
+        { id: "F2", lens: "rule", category: "bug", bucket: "consider", file: "a.ts", line: 25, acted: false },
       ],
     });
     expect(await actedSince({ ...input, head: "f".repeat(40) })).toBe("none");
@@ -155,8 +166,8 @@ describe("acted on, the parts", () => {
 
 describe("acted on, in the run records and usage", () => {
   const rows = [
-    { id: "F1", lens: "rule", bucket: "act_on", file: "a.ts", line: 3, acted: true },
-    { id: "F2", lens: "logic", bucket: "consider", file: "a.ts", line: 25, acted: false },
+    { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 3, acted: true },
+    { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 25, acted: false },
   ] as const;
 
   it("keeps the rows on a review-ended line, and refuses a line whose rows are not as written", async () => {
@@ -170,9 +181,9 @@ describe("acted on, in the run records and usage", () => {
     const spends = await readSpends({ home: dir });
     expect(spends.acted).toEqual([{ project: "ledger", at: "2026-11-09T10:00:00Z", rows }]);
     expect(actedLines({ acted: spends.acted, now: Date.parse("2026-11-09T12:00:00Z") })).toEqual([
-      "acted on this month: findings in Act on or Consider whose region a later commit changed, per lens and bucket",
-      "all 1/2 · logic 0/1 · rule 1/1 · act_on 1/1 · consider 0/1",
-      "  ledger 1/2 · logic 0/1 · rule 1/1 · act_on 1/1 · consider 0/1",
+      "acted on this month: findings in Act on or Consider whose region a later commit changed, per lens, category and bucket",
+      "all 1/2 · logic 0/1 · rule 1/1 · bug 1/1 · test_gap 0/1 · act_on 1/1 · consider 0/1",
+      "  ledger 1/2 · logic 0/1 · rule 1/1 · bug 1/1 · test_gap 0/1 · act_on 1/1 · consider 0/1",
     ]);
     expect(actedLines({ acted: spends.acted, now: Date.parse("2026-12-01T00:00:00Z") })).toEqual([]);
     const bad = JSON.stringify({

@@ -29,7 +29,6 @@ function git(input: CopyInput, args: readonly string[]): ReturnType<typeof hostG
     args: [`--work-tree=${input.into}`, "-c", "core.attributesFile=/dev/null", "-c", "core.autocrlf=false", ...args],
     repo: { kind: "repo", path: input.repo },
     env: { ...input.env, GIT_INDEX_FILE: join(input.into, "..", "index") },
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }

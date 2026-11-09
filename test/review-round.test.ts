@@ -1,3 +1,4 @@
+import { FLOOR } from "../src/core/review/never.js";
 import { readActOn } from "../src/core/review/act-on.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -28,6 +29,7 @@ const FINDING = {
   file: "code/svc/Main.java",
   line: 1,
   rule: "ERR1",
+  category: "bug",
   severity: "blocker",
   finding: "returns 2",
   fix: "return the sum",
@@ -137,7 +139,7 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     env: p.env,
     home: home(),
     project: "ledger",
-    rulebook: RULEBOOK,
+    plugins: [{ label: "rulebook", dir: RULEBOOK }],
     packDir: join(p.root, "packs"),
     recordsDir: join(p.root, "records"),
     runsDir: join(p.root, "runs"),
@@ -159,7 +161,14 @@ describe("reviewRound", () => {
   it("runs find once and verify once per kind, each fresh and read-only, then posts threads and one summary", async () => {
     const log = fresh();
     const seen: Seen[] = [];
-    const logic = { ...FINDING, kind: "logic", axis: "spec", rule: "correctness", finding: "AC1 not met" };
+    const logic = {
+      ...FINDING,
+      kind: "logic",
+      axis: "spec",
+      rule: "correctness",
+      category: "speculative",
+      finding: "AC1 not met",
+    };
     const m = model(
       [
         findAnswer([FINDING, logic]),
@@ -177,7 +186,7 @@ describe("reviewRound", () => {
     expect(seen.every((s) => s.run.maxUsd === "2" && s.run.name === "reviewer-12")).toBe(true);
     expect(log.threads).toHaveLength(2);
     expect(log.threads[0]).toMatch(
-      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, ERR1\): returns 2\n\n- Fix: return the sum$/,
+      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum$/,
     );
     const summary = log.posts.at(-1) ?? "";
     expect(summary.split("\n")[0]).toMatch(
@@ -185,9 +194,36 @@ describe("reviewRound", () => {
         `^\\[reviewer\\] round 1 · head ${p.head2} · patch-id [0-9a-f]+ · Act on 1 · Consider 1 · Noted 0 · Dismissed 0$`,
       ),
     );
-    expect(summary).toContain("- Standards · Act on F1 svc/Main.java:1 ERR1: returns 2 (real)");
-    expect(summary).toContain("- Spec · Consider F2 svc/Main.java:1 correctness: AC1 not met (judgment)");
+    expect(summary).toContain("- Standards · Act on F1 svc/Main.java:1 ERR1 (bug): returns 2 (real)");
+    expect(summary).toContain("- Spec · Consider F2 svc/Main.java:1 correctness (speculative): AC1 not met (judgment)");
     expect(readdirSync(join(p.root, "runs"))).toEqual([]);
+  });
+
+  it("quotes the approved spec's criterion a Spec finding fails, in its thread and the summary (#219)", async () => {
+    const log = fresh();
+    const spec = { ...FINDING, axis: "spec", rule: "AC2", finding: "an empty order totals 1" };
+    const stray = { ...FINDING, axis: "spec", rule: "AC9", finding: "names a criterion the spec lacks" };
+    const standards = { ...FINDING, rule: "AC2" };
+    const m = model(
+      [
+        findAnswer([spec, stray, standards]),
+        verdicts([
+          { id: "F1", bucket: "act_on", why: "real" },
+          { id: "F2", bucket: "consider", why: "maybe" },
+          { id: "F3", bucket: "consider", why: "maybe" },
+        ]),
+      ],
+      [],
+    );
+    await reviewRound(setup(forge(log), m));
+    expect(log.threads[0]).toContain("- Criterion: 2. SPEC-AC2: an empty order totals 0.\n- Fix: return the sum");
+    expect(log.threads[1]).toContain("- Criterion: AC9 is not in the approved spec");
+    expect(log.threads[2]).not.toContain("Criterion");
+    const summary = log.posts.at(-1) ?? "";
+    expect(summary).toContain(
+      "- Spec · Act on F1 svc/Main.java:1 AC2 (bug): an empty order totals 1 (real) · criterion 2. SPEC-AC2: an empty order totals 0.",
+    );
+    expect(summary).toContain("- Standards · Consider F3 svc/Main.java:1 AC2 (bug): returns 2 (maybe)\n");
   });
 
   it("shows each run the pack and the whole head, never a rule file, a symlink or a .gitattributes rewrite", async () => {
@@ -235,7 +271,9 @@ describe("reviewRound", () => {
     expect(JSON.parse(seen[1]?.findings ?? "[]").map((f: { id: string; file: string }) => `${f.id} ${f.file}`)).toEqual(
       ["F1 svc/Main.java", "F2 svc/Main.java"],
     );
-    expect(log.posts.at(-1)).toContain("Consider F2 svc/Main.java:1 ERR1: second (the verify pass gave no verdict)");
+    expect(log.posts.at(-1)).toContain(
+      "Consider F2 svc/Main.java:1 ERR1 (bug): second (the verify pass gave no verdict)",
+    );
   });
 
   it("zero findings still posts the summary and says it is not a pass (#118)", async () => {
@@ -243,6 +281,36 @@ describe("reviewRound", () => {
     await reviewRound(setup(forge(log), model([findAnswer([])], [])));
     expect(log.posts.at(-1)).toContain("No findings. That is not a pass: the human still reviews before merge");
     expect(log.threads).toEqual([]);
+  });
+
+  it("reads its references from the project's plugins; with none, it stops with the reason and posts nothing (#232)", async () => {
+    const log = fresh();
+    const out = await reviewRound(setup(forge(log), model([], []), { plugins: [] }));
+    expect(out).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("needs a plugin that holds its review"),
+    });
+    expect(log.posts).toEqual([]);
+    // a plugin with no process still serves the built-in baseline's references
+    const other = { label: "team@acme", dir: join(p.root, "none") };
+    await reviewRound(
+      setup(forge(log), model([findAnswer([])], []), { plugins: [{ label: "rulebook", dir: RULEBOOK }, other] }),
+    );
+    expect(log.posts.at(-1)).toContain("No findings");
+  });
+
+  it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {
+    const bare = join(p.root, "bare-find.md");
+    writeFileSync(bare, "Find what breaks. Report each finding.\n");
+    const seen: Seen[] = [];
+    await reviewRound(
+      setup(forge(fresh()), model([findAnswer([FINDING]), verdicts([])], seen), {
+        prompts: { find: bare, verify: PROMPTS.verify },
+      }),
+    );
+    expect(seen.map((s) => s.run.prompt.startsWith(FLOOR))).toEqual([true, true]);
+    expect(seen[0]?.run.prompt).toContain("approve or merge");
+    expect(seen[0]?.run.prompt.endsWith("Find what breaks. Report each finding.\n")).toBe(true);
   });
 
   it("a head that moved during the review posts nothing: MOVED", async () => {
@@ -318,8 +386,16 @@ describe("reviewRound", () => {
         acted: {
           since: p.head2,
           rows: [
-            { id: "F1", lens: "rule", bucket: "act_on", file: "svc/Main.java", line: 1, acted: true },
-            { id: "F2", lens: "logic", bucket: "consider", file: "docs/design/order.md", line: 40, acted: false },
+            { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "svc/Main.java", line: 1, acted: true },
+            {
+              id: "F2",
+              lens: "logic",
+              category: "bug",
+              bucket: "consider",
+              file: "docs/design/order.md",
+              line: 40,
+              acted: false,
+            },
           ],
         },
       },
@@ -761,11 +837,12 @@ describe("reviewStep", () => {
       },
     },
   });
-  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_RULEBOOK: RULEBOOK, FACTORY_HOME: home() });
+  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_HOME: home() });
+  const plugins = [{ label: "rulebook", dir: RULEBOOK }];
   const none = async () => ({ kind: "ok" as const, value: [] });
 
   it("is unavailable without its settings, and refuses a bad one", () => {
-    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram", project: "ledger" })).toMatchObject({
+    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram", project: "ledger", plugins })).toMatchObject({
       kind: "unavailable",
     });
     expect(
@@ -774,6 +851,7 @@ describe("reviewStep", () => {
         forge: forge(fresh()),
         factory: "ram",
         project: "ledger",
+        plugins,
       }),
     ).toMatchObject({ kind: "unavailable", reason: expect.stringContaining("FACTORY_MAX_RUNS") });
   });
@@ -785,6 +863,7 @@ describe("reviewStep", () => {
       forge: forge(fresh()),
       factory: "ram",
       project: "ledger",
+      plugins,
       model: m(),
       sessions: none,
     });
@@ -798,6 +877,7 @@ describe("reviewStep", () => {
       forge: forge(fresh(), { moveTo: "f".repeat(40) }),
       factory: "ram",
       project: "ledger",
+      plugins,
       model: m(),
       sessions: none,
     });
@@ -825,6 +905,7 @@ describe("reviewStep", () => {
       forge: forge(fresh()),
       factory: "ram",
       project: "ledger",
+      plugins,
       model: failing,
       sessions: none,
     });

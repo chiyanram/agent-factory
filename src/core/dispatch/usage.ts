@@ -165,7 +165,8 @@ function rateText(name: string, r: Rate): string {
   return `${name} ${r.acted}/${r.of}`;
 }
 
-// actedLines : the automated review's acted-on rate this month, all and per project, per lens and per bucket (#220).
+// actedLines : the automated review's acted-on rate this month, all and per project, per lens, category and bucket
+// (#220).
 // Pure.
 export function actedLines(input: { readonly acted: readonly ActedSeen[]; readonly now: number }): readonly string[] {
   const month = periodsAt(input.now, 1).month;
@@ -175,12 +176,12 @@ export function actedLines(input: { readonly acted: readonly ActedSeen[]; readon
   }
   const line = (name: string, rows: readonly ActedRow[]): string => {
     const r = actedRates(rows);
-    const parts = [...Object.entries(r.lens), ...Object.entries(r.bucket)].map(([k, v]) => rateText(k, v));
+    const parts = [r.lens, r.category, r.bucket].flatMap((by) => Object.entries(by).map(([k, v]) => rateText(k, v)));
     return [rateText(name, r.all), ...parts].join(" · ");
   };
   const projects = [...new Set(seen.map((a) => a.project))].toSorted();
   return [
-    "acted on this month: findings in Act on or Consider whose region a later commit changed, per lens and bucket",
+    "acted on this month: findings in Act on or Consider whose region a later commit changed, per lens, category and bucket",
     line(
       "all",
       seen.flatMap((a) => a.rows),

@@ -36,7 +36,6 @@ function request(args: readonly string[], more: Partial<GitRequest> = {}): GitRe
     args,
     repo: { kind: "repo", path: repo },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
     ...more,
   };
@@ -202,17 +201,12 @@ describe("hostGit keeps what the operator chose", () => {
     expect(effective(ok(await read("")))).toEqual(["system-helper"]);
   });
 
-  it("keeps the factory's own App helper at its exact path, never a look-alike", async () => {
+  it("keeps no helper the repo sets, not even one that names the factory's own App helper (#138)", async () => {
     const own = "!/opt/agent-factory/scripts/github-app.sh git-credential";
     const key = "credential.https://github.com.helper";
     git(["config", "--add", key, ""]);
     git(["config", "--add", key, own]);
-    git(["config", "--add", key, "!/elsewhere/github-app.sh git-credential"]);
-    expect(
-      effective(
-        ok(await hostGit(request(["config", "--get-all", key], { ownHelper: { kind: "helper", value: own } }))),
-      ),
-    ).toEqual([own]);
+    expect(effective(ok(await hostGit(request(["config", "--get-all", key]))))).toEqual([]);
   });
 
   it("an always-set key takes the operator's own value when there is one", async () => {
@@ -234,7 +228,6 @@ describe("hostGit keeps what the operator chose", () => {
       args: ["hash-object", "--stdin"],
       repo: { kind: "none" },
       env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "text", text: "x" },
     }).finally(() => process.chdir(before));
     expect(ok(result).trim()).toBe(
@@ -285,7 +278,7 @@ describe("trustedPath and plan", () => {
   });
 
   it("plans the always-set keys even for a repo that sets nothing", () => {
-    const planned = plan([], [], () => [], { kind: "none" });
+    const planned = plan([], []);
     expect(planned).toMatchObject({ kind: "ok" });
     const keys = planned.kind === "ok" ? planned.overrides.map((o) => o.key) : [];
     expect(keys).toContain("core.fsmonitor");

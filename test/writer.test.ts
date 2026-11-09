@@ -20,7 +20,14 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, stallOf } from "../src/core/writer/settings.js";
-import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import {
+  FOREGROUND,
+  KNOWLEDGE,
+  PROJECT_INSTRUCTIONS,
+  promptFor,
+  writerStep,
+  type WriterSetup,
+} from "../src/core/writer/step.js";
 import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
@@ -232,7 +239,7 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       runsDir: join(p.root, "box-runs"),
     },
     settings: {
-      rulebook,
+      plugins: [rulebook],
       timeoutSeconds: 3600,
       claude: { maxUsd: "2", model: "" },
       completion: FAST,
@@ -355,7 +362,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
     const spec = started(fake);
-    expect(spec.readOnly).toEqual(["AGENTS.md", ".git/config", ".git/hooks", ".factory/spec.md", ".factory/rulebook"]);
+    expect(spec.readOnly).toEqual(["AGENTS.md", ".git/config", ".git/hooks", ".factory/spec.md", ".factory/plugins/1"]);
     expect(spec.network).toBe("factory-int-ledger");
     expect(spec.env).toMatchObject({
       CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test",
@@ -366,7 +373,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(Object.keys(spec.env)).not.toContain("GITHUB_TOKEN");
     expect(Object.keys(spec.env)).not.toContain("PATH");
     const ran = command(fake);
-    expect(ran.argv).toEqual(claudeArgv({ maxUsd: "2", model: "" }));
+    expect(ran.argv).toEqual(claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1));
     expect(ran.stdin).toMatchObject({
       kind: "text",
       text: expect.stringContaining("fix PROJ-1 on factory/PROJ-1 at"),
@@ -802,6 +809,7 @@ const FINDING: Sorted = {
   file: "src/Renewal.java",
   line: 7,
   rule: "R-3",
+  category: "bug",
   severity: "blocker",
   finding: "a reserved loan still renews",
   fix: "refuse it with 409",
@@ -993,22 +1001,35 @@ describe("the writer's words and settings", () => {
     expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
   });
 
-  it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, streamed output, the cap and model only when set", () => {
+  it("runs claude with no settings of the branch, skip-all, each plugin with --plugin-dir, streamed output, the cap and model only when set", () => {
     // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
     // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
-    expect(claudeArgv({ maxUsd: "", model: "" })).toEqual([
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1)).toEqual([
       "claude",
       "-p",
       "--setting-sources",
       "user",
       "--dangerously-skip-permissions",
       "--plugin-dir",
-      ".factory/rulebook",
+      ".factory/plugins/1",
       "--output-format",
       "stream-json",
       "--verbose",
     ]);
-    expect(claudeArgv({ maxUsd: "2", model: "opus" }).slice(-4)).toEqual(["--max-budget-usd", "2", "--model", "opus"]);
+    // the engine runs alone with no plugin, and hands two plugins in the project's order (#232)
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0)).not.toContain("--plugin-dir");
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2).slice(5, 9)).toEqual([
+      "--plugin-dir",
+      ".factory/plugins/1",
+      "--plugin-dir",
+      ".factory/plugins/2",
+    ]);
+    expect(claudeArgv({ maxUsd: "2", model: "opus" }, { kind: "none" }, 1).slice(-4)).toEqual([
+      "--max-budget-usd",
+      "2",
+      "--model",
+      "opus",
+    ]);
   });
 
   it("gives a run 60 minutes unless FACTORY_WRITER_MINUTES says otherwise, from 1 to 240", () => {
@@ -1021,5 +1042,52 @@ describe("the writer's words and settings", () => {
 
   it("is unavailable with the reason when its setup is not there", () => {
     expect(writerStep({ kind: "failed", reason: "no box" })).toEqual({ kind: "unavailable", reason: "no box" });
+  });
+});
+
+describe("the writer step: the project's brief and glossary (#235)", () => {
+  // an accepted brief, as agent-factory onboard accept leaves it: its cites keep each line's text
+  function accepted(cites: readonly { readonly file: string; readonly line: number; readonly text: string }[]): void {
+    const dir = join(home, "projects", "ledger");
+    mkdirSync(dir, { recursive: true });
+    const brief = "# ledger: brief\n\n- `make test` (`Makefile:1`, verified)\n";
+    const glossary = "# ledger: glossary\n\n- **Renewal**: a loan extended. _Avoid_: extension.\n";
+    writeFileSync(join(dir, "brief.md"), brief);
+    writeFileSync(join(dir, "glossary.md"), glossary);
+    writeFileSync(join(dir, "cites.json"), JSON.stringify(cites));
+    const record = { version: 1, kind: "knowledge", brief_hash: specHash(brief), glossary_hash: specHash(glossary) };
+    writeFileSync(join(dir, "knowledge.json"), JSON.stringify(record));
+  }
+
+  it("hands the run the accepted brief and glossary, and puts each stale cite in its record", async () => {
+    accepted([
+      { file: "svc/Main.java", line: 1, text: "class Main {}" },
+      { file: "svc/Main.java", line: 1, text: "class Gone {}" },
+    ]);
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    let brief = "";
+    const reading: Box = {
+      ...fake.box,
+      run: async (call) => {
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const dir = start?.op === "start" ? start.spec.worktree : "";
+        brief = readFileSync(join(dir, ".factory", "brief.md"), "utf8");
+        commitWork(dir, { commit: true, report: DONE, exit: 0 });
+        writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(DONE));
+        await fake.box.run(call);
+        return { kind: "exited", code: 0, stdout: "{}", stderr: "" };
+      },
+    };
+    const out = await run(setup(reading, forge(), []), FIX);
+    expect(brief).toContain("`make test`");
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringContaining(KNOWLEDGE) });
+    expect(valueOf(out).stale).toEqual(["svc/Main.java:1 is stale: its line changed"]);
+  });
+
+  it("a run with no accepted brief goes without one and reports nothing", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out).stale).toBeUndefined();
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.not.stringContaining(KNOWLEDGE) });
   });
 });

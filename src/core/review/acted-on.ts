@@ -5,13 +5,14 @@
 // numbering, is within REGION lines of it. The run records carry the rows (records.ts, review-ended), and `usage`
 // sums them per lens and bucket (usage.ts).
 //
-// The lens is the finder that found it: rule or logic (Finding.kind). A category joins the rows once findings carry one
-// (#218). A diff that merges the default branch in can touch a finding's region too, so the rate counts such a line as
+// The lens is the finder that found it: rule or logic (Finding.kind); the category is the finding's Martian category
+// (#218), so the rate reads per category too. A diff that merges the default branch in can touch a finding's region too, so the rate counts such a line as
 // acted on: an upper bound, never a model's guess.
 
 import type { Result } from "../forge/api.js";
 import { hostGit } from "../git.js";
 import { keepText, readKept, type At } from "../kept.js";
+import { CATEGORIES, type Category } from "../eval/golden.js";
 import type { Bucket, Kind, Sorted } from "./verdicts.js";
 
 export const FINDINGS_FILE = "findings.json";
@@ -26,6 +27,7 @@ const ASKED: readonly Bucket[] = ["act_on", "consider"];
 export type Tracked = {
   readonly id: string;
   readonly lens: Kind;
+  readonly category: Category;
   readonly bucket: Bucket;
   readonly file: string;
   readonly line: number;
@@ -41,7 +43,7 @@ export type Acted = { readonly since: string; readonly rows: readonly ActedRow[]
 export function trackedOf(sorted: readonly Sorted[]): readonly Tracked[] {
   return sorted
     .filter((f) => ASKED.includes(f.bucket))
-    .map((f) => ({ id: f.id, lens: f.kind, bucket: f.bucket, file: f.file, line: f.line }));
+    .map((f) => ({ id: f.id, lens: f.kind, category: f.category, bucket: f.bucket, file: f.file, line: f.line }));
 }
 
 // keepTracked : the round's Act on and Consider findings, with its head
@@ -51,6 +53,7 @@ export function keepTracked(at: At, sorted: readonly Sorted[]): Promise<Result<s
 
 const LENSES: ReadonlySet<unknown> = new Set(["rule", "logic"]);
 const BUCKETS: ReadonlySet<unknown> = new Set(ASKED);
+const KNOWN: ReadonlySet<unknown> = new Set(CATEGORIES);
 
 function fieldsOf(raw: unknown): Record<string, unknown> {
   return typeof raw === "object" && raw !== null ? { ...raw } : {};
@@ -59,7 +62,7 @@ function fieldsOf(raw: unknown): Record<string, unknown> {
 function isTracked(raw: unknown): raw is Tracked {
   const r = fieldsOf(raw);
   const words = [r.id, r.file].every((v) => typeof v === "string");
-  return words && LENSES.has(r.lens) && BUCKETS.has(r.bucket) && isLine(r.line);
+  return words && LENSES.has(r.lens) && KNOWN.has(r.category) && BUCKETS.has(r.bucket) && isLine(r.line);
 }
 
 // isActedRow : one row as the run records hold it. Pure.
@@ -139,7 +142,6 @@ export async function actedSince(input: {
     args: ["diff", "-U0", "--no-renames", "--no-color", "--no-ext-diff", input.since, input.head, "--"],
     repo: { kind: "repo", path: input.repo },
     env: input.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return diff.kind === "ok" ? { since: input.since, rows: actedRows(tracked, changedSpans(diff.stdout)) } : "none";
@@ -152,15 +154,16 @@ function rateOf(rows: readonly ActedRow[]): Rate {
   return { acted: rows.filter((r) => r.acted).length, of: rows.length };
 }
 
-// actedRates : the rate over all rows, per lens and per bucket. Pure.
+// actedRates : the rate over all rows, per lens, per category and per bucket. Pure.
 export function actedRates(rows: readonly ActedRow[]): {
   readonly all: Rate;
   readonly lens: Readonly<Record<string, Rate>>;
+  readonly category: Readonly<Record<string, Rate>>;
   readonly bucket: Readonly<Record<string, Rate>>;
 } {
-  const by = (key: "lens" | "bucket") =>
+  const by = (key: "lens" | "category" | "bucket") =>
     Object.fromEntries(
       [...new Set(rows.map((r) => r[key]))].toSorted().map((k) => [k, rateOf(rows.filter((r) => r[key] === k))]),
     );
-  return { all: rateOf(rows), lens: by("lens"), bucket: by("bucket") };
+  return { all: rateOf(rows), lens: by("lens"), category: by("category"), bucket: by("bucket") };
 }
