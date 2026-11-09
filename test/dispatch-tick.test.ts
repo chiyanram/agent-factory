@@ -1144,7 +1144,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
   it("holds a review round whose worst case could pass the ticket's dollar cap, with no start line (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
     await record({
       where,
       event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
