@@ -1,8 +1,8 @@
 # agent-factory
 
 A coordinator AI that talks with the human, and a dispatcher (code) that starts fresh writer and reviewer workers
-in a box on a project's merge requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the scripts
-do not follow it yet). The rules those
+in a box on a project's merge requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the code
+does not follow it everywhere yet). The rules those
 workers follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
 People start at `README.md`; `docs/DESIGN.md` is the design on one page; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
 
@@ -21,11 +21,10 @@ CI runs both on every pull request and on push to `main`.
   or `gh` call breaks the other forge and cannot be stubbed in a test.
 - Call git on a project's clone only through `hostGit` (`src/core/git.ts`), because plain git runs the hooks and
   programs that a branch or a writer can plant in the repo's own config.
-- Write each script and its test `tests/<script>.test.sh` together, for bash 3.2 and POSIX tools, because the scripts
-  run on stock macOS and on Linux. New components go into the TypeScript package and call CLIs
-  ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)).
-- Keep `GUIDE.md` in step with the scripts, because the coordinator session follows it as its instructions. Mark
-  each place where a script still differs from ADR-0012 with **Today:**, because a reader must not take a decided
+- Ship no bash script: write each new component in the TypeScript package, with its vitest test, and call CLIs
+  from it ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)), because one language is built and checked once.
+- Keep `GUIDE.md` in step with the code, because the coordinator session follows it as its instructions. Mark
+  each place where the code still differs from ADR-0012 with **Today:**, because a reader must not take a decided
   guardrail for an enforced one.
 - Give no LLM seat a forge token or a skip-permissions flag in new code, because ADR-0012 S2, S6 and S11 forbid it.
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
@@ -35,7 +34,7 @@ CI runs both on every pull request and on push to `main`.
 ## Where things go
 
 ```text
-scripts/              the loop scripts and the lint checks
+scripts/              the lint checks and the release helpers, in TypeScript and Node; no bash
 src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab adapter over gh api and glab api
 src/core/egress/      the egress proxy: the allowlist, the Squid config, and the --internal network the box joins (#130)
 src/core/box/         the box seam: one Box interface; FACTORY_BOX picks the place, openBox refuses a box that does not work
@@ -50,7 +49,7 @@ plugins/              the bundled plugins: github and gitlab serve the forge sea
 prompts/              the reviewer's default find and verify instructions, and the eval's judge
 evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)
 src/core/eval/        agent-factory eval reviewer: the harness, the judge, the $100 cap and the results file (#215)
-tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
+test/                 the vitest suite; tests/fixtures/ holds planted input for the checks
 docs/adr/             decision records
 docs/agents/          issue tracker, triage labels, domain-doc conventions
 ```
