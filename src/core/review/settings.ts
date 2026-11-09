@@ -74,9 +74,24 @@ export type Paths = {
   readonly home: string;
   readonly maxUsd: string;
   readonly maxRuns: number;
+  readonly maxFinders: number;
 };
 
-type Limits = { readonly maxUsd: string; readonly maxRuns: number };
+type Limits = { readonly maxUsd: string; readonly maxRuns: number; readonly maxFinders: number };
+
+// the most finder runs a round runs at once when no layer sets it (#237)
+export const MAX_FINDERS = 4;
+
+// maxFindersOf : review.maxFinders, a whole number from 1; the check of its key keeps it at 16 or less
+export function maxFindersOf(env: NodeJS.ProcessEnv): Result<number> {
+  const raw = settingOf(env, "review.maxFinders") ?? String(MAX_FINDERS);
+  return /^[1-9]\d?$/.test(raw)
+    ? { kind: "ok", value: Number(raw) }
+    : {
+        kind: "failed",
+        reason: `${settingName("review.maxFinders")} must be a whole number from 1, got ${JSON.stringify(raw)}`,
+      };
+}
 
 function limits(env: NodeJS.ProcessEnv): Result<Limits> {
   const usd = maxUsd(env);
@@ -84,7 +99,13 @@ function limits(env: NodeJS.ProcessEnv): Result<Limits> {
     return usd;
   }
   const runs = runsAtOnceOf(env);
-  return runs.kind === "ok" ? { kind: "ok", value: { maxUsd: usd.value, maxRuns: runs.value } } : runs;
+  if (runs.kind === "failed") {
+    return runs;
+  }
+  const finders = maxFindersOf(env);
+  return finders.kind === "ok"
+    ? { kind: "ok", value: { maxUsd: usd.value, maxRuns: runs.value, maxFinders: finders.value } }
+    : finders;
 }
 
 type Places = { readonly repo: string; readonly home: string };
@@ -198,5 +219,6 @@ export function reviewSetup(input: {
     model: modelOf(env, input.model),
     sessions: sessionsOf(env, input.sessions),
     maxRuns: p.maxRuns,
+    maxFinders: p.maxFinders,
   };
 }

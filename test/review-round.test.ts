@@ -9,7 +9,7 @@ import type { Note } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { claudeArgs, readAnswer, type Model, type ModelResult, type ModelRun } from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
-import { reviewStep } from "../src/core/review/step.js";
+import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
 
@@ -148,6 +148,7 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     runsDir: join(p.root, "runs"),
     sessions: async () => ({ kind: "ok", value: [] }),
     maxRuns: 2,
+    maxFinders: 4,
     prompts: PROMPTS,
     models: { find: "sonnet", rule: "sonnet", logic: "opus" },
     maxUsd: "2",
@@ -206,7 +207,7 @@ describe("reviewRound", () => {
     const log = fresh();
     const spec = { ...FINDING, axis: "spec", rule: "AC2", finding: "an empty order totals 1" };
     const stray = { ...FINDING, axis: "spec", rule: "AC9", finding: "names a criterion the spec lacks" };
-    const standards = { ...FINDING, rule: "AC2" };
+    const standards = { ...FINDING, line: 2, rule: "AC2" };
     const m = model(
       [
         findAnswer([spec, stray, standards]),
@@ -226,7 +227,7 @@ describe("reviewRound", () => {
     expect(summary).toContain(
       "- Spec · Act on F1 svc/Main.java:1 AC2 (bug): an empty order totals 1 (real) · criterion 2. SPEC-AC2: an empty order totals 0.",
     );
-    expect(summary).toContain("- Standards · Consider F3 svc/Main.java:1 AC2 (bug): returns 2 (maybe)\n");
+    expect(summary).toContain("- Standards · Consider F3 svc/Main.java:2 AC2 (bug): returns 2 (maybe)\n");
   });
 
   it("shows each run the pack and the whole head, never a rule file, a symlink or a .gitattributes rewrite", async () => {
@@ -264,7 +265,7 @@ describe("reviewRound", () => {
       [
         findAnswer([
           { ...FINDING, id: "F1" },
-          { ...FINDING, id: "F1", finding: "second" },
+          { ...FINDING, id: "F1", rule: "ERR2", finding: "second" },
         ]),
         verdicts([{ id: "F1", bucket: "dismissed", why: "no" }]),
       ],
@@ -275,7 +276,7 @@ describe("reviewRound", () => {
       ["F1 svc/Main.java", "F2 svc/Main.java"],
     );
     expect(log.posts.at(-1)).toContain(
-      "Consider F2 svc/Main.java:1 ERR1 (bug): second (the verify pass gave no verdict)",
+      "Consider F2 svc/Main.java:1 ERR2 (bug): second (the verify pass gave no verdict)",
     );
   });
 
@@ -924,5 +925,147 @@ describe("reviewStep", () => {
       reason: expect.stringContaining("pass failed"),
       spend: { usd: expect.closeTo(0.8, 9), tokens: 40 },
     });
+  });
+});
+
+describe("one finder per lens (#237)", () => {
+  // the project's lenses, as its settings file holds them, with its one-way-door paths
+  function lenses(oneWayDoor: readonly string[] = []): void {
+    mkdirSync(join(home(), "projects"), { recursive: true });
+    const lens = (name: string, reference: string) => ({
+      name,
+      rubric: { plugin: "rulebook", skill: "code", reference },
+    });
+    writeFileSync(
+      join(home(), "projects", "ledger.json"),
+      JSON.stringify({
+        review: {
+          lenses: [
+            lens("errors", "errors"),
+            lens("smells", "smells"),
+            { name: "api", rubric: { file: "docs/review/api.md" } },
+            lens("late", "errors"),
+          ],
+        },
+        lanes: { oneWayDoor },
+      }),
+    );
+  }
+
+  // the lens a finder run was for: its pack's section 8, or the baseline lens with none
+  const lensOf = (run: ModelRun): string =>
+    /## 8 · This finder's lens: (\S+)/.exec(readFileSync(join(run.folder, "pack.md"), "utf8"))?.[1] ?? "baseline";
+
+  type Ran = { readonly lens: string; readonly model: string; readonly pack: string; readonly findings: string };
+
+  // the verify pass's answer: every finding it sees in Act on
+  function allActOn(findings: string): unknown {
+    const ids: readonly { readonly id: string }[] = JSON.parse(findings);
+    return verdicts(ids.map((f) => ({ id: f.id, bucket: "act_on", why: "real" })));
+  }
+
+  // a model that answers each finder by its lens, and puts every finding the verify pass sees in Act on
+  function byLens(found: Readonly<Record<string, readonly unknown[]>>, ran: Ran[]): Model {
+    return async (run): Promise<ModelResult> => {
+      const path = join(run.folder, "findings.json");
+      const findings = existsSync(path) ? readFileSync(path, "utf8") : "";
+      const lens = findings === "" ? lensOf(run) : "verify";
+      ran.push({ lens, model: run.model, pack: readFileSync(join(run.folder, "pack.md"), "utf8"), findings });
+      const output = findings === "" ? findAnswer(found[lens] ?? []) : allActOn(findings);
+      return { kind: "ok", value: { output, answer: { usage: { input_tokens: 10 } }, costUsd: 0.1, tokens: 10 } };
+    };
+  }
+
+  // the api lens's rubric, on the default branch
+  function apiRubric(): void {
+    p.write("docs/review/api.md", "API-RUBRIC\n");
+    p.commitAll("api rubric");
+    p.git("push", "-q", "origin", "main");
+  }
+
+  it("runs the lane's count of lenses, each in its own run with its rubric, on the finder's model", async () => {
+    lenses();
+    apiRubric();
+    const ran: Ran[] = [];
+    const out = await reviewRound(setup(forge(fresh()), byLens({}, ran)));
+    expect(out).toMatchObject({ kind: "ok", value: { kind: "posted", lenses: { errors: 0, smells: 0, api: 0 } } });
+    const finders = ran.filter((r) => r.lens !== "verify");
+    expect(finders.map((r) => r.lens).toSorted()).toEqual(["api", "errors", "smells"]);
+    expect(finders.every((r) => r.model === "sonnet")).toBe(true);
+    expect(finders.find((r) => r.lens === "api")?.pack).toContain("API-RUBRIC");
+    expect(finders.find((r) => r.lens === "errors")?.pack).not.toContain("API-RUBRIC");
+  });
+
+  it("runs every lens on the strongest model for a one-way door, and one lens for a tiny change", async () => {
+    lenses(["svc/**"]);
+    apiRubric();
+    const door: Ran[] = [];
+    await reviewRound(setup(forge(fresh()), byLens({}, door)));
+    const doorFinders = door.filter((r) => r.lens !== "verify");
+    expect(doorFinders.map((r) => r.lens).toSorted()).toEqual(["api", "errors", "late", "smells"]);
+    expect(doorFinders.every((r) => r.model === "opus")).toBe(true);
+
+    lenses();
+    approveSpec(home(), specText().replace("\nfeature\n", "\ntiny\n"));
+    const tiny: Ran[] = [];
+    await reviewRound(setup(forge(fresh()), byLens({}, tiny)));
+    expect(tiny.filter((r) => r.lens !== "verify").map((r) => [r.lens, r.model])).toEqual([["errors", "sonnet"]]);
+  });
+
+  it("posts one finding when two lenses report the same file:line and rule, keeping the stronger grade", async () => {
+    lenses();
+    apiRubric();
+    const log = fresh();
+    const ran: Ran[] = [];
+    const cited = { ...FINDING, grade: "cited", finding: "cited one" };
+    const walked = { ...FINDING, grade: "walked", finding: "walked one" };
+    const other = { ...FINDING, line: 2, rule: "ERR2", finding: "only smells" };
+    const out = await reviewRound(setup(forge(log), byLens({ errors: [cited], smells: [walked, other] }, ran)));
+    const verified = JSON.parse(ran.find((r) => r.lens === "verify")?.findings ?? "[]");
+    expect(
+      verified.map((f: { lens: string; lenses: string[]; finding: string }) => [f.lens, f.lenses, f.finding]),
+    ).toEqual([
+      ["smells", ["errors", "smells"], "walked one"],
+      ["smells", ["smells"], "only smells"],
+    ]);
+    expect(log.threads).toHaveLength(2);
+    // the run record: each lens's verified findings no other lens reported
+    expect(out).toMatchObject({ kind: "ok", value: { lenses: { errors: 0, smells: 1, api: 0 } } });
+    expect(log.posts.at(-1)).toContain("- Unique findings per lens: errors 0 · smells 1 · api 0");
+    const kept = readFileSync(join(p.root, "records", "12", p.head2, "reviewer-lenses.jsonl"), "utf8");
+    expect(JSON.parse(kept)).toEqual({ lane: "feature", strongest: false, unique: { errors: 0, smells: 1, api: 0 } });
+  });
+
+  it("runs at most review.maxFinders finders at once; the round is one run with that many model runs", async () => {
+    lenses(["svc/**"]);
+    apiRubric();
+    let now = 0;
+    let most = 0;
+    const ran: Ran[] = [];
+    const inner = byLens({}, ran);
+    const counted: Model = async (run) => {
+      now += 1;
+      most = Math.max(most, now);
+      await new Promise((r) => setTimeout(r, 5));
+      const out = await inner(run);
+      now -= 1;
+      return out;
+    };
+    await reviewRound(setup(forge(fresh()), counted, { maxFinders: 2 }));
+    expect(ran.filter((r) => r.lens !== "verify")).toHaveLength(4);
+    expect(most).toBe(2);
+  });
+
+  it("puts a round's worst case at every finder and both verify passes at the per-run cap", () => {
+    expect(worstCase(3, "0.50")).toBe(2.5);
+    expect(worstCase(1, "")).toBe("unbounded");
+  });
+
+  it("refuses the round when a picked lens's rubric cannot be read, and runs no finder", async () => {
+    lenses();
+    const ran: Ran[] = [];
+    const out = await reviewRound(setup(forge(fresh()), byLens({}, ran)));
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the rubric of the lens api") });
+    expect(ran).toEqual([]);
   });
 });
