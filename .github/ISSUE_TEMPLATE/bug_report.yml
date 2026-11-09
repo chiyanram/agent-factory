@@ -1,6 +1,6 @@
 name: Bug report
 description: Something in agent-factory is wrong or broken.
-labels: ["needs-triage"]
+labels: ["type:bug", "needs-triage"]
 body:
   - type: textarea
     id: what

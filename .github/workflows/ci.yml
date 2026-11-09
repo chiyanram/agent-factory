@@ -61,10 +61,13 @@ jobs:
       - name: Title follows Conventional Commits
         env:
           TITLE: ${{ github.event.pull_request.title }}
+        # One rule in chiyanram/skills, agent-factory and rca-agent (#327): a scope, a lower-case summary and the issue
+        # it works on, as (#N) or (owner/repo#N). Dependabot (scope deps) and the release commit name no issue.
         run: |
-          pattern='^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)(\([a-z0-9-]+\))?!?: .+'
-          if [[ ! "$TITLE" =~ $pattern ]]; then
-            echo "::error::PR title \"$TITLE\" is not a Conventional Commit, e.g. 'feat(box): one box seam (#112)'. See CONTRIBUTING.md#releases."
+          pattern='^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)\([a-z0-9-]+\)!?: [^A-Z].*\([^)]*#[0-9]+[^)]*\)'
+          exempt='^[a-z]+\(deps\): |^chore\(release\): '
+          if [[ ! "$TITLE" =~ $pattern && ! "$TITLE" =~ $exempt ]]; then
+            echo "::error::PR title \"$TITLE\" must be 'type(scope): lower-case summary (#issue)', e.g. 'feat(box): one box seam (#112)'. See CONTRIBUTING.md#releases."
             exit 1
           fi
 
