@@ -120,7 +120,6 @@ function git(input: FloorInput, args: readonly string[]): Promise<GitResult> {
     repo: { kind: "repo", path: input.repo },
     // a path is a path, never a pattern that matches another file's lines
     env: { ...input.env, GIT_NO_REPLACE_OBJECTS: "1", GIT_LITERAL_PATHSPECS: "1" },
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }

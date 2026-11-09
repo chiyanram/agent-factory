@@ -88,7 +88,6 @@ async function git(
     args,
     repo: typeof repo === "string" ? { kind: "repo", path: repo } : repo,
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return ran.kind === "ok"
