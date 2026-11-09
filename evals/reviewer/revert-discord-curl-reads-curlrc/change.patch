@@ -1,0 +1,13 @@
+diff --git a/plugins/discord/plugin b/plugins/discord/plugin
+index c2cc6df..8afa80a 100755
+--- a/plugins/discord/plugin
++++ b/plugins/discord/plugin
+@@ -51,8 +51,6 @@ function curl(config, body) {
+     const child = spawn(
+       "curl",
+       [
+-        // first, so no ~/.curlrc is read: one could trace or proxy the request, and so write the webhook down
+-        "--disable",
+         "--silent",
+         "--show-error",
+         "--fail",

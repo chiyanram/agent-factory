@@ -3,6 +3,30 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.20.1](https://github.com/chiyanram/agent-factory/compare/v0.20.0...v0.20.1) (2026-11-09)
+
+### 🐛 Fixes
+
+* **plugin** — keep a UTF-8 character whole when a plugin's output splits it · [#246](https://github.com/chiyanram/agent-factory/issues/246) (PR [#247](https://github.com/chiyanram/agent-factory/pull/247))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.20.1`
+
+## [0.20.0](https://github.com/chiyanram/agent-factory/compare/v0.19.0...v0.20.0) (2026-11-09)
+
+### ✨ Features
+
+* **review** — the review pack always carries the baseline review checks · [#226](https://github.com/chiyanram/agent-factory/issues/226) (PR [#244](https://github.com/chiyanram/agent-factory/pull/244))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.20.0`
+
+## [0.19.0](https://github.com/chiyanram/agent-factory/compare/v0.18.0...v0.19.0) (2026-11-09)
+
+### ✨ Features
+
+* **writer** — stop a silent run at the stall time; a failed step backs off before it retries · [#228](https://github.com/chiyanram/agent-factory/issues/228) (PR [#243](https://github.com/chiyanram/agent-factory/pull/243))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.19.0`
+
 ## [0.18.0](https://github.com/chiyanram/agent-factory/compare/v0.17.0...v0.18.0) (2026-11-09)
 
 ### ✨ Features

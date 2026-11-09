@@ -3,6 +3,7 @@
 // The request goes in on stdin as one JSON object. Nothing here throws.
 
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 export type Limits = { readonly timeoutMs: number; readonly maxBytes: number };
 
@@ -44,10 +45,13 @@ function finished(end: End, out: { stdout: string; stderr: string }): Ran {
 }
 
 // runPlugin : the plugin's answer, or why there is none. spawn with no shell, in a process group of its own, so the
-// timeout, the cap and the end of the call kill all of it; stdout and stderr together may hold at most maxBytes.
+// timeout, the cap and the end of the call kill all of it; stdout and stderr together may hold at most maxBytes. Each
+// stream decodes through its own StringDecoder, so a UTF-8 character split across two chunks is kept whole, not
+// turned into U+FFFD.
 export const runPlugin: Exec = (input) =>
   new Promise((resolve) => {
     const out = { stdout: "", stderr: "" };
+    const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
     let size = 0;
     let stop: Ran | "none" = "none";
     const child = spawn(input.path, [...input.args], {
@@ -67,7 +71,7 @@ export const runPlugin: Exec = (input) =>
         halt({ kind: "overCap", bytes: input.limits.maxBytes });
         return;
       }
-      out[stream] += chunk.toString("utf8");
+      out[stream] += decoders[stream].write(chunk);
     };
     child.stdout.on("data", take("stdout"));
     child.stderr.on("data", take("stderr"));
@@ -81,6 +85,8 @@ export const runPlugin: Exec = (input) =>
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       killGroup(child.pid);
+      out.stdout += decoders.stdout.end();
+      out.stderr += decoders.stderr.end();
       resolve(stop === "none" ? finished({ code, signal }, out) : stop);
     });
     child.stdin.on("error", () => undefined);

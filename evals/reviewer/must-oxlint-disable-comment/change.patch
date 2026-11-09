@@ -1,0 +1,22 @@
+diff --git a/src/core/review/model.ts b/src/core/review/model.ts
+index cd894dd..02e8347 100644
+--- a/src/core/review/model.ts
++++ b/src/core/review/model.ts
+@@ -74,7 +74,17 @@ function tokensOf(answer: unknown): number {
+     .reduce<number>((sum, n) => sum + (typeof n === "number" ? n : 0), 0);
+ }
+ 
++// oxlint-disable-next-line eslint/complexity
+ function failure(answer: unknown, stderr: string): string {
++  if (prop(answer, "subtype") === "error_max_budget_usd") {
++    return "the pass hit FACTORY_MAX_USD";
++  }
++  if (prop(answer, "subtype") === "error_max_turns") {
++    return "the pass ran out of turns";
++  }
++  if (stderr.includes("rate limit") || stderr.includes("overloaded")) {
++    return "the model is busy; try the round again";
++  }
+   const said = [prop(answer, "subtype"), prop(answer, "result")].filter((s) => typeof s === "string").join(": ");
+   return (said || stderr.trim().split("\n")[0] || "no answer").slice(0, 200);
+ }

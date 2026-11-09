@@ -1,0 +1,106 @@
+diff --git a/src/app.ts b/src/app.ts
+index 25e9380..7d16ce5 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
+ import { fileURLToPath } from "node:url";
+ import { dirname, isAbsolute, join } from "node:path";
+ import { homedir, userInfo } from "node:os";
+-import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
++import { claimLabel, format, poll as pollForge } from "./core/poll.js";
+ import { openProject, openProjectForge } from "./core/forge/index.js";
+ import type { Forge } from "./core/forge/types.js";
+ import { checkSpec, readSpec, template } from "./core/spec.js";
+@@ -145,8 +145,8 @@ function version(): string {
+ }
+ 
+ async function poll({ json, io }: Args): Promise<number> {
+-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+-  if (label.trim() === "") {
++  const label = claimLabel(io.env);
++  if (label === "") {
+     io.err("agent-factory poll: FACTORY_CLAIM_LABEL is set but empty\n");
+     return 1;
+   }
+@@ -333,7 +333,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
+     return planned;
+   }
+   const { gate, plan } = planned.value;
+-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
++  const label = claimLabel(io.env);
+   const writer = await writerSetup({
+     env: io.env,
+     home,
+@@ -378,7 +378,7 @@ async function pass(
+     home: settings.home,
+     project,
+     forge,
+-    label: io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL,
++    label: claimLabel(io.env),
+     ...planned.value,
+     now: () => Date.now(),
+     quietMinutes: settings.quiet,
+diff --git a/src/core/poll.ts b/src/core/poll.ts
+index 72dab22..a3d4074 100644
+--- a/src/core/poll.ts
++++ b/src/core/poll.ts
+@@ -58,6 +58,12 @@ export type PollLine = OpenLine | MergedLine;
+ 
+ export const DEFAULT_CLAIM_LABEL = "agent::claimed";
+ 
++// claimLabel : FACTORY_CLAIM_LABEL without the spaces around it, else the default; "" when it is set but blank.
++// Pure.
++export function claimLabel(env: NodeJS.ProcessEnv): string {
++  return (env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL).trim();
++}
++
+ function names(team: readonly Person[], keep: (p: Person) => boolean): ReadonlySet<string> {
+   return new Set(team.filter(keep).map((p) => p.name.toLowerCase()));
+ }
+diff --git a/src/loop-cli.ts b/src/loop-cli.ts
+index 82a7d70..2762942 100644
+--- a/src/loop-cli.ts
++++ b/src/loop-cli.ts
+@@ -11,7 +11,7 @@ import type { PushTarget } from "./core/writer/step.js";
+ import type { Forge } from "./core/forge/types.js";
+ import { lintEdit } from "./core/lint-edit.js";
+ import { ask, block, claim, reconcile, release, status, type AtHead } from "./core/loop.js";
+-import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
++import { claimLabel } from "./core/poll.js";
+ import { claudeSessions } from "./core/review/live.js";
+ import { runInFolder } from "./core/review/model.js";
+ import { claudeEnv } from "./core/review/settings.js";
+@@ -56,8 +56,8 @@ function lines(value: string | readonly string[], dry: string): string {
+ async function forgeOf(
+   io: LoopIo,
+ ): Promise<Result<{ readonly forge: Forge; readonly label: string; readonly identity: Identity }>> {
+-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+-  if (label.trim() === "") {
++  const label = claimLabel(io.env);
++  if (label === "") {
+     return { kind: "failed", reason: "FACTORY_CLAIM_LABEL is set but empty" };
+   }
+   const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
+diff --git a/test/poll.test.ts b/test/poll.test.ts
+index 1752936..4671fda 100644
+--- a/test/poll.test.ts
++++ b/test/poll.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from "vitest";
+-import { decide, format, poll, stop, type OpenLine } from "../src/core/poll.js";
++import { claimLabel, decide, DEFAULT_CLAIM_LABEL, format, poll, stop, type OpenLine } from "../src/core/poll.js";
+ import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
+ import { renderPost } from "../src/core/post.js";
+ 
+@@ -162,3 +162,11 @@ describe("poll", () => {
+     ).toEqual(failed);
+   });
+ });
++
++describe("claimLabel", () => {
++  it("strips the spaces around the label, falls back to the default, and answers \"\" for a blank one", () => {
++    expect(claimLabel({ FACTORY_CLAIM_LABEL: "  agent::claimed " })).toBe("agent::claimed");
++    expect(claimLabel({})).toBe(DEFAULT_CLAIM_LABEL);
++    expect(claimLabel({ FACTORY_CLAIM_LABEL: "  " })).toBe("");
++  });
++});

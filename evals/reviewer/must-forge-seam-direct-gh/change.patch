@@ -1,0 +1,40 @@
+diff --git a/src/core/notify.ts b/src/core/notify.ts
+index 94e54c0..db6e0a2 100644
+--- a/src/core/notify.ts
++++ b/src/core/notify.ts
+@@ -8,7 +8,9 @@
+ // record, and the ping is not tried again. A reply in Discord is never an approval. The text is a post.ts template, so
+ // no @everyone, mention, reference or link forms; the plugin switches every mention off as well.
+ 
++import { execFile } from "node:child_process";
+ import { realpath } from "node:fs/promises";
++import { promisify } from "node:util";
+ import type { Done, Result } from "./forge/api.js";
+ import { pluginConfigOf } from "./plugin/config.js";
+ import { callPlugin, type Secrets, type Setup } from "./plugin/registry.js";
+@@ -65,7 +67,8 @@ export type NotifyTarget = {
+ // pluginNotify : the pings through one notify plugin; the plugin answers { kind: "done" } when it went out
+ export function pluginNotify(target: NotifyTarget): Notify {
+   return async (ping) => {
+-    const text = renderPost(pingPost(target, ping));
++    const title = await changeTitle(ping.change);
++    const text = renderPost({ ...pingPost(target, ping), fields: [...pingPost(target, ping).fields, { label: "title", value: title }] });
+     if (text.kind === "refused") {
+       return { kind: "failed", reason: text.reason };
+     }
+@@ -79,6 +82,15 @@ export function pluginNotify(target: NotifyTarget): Notify {
+   };
+ }
+ 
++// changeTitle : the change's title, so a person sees what the ping is about; "" when it cannot be read
++async function changeTitle(change: number | "none"): Promise<string> {
++  if (change === "none") {
++    return "";
++  }
++  const read = await promisify(execFile)("gh", ["pr", "view", String(change), "--json", "title", "--jq", ".title"]).catch(() => undefined);
++  return read === undefined ? "" : read.stdout.trim();
++}
++
+ function sentDone(plugin: string, sent: Awaited<ReturnType<typeof callPlugin>>): Done {
+   if (sent.kind === "failed") {
+     return sent;

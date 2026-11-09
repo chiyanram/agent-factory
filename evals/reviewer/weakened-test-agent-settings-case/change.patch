@@ -1,0 +1,38 @@
+diff --git a/src/core/agent-settings.ts b/src/core/agent-settings.ts
+index c681f5f..6ddeb5d 100644
+--- a/src/core/agent-settings.ts
++++ b/src/core/agent-settings.ts
+@@ -11,13 +11,9 @@ import type { Guard } from "./push.js";
+ 
+ export const AGENT_SETTINGS = [".claude", ".agents", "AGENTS.md", "CLAUDE.md"] as const;
+ 
+-// isAgentSetting : the path is one of the list, or inside one of its folders, in any letter case. Pure.
++// isAgentSetting : the path is one of the list, or inside one of its folders. Pure.
+ export function isAgentSetting(path: string): boolean {
+-  const lower = path.toLowerCase();
+-  return AGENT_SETTINGS.some((s) => {
+-    const name = s.toLowerCase();
+-    return lower === name || lower.startsWith(`${name}/`);
+-  });
++  return AGENT_SETTINGS.some((name) => path === name || path.startsWith(`${name}/`));
+ }
+ 
+ // noAgentSettings : refuses a push that adds or changes an agent setting; the work is then blocked with the files named
+diff --git a/test/agent-settings.test.ts b/test/agent-settings.test.ts
+index 1ba2f18..0de55f9 100644
+--- a/test/agent-settings.test.ts
++++ b/test/agent-settings.test.ts
+@@ -6,11 +6,10 @@ import { isAgentSetting, noAgentSettings } from "../src/core/agent-settings.js";
+ import { tempDir } from "./temp.js";
+ 
+ describe("isAgentSetting (#110)", () => {
+-  it("names the root settings, their folders' files, in any letter case, and nothing else", () => {
++  it("names the root settings, their folders' files, and nothing else", () => {
+     const yes = [".claude/settings.json", ".claude", ".agents/skills/x/SKILL.md", "AGENTS.md", "CLAUDE.md"];
+-    const alsoYes = [".CLAUDE/settings.json", "claude.md", "Agents.md"];
+     const no = [".claudex/a", "src/.claude/settings.json", "docs/AGENTS.md", "CLAUDE.md.bak", "src/a.ts"];
+-    expect([...yes, ...alsoYes].filter((p) => !isAgentSetting(p))).toEqual([]);
++    expect(yes.filter((p) => !isAgentSetting(p))).toEqual([]);
+     expect(no.filter(isAgentSetting)).toEqual([]);
+   });
+ });

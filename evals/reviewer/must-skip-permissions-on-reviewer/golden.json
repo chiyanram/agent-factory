@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/review/model.ts",
+    "line": 51,
+    "issue": "The reviewer's claude runs on the host, not in a box, and now gets --dangerously-skip-permissions: every tool call is allowed without a check (AGENTS.md MUST; ADR-0012 S11 allows it only in the vm box). In -p mode a denied call fails rather than waits, so the comment's reason does not hold.",
+    "severity": "blocker",
+    "category": "security"
+  }
+]

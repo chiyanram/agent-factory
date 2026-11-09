@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/writer/step.ts",
+    "line": 143,
+    "issue": "promptFor no longer adds FOREGROUND, so no writer mode is told to run subagents and commands in the foreground; work left in the background is lost when the run ends, or holds the process open (#192). FOREGROUND is still exported and promptFor's comment still names it.",
+    "severity": "warning",
+    "category": "bug"
+  }
+]

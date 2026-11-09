@@ -1,0 +1,9 @@
+[
+  {
+    "file": "scripts/start-writer.sh",
+    "line": 36,
+    "issue": "${state,,} is bash 4 syntax: under the bash 3.2 that stock macOS ships it is a bad substitution and start-writer stops (AGENTS.md MUST: scripts for bash 3.2 and POSIX tools). tr '[:upper:]' '[:lower:]' does it portably, as scripts/lib/git.sh does.",
+    "severity": "blocker",
+    "category": "bug"
+  }
+]

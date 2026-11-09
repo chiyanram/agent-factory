@@ -1,0 +1,85 @@
+diff --git a/GUIDE.md b/GUIDE.md
+index a9d2f0c..5b5976e 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -446,6 +446,8 @@ exists yet, so you run the triggers below by hand.
+   its timeout and is `blocked`; past the timeout and a 30 s grace the host stops the box itself, since the box's
+   timeout stops counting once `claude` exits and a child holding stdout open would keep the pass waiting. The window's
+   edge is not exact: a run that exits as the window closes may still read as hung.
++  Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
++  in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
+   **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the
+   report replaces that once the writer starts through the box and the dispatcher (#103, #138).
+ - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
+diff --git a/src/core/writer/step.ts b/src/core/writer/step.ts
+index fa4bd49..42ac391 100644
+--- a/src/core/writer/step.ts
++++ b/src/core/writer/step.ts
+@@ -111,6 +111,11 @@ const TEMPLATE: Readonly<Record<RunMode, keyof Prompts>> = {
+ 
+ // the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
+ // reads them as it reads the code
++// every mode's run ends when the model stops: a subagent or command left in the background is lost, or holds the
++// process open (#192; the completion window, #182, is the net behind it)
++export const FOREGROUND =
++  "Run every subagent and command in the foreground and wait for it to finish. This run ends when you stop, so anything left in the background is lost.";
++
+ export const PROJECT_INSTRUCTIONS = [
+   "This project's instructions are not loaded for you. Before you change anything, read AGENTS.md and CLAUDE.md at the",
+   "root, and the AGENTS.md or CLAUDE.md of each folder you change, and follow them. The project's skills are in",
+@@ -118,8 +123,8 @@ export const PROJECT_INSTRUCTIONS = [
+   ".claude and .agents: the push refuses a commit that does.",
+ ].join("\n");
+ 
+-// promptFor : the mode's prompt with the run's names, the project's instructions and tools, then the report's schema.
+-// Pure.
++// promptFor : the mode's prompt with the run's names, the foreground rule, the project's instructions and tools, then the
++// report's schema. Pure.
+ export function promptFor(input: {
+   readonly prompts: Prompts;
+   readonly mode: RunMode;
+@@ -135,7 +140,7 @@ export function promptFor(input: {
+     .replaceAll("{{branch}}", input.branch)
+     .replaceAll("{{head}}", input.head);
+   const tools = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
+-  return `${filled.trimEnd()}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
++  return `${filled.trimEnd()}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
+ }
+ 
+ // outOf : what the dispatcher records, from what the host did with the run. Pure.
+diff --git a/test/writer.test.ts b/test/writer.test.ts
+index df5cedf..eebe4b2 100644
+--- a/test/writer.test.ts
++++ b/test/writer.test.ts
+@@ -19,7 +19,7 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
+ import { specHash } from "../src/core/spec.js";
+ import { claudeArgv } from "../src/core/writer/run.js";
+ import { minutesOf } from "../src/core/writer/settings.js";
+-import { PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
++import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+ import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
+ import { fakeBox, type FakeBox } from "./fake-box.js";
+ import { project, type Project } from "./review-repo.js";
+@@ -768,12 +768,21 @@ describe("the writer's words and settings", () => {
+     });
+     expect(
+       text.startsWith(
+-        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
++        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
+       ),
+     ).toBe(true);
+     expect(text).toContain(REPORT_INSTRUCTIONS);
+   });
+ 
++  it("tells the writer of every mode to keep its subagents and commands in the foreground (#192)", () => {
++    const prompts = { fix: "f", testFirst: "t", rework: "r", ci: "c" };
++    const modes = ["fix", "test-first", "rework", "ci"] as const;
++    const texts = modes.map((mode) =>
++      promptFor({ prompts, mode, ticket: "PROJ-1", branch: "b", head: "h", tools: [] }),
++    );
++    expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
++  });
++
+   it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, the cap and model only when set", () => {
+     // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
+     // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)

@@ -1,0 +1,384 @@
+diff --git a/GUIDE.md b/GUIDE.md
+index 2355e9c..2a36cf3 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -19,7 +19,8 @@ human           agent-factory approve (a local permission) · reviews · merges
+ ```
+ 
+ Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
+-and agent commits carry an `Agent: <seat>` trailer. With your own login there is nothing more to set up; the steps
++and agent commits carry an `Agent: <seat>` trailer. **Today:** no script writes the trailer yet; `src/core/notes.ts`
++reads it, and the writer's box (#108, #109) will add it. With your own login there is nothing more to set up; the steps
+ below are for a project that uses a bot. A bot's key belongs to a separate `factory` OS user on the VM, never to a file
+ your own user can read.
+ 
+@@ -198,7 +199,10 @@ and `#12` for `!12`.
+ `poll` keeps no state, so a restart re-reads everything. It counts `/approved` only from a human maintainer, as the
+ first line of a note, and only when it is newer than the last human edit of the description; an older one shows as
+ `approved=stale`. It counts an open ask as a `[coordinator] OPEN:` or `[writer] OPEN:` note with no human note after
+-it. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
++it. **Today** it tells agent from human by author. The target (#128, `src/core/notes.ts`) works when the factory
++posts with your own login: a note is the factory's only when it comes from the factory's login **and** starts with a
++seat prefix, and an ask stays open until a project member writes after it. The ported poll (#102) will use it; the
++bash poll does not. A run is live while `claude agents --json` lists its session (`writer-<mr>` or `reviewer-<mr>`).
+ 
+ ### Escalation
+ 
+diff --git a/scripts/lib/github.sh b/scripts/lib/github.sh
+index dc207a2..760f490 100644
+--- a/scripts/lib/github.sh
++++ b/scripts/lib/github.sh
+@@ -97,13 +97,15 @@ forge_notes() {
+ }
+ 
+ # GitHub anchors a review comment only to a line in the diff; otherwise the finding goes out as a plain comment that
+-# names file:line.
++# names file:line. The file:line goes after the seat prefix, so the note still starts "[reviewer] " and reads as the
++# factory's own under the developer's login (#128).
+ forge_line_finding() {
++  line_note='. as $x | ($x.file) as $f | ($x.line) as $l | {body: ($b | if test("^\\[[a-z]+\\] ") then sub("^(?<p>\\[[a-z]+\\] )"; "\(.p)`\($f):\($l)` ") else "`\($f):\($l)` " + . end)}'
+   r=$(repo) || return 1
+   comment=$(printf '%s' "$3" | jq -c --arg b "$4" --arg sha "$(printf '%s' "$2" | jq -r .sha)" \
+     '{body: $b, commit_id: $sha, path: .file, line: .line, side: "RIGHT"}')
+   gh_post "repos/$r/pulls/$1/comments" "$comment" > /dev/null 2>&1 && return 0
+-  gh_post "repos/$r/issues/$1/comments" "$(printf '%s' "$3" | jq -c --arg b "$4" '{body: ("`\(.file):\(.line)` " + $b)}')" \
++  gh_post "repos/$r/issues/$1/comments" "$(printf '%s' "$3" | jq -c --arg b "$4" "$line_note")" \
+     > /dev/null
+ }
+ 
+diff --git a/scripts/lib/gitlab.sh b/scripts/lib/gitlab.sh
+index bb5ecda..57041a8 100644
+--- a/scripts/lib/gitlab.sh
++++ b/scripts/lib/gitlab.sh
+@@ -76,7 +76,8 @@ forge_line_finding() {
+     position: {position_type: "text", base_sha: $r.base_sha, start_sha: $r.start_sha, head_sha: $r.head_sha,
+     new_path: .file, new_line: .line}}' > "$thread"
+   if ! gl_api "projects/$(project_ref)/merge_requests/$1/discussions" -X POST --input "$thread" > /dev/null 2>&1; then
+-    printf '%s' "$3" | jq -c --arg b "$4" '{body: ("`\(.file):\(.line)` " + $b)}' > "$thread"
++    # the file:line goes after the seat prefix, so the note still starts "[reviewer] " (#128)
++    printf '%s' "$3" | jq -c --arg b "$4" '. as $x | ($x.file) as $f | ($x.line) as $l | {body: ($b | if test("^\\[[a-z]+\\] ") then sub("^(?<p>\\[[a-z]+\\] )"; "\(.p)`\($f):\($l)` ") else "`\($f):\($l)` " + . end)}' > "$thread"
+     gl_api "projects/$(project_ref)/merge_requests/$1/discussions" -X POST --input "$thread" > /dev/null \
+       || { rm -f "$thread"; return 1; }
+   fi
+diff --git a/src/core/notes.ts b/src/core/notes.ts
+new file mode 100644
+index 0000000..1d2e466
+--- /dev/null
++++ b/src/core/notes.ts
+@@ -0,0 +1,151 @@
++// notes — which notes on a change are the factory's and which are people's, and which asks are still open (#128;
++// ADR-0012 S14).
++//
++// At work the factory posts with the developer's own login, so a note's author no longer says whether an agent wrote
++// it: the developer's own reply and the dispatcher's post share one name. The factory's notes are told apart by their
++// first line instead, which the posting template (#126) always writes as "[writer] …", "[reviewer] …" or
++// "[coordinator] …". A seat prefix alone is not enough, because anyone who can comment can type one: a stranger's
++// "[writer] OPEN:" would then hold the change as an open ask (#85, item 2). So a note is the factory's only when it
++// has a seat prefix AND comes from the identity the factory posts with (the developer's login, or the project's bot).
++//
++//   agent   the factory's identity, and a seat prefix on line 1
++//   person  anyone else, or the factory's identity with no seat prefix (the developer typing a reply)
++// An ask is an agent note whose first line starts "[coordinator] OPEN:" or "[writer] OPEN:". It stays open until a
++// person who is a project member writes after it. Logins are compared without case, and notes are ordered by the
++// instant they were written.
++//
++// Agent commits carry an "Agent: <seat>" trailer, so the history shows which commits an agent made even under the
++// developer's own login. commitKind reads it as git reads trailers, so what it counts is what `git log` shows.
++
++import type { Seat } from "./post.js";
++
++export type Author = { readonly name: string };
++export type Note = { readonly body: string; readonly author: Author; readonly at: string };
++
++export type NoteKind =
++  | { readonly kind: "agent"; readonly seat: Seat; readonly ask: boolean }
++  | { readonly kind: "person"; readonly member: boolean };
++
++export type Readers = {
++  // the login the factory posts with: the developer's own, or the project's bot
++  readonly factory: string;
++  // the people who may answer an ask: the project's members
++  readonly members: ReadonlySet<string>;
++};
++
++// A login is compared without case: GitHub and GitLab both treat "Ram" and "ram" as one account.
++function same(a: string, b: string): boolean {
++  return a.toLowerCase() === b.toLowerCase();
++}
++
++const SEAT_LINE = /^\[(writer|reviewer|coordinator)\] /;
++// The reviewer's line findings were once posted as "`file:line` [reviewer] …"; a note in that form is still the factory's.
++const OLD_LINE_FINDING = /^`[^`\n]+` \[(reviewer)\] /;
++const ASK_LINE = /^\[(coordinator|writer)\] OPEN:/;
++
++function firstLine(body: string): string {
++  return body.split(/\r?\n/, 1)[0] ?? "";
++}
++
++function seatOf(line: string): Seat | undefined {
++  return (SEAT_LINE.exec(line)?.[1] ?? OLD_LINE_FINDING.exec(line)?.[1]) as Seat | undefined;
++}
++
++// classify : one note, by its author and its first line.
++export function classify(request: { readonly note: Note; readonly readers: Readers }): NoteKind {
++  const { note, readers } = request;
++  const line = firstLine(note.body);
++  const seat = seatOf(line);
++  if (seat !== undefined && same(note.author.name, readers.factory)) {
++    return { kind: "agent", seat, ask: ASK_LINE.test(line) };
++  }
++  const member = [...readers.members].some((name) => same(name, note.author.name));
++  return { kind: "person", member };
++}
++
++function isAsk(kind: NoteKind): boolean {
++  return kind.kind === "agent" && kind.ask;
++}
++
++function isMemberReply(kind: NoteKind): boolean {
++  return kind.kind === "person" && kind.member;
++}
++
++// A note's place in time. A time the forge sent that does not parse is put where it keeps an ask open: an ask last,
++// any other note first, so a bad timestamp never closes an ask.
++function when(at: string, kind: NoteKind): number {
++  const time = Date.parse(at);
++  if (!Number.isNaN(time)) {
++    return time;
++  }
++  return isAsk(kind) ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
++}
++
++// openAsks : how many asks have no member's note after them. Notes are taken in time order, by the instant, not the
++// text, since a forge may write "+01:00" or leave out the milliseconds.
++export function openAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
++  const kinds = request.notes
++    .map((note) => classify({ note, readers: request.readers }))
++    .map((kind, i) => ({ kind, time: when(request.notes[i]!.at, kind) }))
++    .sort((a, b) => a.time - b.time)
++    .map((entry) => entry.kind);
++  const lastReply = kinds.map(isMemberReply).lastIndexOf(true);
++  return kinds.filter((kind, i) => i > lastReply && isAsk(kind)).length;
++}
++
++const SEATS: readonly Seat[] = ["writer", "reviewer", "coordinator"];
++
++// agentTrailer : the trailer line an agent commit carries.
++export function agentTrailer(request: { readonly seat: Seat }): string {
++  return `Agent: ${request.seat}`;
++}
++
++export type CommitKind = { readonly kind: "agent"; readonly seat: Seat } | { readonly kind: "person" };
++
++// A trailer line as git reads one: a key of letters, digits and "-", optional space, ":", the value. A line that
++// starts with white space continues the trailer above it.
++const TRAILER = /^([A-Za-z0-9-]+)\s*:\s*(.*)$/;
++const CONTINUED = /^\s+\S/;
++// the lines git itself writes, which let a block with other lines in it still count (git interpret-trailers)
++const GIT_WRITTEN = /^(Signed-off-by\s*:|\(cherry picked from commit )/i;
++
++type Trailer = { readonly key: string; readonly value: string };
++type Block = { readonly trailers: readonly Trailer[]; readonly other: number; readonly gitWritten: boolean };
++
++function readBlock(lines: readonly string[]): Block {
++  const trailers: Trailer[] = [];
++  let other = 0;
++  for (const line of lines) {
++    const match = TRAILER.exec(line);
++    const last = trailers.at(-1);
++    if (match !== null) {
++      trailers.push({ key: match[1]!, value: match[2]!.trim() });
++    } else if (CONTINUED.test(line) && last !== undefined) {
++      trailers[trailers.length - 1] = { key: last.key, value: `${last.value} ${line.trim()}` };
++    } else {
++      other += 1;
++    }
++  }
++  return { trailers, other, gitWritten: lines.some((line) => GIT_WRITTEN.test(line)) };
++}
++
++// git's rule: the last paragraph is the trailer block when every line in it is a trailer, or when a quarter of it is
++// and one of those is a line git writes. The first paragraph is the subject and never one.
++function trailerBlock(message: string): readonly Trailer[] {
++  const paragraphs = message.replace(/\r\n?/g, "\n").trim().split(/\n[ \t]*\n/);
++  if (paragraphs.length < 2) {
++    return [];
++  }
++  const block = readBlock((paragraphs.at(-1) ?? "").split("\n"));
++  const all = block.other === 0;
++  const enough = block.gitWritten && block.trailers.length * 3 >= block.other;
++  return all || enough ? block.trailers : [];
++}
++
++// commitKind : an agent commit has an "Agent: <seat>" trailer, read as git reads trailers; the key is matched without
++// case, and an unknown seat makes it a person's commit.
++export function commitKind(request: { readonly message: string }): CommitKind {
++  const agent = trailerBlock(request.message).find((t) => t.key.toLowerCase() === "agent");
++  const seat = SEATS.find((s) => s === agent?.value);
++  return seat !== undefined ? { kind: "agent", seat } : { kind: "person" };
++}
+diff --git a/test/notes.test.ts b/test/notes.test.ts
+new file mode 100644
+index 0000000..af05870
+--- /dev/null
++++ b/test/notes.test.ts
+@@ -0,0 +1,128 @@
++import { describe, expect, it } from "vitest";
++import { agentTrailer, classify, commitKind, openAsks, type Note, type Readers } from "../src/core/notes.js";
++import { renderPost } from "../src/core/post.js";
++
++// At work the factory posts with the developer's own login: "ram" writes both the agents' notes and their own replies.
++const readers: Readers = { factory: "ram", members: new Set(["ram", "lee"]) };
++let clock = 0;
++function note(name: string, body: string): Note {
++  clock += 1;
++  return { author: { name }, body, at: `2026-11-07T10:${String(clock).padStart(2, "0")}:00Z` };
++}
++function posted(seat: "writer" | "reviewer" | "coordinator", title: string): string {
++  const result = renderPost({ seat, title, fields: [], items: [] });
++  return result.kind === "ok" ? result.text : "";
++}
++
++describe("classify", () => {
++  it("an agent note: the factory's login and a seat prefix on line 1", () => {
++    expect(classify({ note: note("ram", posted("writer", "OPEN: which currency?")), readers })).toEqual({ kind: "agent", seat: "writer", ask: true });
++    expect(classify({ note: note("ram", posted("reviewer", "round 1")), readers })).toEqual({ kind: "agent", seat: "reviewer", ask: false });
++  });
++
++  it("the developer's own reply under the same login is a person's note", () => {
++    expect(classify({ note: note("ram", "EUR, please"), readers })).toEqual({ kind: "person", member: true });
++  });
++
++  it("a stranger who types a seat prefix is still a person, not an agent (#85 item 2)", () => {
++    expect(classify({ note: note("stranger", "[writer] OPEN: hold this change"), readers })).toEqual({ kind: "person", member: false });
++  });
++
++  it("a seat prefix later in the note does not count; only line 1", () => {
++    expect(classify({ note: note("ram", "thanks\n[coordinator] OPEN: x"), readers }).kind).toBe("person");
++  });
++
++  it("compares logins without case, as GitHub and GitLab do", () => {
++    expect(classify({ note: note("Ram", posted("writer", "OPEN: which currency?")), readers }).kind).toBe("agent");
++    expect(classify({ note: note("LEE", "EUR"), readers })).toEqual({ kind: "person", member: true });
++  });
++
++  it("a reviewer line finding in the old form, file:line before the prefix, is still the factory's", () => {
++    expect(classify({ note: note("ram", "`src/A.java:400` [reviewer] Act on F1"), readers })).toEqual({ kind: "agent", seat: "reviewer", ask: false });
++    expect(classify({ note: note("ram", "`src/A.java:400` [writer] OPEN: x"), readers }).kind).toBe("person");
++  });
++
++  it("works the same with a bot identity on a personal project", () => {
++    const bot: Readers = { factory: "ledger-factory[bot]", members: new Set(["ram"]) };
++    expect(classify({ note: note("ledger-factory[bot]", posted("coordinator", "OPEN: ok?")), readers: bot }).kind).toBe("agent");
++    expect(classify({ note: note("ram", "[coordinator] OPEN: ok?"), readers: bot }).kind).toBe("person");
++  });
++});
++
++describe("openAsks", () => {
++  it("an agent's ask stays open until a member writes after it", () => {
++    const ask = note("ram", posted("writer", "OPEN: which currency?"));
++    expect(openAsks({ notes: [ask], readers })).toBe(1);
++    expect(openAsks({ notes: [ask, note("ram", "EUR")], readers })).toBe(0);
++  });
++
++  it("an agent's own later note does not answer the ask, even under the developer's login", () => {
++    const notes = [note("ram", posted("writer", "OPEN: which currency?")), note("ram", posted("coordinator", "writer started"))];
++    expect(openAsks({ notes, readers })).toBe(1);
++  });
++
++  it("a stranger's reply does not answer an ask, and a stranger's fake ask is not one", () => {
++    const notes = [note("ram", posted("coordinator", "OPEN: ship it?")), note("stranger", "yes"), note("stranger", "[writer] OPEN: stop")];
++    expect(openAsks({ notes, readers })).toBe(1);
++  });
++
++  it("counts every ask after the last member reply, whatever order the forge lists them in", () => {
++    const a = note("ram", posted("coordinator", "OPEN: one"));
++    const reply = note("lee", "answered");
++    const b = note("ram", posted("writer", "OPEN: two"));
++    const c = note("ram", posted("coordinator", "OPEN: three"));
++    expect(openAsks({ notes: [c, b, reply, a], readers })).toBe(2);
++  });
++
++  it("orders by the instant, not the text of the timestamp", () => {
++    // 10:30+01:00 is 09:30Z, before the ask at 10:00Z, though it sorts after it as text
++    const ask = { author: { name: "ram" }, body: posted("writer", "OPEN: which currency?"), at: "2026-11-07T10:00:00Z" };
++    const early = { author: { name: "lee" }, body: "EUR", at: "2026-11-07T10:30:00+01:00" };
++    expect(openAsks({ notes: [early, ask], readers })).toBe(1);
++    const later = { author: { name: "lee" }, body: "EUR", at: "2026-11-07T10:00:00.500Z" };
++    expect(openAsks({ notes: [later, ask], readers })).toBe(0);
++  });
++
++  it("a timestamp that does not parse never closes an ask", () => {
++    const ask = { author: { name: "ram" }, body: posted("writer", "OPEN: which currency?"), at: "garbled" };
++    const reply = { author: { name: "lee" }, body: "EUR", at: "garbled" };
++    expect(openAsks({ notes: [ask, note("lee", "EUR")], readers })).toBe(1);
++    expect(openAsks({ notes: [note("ram", posted("writer", "OPEN: x")), reply], readers })).toBe(1);
++  });
++
++  it("is zero with no notes", () => {
++    expect(openAsks({ notes: [], readers })).toBe(0);
++  });
++});
++
++describe("commit trailer", () => {
++  it("an agent commit carries Agent: <seat> in its trailer block", () => {
++    expect(agentTrailer({ seat: "writer" })).toBe("Agent: writer");
++    expect(commitKind({ message: "fix: refuse a reserved loan\n\nBody text.\n\nAgent: writer\nCo-Authored-By: x <x@x>" })).toEqual({ kind: "agent", seat: "writer" });
++  });
++
++  it("reads the trailer as git does: key without case, optional space around the colon, CRLF", () => {
++    for (const trailer of ["agent: reviewer", "AGENT:reviewer", "Agent : reviewer", "Agent:   reviewer  "]) {
++      expect(commitKind({ message: `fix: x\r\n\r\n${trailer}\r\n` })).toEqual({ kind: "agent", seat: "reviewer" });
++    }
++  });
++
++  it("takes a block with other lines only when a quarter of it is trailers and git wrote one of them", () => {
++    const mixed = "fix: x\n\nsome wrapped text\nAgent: writer\nSigned-off-by: a <a@a>";
++    expect(commitKind({ message: mixed })).toEqual({ kind: "agent", seat: "writer" });
++    expect(commitKind({ message: "fix: x\n\nsome text\nAgent: writer\nCo-Authored-By: a <a@a>" })).toEqual({ kind: "person" });
++    const thin = "fix: x\n\none\ntwo\nthree\nfour\nfive\nsix\nseven\nAgent: writer\nSigned-off-by: a <a@a>";
++    expect(commitKind({ message: thin })).toEqual({ kind: "person" });
++  });
++
++  it("a folded line continues the trailer above it", () => {
++    expect(commitKind({ message: "fix: x\n\nCo-Authored-By: a\n  <a@a>\nAgent: coordinator" })).toEqual({ kind: "agent", seat: "coordinator" });
++    expect(commitKind({ message: "fix: x\n\nAgent: writer\n  and more" })).toEqual({ kind: "person" });
++  });
++
++  it("a person's commit has none; the subject alone, the body, or an unknown seat never counts", () => {
++    for (const message of ["fix: x", "Agent: writer", "fix: x\nAgent: writer", "fix: x\n\nAgent: writer was here\n\nSigned-off-by: a", "fix: x\n\nAgent: builder"]) {
++      expect(commitKind({ message })).toEqual({ kind: "person" });
++    }
++  });
++});
+diff --git a/tests/github.test.sh b/tests/github.test.sh
+index 362366d..cefcee0 100644
+--- a/tests/github.test.sh
++++ b/tests/github.test.sh
+@@ -179,7 +179,7 @@ respond "$FACTORY_GH" 1 422 '{"message":"Validation Failed"}'
+ respond "$FACTORY_GH" 2 201 '{"id":2}'
+ forge_line_finding 12 '{"sha":"aaaa1111"}' '{"file":"src/A.java","line":400}' "[reviewer] Act on F1"
+ expect_eq "a line outside the diff goes out as a plain comment that names file:line" \
+-  '`src/A.java:400` [reviewer] Act on F1' "$(sed -n 2p "$(log)/inputs.log" | jq -r .body)"
++  '[reviewer] `src/A.java:400` Act on F1' "$(sed -n 2p "$(log)/inputs.log" | jq -r .body)"
+ expect_pass "on the conversation, not the diff" grep -q '^api --include repos/chiyanram/ledger/issues/12/comments ' "$(log)/calls.log"
+ 
+ FACTORY_GH=$(glab_stub); export FACTORY_GH
+diff --git a/tests/gitlab.test.sh b/tests/gitlab.test.sh
+index 3862310..fbd6f61 100644
+--- a/tests/gitlab.test.sh
++++ b/tests/gitlab.test.sh
+@@ -36,4 +36,13 @@ printf 'glab: not logged in\n' > "$(dirname "$FACTORY_GLAB")/e1"
+ : > "$(dirname "$FACTORY_GLAB")/r1"
+ expect_fail "output with no HTTP status fails" "no HTTP status" gl_api projects/1/merge_requests/12
+ 
++FACTORY_GLAB=$(glab_stub); export FACTORY_GLAB
++export FACTORY_PROJECT=o/r
++respond "$FACTORY_GLAB" 1 400 '{"message":"400 Bad request - line_code can not be blank"}'
++respond "$FACTORY_GLAB" 2 201 '{"id":"d2"}'
++forge_line_finding 12 '{"diff_refs":{"base_sha":"b","start_sha":"s","head_sha":"h"}}' \
++  '{"file":"src/A.java","line":400}' "[reviewer] Act on F1"
++expect_eq "a line outside the diff opens an unanchored thread that keeps the seat prefix first (#128)" \
++  '[reviewer] `src/A.java:400` Act on F1' "$(sed -n 2p "$(dirname "$FACTORY_GLAB")/inputs.log" | jq -r .body)"
++
+ finish

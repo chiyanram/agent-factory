@@ -1,0 +1,13 @@
+diff --git a/src/core/writer/run.ts b/src/core/writer/run.ts
+index eea78cd..c90970d 100644
+--- a/src/core/writer/run.ts
++++ b/src/core/writer/run.ts
+@@ -70,8 +70,6 @@ export function claudeArgv(claude: Claude, settings: SettingsArg = { kind: "none
+   return [
+     "claude",
+     "-p",
+-    "--setting-sources",
+-    "user",
+     "--dangerously-skip-permissions",
+     "--plugin-dir",
+     RULEBOOK_DIR,

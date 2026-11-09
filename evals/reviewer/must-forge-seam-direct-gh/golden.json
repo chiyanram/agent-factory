@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/notify.ts",
+    "line": 90,
+    "issue": "Reads the change's title with a direct gh call instead of through the Forge seam (src/core/forge/): it breaks on GitLab, ignores the project's identity and forge host, and cannot be stubbed in a test (AGENTS.md MUST: the forge only through the Forge seam).",
+    "severity": "blocker",
+    "category": "api"
+  }
+]

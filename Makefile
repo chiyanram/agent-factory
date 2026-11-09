@@ -6,10 +6,11 @@ help: ## list the targets
 node_modules/.package-lock.json: package.json package-lock.json
 	@npm ci --no-audit --no-fund --ignore-scripts
 
-lint: node_modules/.package-lock.json ## check links, the AGENTS.md size, tmpdir called outside test/temp.ts, the coordinator's wall, type-check, the Biome format, and the oxlint rules
+lint: node_modules/.package-lock.json ## check links, the AGENTS.md size, tmpdir called outside test/temp.ts, the golden set, the coordinator's wall, type-check, the Biome format, and the oxlint rules
 	@node scripts/check-links.ts .
 	@node scripts/check-size.ts .
 	@node scripts/check-temp-dirs.ts .
+	@node scripts/check-evals.ts .
 	@node scripts/check-coordinator.ts
 	@npm run --silent lint
 	@npx --no-install biome ci .

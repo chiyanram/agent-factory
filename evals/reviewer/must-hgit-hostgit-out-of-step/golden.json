@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/git.ts",
+    "line": 57,
+    "issue": "hostGit now always sets commit.gpgsign and tag.gpgsign, but hgit's list in scripts/lib/git.sh (hg_overrides and its header) is not changed: the bash scripts and the package now run git differently (AGENTS.md MUST: keep hgit and hostGit in step).",
+    "severity": "warning",
+    "category": "bug"
+  }
+]

@@ -1,0 +1,20 @@
+diff --git a/GUIDE.md b/GUIDE.md
+index 652ceda..e1000b2 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -103,11 +103,12 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
+ - The backstop, in case a CI change gets through anyway; set it up once per project:
+   - GitLab: mark every secret CI/CD variable **Protected**, so a pipeline on an agent branch never sees it. Optional:
+     point Settings → CI/CD → General pipelines → CI/CD configuration file at a file in a separate project you
+-    protect (`.gitlab-ci.yml@group/ci-config`), so the branch's copy is not the one that runs. **Today:** not yet tried
+-    on the free tier.
++    protect (`.gitlab-ci.yml@group/ci-config`), so the branch's copy is not the one that runs. The GitLab docs list it
++    on the Free tier ([pipeline settings](https://docs.gitlab.com/ci/pipelines/settings/)). **Today:** not yet tried.
+   - GitHub: keep secrets only in environments that need a reviewer's approval, never as plain repository secrets;
+     and give a bot App no **Workflows** permission (step 1), so it cannot push a workflow change at all.
+-  - **Today:** `agent-factory setup` does not check the backstop yet; check it by hand.
++  - Check the backstop by hand. `agent-factory setup` does not check it, because the factory's identity must not hold
++    the right to read CI variables or secrets (#115).
+ - VM (`FACTORY_BOX=vm`): install Sysbox on the VM first ([#158](https://github.com/chiyanram/agent-factory/issues/158)).
+   The box runs its own Docker under `--runtime=sysbox-runc`, so its root is an unprivileged user on the VM. Without
+   Sysbox the box refuses to start; it never falls back to `--privileged` ([decision](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6704930024)).

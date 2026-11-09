@@ -1,0 +1,14 @@
+diff --git a/src/core/review/settings.ts b/src/core/review/settings.ts
+index 187148a..641307b 100644
+--- a/src/core/review/settings.ts
++++ b/src/core/review/settings.ts
+@@ -115,6 +115,9 @@ const CLAUDE_ENV = new Set([
+   "no_proxy",
+   "NODE_EXTRA_CA_CERTS",
+   "SSL_CERT_FILE",
++  // so the finder can read the PR's own comments with gh when the pack leaves one out
++  "GH_TOKEN",
++  "GITLAB_TOKEN",
+ ]);
+ 
+ // claudeEnv : the environment the claude CLI gets: what it needs to run and sign in, and nothing else

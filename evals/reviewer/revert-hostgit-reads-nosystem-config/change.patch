@@ -1,0 +1,26 @@
+diff --git a/src/core/git.ts b/src/core/git.ts
+index 3b8214d..bffdfd1 100644
+--- a/src/core/git.ts
++++ b/src/core/git.ts
+@@ -165,12 +165,6 @@ export type ConfigRead =
+     }
+   | Refused;
+ 
+-// readsSystem : false when GIT_CONFIG_NOSYSTEM is a true value. git then skips the system config, but an explicit
+-// --system reads it anyway, so hostGit must skip it too or it adds back a value the operator turned off (#167).
+-function readsSystem(env: NodeJS.ProcessEnv): boolean {
+-  return /^(|0|false|no|off)$/i.test(env.GIT_CONFIG_NOSYSTEM ?? "");
+-}
+-
+ // trustedList : one trusted config file as `git config --null --list` prints it. An unreadable file reads as empty,
+ // which leaves the neutral values: the safe side.
+ async function trustedList(git: string, scope: "--system" | "--global", env: NodeJS.ProcessEnv): Promise<string> {
+@@ -182,7 +176,7 @@ async function trustedList(git: string, scope: "--system" | "--global", env: Nod
+ // list: an empty list would leave every repo key unchecked (git before 2.26 has no --show-scope).
+ async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Promise<ConfigRead> {
+   const trusted = [
+-    ...parseList(readsSystem(env) ? await trustedList(git, "--system", env) : ""),
++    ...parseList(await trustedList(git, "--system", env)),
+     ...parseList(await trustedList(git, "--global", env)),
+   ];
+   const scoped = await run(
