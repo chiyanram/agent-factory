@@ -1,4 +1,4 @@
-// usage-cli — agent-factory usage [<project>] (#131): what the dispatcher's runs spent today, in the current window
+// usage-cli — agent-factory usage [<project>] (#131): what the orchestrator's runs spent today, in the current window
 // and this month, per project and per ticket, read from the run records (src/core/dispatch/usage.ts). It reads only.
 
 import { plainName } from "./core/spec.js";
@@ -13,7 +13,7 @@ export type UsageIo = {
   readonly err: (text: string) => void;
 };
 
-export const USAGE_HELP = `  usage [<project>]            what the dispatcher's runs spent today, in the current window and this month, per
+export const USAGE_HELP = `  usage [<project>]            what the orchestrator's runs spent today, in the current window and this month, per
                                project and ticket, from the run records
 `;
 
