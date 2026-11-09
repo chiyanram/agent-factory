@@ -133,7 +133,6 @@ async function git(repo: string, env: NodeJS.ProcessEnv, args: readonly string[]
     args,
     repo: { kind: "repo", path: repo },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return r.kind === "ok" ? r.stdout.trim() : "";
@@ -173,7 +172,8 @@ function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, descripti
     factory: LOGIN,
     project: PROJECT,
     number: run,
-    paths: { repo: cloned.repo, rulebook: ctx.rulebook, home, maxUsd: ctx.settings.runUsd, maxRuns: 1 },
+    paths: { repo: cloned.repo, home, maxUsd: ctx.settings.runUsd, maxRuns: 1 },
+    plugins: [{ label: "the eval's plugin", dir: ctx.rulebook }],
     model: ctx.capped,
     sessions: async () => ({ kind: "ok", value: [] }),
   });

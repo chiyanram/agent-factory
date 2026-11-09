@@ -590,6 +590,22 @@ describe("every module reads the resolved settings (#254)", () => {
     expect(errors(withEnv([team], { FACTORY_MAX_TOKENS_DAY: "100" }))).toEqual([]);
   });
 
+  it("the run hours are a cap a lower layer can only narrow, and runs at once a cap (#299)", () => {
+    const team = layer("team", { runHours: "22-06", caps: { liveRuns: 2 } });
+    const narrow = { FACTORY_RUN_HOURS: "23-05" };
+    expect(capsOf(runEnv(narrow, withEnv([team], narrow)))).toMatchObject({
+      kind: "ok",
+      value: { runsAtOnce: 2, runHours: { text: "23-05" } },
+    });
+    expect(errors(withEnv([team], { FACTORY_RUN_HOURS: "20-06" }))[0]).toContain(
+      'runHours: the machine layer (env FACTORY_RUN_HOURS) "20-06" is not within "22-06"',
+    );
+    expect(errors(withEnv([team], { FACTORY_MAX_RUNS: "3" }))[0]).toContain("3 is higher than 2");
+    expect(errors(withEnv([layer("user", { runHours: "9-17" })], {}))[0]).toContain(
+      'runHours in /user.json:2 must be hours in UTC as "HH-HH"',
+    );
+  });
+
   it("runEnv puts only a file's values in the variables; a variable alone stays exactly as it is", () => {
     const env = { FACTORY_MAX_USD: "2.50", FACTORY_DRY_RUN: "1" };
     expect(runEnv(env, withEnv([], env))).toEqual(env);

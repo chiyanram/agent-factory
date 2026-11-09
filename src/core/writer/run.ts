@@ -1,7 +1,7 @@
 // run — one writer run in a fresh box (#113; ADR-0012 S5, S11, S13). The host has made the clone (clone.ts); this
 // file runs the agent in it and reads how it ended:
 //   1 the project's egress proxy, then the box, with the clone mounted and only the model login and the proxy settings
-//   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), the rulebook as a plugin, and
+//   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), each plugin with --plugin-dir, and
 //     no settings from the branch: --setting-sources user drops its .claude/settings.json, hooks, env and .mcp.json,
 //     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08). Its output is
 //     streamed (stream-json, which -p takes only with --verbose): one JSON event a line, the last one the result with
@@ -25,8 +25,8 @@ import { hostGit, type GitResult } from "../git.js";
 import { decide, endingOf, loadReport, validReport, type Ending, type Outcome, type RunEnd } from "../report.js";
 import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
+import { pluginPaths, type Clone } from "./clone.js";
 import { NO_STREAM, streamOf, streamSpend, type Spend, type Stream } from "../dispatch/spend.js";
-import { RULEBOOK_DIR, type Clone } from "./clone.js";
 
 export type Claude = {
   // "" for no cap (FACTORY_MAX_USD)
@@ -58,6 +58,8 @@ export type WriterRun = {
   readonly timeoutSeconds: number;
   readonly claude: Claude;
   readonly settings: SettingsArg;
+  // how many plugins the clone holds (clone.ts pluginPaths)
+  readonly plugins: number;
   readonly completion: Completion;
   readonly stallMs: number;
 };
@@ -79,15 +81,14 @@ const QUIET: Readonly<Record<string, string>> = {
 
 // claudeArgv : the writer's command. Pure. The prompt goes on stdin; the plugin and settings paths are relative to the
 // clone.
-export function claudeArgv(claude: Claude, settings: SettingsArg = { kind: "none" }): Argv {
+export function claudeArgv(claude: Claude, settings: SettingsArg, plugins: number): Argv {
   return [
     "claude",
     "-p",
     "--setting-sources",
     "user",
     "--dangerously-skip-permissions",
-    "--plugin-dir",
-    RULEBOOK_DIR,
+    ...pluginArgs(plugins),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -95,6 +96,11 @@ export function claudeArgv(claude: Claude, settings: SettingsArg = { kind: "none
     ...(claude.model === "" ? [] : ["--model", claude.model]),
     ...(settings.kind === "file" ? ["--settings", settings.path] : []),
   ];
+}
+
+// pluginArgs : one --plugin-dir per plugin the clone holds, in order. Pure.
+function pluginArgs(count: number): readonly string[] {
+  return pluginPaths(count).flatMap((dir) => ["--plugin-dir", dir]);
 }
 
 // runEnd : how the run ended, as the report reads it. Pure.
@@ -176,7 +182,7 @@ async function inBox(run: WriterRun): Promise<InBox> {
   const running = run.setup.box.run({
     session: session.value,
     command: {
-      argv: claudeArgv(run.claude, run.settings),
+      argv: claudeArgv(run.claude, run.settings, run.plugins),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
       // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it
@@ -301,7 +307,6 @@ async function git(run: WriterRun, args: readonly string[], stdin = ""): Promise
     args,
     repo: { kind: "repo", path: run.clone.repo },
     env: run.setup.env,
-    ownHelper: { kind: "none" },
     stdin: stdin === "" ? { kind: "none" } : { kind: "text", text: stdin },
   });
   return ran.kind === "ok"
