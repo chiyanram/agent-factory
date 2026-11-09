@@ -1,5 +1,5 @@
 // git — every git call the package makes on a project's clone, hardened against a planted hook or repo config
-// (#87; ADR-0012 S12). The same rules as scripts/lib/git.sh, which the bash scripts use; keep the two in step.
+// (#87; ADR-0012 S12). It is the one git seam: nothing else runs git on a project's clone.
 //
 // A branch or a writer can write the repo's own config (.git/config, a worktree's config.worktree, a file they include)
 // or a hook. Plain git on the host would then run that program as the operator, outside any box. hostGit runs git so
@@ -220,8 +220,7 @@ function refuseStep(ctx: Context, key: string): Step {
       };
 }
 
-// helperStep : an empty helper clears the list so far, then the trusted helpers; no helper the repo sets is kept, as in
-// scripts/lib/git.sh
+// helperStep : an empty helper clears the list so far, then the trusted helpers; no helper the repo sets is kept
 function helperStep(ctx: Context, key: string): Step {
   return { kind: "add", overrides: [{ key, value: "" }, ...ctx.values(key).map((value) => ({ key, value }))] };
 }
