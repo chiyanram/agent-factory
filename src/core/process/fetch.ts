@@ -2,7 +2,7 @@
 // by its hash (#232; docs/DESIGN.md section 5 "Plugins"). The marketplace names each plugin's folder in
 // .claude-plugin/marketplace.json ("source": "./plugins/<name>"), which must be a folder inside the marketplace. Every
 // git call goes through hostGit; the checkout is a worktree of the marketplace's clone, removed after the copy.
-// Nothing is pinned here: `agent-factory plugin update` shows the change, checks it, then moves the pin (next PR).
+// Nothing is pinned here: `agent-factory plugin update` shows the change, checks it, then moves the pin.
 
 import { cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
