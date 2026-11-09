@@ -503,6 +503,35 @@ FACTORY_TEST_BOX_IMAGE="$(jq -r .image "$FACTORY_HOME/projects/<project>/box.jso
 It plants a canary and a `GH_TOKEN` in the host environment, runs `env` in a real box, and fails if either one, or any
 secret-like name the box was not given, is there. Where there is no image or no Sysbox, it is skipped and says why.
 
+### Check the egress proxy
+
+**Today:** the egress proxy is tested only on a fake docker. Each runner joins its project's `--internal` network,
+`factory-int-<project>`, and leaves only through the project's Squid proxy; that it holds on a real Docker host is
+proven only by this check (#130). Run it on the VM after the first `box build`, as the user that runs the dispatcher,
+with the same settings as a dispatch pass:
+
+```bash
+agent-factory egress check <project> --port 22
+```
+
+Name with `--port` each port a runner may reach on the host's gateway (setup lists the ports that listen on all
+interfaces, #136). It starts the project's proxy as a run does, then a fresh runner on an empty folder, and prints one
+line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each one on #130 with the output:
+
+- [ ] a host off the allowlist (`example.com`) is refused: the proxy answers 403;
+- [ ] a model call reaches `api.anthropic.com` through the proxy (any HTTP answer from it), and the same host on
+  port 80 is refused; `--model-host` names another model API;
+- [ ] a direct connection that skips the proxy (`1.1.1.1:443`) fails;
+- [ ] an outside name does not resolve in the runner, so DNS is no way out either;
+- [ ] on the host's gateway, every open port is one you named; close any other port, or bind it to `127.0.0.1`;
+- [ ] the inner Docker pulls `hello-world`, as Testcontainers does; the list needs `.docker.io` and
+  `production.cloudflare.docker.com`, and `--pull` names the image your ITs use;
+- [ ] a real model call, by the first writer run on the VM, goes through: the check reaches the host, not the model;
+- [ ] the open question: does the work build need a private-registry token? Run the work project's build in the
+  runner; if a registry answers 401, record it on #130.
+
+**Today:** `--internal` with Rancher Desktop's containerd engine is unverified; the laptop runner is stage B (#129).
+
 ## Run the loop
 
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
