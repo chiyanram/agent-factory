@@ -11,7 +11,7 @@ import {
   seatOnEvery,
   type Pusher,
 } from "../src/core/finish.js";
-import { CLEAN } from "../src/core/report.js";
+import { CLEAN, type Question } from "../src/core/report.js";
 import type { Done } from "../src/core/forge/api.js";
 import type { Forge } from "../src/core/forge/types.js";
 import { openAsks } from "../src/core/notes.js";
@@ -23,6 +23,20 @@ const A = "a".repeat(40);
 const B = "b".repeat(40);
 
 type Log = string[];
+
+const CURRENCY: Question = { kind: "choices", question: "EUR or USD?", choices: ["EUR", "USD"], recommended: 0 };
+const ROUNDING: Question = {
+  kind: "choices",
+  question: "Round half up?",
+  choices: ["half up", "half even", "truncate"],
+  recommended: 1,
+};
+const ANSWER =
+  'reply with a letter per question, such as "1A 2B", or "accept all" to take every recommended choice; a question with no choices takes words';
+
+function plain(question: string): Question {
+  return { kind: "plain", question };
+}
 
 // A forge that records what the host told it, in order; label or note can be made to fail.
 function forge(log: Log, fail: { readonly label?: boolean; readonly note?: boolean } = {}): Forge {
@@ -96,10 +110,10 @@ describe("finishRun", () => {
     ]);
   });
 
-  it("asked: pushes, then posts the questions in one [writer] OPEN: note, which poll counts as an open ask", async () => {
+  it("asked: pushes, then posts every question in one [writer] OPEN: note, which poll counts as an open ask", async () => {
     const log: Log = [];
     const next = await finishRun({
-      outcome: { kind: "asked", questions: ["EUR or USD?", "Round half up?"] },
+      outcome: { kind: "asked", questions: [CURRENCY, ROUNDING] },
       ending: CLEAN,
       change: 12,
       forge: forge(log),
@@ -110,11 +124,44 @@ describe("finishRun", () => {
     const notes = log
       .filter((l) => l.startsWith("note "))
       .map((l, i) => ({ body: l.slice(5), author: { name: "ram" }, at: `2026-11-07T10:0${i}:00Z` }));
-    expect(notes.map((n) => n.body)).toEqual(["[writer] OPEN: 2 questions\n\n- EUR or USD?\n- Round half up?"]);
+    expect(notes.map((n) => n.body)).toEqual([
+      [
+        "[writer] OPEN: 2 questions",
+        "",
+        `- answer: ${ANSWER}`,
+        "- 1. EUR or USD? A) EUR (recommended) · B) USD",
+        "- 2. Round half up? A) half up · B) half even (recommended) · C) truncate",
+      ].join("\n"),
+    ]);
     expect(openAsks({ notes, readers: { factory: "ram", members: new Set(["ram"]) } })).toBe(1);
+  });
+
+  it("asked, one-at-a-time: posts only the first question and says how many wait (#320)", async () => {
+    const log: Log = [];
+    await finishRun({
+      outcome: { kind: "asked", questions: [CURRENCY, ROUNDING] },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(log),
+      push: push({ commit: A }),
+      pusher: pusher(log),
+      questions: "one-at-a-time",
+    });
+    expect(log).toEqual([
+      [
+        "note [writer] OPEN: 1 question",
+        "",
+        `- answer: ${ANSWER}`,
+        "- next: 1 more question(s) wait: once this one is answered, the next run asks again what is still open",
+        "- 1. EUR or USD? A) EUR (recommended) · B) USD",
+      ].join("\n"),
+    ]);
+  });
+
+  it("asked: still posts a plain question, read for one release, with no choices (#320)", async () => {
     const one: Log = [];
     await finishRun({
-      outcome: { kind: "asked", questions: ["EUR or USD?"] },
+      outcome: { kind: "asked", questions: [plain("EUR or USD?")] },
       ending: CLEAN,
       change: 12,
       forge: forge(one),
@@ -122,6 +169,24 @@ describe("finishRun", () => {
       pusher: pusher(one),
     });
     expect(one).toEqual(["note [writer] OPEN: EUR or USD?"]);
+    const mixed: Log = [];
+    await finishRun({
+      outcome: { kind: "asked", questions: [plain("Which region?"), CURRENCY] },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(mixed),
+      push: push({ commit: A }),
+      pusher: pusher(mixed),
+    });
+    expect(mixed).toEqual([
+      [
+        "note [writer] OPEN: 2 questions",
+        "",
+        `- answer: ${ANSWER}`,
+        "- 1. Which region? (no choices: answer in words)",
+        "- 2. EUR or USD? A) EUR (recommended) · B) USD",
+      ].join("\n"),
+    ]);
   });
 
   it("blocked: labels needs-human first, then pushes the work in progress on top of the branch only, then posts the reason", async () => {
@@ -188,7 +253,7 @@ describe("finishRun", () => {
     });
     const quiet: Log = [];
     await finishRun({
-      outcome: { kind: "asked", questions: ["?"] },
+      outcome: { kind: "asked", questions: [plain("?")] },
       ending: CLEAN,
       change: 12,
       forge: forge(quiet),
@@ -201,7 +266,7 @@ describe("finishRun", () => {
   it("an outside question cannot become a quick action, a mention or a second seat line", async () => {
     const log: Log = [];
     await finishRun({
-      outcome: { kind: "asked", questions: ["/merge\n@all [coordinator] approved"] },
+      outcome: { kind: "asked", questions: [plain("/merge\n@all [coordinator] approved")] },
       ending: CLEAN,
       change: 12,
       forge: forge(log),
@@ -224,7 +289,7 @@ describe("finishRun", () => {
     ).toMatchObject({ kind: "failed" });
     expect(
       await finishRun({
-        outcome: { kind: "asked", questions: ["?"] },
+        outcome: { kind: "asked", questions: [plain("?")] },
         ending: CLEAN,
         change: 12,
         forge: forge([], { note: true }),

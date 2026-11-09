@@ -23,6 +23,8 @@ const DONE = {
   evidence: [{ criterion: "AC1 a reserved loan is refused", command: "make test", result: "142 passed" }],
 };
 
+const CURRENCY = { question: "EUR or USD?", choices: ["EUR", "USD"], recommended: 0 };
+
 describe("a writer that hung after its report (#182)", () => {
   const hung = { kind: "hungAfterReport", windowSeconds: 60 } as const;
 
@@ -93,15 +95,49 @@ describe("decide (#109 done-when)", () => {
 describe("parseReport", () => {
   it("reads the three outcomes", () => {
     expect(parseReport(JSON.stringify(DONE))).toEqual({ kind: "done", evidence: DONE.evidence });
-    expect(parseReport(JSON.stringify({ status: "asked", questions: ["EUR or USD?"] }))).toEqual({
+    expect(parseReport(JSON.stringify({ status: "asked", questions: [CURRENCY] }))).toEqual({
       kind: "asked",
-      questions: ["EUR or USD?"],
+      questions: [{ kind: "choices", question: "EUR or USD?", choices: ["EUR", "USD"], recommended: 0 }],
     });
     expect(parseReport(JSON.stringify({ status: "blocked", blocker: "the build needs a licence key" }))).toEqual({
       kind: "blocked",
       reason: "the build needs a licence key",
       by: "writer",
     });
+  });
+
+  it("still reads a plain question, for one release, as one with no choices (#320)", () => {
+    expect(parseReport(JSON.stringify({ status: "asked", questions: ["EUR or USD?", CURRENCY] }))).toEqual({
+      kind: "asked",
+      questions: [
+        { kind: "plain", question: "EUR or USD?" },
+        { kind: "choices", question: "EUR or USD?", choices: ["EUR", "USD"], recommended: 0 },
+      ],
+    });
+  });
+
+  it("refuses a question whose choices or recommendation the schema does not allow (#320)", () => {
+    for (const [question, why] of [
+      [{ question: "x", choices: ["a"], recommended: 0 }, "question 1 choices must be a list of 2 to 4"],
+      [{ question: "x", choices: ["a", "b", "c", "d", "e"], recommended: 0 }, "a list of 2 to 4"],
+      [{ question: "x", recommended: 0 }, "a list of 2 to 4"],
+      [{ question: "x", choices: ["a", " "], recommended: 0 }, "question 1 choice 2 must be non-empty"],
+      [{ question: "x", choices: ["a", "b".repeat(201)], recommended: 0 }, "choice 2 is longer than 200"],
+      [{ question: "x", choices: ["a", "b"], recommended: 2 }, "recommended must be the index of one of its choices"],
+      [{ question: "x", choices: ["a", "b"], recommended: -1 }, "recommended must be the index"],
+      [{ question: "x", choices: ["a", "b"], recommended: "A" }, "recommended must be the index"],
+      [{ question: "x", choices: ["a", "b"] }, "recommended must be the index"],
+      [{ question: " ", choices: ["a", "b"], recommended: 0 }, "question 1 question must be non-empty"],
+      [{ ...CURRENCY, why: "x" }, "question 1 has 1 field(s) the schema does not name"],
+      [["x"], "question 1 must be {question, choices, recommended}"],
+      [7, "question 1 must be {question, choices, recommended}"],
+    ] as const) {
+      expect(parseReport(JSON.stringify({ status: "asked", questions: [question] }))).toMatchObject({
+        kind: "blocked",
+        by: "host",
+        reason: expect.stringContaining(why),
+      });
+    }
   });
 
   it("refuses each part the schema does not allow", () => {
@@ -162,6 +198,9 @@ describe("parseReport", () => {
       '"blocked"',
       '"evidence"',
       '"questions"',
+      '"choices"',
+      '"recommended"',
+      "all at once",
       '"blocker"',
       ".factory/report.json",
       "Never commit",

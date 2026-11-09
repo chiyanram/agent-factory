@@ -48,6 +48,11 @@ const runHours: Check = (value) => (hoursOf(value) === "bad" ? HOURS_HINT : "");
 
 const DRY: readonly string[] = ["0", "1"];
 
+// how a run's questions are asked: all at once, as one numbered round of choices (the default), or one at a time
+// (#320)
+export const QUESTIONS = ["round", "one-at-a-time"] as const;
+export type Questions = (typeof QUESTIONS)[number];
+
 // the most tokens a token cap may hold
 const MOST_TOKENS = 1_000_000_000_000;
 
@@ -207,6 +212,13 @@ export const MACHINE_KEYS = [
     "preference",
     "how often the git host is polled (default 5)",
     wholeNumber(60),
+  ),
+  machine(
+    "questions",
+    "FACTORY_QUESTIONS",
+    "preference",
+    "how a run asks: round, every open question at once with choices and a recommendation (default), or one-at-a-time",
+    oneOf(QUESTIONS),
   ),
   machine(
     "quietMinutes",

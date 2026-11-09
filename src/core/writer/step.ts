@@ -304,6 +304,7 @@ async function onChange(
     forge: setup.forge,
     push: run.push,
     pusher: setup.pusher,
+    questions: setup.settings.questions,
   });
   if (next.kind === "failed") {
     return next;
@@ -338,6 +339,7 @@ async function finished(
     forge: setup.forge,
     push,
     pusher: setup.pusher,
+    questions: setup.settings.questions,
     open: openFor(setup, p, clone.branch),
   });
   return first.kind === "ok" ? { kind: "ok", value: outOf(ended, first.value.next) } : first;
