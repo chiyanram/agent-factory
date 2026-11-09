@@ -4,7 +4,7 @@ A coordinator AI that talks with the human, and a dispatcher (code) that starts 
 in a box on a project's merge requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the scripts
 do not follow it yet). The rules those
 workers follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
-People start at `README.md`; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
+People start at `README.md`; `docs/DESIGN.md` is the design on one page; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
 
 ## Check
 
