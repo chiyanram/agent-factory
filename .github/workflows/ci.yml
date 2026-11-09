@@ -39,7 +39,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - run: make test
+      # The runner image may put a newer bash first on PATH; the stock /bin/bash is the 3.2 a Mac ships.
+      - name: make test with the stock bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/stock-bash"
+          ln -sf /bin/bash "$RUNNER_TEMP/stock-bash/bash"
+          export PATH="$RUNNER_TEMP/stock-bash:$PATH"
+          bash --version | head -1
+          make test
 
   # Pull requests are squash-merged with the PR title as the commit subject, so the title is what semantic-release
   # reads on main (#153).
