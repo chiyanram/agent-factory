@@ -25,6 +25,7 @@ import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
+import type { PluginHash } from "../process/use.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 
@@ -94,6 +95,8 @@ export type Event =
       readonly phase: Phase;
       readonly mode: WriterMode | "none";
       readonly head: string;
+      // each plugin the run used and its hash (#232); absent on older lines
+      readonly plugins?: readonly PluginHash[];
     }
   | {
       readonly at: string;
@@ -243,7 +246,23 @@ function startedOf(raw: unknown, at: string): Event | Bad {
   const phase = oneOf(raw, "phase", PHASES);
   const mode = oneOf(raw, "mode", [...MODES, "none"] as const);
   const head = str(raw, "head");
-  return phase === BAD || mode === BAD || head === BAD ? BAD : { at, kind: "started", phase, mode, head };
+  if (phase === BAD || mode === BAD || head === BAD) {
+    return BAD;
+  }
+  const plugins = hashesIn(prop(raw, "plugins"));
+  return plugins === undefined
+    ? { at, kind: "started", phase, mode, head }
+    : { at, kind: "started", phase, mode, head, plugins };
+}
+
+// hashesIn : a started line's plugins and their hashes; none on an older line, or one that holds no list
+function hashesIn(value: unknown): readonly PluginHash[] | undefined {
+  const list = Array.isArray(value) ? value : [];
+  const hashes = list.flatMap((h: unknown) => {
+    const [ref, sha256] = [prop(h, "ref"), prop(h, "sha256")];
+    return typeof ref === "string" && typeof sha256 === "string" ? [{ ref, sha256 }] : [];
+  });
+  return Array.isArray(value) ? hashes : undefined;
 }
 
 function rowOf(row: unknown): Evidence | Bad {

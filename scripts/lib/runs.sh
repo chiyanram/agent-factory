@@ -2,7 +2,7 @@
 #
 #   FACTORY_CLAUDE     the claude binary (default: claude); a test points it at a stub
 #   FACTORY_REPO       the local clone of the project; runs get worktrees in $FACTORY_REPO/.claude/worktrees/
-#   FACTORY_MAX_RUNS   live runs allowed on this machine at once (default 2, playbook §Triggers)
+#   FACTORY_MAX_RUNS   runs at once: live runs allowed on this machine (default 1, ADR-0012 S16)
 #
 # A run is a Claude session named writer-<mr> or reviewer-<mr>. A background run is live while `claude agents --json`
 # lists it, so liveness never depends on poking a worker (ADR-0002). A foreground `claude -p` run is not listed there,

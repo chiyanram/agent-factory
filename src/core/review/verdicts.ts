@@ -3,6 +3,8 @@
 // dropped (so a thread anchors). A finding the verify pass gives no verdict is kept as Consider, never dropped.
 // Nothing here posts: the post template (#126) makes every field inert. Each finding carries a category, what it is
 // (the Martian categories, ADR-0015 R2), and keeps its severity, how much it matters (decided on #218, 2026-11-09).
+// A Spec finding names the acceptance criterion it fails as its rule, AC<n>; the round quotes that line from the
+// approved spec, never from the model (#219).
 
 import { prop } from "../dispatch/records.js";
 import { CATEGORIES, type Category } from "../eval/golden.js";
@@ -178,6 +180,25 @@ export type Counts = Readonly<Record<Bucket, number>>;
 export function counts(sorted: readonly Sorted[]): Counts {
   const n = (b: Bucket) => sorted.filter((f) => f.bucket === b).length;
   return { act_on: n("act_on"), consider: n("consider"), noted: n("noted"), dismissed: n("dismissed") };
+}
+
+const CRITERION = /^AC(\d+)$/;
+
+// criterionOf : the number of the criterion a Spec finding's rule names; 0 for none
+function criterionOf(f: Finding): number {
+  const n = CRITERION.exec(f.rule.trim())?.[1];
+  return f.axis === "spec" && n !== undefined ? Number(n) : 0;
+}
+
+// quoteOf : the criterion line a Spec finding fails, quoted from the approved spec, or why there is none to quote;
+// "" for a Standards finding or a rule that names no criterion. Pure.
+export function quoteOf(f: Finding, criteria: readonly string[]): string {
+  const n = criterionOf(f);
+  if (n === 0) {
+    return "";
+  }
+  const line = criteria[n - 1];
+  return line === undefined ? `AC${n} is not in the approved spec` : `${n}. ${line}`;
 }
 
 export function countsLine(c: Counts): string {

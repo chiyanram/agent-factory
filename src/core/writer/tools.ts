@@ -64,7 +64,6 @@ export async function readTools(input: {
       args,
       repo: { kind: "repo", path: input.repo },
       env: input.env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "none" },
     });
   const fetched = await git(["fetch", "-q", "origin", `+refs/heads/${input.base}:${ref}`]);

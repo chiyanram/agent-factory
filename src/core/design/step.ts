@@ -84,7 +84,6 @@ async function git(setup: DesignSetup, args: readonly string[]): Promise<Result<
     args,
     repo: { kind: "repo", path: setup.repo },
     env: setup.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return ran.kind === "ok"

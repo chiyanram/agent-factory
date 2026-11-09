@@ -12,8 +12,9 @@
 // makes any approval stale, and a human approves the raised spec.
 //
 // The engine acts on a lane's properties, never on its name (section 3). Today one property, approval, is read from
-// the default lanes below. Each lane also says whether its spec and design get a design review before the human's
-// approval (designReview, #236): a design-reviewer run, then a verify pass. The approval floor: every lane above the lowest needs a human's approval, and no settings
+// the project's process: its process plugin's lanes, or the default lanes below (process/read.ts, #232). Each lane also
+// says whether its spec and design get a design review before the human's approval (designReview, #236): a
+// design-reviewer run, then a verify pass. The approval floor: every lane above the lowest needs a human's approval, and no settings
 // layer or process plugin can turn that off. In the settings the floor is "approval.floor", a locked key fixed to tiny
 // (#229; settings/keys.ts). lanesOf is the one door a lanes value from a process plugin comes through; it refuses any
 // value that drops the floor.
@@ -98,9 +99,10 @@ export function lanesOf(value: unknown, from: string): Result<readonly LaneProps
       );
 }
 
-// needsApproval : whether a lane's build waits for a human's approval as well as a START. Pure.
-export function needsApproval(lane: Lane): boolean {
-  return DEFAULT_LANES.find((l) => l.name === lane)?.approval ?? true;
+// needsApproval : whether a lane's build waits for a human's approval as well as a START, by the project's lanes; a
+// lane they leave out needs one. The lanes came through lanesOf, so the approval floor holds. Pure.
+export function needsApproval(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
+  return lanes.find((l) => l.name === lane)?.approval ?? true;
 }
 
 // needsDesignReview : whether a lane's spec and design get a design review before the human's approval (#236). Pure.
