@@ -842,8 +842,8 @@ it is a prompt instruction at most.
   push refuses a commit that adds or changes one ("touches the agent's settings", `src/core/agent-settings.ts`). As
   for CI, a version equal to the default branch's passes, so a merge of main is fine. A person makes that change in
   their own commit.
-- **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
-  `hgit` (`scripts/lib/git.sh`), and every one the TypeScript package makes through `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
+- **Enforced: host git runs no planted program.** Every git call the factory makes on a project's clone goes through
+  `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
   and the rest come from your own system and global config only, never from the repo's. A repo whose own config
   sets an external diff, a merge driver, a URL rewrite or an `http.*` setting is refused (#87,
   [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)). **Decided:** the git
