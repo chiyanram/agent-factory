@@ -11,6 +11,7 @@ import { codeOf } from "./core/dispatch/records.js";
 import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { pluginConfigOf } from "./core/plugin/config.js";
+import { pluginListOf } from "./core/process/plugins.js";
 import { projectPath, readyFieldsOf } from "./core/project.js";
 import { layered, readTeamAt, teamDir, type Layered, type Pin, type Read } from "./core/settings/layers.js";
 import { canonical, where, type Problem, type Resolved } from "./core/settings/resolve.js";
@@ -62,8 +63,11 @@ async function resolved(io: SettingsIo, loaded: Loaded, team?: Read): Promise<La
 // readerErrors : what the project file's own readers refuse in the resolved settings
 function readerErrors(path: string, effective: object): readonly Problem[] {
   const ready = readyFieldsOf(path, effective);
-  const plugins = pluginConfigOf(path, effective);
-  return [ready, plugins].flatMap((r) => (r.kind === "failed" ? [{ level: "error" as const, text: r.reason }] : []));
+  const connectors = pluginConfigOf(path, effective);
+  const plugins = pluginListOf(path, effective);
+  return [ready, connectors, plugins].flatMap((r) =>
+    r.kind === "failed" ? [{ level: "error" as const, text: r.reason }] : [],
+  );
 }
 
 function allProblems(path: string, layers: Layered): readonly Problem[] {
