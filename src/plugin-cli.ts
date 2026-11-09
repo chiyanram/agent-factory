@@ -1,6 +1,6 @@
 // plugin-cli — `agent-factory plugin add | update | test | list` (#134; ADR-0014 P2, P8, P10). A plugin is named by its
 // absolute path, or by the name of one bundled with the package (<package>/plugins/<name>/plugin). Nothing is fetched
-// from the network. `update <name>` runs the test kit and shows the new version's hash and the writes it adds;
+// from the network. `update <project> <name@marketplace>` pins a project's Claude Code plugin (plugin-pin-cli.ts). `update <name>` runs the test kit and shows the new version's hash and the writes it adds;
 // `update <name> <sha256>` records it, only when that is still the hash.
 
 import { access, stat } from "node:fs/promises";
@@ -17,6 +17,7 @@ import {
   type Secrets,
   type Setup,
 } from "./core/plugin/registry.js";
+import { pinUpdate } from "./plugin-pin-cli.js";
 
 export type PluginIo = {
   readonly env: NodeJS.ProcessEnv;
@@ -141,17 +142,26 @@ async function list(io: PluginIo): Promise<number> {
 }
 
 const USAGE =
-  "usage: agent-factory plugin add <path|bundled name> | update <name> [<sha256>] | test <path|name> | list\n";
+  "usage: agent-factory plugin add <path|bundled name> | update <name> [<sha256>] | update <project> <name@marketplace> [<commit>] | test <path|name> | list\n";
 
 type Verb = (io: PluginIo, args: readonly string[]) => Promise<number>;
+
+// update : a connector's update, or, when the second word is name@marketplace, a project's plugin pin (#232)
+function updateVerb(io: PluginIo, [first = "", second, third]: readonly string[]): Promise<number> {
+  if (second?.includes("@") === true) {
+    return pinUpdate(io, first, second, third);
+  }
+  return third === undefined ? connectorUpdate(io, first, second) : (io.err(USAGE), Promise.resolve(64));
+}
+
+function connectorUpdate(io: PluginIo, name: string, sha: string | undefined): Promise<number> {
+  return sha === undefined ? showUpdate(io, name) : recordUpdate(io, name, sha);
+}
 
 // each subcommand and the numbers of words it takes after it
 const VERBS: Readonly<Record<string, { readonly words: readonly number[]; readonly run: Verb }>> = {
   add: { words: [1], run: (io, [path = ""]) => add(io, path) },
-  update: {
-    words: [1, 2],
-    run: (io, [name = "", sha]) => (sha === undefined ? showUpdate(io, name) : recordUpdate(io, name, sha)),
-  },
+  update: { words: [1, 2, 3], run: updateVerb },
   test: { words: [1], run: (io, [word = ""]) => test(io, word) },
   list: { words: [0], run: (io) => list(io) },
 };

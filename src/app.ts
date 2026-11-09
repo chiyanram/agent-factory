@@ -91,6 +91,8 @@ commands:
   coordinator [copilot]        start the coordinator's session there, with only those settings (#106)
   plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
+  plugin update <project> <name@marketplace> [<commit>]
+                               fetch a listed plugin, show the change, run config check, then move its pin (#232)
   plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
   plugin list                  the registered plugins
   config show <project>        every settings key: its value, layer, file:line and class (--json: as JSON)

@@ -411,8 +411,19 @@ there.
   refused.
 - `plugins`: the Claude Code plugins the project installs, each `name@marketplace`, in order, each name once
   ([docs/DESIGN.md](docs/DESIGN.md) section 5 "Plugins"). It is a locked key, so a user layer cannot drop or swap the
-  process plugin. None listed means the engine runs alone, on its built-in process. **Today:** the list is checked and
-  locked only; no plugin is fetched, pinned by hash or handed to a run yet (#232).
+  process plugin. None listed means the engine runs alone, on its built-in process. Each listed plugin is pinned by
+  commit and hash with `agent-factory plugin update <project> <name@marketplace> [<commit>]`:
+  - clone the marketplace once to `$FACTORY_HOME/marketplaces/<marketplace>` (for `rulebook@chiyanram`:
+    `git clone https://github.com/chiyanram/skills`); the command fetches its `HEAD` through hostGit, or takes the
+    commit you name;
+  - it copies the plugin's folder (its `source` in `.claude-plugin/marketplace.json`, which must be a folder inside the
+    marketplace) to `$FACTORY_HOME/plugins/<marketplace>/<name>/<sha256>/`, never into the product repo;
+  - it shows the pin before and after and each file added (`+`), removed (`-`) or changed (`~`), then runs `config
+    check` and reads the process of the project's plugins with the new version in (a lanes file that drops the approval
+    floor fails it). Only when both pass does it write the pin to `$FACTORY_HOME/projects/<project>.plugins.json`. It
+    does not run the eval set; `agent-factory eval reviewer` does, and spends money.
+  - A listed plugin with no pin, or whose stored folder no longer has the pin's hash, is refused.
+  **Today:** runs do not use the pins yet; the writer and the review still read `FACTORY_RULEBOOK` (#232).
 - `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
   [docs/DESIGN.md](docs/DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing
