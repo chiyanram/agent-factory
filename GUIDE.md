@@ -443,11 +443,11 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | class | rule | keys |
 |---|---|---|
 | ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits` |
-| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `implementer.minutes`, `implementer.stallMinutes` |
+| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
 | locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
-| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `poll.minutes` |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
   layer, its `file:line` and the team value. A team `locked` mode holds on any class.
@@ -458,10 +458,12 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   resolves the layers, runs the project file's checks on the result, and exits 0 or 1; `team update <project>
   [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
   Fetch the team's clone yourself first; nothing here uses the network.
-- The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch` and `review`
-  resolve the layers once before the run, print each warning, and refuse to start on an error, so a team's
-  `caps.usdPerRun` is the most each model run of the project may spend (#254).
-- **Today:** `dispatch` and `review` read the resolved values; the other commands still read the variables alone.
+- The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch`, `review` and
+  `start` resolve the project's layers once before the run, print each warning, and refuse to start on an error, so a
+  team's `caps.usdPerRun` is the most each model run of the project may spend (#254). `poll` and the loop commands
+  name no project, so they resolve the user and machine layers only; `lint-edit` reads no setting.
+- Every module reads a machine key through `src/core/settings/machine.ts`, never its variable;
+  `test/settings-read.test.ts` fails on a direct read.
 
 ### The box image
 

@@ -3,6 +3,7 @@
 
 import type { Result } from "./api.js";
 import type { ForgeName } from "./types.js";
+import { settingOf } from "../settings/machine.js";
 
 export type GithubProject = { readonly owner: string; readonly name: string };
 
@@ -32,7 +33,7 @@ export function gitlabProject(project: string): Result<string> {
 
 // forgeName : FACTORY_FORGE, checked.
 export function forgeName(env: NodeJS.ProcessEnv): Result<ForgeName> {
-  const kind = env.FACTORY_FORGE ?? "gitlab";
+  const kind = settingOf(env, "gitHost") ?? "gitlab";
   return kind === "github" || kind === "gitlab"
     ? { kind: "ok", value: kind }
     : { kind: "failed", reason: `FACTORY_FORGE must be gitlab or github, got ${JSON.stringify(kind)}` };
