@@ -22,8 +22,13 @@ describe("the published package (#171)", () => {
     const prompts = readdirSync(join(ROOT, "prompts"), { recursive: true, withFileTypes: true })
       .filter((f) => f.isFile())
       .map((f) => relative(ROOT, join(f.parentPath, f.name)));
-    expect(prompts).toEqual(expect.arrayContaining(["prompts/roles/cleanup.md", "prompts/roles/onboarder.md"]));
-    expect(prompts).toContain("prompts/writer-ci.md");
+    expect(prompts).toEqual(
+      expect.arrayContaining([
+        "prompts/roles/cleanup.md",
+        "prompts/roles/onboarder.md",
+        "prompts/roles/implementer.md",
+      ]),
+    );
     expect(files).toEqual(expect.arrayContaining([...prompts, "images/factory-box/Dockerfile"]));
   });
 });

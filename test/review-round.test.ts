@@ -765,6 +765,13 @@ describe("claudeArgs", () => {
       "--max-budget-usd",
     );
   });
+
+  it("gives a role card's run the card's tools, which can narrow Read, Grep and Glob, never widen them (#232)", () => {
+    const run = { folder: "/x", model: "opus", schema: "{}", prompt: "P", name: "n", maxUsd: "" };
+    expect(claudeArgs({ ...run, tools: ["Glob", "Read"] })).toContain("Read,Glob");
+    expect(claudeArgs({ ...run, tools: ["Read", "Bash"] })).toContain("Read");
+    expect(claudeArgs({ ...run, tools: ["Read", "Bash"] }).join(" ")).not.toContain("Bash");
+  });
 });
 
 describe("reviewStep", () => {
