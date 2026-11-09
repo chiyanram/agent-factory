@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.26.0](https://github.com/chiyanram/agent-factory/compare/v0.25.0...v0.26.0) (2026-11-09)
+
+### ✨ Features
+
+* **plugin** — rename the connector map to connectors and add the plugins list key · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#257](https://github.com/chiyanram/agent-factory/pull/257))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.26.0`
+
 ## [0.25.0](https://github.com/chiyanram/agent-factory/compare/v0.24.0...v0.25.0) (2026-11-09)
 
 ### ✨ Features
