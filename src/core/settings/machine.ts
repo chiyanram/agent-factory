@@ -6,11 +6,11 @@
 // variables, with each machine key a file layer set put in its variable. The agent CLI never gets them: claudeEnv
 // passes no FACTORY_* variable (ADR-0012 S2).
 
-import { canonical, type Resolution } from "./resolve.js";
-import { machineKeys, type MachineId } from "./keys.js";
+import type { Resolution } from "./resolve.js";
+import { MACHINE_KEYS, type MachineId } from "./variables.js";
 
 function variableOf(id: MachineId): string {
-  const key = machineKeys().find((k) => k.id === id);
+  const key = MACHINE_KEYS.find((k) => k.id === id);
   if (key === undefined) {
     throw new Error(`${id} is not a machine key`);
   }
@@ -28,7 +28,7 @@ export function settingName(id: MachineId): string {
 }
 
 function asText(value: unknown): string {
-  return typeof value === "string" ? value : canonical(value);
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 // runEnv : the env a run's modules read, with every machine key a team, project or user file set in its variable

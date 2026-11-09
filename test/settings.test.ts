@@ -12,6 +12,7 @@ import { keyLines } from "../src/core/settings/lines.js";
 import { canonical, didYouMean, resolve, type FileLayer, type Resolved } from "../src/core/settings/resolve.js";
 import { runEnv, settingOf } from "../src/core/settings/machine.js";
 import { maxUsd } from "../src/core/review/settings.js";
+import { evalSettings } from "../src/core/eval/harness.js";
 import { tempDir } from "./temp.js";
 
 let home = "";
@@ -623,5 +624,37 @@ describe("every module reads the resolved settings (#254)", () => {
     const unmark = resolved([layer("team", { work: true }), layer("project", { work: false })]);
     expect(errors(unmark)[0]).toContain("work: the project layer (/project.json:2) false is looser than true");
     expect(errors(resolved([layer("project", { repoCommits: "yes" })]))[0]).toContain("must be true or false");
+  });
+
+  it("start resolves the project's layers, and poll and the loop commands the user and machine layers", async () => {
+    const commit = commitTeam({ caps: { usdPerRun: 1 } });
+    writeProject({ ...BASE, team: `acme@${commit}` });
+    const start = await cli(["start", "ledger", "5"], { FACTORY_MAX_USD: "5" });
+    expect(start.code).toBe(1);
+    expect(start.err).toContain("agent-factory start: ");
+    expect(start.err).toContain("caps.usdPerRun: the machine layer");
+    writeUser({ claimLabl: "x" });
+    for (const argv of [["poll"], ["claim", "5"], ["reconcile"]]) {
+      const r = await cli(argv);
+      expect(r.err).toContain(`agent-factory ${argv[0]}: warning: `);
+      expect(r.err).toContain("unknown key claimLabl; did you mean claimLabel?");
+    }
+    writeUser({ caps: { usdPerRun: "lots" } });
+    const bad = await cli(["poll"]);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("caps.usdPerRun in");
+  });
+
+  it("the eval judge's spend cap and model are settings keys: a cap, and a preference", () => {
+    const team = layer("team", { eval: { judgeUsdPerRun: 0.2, judgeModel: "opus" } });
+    const flags = { drafts: false, allowPartial: false };
+    expect(evalSettings(runEnv({}, withEnv([team], {})), flags)).toMatchObject({
+      judgeUsd: "0.2",
+      judgeModel: "opus",
+    });
+    expect(errors(withEnv([team], { FACTORY_JUDGE_MAX_USD: "1" }))[0]).toContain(
+      "eval.judgeUsdPerRun: the machine layer (env FACTORY_JUDGE_MAX_USD) 1 is higher than 0.2",
+    );
+    expect(valueOf(withEnv([team], { FACTORY_JUDGE_MODEL: "sonnet" }), "eval.judgeModel")?.value).toBe("sonnet");
   });
 });

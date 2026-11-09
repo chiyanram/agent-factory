@@ -8,20 +8,6 @@ import { machineKeys } from "../src/core/settings/keys.js";
 
 const ROOT = join(import.meta.dirname, "..");
 
-// the modules not yet moved to settingOf, and the variables each still reads. It only shrinks: an entry that is no
-// longer read fails this test, so it is taken off when the module moves (#254 follow-up).
-const NOT_YET: Readonly<Record<string, readonly string[]>> = {
-  "src/loop-cli.ts": ["FACTORY_CLAIM_LABEL", "FACTORY_DRY_RUN"],
-  "src/eval-cli.ts": ["FACTORY_DRY_RUN", "FACTORY_MAX_USD", "FACTORY_RULEBOOK"],
-  "src/core/forge/index.ts": ["FACTORY_DRY_RUN", "FACTORY_FORGE", "FACTORY_FORGE_HOST", "FACTORY_MAX_TRIES"],
-  "src/core/forge/target.ts": ["FACTORY_FORGE"],
-  "src/core/ready/plan.ts": ["FACTORY_EGRESS_IMAGE"],
-  "src/core/eval/harness.ts": ["FACTORY_MAX_USD"],
-  "src/core/egress/upstream.ts": ["FACTORY_UPSTREAM_PROXY"],
-  "src/core/identity.ts": ["FACTORY_IDENTITY"],
-  "src/core/box/choose.ts": ["FACTORY_BOX"],
-};
-
 function sources(dir: string): readonly string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const path = join(dir, e.name);
@@ -33,8 +19,9 @@ function sources(dir: string): readonly string[] {
 }
 
 const NAMES = machineKeys().map((k) => k.env);
-// env.FACTORY_X, or the name as a string, as in env["FACTORY_X"] or a reader handed "FACTORY_X"
-const READ = new RegExp(`(?:\\.|["'\`])(${NAMES.join("|")})\\b(?!\\s*=[^=])`, "g");
+// env.FACTORY_X, or the name as a whole string, as in env["FACTORY_X"] or a reader handed "FACTORY_X"; a message that
+// names the variable is not a read
+const READ = new RegExp(`(?:\\.(${NAMES.join("|")})\\b(?!\\s*=[^=])|["'\`](${NAMES.join("|")})["'\`])`, "g");
 
 // reads : the settings variables one source reads, by name; comments and the adapter itself do not count
 export function reads(text: string): readonly string[] {
@@ -42,7 +29,7 @@ export function reads(text: string): readonly string[] {
     .split("\n")
     .map((line) => line.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/ .*$/, ""))
     .join("\n");
-  return [...new Set([...code.matchAll(READ)].map((m) => m[1] ?? ""))];
+  return [...new Set([...code.matchAll(READ)].map((m) => m[1] ?? m[2] ?? ""))];
 }
 
 function found(): Readonly<Record<string, readonly string[]>> {
@@ -58,9 +45,8 @@ function found(): Readonly<Record<string, readonly string[]>> {
 }
 
 describe("settings are read through the one adapter (#254)", () => {
-  it("no module reads a settings key's FACTORY_* variable but the ones not yet moved, and those only shrink", () => {
-    const sorted = Object.fromEntries(Object.entries(NOT_YET).map(([k, v]) => [k, v.toSorted()]));
-    expect(found()).toEqual(sorted);
+  it("no module reads a settings key's FACTORY_* variable but through the adapter", () => {
+    expect(found()).toEqual({});
   });
 
   it("catches a direct read in every form, and leaves comments, other variables, a test's own env and the adapter's calls alone", () => {
@@ -70,6 +56,7 @@ describe("settings are read through the one adapter (#254)", () => {
     expect(reads('const n = name("FACTORY_WRITER_MODEL");')).toEqual(["FACTORY_WRITER_MODEL"]);
     expect(reads("// env.FACTORY_MAX_USD is the cap")).toEqual([]);
     expect(reads("const a = env.FACTORY_REPO;")).toEqual([]);
+    expect(reads('reason: "FACTORY_BOX is not set; set it to vm"')).toEqual([]);
     expect(reads('env.FACTORY_MAX_USD = "2";')).toEqual([]);
     expect(reads('const a = settingOf(env, "caps.usdPerRun");')).toEqual([]);
   });

@@ -166,7 +166,11 @@ function version(): string {
   return pkg.version;
 }
 
-async function poll({ json, io }: Args): Promise<number> {
+function poll(args: Args): Promise<number> {
+  return resolvedRun("poll", undefined, args.io, (io) => pollResolved({ ...args, io }));
+}
+
+async function pollResolved({ json, io }: Args): Promise<number> {
   const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   if (label.trim() === "") {
     io.err(`agent-factory poll: ${settingName("claimLabel")} is set but empty\n`);
@@ -296,6 +300,10 @@ async function startCommand({ positionals, yes, io }: Args): Promise<number> {
     io.err("usage: agent-factory start <project> <ticket> [--yes]\n");
     return 64;
   }
+  return resolvedRun("start", target.project, io, (resolved) => startResolved(target, yes, resolved));
+}
+
+async function startResolved(target: TicketArgs, yes: boolean, io: Io): Promise<number> {
   const branch = await branchAt(io, target);
   if (branch.kind === "failed") {
     io.err(`agent-factory start: refused: ${branch.reason}\n`);
@@ -585,7 +593,7 @@ async function dispatchReady(io: Io): Promise<DispatchSettings> {
 // resolved values, and the warnings (an unknown key) are printed; a layer that loosens a safety key refuses it
 async function resolvedRun(
   name: string,
-  project: string,
+  project: string | undefined,
   io: Io,
   run: (resolved: Io) => Promise<number>,
 ): Promise<number> {
@@ -1012,7 +1020,11 @@ const COMMANDS: readonly Command[] = [
   { name: "team", run: teamCli },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
-    run: ({ positionals, io }: Args) => Promise.resolve(run(positionals, io)),
+    // the writer's lint hook reads no setting, and prints only the lint's own output
+    run: ({ positionals, io }: Args) =>
+      name === "lint-edit"
+        ? Promise.resolve(run(positionals, io))
+        : resolvedRun(name, undefined, io, (resolved) => Promise.resolve(run(positionals, resolved))),
   })),
 ];
 

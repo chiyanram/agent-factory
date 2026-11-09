@@ -19,6 +19,7 @@ import { gitlab } from "./gitlab.js";
 import { pluginConfigOf } from "../plugin/config.js";
 import type { Setup } from "../plugin/registry.js";
 import { readProjectRaw } from "../project.js";
+import { settingName, settingOf } from "../settings/machine.js";
 import { pluginForge, type PluginTarget } from "./plugin.js";
 import { forgeName, githubProject, gitlabProject } from "./target.js";
 import type { Forge, ForgeName } from "./types.js";
@@ -119,7 +120,7 @@ function dryRunSetting(value: string | undefined): Result<boolean> {
 
 // settled : the adapter with the identity's login and FACTORY_DRY_RUN applied.
 function settled(setup: ForgeSetup, forge: Forge): Result<Forge> {
-  const dry = dryRunSetting(setup.env.FACTORY_DRY_RUN);
+  const dry = dryRunSetting(settingOf(setup.env, "dryRun"));
   if (dry.kind === "failed") {
     return dry;
   }
@@ -128,7 +129,7 @@ function settled(setup: ForgeSetup, forge: Forge): Result<Forge> {
 }
 
 export function openForge(setup: ForgeSetup): Result<Forge> {
-  const tries = maxTries(setup.env.FACTORY_MAX_TRIES);
+  const tries = maxTries(settingOf(setup.env, "caps.gitHostTries"));
   if (tries.kind === "failed") {
     return tries;
   }
@@ -141,7 +142,7 @@ const DEFAULT_HOST: Readonly<Record<ForgeName, string>> = { github: "github.com"
 // forgeHost : the forge's host, FACTORY_FORGE_HOST, checked: github.com and gitlab.com unless set. The host push sends a
 // branch only to a URL on this host.
 export function forgeHost(env: NodeJS.ProcessEnv, forge: "github" | "gitlab"): Result<string> {
-  const host = env.FACTORY_FORGE_HOST ?? DEFAULT_HOST[forge];
+  const host = settingOf(env, "gitHostName") ?? DEFAULT_HOST[forge];
   return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host)
     ? { kind: "ok", value: host }
     : { kind: "failed", reason: `FACTORY_FORGE_HOST must be a host name, got ${JSON.stringify(host)}` };
@@ -226,8 +227,8 @@ const DROPPED = [
 
 function droppedSetting(env: NodeJS.ProcessEnv, forge: ForgeName): string | undefined {
   const set = DROPPED.find((name) => (env[name] ?? "") !== "");
-  const host = env.FACTORY_FORGE_HOST ?? DEFAULT_HOST[forge];
-  return set ?? (host === DEFAULT_HOST[forge] ? undefined : "FACTORY_FORGE_HOST");
+  const host = settingOf(env, "gitHostName") ?? DEFAULT_HOST[forge];
+  return set ?? (host === DEFAULT_HOST[forge] ? undefined : settingName("gitHostName"));
 }
 
 // plainSettings : the plugin serves the forge it is named for, on its default host, as the CLI's own login; a setting

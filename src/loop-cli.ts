@@ -15,6 +15,7 @@ import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
 import { claudeSessions } from "./core/review/live.js";
 import { runInFolder } from "./core/review/model.js";
 import { claudeEnv } from "./core/review/settings.js";
+import { settingOf } from "./core/settings/machine.js";
 
 export type LoopIo = {
   readonly env: NodeJS.ProcessEnv;
@@ -56,7 +57,7 @@ function lines(value: string | readonly string[], dry: string): string {
 async function forgeOf(
   io: LoopIo,
 ): Promise<Result<{ readonly forge: Forge; readonly label: string; readonly identity: Identity }>> {
-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   if (label.trim() === "") {
     return { kind: "failed", reason: "FACTORY_CLAIM_LABEL is set but empty" };
   }
@@ -72,7 +73,7 @@ async function onForge(name: string, io: LoopIo, act: Act): Promise<number> {
     io.err(`agent-factory ${name}: ${done.reason}\n`);
     return 1;
   }
-  io.out(lines(done.value, io.env.FACTORY_DRY_RUN === "1" ? " (dry run)" : ""));
+  io.out(lines(done.value, settingOf(io.env, "dryRun") === "1" ? " (dry run)" : ""));
   return 0;
 }
 
@@ -121,7 +122,7 @@ function reconciled(positionals: readonly string[], io: LoopIo): Promise<number>
       repo,
       env: io.env,
       sessions,
-      dryRun: io.env.FACTORY_DRY_RUN === "1",
+      dryRun: settingOf(io.env, "dryRun") === "1",
       landing: { target: landingTarget(io.env, forge, identity), pusher: hostPush },
     }),
   );
