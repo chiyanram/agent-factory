@@ -8,8 +8,8 @@ code in other projects, such as how to write tests or Java, go to the `rulebook`
 
 | tool | needed for |
 |---|---|
-| bash, git, jq, make | everything; scripts run on bash 3.2 (stock macOS) and on Linux |
-| `glab` or `gh` | running the scripts against GitLab or GitHub; the tests stub both |
+| git, make | everything; the package runs on macOS and on Linux |
+| `glab` or `gh` | running the factory against GitLab or GitHub; the tests stub both |
 | `claude` (Claude Code CLI) | running writers and reviewers; the tests stub it |
 | Node 22 or later (npm 10 is fine) | the TypeScript package (ADR-0013): `make` runs `npm ci` from `package-lock.json` |
 | npm 11 | only to change dependencies: `npx npm@11 install <pkg>`. npm 10 crashes when it re-resolves the tree (an arborist bug on vite's optional peer `vitest@*`), so never add `legacy-peer-deps` |
@@ -22,18 +22,13 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to a reviewer input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed runners, no forge token or skip-permissions flag outside the forge seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and each script with its test; the exceptions and their reasons are in the script), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
-| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. CI runs it on Linux and on macOS. One file: `bash tests/git.test.sh` or `npx vitest run test/poll.test.ts` |
+| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to a reviewer input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed runners, no forge token or skip-permissions flag outside the forge seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
+| `make test` | builds, then runs the vitest suite. CI runs it on Linux and on macOS. One file: `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
 
-Each test file prints `ok   <name>` or `FAIL <name>: …` per assertion and exits non-zero on any failure. Tests are
-plain bash. The helpers are in [tests/lib.sh](tests/lib.sh):
-
-| helper | does |
-|---|---|
-| `expect_pass`, `expect_fail`, `expect_eq` | assert on a command's exit code and output |
-| `finish` | ends the file with the right exit code |
+Tests are vitest files under `test/`, one per module, named `<module>.test.ts`. A test makes its temp folders with
+`tempDir()` from [test/temp.ts](test/temp.ts).
 
 ## How a change lands
 
@@ -53,25 +48,25 @@ issue ──▶ branch ──▶ make lint + make test ──▶ pull request �
 A good pull request has one concern, a test that fails without the change, and no secrets, tokens or real project
 data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md](GUIDE.md) or an ADR too.
 
-## Add a script
+## Add a command
 
-1. Write the test first: `tests/<script>.test.sh`, using the helpers in `tests/lib.sh`. Watch it fail.
-2. Add `scripts/<script>.sh`. Start it with a header comment: usage, what it prints, the settings it reads.
-3. A bash script has no forge seam any more: anything that calls the forge goes into the TypeScript package and uses
-   the `Forge` seam in `src/core/forge/` (#138).
+No bash ships: every component is TypeScript in the package and calls CLIs
+([ADR-0013](docs/adr/0013-typescript-package-cli-first.md), #138). `make lint` fails on any `.sh` file.
+
+1. Write the test first: `test/<module>.test.ts`. Watch it fail.
+2. Add the module under `src/core/` and its command to the `agent-factory` CLI. Start the module with a header
+   comment: what it does, what it prints, the settings it reads.
+3. Call the forge only through the `Forge` seam in `src/core/forge/`, and git on a project's clone only through
+   `hostGit` (`src/core/git.ts`). Read a setting only through `settingOf`.
 4. Print one line on success. Write errors to stderr and exit non-zero.
-5. Add the script to the Scripts table in [GUIDE.md](GUIDE.md#scripts), and any new setting to
+5. Add the command to the Scripts table in [GUIDE.md](GUIDE.md#scripts), and any new setting to
    [Settings](GUIDE.md#settings).
-
-The factory moves to a TypeScript package that calls CLIs ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)).
-Until a script is ported, keep it in bash. Write for bash 3.2 and POSIX tools: no GNU-only flags, no associative arrays. Files in `scripts/lib/` are sourced,
-never run. Every `claude` call goes through `${FACTORY_CLAUDE:-claude}`.
 
 ## Add a check
 
 1. Plant bad input under `tests/fixtures/<case>/`. `make lint` skips that folder.
-2. Add `tests/<check>.test.sh` that expects the check to fail on it. Watch it fail.
-3. Write `scripts/<check>.sh` and add it to the `lint` target in the `Makefile`.
+2. Add `test/<check>.test.ts` that expects the check to fail on it. Watch it fail.
+3. Write `scripts/<check>.ts` and add it to the `lint` target in the `Makefile`.
 
 ## Add a decision
 
@@ -95,7 +90,9 @@ Pin every GitHub Actions step to a full commit SHA, with the version in a commen
 
 ## Releases
 
-Every push to `main` runs semantic-release (`release.config.mjs`, #153), the same way as chiyanram/skills.
+Releases are manual during the dev phase (#327). A merge to `main` runs the checks only. To release, open
+**Actions → ci → Run workflow** on `main`, or run `gh workflow run ci.yml --ref main`; semantic-release
+(`release.config.mjs`, #153) then runs after the checks pass, the same way as chiyanram/skills.
 
 - Pull requests are squash-merged with the PR title as the commit subject, so **the PR title decides the release**.
   CI fails a title that is not a Conventional Commit, and a title, description or commit that holds a skip-ci marker.
