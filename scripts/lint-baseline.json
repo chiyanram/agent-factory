@@ -1,11 +1,10 @@
 {
-  "src/app.ts eslint(complexity)": 3,
+  "src/app.ts eslint(complexity)": 2,
   "src/app.ts typescript(no-unsafe-type-assertion)": 1,
   "src/core/app-token.ts eslint(complexity)": 4,
   "src/core/app-token.ts typescript(no-non-null-assertion)": 5,
   "src/core/app-token.ts typescript(no-unnecessary-type-assertion)": 4,
   "src/core/app-token.ts typescript(no-unsafe-type-assertion)": 3,
-  "src/core/approval.ts typescript(no-unsafe-type-assertion)": 1,
   "src/core/finish.ts eslint(complexity)": 1,
   "src/core/finish.ts eslint(no-shadow)": 1,
   "src/core/forge/api.ts eslint(complexity)": 5,

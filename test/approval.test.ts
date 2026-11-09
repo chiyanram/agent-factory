@@ -38,6 +38,8 @@ const writeSpec = (text: string): void => {
   writeFileSync(specFile(), text);
 };
 const seen = (text: string): string => specHash(text);
+const DESIGN = "# Design\n\nA reservation check in RenewalService.\n";
+const writeDesign = (text: string): void => writeFileSync(join(home, "specs", "ledger", "PROJ-123", "design.md"), text);
 
 beforeEach(() => {
   home = tempDir("factory-home-");
@@ -45,17 +47,20 @@ beforeEach(() => {
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 describe("approve", () => {
-  it("records the approval with the spec's full hash, who and when", async () => {
+  it("records the approval with the spec's full hash, the design's (none here), who, the front door and when", async () => {
     writeSpec(SPEC);
     const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "2026-11-07T09:12:00Z" });
     expect(result).toMatchObject({ kind: "approved", path: join(home, "approvals", "ledger", "PROJ-123.json") });
     const record = JSON.parse(readFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), "utf8"));
     expect(record).toEqual({
-      version: 1,
+      version: 2,
+      kind: "approval",
       project: "ledger",
       ticket: "PROJ-123",
       spec_hash: specHash(SPEC),
+      design_hash: "none",
       by: "ram",
+      via: "terminal",
       at: "2026-11-07T09:12:00Z",
     });
   });
@@ -165,6 +170,69 @@ describe("approvalState", () => {
     writeSpec(SPEC);
     await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
     rmSync(specFile());
+    expect(await approvalState(where())).toMatchObject({ kind: "refused" });
+  });
+});
+
+describe("the design hash (#227)", () => {
+  it("binds the design beside the spec: approve needs its hash, and an edit to it makes the approval stale", async () => {
+    writeSpec(SPEC);
+    writeDesign(DESIGN);
+    const without = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
+    expect(without.kind === "refused" ? without.reason : "").toContain("design's hash is now");
+    const done = await approve({
+      where: where(),
+      seenHash: seen(SPEC),
+      seenDesign: specHash(DESIGN),
+      by: "ram",
+      via: "discord",
+      at: "t",
+    });
+    expect(done).toMatchObject({ kind: "approved", record: { design_hash: specHash(DESIGN), via: "discord" } });
+    expect(await approvalState(where())).toMatchObject({ kind: "approved" });
+    writeDesign(DESIGN.replace("RenewalService", "LoanService"));
+    expect(await approvalState(where())).toMatchObject({
+      kind: "stale",
+      part: "design",
+      approvedHash: specHash(DESIGN),
+    });
+  });
+
+  it("refuses a design with a character that does not show", async () => {
+    writeSpec(SPEC);
+    writeDesign("# Design\n\nhidden\u200b here\n");
+    const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
+    expect(result.kind === "refused" ? result.reason : "").toContain("do not show");
+  });
+
+  it("reads a record written before #227 as one that bound no design and came from the terminal", async () => {
+    writeSpec(SPEC);
+    mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
+    const old = { version: 1, project: "ledger", ticket: "PROJ-123", spec_hash: specHash(SPEC), by: "ram", at: "t" };
+    writeFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), JSON.stringify(old));
+    expect(await approvalState(where())).toMatchObject({
+      kind: "approved",
+      record: { version: 2, design_hash: "none", via: "terminal" },
+    });
+    writeDesign(DESIGN);
+    expect(await approvalState(where())).toMatchObject({ kind: "stale", part: "design" });
+  });
+
+  it("refuses a version 2 record with a front door the factory does not know", async () => {
+    writeSpec(SPEC);
+    mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
+    const bad = {
+      version: 2,
+      kind: "approval",
+      project: "ledger",
+      ticket: "PROJ-123",
+      spec_hash: specHash(SPEC),
+      design_hash: "none",
+      by: "ram",
+      via: "bot",
+      at: "t",
+    };
+    writeFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), JSON.stringify(bad));
     expect(await approvalState(where())).toMatchObject({ kind: "refused" });
   });
 });

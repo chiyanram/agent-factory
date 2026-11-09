@@ -424,3 +424,14 @@ describe("failedJobs (#171)", () => {
     });
   });
 });
+
+describe("branchExists (#227)", () => {
+  it("searches the whole name and checks the list for it exactly", async () => {
+    const f = fake("gitlab", [ok([{ name: "factory/T-1" }]), ok([])]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.branchExists({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: true });
+    expect(f.calls[0]?.args.join(" ")).toContain("repository/branches?search=%5Efactory%2FT-1%24");
+    expect(await forge.branchExists({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: false });
+    expect(await forge.branchExists({ branch: "a b" })).toMatchObject({ kind: "failed" });
+  });
+});

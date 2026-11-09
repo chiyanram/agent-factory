@@ -102,6 +102,7 @@ export function pluginForge(target: PluginTarget): Forge {
     me: () => read(target, "me", {}, text),
     change: (i): Promise<Result<Change>> => read(target, "change", i, changeOf),
     defaultBranch: () => read(target, "defaultBranch", {}, text),
+    branchExists: (i) => read(target, "branchExists", i, (r, v) => r.bool(v, "")),
     addLabel: (i) => written(target, "addLabel", i),
     removeLabel: (i) => written(target, "removeLabel", i),
     note: (i) => written(target, "note", i),

@@ -473,3 +473,16 @@ describe("failedJobs (#171)", () => {
     });
   });
 });
+
+describe("branchExists (#227)", () => {
+  it("finds the exact branch among the refs that start with its name, and refuses a name that is not plain", async () => {
+    const refs = ok([{ ref: "refs/heads/factory/T-10" }, { ref: "refs/heads/factory/T-1" }]);
+    const f = fake("github", [refs, ok([{ ref: "refs/heads/factory/T-10" }])]);
+    const forge = github(f.client, project);
+    expect(await forge.branchExists({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: true });
+    expect(f.calls[0]?.args.join(" ")).toContain("repos/chiyanram/ledger/git/matching-refs/heads/factory/T-1");
+    expect(await forge.branchExists({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: false });
+    expect(await forge.branchExists({ branch: "../x" })).toMatchObject({ kind: "failed" });
+    expect(f.calls).toHaveLength(2);
+  });
+});

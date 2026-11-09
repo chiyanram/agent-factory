@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { claudeMd, claudeSettings, copilotArgs, type CoordinatorPlaces } from "../src/core/coordinator.js";
-import { installCoordinator, startCoordinator, type Interactive } from "../src/coordinator-cli.js";
+import {
+  bashReaches,
+  claudeArgv,
+  claudeMd,
+  claudeSettings,
+  copilotArgs,
+  wallProblems,
+  type CoordinatorPlaces,
+} from "../src/core/coordinator.js";
+import { checkWall, installCoordinator, startCoordinator, type Interactive } from "../src/coordinator-cli.js";
 import { tempDir } from "./temp.js";
 
 const PLACES: CoordinatorPlaces = {
@@ -119,7 +127,12 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       `${HOME}/.claude/settings.json`,
       "/work/project/.claude/settings.local.json",
       "/home/ram/.factory/approvals/ledger/PROJ-1.json",
+      "/home/ram/.factory/starts/ledger/PROJ-1.json",
+      "/home/ram/.factory/settings.json",
+      "/home/ram/.factory/team/settings.json",
+      "/home/ram/.factory/rubrics/security.md",
       "/home/ram/.factory/projects/ledger.json",
+      "/home/ram/.factory/projects/ledger/brief.md",
       "/home/ram/.factory/runs/ledger/PROJ-1.jsonl",
       "/home/ram/.factory/review-runs/x/pack.md",
       "/home/ram/.factory/box-runs/x/code/Makefile",
@@ -138,7 +151,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(verdict("Edit", "/work/project/src/app.ts")).toBe("prompt");
   });
 
-  it("runs the read commands, status and request with no prompt; approve, confirm and every start command ask", () => {
+  it("runs the read commands, status and request with no prompt; confirm and every old loop command ask", () => {
     for (const command of [
       "agent-factory poll",
       "agent-factory poll --json",
@@ -150,7 +163,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "allow" });
     }
     for (const command of [
-      `agent-factory approve ledger PROJ-1 ${"a".repeat(64)}`,
       "agent-factory confirm ledger/PROJ-1/tracker.create/0123456789ab '[coordinator] a follow-up'",
       "agent-factory request notify --file d.json && agent-factory confirm ledger/PROJ-1/notify/0123456789ab x",
       "agent-factory claim 12",
@@ -163,6 +175,17 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "/opt/agent-factory/scripts/start-writer.sh 12",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "ask" });
+    }
+  });
+
+  it("denies approve and start: the AI never approves and never STARTs a ticket (#227)", () => {
+    for (const command of [
+      `agent-factory approve ledger PROJ-1 ${"a".repeat(64)}`,
+      "agent-factory approve",
+      "agent-factory start ledger PROJ-1",
+      "agent-factory spec ledger PROJ-1 && agent-factory start ledger PROJ-1 --yes",
+    ]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
     }
   });
 
@@ -210,16 +233,79 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     });
   });
 
-  it("gives Copilot the same denies and read commands as flags; what is not allowed asks there", () => {
+  it("gives Copilot the same denies and read commands as flags; approve and start are denied there too", () => {
     const args = copilotArgs(PLACES);
     expect(args).toContain("shell(gh)");
     expect(args).toContain("shell(sudo)");
     expect(args).toContain("shell(agent-factory poll)");
     expect(args).toContain("shell(agent-factory request)");
     expect(args).toContain("shell(agent-factory project)");
-    expect(args.join(" ")).not.toContain("shell(agent-factory approve)");
+    expect(args).toContain("shell(agent-factory approve)");
+    expect(args).toContain("shell(agent-factory start)");
+    expect(args[args.indexOf("shell(agent-factory approve)") - 1]).toBe("--deny-tool");
     expect(args.join(" ")).not.toContain("shell(agent-factory confirm)");
     expect(args.slice(0, 2)).toEqual(["--add-dir", "/home/ram/.factory/specs"]);
+  });
+});
+
+describe("the wall's check (#105, #227)", () => {
+  type Rules = { allow: string[]; ask: string[]; deny: string[] };
+  const loosened = (change: (p: Rules & Record<string, unknown>) => void): unknown => {
+    const settings = claudeSettings(PLACES);
+    const p = settings.permissions;
+    const permissions: Rules & Record<string, unknown> = {
+      ...p,
+      allow: [...p.allow],
+      ask: [...p.ask],
+      deny: [...p.deny],
+    };
+    change(permissions);
+    return { ...settings, permissions };
+  };
+
+  it("finds nothing wrong with the shipped template, and the session never asks for bypass mode", () => {
+    expect(wallProblems(claudeSettings(PLACES), PLACES)).toEqual([]);
+    expect(claudeArgv().join(" ")).not.toMatch(/dangerously|bypass|skip-permissions/);
+  });
+
+  it("names each loosening: approve or start allowed or asked, gh, glab, curl, bash -c, an edit outside the specs", () => {
+    const cases: readonly [(p: Rules & Record<string, unknown>) => void, string][] = [
+      [(p) => p.allow.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
+      [(p) => p.ask.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
+      [(p) => p.allow.push("Bash(agent-factory start:*)"), "agent-factory start"],
+      [(p) => p.allow.push("Bash(gh *)"), "run gh api user"],
+      [(p) => p.allow.push("Bash(glab api *)"), "run glab api user"],
+      [(p) => p.allow.push("Bash(curl:*)"), "run curl"],
+      [(p) => p.allow.push("Bash(bash -c *)"), "run bash -c true"],
+      [(p) => p.allow.push("Bash"), "Bash lets the coordinator run"],
+      [(p) => p.allow.push("Bash(*)"), "Bash(*) lets the coordinator run"],
+      [(p) => p.allow.push("Edit(//home/ram/.factory/approvals/**)"), "edit outside the spec drafts"],
+      [(p) => p.allow.push("Edit(//home/ram/.factory/specs/../starts/**)"), "edit outside the spec drafts"],
+      [(p) => p.allow.push("Write"), "Write lets the coordinator edit outside"],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory approve"))),
+        "Bash(agent-factory approve) is missing",
+      ],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("/starts/"))),
+        "Edit(//home/ram/.factory/starts/**) is missing",
+      ],
+      [(p) => (p.deny = p.deny.filter((r) => r !== "Edit(~/.claude/**)")), "Edit(~/.claude/**) is missing"],
+      [(p) => (p.disableBypassPermissionsMode = "allow"), "bypass-permissions mode is not disabled"],
+      [(p) => (p.defaultMode = "bypassPermissions"), "the default mode is bypassPermissions"],
+    ];
+    for (const [change, problem] of cases) {
+      const found = wallProblems(loosened(change), PLACES).join("\n");
+      expect({ problem, found: found.includes(problem) }).toEqual({ problem, found: true });
+    }
+    expect(wallProblems("not settings", PLACES).length).toBeGreaterThan(0);
+  });
+
+  it("matches Bash rules as Claude Code does: a trailing * also matches the bare command", () => {
+    expect(bashReaches("Bash(agent-factory start *)", "agent-factory start ledger PROJ-1")).toBe(true);
+    expect(bashReaches("Bash(agent-factory st*)", "agent-factory start ledger PROJ-1")).toBe(true);
+    expect(bashReaches("Bash(agent-factory status *)", "agent-factory start ledger PROJ-1")).toBe(false);
+    expect(bashReaches("Read(//x/**)", "gh api user")).toBe(false);
   });
 });
 
@@ -262,6 +348,27 @@ describe("setup coordinator and the launcher (#106)", () => {
       reason: expect.stringContaining("is a symlink"),
     });
     expect(readdirSync(elsewhere)).toEqual([]);
+  });
+
+  it("the orchestrator's check refuses missing or loosened settings, and passes the ones setup writes (#105)", async () => {
+    expect(await checkWall(places())).toMatchObject({ reason: expect.stringContaining("run agent-factory setup") });
+    await installCoordinator(places());
+    expect(await checkWall(places())).toEqual({ kind: "ok" });
+    const file = join(home, "coordinator", ".claude", "settings.json");
+    const settings = claudeSettings(places());
+    const loose = {
+      ...settings,
+      permissions: { ...settings.permissions, allow: [...settings.permissions.allow, "Bash(agent-factory approve *)"] },
+    };
+    rmSync(file);
+    writeFileSync(file, JSON.stringify(loose));
+    expect(await checkWall(places())).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("Bash(agent-factory approve *) lets the coordinator run"),
+    });
+    rmSync(file);
+    writeFileSync(file, "{not json");
+    expect(await checkWall(places())).toMatchObject({ reason: expect.stringContaining("not valid JSON") });
   });
 
   it("leaves the import out when the package path has a space, which an @import cannot hold", () => {

@@ -1,5 +1,7 @@
-// tick — one pass of the dispatcher over a project (#103; ADR-0012 S3). It keeps no memory of its own: every pass reads
-// the local approvals, the forge (poll), and the run records, decides each ticket with the table, then acts:
+// tick — one pass of the orchestrator over a project (#103; ADR-0012 S3). It keeps no memory of its own: every pass
+// reads the local START and approval records, the git host (poll), and the run records, decides each ticket with the
+// table, then acts:
+//   - the shared copy of each approval, once, on the ticket's open PR (#227)
 //   - forge-only actions (needs-human, release, ping, reconcile) for every ticket that has one
 //   - at most one run (writer, ready check or reviewer) per pass: runs at once is 1 (ADR-0012 S16)
 // A run's step is a seam. A step that is not built yet says so, and the pass records nothing for it, so the ticket is
@@ -7,21 +9,39 @@
 // dies in between leaves the first alone, and the next pass hands that ticket to a person.
 //
 // A lock file keeps two passes from running at once (cron every few minutes, a run of an hour).
+//
+// The ticket list (#227) is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
+// the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
+// approval with no START waits. The newer of the two records is when the counts start afresh. The shared copy is a note the
+// project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or none>", for
+// people to see. It never starts anything: the orchestrator decides only from the local records.
 
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { approvalState } from "../approval.js";
+import { approvalState, currentSpec, type ApprovalRecord } from "../approval.js";
 import { NEEDS_HUMAN } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { plainName } from "../spec.js";
+import { plainName, type Lane } from "../spec.js";
+import { readStart, type StartRecord } from "../start.js";
 import type { Evidence } from "../report.js";
-import { codeOf, modeOf, nextTryOf, readRecords, record, summarize, type Retried, type Task } from "./records.js";
-import { decide, type Action, type ApprovalView, type ChangeView, type Gate, type TicketState } from "./table.js";
+import {
+  codeOf,
+  modeOf,
+  nextTryOf,
+  readRecords,
+  record,
+  summarize,
+  type Event,
+  type Retried,
+  type Task,
+} from "./records.js";
+import { approvalKey, sharedNote } from "./shared.js";
+import { decide, goAt, type Action, type ApprovalView, type ChangeView, type Gate, type TicketState } from "./table.js";
 
 export const BRANCH_PREFIX = "factory/";
 
@@ -79,27 +99,87 @@ export type TickSetup = {
 
 export type Decision = { readonly ticket: string; readonly action: Action };
 
-// tickets with a local approval record, and those whose change is on the forge
+async function namesIn(dir: string): Promise<readonly string[]> {
+  const files = await readdir(dir).catch(() => [] as string[]);
+  return files.filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
+}
+
+// tickets with a START or an approval record, and those whose change is on the git host
 async function ticketNames(setup: TickSetup, lines: readonly (OpenLine | MergedLine)[]): Promise<readonly string[]> {
-  const files = await readdir(join(setup.home, "approvals", setup.project)).catch(() => [] as string[]);
-  const approved = files.filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
+  const started = await namesIn(join(setup.home, "starts", setup.project));
+  const approved = await namesIn(join(setup.home, "approvals", setup.project));
   const onForge = lines
     .filter((l) => l.branch.startsWith(BRANCH_PREFIX) && !l.fork)
     .map((l) => l.branch.slice(BRANCH_PREFIX.length));
-  return [...new Set([...approved, ...onForge])].filter(plainName).toSorted();
+  return [...new Set([...started, ...approved, ...onForge])].filter(plainName).toSorted();
 }
 
-async function approvalOf(setup: TickSetup, ticket: string): Promise<Result<ApprovalView>> {
-  const state = await approvalState({ home: setup.home, project: setup.project, ticket });
-  switch (state.kind) {
-    case "approved":
-      return { kind: "ok", value: { kind: "approved", at: state.record.at, lane: state.spec.lane } };
-    case "stale":
-    case "missing":
-      return { kind: "ok", value: { kind: state.kind } };
-    case "refused":
-      return { kind: "failed", reason: `${ticket}: ${state.reason}` };
+// What a human said for the ticket: its approval as the table sees it, and the approval record itself, for its shared
+// copy, while it is the current one.
+type Said = { readonly view: ApprovalView; readonly record: ApprovalRecord | "none" };
+
+function newest(a: string, b: string): string {
+  return Date.parse(b) > Date.parse(a) ? b : a;
+}
+
+// approvedView : an approval lets the build begin only with a START; the newer of the two is when the counts start,
+// so a person who takes the ticket back from needs-human may START or approve again
+function approvedView(approval: ApprovalRecord, lane: Lane, started: StartRecord | "none"): ApprovalView {
+  return started === "none" ? { kind: "unstarted" } : { kind: "approved", at: newest(approval.at, started.at), lane };
+}
+
+// startedView : a START with no current approval: the build may begin in the tiny lane only. A spec the coordinator
+// has not written yet, or one not ready, waits for it.
+async function startedView(
+  setup: TickSetup,
+  ticket: string,
+  started: StartRecord,
+  stale: boolean,
+): Promise<ApprovalView> {
+  const spec = await currentSpec({ home: setup.home, project: setup.project, ticket });
+  if (spec.kind !== "spec") {
+    return { kind: "unwritten" };
   }
+  const { lane } = spec.spec;
+  if (lane === "tiny") {
+    return { kind: "started", at: started.at, lane };
+  }
+  return stale ? { kind: "stale" } : { kind: "unapproved", lane };
+}
+
+async function startOf(setup: TickSetup, ticket: string): Promise<Result<StartRecord | "none">> {
+  const stored = await readStart({ home: setup.home, project: setup.project, ticket });
+  if (stored.kind === "refused") {
+    return { kind: "failed", reason: `${ticket}: ${stored.reason}` };
+  }
+  return { kind: "ok", value: stored.kind === "record" ? stored.record : "none" };
+}
+
+// unapprovedSaid : no current approval; a START may still let a tiny ticket begin
+async function unapprovedSaid(
+  setup: TickSetup,
+  ticket: string,
+  started: StartRecord | "none",
+  stale: boolean,
+): Promise<Result<Said>> {
+  const view: ApprovalView =
+    started === "none" ? { kind: stale ? "stale" : "missing" } : await startedView(setup, ticket, started, stale);
+  return { kind: "ok", value: { view, record: "none" } };
+}
+
+async function saidOf(setup: TickSetup, ticket: string): Promise<Result<Said>> {
+  const started = await startOf(setup, ticket);
+  if (started.kind === "failed") {
+    return started;
+  }
+  const state = await approvalState({ home: setup.home, project: setup.project, ticket });
+  if (state.kind === "approved") {
+    const view = approvedView(state.record, state.spec.lane, started.value);
+    return { kind: "ok", value: { view, record: state.record } };
+  }
+  return state.kind === "refused"
+    ? { kind: "failed", reason: `${ticket}: ${state.reason}` }
+    : unapprovedSaid(setup, ticket, started.value, state.kind === "stale");
 }
 
 // changeOf : the ticket's change: on factory/<ticket>, in this repository (a fork's branch is never it). An open change
@@ -118,41 +198,59 @@ function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): Ch
   return only.kind === "open" ? { kind: "open", line: only } : { kind: "merged", line: only };
 }
 
+// sharedBefore : whether the run records hold the shared copy of this approval
+function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none"): boolean {
+  const key = approved === "none" ? "" : approvalKey(approved);
+  return events.some((e) => e.kind === "shared" && e.approval === key);
+}
+
+// Decided's ticket: its state for the table, and the current approval with whether its shared copy is posted
+type Read = {
+  readonly state: TicketState;
+  readonly approved: ApprovalRecord | "none";
+  readonly shared: boolean;
+};
+
 async function stateOf(
   setup: TickSetup,
   ticket: string,
   lines: readonly (OpenLine | MergedLine)[],
-): Promise<Result<TicketState>> {
-  const approval = await approvalOf(setup, ticket);
-  if (approval.kind === "failed") {
-    return approval;
+): Promise<Result<Read>> {
+  const said = await saidOf(setup, ticket);
+  if (said.kind === "failed") {
+    return said;
   }
   const events = await readRecords({ home: setup.home, project: setup.project, ticket });
   if (events.kind === "failed") {
     return events;
   }
-  const since = approval.value.kind === "approved" ? approval.value.at : "1970-01-01T00:00:00Z";
+  const since = goAt(said.value.view) || "1970-01-01T00:00:00Z";
   const runs = summarize({ events: events.value, since });
+  const approved = said.value.record;
   return {
     kind: "ok",
     value: {
-      ticket,
-      gate: setup.gate,
-      approval: approval.value,
-      change: changeOf(ticket, lines),
-      runs,
-      now: setup.now(),
-      quietMinutes: setup.quietMinutes,
+      state: {
+        ticket,
+        gate: setup.gate,
+        approval: said.value.view,
+        change: changeOf(ticket, lines),
+        runs,
+        now: setup.now(),
+        quietMinutes: setup.quietMinutes,
+      },
+      approved,
+      shared: sharedBefore(events.value, approved),
     },
   };
 }
 
 export type Decided =
-  | { readonly state: TicketState; readonly action: Action }
+  | (Read & { readonly action: Action })
   | { readonly kind: "broken"; readonly ticket: string; readonly reason: string };
 
-// decideAll : one decision per ticket, in ticket order. A ticket whose spec, approval or records cannot be read is
-// broken: it fails on its own, and every other ticket is still decided.
+// decideAll : one decision per ticket, in ticket order. A ticket whose spec, START, approval or records cannot be read
+// is broken: it fails on its own, and every other ticket is still decided.
 export async function decideAll(setup: TickSetup): Promise<Result<readonly Decided[]>> {
   const lines = await poll({ forge: setup.forge, label: setup.label });
   if (lines.kind === "failed") {
@@ -160,11 +258,11 @@ export async function decideAll(setup: TickSetup): Promise<Result<readonly Decid
   }
   const out: Decided[] = [];
   for (const ticket of await ticketNames(setup, lines.value)) {
-    const state = await stateOf(setup, ticket, lines.value);
+    const read = await stateOf(setup, ticket, lines.value);
     out.push(
-      state.kind === "ok"
-        ? { state: state.value, action: decide(state.value) }
-        : { kind: "broken", ticket, reason: state.reason },
+      read.kind === "ok"
+        ? { ...read.value, action: decide(read.value.state) }
+        : { kind: "broken", ticket, reason: read.reason },
     );
   }
   return { kind: "ok", value: out };
@@ -486,6 +584,27 @@ function logResult(setup: TickSetup, ticket: string, result: Done | Unavailable)
 
 type Later = { readonly state: TicketState; readonly action: Action };
 
+// unshared : the approval and the PR its shared copy goes on, or "none" when it is posted already or has no PR yet
+function unshared(d: Read): { readonly approval: ApprovalRecord; readonly number: number } | "none" {
+  const n = d.state.change.kind === "open" ? d.state.change.line.number : "none";
+  return d.approved === "none" || d.shared || n === "none" ? "none" : { approval: d.approved, number: n };
+}
+
+// share : the shared copy of the ticket's current approval (#227), once, on its open PR. It is for people to see and
+// never starts anything, so one that fails is printed and the pass goes on; the next pass tries again.
+async function share(setup: TickSetup, d: Read): Promise<void> {
+  const due = unshared(d);
+  if (due === "none") {
+    return;
+  }
+  const posted = await setup.forge.note({ number: due.number, post: sharedNote(due.approval) });
+  const event = { at: at(setup), kind: "shared", approval: approvalKey(due.approval) } as const;
+  const kept = posted.kind === "ok" ? await record({ where: where(setup, d.state), event }) : posted;
+  if (kept.kind === "failed") {
+    setup.log(`${d.state.ticket}: the shared copy of the approval did not go out: ${kept.reason}`);
+  }
+}
+
 // forgePass : every forge-only action, on fresh decisions; what is left is a run or a wait
 async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran[]): Promise<readonly Later[]> {
   const later: Later[] = [];
@@ -500,6 +619,7 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
       continue;
     }
     setup.log(`${d.state.ticket}: ${describe(d.action)}`);
+    await share(setup, d);
     const done = await forgeAction(setup, d.state, d.action);
     if (done === "none") {
       later.push(d);

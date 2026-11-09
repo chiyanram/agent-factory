@@ -9,8 +9,9 @@ import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
 import { openProject, openProjectForge } from "./core/forge/index.js";
 import type { Forge } from "./core/forge/types.js";
-import { checkSpec, plainName, readSpec, template } from "./core/spec.js";
+import { checkSpec, designHash, plainName, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
+import { start } from "./core/start.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, vmBox, type Built } from "./core/box/index.js";
@@ -44,7 +45,7 @@ import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
-import { installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
+import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -52,15 +53,21 @@ commands:
   poll                         one line of facts per open change, read from the forge
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
   spec --template <ticket>     print an empty spec to fill in
-  approve <project> <ticket> <hash>
-                               record the human's approval of the spec with exactly that hash (all 64 characters,
-                               as spec printed it); run it only behind the harness ask prompt, never from an allow list
+  start <project> <ticket> [--yes]
+                               a human's START: open the ticket (in the tiny lane it also lets the build begin); asks
+                               first, exit 3, when factory/<ticket> is already on the git host; --yes is the answer.
+                               A human runs it; the coordinator's settings deny it
+  approve <project> <ticket> <hash> [<design hash>]
+                               record the human's approval of the spec and the design with exactly those hashes (all 64
+                               characters, as spec printed them; no design hash is none). A human runs it; the
+                               coordinator's settings deny it
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
   review <project> <number>    one review round on a claimed change: pack, find, verify, threads, status box, summary;
                                the contract is the approved spec of the ticket its factory/<ticket> branch names;
                                exit 0 posted or reused, 3 when the head moved, 1 otherwise
-  dispatch <project> --once    one pass of the dispatcher over the project's approved tickets and their changes:
-                               decides each with the table and acts (--dry-run: decides and acts on none)
+  dispatch <project> --once    one pass of the orchestrator over the project's started and approved tickets and their
+                               PRs: decides each with the table and acts (--dry-run: decides and acts on none); it
+                               refuses to start while the coordinator's settings are looser than its wall
   app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
                                repository, as JSON {token, login, expiresAt}
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
@@ -102,6 +109,7 @@ type Args = {
   readonly template: boolean;
   readonly once: boolean;
   readonly dryRun: boolean;
+  readonly yes: boolean;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -198,18 +206,29 @@ async function spec({ template: wantTemplate, positionals, io }: Args): Promise<
     case "missing":
       io.err(`agent-factory spec: no spec at ${read.where}; start one with: agent-factory spec --template ${ticket}\n`);
       return 1;
-    case "found": {
-      const checked = checkSpec(read.text);
-      if (checked.kind === "invalid") {
-        io.err(
-          `agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`,
-        );
-        return 2;
-      }
-      io.out(`spec ${project}/${ticket} ${checked.spec.hash} ${read.where}\n`);
-      return 0;
-    }
+    case "found":
+      return specFound(io, { home: home.path, project, ticket }, read);
   }
+}
+
+// specFound : the spec's hash and its design's (#227), or what the spec is missing
+async function specFound(
+  io: Io,
+  at: { readonly home: string; readonly project: string; readonly ticket: string },
+  read: { readonly text: string; readonly where: string },
+): Promise<number> {
+  const checked = checkSpec(read.text);
+  if (checked.kind === "invalid") {
+    io.err(`agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`);
+    return 2;
+  }
+  const design = await designHash({ store: { kind: "local", root: join(at.home, "specs") }, ...at });
+  if (design.kind === "refused") {
+    io.err(`agent-factory spec: ${design.reason}\n`);
+    return 1;
+  }
+  io.out(`spec ${at.project}/${at.ticket} ${checked.spec.hash} ${read.where}\ndesign ${design.hash}\n`);
+  return 0;
 }
 
 // whoApproves : the OS user and, when set, the operator's own git user.name. A record, not proof: the harness prompt is
@@ -226,10 +245,91 @@ async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
   return gitName.length > 0 ? `${userInfo().username} (${gitName})` : userInfo().username;
 }
 
+// branchOnHost : whether factory/<ticket> is already on the git host, through the project's forge seam
+async function branchOnHost(io: Io, home: string, project: string, ticket: string): Promise<Result<boolean>> {
+  const opened = await openProjectForge(
+    { env: io.env, log: (line) => io.err(`${line}\n`) },
+    { home, project, plugins: await pluginSetup(home, io.env) },
+  );
+  return opened.kind === "ok" ? opened.value.forge.branchExists({ branch: `factory/${ticket}` }) : opened;
+}
+
+type TicketArgs = { readonly project: string; readonly ticket: string };
+
+function startTarget(positionals: readonly string[]): TicketArgs | "bad" {
+  const [project, ticket] = positionals.length === 2 ? positionals : [];
+  return [project, ticket].every((n) => n !== undefined && plainName(n))
+    ? { project: String(project), ticket: String(ticket) }
+    : "bad";
+}
+
+// branchAt : whether factory/<ticket> is on the git host, with the factory home it was asked from
+async function branchAt(
+  io: Io,
+  target: TicketArgs,
+): Promise<Result<{ readonly home: string; readonly there: boolean }>> {
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    return { kind: "failed", reason: home.reason };
+  }
+  const there = await branchOnHost(io, home.path, target.project, target.ticket);
+  return there.kind === "ok" ? { kind: "ok", value: { home: home.path, there: there.value } } : there;
+}
+
+// start : a human's START at the terminal (#227). It asks first, exit 3, when the ticket's branch is on the git host.
+async function startCommand({ positionals, yes, io }: Args): Promise<number> {
+  const target = startTarget(positionals);
+  if (target === "bad") {
+    io.err("usage: agent-factory start <project> <ticket> [--yes]\n");
+    return 64;
+  }
+  const branch = await branchAt(io, target);
+  if (branch.kind === "failed") {
+    io.err(`agent-factory start: refused: ${branch.reason}\n`);
+    return 1;
+  }
+  const result = await start({
+    where: { home: branch.value.home, ...target },
+    by: await whoApproves(io.env),
+    via: "terminal",
+    at: new Date().toISOString(),
+    branch: branch.value.there ? "present" : "absent",
+    confirmed: yes,
+  });
+  return startOutcome(io, result);
+}
+
+function startOutcome(io: Io, result: Awaited<ReturnType<typeof start>>): number {
+  switch (result.kind) {
+    case "started":
+      io.out(
+        `started ${result.record.project}/${result.record.ticket} by ${result.record.by} at ${result.record.at}\n`,
+      );
+      return 0;
+    case "ask":
+      io.err(`agent-factory start: ${result.question}; run it again with --yes to START anyway\n`);
+      return 3;
+    case "refused":
+      io.err(`agent-factory start: refused: ${result.reason}\n`);
+      return 1;
+  }
+}
+
+type ApproveArgs = TicketArgs & { readonly hash: string; readonly design: string };
+
+// approveArgs : the project, the ticket, the spec hash and the design hash ("none" when not given)
+function approveArgs(positionals: readonly string[]): ApproveArgs | "bad" {
+  const [project, ticket, hash, design] = [...positionals, "none"];
+  const given = positionals.length >= 3 && positionals.length <= 4;
+  return given ? { project, ticket: String(ticket), hash: String(hash), design: String(design) } : "bad";
+}
+
 async function approveCommand({ positionals, io }: Args): Promise<number> {
-  const [project, ticket, hash] = positionals;
-  if (project === undefined || ticket === undefined || hash === undefined) {
-    io.err("usage: agent-factory approve <project> <ticket> <the full spec hash that agent-factory spec printed>\n");
+  const args = approveArgs(positionals);
+  if (args === "bad") {
+    io.err(
+      "usage: agent-factory approve <project> <ticket> <the full spec hash> [<the design hash>], as agent-factory spec printed them\n",
+    );
     return 64;
   }
   const home = factoryHome(io.env);
@@ -237,10 +337,13 @@ async function approveCommand({ positionals, io }: Args): Promise<number> {
     io.err(`agent-factory approve: refused: ${home.reason}\n`);
     return 1;
   }
+  const { project, ticket } = args;
   const result = await approve({
     where: { home: home.path, project, ticket },
-    seenHash: hash,
+    seenHash: args.hash,
+    seenDesign: args.design,
     by: await whoApproves(io.env),
+    via: "terminal",
     at: new Date().toISOString(),
   });
   if (result.kind === "refused") {
@@ -248,7 +351,7 @@ async function approveCommand({ positionals, io }: Args): Promise<number> {
     return 1;
   }
   const r = result.record;
-  io.out(`approved ${project}/${ticket} spec ${r.spec_hash} by ${r.by} at ${r.at}\n`);
+  io.out(`approved ${project}/${ticket} spec ${r.spec_hash} design ${r.design_hash} by ${r.by} at ${r.at}\n`);
   return 0;
 }
 
@@ -263,12 +366,12 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
   switch (state.kind) {
     case "approved":
       io.out(
-        `approved ${project}/${ticket} spec ${state.record.spec_hash} by ${state.record.by} at ${state.record.at}\n`,
+        `approved ${project}/${ticket} spec ${state.record.spec_hash} design ${state.record.design_hash} by ${state.record.by} at ${state.record.at}\n`,
       );
       return 0;
     case "stale":
       io.out(
-        `stale ${project}/${ticket}: approved spec ${state.approvedHash}, now ${state.currentHash}; approve again\n`,
+        `stale ${project}/${ticket}: approved ${state.part} ${state.approvedHash}, now ${state.currentHash}; approve again\n`,
       );
       return 3;
     case "missing":
@@ -417,6 +520,17 @@ async function onePass(project: string, dryRun: boolean, io: Io, settings: PassS
   return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
 }
 
+// dispatchReady : the pass's settings; refused while the coordinator could approve, START or reach the git host
+// itself (#105, #227)
+async function dispatchReady(io: Io): Promise<DispatchSettings> {
+  const settings = dispatchSettings(io.env);
+  const places = placesOf(io);
+  const wall = places.kind === "ok" ? await checkWall(places.value) : places;
+  return wall.kind === "failed" && !("kind" in settings)
+    ? { kind: "refused", reason: `refused: ${wall.reason}` }
+    : settings;
+}
+
 // dispatch : one pass (#103). Only --once: launchd or cron runs it every few minutes, and a lock keeps passes apart.
 async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise<number> {
   const [project] = positionals;
@@ -424,7 +538,7 @@ async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise
     io.err("usage: agent-factory dispatch <project> --once [--dry-run]\n");
     return 64;
   }
-  const settings = dispatchSettings(io.env);
+  const settings = await dispatchReady(io);
   if ("kind" in settings) {
     io.err(`agent-factory dispatch: ${settings.reason}\n`);
     return 1;
@@ -782,6 +896,7 @@ async function setupStep({
 const COMMANDS: readonly Command[] = [
   { name: "poll", run: poll },
   { name: "spec", run: spec },
+  { name: "start", run: startCommand },
   { name: "approve", run: approveCommand },
   { name: "approval", run: approvalCommand },
   { name: "app-token", run: appTokenCommand },
@@ -834,6 +949,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       once: { type: "boolean" },
       "dry-run": { type: "boolean" },
       template: { type: "boolean" },
+      yes: { type: "boolean" },
     },
   });
   if (values.version === true) {
@@ -850,6 +966,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
     template: values.template === true,
     once: values.once === true,
     dryRun: values["dry-run"] === true,
+    yes: values.yes === true,
     positionals: positionals.slice(1),
     io,
   });

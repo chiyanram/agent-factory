@@ -4,11 +4,21 @@
 //   <FACTORY_HOME>/coordinator/.claude/settings.json   the wall, read-only (0444)
 //   <FACTORY_HOME>/coordinator/CLAUDE.md               "follow GUIDE.md", read-only
 //   FACTORY_BOT_HOME                                   the factory user's home on the VM (default /home/factory)
+//
+// checkWall is what the orchestrator runs before each pass (#105, #227): it refuses to start while the coordinator's
+// settings are missing or looser than the wall coordinator.ts builds.
 
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Done, Result } from "./core/forge/api.js";
-import { claudeArgv, claudeMd, claudeSettings, copilotArgs, type CoordinatorPlaces } from "./core/coordinator.js";
+import {
+  claudeArgv,
+  claudeMd,
+  claudeSettings,
+  copilotArgs,
+  wallProblems,
+  type CoordinatorPlaces,
+} from "./core/coordinator.js";
 import { attempt } from "./core/review/safe.js";
 
 export type Interactive = (input: {
@@ -94,4 +104,32 @@ export async function startCoordinator(
   }
   const [bin, ...args] = runner === "claude" ? claudeArgv() : ["copilot", ...copilotArgs(places)];
   return io.interactive({ bin, args, cwd: dir, env: io.env });
+}
+
+function parsedSettings(text: string, path: string): Result<unknown> {
+  try {
+    return { kind: "ok", value: JSON.parse(text) as unknown };
+  } catch {
+    return { kind: "failed", reason: `${path} is not valid JSON` };
+  }
+}
+
+// checkWall : ok only while the coordinator's settings are in place and hold the whole wall
+export async function checkWall(places: CoordinatorPlaces): Promise<Done> {
+  const path = join(coordinatorDir(places.factoryHome), ".claude", "settings.json");
+  const text = await readFile(path, "utf8").catch(() => "");
+  const settings: Result<unknown> =
+    text === ""
+      ? { kind: "failed", reason: `no coordinator settings at ${path}; run agent-factory setup coordinator` }
+      : parsedSettings(text, path);
+  if (settings.kind === "failed") {
+    return settings;
+  }
+  const problems = wallProblems(settings.value, places);
+  return problems.length === 0
+    ? { kind: "ok" }
+    : {
+        kind: "failed",
+        reason: `the coordinator's settings in ${path} are looser than its wall; run agent-factory setup coordinator again:\n${problems.map((p) => `  - ${p}`).join("\n")}`,
+      };
 }

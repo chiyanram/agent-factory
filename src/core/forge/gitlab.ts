@@ -6,6 +6,7 @@
 // Under the developer's login such a note would read as their reply and close an ask (#128), so the seam returns
 // comments only: system notes are left out everywhere.
 
+import { plainBranch } from "../branch.js";
 import type { Note } from "../notes.js";
 import { graphql, rest, restText, type Client, type Done, type Result } from "./api.js";
 import { reader, type Reader } from "./read.js";
@@ -415,6 +416,17 @@ export function gitlab(client: Client, project: string): Forge {
     async defaultBranch() {
       const branch = await get(base, "gitlab project", (v, r) => r.text(v, "default_branch"));
       return branch.kind === "ok" ? { kind: "ok", value: String(branch.value) } : branch;
+    },
+    // search with ^ and $ matches the whole name, and the list is still checked for it exactly
+    async branchExists(input) {
+      if (!plainBranch(input.branch)) {
+        return { kind: "failed", reason: `gitlab: not a plain branch name: ${JSON.stringify(input.branch)}` };
+      }
+      const search = encodeURIComponent(`^${input.branch}$`);
+      const found = await get(`${base}/repository/branches?search=${search}&per_page=100`, "gitlab branches", (v, r) =>
+        r.list(v, "").some((b) => r.text(b, "name") === input.branch),
+      );
+      return found.kind === "ok" ? { kind: "ok", value: found.value === true } : found;
     },
     // a commit status with the branch as ref: GitLab adds it to an external pipeline for that head, which the merge
     // request shows as its head pipeline

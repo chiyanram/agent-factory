@@ -15,7 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { cleanField } from "./post.js";
 
 export const LANES = ["tiny", "bug", "feature", "one-way door"] as const;
@@ -294,7 +294,8 @@ export function readSpec(request: { readonly store: SpecStore } & Ticket): Promi
   }
 }
 
-export type Approver = { readonly by: string; readonly at: string };
+// said: approved, or started for a tiny ticket that needs a START only (#227); none is approved
+export type Approver = { readonly by: string; readonly at: string; readonly said?: "approved" | "started" };
 
 // prBlock : the part of a PR body that records what was approved: the spec itself, its hash and who approved it when.
 // The reviewer's pack does not read it: it reads the spec from the store and checks its hash against the approval
@@ -308,10 +309,51 @@ export function prBlock(request: { readonly spec: Spec; readonly approver: Appro
   return [
     "## Approved spec",
     "",
-    `spec ${spec.hash} · approved locally by ${cleanField(approver.by, 100)} at ${cleanField(approver.at, 40)}`,
+    `spec ${spec.hash} · ${approver.said ?? "approved"} locally by ${cleanField(approver.by, 100)} at ${cleanField(approver.at, 40)}`,
     "",
     `${fence}markdown`,
     spec.text.replace(/\n$/, ""),
     fence,
   ].join("\n");
+}
+
+// The design (#227) lives beside the spec in the local store, as design.md, and an approval binds its hash as it binds
+// the spec's: an edit to either makes the approval stale. A ticket with no design file has the design hash "none" (the
+// spec's "## Design" then says none, or links a page the spec text itself binds). An issue-backed spec keeps no design
+// file, so its design is "none". The design is held to the same rule as the spec: nothing in it may be hidden.
+export const NO_DESIGN = "none";
+
+export type DesignHash = { readonly kind: "design"; readonly hash: string } | Refused;
+
+export function designPath(at: { readonly root: string } & Ticket): SpecPath {
+  const spec = specPath(at);
+  return spec.kind === "path" ? { kind: "path", path: join(dirname(spec.path), "design.md") } : spec;
+}
+
+function hashOfDesign(text: string, where: string): DesignHash {
+  const hidden = hiddenProblems(normalise(text));
+  return hidden.length > 0
+    ? { kind: "refused", reason: `${where} holds ${hidden.join("; ")}` }
+    : { kind: "design", hash: specHash(text) };
+}
+
+async function localDesign(at: { readonly root: string } & Ticket): Promise<DesignHash> {
+  const path = designPath(at);
+  if (path.kind === "refused") {
+    return path;
+  }
+  try {
+    return hashOfDesign(await readFile(path.path, "utf8"), path.path);
+  } catch (error: unknown) {
+    return missingFile(error)
+      ? { kind: "design", hash: NO_DESIGN }
+      : { kind: "refused", reason: `cannot read ${path.path}: ${String(error)}` };
+  }
+}
+
+// designHash : the hash of the ticket's design file, or "none" when it has none
+export function designHash(request: { readonly store: SpecStore } & Ticket): Promise<DesignHash> {
+  return request.store.kind === "local"
+    ? localDesign({ root: request.store.root, project: request.project, ticket: request.ticket })
+    : Promise.resolve({ kind: "design", hash: NO_DESIGN });
 }
