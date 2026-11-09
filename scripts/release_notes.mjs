@@ -1,6 +1,6 @@
 // The shape of the release notes (#157): emoji sections, one bullet per change as
 // `**scope** — subject · #ticket (PR #pr)`, and an install line. release.config.mjs imports `releaseNotes`;
-// tests/release_notes.test.sh renders fixture commits with it and compares them to a golden file.
+// test/release-notes.test.ts renders fixture commits with it and compares them to a golden file.
 //
 // A squash merge on GitHub appends `(#pr)` to the PR title, so the last `(#N)` at the end of a subject is the PR and
 // any before it are the tickets. The commit hash and the `closes` list are left out: the preset turns every `#N` in a
