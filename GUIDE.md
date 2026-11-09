@@ -396,7 +396,9 @@ there.
   build files, the verify command's files and the test config (`src/core/ready/judge.ts`).
 - `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
   `.npmjs.org` for a
-  domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
+  domain and every subdomain; no wildcard, IP, scheme, port or path. A git host is refused, with its subdomains:
+  `github.com`, `gitlab.com` and the `FACTORY_FORGE_HOST` you set, because the runner has no git login and needs none;
+  the host clones, pushes and posts. Each project has its own proxy,
   `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
   no box runs for the project.

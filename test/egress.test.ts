@@ -42,6 +42,29 @@ describe("parseAllowlist", () => {
     });
   });
 
+  it.each(["github.com", "api.github.com", ".github.com", "gitlab.com", ".gitlab.com", "registry.gitlab.com"])(
+    "refuses the public git host %s, since the runner holds no git login and needs none",
+    (entry) => {
+      expect(parseAllowlist(["api.anthropic.com", entry])).toEqual({
+        kind: "refused",
+        reason: `${JSON.stringify(entry)} is a git host; the runner needs none, because the host clones, pushes and posts`,
+      });
+    },
+  );
+
+  it("refuses the project's own git host, and a dotted entry that covers it, only when the caller names it", () => {
+    expect(parseAllowlist(["gitlab.corp.example"]).kind).toBe("ok");
+    expect(parseAllowlist(["gitlab.corp.example"], ["gitlab.corp.example"]).kind).toBe("refused");
+    expect(parseAllowlist([".corp.example"], ["gitlab.corp.example"]).kind).toBe("refused");
+  });
+
+  it("keeps a host that only ends with a git host's letters, and the image registries near them", () => {
+    expect(parseAllowlist(["notgithub.com", "ghcr.io", "objects.githubusercontent.com"])).toEqual({
+      kind: "ok",
+      hosts: ["ghcr.io", "notgithub.com", "objects.githubusercontent.com"],
+    });
+  });
+
   it("names every bad entry at once", () => {
     const result = parseAllowlist(["*.a.com", "10.0.0.1"]);
     expect(result.kind).toBe("refused");
