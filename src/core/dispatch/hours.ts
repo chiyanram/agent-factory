@@ -1,6 +1,7 @@
 // hours — the run hours: the hours of the day, in UTC as the day caps are, in which the orchestrator may start a run
 // (#299; ADR-0012 S16). Written "HH-HH": from the first hour up to the second, so "22-06" is the night across midnight
-// and "00-24" is the whole day. Outside them no new run starts; a run already going is never stopped, as with the caps.
+// and "00-24" is the whole day. Outside them no new run starts, and dispatch ends with when to run it again (tick.ts
+// runHoursEnd); a run already going is never stopped, as with the caps.
 // A leaf: settings/variables.ts reads its checks, so it imports no module at run time.
 
 export const HOURS_FORM = /^([01]\d|2[0-4])-([01]\d|2[0-4])$/;

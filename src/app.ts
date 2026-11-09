@@ -29,7 +29,7 @@ import {
   type TokenStore,
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
-import { STEPS_TODAY, tick, type Steps } from "./core/dispatch/tick.js";
+import { runHoursEnd, STEPS_TODAY, tick, type Steps } from "./core/dispatch/tick.js";
 import type { Gate } from "./core/dispatch/table.js";
 import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
@@ -627,6 +627,10 @@ async function onePass(project: string, dryRun: boolean, io: Io, settings: PassS
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);
     return 1;
+  }
+  const closed = runHoursEnd({ project, caps: settings.caps }, passed.value);
+  if (closed !== "none") {
+    io.err(`agent-factory dispatch: ${closed}\n`);
   }
   return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
 }

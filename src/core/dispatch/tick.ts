@@ -826,17 +826,31 @@ async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Pro
   return true;
 }
 
+// what a run held outside the run hours is recorded with; the orchestrator loop ends on it (runHoursEnd)
+const OUTSIDE_HOURS = "held: outside";
+
+// runHoursEnd : after a pass that held a run outside the run hours, what to tell the human; "none" otherwise. The
+// orchestrator loop ends then, with this line, and never waits for the hours (#299; no job runs in the background):
+// the held runs stay in the records, so the next dispatch picks them up. Pure.
+export function runHoursEnd(setup: Pick<TickSetup, "project" | "caps">, ran: readonly Ran[]): string {
+  const hours = setup.caps.runHours;
+  const held = ran.some((r) => r.result.kind === "unavailable" && r.result.reason.startsWith(OUTSIDE_HOURS));
+  return held && hours !== "any"
+    ? `run hours are ${hours.text} UTC; run \`agent-factory dispatch ${setup.project}\` again then`
+    : "none";
+}
+
 // closed : every run held while the hour is outside the run hours (hours.ts); nothing is stopped, and the tickets stay
-// in flight, so a later pass starts them once the hours open
+// in flight, so a dispatch started inside the hours runs them (runHoursEnd)
 function closed(setup: TickSetup, runs: readonly Later[], ran: Ran[]): boolean {
   const hours = setup.caps.runHours;
   if (runs.length === 0 || hours === "any" || openAt(hours, setup.now())) {
     return false;
   }
-  const why = `outside the run hours ${hours.text} (UTC, ${settingName("runHours")})`;
-  setup.log(`no new runs: ${why}`);
+  const why = `the run hours ${hours.text} (UTC, ${settingName("runHours")})`;
+  setup.log(`no new runs: outside ${why}`);
   for (const { state, action } of runs) {
-    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `held: ${why}` } });
+    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `${OUTSIDE_HOURS} ${why}` } });
   }
   return true;
 }
