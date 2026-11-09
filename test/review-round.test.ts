@@ -9,7 +9,7 @@ import type { Note } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { claudeArgs, readAnswer, type Model, type ModelResult, type ModelRun } from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
-import { reviewStep } from "../src/core/review/step.js";
+import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
 
@@ -147,6 +147,7 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     runsDir: join(p.root, "runs"),
     sessions: async () => ({ kind: "ok", value: [] }),
     maxRuns: 2,
+    maxFinders: 4,
     prompts: PROMPTS,
     models: { find: "sonnet", rule: "sonnet", logic: "opus" },
     maxUsd: "2",
@@ -977,6 +978,31 @@ describe("one finder per lens (#237)", () => {
     expect(log.posts.at(-1)).toContain("- Unique findings per lens: errors 0 · smells 1 · api 0");
     const kept = readFileSync(join(p.root, "records", "12", p.head2, "reviewer-lenses.jsonl"), "utf8");
     expect(JSON.parse(kept)).toEqual({ lane: "feature", strongest: false, unique: { errors: 0, smells: 1, api: 0 } });
+  });
+
+  it("runs at most review.maxFinders finders at once; the round is one run with that many model runs", async () => {
+    lenses(["svc/**"]);
+    apiRubric();
+    let now = 0;
+    let most = 0;
+    const ran: Ran[] = [];
+    const inner = byLens({}, ran);
+    const counted: Model = async (run) => {
+      now += 1;
+      most = Math.max(most, now);
+      await new Promise((r) => setTimeout(r, 5));
+      const out = await inner(run);
+      now -= 1;
+      return out;
+    };
+    await reviewRound(setup(forge(fresh()), counted, { maxFinders: 2 }));
+    expect(ran.filter((r) => r.lens !== "verify")).toHaveLength(4);
+    expect(most).toBe(2);
+  });
+
+  it("puts a round's worst case at every finder and both verify passes at the per-run cap", () => {
+    expect(worstCase(3, "0.50")).toBe(2.5);
+    expect(worstCase(1, "")).toBe("unbounded");
   });
 
   it("refuses the round when a picked lens's rubric cannot be read, and runs no finder", async () => {

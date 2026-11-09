@@ -84,6 +84,13 @@ export const MACHINE_KEYS = [
   machine("review.verifyPrompt", "FACTORY_REVIEW_VERIFY", "locked", "the automated review's verify instructions"),
   machine("caps.usdPerRun", "FACTORY_MAX_USD", "cap", "the most one model run may spend, in US dollars", dollars),
   machine(
+    "review.maxFinders",
+    "FACTORY_MAX_FINDERS",
+    "cap",
+    "the most finder runs one review round runs at once; the round counts as one run (default 4)",
+    wholeNumber(16),
+  ),
+  machine(
     "caps.liveRuns",
     "FACTORY_MAX_RUNS",
     "cap",

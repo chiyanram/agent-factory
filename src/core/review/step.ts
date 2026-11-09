@@ -11,7 +11,8 @@ import type { Forge } from "../forge/types.js";
 import type { Steps } from "../dispatch/tick.js";
 import type { Sessions } from "./live.js";
 import type { Model, ModelResult } from "./model.js";
-import { reviewRound, type Outcome } from "./round.js";
+import { lensSetupOf, roundLenses } from "./finders.js";
+import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
 import { paths, reviewSetup } from "./settings.js";
 import { addSpend, NO_SPEND, spendOf, type Spend } from "../dispatch/spend.js";
 
@@ -52,6 +53,24 @@ function metered(model: Model, meter: Meter): Model {
   };
 }
 
+// worstCase : the most a round spends with this many finders, each run at the per-run cap ("" for none): the finders
+// and the verify passes; "unbounded" with no per-run cap. Pure.
+export function worstCase(finders: number, maxUsd: string): number | "unbounded" {
+  return maxUsd === "" ? "unbounded" : (finders + VERIFY_PASSES) * Number(maxUsd);
+}
+
+// worstUsd : the worst case of a round of this project: every lens its settings let a round pick (#237)
+async function worstUsd(input: {
+  readonly home: string;
+  readonly project: string;
+  readonly maxUsd: string;
+}): Promise<Result<number | "unbounded">> {
+  const setup = await lensSetupOf(input);
+  return setup.kind === "ok"
+    ? { kind: "ok", value: worstCase(roundLenses(setup.value.lenses).length, input.maxUsd) }
+    : setup;
+}
+
 // reviewStep : available when the reviewer's settings are there
 export function reviewStep(input: {
   readonly env: NodeJS.ProcessEnv;
@@ -66,8 +85,10 @@ export function reviewStep(input: {
   if (p.kind === "failed") {
     return { kind: "unavailable", reason: `the reviewer is not set up: ${p.reason}` };
   }
+  const { home, maxUsd } = p.value;
   return {
     kind: "available",
+    worstUsd: () => worstUsd({ home, project: input.project, maxUsd }),
     run: async (run) => {
       if (run.change.kind !== "open") {
         return { kind: "failed", reason: "no open change to review" };
