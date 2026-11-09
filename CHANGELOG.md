@@ -3,6 +3,18 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.17.0](https://github.com/chiyanram/agent-factory/compare/v0.16.0...v0.17.0) (2026-11-09)
+
+### ✨ Features
+
+* **notify** — Discord pings when a ticket needs a person · [#119](https://github.com/chiyanram/agent-factory/issues/119) (PR [#211](https://github.com/chiyanram/agent-factory/pull/211))
+
+### 🐛 Fixes
+
+* **writer** — every writer prompt says to run subagents and commands in the foreground · [#192](https://github.com/chiyanram/agent-factory/issues/192) (PR [#210](https://github.com/chiyanram/agent-factory/pull/210))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.17.0`
+
 ## [0.16.0](https://github.com/chiyanram/agent-factory/compare/v0.15.1...v0.16.0) (2026-11-08)
 
 ### ✨ Features
