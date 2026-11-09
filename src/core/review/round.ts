@@ -440,7 +440,7 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
 function threadPost(f: Sorted): Post {
   return {
     seat: "reviewer",
-    title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.rule}): ${f.finding}`,
+    title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.category}, ${f.rule}): ${f.finding}`,
     fields: [{ label: "Fix", value: f.fix }],
     items: [],
   };
@@ -493,7 +493,8 @@ function findingLines(sorted: readonly Sorted[], axis: "standards" | "spec", nam
   return mine.length === 0
     ? [`${name} · none`]
     : mine.map(
-        (f) => `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule}: ${f.finding} (${f.why})`,
+        (f) =>
+          `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule} (${f.category}): ${f.finding} (${f.why})`,
       );
 }
 
