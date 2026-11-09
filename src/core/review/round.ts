@@ -26,9 +26,11 @@ import type { Change, Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
+import { actedSince, keepTracked, type Acted } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
+import { BASELINE_LENS } from "./lenses.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
@@ -91,6 +93,8 @@ export type Outcome =
       readonly costUsd: number;
       // every token the round's passes spent (#131)
       readonly tokens: number;
+      // the last full round's Act on and Consider findings, each acted on or not since its head (#220)
+      readonly acted: Acted | "none";
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -437,7 +441,7 @@ async function findAndVerify(ctx: Ctx, run: string, pack: Pack): Promise<Result<
   if (found.kind === "failed") {
     return found;
   }
-  const findings = readFindings(found.value.output);
+  const findings = readFindings(found.value.output, BASELINE_LENS);
   return findings.kind === "ok" ? verifyAll(ctx, run, found.value, findings.value) : findings;
 }
 
@@ -458,13 +462,18 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
   }
 }
 
-// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219)
+// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219); every thread shows the finder's
+// grade and evidence (#237)
 function threadPost(f: Sorted, criteria: readonly string[]): Post {
   const quote = quoteOf(f, criteria);
   return {
     seat: "reviewer",
     title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.category}, ${f.rule}): ${f.finding}`,
-    fields: [...(quote === "" ? [] : [{ label: "Criterion", value: quote }]), { label: "Fix", value: f.fix }],
+    fields: [
+      ...(quote === "" ? [] : [{ label: "Criterion", value: quote }]),
+      { label: "Fix", value: f.fix },
+      { label: "Evidence", value: `${f.grade} · ${f.evidence}` },
+    ],
     items: [],
   };
 }
@@ -562,6 +571,17 @@ async function threadsAndLabel(
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
+// actedOf : keeps this round's findings for the next round's rate, and rates the last full round's against this head;
+// neither can fail the round (#220)
+async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promise<Acted | "none"> {
+  const at = { recordsDir: ctx.setup.recordsDir, change: ctx.setup.number, head };
+  await keepTracked(at, sorted);
+  const last = ctx.past.last;
+  return last.kind === "round"
+    ? actedSince({ ...at, repo: ctx.setup.repo, env: ctx.setup.env, since: last.head })
+    : "none";
+}
+
 async function post(
   ctx: Ctx,
   pack: Pack,
@@ -581,6 +601,7 @@ async function post(
   if (kept.kind === "failed") {
     return kept;
   }
+  const acted = await actedOf(ctx, pack.head, result.sorted);
   const labelled = await threadsAndLabel(ctx, box.value, result.sorted, pack.criteria);
   if (labelled.kind === "failed") {
     return labelled;
@@ -604,6 +625,7 @@ async function post(
           counts: c,
           costUsd: result.spent.costUsd,
           tokens: result.spent.find + result.spent.verify,
+          acted,
         },
       }
     : summary;

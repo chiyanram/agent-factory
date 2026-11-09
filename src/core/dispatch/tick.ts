@@ -54,6 +54,7 @@ import { designView, type DesignView } from "./design.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import type { Spend } from "./spend.js";
+import type { Acted } from "../review/acted-on.js";
 import { heldWords, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
@@ -124,7 +125,7 @@ export type Steps = {
         readonly kind: "available";
         readonly run: (
           input: RunInput,
-        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend }> | FailedSpent>;
+        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend; readonly acted?: Acted }> | FailedSpent>;
       };
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
@@ -735,7 +736,7 @@ function reviewEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly actOn: number; readonly spend: Spend },
+  value: { readonly actOn: number; readonly spend: Spend; readonly acted?: Acted },
 ): Promise<Done> {
   return record({
     where: where(setup, state),
@@ -745,6 +746,7 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
+      ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });

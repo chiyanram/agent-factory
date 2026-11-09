@@ -39,7 +39,12 @@ const SPEC = (lane: string) =>
   ].join("\n");
 
 const H = "1".repeat(40);
-const NO_DESIGN_REVIEW = DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.approval, designReview: false }));
+const NO_DESIGN_REVIEW = DEFAULT_LANES.map((l) => ({
+  name: l.name,
+  approval: l.approval,
+  lenses: l.lenses,
+  designReview: false,
+}));
 // the shared copy of the approval approved() gives (#227)
 const COPY = (ticket: string, lane = "feature") =>
   `[coordinator] approved by ram via terminal, spec ${specHash(SPEC(lane).replace("PROJ-1", ticket))}, design none`;
@@ -777,7 +782,7 @@ describe("START and approval (#227)", () => {
   it("the project's process lanes decide: a process that makes tiny need an approval holds a START (#232)", async () => {
     spec("tiny");
     await started("2026-11-07T08:00:00Z");
-    const strict = DEFAULT_LANES.map((l) => ({ ...l, approval: true }));
+    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true, lenses: l.lenses }));
     const log: string[] = [];
     await tick(setup({ team, open: [], merged: [] }, log, { dryRun: true, lanes: strict }));
     expect(log).toEqual([
@@ -1492,7 +1497,12 @@ describe("the design review and the cleanup run (#236)", () => {
     const spent =
       read.kind === "ok" ? summarize({ events: read.value, since: "1970-01-01T00:00:00Z" }).spent : undefined;
     expect(spent).toEqual({ usd: 2, tokens: 18 });
-    const off = DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.approval, designReview: false }));
+    const off = DEFAULT_LANES.map((l) => ({
+      name: l.name,
+      approval: l.approval,
+      lenses: l.lenses,
+      designReview: false,
+    }));
     const log: string[] = [];
     await tick(setup({ team, open: [], merged: [] }, log, { lanes: off, dryRun: true }));
     expect(log).toEqual([

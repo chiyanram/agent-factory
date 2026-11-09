@@ -11,8 +11,10 @@
 // needs-human after the ready check. The way on is the same either way: the coordinator raises the spec's lane, which
 // makes any approval stale, and a human approves the raised spec.
 //
-// The engine acts on a lane's properties, never on its name (section 3). Today one property, approval, is read from
-// the project's process: its process plugin's lanes, or the default lanes below (process/read.ts, #232). Each lane also
+// The engine acts on a lane's properties, never on its name (section 3). Two are read from the project's process: its
+// process plugin's lanes, or the default lanes below (process/read.ts, #232): approval, and how many lenses the
+// automated review runs (#237; review/lenses.ts pickLenses). A lanes file writes the lens count as a person reads it,
+// "1", "~3" or "all, on the strongest model"; a lane that leaves it out keeps the default lane's count. Each lane also
 // says whether its spec and design get a design review before the human's approval (designReview, #236): a
 // design-reviewer run, then a verify pass. The approval floor: every lane above the lowest needs a human's approval, and no settings
 // layer or process plugin can turn that off. In the settings the floor is "approval.floor", a locked key fixed to tiny
@@ -28,19 +30,55 @@ import { prop } from "./dispatch/records.js";
 import { readProjectRaw } from "./project.js";
 import { LANES, type Lane, type Spec } from "./spec.js";
 
+// how many lenses a lane's review runs: a count, or every lens on the strongest model
+export type LensCount = number | "all";
+
 // one lane's properties, in the lanes' order from the lightest
 // designReview: whether the lane's spec and design get a design review (#236); a lane that does not say keeps the
 // default lane's
-export type LaneProps = { readonly name: Lane; readonly approval: boolean; readonly designReview?: boolean };
+export type LaneProps = {
+  readonly name: Lane;
+  readonly approval: boolean;
+  readonly lenses: LensCount;
+  readonly designReview?: boolean;
+};
 
-// the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well, after a design
-// review (docs/DESIGN.md section 3)
+// the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well. Tiny runs one
+// lens, bug and feature about 3, and the one-way door all; every lane but tiny gets a design review (docs/DESIGN.md
+// section 3)
+const DEFAULT_COUNTS: Readonly<Record<Lane, LensCount>> = { tiny: 1, bug: 3, feature: 3, "one-way door": "all" };
+
 export const DEFAULT_LANES: readonly LaneProps[] = [
-  { name: "tiny", approval: false, designReview: false },
-  { name: "bug", approval: true, designReview: true },
-  { name: "feature", approval: true, designReview: true },
-  { name: "one-way door", approval: true, designReview: true },
+  { name: "tiny", approval: false, lenses: DEFAULT_COUNTS.tiny, designReview: false },
+  { name: "bug", approval: true, lenses: DEFAULT_COUNTS.bug, designReview: true },
+  { name: "feature", approval: true, lenses: DEFAULT_COUNTS.feature, designReview: true },
+  { name: "one-way door", approval: true, lenses: DEFAULT_COUNTS["one-way door"], designReview: true },
 ];
+
+// countText : a lens count as a person writes it: "all…" for every lens, else its first whole number ("~3" is 3)
+function countText(value: string): LensCount | "bad" {
+  if (/^\s*all\b/i.test(value)) {
+    return "all";
+  }
+  const n = Number(/^\s*~?\s*(\d+)\b/.exec(value)?.[1] ?? 0);
+  return n >= 1 ? n : "bad";
+}
+
+function wholeCount(value: number): LensCount | "bad" {
+  return Number.isSafeInteger(value) && value >= 1 ? value : "bad";
+}
+
+// lensCountOf : a lanes file's lens count, "1", "~3", "all, on the strongest model" or a whole number; the default
+// lane's count when it is left out; "bad" for anything else. Pure.
+function lensCountOf(value: unknown, lane: Lane): LensCount | "bad" {
+  if (value === undefined) {
+    return DEFAULT_COUNTS[lane];
+  }
+  if (typeof value === "number") {
+    return wholeCount(value);
+  }
+  return typeof value === "string" ? countText(value) : "bad";
+}
 
 // defaultDesignReview : the default lanes' designReview for a lane, for a lanes value that does not say. Pure.
 function defaultDesignReview(lane: Lane): boolean {
@@ -67,8 +105,9 @@ function propsOf(value: unknown): LaneProps | "bad" {
   if (lane === undefined || typeof approval !== "boolean") {
     return "bad";
   }
+  const lenses = lensCountOf(prop(value, "lenses"), lane);
   const designReview = designReviewOf(value, lane);
-  return designReview === "bad" ? "bad" : { name: lane, approval, designReview };
+  return lenses === "bad" || designReview === "bad" ? "bad" : { name: lane, approval, lenses, designReview };
 }
 
 // namedLanes : every lane's properties, or "bad" when the value is not a list of them. Pure.
@@ -90,7 +129,7 @@ export function lanesOf(value: unknown, from: string): Result<readonly LaneProps
   const named = namedLanes(value);
   if (named === "bad") {
     return failed(
-      `${from}: the lanes must be a list of {"name", "approval"} (and an optional "designReview"), with a name one of ${LANES.join(", ")}`,
+      `${from}: the lanes must be a list of {"name", "approval", "lenses"} (and an optional "designReview"), with a name one of ${LANES.join(", ")} and lenses a count or "all"`,
     );
   }
   const breaks = floorBreaks(named);

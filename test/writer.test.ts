@@ -822,12 +822,15 @@ describe("the writer step: a later run on the change", () => {
 
 const FINDING: Sorted = {
   id: "F-1",
+  lens: "baseline",
   axis: "standards",
   kind: "logic",
   file: "src/Renewal.java",
   line: 7,
   rule: "R-3",
   category: "bug",
+  grade: "walked",
+  evidence: "renew() at line 7",
   severity: "blocker",
   finding: "a reserved loan still renews",
   fix: "refuse it with 409",

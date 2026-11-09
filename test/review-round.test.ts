@@ -31,6 +31,8 @@ const FINDING = {
   rule: "ERR1",
   category: "bug",
   severity: "blocker",
+  grade: "walked",
+  evidence: "add(1, 1) returns 2 at svc/Main.java:1",
   finding: "returns 2",
   fix: "return the sum",
 };
@@ -187,7 +189,7 @@ describe("reviewRound", () => {
     expect(seen.every((s) => s.run.maxUsd === "2" && s.run.name === "reviewer-12")).toBe(true);
     expect(log.threads).toHaveLength(2);
     expect(log.threads[0]).toMatch(
-      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum$/,
+      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum\n- Evidence: walked · add\(1, 1\) returns 2 at svc\/Main\.java:1$/,
     );
     const summary = log.posts.at(-1) ?? "";
     expect(summary.split("\n")[0]).toMatch(
@@ -353,6 +355,54 @@ describe("reviewRound", () => {
     expect(seen).toEqual([]);
     expect(log.labels.slice(labelsBefore)).toEqual(["needs-human"]);
     expect(log.posts.at(-1)).toMatch(new RegExp(`^\\[reviewer\\] round 1 reused · head ${head} · patch-id`));
+  });
+
+  it("the next full round rates the last round's Act on and Consider findings: acted on when a commit changed their region (#220)", async () => {
+    const log = fresh();
+    const far = { ...FINDING, kind: "logic", axis: "spec", file: "code/docs/design/order.md", line: 40 };
+    const first = await reviewRound(
+      setup(
+        forge(log),
+        model(
+          [
+            findAnswer([FINDING, far]),
+            verdicts([{ id: "F1", bucket: "act_on", why: "real" }]),
+            verdicts([{ id: "F2", bucket: "consider", why: "maybe" }]),
+          ],
+          [],
+        ),
+      ),
+    );
+    expect(first).toMatchObject({ kind: "ok", value: { kind: "posted", round: 1, acted: "none" } });
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write("svc/Main.java", "class Main { int total() { return 3; } }\n");
+    const head = p.commitAll("fix the sum");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    p.git("checkout", "-q", "main");
+    const notes = log.posts.map((body) => ({ body, author: { name: "ram" }, at: "2026-11-07T10:00:00Z" }));
+    const second = await reviewRound(setup(forge(log, { change: changeAt(head), notes }), model([findAnswer([])], [])));
+    expect(second).toMatchObject({
+      kind: "ok",
+      value: {
+        kind: "posted",
+        round: 2,
+        acted: {
+          since: p.head2,
+          rows: [
+            { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "svc/Main.java", line: 1, acted: true },
+            {
+              id: "F2",
+              lens: "logic",
+              category: "bug",
+              bucket: "consider",
+              file: "docs/design/order.md",
+              line: 40,
+              acted: false,
+            },
+          ],
+        },
+      },
+    });
   });
 
   it("a failed needs-human label posts no reuse note, so the next run tries again", async () => {
