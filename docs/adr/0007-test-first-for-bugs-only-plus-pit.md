@@ -1,5 +1,7 @@
 # 0007 · Test-first for bugs only, mutation testing for features
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-21 (#1 "Box 4", "G12 precondition"; old G12, chiyanram/skills#68)
 
 ## Context

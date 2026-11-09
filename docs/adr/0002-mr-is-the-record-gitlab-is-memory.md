@@ -1,5 +1,7 @@
 # 0002 · The MR is the one record; GitLab is the only memory
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-18 (#4 Q1), extended 2026-10-20 (#1 "Box 2")
 
 ## Context

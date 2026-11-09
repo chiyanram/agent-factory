@@ -1,5 +1,7 @@
 # 0011 · The factory side of the /crq pipeline
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-11-06 (operator, chiyanram/skills#210, D1–D17). Amends ADR-0001 and ADR-0004.
 
 ## Context

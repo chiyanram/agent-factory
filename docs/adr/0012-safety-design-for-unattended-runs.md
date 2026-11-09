@@ -1,5 +1,7 @@
 # 0012 · Safety design for unattended runs
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-11-06 (operator, map #30: W1, Q1, Q4–Q7, Q11, Q15, gaps 1–3). S1 revised 2026-11-09 (#227). S13 amended 2026-11-09 for the PR body (#335). Amends ADR-0001, 0005, 0006,
 0010 and 0011. Closes the design side of #83 gaps 1–6. The scripts do not follow it yet. Each build ticket is cut under
 #30.

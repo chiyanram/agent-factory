@@ -5,7 +5,7 @@ a word under _Avoid_, use the term instead.
 
 The factory words are Matt Pocock's `software-factory` vocabulary (mattpocock/skills @4ae2317,
 `skills/in-progress/software-factory/`, MIT). The term map was confirmed on #144 on 2026-11-08, and four clashes were
-settled on 2026-11-09. Code names that still use an old word are renamed in #144 phase 4. Until then, the alias column
+settled on 2026-11-09 ([ADR-0016](docs/adr/0016-adopt-the-software-factory-vocabulary.md)). Code names that still use an old word are renamed in #144 phase 4. Until then, the alias column
 says what they mean.
 
 ## The factory

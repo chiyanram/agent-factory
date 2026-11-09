@@ -1,5 +1,7 @@
 # 0015 · Eval the reviewer first: seeded bugs, recall in Act on, and a baseline no change may lower
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-11-08 (operator, map #175: #180, #188, #197, #204, #205). The implementer's eval is not decided
 here.
 
