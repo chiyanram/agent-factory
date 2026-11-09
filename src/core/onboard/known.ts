@@ -37,7 +37,6 @@ export async function knownFor(input: {
       args: ["show", `${input.ref}:${file}`],
       repo: { kind: "repo", path: input.repo },
       env: input.env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "none" },
     });
     lines.set(file, shown.kind === "ok" ? shown.stdout.replace(/\n$/, "").split("\n") : undefined);

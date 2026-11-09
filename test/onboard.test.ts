@@ -9,6 +9,8 @@ import { accept, readKnowledge } from "../src/core/onboard/home.js";
 import { knownFor } from "../src/core/onboard/known.js";
 import { onboard, FLOOR, type OnboardSetup } from "../src/core/onboard/run.js";
 import type { Model, ModelRun } from "../src/core/review/model.js";
+import { onboardSetup } from "../src/core/onboard/settings.js";
+import { REVIEW_MODELS } from "../src/core/review/pinned.js";
 import { onboardCommand } from "../src/onboard-cli.js";
 import { tempDir } from "./temp.js";
 
@@ -285,5 +287,22 @@ describe("agent-factory onboard (#235)", () => {
     const hashes = lines.join("").match(/onboard accept ledger ([0-9a-f]{64}) ([0-9a-f]{64})/);
     expect(await onboardCommand(["accept", "ledger", hashes?.[1] ?? "", hashes?.[2] ?? ""], io)).toBe(0);
     expect(await readKnowledge(r.home, "ledger")).toMatchObject({ kind: "accepted" });
+  });
+});
+
+describe("onboardSetup (#235, after #232 and #213)", () => {
+  it("hands the run the project's plugins, and the pinned logic model unless a layer sets another id", () => {
+    const plugins = [{ label: "rulebook@acme", dir: "/plugins/rulebook" }];
+    const input = {
+      forge: { defaultBranch: async () => ({ kind: "ok" as const, value: "main" }) },
+      home: "/h",
+      project: "ledger",
+      now: () => 0,
+      plugins,
+    };
+    const set = onboardSetup({ ...input, env: { FACTORY_REPO: "/r", FACTORY_HOME: "/h" } });
+    expect(set).toMatchObject({ kind: "ok", value: { plugins, modelName: REVIEW_MODELS.logic } });
+    const other = onboardSetup({ ...input, env: { FACTORY_REPO: "/r", FACTORY_LOGIC_MODEL: "claude-opus-5-1" } });
+    expect(other).toMatchObject({ kind: "ok", value: { modelName: "claude-opus-5-1" } });
   });
 });
