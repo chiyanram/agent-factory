@@ -37,7 +37,9 @@ const wrote = (over: Partial<Summary> = {}): Summary => ({
   lastAt: "2026-11-07T09:50:00Z",
   ...over,
 });
-const readyOk: Partial<Summary> = { lastReady: { kind: "ended", head: H, passed: true, why: "x" } };
+const readyOk: Partial<Summary> = {
+  lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: true, why: "x" },
+};
 const reviewed = (actOn: number, rounds = 1): Partial<Summary> => ({
   ...readyOk,
   lastReview: { kind: "ended", head: H, actOn },
@@ -53,6 +55,7 @@ function state(over: Partial<TicketState> = {}): TicketState {
     runs: wrote({ ...reviewed(0) }),
     now: NOW,
     quietMinutes: 30,
+    waiver: { kind: "none" },
     ...over,
   };
 }
@@ -255,12 +258,27 @@ describe("decide: one row each", () => {
   it("writer done with no ready check at this head: the ready check", () => {
     expect(decide(state({ runs: wrote() }))).toEqual({ kind: "ready", head: H });
     expect(
-      decide(state({ runs: wrote({ lastReady: { kind: "ended", head: "9".repeat(40), passed: true, why: "x" } }) })),
+      decide(
+        state({
+          runs: wrote({
+            lastReady: {
+              kind: "ended",
+              at: "2026-11-07T09:55:00Z",
+              human: false,
+              head: "9".repeat(40),
+              passed: true,
+              why: "x",
+            },
+          }),
+        }),
+      ),
     ).toEqual({ kind: "ready", head: H });
   });
 
   it("a failed ready check sends the writer back, and stops after 3", () => {
-    const failed = { lastReady: { kind: "ended", head: H, passed: false, why: "x" } } as const;
+    const failed = {
+      lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: false, why: "x" },
+    } as const;
     expect(decide(state({ runs: wrote({ ...failed, readyFailures: 1 }) }))).toMatchObject({
       kind: "writer",
       task: { kind: "ready-failed", why: "x" },
@@ -269,6 +287,29 @@ describe("decide: one row each", () => {
       kind: "needs-human",
       why: expect.stringContaining("3 times"),
     });
+  });
+
+  it("a test check stops the change for a person with the hits; a waiver at this head, given after, runs it again", () => {
+    const stopped = {
+      lastReady: {
+        kind: "ended",
+        at: "2026-11-07T09:55:00Z",
+        human: true,
+        head: H,
+        passed: false,
+        why: "the floor guard: build.gradle changes a judge file",
+      },
+      readyFailures: 1,
+    } as const;
+    expect(decide(state({ runs: wrote(stopped) }))).toEqual({
+      kind: "needs-human",
+      why: `the test checks stopped the change at ${H.slice(0, 8)}: the floor guard: build.gradle changes a judge file`,
+    });
+    const waived = (head: string, at: string) => state({ runs: wrote(stopped), waiver: { kind: "waived", head, at } });
+    expect(decide(waived(H, "2026-11-07T09:58:00Z"))).toEqual({ kind: "ready", head: H });
+    // a waiver at another head, or one older than the check, does not
+    expect(decide(waived("9".repeat(40), "2026-11-07T09:58:00Z"))).toMatchObject({ kind: "needs-human" });
+    expect(decide(waived(H, "2026-11-07T09:50:00Z"))).toMatchObject({ kind: "needs-human" });
   });
 
   it("a passed ready check with no review at this head: the reviewer, and no 4th round", () => {
@@ -343,7 +384,14 @@ describe("decide: one row each", () => {
 
   it("the writer goes back with the ready check's reason", () => {
     const failed = {
-      lastReady: { kind: "ended", head: H, passed: false, why: "row 1 (AC1): make test exited 2" },
+      lastReady: {
+        kind: "ended",
+        at: "2026-11-07T09:55:00Z",
+        human: false,
+        head: H,
+        passed: false,
+        why: "row 1 (AC1): make test exited 2",
+      },
     } as const;
     expect(decide(state({ runs: wrote({ ...failed, readyFailures: 1 }) }))).toMatchObject({
       why: "the ready check failed at this head: row 1 (AC1): make test exited 2",
@@ -362,7 +410,11 @@ describe("decide: one row each", () => {
 describe("backoff (#228)", () => {
   const at = (ms: number) => new Date(NOW + ms).toISOString();
   const failedReady = (nextTry: Summary["nextTry"], readyFailures = 1): Summary =>
-    wrote({ lastReady: { kind: "ended", head: H, passed: false, why: "row 1" }, readyFailures, nextTry });
+    wrote({
+      lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: false, why: "row 1" },
+      readyFailures,
+      nextTry,
+    });
 
   it("waits 10 s after the first failure, doubling each time, never more than 5 minutes", () => {
     expect([1, 2, 3, 4, 5, 6, 7, 20].map(backoffMs)).toEqual([

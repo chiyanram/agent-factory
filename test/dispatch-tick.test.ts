@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
+import { waive } from "../src/core/waiver.js";
 import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
@@ -292,7 +293,10 @@ describe("tick", () => {
     let head = H;
     const steps: Steps = {
       ...STEPS_TODAY,
-      ready: { kind: "available", run: async () => ({ kind: "ok", value: { passed: false, why: "row 1" } }) },
+      ready: {
+        kind: "available",
+        run: async () => ({ kind: "ok", value: { passed: false, why: "row 1", human: false } }),
+      },
       writer: {
         kind: "available",
         run: async (input) => {
@@ -325,6 +329,65 @@ describe("tick", () => {
     expect(wrote).toEqual(["ready-failed"]);
     await pass("2026-11-07T10:01:20Z");
     expect(wrote).toEqual(["ready-failed", "ready-failed"]);
+  });
+
+  it("a test check hit goes to a person, never back to the writer; a human's waiver at the head runs it again (#231)", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    await record({
+      where,
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p1",
+        evidence: [],
+        hung: false,
+      },
+    });
+    let human = true;
+    const wrote: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      ready: {
+        kind: "available",
+        run: async () => ({
+          kind: "ok",
+          value: human
+            ? { passed: false, why: "the floor guard: build.gradle adds a judge file", human: true }
+            : { passed: true, why: "", human: false },
+        }),
+      },
+      writer: {
+        kind: "available",
+        run: async (input) => (wrote.push(input.task.kind), { kind: "failed", reason: "not this time" }),
+      },
+    };
+    const log: string[] = [];
+    const pass = (time: string) =>
+      tick(setup({ team, open: [open({ head: H })], merged: [] }, log, { steps, now: () => Date.parse(time) }));
+    const last = async () => {
+      const read = await readRecords(where);
+      return read.kind === "ok" ? read.value.at(-1) : undefined;
+    };
+    await pass("2026-11-07T10:00:00Z");
+    expect(await last()).toMatchObject({ kind: "ready-ended", passed: false, human: true });
+    expect(await last()).not.toHaveProperty("nextTry");
+    await pass("2026-11-07T10:01:00Z");
+    expect(await last()).toMatchObject({
+      kind: "blocked",
+      why: expect.stringContaining("the test checks stopped the change at 11111111: the floor guard: build.gradle"),
+    });
+    expect(wrote).toEqual([]);
+    expect(await waive({ where, head: H, by: "ram", via: "terminal", at: "2026-11-07T10:02:00Z" })).toMatchObject({
+      kind: "waived",
+    });
+    human = false;
+    await pass("2026-11-07T10:03:00Z");
+    expect(await last()).toMatchObject({ kind: "ready-ended", passed: true, head: H });
+    expect(wrote).toEqual([]);
   });
 
   it("a stale approval releases the claim; a merged change is reconciled; a green gate is pinged once", async () => {
@@ -396,7 +459,8 @@ describe("tick", () => {
       ready: {
         kind: "available",
         run: async (input) => (
-          given.push(input.evidence), { kind: "ok", value: { passed: false, why: "row 1 (AC1): make test exited 2" } }
+          given.push(input.evidence),
+          { kind: "ok", value: { passed: false, why: "row 1 (AC1): make test exited 2", human: false } }
         ),
       },
     };

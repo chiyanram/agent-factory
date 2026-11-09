@@ -92,6 +92,8 @@ export type Event =
       readonly head: string;
       readonly passed: boolean;
       readonly why: string;
+      // a test check stopped it for a person, not the writer (#231); absent on older lines, which are false
+      readonly human?: boolean;
       // only when it failed (#228)
       readonly nextTry?: NextTry;
     }
@@ -254,6 +256,15 @@ function whyOf(raw: unknown): string | Bad {
   return prop(raw, "why") === undefined ? "" : str(raw, "why");
 }
 
+// humanField : a ready line's human flag, as a field to spread: none on a line that has none (#231)
+function humanField(raw: unknown): { readonly human?: boolean } | Bad {
+  const human = prop(raw, "human");
+  if (human === undefined) {
+    return {};
+  }
+  return typeof human === "boolean" ? { human } : BAD;
+}
+
 function readyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
@@ -262,7 +273,12 @@ function readyEndedOf(raw: unknown, at: string): Event | Bad {
   if (head === BAD || why === BAD || next === BAD) {
     return BAD;
   }
-  return typeof passed === "boolean" ? { at, kind: "ready-ended", head, passed, why, ...next } : BAD;
+  return typeof passed === "boolean" ? withHuman(raw, { at, kind: "ready-ended", head, passed, why, ...next }) : BAD;
+}
+
+function withHuman(raw: unknown, event: Extract<Event, { kind: "ready-ended" }>): Event | Bad {
+  const human = humanField(raw);
+  return human === BAD ? BAD : { ...event, ...human };
 }
 
 function verifyEndedOf(raw: unknown, at: string): Event | Bad {
@@ -371,7 +387,15 @@ export type Summary = {
   readonly readyFailures: number;
   readonly lastReady:
     | { readonly kind: "none" }
-    | { readonly kind: "ended"; readonly head: string; readonly passed: boolean; readonly why: string };
+    | {
+        readonly kind: "ended";
+        readonly at: string;
+        readonly head: string;
+        readonly passed: boolean;
+        readonly why: string;
+        // a test check stopped it for a person (#231)
+        readonly human: boolean;
+      };
   readonly lastVerify:
     | { readonly kind: "none" }
     | { readonly kind: "ended"; readonly head: string; readonly passed: boolean };
@@ -446,7 +470,7 @@ const STEPS: Steps = {
   "ready-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
-    lastReady: { kind: "ended", head: e.head, passed: e.passed, why: e.why },
+    lastReady: { kind: "ended", at: e.at, head: e.head, passed: e.passed, why: e.why, human: e.human === true },
     readyFailures: s.readyFailures + Number(!e.passed),
     nextTry: nextTryView(e.nextTry),
   }),

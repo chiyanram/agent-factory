@@ -1,9 +1,11 @@
 // steps — the ready check and the local verifier as the dispatcher's steps (#91; #138). Both run branch code, so both
 // run only in a fresh box (boxrun.ts), and both read their commands from the project file, never from the branch.
 //
-//   ready    first the floor guard (floor.ts) reads the diff on the host: a skip, a deleted test, a removed assertion,
-//            a suppression with no reason or an empty catch fails the check at once, with its file:line, and no box
-//            runs; a guard that cannot read the diff fails the step, so a person looks. Then each evidence row of the
+//   ready    first the floor guard (floor.ts) reads the diff on the host: a test check hit (a deleted test or test
+//            case, a skip, a removed assertion, a changed judge file) fails the check at once for a person
+//            (needs-human), with its file:line, unless the ticket's waiver (waiver.ts) clears it; a suppression with no
+//            reason or an empty catch fails it for the writer; no box runs on a hit. A guard that cannot read the diff
+//            or the waiver fails the step, so a person looks. Then each evidence row of the
 //            writer's report runs again at the head. A row whose command needs a shell, or starts with a program the
 //            project file does not list, fails the check: the writer is sent back to fix it.
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
@@ -20,7 +22,8 @@ import type { Argv, ProjectFile } from "../project.js";
 import type { Evidence } from "../report.js";
 import { commandArgv } from "./command.js";
 import { rowLine, runInBox, type BoxSetup, type Row } from "./boxrun.js";
-import { floorGuard, hitsLine } from "./floor.js";
+import { floorGuard, forHuman, hitsLine } from "./floor.js";
+import { judgeFiles } from "./judge.js";
 
 export const VERIFY_CONTEXT = "agent-factory/verify";
 
@@ -41,7 +44,13 @@ function failedRow(rows: readonly Row[]): Row | "none" {
   return rows.find((r) => r.ran.kind === "timedOut" || r.ran.code !== 0) ?? "none";
 }
 
-type Checked = { readonly passed: boolean; readonly why: string };
+// human: the check stopped for a person (a test check hit), not for the writer
+type Checked = { readonly passed: boolean; readonly why: string; readonly human: boolean };
+
+const PASSED: Checked = { passed: true, why: "", human: false };
+
+// the head of the ticket's waiver of the test checks (waiver.ts), or "none"
+export type WaiverHead = (ticket: string) => Promise<Result<string>>;
 
 // argvs : every row's command as argv, or the first row that cannot run with no shell
 function argvs(evidence: readonly Evidence[], programs: readonly string[]): Result<ReturnType<typeof commandArgv>[]> {
@@ -60,49 +69,56 @@ function argvs(evidence: readonly Evidence[], programs: readonly string[]): Resu
 function verdict(evidence: readonly Evidence[], rows: readonly Row[]): Checked {
   const bad = failedRow(rows);
   if (bad === "none") {
-    return { passed: true, why: "" };
+    return PASSED;
   }
   const i = rows.indexOf(bad);
-  return { passed: false, why: `row ${i + 1} (${evidence[i]?.criterion ?? ""}): ${rowLine(bad)}` };
+  return { passed: false, why: `row ${i + 1} (${evidence[i]?.criterion ?? ""}): ${rowLine(bad)}`, human: false };
 }
 
+type Guarding = { readonly plan: ReadyPlan; readonly forge: Forge; readonly waiver: WaiverHead };
+
 // floor : the floor guard on the change's diff, before any box runs; none is a pass
-async function floor(plan: ReadyPlan, forge: Forge, open: Open, head: string): Promise<Result<Checked>> {
-  const base = await forge.defaultBranch();
+async function floor(g: Guarding, open: Open, input: RunInput): Promise<Result<Checked>> {
+  const base = await g.forge.defaultBranch();
+  if (base.kind === "failed") {
+    return base;
+  }
+  const waived = await g.waiver(input.ticket);
   const hits =
-    base.kind === "ok"
+    waived.kind === "ok"
       ? await floorGuard({
-          repo: plan.setup.repo,
-          env: plan.setup.env,
+          repo: g.plan.setup.repo,
+          env: g.plan.setup.env,
           base: base.value,
           branch: open.branch,
-          head,
-          testFiles: plan.project.ready.testFiles,
+          head: input.head,
+          testFiles: g.plan.project.ready.testFiles,
+          judgeFiles: judgeFiles(g.plan.project),
+          waived: waived.value,
         })
-      : base;
+      : waived;
   if (hits.kind === "failed") {
     return hits;
   }
   return {
     kind: "ok",
-    value: hits.value.length === 0 ? { passed: true, why: "" } : { passed: false, why: hitsLine(hits.value) },
+    value: hits.value.length === 0 ? PASSED : { passed: false, why: hitsLine(hits.value), human: forHuman(hits.value) },
   };
 }
 
 async function check(
-  plan: ReadyPlan,
-  forge: Forge,
+  g: Guarding,
   open: Open,
   input: RunInput & { readonly evidence: readonly Evidence[] },
 ): Promise<Result<Checked>> {
   if (input.evidence.length === 0) {
-    return { kind: "ok", value: { passed: false, why: "the writer gave no evidence rows to run again" } };
+    return { kind: "ok", value: { passed: false, why: "the writer gave no evidence rows to run again", human: false } };
   }
-  const guarded = await floor(plan, forge, open, input.head);
+  const guarded = await floor(g, open, input);
   if (guarded.kind === "failed" || !guarded.value.passed) {
     return guarded;
   }
-  return rerun(plan, open, input);
+  return rerun(g.plan, open, input);
 }
 
 async function rerun(
@@ -112,7 +128,7 @@ async function rerun(
 ): Promise<Result<Checked>> {
   const parsed = argvs(input.evidence, plan.project.ready.programs);
   if (parsed.kind === "failed") {
-    return { kind: "ok", value: { passed: false, why: parsed.reason } };
+    return { kind: "ok", value: { passed: false, why: parsed.reason, human: false } };
   }
   const commands = parsed.value.flatMap((a) => (a.kind === "ok" ? [a.value] : []));
   const rows = await runInBox({
@@ -125,8 +141,8 @@ async function rerun(
   return rows.kind === "ok" ? { kind: "ok", value: verdict(input.evidence, rows.value) } : rows;
 }
 
-// readyStep : the ready check, when there is a box and a project file
-export function readyStep(plan: BoxPlan, forge: Forge): Steps["ready"] {
+// readyStep : the ready check, when there is a box and a project file; waiver reads the ticket's waiver
+export function readyStep(plan: BoxPlan, forge: Forge, waiver: WaiverHead): Steps["ready"] {
   if (plan.kind === "unavailable") {
     return plan;
   }
@@ -134,7 +150,9 @@ export function readyStep(plan: BoxPlan, forge: Forge): Steps["ready"] {
     kind: "available",
     run: async (input) => {
       const open = openOf(input);
-      return open === "none" ? { kind: "failed", reason: "no open change to check" } : check(plan, forge, open, input);
+      return open === "none"
+        ? { kind: "failed", reason: "no open change to check" }
+        : check({ plan, forge, waiver }, open, input);
     },
   };
 }
