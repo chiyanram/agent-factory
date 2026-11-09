@@ -582,6 +582,9 @@ exists yet, so you run the triggers below by hand.
   the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
   and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice
   per day or window. A run already going is never stopped for a cap, so a cap can be passed by the run that reaches it.
+  A review round that fails after it spent (a pass at its budget, say) writes a `spent` line with what every pass spent,
+  the failed one's too: its start still reads as a run that never ended, so a person looks, and its spend counts toward
+  the caps and `usage`.
   Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
   in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.

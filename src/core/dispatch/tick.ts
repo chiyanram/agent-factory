@@ -65,6 +65,9 @@ export const BRANCH_PREFIX = "factory/";
 export type Unavailable = { readonly kind: "unavailable"; readonly reason: string };
 export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O>> };
 
+// a run that failed after it spent: its spend is still recorded (#131)
+export type FailedSpent = { readonly kind: "failed"; readonly reason: string; readonly spend: Spend };
+
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 // what the ready check holds the change to, read on the host (#230): the spec's acceptance criteria, in order (AC-1
 // first), and the project's one-way-door paths
@@ -90,8 +93,16 @@ export type Steps = {
     RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts,
     { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane }
   >;
-  // what the round spent: zero when it ran no model, as when it reused a verdict (#131)
-  readonly review: Step<RunInput, { readonly actOn: number; readonly spend: Spend }>;
+  // what the round spent: zero when it ran no model, as when it reused a verdict (#131); a round that fails says what
+  // its passes spent too, so the caps and usage count it
+  readonly review:
+    | Unavailable
+    | {
+        readonly kind: "available";
+        readonly run: (
+          input: RunInput,
+        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend }> | FailedSpent>;
+      };
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
 };
@@ -637,19 +648,47 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
     return started;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head });
-  return ran.kind === "ok"
-    ? record({
-        where: where(setup, state),
-        event: {
-          at: at(setup),
-          kind: "review-ended",
-          head,
-          actOn: ran.value.actOn,
-          spend: ran.value.spend,
-          ...failedAt(setup, "review", ran.value.actOn > 0, state.runs.reviewFailures),
-        },
-      })
-    : ran;
+  return ran.kind === "ok" ? reviewEnded(setup, state, head, ran.value) : failedSpent(setup, state, head, ran);
+}
+
+function reviewEnded(
+  setup: TickSetup,
+  state: TicketState,
+  head: string,
+  value: { readonly actOn: number; readonly spend: Spend },
+): Promise<Done> {
+  return record({
+    where: where(setup, state),
+    event: {
+      at: at(setup),
+      kind: "review-ended",
+      head,
+      actOn: value.actOn,
+      spend: value.spend,
+      ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
+    },
+  });
+}
+
+// failedSpent : a review that failed leaves its start alone, so a person looks; what it spent is still recorded, as a
+// spent line, so the caps and usage count it (#131)
+async function failedSpent(
+  setup: TickSetup,
+  state: TicketState,
+  head: string,
+  ran: { readonly kind: "failed"; readonly reason: string; readonly spend?: Spend },
+): Promise<Done> {
+  const spend = ran.spend;
+  if (spend !== undefined && (spend.usd > 0 || spend.tokens > 0)) {
+    const kept = await record({
+      where: where(setup, state),
+      event: { at: at(setup), kind: "spent", phase: "review", head, spend },
+    });
+    if (kept.kind === "failed") {
+      setup.log(`${state.ticket}: the failed review's spend was not recorded: ${kept.reason}`);
+    }
+  }
+  return { kind: "failed", reason: ran.reason };
 }
 
 // the actions that start a run; "none" for the rest
