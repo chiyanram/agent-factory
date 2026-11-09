@@ -4,6 +4,8 @@ on:
   pull_request:
     # labeled and unlabeled: check-eval-proof reads the operator's eval-baseline-approved label from the event (#217)
     types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+  # the merge queue builds each pull request on top of the ones ahead of it, and merges it only when this run passes (#323)
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch:

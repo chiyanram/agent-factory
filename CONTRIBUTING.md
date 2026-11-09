@@ -46,7 +46,9 @@ issue ──▶ branch ──▶ make lint + make test ──▶ pull request �
 3. Change the code and its test together. Run `make lint` and `make test`.
 4. Open one pull request per issue, and link the issue (`Closes #56`).
 5. A maintainer reviews it. Answer each comment with a change or a reason.
-6. A maintainer merges once CI is green and the review is resolved.
+6. A maintainer adds it to the merge queue once CI is green and the review is resolved. The queue builds it on top
+   of the pull requests ahead of it, runs `lint-and-test` and `test-macos` there, and squash-merges it only when
+   both pass (#323). Do not merge `main` into a branch only to bring it up to date: the queue does that.
 
 A good pull request has one concern, a test that fails without the change, and no secrets, tokens or real project
 data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md](GUIDE.md) or an ADR too.
