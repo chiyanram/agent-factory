@@ -1,0 +1,70 @@
+# Commit-message prompts for `cz commit` (chiyanram/skills#281, chiyanram/agent-factory#341, chiyanram/rca-agent#51).
+# The same file in all three repos. commitizen only writes the message: semantic-release cuts the releases, and CI
+# checks the PR title. Format and rules: CONTRIBUTING.md#commit-messages.
+[tool.commitizen]
+name = "cz_customize"
+
+[tool.commitizen.customize]
+message_template = """{{change_type}}({{scope}}){% if breaking %}!{% endif %}: {{subject}} ({{issue}}){% if body %}
+
+{{body}}{% endif %}{% if breaking %}
+
+BREAKING CHANGE: {{breaking}}{% endif %}{% if refs %}
+
+Refs {{refs}}{% endif %}"""
+example = """feat(intake): accept a log bundle (#50)
+
+A bundle holds every log of one incident, so a single upload is enough.
+
+Refs #12"""
+schema = "type(scope)[!]: lower-case summary (#issue)\n\nwhy\n\n[BREAKING CHANGE: what breaks]\n[Refs #N]"
+schema_pattern = '^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)\([a-z0-9-]+\)!?: [^A-Z].*\([^)]*#[0-9]+[^)]*\)'
+info = "See CONTRIBUTING.md#commit-messages."
+
+[[tool.commitizen.customize.questions]]
+type = "list"
+name = "change_type"
+message = "Type of change"
+choices = [
+  { value = "feat", name = "feat: something new to ship (minor release)" },
+  { value = "fix", name = "fix: something shipped is wrong (patch release)" },
+  { value = "perf", name = "perf: faster, same behaviour (patch release)" },
+  { value = "revert", name = "revert: undo an earlier commit" },
+  { value = "docs", name = "docs: documentation only" },
+  { value = "refactor", name = "refactor: code change, same behaviour" },
+  { value = "test", name = "test: tests only" },
+  { value = "build", name = "build: build system or dependencies" },
+  { value = "ci", name = "ci: CI and repo tooling" },
+  { value = "style", name = "style: formatting only" },
+  { value = "chore", name = "chore: anything else that ships nothing" },
+]
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "scope"
+message = "Scope (lower-case, required), e.g. crq, dispatch, intake"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "subject"
+message = "Summary (lower-case, imperative, no full stop)"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "issue"
+message = "Issue: #N, or owner/repo#N for another repo"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "body"
+message = "Why (optional; press enter to skip)"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "breaking"
+message = "BREAKING CHANGE: what breaks (optional; press enter to skip)"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "refs"
+message = "Other issues, e.g. #12, #13 (optional; press enter to skip)"
