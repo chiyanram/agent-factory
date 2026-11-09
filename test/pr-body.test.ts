@@ -137,6 +137,30 @@ describe("cleanBody: the implementer's PR body, cleaned (#335)", () => {
     expect(out).toBe(`[MR](https://gitlab.example.com/g/p/-/merge_requests/3) x (https:${J}//github.com/a)`);
   });
 
+  it("neutralises a closing keyword's references, in any case and form, and keeps a plain reference", () => {
+    const planted = [
+      "Fixes: #12",
+      "closes chiyanram/x#3",
+      "Resolved #4",
+      "FIX #5, #6 and !7",
+      "**Closes** https://github.com/o/r/issues/8",
+      "Implements group/sub/project!9",
+      "fixed: *#10*",
+      "See #11 and o/r#12; this fixes nothing; a prefix #13",
+    ].join("\n");
+    expect(clean(planted).split("\n")).toEqual([
+      `Fixes: #${J}12`,
+      `closes chiyanram/x#${J}3`,
+      `Resolved #${J}4`,
+      `FIX #${J}5, #${J}6 and !${J}7`,
+      `**Closes** https:${J}//github.com/o/r/issues/8`,
+      `Implements group/sub/project!${J}9`,
+      `fixed: *#${J}10*`,
+      "See #11 and o/r#12; this fixes nothing; a prefix #13",
+    ]);
+    expect(clean(clean(planted))).toBe(clean(planted));
+  });
+
   it("keeps www. only before the git host itself", () => {
     expect(clean("www.github.com/o/r and www.github.com.evil.example")).toBe(
       `www.github.com/o/r and www${J}.github.com.evil.example`,
@@ -156,7 +180,7 @@ describe("cleanBody: the implementer's PR body, cleaned (#335)", () => {
   });
 
   it("gives the same text when it cleans cleaned text", () => {
-    const planted = `${NORMAL}\n<b>x</b> @a /b\n/approve\n[e](https://evil.example) www.evil.example &amp; [[[x]]](//e)\n[r]: https://e.example`;
+    const planted = `${NORMAL}\n<b>x</b> @a /b\n/approve\n[e](https://evil.example) www.evil.example &amp; [[[x]]](//e)\n[r]: https://e.example\nFixes: #12, closes o/r#3 and Resolved https://github.com/o/r/issues/4`;
     const once = clean(planted);
     expect(clean(once)).toBe(once);
     const capped = clean(planted, 200);

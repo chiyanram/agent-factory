@@ -928,7 +928,7 @@ it is a prompt instruction at most.
   the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
   One exception, the PR body (#335): below its own templated lines, the host posts the implementer's
   `.factory/pr.md` as Markdown, only through the cleaner (`src/core/pr-body.ts`). It drops raw HTML, breaks every `@`,
-  puts `\` before a line that starts with `/`, turns links to any host but the project's git host into plain text,
+  puts `\` before a line that starts with `/`, breaks each reference after a closing keyword (`Fixes #12`), turns links to any host but the project's git host into plain text,
   and caps the length; tables, headings and lists stay. Notes and comments stay fixed templates.
 - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106). **Today:** an edit elsewhere asks you rather than being refused.

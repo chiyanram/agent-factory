@@ -11,6 +11,9 @@
 //   - "@" gets a word joiner after it, so no forge sees a mention or an e-mail link
 //   - "&" before an entity gets one too, so no entity hides a character the rules below look for
 //   - a line whose first character is "/" (a GitLab quick action: /approve, /merge) gets a "\" before it
+//   - each reference after a closing keyword (Fixes #12, closes owner/repo#3, Resolved !4, Closes and an issue's
+//     address) gets a word joiner after its "#" or "!", or inside its "://", so only the engine's own lines can close a
+//     ticket; a plain "#12" after no keyword stays
 //   - a link or image to a host other than the project's git host becomes plain text: its words, then its address
 //     with a word joiner inside "://", so no forge links it; a relative link stays, as it points at the git host
 //   - a reference definition ("[id]: url") to another host gets a "\" before it, so it defines nothing
@@ -169,9 +172,28 @@ function noOutsideAddresses(text: string, host: string): string {
   return bare.replace(www, `$1${JOIN}.`);
 }
 
+// CLOSING : a closing keyword (GitHub's, and GitLab's default pattern, any case), with its emphasis and colon, then
+// the list of references it would close: #N, owner/repo#N, GitLab !N, or a full issue address
+const KEYWORD = String.raw`\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)\b`;
+const REF = String.raw`(?:[\w.-]+\/[\w./-]+)?[#!]\d+|[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s<>()[\]"'\`]+`;
+const CLOSING = new RegExp(
+  String.raw`(${KEYWORD}[*_~\`]*:?[*_~\`]*[ \t]+[*_~\`]*)((?:${REF})(?:[*_~\`]*(?:\s*,\s*|\s+(?:and\s+)?|\s*,\s*and\s+)(?:${REF}))*)`,
+  "gi",
+);
+
+// noClosing : each reference after a closing keyword broken, so only the engine's own lines can close a ticket; a
+// reference after no keyword stays
+function noClosing(text: string): string {
+  return text.replace(
+    CLOSING,
+    (_whole, keyword: string, refs: string) =>
+      `${keyword}${refs.replace(/[#!]/g, `$&${JOIN}`).replace(/:\/\//g, `:${JOIN}//`)}`,
+  );
+}
+
 // inert : the rules that hold anywhere in the text, code or not
 function inert(text: string): string {
-  return text
+  return noClosing(text)
     .replace(/</g, `<${JOIN}`)
     .replace(/@/g, `@${JOIN}`)
     .replace(/&(?=#|[A-Za-z][A-Za-z0-9]*;)/g, `&${JOIN}`)
