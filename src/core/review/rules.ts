@@ -8,8 +8,8 @@ import { prose } from "./fence.js";
 
 export type Pointer = { readonly domain: string; readonly reference: string };
 
-// BASELINE : the review checks every pack carries, whatever the AGENTS.md files say (#226). The one place the list
-// lives: the plugins ticket (#232) reads it from the process plugin instead, with this as the built-in default.
+// BASELINE : the review checks every pack carries, whatever the AGENTS.md files say (#226): the built-in default. A
+// process plugin's review.json replaces it (process/read.ts, #232).
 export const BASELINE: readonly Pointer[] = [
   { domain: "crq", reference: "review-process" },
   { domain: "crq", reference: "code-review" },

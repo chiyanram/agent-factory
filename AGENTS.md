@@ -48,7 +48,7 @@ src/core/review/      the reviewer: the context pack, one review round (find, ve
 src/core/ready/       the ready check and the local verifier: branch code run in a fresh box, never on the host (#91)
 src/core/settings/    the settings layers: team, project, user and machine; each key's class; config show/check (#229)
 src/core/plugin/      the plugin contract: describe and call, the pinned registry, and the contract test kit (#134)
-src/core/process/     the project's plugin list: name@marketplace, a locked key (#232)
+src/core/process/     the project's plugin list, and its process: lanes and review baseline, or the built-in one (#232)
 plugins/              the bundled plugins: github and gitlab serve the forge seam (lib/ built from dist/); discord pings
 prompts/              the reviewer's default find and verify instructions, and the eval's judge
 evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)
