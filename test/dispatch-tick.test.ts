@@ -6,6 +6,7 @@ import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
 import { waive } from "../src/core/waiver.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
+import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
 import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
@@ -135,6 +136,7 @@ function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): 
     steps: STEPS_TODAY,
     now: () => Date.parse("2026-11-07T10:00:00Z"),
     quietMinutes: 30,
+    caps: NO_CAPS,
     pollMinutes: 5,
     repo: "chiyanram/ledger",
     notify: NO_NOTIFY,
@@ -230,7 +232,7 @@ describe("tick", () => {
     expect(await readRecords({ home, project: "ledger", ticket: "PROJ-1" })).toEqual({ kind: "ok", value: [] });
   });
 
-  it("an available writer: claims the change, records the start and the end; one run per pass", async () => {
+  it("an available writer: claims the change, records the start and the end with its spend; one run per pass", async () => {
     await approved("PROJ-1");
     await approved("PROJ-2");
     const log: string[] = [];
@@ -241,7 +243,17 @@ describe("tick", () => {
         kind: "available",
         run: async (input) => (
           runs.push(input.ticket),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+          {
+            kind: "ok",
+            value: {
+              head: H,
+              outcome: "done",
+              patch: "p1",
+              evidence: [],
+              hung: false,
+              spend: { usd: 0.5, tokens: 900 },
+            },
+          }
         ),
       },
     };
@@ -256,6 +268,8 @@ describe("tick", () => {
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     // the approval's shared copy goes on the PR first, once (#227)
     expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toEqual(["shared", "started", "writer-ended"]);
+    // every run records its tokens and cost (#131)
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ spend: { usd: 0.5, tokens: 900 } });
   });
 
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
@@ -439,6 +453,42 @@ describe("tick", () => {
     expect(again.filter((l) => l.startsWith("note #14"))).toEqual([]);
     // pinged once, as the note
     expect(pings).toHaveLength(1);
+  });
+
+  it("a review round records its Act on count and what it spent (#131)", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: {
+        kind: "available",
+        run: async () => ({ kind: "ok", value: { actOn: 0, spend: { usd: 0.3, tokens: 40 } } }),
+      },
+    };
+    expect(await tick(setup({ team, open: [open()], merged: [] }, [], { steps }))).toMatchObject({ kind: "ok" });
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({
+      kind: "review-ended",
+      actOn: 0,
+      spend: { usd: 0.3, tokens: 40 },
+    });
+  });
+
+  it("keeps a run's spend; a line from before #131 has none; a spend that is not two amounts fails the read", async () => {
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const path = join(home, "runs", "ledger", "PROJ-1.jsonl");
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    const base = { at: "2026-11-07T09:00:00Z", kind: "review-ended", head: H, actOn: 0 };
+    writeFileSync(path, `${JSON.stringify(base)}\n${JSON.stringify({ ...base, spend: { usd: 0.1, tokens: 7 } })}\n`);
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value : []).toEqual([base, { ...base, spend: { usd: 0.1, tokens: 7 } }]);
+    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: -1, tokens: 7 } })}\n`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: 1 } })}\n`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
   });
 
   it("the ready check gets the writer's evidence rows and records its reason; a local gate runs the verifier (#91)", async () => {
@@ -962,5 +1012,132 @@ describe("the lane set by code, raise only (#230)", () => {
     expect(log.find((l) => l.startsWith("note #12"))).toBe(
       `note #12 [coordinator] blocked: the lane is raised from tiny to bug (the ready check read the real diff): ${LONG}`,
     );
+  });
+});
+
+describe("caps per ticket, per project-day and the window share (#131)", () => {
+  const caps = (over: Partial<Caps> = {}): Caps => ({ ...NO_CAPS, ...over });
+  const writer = (runs: string[]): Steps => ({
+    ...STEPS_TODAY,
+    writer: {
+      kind: "available",
+      run: async (input) => (
+        runs.push(input.ticket),
+        { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+      ),
+    },
+  });
+  // a review round of PROJ-9 at `at` that spent this much
+  const spent = (at: string, usd: number, tokens: number, project = "ledger") =>
+    record({
+      where: { home, project, ticket: "PROJ-9" },
+      event: { at, kind: "review-ended", head: H, actOn: 0, spend: { usd, tokens } },
+    });
+  const changes = () => ({ team, open: [open({ labels: [] })], merged: [] });
+
+  it("a ticket at its cap goes to needs-human with its spend shown, once, and starts no run", async () => {
+    await approved();
+    await record({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "test-first",
+        head: H,
+        outcome: "blocked",
+        patch: "p",
+        evidence: [],
+        hung: false,
+        spend: { usd: 2.5, tokens: 300 },
+      },
+    });
+    const log: string[] = [];
+    const runs: string[] = [];
+    const ticket = { usd: 2, tokens: "none" } as const;
+    await tick(setup(changes(), log, { steps: writer(runs), caps: caps({ ticket }) }));
+    expect(runs).toEqual([]);
+    expect(log).toContain("label +needs-human #12");
+    expect(log.find((l) => l.startsWith("note #12 [coordinator] blocked"))).toBe(
+      "note #12 [coordinator] blocked: the ticket spent $2.50 and 300 tokens since its approval, at its cap of $2 (FACTORY_MAX_USD_TICKET)",
+    );
+    // handed over once: a person removing the label does not repost it
+    const again: string[] = [];
+    await tick(setup(changes(), again, { steps: writer(runs), caps: caps({ ticket }) }));
+    expect(again.filter((l) => l.includes("blocked:"))).toEqual([]);
+    expect(runs).toEqual([]);
+    // under the cap, the same ticket runs
+    rmSync(join(home, "runs"), { recursive: true, force: true });
+    await tick(setup(changes(), [], { steps: writer(runs), caps: caps({ ticket: { usd: 3, tokens: "none" } }) }));
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("a project at its day cap starts no run that day and sends one notice; the next day it runs again", async () => {
+    await approved();
+    await spent("2026-11-07T01:00:00Z", 1, 10);
+    await spent("2026-11-06T23:00:00Z", 50, 10);
+    const pings: Ping[] = [];
+    const runs: string[] = [];
+    const day = { usd: 1, tokens: "none" } as const;
+    const pass = async (now: string) => {
+      const log: string[] = [];
+      const ran = await tick(
+        setup(changes(), log, {
+          steps: writer(runs),
+          caps: caps({ day }),
+          notify: pinger(pings),
+          now: () => Date.parse(now),
+        }),
+      );
+      return { ran, log };
+    };
+    const first = await pass("2026-11-07T10:00:00Z");
+    expect(runs).toEqual([]);
+    expect(first.log).toContain(
+      "log no new runs: today (2026-11-07, UTC) the project spent $1.00 and 10 tokens, at the cap of $1 (FACTORY_MAX_USD_DAY)",
+    );
+    // held, not failed: the pass exits 0
+    expect(first.ran).toMatchObject({ kind: "ok", value: [{ ticket: "PROJ-1", result: { kind: "unavailable" } }] });
+    await pass("2026-11-07T11:00:00Z");
+    expect(pings).toEqual([
+      { kind: "paused", ticket: "PROJ-1", change: 12, why: expect.stringContaining("FACTORY_MAX_USD_DAY") },
+    ]);
+    await pass("2026-11-08T00:30:00Z");
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("the token caps count tokens, as on a subscription, and the window share pauses until the window has room", async () => {
+    await approved();
+    await spent("2026-11-07T06:00:00Z", 0, 700);
+    const runs: string[] = [];
+    const log: string[] = [];
+    const window = { tokens: 500, machineTokens: "none" } as const;
+    await tick(setup(changes(), log, { steps: writer(runs), caps: caps({ window }) }));
+    expect(runs).toEqual([]);
+    expect(log).toContain(
+      "log no new runs: in the last 5 h the project spent $0.00 and 700 tokens, at the cap of 500 tokens (FACTORY_WINDOW_TOKENS)",
+    );
+    // 5 h after that round the window has room again
+    await tick(
+      setup(changes(), [], {
+        steps: writer(runs),
+        caps: caps({ window }),
+        now: () => Date.parse("2026-11-07T11:30:00Z"),
+      }),
+    );
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("the machine's share counts every project on this machine", async () => {
+    await approved();
+    await spent("2026-11-07T09:00:00Z", 0, 300, "atlas");
+    await spent("2026-11-07T09:00:00Z", 0, 300);
+    const runs: string[] = [];
+    const log: string[] = [];
+    const share = (machineTokens: number) => caps({ window: { tokens: "none", machineTokens } });
+    await tick(setup(changes(), log, { steps: writer(runs), caps: share(600) }));
+    expect(runs).toEqual([]);
+    expect(log.join("\n")).toContain("every project on this machine spent $0.00 and 600 tokens");
+    await tick(setup(changes(), [], { steps: writer(runs), caps: share(601) }));
+    expect(runs).toEqual(["PROJ-1"]);
   });
 });

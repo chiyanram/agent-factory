@@ -9,7 +9,7 @@ People start at `README.md`; `docs/DESIGN.md` is the design on one page; `GUIDE.
 ## Check
 
 ```bash
-make lint   # links resolve; AGENTS.md under 200 lines; tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
+make lint   # links resolve; AGENTS.md under 200 lines; the MUSTs below (check-musts); tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
 make test   # every tests/*.test.sh; no network, glab, gh or claude needed
 ```
 
@@ -17,9 +17,8 @@ CI runs both on every pull request and on push to `main`.
 
 ## MUSTs
 
-- Call the forge only through the `Forge` seam in `src/core/forge/` (or, in a bash script not yet ported, a `forge_*`
-  call in `scripts/lib/forge.sh`), added to both adapters, because a direct `glab` or `gh` call breaks the other forge
-  and cannot be stubbed in a test.
+- Call the forge only through the `Forge` seam in `src/core/forge/`, added to both adapters, because a direct `glab`
+  or `gh` call breaks the other forge and cannot be stubbed in a test.
 - Call git on a project's clone only through `hgit` (`scripts/lib/git.sh`) or `hostGit` (`src/core/git.ts`), and keep
   the two in step, because plain git runs the hooks and programs that a branch or a writer can plant in the repo's
   own config.
@@ -38,7 +37,7 @@ CI runs both on every pull request and on push to `main`.
 
 ```text
 scripts/              the loop scripts and the lint checks
-scripts/lib/          the bash forge seam, until its last caller is ported (#138), and run tracking (runs.sh)
+scripts/lib/          tokens.sh's helpers until #131 replaces it: run tracking (runs.sh), the change prefix (forge.sh)
 src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab adapter over gh api and glab api
 src/core/egress/      the egress proxy: the allowlist, the Squid config, and the --internal network the box joins (#130)
 src/core/box/         the box seam: one Box interface; FACTORY_BOX picks the place, openBox refuses a box that does not work

@@ -22,8 +22,8 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
-| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. CI runs it on Linux and on macOS. One file: `bash tests/start-writer.test.sh` or `npx vitest run test/poll.test.ts` |
+| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed runners, no forge token or skip-permissions flag outside the forge seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and each script with its test; the exceptions and their reasons are in the script), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
+| `make test` | runs every `tests/*.test.sh`, then the vitest suite; fails if any one fails. CI runs it on Linux and on macOS. One file: `bash tests/git.test.sh` or `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
 
@@ -33,10 +33,6 @@ plain bash. The helpers are in [tests/lib.sh](tests/lib.sh):
 | helper | does |
 |---|---|
 | `expect_pass`, `expect_fail`, `expect_eq` | assert on a command's exit code and output |
-| `fixture_repo <case>` | copies `tests/fixtures/<case>/` into a fresh git repo |
-| `glab_stub` / `respond` / `calls` | a fake `glab` (`FACTORY_GLAB`) or `gh` (`FACTORY_GH`): replays canned answers and logs every call |
-| `claude_stub` / `live` | a fake `claude` (`FACTORY_CLAUDE`), with a settable list of live sessions |
-| `project_clone` | a throwaway clone with a bare origin |
 | `finish` | ends the file with the right exit code |
 
 ## How a change lands
@@ -59,8 +55,8 @@ data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md]
 
 1. Write the test first: `tests/<script>.test.sh`, using the helpers in `tests/lib.sh`. Watch it fail.
 2. Add `scripts/<script>.sh`. Start it with a header comment: usage, what it prints, the settings it reads.
-3. Call the forge only through a `forge_*` call in `scripts/lib/forge.sh`, and add it to both adapters. (New code
-   goes into the TypeScript package and uses the `Forge` seam in `src/core/forge/`.)
+3. A bash script has no forge seam any more: anything that calls the forge goes into the TypeScript package and uses
+   the `Forge` seam in `src/core/forge/` (#138).
 4. Print one line on success. Write errors to stderr and exit non-zero.
 5. Add the script to the Scripts table in [GUIDE.md](GUIDE.md#scripts), and any new setting to
    [Settings](GUIDE.md#settings).
@@ -122,7 +118,6 @@ Every push to `main` runs semantic-release (`release.config.mjs`, #153), the sam
 | `refused: … a human account` | log the CLI in as the bot ([GUIDE.md](GUIDE.md#set-up-identity)) |
 | `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | export the setting ([GUIDE.md](GUIDE.md#settings)) |
 | `cannot list live runs: claude agents --json failed` | the `claude` CLI is missing or too old |
-| `the writer for !<mr> did not start` | open `claude` once in `FACTORY_REPO` and accept the trust prompt |
 | `gitlab: HTTP 429 after 4 tries` | the forge is rate-limiting; wait, or raise `FACTORY_MAX_TRIES` |
 
 ## Design history

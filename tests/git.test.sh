@@ -91,11 +91,9 @@ expect_eq "with GIT_CONFIG_NOSYSTEM off, the system helper is kept" system-helpe
   "$(GIT_CONFIG_SYSTEM="$base/system.gitconfig" GIT_CONFIG_NOSYSTEM= hgit -C "$base/repo" config --get-all credential.helper | effective)"
 
 setup
-own="!$REPO_ROOT/scripts/github-app.sh git-credential"
 git -C "$base/repo" config --add credential.https://github.com.helper ""
-git -C "$base/repo" config --add credential.https://github.com.helper "$own"
-git -C "$base/repo" config --add credential.https://github.com.helper "!$base/elsewhere/github-app.sh git-credential"
-expect_eq "this factory's own App helper is the one repo helper kept; a look-alike path is not" "$own" \
+git -C "$base/repo" config --add credential.https://github.com.helper "!$REPO_ROOT/scripts/github-app.sh git-credential"
+expect_eq "no repo-set helper is kept, the old App helper's path included (#138)" "" \
   "$(hgit -C "$base/repo" config --get-all credential.https://github.com.helper | effective)"
 
 setup

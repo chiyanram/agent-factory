@@ -374,6 +374,26 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(readdirSync(join(p.root, "box-runs"))).toEqual([]);
   });
 
+  it("records the run's tokens and cost from the result event of its stream-json output (#131)", async () => {
+    const result = {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: 0.42,
+      usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 5, cache_read_input_tokens: 1000 },
+    };
+    const stdout = `${JSON.stringify({ type: "system", subtype: "init" })}\n${JSON.stringify(result)}\n`;
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out).spend).toEqual({ usd: 0.42, tokens: 1125 });
+  });
+
+  it("records no spend for a run that printed no result event, so usage counts it as unmeasured (#131)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: '{"type":"system"}\n', stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out)).not.toHaveProperty("spend");
+  });
+
   it("opens no change when the run committed nothing, so a person looks", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();

@@ -173,7 +173,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory review ledger 12",
       "agent-factory dispatch ledger --once",
       "agent-factory setup claude",
-      "/opt/agent-factory/scripts/start-writer.sh 12",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "ask" });
     }

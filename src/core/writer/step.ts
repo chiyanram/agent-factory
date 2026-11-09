@@ -29,6 +29,7 @@ import type { BoxSetup } from "../ready/boxrun.js";
 import { readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start, type FileText } from "./clone.js";
 import { readTools, settingsOf, toolLines } from "./tools.js";
+import type { Spend } from "../dispatch/spend.js";
 import { writerRun, type Ended } from "./run.js";
 import { ciText, taskText, verifyText } from "./task.js";
 import { VERIFY_FILE } from "../ready/steps.js";
@@ -91,6 +92,8 @@ export type WriterOut = {
   readonly evidence: readonly Evidence[];
   // the writer hung after its report and the host stopped it after the completion window (#182)
   readonly hung: boolean;
+  // what the run spent (#131); none when the host started no run, or the run printed no result event
+  readonly spend?: Spend;
 };
 
 // readPrompts : the package's writer prompts
@@ -157,7 +160,12 @@ export function promptFor(input: {
 
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
-  const base = { head: ended.tip, patch: ended.patch, hung: ended.ending.kind === "hung" };
+  const base = {
+    head: ended.tip,
+    patch: ended.patch,
+    hung: ended.ending.kind === "hung",
+    ...(ended.spend === "unmeasured" ? {} : { spend: ended.spend }),
+  };
   switch (next.kind) {
     case "ready-check":
       return { ...base, outcome: "done", evidence: next.evidence };

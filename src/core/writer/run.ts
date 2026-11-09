@@ -15,6 +15,8 @@
 //     again after the stop (#182; ADR-0012 S13). A run with no valid report is stopped by the host at its timeout and
 //     a grace, and is blocked.
 //   4 the branch's tip, and the patch-id of everything since the start, which the dispatcher compares run to run
+//   5 the run's tokens and cost, from the result event of its stream-json output (#131); a run stopped before it
+//     printed one is unmeasured
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { Argv } from "../project.js";
@@ -24,6 +26,7 @@ import { decide, endingOf, loadReport, validReport, type Ending, type Outcome, t
 import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { pluginPaths, type Clone } from "./clone.js";
+import { NO_STREAM, streamOf, streamSpend, type Spend, type Stream } from "../dispatch/spend.js";
 
 export type Claude = {
   // "" for no cap (FACTORY_MAX_USD)
@@ -66,6 +69,8 @@ export type Ended = {
   readonly ending: Ending;
   readonly tip: string;
   readonly patch: string;
+  // what the run spent, as its result event reported it (#131)
+  readonly spend: Spend | "unmeasured";
 };
 
 // only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
@@ -140,8 +145,9 @@ export function lastLines(tail: Tail): readonly string[] {
   return [...tail.lines, tail.partial].filter((l) => l.trim() !== "").slice(-SHOWN_LINES);
 }
 
-// Heard : what the host has heard of the run so far: when it last printed (ms; 0 for never), and its tail
-type Heard = { at: number; tail: Tail };
+// Heard : what the host has heard of the run so far: when it last printed (ms; 0 for never), its tail, and its
+// stream-json output read for the result event (#131)
+type Heard = { at: number; tail: Tail; stream: Stream };
 
 // quietAfter : how long the run has printed nothing, in awake time, after one more poll. Each poll adds the time since
 // the last poll, or since the last output if that came later, but never more than two polls: a poll that took longer
@@ -159,17 +165,20 @@ export function quietAfter(input: {
     : input.quiet + Math.min(input.now - input.last, most);
 }
 
+// InBox : how the run ended, and what it spent
+type InBox = { readonly end: RunEnd; readonly spend: Spend | "unmeasured" };
+
 // inBox : the agent's run, start to stop; the run's end, or why the box itself failed
-async function inBox(run: WriterRun): Promise<RunEnd> {
+async function inBox(run: WriterRun): Promise<InBox> {
   const session = await startBox(run.setup, {
     worktree: run.clone.repo,
     readOnly: run.clone.readOnly,
     env: { ...run.login, ...QUIET },
   });
   if (session.kind === "failed") {
-    return { kind: "failed", reason: session.reason };
+    return { end: { kind: "failed", reason: session.reason }, spend: "unmeasured" };
   }
-  const heard: Heard = { at: 0, tail: NO_TAIL };
+  const heard: Heard = { at: 0, tail: NO_TAIL, stream: NO_STREAM };
   const running = run.setup.box.run({
     session: session.value,
     command: {
@@ -181,11 +190,13 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
       watch: (chunk) => {
         heard.at = Date.now();
         heard.tail = tailOf(heard.tail, chunk);
+        heard.stream = streamOf(heard.stream, chunk);
       },
     },
   });
   const end = await watched(run, running, heard);
-  return stoppedEnd(run, session.value, running, { end, heard });
+  const stopped = await stoppedEnd(run, session.value, running, { end, heard });
+  return { end: stopped, spend: streamSpend(heard.stream) };
 }
 
 // afterStop : the end of a run the host stopped. Pure.
@@ -327,13 +338,13 @@ async function committed(run: WriterRun): Promise<Result<{ readonly tip: string;
 
 // writerRun : the run, then its outcome, the branch's tip and the patch. A failure here is the host's, not the run's.
 export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
-  const end = await inBox(run);
+  const { end, spend } = await inBox(run);
   const outcome = decide({
     end,
     file: end.kind === "failed" ? { kind: "missing" } : await loadReport({ worktree: run.clone.repo }),
   });
   const tip = await committed(run);
   return tip.kind === "ok"
-    ? { kind: "ok", value: { outcome, ending: endingOf(end), ...tip.value } }
+    ? { kind: "ok", value: { outcome, ending: endingOf(end), spend, ...tip.value } }
     : { kind: "failed", reason: `cannot read what the run committed: ${tip.reason}` };
 }

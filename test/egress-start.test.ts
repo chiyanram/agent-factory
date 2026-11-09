@@ -156,6 +156,7 @@ describe("openEgress", () => {
     const started = await openEgress({
       project: "ledger",
       allowlist: ["api.anthropic.com"],
+      gitHosts: [],
       upstream: { kind: "none" },
       image: IMAGE,
       dir: join(dir, "egress"),
@@ -175,12 +176,28 @@ describe("openEgress", () => {
     const started = await openEgress({
       project: "ledger",
       allowlist: ["*.evil.com"],
+      gitHosts: [],
       upstream: { kind: "none" },
       image: IMAGE,
       dir,
       docker: fake.docker,
     });
     expect(started.kind).toBe("failed");
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("refuses the project's own git host, named by the caller, before it calls docker", async () => {
+    const fake = fakeDocker({});
+    const started = await openEgress({
+      project: "ledger",
+      allowlist: ["api.anthropic.com", "gitlab.corp.example"],
+      gitHosts: ["gitlab.corp.example"],
+      upstream: { kind: "none" },
+      image: IMAGE,
+      dir,
+      docker: fake.docker,
+    });
+    expect(started).toEqual({ kind: "failed", reason: expect.stringContaining('"gitlab.corp.example" is a git host') });
     expect(fake.calls).toEqual([]);
   });
 });
@@ -206,6 +223,7 @@ describe("openEgress for two projects", () => {
       openEgress({
         project,
         allowlist: [host],
+        gitHosts: [],
         upstream: { kind: "none" },
         image: IMAGE,
         dir,

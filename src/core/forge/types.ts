@@ -1,5 +1,5 @@
-// types — the forge seam (ADR-0010): one interface, a GitHub and a GitLab adapter, the same shapes from both. The
-// scripts' scripts/lib/forge.sh is the bash side of the same seam; it stays until its last caller is ported (#138).
+// types — the forge seam (ADR-0010): one interface, a GitHub and a GitLab adapter, the same shapes from both. No bash
+// script calls a forge any more (#138).
 
 import type { Post } from "../post.js";
 import type { Note } from "../notes.js";

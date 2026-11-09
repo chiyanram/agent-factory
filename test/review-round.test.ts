@@ -767,7 +767,11 @@ describe("reviewStep", () => {
       model: m(),
       sessions: none,
     });
-    expect(step.kind === "available" ? await step.run(input(12)) : step).toEqual({ kind: "ok", value: { actOn: 1 } });
+    // the round's spend goes to the run record (#131): each pass of the fake model costs $0.10 and 10 tokens
+    expect(step.kind === "available" ? await step.run(input(12)) : step).toEqual({
+      kind: "ok",
+      value: { actOn: 1, spend: { usd: 0.2, tokens: 20 } },
+    });
     const movedStep = reviewStep({
       env: env(),
       forge: forge(fresh(), { moveTo: "f".repeat(40) }),
