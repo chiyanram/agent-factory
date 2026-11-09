@@ -1,5 +1,5 @@
 // usage — what the runs spent, from the run records (#131; ADR-0012 S16): today, the current window and the month, per
-// project and per ticket. Only the dispatcher's runs write records, so a review or eval run by hand is not in it.
+// project and per ticket. Only the orchestrator's runs write records, so a review or eval run by hand is not in it.
 // Days and months are UTC; the window is the last window.hours hours (default 5), the length of a subscription's usage
 // window. A run whose record has no spend is counted apart as unmeasured, never as free.
 

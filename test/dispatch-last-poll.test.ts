@@ -1,3 +1,4 @@
+import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -126,6 +127,7 @@ describe("tick: each poll writes its last-poll time (#103)", () => {
     steps: STEPS_TODAY,
     now: () => NOW,
     quietMinutes: 30,
+    caps: NO_CAPS,
     pollMinutes: 7,
     repo: "chiyanram/ledger",
     notify: NO_NOTIFY,

@@ -55,6 +55,7 @@ import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
+import { capsOf, type Caps } from "./core/dispatch/caps.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -460,9 +461,7 @@ function minutesOf(env: NodeJS.ProcessEnv, id: MachineId, fallback: number): num
   return /^[1-9]\d{0,5}$/.test(raw) ? Number(raw) : "bad";
 }
 
-type DispatchSettings =
-  | { readonly home: string; readonly quiet: number; readonly poll: number }
-  | { readonly kind: "refused"; readonly reason: string };
+type DispatchSettings = PassSettings | { readonly kind: "refused"; readonly reason: string };
 
 function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
   const home = factoryHome(env);
@@ -474,9 +473,13 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
   if (every === "bad") {
     return { kind: "refused", reason: `${settingName("poll.minutes")} must be a whole number of minutes` };
   }
+  const caps = capsOf(env);
+  if (caps.kind === "failed") {
+    return { kind: "refused", reason: caps.reason };
+  }
   return quiet === "bad"
     ? { kind: "refused", reason: `${settingName("quietMinutes")} must be a whole number of minutes` }
-    : { home: home.path, quiet, poll: every };
+    : { home: home.path, quiet, poll: every, caps: caps.value };
 }
 
 type Planned = { readonly gate: Gate; readonly steps: Steps };
@@ -562,7 +565,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   return { kind: "ok", value: { gate, steps } };
 }
 
-type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number };
+type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number; readonly caps: Caps };
 
 // pass : the steps, then one locked pass with them
 async function pass(
@@ -590,6 +593,7 @@ async function pass(
     now: () => Date.now(),
     quietMinutes: settings.quiet,
     pollMinutes: settings.poll,
+    caps: settings.caps,
     repo: io.env.FACTORY_PROJECT ?? "",
     dryRun,
     log: (line) => io.out(`${line}\n`),
