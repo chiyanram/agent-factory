@@ -3,6 +3,7 @@ import { quoteOf, type Finding } from "../src/core/review/verdicts.js";
 
 const F: Finding = {
   id: "F1",
+  lens: "baseline",
   axis: "spec",
   kind: "rule",
   file: "src/a.ts",
@@ -10,6 +11,8 @@ const F: Finding = {
   rule: "AC2",
   severity: "blocker",
   category: "bug",
+  grade: "cited",
+  evidence: "AC2 of the spec",
   finding: "an empty order totals 1",
   fix: "return 0",
 };

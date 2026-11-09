@@ -120,6 +120,8 @@ const finding = (file: string, line: number) => ({
   rule: "correctness",
   category: "bug",
   severity: "blocker",
+  grade: "walked",
+  evidence: "v10 = 11 at the line",
   finding: "v10 is 11, not 10",
   fix: "set it to 10",
 });

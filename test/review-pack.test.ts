@@ -83,6 +83,8 @@ describe("buildPack", () => {
       base,
       reused: false,
       criteria: ["SPEC-AC1: total() returns the sum.", "SPEC-AC2: an empty order totals 0."],
+      lane: "feature",
+      master: p.git("rev-parse", "origin/main"),
     });
     const text = readFileSync(built.value.path, "utf8");
     expect(section(text, 1)).toContain(p.head2);

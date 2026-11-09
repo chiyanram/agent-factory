@@ -29,7 +29,7 @@ and in each project's own `AGENTS.md` files, not here.
 
 ## Quick start
 
-You need bash, git, jq and the Claude Code CLI. Check the scripts:
+You need Node 22 or later, git, make and the Claude Code CLI. Check the package:
 
 ```bash
 git clone https://github.com/chiyanram/agent-factory.git

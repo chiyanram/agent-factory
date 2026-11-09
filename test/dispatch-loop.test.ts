@@ -142,7 +142,7 @@ function loopWith(
     dryRun: false,
     log: (l) => lines.push(l),
     // these tests carry the build: a lanes file may leave the design review out (#236), which has its own tests
-    lanes: DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.approval, designReview: false })),
+    lanes: DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.approval, lenses: l.lenses, designReview: false })),
   };
   const run = () =>
     orchestratorLoop({
