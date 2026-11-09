@@ -8,9 +8,18 @@ import type { CommitStatus, Forge } from "../src/core/forge/types.js";
 import type { ProjectFile } from "../src/core/project.js";
 import type { Evidence } from "../src/core/report.js";
 import { boxPlan } from "../src/core/ready/plan.js";
-import { recordsDirOf, readKept } from "../src/core/kept.js";
+import { MAX_LOG_CHARS, MAX_LOG_LINES, recordsDirOf, readKept, tailOf } from "../src/core/kept.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
-import { readyStep, verifyStep, VERIFY_CONTEXT, VERIFY_FILE, type BoxPlan } from "../src/core/ready/steps.js";
+import { capped, MAX_TASK_CHARS } from "../src/core/writer/task.js";
+import {
+  READY_FILE,
+  readyOutput,
+  readyStep,
+  verifyStep,
+  VERIFY_CONTEXT,
+  VERIFY_FILE,
+  type BoxPlan,
+} from "../src/core/ready/steps.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
 
@@ -227,6 +236,87 @@ function statusForge(posted: CommitStatus[]): Forge {
   };
 }
 
+describe("the ready check's kept output (#199)", () => {
+  const keptAt = (at = head) => readKept({ recordsDir: recordsDirOf(p.clone), change: 12, head: at }, READY_FILE);
+
+  it("keeps the failed row's line and its stdout and stderr tails with the head; a pass keeps nothing", async () => {
+    expect(await ready(fakeBox({ runs: [exited(0)] }).box, [row("make a")])).toMatchObject({ value: { passed: true } });
+    expect(existsSync(join(recordsDirOf(p.clone), "12", head))).toBe(false);
+    const ran: Ran = {
+      kind: "exited",
+      code: 1,
+      stdout: "> Task :test\nOrderTest > total FAILED\n```\n",
+      stderr: "\u001b[31mBUILD FAILED\u001b[0m\n",
+    };
+    const out = await ready(fakeBox({ runs: [exited(0), ran] }).box, [row("make a"), row("make b", "AC2")]);
+    expect(out).toEqual({ kind: "ok", value: { passed: false, why: "row 2 (AC2): make b exited 1", human: false } });
+    expect(await keptAt()).toEqual({
+      kind: "ok",
+      value: [
+        "# The ready check failed",
+        "",
+        "The host checked your head, and ran your evidence rows again there in a fresh box. It failed:",
+        "",
+        "row 2 (AC2): make b exited 1",
+        "",
+        "stdout, its last lines:",
+        "",
+        "```text",
+        "> Task :test\nOrderTest > total FAILED\n` ` `",
+        "```",
+        "",
+        "stderr, its last lines:",
+        "",
+        "```text",
+        "BUILD FAILED",
+        "```",
+        "",
+      ].join("\n"),
+    });
+  });
+
+  it("keeps why a check failed with no row output: a row that cannot run, or no rows", async () => {
+    await ready(fakeBox({}).box, [row("bash -c 'make test'")]);
+    expect(await keptAt()).toMatchObject({ kind: "ok", value: expect.stringContaining("row 1 (AC1): ") });
+    await ready(fakeBox({}).box, []);
+    const kept = await keptAt();
+    expect(kept).toMatchObject({ kind: "ok", value: expect.stringContaining("no evidence rows") });
+    expect(kept.kind === "ok" ? kept.value : "").not.toContain("last lines");
+  });
+
+  it("records nothing when it cannot keep the output: the step fails, so a person looks", async () => {
+    mkdirSync(join(p.clone, ".claude"), { recursive: true });
+    writeFileSync(recordsDirOf(p.clone), "not a folder");
+    const out = await ready(fakeBox({ runs: [exited(2)] }).box, [row("make test")]);
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("cannot keep") });
+  });
+
+  it("fits the writer's task cap when both streams are long, keeping the last line of each and saying what it cut", async () => {
+    const long = (name: string) =>
+      `${Array.from({ length: 150 }, (_, i) => `${name} ${i} ${"z".repeat(120)}`).join("\n")}\n${name}: the last line\n`;
+    const ran: Ran = { kind: "exited", code: 1, stdout: long("out"), stderr: long("err") };
+    const why = `row 1 (${"a criterion ".repeat(400)}): make test exited 1`;
+    const kept = readyOutput(why, { argv: ["make", "test"], ran });
+    expect(kept.length).toBeLessThanOrEqual(MAX_TASK_CHARS);
+    expect(capped(kept)).toBe(kept);
+    expect(kept).toContain("out: the last line\n```");
+    expect(kept).toContain("err: the last line\n```");
+    expect(kept).toContain("make test exited 1");
+    expect(kept.match(/\(…\d+ earlier characters cut\)/g)).toHaveLength(3);
+    const out = await ready(fakeBox({ runs: [ran] }).box, [row("make test")]);
+    expect(out).toMatchObject({ value: { passed: false } });
+    const read = await keptAt();
+    expect(read.kind === "ok" ? read.value.length : Infinity).toBeLessThanOrEqual(MAX_TASK_CHARS);
+  });
+
+  it("bounds a tail by lines and by characters, however long its lines", () => {
+    const many = Array.from({ length: MAX_LOG_LINES + 50 }, (_, i) => `line ${i}`).join("\n");
+    expect(tailOf(many).split("\n")).toHaveLength(MAX_LOG_LINES);
+    const wide = `${"a".repeat(MAX_LOG_CHARS)}\n${"b".repeat(MAX_LOG_CHARS)}`;
+    expect(tailOf(wide)).toBe("b".repeat(MAX_LOG_CHARS));
+  });
+});
+
 describe("the local verifier (#91)", () => {
   it("runs the project file's verify command in a box and posts pending, then its result, at the head", async () => {
     const posted: CommitStatus[] = [];
@@ -320,6 +410,8 @@ describe("the floor guard in the ready check (#190)", () => {
       value: { passed: false, why: expect.stringContaining("src/test/OrderTest.java:2 adds a skip marker") },
     });
     expect(fake.calls).toEqual([]);
+    const kept = await readKept({ recordsDir: recordsDirOf(p.clone), change: 12, head: skipped }, READY_FILE);
+    expect(kept).toMatchObject({ kind: "ok", value: expect.stringContaining("src/test/OrderTest.java:2") });
   });
 
   it("fails the step, never passes, when the guard cannot read the diff", async () => {

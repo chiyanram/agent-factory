@@ -281,7 +281,7 @@ describe("decide: one row each", () => {
     } as const;
     expect(decide(state({ runs: wrote({ ...failed, readyFailures: 1 }) }))).toMatchObject({
       kind: "writer",
-      task: { kind: "ready-failed", why: "x" },
+      task: { kind: "ready-failed", head: H },
     });
     expect(decide(state({ runs: wrote({ ...failed, readyFailures: MAX_READY_FAILURES }) }))).toMatchObject({
       kind: "needs-human",

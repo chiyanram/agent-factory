@@ -282,7 +282,7 @@ const ready: Rule = (s) => {
   if (r.passed) {
     return "next";
   }
-  return r.human ? testChecksStopped(s, head, r) : readyFailed(s, r.why);
+  return r.human ? testChecksStopped(s, head, r) : readyFailed(s, head, r.why);
 };
 
 // testChecksStopped : a test check hit is a person's to decide, until their waiver at this head runs the check again
@@ -292,12 +292,12 @@ function testChecksStopped(s: TicketState, head: string, r: { readonly at: strin
     : { kind: "needs-human", why: `the test checks stopped the change at ${head.slice(0, 8)}: ${r.why}` };
 }
 
-function readyFailed(s: TicketState, why: string): Action {
+function readyFailed(s: TicketState, head: string, why: string): Action {
   return s.runs.readyFailures >= MAX_READY_FAILURES
     ? { kind: "needs-human", why: `the ready check failed ${s.runs.readyFailures} times` }
     : {
         kind: "writer",
-        task: { kind: "ready-failed", why },
+        task: { kind: "ready-failed", head },
         why: `the ready check failed at this head: ${why}`,
       };
 }
