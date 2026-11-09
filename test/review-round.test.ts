@@ -1,3 +1,4 @@
+import { FLOOR } from "../src/core/review/never.js";
 import { readActOn } from "../src/core/review/act-on.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -253,6 +254,20 @@ describe("reviewRound", () => {
     await reviewRound(setup(forge(log), model([findAnswer([])], [])));
     expect(log.posts.at(-1)).toContain("No findings. That is not a pass: the human still reviews before merge");
     expect(log.threads).toEqual([]);
+  });
+
+  it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {
+    const bare = join(p.root, "bare-find.md");
+    writeFileSync(bare, "Find what breaks. Report each finding.\n");
+    const seen: Seen[] = [];
+    await reviewRound(
+      setup(forge(fresh()), model([findAnswer([FINDING]), verdicts([])], seen), {
+        prompts: { find: bare, verify: PROMPTS.verify },
+      }),
+    );
+    expect(seen.map((s) => s.run.prompt.startsWith(FLOOR))).toEqual([true, true]);
+    expect(seen[0]?.run.prompt).toContain("approve or merge");
+    expect(seen[0]?.run.prompt.endsWith("Find what breaks. Report each finding.\n")).toBe(true);
   });
 
   it("a head that moved during the review posts nothing: MOVED", async () => {
@@ -774,6 +789,34 @@ describe("reviewStep", () => {
     expect(movedStep.kind === "available" ? await movedStep.run(input(12)) : movedStep).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("the head moved"),
+    });
+  });
+
+  it("a round whose pass fails still gives what every pass spent, the failed one's too (#131)", async () => {
+    const found = model([findAnswer([FINDING])], []);
+    let calls = 0;
+    const failing: Model = async (run) => {
+      calls += 1;
+      return calls === 1
+        ? found(run)
+        : {
+            kind: "failed",
+            reason: "error_max_budget_usd",
+            answer: { subtype: "error_max_budget_usd", total_cost_usd: 0.7, usage: { output_tokens: 30 } },
+          };
+    };
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      model: failing,
+      sessions: none,
+    });
+    expect(step.kind === "available" ? await step.run(input(12)) : step).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("pass failed"),
+      spend: { usd: expect.closeTo(0.8, 9), tokens: 40 },
     });
   });
 });

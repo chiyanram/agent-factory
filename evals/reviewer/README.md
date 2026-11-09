@@ -92,3 +92,25 @@ Exit 0 when the results file is written, 3 when it is written but partial, 1 whe
 | `recall_at_act_on` | seeds matched in Act on over seeds × runs: overall, `by_category` and `by_severity` |
 | `clean_floor` | every Act on finding on a case whose `golden.json` is `[]`; the floor is 0 (E2) |
 | `per_case` | each run: what the round did, its Act on findings, each seed's match and the judge's confidence, its cost |
+
+## The proof check
+
+CI checks the proof, not the model (ADR-0015 E10, #217). `make lint` runs `scripts/check-eval-proof.ts`, which diffs
+the change against the default branch (`FACTORY_BASE_REF`, else `origin/$GITHUB_BASE_REF`, else `origin/main`) and
+needs no model and no token.
+
+**A change to a reviewer input** (`prompts/review-*.md` or `prompts/eval-judge.md`) must add a
+`results/<date>-<sha>.json` that proves it:
+
+- `"partial": false` and `"proof": true` (no draft case);
+- `inputs.prompts` holds the git blob SHA of each prompt as the change leaves it, and `head` is a commit on the
+  branch: run the pass at the change, then commit its results file;
+- `recall_at_act_on.overall.recall` is not below `baseline.json`'s;
+- `clean_floor.hits` is 0.
+
+Until there is a `baseline.json` (#216), a reviewer-input change is refused: there is nothing to prove it against.
+The model and rulebook pins become reviewer inputs when they land (#213, and the plugin pins with #232).
+
+**A change to `baseline.json`** needs the operator's approval: the pull request label `eval-baseline-approved`, which
+CI reads from the pull request event. Only the operator adds it; an agent never does. A local run has no event, so it
+refuses a baseline change. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits.
