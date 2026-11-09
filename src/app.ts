@@ -568,7 +568,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     identity,
     store: tokenStore(io, home),
     pusher: hostPush,
-    plugins: used.value.plugins.map((p) => p.dir),
+    plugins: used.value.plugins,
     lanes: own.value.lanes,
   });
   const steps: Steps = {

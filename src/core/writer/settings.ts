@@ -10,11 +10,13 @@
 import type { Result } from "../forge/api.js";
 import { maxUsd } from "../review/settings.js";
 import { settingName, settingOf } from "../settings/machine.js";
+import type { PluginDir } from "../process/read.js";
 import { COMPLETION, STALL_MS, type Claude, type Completion } from "./run.js";
 
 export type WriterSettings = {
-  // the plugins' folders, in the project's order: each is copied into the run and loaded with --plugin-dir (#232)
-  readonly plugins: readonly string[];
+  // the plugins, in the project's order: each folder is copied into the run and loaded with --plugin-dir, and the
+  // process plugin's role cards start each run (#232)
+  readonly plugins: readonly PluginDir[];
   readonly timeoutSeconds: number;
   readonly claude: Claude;
   readonly completion: Completion;
@@ -61,7 +63,7 @@ function timesOf(env: NodeJS.ProcessEnv): Result<{ readonly timeoutSeconds: numb
   return stall.kind === "ok" ? { kind: "ok", value: { timeoutSeconds: timeout.value, stallMs: stall.value } } : stall;
 }
 
-export function writerSettings(env: NodeJS.ProcessEnv, plugins: readonly string[]): Result<WriterSettings> {
+export function writerSettings(env: NodeJS.ProcessEnv, plugins: readonly PluginDir[]): Result<WriterSettings> {
   const times = timesOf(env);
   if (times.kind === "failed") {
     return times;

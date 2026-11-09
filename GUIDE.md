@@ -607,6 +607,17 @@ exists yet, so you run the triggers below by hand.
   the caps and `usage`.
   Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
   in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
+  Every writer run starts from its role card (#232): test-first, the implementer (fix, rework, CI and merge runs) or
+  cleanup, from the process plugin's `process/roles/`, else the engine's `prompts/roles/`. The prompt is the card's
+  body, then the run's task in the engine's words, then the engine's floor (`FLOOR` in `src/core/writer/step.ts`),
+  which no card can drop. The engine enforces the card's frontmatter (`src/core/process/cards.ts`): its `tools` are
+  the run's only tools (`claude --tools`, with the task list, skills and subagents, which add no reach); its
+  `must_not_see` leaves those inputs out of the run, on top of the role's own floor, and a card that leaves out what
+  the run needs (the spec, its task) stops the run for a person; each field its `hand_off` names must be one the
+  engine's schema for the role has, and what the run returns is read with that schema. A card that fails a check
+  stops the run for a person. The design review's runs follow the same card rules. **Today:** the automated review's find
+  and verify passes still read `prompts/review-find.md` and `prompts/review-verify.md`, not the finder and verify-pass
+  cards: they and `prompts/eval-judge.md` stay until the reviewer eval has a baseline (`scripts/check-eval-proof.ts`).
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
 
 A developer without the fleet runs `/crq` in one session and takes these steps itself. A small fix costs less that way.

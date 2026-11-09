@@ -23,7 +23,7 @@ describe("the published package (#171)", () => {
       .filter((f) => f.isFile())
       .map((f) => relative(ROOT, join(f.parentPath, f.name)));
     expect(prompts).toContain("prompts/roles/cleanup.md");
-    expect(prompts).toContain("prompts/writer-ci.md");
+    expect(prompts).toContain("prompts/roles/implementer.md");
     expect(files).toEqual(expect.arrayContaining([...prompts, "images/factory-box/Dockerfile"]));
   });
 });

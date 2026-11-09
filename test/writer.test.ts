@@ -20,7 +20,21 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, stallOf } from "../src/core/writer/settings.js";
-import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import {
+  FLOOR,
+  FOREGROUND,
+  PROJECT_INSTRUCTIONS,
+  runPrompt,
+  writerStep,
+  type WriterSetup,
+} from "../src/core/writer/step.js";
+import { readCard, type Role } from "../src/core/process/cards.js";
+import { readProcess, type PluginDir } from "../src/core/process/read.js";
+import { designSteps, FLOOR as DESIGN_FLOOR } from "../src/core/design/step.js";
+import type { ModelRun } from "../src/core/review/model.js";
+import { NO_DESIGN } from "../src/core/spec.js";
+import { createHash } from "node:crypto";
+import { copyFileSync } from "node:fs";
 import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
@@ -237,18 +251,11 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       runsDir: join(p.root, "box-runs"),
     },
     settings: {
-      plugins: [rulebook],
+      plugins: [{ label: "rulebook@chiyanram", dir: rulebook }],
       timeoutSeconds: 3600,
       claude: { maxUsd: "2", model: "" },
       completion: FAST,
       stallMs: STALL_MS,
-    },
-    prompts: {
-      fix: "fix {{ticket}} on {{branch}} at {{head}}",
-      testFirst: "test {{ticket}}",
-      rework: "rework {{ticket}}",
-      ci: "ci {{ticket}}",
-      merge: "merge {{ticket}} with origin/{{base}}",
     },
     forge: told.forge,
     push: { forge: "github", host: "github.com", project: "o/r", identity: { kind: "own" }, env: p.env },
@@ -371,10 +378,14 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(Object.keys(spec.env)).not.toContain("GITHUB_TOKEN");
     expect(Object.keys(spec.env)).not.toContain("PATH");
     const ran = command(fake);
-    expect(ran.argv).toEqual(claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1));
+    // the run gets the built-in implementer card's tools, and its prompt starts with the card's body
+    expect(ran.argv).toEqual(
+      claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1, ["Read", "Grep", "Glob", "Edit", "Bash"]),
+    );
+    expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^# Implementer\n/) });
     expect(ran.stdin).toMatchObject({
       kind: "text",
-      text: expect.stringContaining("fix PROJ-1 on factory/PROJ-1 at"),
+      text: expect.stringContaining("This run builds ticket PROJ-1, on branch factory/PROJ-1 at head"),
     });
     expect(readdirSync(join(p.root, "box-runs"))).toEqual([]);
   });
@@ -737,7 +748,10 @@ describe("the writer step: a later run on the change", () => {
       "## test\n\nThe end of its log:\n\n```text\nFAIL RenewalTest > refuses a reserved loan\n```",
     );
     expect(seen[0]?.task).toContain("## sonar\n\nNo log: not a GitHub Actions job");
-    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^ci PROJ-1/) });
+    expect(command(fake).stdin).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("This run makes CI pass for ticket PROJ-1"),
+    });
 
     const none = fakeBox({});
     const told = forge([]);
@@ -777,7 +791,7 @@ describe("the writer step: a later run on the change", () => {
     const { head } = valueOf(out);
     expect(command(fake).stdin).toMatchObject({
       kind: "text",
-      text: expect.stringMatching(/^merge PROJ-1 with origin\/main/),
+      text: expect.stringContaining("This run merges main into ticket PROJ-1's branch feat/x"),
     });
     // a merge on top of the branch: its first parent the old head, its second main; the lease was the old head
     expect(origin("refs/heads/feat/x")).toBe(head);
@@ -837,7 +851,10 @@ describe("the writer step: a rework run (#171)", () => {
     expect(seen[0]?.task).toContain("Fix: refuse it with 409");
     expect(seen[0]?.task).not.toContain("F-2");
     expect(started(fake).readOnly).toContain(".factory/task.md");
-    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^rework PROJ-1/) });
+    expect(command(fake).stdin).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("This run reworks ticket PROJ-1"),
+    });
     expect(pushes).toEqual([{ lease: p.head2, branch: "feat/x" }]);
   });
 
@@ -855,7 +872,10 @@ describe("the writer step: a rework run (#171)", () => {
     expect(seen[0]?.task).toContain("row 1 (AC1): make test exited 2");
     expect(seen[0]?.task?.length).toBeLessThanOrEqual(MAX_TASK_CHARS + 100);
     expect(seen[0]?.task).toContain(`(cut at ${MAX_TASK_CHARS} characters)`);
-    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^rework PROJ-1/) });
+    expect(command(fake).stdin).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("This run reworks ticket PROJ-1"),
+    });
   });
 
   it("gives a person the change when the ready check kept nothing at the head, naming where it looked", async () => {
@@ -905,7 +925,10 @@ describe("the writer step: a CI run on a local gate (#171)", () => {
     );
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
     expect(seen[0]?.task).toBe("# The local verifier failed\n\nmake verify exited 2\n");
-    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^ci PROJ-1/) });
+    expect(command(fake).stdin).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("This run makes CI pass for ticket PROJ-1"),
+    });
   });
 });
 
@@ -967,42 +990,37 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
 });
 
 describe("the writer's words and settings", () => {
-  it("fills the prompt with the run's names, then the project's instructions and tools, then the report's schema", () => {
-    const text = promptFor({
-      prompts: {
-        fix: "fix {{ticket}} on {{branch}} at {{head}} ({{ticket}})",
-        testFirst: "t",
-        rework: "r",
-        ci: "c",
-        merge: "m",
-      },
+  it("builds the prompt from the role card: its body, the run's task, the floor, the project's instructions and tools, then the report's schema (#232)", async () => {
+    const card = await readCard([], "implementer");
+    if (card.kind !== "ok") throw new Error(card.reason);
+    const text = runPrompt({
+      card: card.value,
       mode: "fix",
-      ticket: "PROJ-1",
-      branch: "factory/PROJ-1",
-      head: "abc",
+      names: { ticket: "PROJ-1", branch: "factory/PROJ-1", head: "abc", base: "main" },
       tools: ["Each file you edit is linted at once with: make lint-file."],
     });
     expect(
       text.startsWith(
-        `fix PROJ-1 on factory/PROJ-1 at abc (PROJ-1)\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
+        `${card.value.body}\n\nThis run builds ticket PROJ-1, on branch factory/PROJ-1 at head abc. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design.\n\n${FLOOR}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
       ),
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
+    expect(text).not.toContain('"deferred"');
   });
 
-  it("tells the writer of every mode to keep its subagents and commands in the foreground (#192)", () => {
-    const prompts = { fix: "f", testFirst: "t", rework: "r", ci: "c", merge: "m" };
-    const modes = ["fix", "test-first", "rework", "ci", "merge"] as const;
-    const texts = modes.map((mode) =>
-      promptFor({ prompts, mode, ticket: "PROJ-1", branch: "b", head: "h", tools: [] }),
-    );
-    expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
+  it("tells the writer of every mode the floor and to keep its subagents and commands in the foreground (#192, #232)", async () => {
+    const card = await readCard([], "implementer");
+    if (card.kind !== "ok") throw new Error(card.reason);
+    const modes = ["fix", "test-first", "rework", "ci", "merge", "cleanup"] as const;
+    const names = { ticket: "PROJ-1", branch: "b", head: "h", base: "main" };
+    const texts = modes.map((mode) => runPrompt({ card: card.value, mode, names, tools: [] }));
+    expect(texts.filter((t) => !t.includes(FOREGROUND) || !t.includes(FLOOR))).toEqual([]);
   });
 
   it("runs claude with no settings of the branch, skip-all, each plugin with --plugin-dir, streamed output, the cap and model only when set", () => {
     // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
     // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
-    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1)).toEqual([
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1, ["Read", "Edit", "Bash"])).toEqual([
       "claude",
       "-p",
       "--setting-sources",
@@ -1010,19 +1028,21 @@ describe("the writer's words and settings", () => {
       "--dangerously-skip-permissions",
       "--plugin-dir",
       ".factory/plugins/1",
+      "--tools",
+      "Read,Edit,Write,Bash,TodoWrite,Skill,Task",
       "--output-format",
       "stream-json",
       "--verbose",
     ]);
     // the engine runs alone with no plugin, and hands two plugins in the project's order (#232)
-    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0)).not.toContain("--plugin-dir");
-    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2).slice(5, 9)).toEqual([
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0, ["Read"])).not.toContain("--plugin-dir");
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2, ["Read"]).slice(5, 9)).toEqual([
       "--plugin-dir",
       ".factory/plugins/1",
       "--plugin-dir",
       ".factory/plugins/2",
     ]);
-    expect(claudeArgv({ maxUsd: "2", model: "opus" }, { kind: "none" }, 1).slice(-4)).toEqual([
+    expect(claudeArgv({ maxUsd: "2", model: "opus" }, { kind: "none" }, 1, ["Read"]).slice(-4)).toEqual([
       "--max-budget-usd",
       "2",
       "--model",
@@ -1096,5 +1116,214 @@ describe("the writer step: the cleanup run (#236)", () => {
     const out = await run(setup(fake.box, told, []), { ...CLEANUP, head: p.head2 }, openLine());
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
     expect(told.log.find((l) => l.startsWith("note 12"))).toContain("the cleanup run has no role card");
+  });
+});
+
+describe("the writer step: role cards from the process plugin (#232)", () => {
+  // the rulebook plugin's process, holding this implementer card
+  function implementerCard(text: string): void {
+    const roles = join(rulebook, "skills", "crq", "process", "roles");
+    mkdirSync(roles, { recursive: true });
+    writeFileSync(join(roles, "..", "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+    writeFileSync(join(roles, "implementer.md"), text);
+  }
+
+  it("starts the run from the plugin's card: its body leads the prompt, its tools are the run's only tools, and its hash is recorded", async () => {
+    implementerCard("---\nrole: implementer\ntools: [Read, Edit]\n---\n\nBuild it the team's way.\n");
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out).card).toMatch(/^[0-9a-f]{64}$/);
+    const ran = command(fake);
+    expect(ran.argv.slice(ran.argv.indexOf("--tools"), ran.argv.indexOf("--tools") + 2)).toEqual([
+      "--tools",
+      "Read,Edit,Write,TodoWrite,Skill,Task",
+    ]);
+    expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^Build it the team's way\.\n\n/) });
+    // the card names no floor, and the run still gets it
+    expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringContaining(FLOOR) });
+  });
+
+  it("a card whose must_not_see leaves out the run's task stops the run for a person, and starts no box", async () => {
+    implementerCard("---\nrole: implementer\ntools: [Read]\nmust_not_see: the act_on list\n---\n\nBuild.\n");
+    const kept = await keepActOn({ recordsDir: recordsDirOf(p.clone), change: 12, head: p.head2, sorted: [FINDING] });
+    expect(kept.kind).toBe("ok");
+    const fake = fakeBox({});
+    const told = forge();
+    const out = await run(setup(fake.box, told, []), { kind: "act-on", head: p.head2 }, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(told.log.find((l) => l.startsWith("note 12"))).toContain("leaves out the act_on list");
+    expect(fake.calls.filter((c) => c.op === "start")).toEqual([]);
+  });
+
+  it("the test-first run starts from the test-first card", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), { kind: "test-first" });
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^# Test-first\n/) });
+  });
+});
+
+describe("a full run on each process: no plugin, the rulebook plugin, a team plugin (#232)", () => {
+  const FIXTURES = join(import.meta.dirname, "..", "tests", "fixtures", "process");
+  const BUILT_IN = join(import.meta.dirname, "..", "prompts", "roles");
+  const ROLES: readonly Role[] = ["design-reviewer", "verify-pass", "implementer", "cleanup"];
+  const sha = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
+  const bodyOf = (file: string) =>
+    readFileSync(file, "utf8")
+      .replace(/^---\n[\s\S]*?\n---\n/, "")
+      .trim();
+
+  // a plugin folder with a process: its lanes, and its role cards copied from `cards`
+  function processPlugin(name: string, lanes: unknown, cards: string): string {
+    const dir = join(p.root, name, "skills", "crq", "process");
+    mkdirSync(join(dir, "roles"), { recursive: true });
+    writeFileSync(join(dir, "lanes.json"), JSON.stringify(lanes));
+    for (const role of ROLES) {
+      copyFileSync(join(cards, `${role}.md`), join(dir, "roles", `${role}.md`));
+    }
+    return join(dir, "roles");
+  }
+
+  // the team's own cards: narrower tools, no floor of their own
+  function teamCards(): string {
+    const dir = join(p.root, "team-cards");
+    mkdirSync(dir);
+    const card = (role: Role, tools: string, hand: string) =>
+      writeFileSync(
+        join(dir, `${role}.md`),
+        `---\nrole: ${role}\ntools: [${tools}]\nmust_not_see: none\nhand_off: ${hand}\n---\n\nThe team's ${role}.\n`,
+      );
+    card("design-reviewer", "Read, Grep", "{id, decision, verdict, file, line, rule, severity, grade, finding, fix}");
+    card("verify-pass", "Read", "{id, bucket, why}");
+    card("implementer", "Read, Edit, Bash", ".factory/report.json {status: done, evidence}");
+    card("cleanup", "Read, Edit", ".factory/report.json {status: done, evidence, deferred}");
+    return dir;
+  }
+
+  const DESIGN_FINDING = {
+    id: "D-1",
+    decision: "one table per ticket",
+    verdict: "conflict",
+    file: "AGENTS.md",
+    line: 1,
+    rule: "reuse",
+    severity: "warning",
+    grade: "walked",
+    finding: "the table exists",
+    fix: "reuse it",
+  };
+
+  // the design review and its verify pass, with a fake model; what each run was given
+  async function designRuns(plugins: readonly PluginDir[]) {
+    const seen: ModelRun[] = [];
+    const outputs = [{ findings: [DESIGN_FINDING] }, { verdicts: [{ id: "D1", bucket: "act_on", why: "it holds" }] }];
+    const design = designSteps({
+      kind: "ok",
+      value: {
+        home,
+        project: "ledger",
+        repo: p.clone,
+        env: p.env,
+        forge: { defaultBranch: async () => ({ kind: "ok", value: "main" }) },
+        model: async (r) => {
+          seen.push(r);
+          return { kind: "ok", value: { output: outputs[seen.length - 1], answer: {}, costUsd: 0.1, tokens: 10 } };
+        },
+        modelName: "opus",
+        maxUsd: "2",
+        plugins,
+        runsDir: join(p.root, "design-runs"),
+      },
+    });
+    if (design.designReview.kind !== "available" || design.designVerify.kind !== "available") throw new Error("off");
+    const at = { ticket: "PROJ-1", spec: specHash(SPEC), design: NO_DESIGN };
+    const reviewed = await design.designReview.run(at);
+    if (reviewed.kind !== "ok" || reviewed.value.kind !== "done") throw new Error(JSON.stringify(reviewed));
+    const verified = await design.designVerify.run({ ...at, findings: reviewed.value.findings });
+    expect(verified).toMatchObject({ kind: "ok", value: { kind: "done", kept: [{ id: "D1", bucket: "act_on" }] } });
+    return { seen, card: reviewed.value.card };
+  }
+
+  // the implementer's first run, then cleanup on the change, in fake boxes
+  async function writerRuns(plugins: readonly PluginDir[]) {
+    const s = (box: Box) => ({
+      ...setup(box, forge(), []),
+      settings: { ...setup(box, forge(), []).settings, plugins },
+    });
+    const fixBox = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const fixed = valueOf(await run(s(writer(fixBox, { commit: true, report: DONE, exit: 0 }, [])), FIX));
+    const cleanBox = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const cleanup: Task = { kind: "cleanup", head: p.head2, evidence: DONE.evidence };
+    const cleaned = valueOf(
+      await run(s(writer(cleanBox, { commit: false, report: DONE, exit: 0 }, [])), cleanup, openLine()),
+    );
+    return { fixed, cleaned, fix: command(fixBox), clean: command(cleanBox) };
+  }
+
+  const stdinOf = (c: Command) => (c.stdin.kind === "text" ? c.stdin.text : "");
+
+  // the whole flow with fake runs: the process, the design review and its verify pass, the implementer, then cleanup;
+  // each run started from the card at cards[role]
+  async function fullRun(plugins: readonly PluginDir[], cards: Readonly<Record<Role, string>>) {
+    const process = await readProcess(plugins);
+    if (process.kind !== "ok") throw new Error(process.reason);
+    const design = await designRuns(plugins);
+    const writing = await writerRuns(plugins);
+    expect(design.card).toBe(sha(cards["design-reviewer"]));
+    expect(writing.fixed).toMatchObject({ outcome: "done", card: sha(cards.implementer) });
+    expect(writing.cleaned).toMatchObject({ outcome: "done", card: sha(cards.cleanup) });
+    // each run's prompt is its card's body, then the engine's own words and floor, whatever the card left out
+    const prompts = [...design.seen.map((r) => r.prompt), stdinOf(writing.fix), stdinOf(writing.clean)];
+    const bodies = (["design-reviewer", "verify-pass", "implementer", "cleanup"] as const).map((r) => bodyOf(cards[r]));
+    expect(prompts.map((t, i) => t.startsWith(`${bodies[i]}\n\n`))).toEqual([true, true, true, true]);
+    expect(prompts.slice(0, 2).every((t) => t.includes(DESIGN_FLOOR))).toBe(true);
+    expect(prompts.slice(2).every((t) => t.includes(FLOOR))).toBe(true);
+    return { lanes: process.value.lanes, design: design.seen, fix: writing.fix, clean: writing.clean };
+  }
+
+  const cardsIn = (dir: string): Readonly<Record<Role, string>> => {
+    const at = (role: Role) => join(dir, `${role}.md`);
+    return {
+      implementer: at("implementer"),
+      "test-first": at("test-first"),
+      cleanup: at("cleanup"),
+      "design-reviewer": at("design-reviewer"),
+      "verify-pass": at("verify-pass"),
+    };
+  };
+  const toolsAt = (argv: readonly string[]) => argv[argv.indexOf("--tools") + 1];
+
+  it("with no plugin, the engine runs alone on its built-in process and cards", async () => {
+    const ran = await fullRun([], cardsIn(BUILT_IN));
+    expect(ran.lanes.map((l) => [l.name, l.approval])).toEqual([
+      ["tiny", false],
+      ["bug", true],
+      ["feature", true],
+      ["one-way door", true],
+    ]);
+    expect(ran.design.map((r) => r.tools)).toEqual([
+      ["Read", "Grep", "Glob"],
+      ["Read", "Grep", "Glob"],
+    ]);
+    expect(toolsAt(ran.fix.argv)).toBe("Read,Grep,Glob,Edit,Write,Bash,TodoWrite,Skill,Task");
+    expect(ran.fix.argv).not.toContain("--plugin-dir");
+  });
+
+  it("with the rulebook plugin, every run starts from the rulebook's card, and the plugin is handed to the writer", async () => {
+    const lanes = JSON.parse(readFileSync(join(FIXTURES, "rulebook-lanes.json"), "utf8")) as unknown;
+    const roles = processPlugin("rulebook-crq", lanes, join(FIXTURES, "rulebook-roles"));
+    const ran = await fullRun([{ label: "rulebook@chiyanram", dir: join(p.root, "rulebook-crq") }], cardsIn(roles));
+    expect(ran.lanes.map((l) => l.name)).toEqual(["tiny", "bug", "feature", "one-way door"]);
+    expect(ran.fix.argv).toContain("--plugin-dir");
+    expect(toolsAt(ran.fix.argv)).toBe("Read,Grep,Glob,Edit,Write,Bash,TodoWrite,Skill,Task");
+  });
+
+  it("with a team plugin, its lanes and cards decide: its narrower tools are the runs' only tools, and the floor still holds", async () => {
+    const lanes = { lanes: ["tiny", "bug", "feature", "one-way door"].map((lane) => ({ lane, approval: true })) };
+    const roles = processPlugin("team", lanes, teamCards());
+    const ran = await fullRun([{ label: "team@acme", dir: join(p.root, "team") }], cardsIn(roles));
+    expect(ran.lanes.every((l) => l.approval)).toBe(true);
+    expect(ran.design.map((r) => r.tools)).toEqual([["Read", "Grep"], ["Read"]]);
+    expect(toolsAt(ran.fix.argv)).toBe("Read,Edit,Write,Bash,TodoWrite,Skill,Task");
+    expect(toolsAt(ran.clean.argv)).toBe("Read,Edit,Write,TodoWrite,Skill,Task");
   });
 });
