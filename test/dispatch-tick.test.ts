@@ -229,7 +229,7 @@ describe("tick", () => {
     expect(await readRecords({ home, project: "ledger", ticket: "PROJ-1" })).toEqual({ kind: "ok", value: [] });
   });
 
-  it("an available writer: claims the change, records the start and the end; one run per pass", async () => {
+  it("an available writer: claims the change, records the start and the end with its spend; one run per pass", async () => {
     await approved("PROJ-1");
     await approved("PROJ-2");
     const log: string[] = [];
@@ -240,7 +240,17 @@ describe("tick", () => {
         kind: "available",
         run: async (input) => (
           runs.push(input.ticket),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+          {
+            kind: "ok",
+            value: {
+              head: H,
+              outcome: "done",
+              patch: "p1",
+              evidence: [],
+              hung: false,
+              spend: { usd: 0.5, tokens: 900 },
+            },
+          }
         ),
       },
     };
@@ -255,6 +265,8 @@ describe("tick", () => {
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     // the approval's shared copy goes on the PR first, once (#227)
     expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toEqual(["shared", "started", "writer-ended"]);
+    // every run records its tokens and cost (#131)
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ spend: { usd: 0.5, tokens: 900 } });
   });
 
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
@@ -438,6 +450,42 @@ describe("tick", () => {
     expect(again.filter((l) => l.startsWith("note #14"))).toEqual([]);
     // pinged once, as the note
     expect(pings).toHaveLength(1);
+  });
+
+  it("a review round records its Act on count and what it spent (#131)", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: {
+        kind: "available",
+        run: async () => ({ kind: "ok", value: { actOn: 0, spend: { usd: 0.3, tokens: 40 } } }),
+      },
+    };
+    expect(await tick(setup({ team, open: [open()], merged: [] }, [], { steps }))).toMatchObject({ kind: "ok" });
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({
+      kind: "review-ended",
+      actOn: 0,
+      spend: { usd: 0.3, tokens: 40 },
+    });
+  });
+
+  it("keeps a run's spend; a line from before #131 has none; a spend that is not two amounts fails the read", async () => {
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const path = join(home, "runs", "ledger", "PROJ-1.jsonl");
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    const base = { at: "2026-11-07T09:00:00Z", kind: "review-ended", head: H, actOn: 0 };
+    writeFileSync(path, `${JSON.stringify(base)}\n${JSON.stringify({ ...base, spend: { usd: 0.1, tokens: 7 } })}\n`);
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value : []).toEqual([base, { ...base, spend: { usd: 0.1, tokens: 7 } }]);
+    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: -1, tokens: 7 } })}\n`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: 1 } })}\n`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
   });
 
   it("the ready check gets the writer's evidence rows and records its reason; a local gate runs the verifier (#91)", async () => {

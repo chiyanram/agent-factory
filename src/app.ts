@@ -53,6 +53,7 @@ import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
+import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -96,7 +97,7 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${LOOP_HELP}${EVAL_HELP}
@@ -167,6 +168,19 @@ function version(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version: string };
   return pkg.version;
+}
+
+// usage : the spend table (#131), with the project's settings layers resolved when it names one
+function usage({ positionals, io }: Args): Promise<number> {
+  const [project] = positionals;
+  return resolvedRun("usage", project, io, (resolved) => {
+    const home = factoryHome(resolved.env);
+    if (home.kind === "refused") {
+      io.err(`agent-factory usage: ${home.reason}\n`);
+      return Promise.resolve(1);
+    }
+    return usageCommand(positionals, { ...resolved, home: home.path, now: Date.now });
+  });
 }
 
 function poll(args: Args): Promise<number> {
@@ -1021,6 +1035,7 @@ const COMMANDS: readonly Command[] = [
   { name: "app-token", run: appTokenCommand },
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
+  { name: "usage", run: usage },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
   { name: "plugin", run: pluginCli },

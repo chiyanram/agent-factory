@@ -32,6 +32,7 @@ import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { readProcess } from "../process/read.js";
 import { attempt } from "./safe.js";
+import { settingName } from "../settings/machine.js";
 import { plainName } from "../spec.js";
 import { statusBox, type Box } from "./status.js";
 import {
@@ -85,6 +86,8 @@ export type Outcome =
       readonly head: string;
       readonly counts: Counts;
       readonly costUsd: number;
+      // every token the round's passes spent (#131)
+      readonly tokens: number;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -179,7 +182,7 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
   }
   const s = ctx.setup;
   // the rulebook folder stands in for the project's plugin list until plugins are fetched and pinned (#232)
-  const own = await readProcess([{ label: "FACTORY_RULEBOOK", dir: s.rulebook }]);
+  const own = await readProcess([{ label: settingName("rulebook"), dir: s.rulebook }]);
   if (own.kind === "failed") {
     return own;
   }
@@ -558,7 +561,17 @@ async function post(
     [{ label: "Spent at this head", value: spent }],
   );
   return summary.kind === "ok"
-    ? { kind: "ok", value: { kind: "posted", round, head: pack.head, counts: c, costUsd: result.spent.costUsd } }
+    ? {
+        kind: "ok",
+        value: {
+          kind: "posted",
+          round,
+          head: pack.head,
+          counts: c,
+          costUsd: result.spent.costUsd,
+          tokens: result.spent.find + result.spent.verify,
+        },
+      }
     : summary;
 }
 

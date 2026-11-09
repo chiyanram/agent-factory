@@ -353,6 +353,7 @@ The scripts read their settings from the environment.
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `start-writer` and `agent-factory review` refuse it | off |
 | `FACTORY_RUN_MODE` | `print` runs the writer as a foreground `claude -p` | background |
 | `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
+| `FACTORY_WINDOW_HOURS` | `usage`: the length of the subscription's usage window, in hours, from 1 to 24 (`window.hours`) | `5` |
 | budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
@@ -546,6 +547,11 @@ exists yet, so you run the triggers below by hand.
   the stall time (`FACTORY_WRITER_STALL_MINUTES`, 5 minutes) is stopped and `blocked`, so it goes to `needs-human`;
   its note shows its last five output lines, each cleaned by `post.ts` (#228). Time the machine spends asleep does not
   count: each 5 s poll adds at most 10 s of silence.
+  The host reads the stream's last line, the result event, for the run's cost and tokens (`total_cost_usd` and every
+  `usage` token, cache reads and writes too), and keeps them as `spend` on the run's `writer-ended` record; a review
+  round's `review-ended` record keeps what its passes spent the same way (#131). A run stopped before its result event
+  has no `spend`: `usage` counts it as unmeasured, never as free. On a subscription the CLI still reports the tokens,
+  and its dollar figure is what they would cost on the API.
   Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
   in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
   **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the
@@ -711,6 +717,7 @@ and `#12` for `!12`.
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory dispatch <project> --once [--dry-run]` | one pass of the dispatcher's table over the project (see Triggers); exit 0, 1 when it cannot run, 2 when an action failed |
+| `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131) |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
