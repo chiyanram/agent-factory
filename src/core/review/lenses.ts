@@ -14,8 +14,8 @@
 //   uniqueByLens   per lens, the verified findings no other lens reported, so a lens that adds none after 20 PRs can be
 //                  retired (DESIGN.md section 6). Dismissed findings do not count.
 //
-// Not yet here (#237): the lenses settings key, a finder run per lens from the finder role card, and the per-lens count
-// in the run record.
+// The round (round.ts) runs one finder per picked lens with what finders.ts gives it, and keeps uniqueByLens with the
+// head; the instructions are still the engine's prompts, not the finder role card, until the eval baseline (#216).
 
 import { isTestFile } from "../ready/floor.js";
 import { matches, type LensCount } from "../lane.js";
