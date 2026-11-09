@@ -39,7 +39,8 @@ ticket ──▶ branch ──▶ make lint + make test ──▶ pull request �
 1. Open or pick a [ticket](https://github.com/chiyanram/agent-factory/issues). Say what is wrong and why it matters.
 2. Make one branch for it, named `<type>/<ticket>-<slug>`, such as `fix/56-approved-stale`.
 3. Change the code and its test together. Run `make lint` and `make test`.
-4. Open one pull request per ticket, and link the ticket (`Closes #56`).
+4. Open one pull request per ticket. Its title and description become the commit on `main`; see
+   [Commit messages](#commit-messages).
 5. A maintainer reviews it. Answer each comment with a change or a reason.
 6. A maintainer adds it to the merge queue once CI is green and the review is resolved. The queue builds it on top
    of the pull requests ahead of it, runs `lint-and-test` and `test-macos` there, and squash-merges it only when
@@ -75,16 +76,32 @@ rejected and Sources. To change a decision, write a new ADR that supersedes the 
 
 ## Commit messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): subject`, lower case, no period.
-Every commit has a body that says why. An agent's commit names the human it worked for in a `Co-Authored-By:`
-trailer.
+One format in chiyanram/skills, chiyanram/agent-factory and chiyanram/rca-agent (#341). It has the commitizen
+sections:
 
-| type | for |
-|---|---|
-| `feat` | a new script or behaviour |
-| `fix` | a bug fix |
-| `docs` | documentation and ADRs |
-| `chore` | build, CI and repo upkeep |
+```
+type(scope): lower-case summary (#issue)
+
+Why the change is needed, in 1–3 sentences.
+
+BREAKING CHANGE: what breaks and what to do instead
+Refs #12
+```
+
+- **Title**: a type, a required lower-case scope, an imperative lower-case summary with no full stop, and the ticket as
+  `(#N)` or `(owner/repo#N)`, such as `fix(dispatch): count a failed round's spend (#131)`. Add `!` after the scope for a breaking change. Only Dependabot
+  (scope `deps`) and the release commit name no ticket.
+- **Body**: why, not what; the diff shows what. Optional footers: `BREAKING CHANGE:`, `Closes #N` to close the ticket on
+  merge, and `Refs #N` for other tickets.
+- **No tool or co-author lines**: no `Co-Authored-By`, no "Generated with" line.
+
+Pull requests are squash-merged. The commit on `main` is the **PR title** (GitHub adds `(#pr)`) and the **PR
+description** as its body, so write the description as the commit body. The branch commits are dropped, so they can be
+anything. CI checks the PR title.
+
+To get the prompts, install [commitizen](https://commitizen-tools.github.io/commitizen/) once (`pipx install
+commitizen`) and run `cz commit`. `.cz.toml` holds the prompts; it is the same file in all three repos. commitizen only
+writes the message: semantic-release still cuts the releases.
 
 Pin every GitHub Actions step to a full commit SHA, with the version in a comment.
 
