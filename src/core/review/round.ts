@@ -68,6 +68,8 @@ import {
 
 export const NEEDS_HUMAN = "needs-human";
 export const MAX_ROUNDS = 3;
+// the most verify passes a round runs: one per kind, rule and logic
+export const VERIFY_PASSES = 2;
 
 export type ReviewSetup = {
   readonly forge: Forge;
@@ -94,6 +96,8 @@ export type ReviewSetup = {
   // the live runs on this machine, and how many may run at once (live.ts)
   readonly sessions: Sessions;
   readonly maxRuns: number;
+  // the most finder runs at once (review.maxFinders): the round counts as one run, with up to this many model runs
+  readonly maxFinders: number;
 };
 
 export type Outcome =
@@ -514,15 +518,20 @@ async function rubrics(ctx: Ctx, plan: Plan, pack: Pack, references: string): Pr
   return bad?.kind === "failed" ? bad : { kind: "ok", value: read.map((r) => (r.kind === "ok" ? r.value : "")) };
 }
 
-// findAll : every picked lens's finder, in parallel; one that fails fails the round, after all have ended, so each
-// run's spend is metered
+// findAll : every picked lens's finder, in parallel, at most review.maxFinders at once; one that fails fails the round,
+// after all have ended, so each run's spend is metered
 async function findAll(
   ctx: Ctx,
   plan: Plan,
   read: readonly string[],
   shared: Shared,
 ): Promise<Result<readonly Finder[]>> {
-  const ran = await Promise.all(plan.lenses.map((lens, i) => findLens(ctx, lens, read[i] ?? "", shared)));
+  const most = Math.max(1, ctx.setup.maxFinders);
+  const ran: Result<Finder>[] = [];
+  for (let at = 0; at < plan.lenses.length; at += most) {
+    const batch = plan.lenses.slice(at, at + most);
+    ran.push(...(await Promise.all(batch.map((lens, i) => findLens(ctx, lens, read[at + i] ?? "", shared)))));
+  }
   const bad = ran.find((r) => r.kind === "failed");
   return bad?.kind === "failed" ? bad : { kind: "ok", value: ran.flatMap((r) => (r.kind === "ok" ? [r.value] : [])) };
 }

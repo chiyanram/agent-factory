@@ -49,10 +49,10 @@ import {
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
 import type { Spend } from "./spend.js";
-import { heldWords, projectStop, type Caps, type Stop } from "./caps.js";
+import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
-import { readSpends } from "./usage.js";
+import { periodsAt, readSpends, totalOf } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
   decide,
@@ -67,7 +67,8 @@ import {
 
 export const BRANCH_PREFIX = "factory/";
 
-export type Unavailable = { readonly kind: "unavailable"; readonly reason: string };
+// held: a cap kept the run from starting (#131, #237), not a step that is not set up
+export type Unavailable = { readonly kind: "unavailable"; readonly reason: string; readonly held?: boolean };
 export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O>> };
 
 // a run that failed after it spent: its spend is still recorded (#131)
@@ -106,6 +107,9 @@ export type Steps = {
     | Unavailable
     | {
         readonly kind: "available";
+        // the most a round can spend, in dollars: every finder it can pick and its verify passes at the per-run cap;
+        // "unbounded" with no per-run cap. A round whose worst case could pass a dollar cap is held (#237)
+        readonly worstUsd?: () => Promise<Result<number | "unbounded">>;
         readonly run: (
           input: RunInput,
         ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend }> | FailedSpent>;
@@ -666,10 +670,61 @@ async function runVerify(setup: TickSetup, state: TicketState, head: string): Pr
     : ran;
 }
 
+// dollarCapped : whether the ticket or the day has a dollar cap. Pure.
+function dollarCapped(caps: Caps): boolean {
+  return caps.ticket.usd !== "none" || caps.day.usd !== "none";
+}
+
+// roomCheck : the review step's worst case, when a dollar cap could hold the round; undefined when none could
+function roomCheck(setup: TickSetup): (() => Promise<Result<number | "unbounded">>) | undefined {
+  const step = setup.steps.review;
+  const worstUsd = step.kind === "available" ? step.worstUsd : undefined;
+  return dollarCapped(setup.caps) ? worstUsd : undefined;
+}
+
+// daySpend : what the project's runs spent today (UTC); read only when the day has a dollar cap
+async function daySpend(setup: TickSetup): Promise<Spend> {
+  const { caps } = setup;
+  const runs = caps.day.usd === "none" ? [] : (await readSpends({ home: setup.home, project: setup.project })).runs;
+  return totalOf(runs, periodsAt(setup.now(), caps.windowHours).day).spend;
+}
+
+// roundRoom : why a review round is held by its worst case (caps.ts overCaps), or ""; read before its "started" line,
+// so a held round leaves no run behind
+async function roundRoom(setup: TickSetup, state: TicketState): Promise<Result<string>> {
+  const worstUsd = roomCheck(setup);
+  if (worstUsd === undefined) {
+    return { kind: "ok", value: "" };
+  }
+  const worst = await worstUsd();
+  return worst.kind === "ok"
+    ? {
+        kind: "ok",
+        value: overCaps({ worst: worst.value, ticket: state.runs.spent, day: await daySpend(setup), caps: setup.caps }),
+      }
+    : worst;
+}
+
+// heldRound : the round held by its worst case, or a failure to read it, or "go"
+async function heldRound(setup: TickSetup, state: TicketState): Promise<Done | Unavailable | "go"> {
+  const room = await roundRoom(setup, state);
+  if (room.kind === "failed") {
+    return room;
+  }
+  return room.value === "" ? "go" : { kind: "unavailable", reason: `held: ${room.value}`, held: true };
+}
+
 async function runReview(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
   const step = setup.steps.review;
-  const started = step.kind === "available" ? await startCheck(setup, state, "review", head) : step;
-  if (started.kind !== "ok" || step.kind === "unavailable") {
+  if (step.kind === "unavailable") {
+    return step;
+  }
+  const held = await heldRound(setup, state);
+  if (held !== "go") {
+    return held;
+  }
+  const started = await startCheck(setup, state, "review", head);
+  if (started.kind !== "ok") {
     return started;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head });
@@ -906,6 +961,11 @@ async function someRuns(setup: TickSetup, later: readonly Later[], ran: Ran[], m
   }
 }
 
+// heldOf : a result a cap held, marked held, as a field to spread. Pure.
+function heldOf(result: Done | Unavailable): { readonly held?: true } {
+  return result.kind === "unavailable" && result.held === true ? { held: true } : {};
+}
+
 // firstRun : the first run that can start, and the index of its entry in `later`, or "none"; an unavailable step
 // lets the next one try
 async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<number | "none"> {
@@ -915,7 +975,7 @@ async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): 
     if (result === "none") {
       continue;
     }
-    ran.push({ ticket: state.ticket, action, result });
+    ran.push({ ticket: state.ticket, action, result, ...heldOf(result) });
     logResult(setup, state.ticket, result);
     if (result.kind !== "unavailable") {
       return i;
