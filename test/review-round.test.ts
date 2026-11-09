@@ -31,6 +31,8 @@ const FINDING = {
   rule: "ERR1",
   category: "bug",
   severity: "blocker",
+  grade: "walked",
+  evidence: "add(1, 1) returns 2 at svc/Main.java:1",
   finding: "returns 2",
   fix: "return the sum",
 };
@@ -186,7 +188,7 @@ describe("reviewRound", () => {
     expect(seen.every((s) => s.run.maxUsd === "2" && s.run.name === "reviewer-12")).toBe(true);
     expect(log.threads).toHaveLength(2);
     expect(log.threads[0]).toMatch(
-      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum$/,
+      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum\n- Evidence: walked · add\(1, 1\) returns 2 at svc\/Main\.java:1$/,
     );
     const summary = log.posts.at(-1) ?? "";
     expect(summary.split("\n")[0]).toMatch(

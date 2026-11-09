@@ -30,6 +30,7 @@ import { actedSince, keepTracked, type Acted } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
+import { BASELINE_LENS } from "./lenses.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
@@ -440,7 +441,7 @@ async function findAndVerify(ctx: Ctx, run: string, pack: Pack): Promise<Result<
   if (found.kind === "failed") {
     return found;
   }
-  const findings = readFindings(found.value.output);
+  const findings = readFindings(found.value.output, BASELINE_LENS);
   return findings.kind === "ok" ? verifyAll(ctx, run, found.value, findings.value) : findings;
 }
 
@@ -461,13 +462,18 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
   }
 }
 
-// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219)
+// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219); every thread shows the finder's
+// grade and evidence (#237)
 function threadPost(f: Sorted, criteria: readonly string[]): Post {
   const quote = quoteOf(f, criteria);
   return {
     seat: "reviewer",
     title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.category}, ${f.rule}): ${f.finding}`,
-    fields: [...(quote === "" ? [] : [{ label: "Criterion", value: quote }]), { label: "Fix", value: f.fix }],
+    fields: [
+      ...(quote === "" ? [] : [{ label: "Criterion", value: quote }]),
+      { label: "Fix", value: f.fix },
+      { label: "Evidence", value: `${f.grade} · ${f.evidence}` },
+    ],
     items: [],
   };
 }

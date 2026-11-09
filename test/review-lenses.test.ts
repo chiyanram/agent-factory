@@ -9,6 +9,7 @@ import {
   type Touched,
   uniqueByLens,
 } from "../src/core/review/lenses.js";
+import type { Grade } from "../src/core/review/verdicts.js";
 
 const lens = (name: string, over: Partial<Lens> = {}): Lens => ({
   name,
@@ -82,7 +83,14 @@ describe("pickLenses: the blast radius (#237)", () => {
   });
 });
 
-const f = (id: string, file: string, line: number, rule: string) => ({ id, file, line, rule, finding: id });
+const f = (id: string, file: string, line: number, rule: string, grade: Grade = "cited") => ({
+  id,
+  file,
+  line,
+  rule,
+  grade,
+  finding: id,
+});
 
 describe("mergeFindings and uniqueByLens (#237)", () => {
   it("posts one finding when two lenses report the same file:line and rule, naming both lenses", () => {
@@ -91,10 +99,26 @@ describe("mergeFindings and uniqueByLens (#237)", () => {
       { lens: "correctness", findings: [f("F1", "src/a.ts", 3, "ERR1"), f("F2", "src/a.ts", 3, "correctness")] },
     ]);
     expect(merged).toEqual([
-      { id: "F1", file: "src/a.ts", line: 3, rule: "ERR1", finding: "F1", lenses: ["standards", "correctness"] },
-      { id: "F2", file: "src/a.ts", line: 9, rule: "ERR1", finding: "F2", lenses: ["standards"] },
-      { id: "F3", file: "src/a.ts", line: 3, rule: "correctness", finding: "F2", lenses: ["correctness"] },
+      { ...f("F1", "src/a.ts", 3, "ERR1"), lenses: ["standards", "correctness"] },
+      { ...f("F2", "src/a.ts", 9, "ERR1"), lenses: ["standards"] },
+      { ...f("F3", "src/a.ts", 3, "correctness"), finding: "F2", lenses: ["correctness"] },
     ]);
+  });
+
+  it("keeps the report with the stronger grade, and the lower ID when the grades tie (the verify-pass card)", () => {
+    const merged = mergeFindings([
+      { lens: "standards", findings: [f("F1", "a", 1, "r", "cited"), f("F2", "a", 2, "r", "walked")] },
+      { lens: "correctness", findings: [f("F1", "a", 1, "r", "ran"), f("F2", "a", 2, "r", "walked")] },
+    ]);
+    expect(merged.map((m) => [m.id, m.line, m.grade, m.finding, m.lenses])).toEqual([
+      ["F1", 1, "ran", "F1", ["standards", "correctness"]],
+      ["F2", 2, "walked", "F2", ["standards", "correctness"]],
+    ]);
+    const tie = mergeFindings([
+      { lens: "standards", findings: [{ ...f("F1", "a", 1, "r", "walked"), finding: "first" }] },
+      { lens: "correctness", findings: [{ ...f("F1", "a", 1, "r", "walked"), finding: "second" }] },
+    ]);
+    expect(tie.map((m) => m.finding)).toEqual(["first"]);
   });
 
   it("keeps one lens's own duplicate once", () => {

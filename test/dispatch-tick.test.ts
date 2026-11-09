@@ -770,7 +770,7 @@ describe("START and approval (#227)", () => {
   it("the project's process lanes decide: a process that makes tiny need an approval holds a START (#232)", async () => {
     spec("tiny");
     await started("2026-11-07T08:00:00Z");
-    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true }));
+    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true, lenses: l.lenses }));
     const log: string[] = [];
     await tick(setup({ team, open: [], merged: [] }, log, { dryRun: true, lanes: strict }));
     expect(log).toEqual([
