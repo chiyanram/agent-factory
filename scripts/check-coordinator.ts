@@ -1,6 +1,6 @@
-// check-coordinator — fails when the coordinator's settings template is looser than its wall (#105, #227): approve or
-// start allowed or asked, raw gh, glab or curl, bash -c, an edit outside the spec drafts, a missing deny, or bypass
-// mode. The orchestrator runs the same check (wallProblems in src/core/coordinator.ts) before each pass.
+// check-coordinator — fails when the coordinator's settings template is looser than its wall (#105, #227, #215):
+// approve, start or eval allowed or asked, raw gh, glab or curl, bash -c, an edit outside the spec drafts, a missing
+// deny, or bypass mode. The orchestrator runs the same check (wallProblems in src/core/coordinator.ts) before each pass.
 //
 //   node scripts/check-coordinator.ts                   the template src/core/coordinator.ts builds (make lint)
 //   node scripts/check-coordinator.ts <settings.json>   a settings file, as built for the sample places below

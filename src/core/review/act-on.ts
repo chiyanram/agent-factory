@@ -30,7 +30,8 @@ export function keepActOn(input: At & { readonly sorted: readonly Sorted[] }): P
 
 const FIELDS = ["id", "file", "rule", "severity", "finding", "fix"] as const;
 
-function isActOn(raw: unknown): raw is ActOn {
+// isActOn : one kept Act on finding, well formed. Pure.
+export function isActOn(raw: unknown): raw is ActOn {
   if (typeof raw !== "object" || raw === null) {
     return false;
   }

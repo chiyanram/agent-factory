@@ -171,7 +171,8 @@ The wall (`src/core/coordinator.ts`):
   too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`, `start-writer.sh`), since the loop is
   still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
 - **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
-  STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+  STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
+  `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
   `starts`, `waivers`,
@@ -380,8 +381,9 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 }
 ```
 
-`agent-factory project init <project> [--template <file>]` writes it: from a team's template, copied once and never
-read again and only when its fields read, or with no plugin and the default policy. It never replaces a file that is
+`agent-factory project init <project> [--template <file>]` writes it: from a template, copied once and never
+read again and only when its fields read, or with no plugin and the default policy. A team that keeps its settings
+live uses a team layer instead ([Settings layers](#settings-layers)). It never replaces a file that is
 there.
 
 - `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
@@ -410,6 +412,44 @@ there.
   with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
   for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
   turns a local gate into forge CI.
+
+### Settings layers
+
+The project file is one of three settings layers, all in the factory home and never in the repo (#229;
+[docs/DESIGN.md](docs/DESIGN.md) section 5 "Settings"). They are resolved on this host each time a project file is read,
+so before every run, and no run's agent is handed them. The coordinator's deny list covers each of them:
+`$FACTORY_HOME/user.json`, `$FACTORY_HOME/teams/**` and `$FACTORY_HOME/projects/**`, and the orchestrator refuses to
+start while one is missing (`wallProblems`).
+
+| layer | file | holds |
+|---|---|---|
+| team | `$FACTORY_HOME/teams/<team>/team.json`, a git clone, read at the commit the project pins | the project file's keys, plus `"modes": {"<key>": "locked" \| "default" \| "open"}` |
+| project | `$FACTORY_HOME/projects/<project>.json`; `"team": "<team>@<full commit>"` pins the team | the keys above |
+| user | `$FACTORY_HOME/user.json` | the same keys |
+| machine | the `FACTORY_*` variables | the keys that `config show` lists with an `env` source |
+
+Every key has a class, fixed in code (`src/core/settings/keys.ts`):
+
+| class | rule | keys |
+|---|---|---|
+| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun` |
+| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap` |
+| allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
+| deny-list | all layers add | `ready.testFiles`, `lanes.oneWayDoor` |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
+
+- A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
+  layer, its `file:line` and the team value. A team `locked` mode holds on any class.
+- `approval.floor` is the engine's: no lane above tiny starts without a human approval, and no layer can change it.
+- An unknown key is a warning with "did you mean" for one release, then an error.
+- With no team pin and no user file, every value is the project file's own, as before the layers.
+- `agent-factory config show <project>` prints each key's value, layer, `file:line` and class; `config check <project>`
+  resolves the layers, runs the project file's checks on the result, and exits 0 or 1; `team update <project>
+  [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
+  Fetch the team's clone yourself first; nothing here uses the network.
+- **Today:** the machine-layer keys are still read by each module from its own variable, so a file value for one is
+  reported by `config check` and not used, and `lanes.oneWayDoor` waits for the lane check (#230).
 
 ### The box image
 
@@ -452,7 +492,7 @@ to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, n
 story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
 questions and status to Jira or the issue through `agent-factory request` ([Writes](#writes)), and
 `agent-factory confirm` behind the person's yes; you never run `agent-factory approve`, `agent-factory start` or
-`agent-factory waive`, which are denied to you: the human runs them (#227, #231). You edit and write only spec drafts in
+`agent-factory waive` or `agent-factory eval`, which are denied to you: the human runs them (#227, #231, #215). You edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.

@@ -45,8 +45,10 @@ import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
+import { EVAL_HELP, evalCommand } from "./eval-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
+import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -86,10 +88,14 @@ commands:
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
   plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
   plugin list                  the registered plugins
+  config show <project>        every settings key: its value, layer, file:line and class (--json: as JSON)
+  config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
+  team update <project> [<commit>]
+                               show what the team's new commit changes, check it, then move the project's pin
 ${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${LOOP_HELP}
+${LOOP_HELP}${EVAL_HELP}
 options:
   --help      show this help
   --version   show the package version
@@ -882,6 +888,26 @@ async function pluginCli({ positionals, io }: Args): Promise<number> {
   return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg: PKG });
 }
 
+// settingsIo : what config and team run with: the factory home, never the product repo (#229)
+function settingsIo(io: Io, json: boolean, name: string): SettingsIo | undefined {
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    io.err(`agent-factory ${name}: ${home.reason}\n`);
+    return undefined;
+  }
+  return { env: io.env, out: io.out, err: io.err, home: home.path, json };
+}
+
+async function configCli({ positionals, json, io }: Args): Promise<number> {
+  const sio = settingsIo(io, json, "config");
+  return sio === undefined ? 1 : configCommand(positionals, sio);
+}
+
+async function teamCli({ positionals, json, io }: Args): Promise<number> {
+  const sio = settingsIo(io, json, "team");
+  return sio === undefined ? 1 : teamCommand(positionals, sio);
+}
+
 // coordinator : the coordinator's session, in its own folder with its own settings (#106)
 async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
   const runner = runnerOf(positionals);
@@ -949,6 +975,8 @@ const COMMANDS: readonly Command[] = [
   { name: "coordinator", run: coordinatorCommand },
   { name: "plugin", run: pluginCli },
   { name: "box", run: boxCommand },
+  { name: "config", run: configCli },
+  { name: "team", run: teamCli },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
     run: ({ positionals, io }: Args) => Promise.resolve(run(positionals, io)),
@@ -978,6 +1006,10 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
 }
 
 export function runCli(argv: readonly string[], io: Io): Promise<number> {
+  // eval reads its own options (--drafts, --allow-partial)
+  if (argv[0] === "eval") {
+    return evalCommand(argv.slice(1), io);
+  }
   return ownOptions(argv, io) ?? mainCli(argv, io);
 }
 

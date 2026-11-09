@@ -10,7 +10,8 @@
 //           (#113)
 //   deny    `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
 //           STARTs a ticket (#227, P6, P8) and never waives its own test check hit (#231); a human runs them at a
-//           front door. Raw git host and network clients, git push, a second
+//           front door. `agent-factory eval`: an eval pass is an extra task that spends on model runs (up to $100,
+//           ADR-0015 E11), and only a human starts one (#215). Raw git host and network clients, git push, a second
 //           interpreter or shell (a Read deny does not stop a program that opens files itself), sudo and the App
 //           token's wrapper; editing any .claude/ (the user's settings and each project's), the package, the START,
 //           approval and waiver records, the project home, the team and user settings layers, the local rubric folders, the
@@ -42,8 +43,9 @@ const READS = ["poll", "spec", "approval", "status", "request", "--help", "--ver
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
-// the commands only a human runs: the AI never approves, never STARTs (#227) and never waives a test check (#231)
-export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start", "agent-factory waive"];
+// the commands only a human runs: the AI never approves, never STARTs (#227), never waives a test check (#231), and
+// never starts an eval pass, an extra task that spends on model runs (#215)
+export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start", "agent-factory waive", "agent-factory eval"];
 
 const DENY_BASH = [
   ...HUMAN_ONLY,
@@ -156,11 +158,12 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${home}/approvals/**)`,
     `Edit(${home}/starts/**)`,
     `Edit(${home}/waivers/**)`,
-    // the settings layers and rubric folders the plugin work adds (#229, #232): denied before they exist
-    `Edit(${home}/settings.json)`,
-    `Edit(${home}/team/**)`,
-    `Edit(${home}/rubrics/**)`,
+    // the settings layers (#229; settings/layers.ts): the user file, every team's clone and its team.json, and the
+    // project home (each <project>.json and its <project>/ folder); and the rubric folders (#232)
+    `Edit(${home}/user.json)`,
+    `Edit(${home}/teams/**)`,
     `Edit(${home}/projects/**)`,
+    `Edit(${home}/rubrics/**)`,
     `Edit(${home}/runs/**)`,
     `Edit(${home}/secrets/**)`,
     `Edit(${home}/coordinator/**)`,
@@ -228,6 +231,7 @@ const NEVER_LET = [
   "agent-factory approve PROJ PROJ-1 0",
   "agent-factory start PROJ PROJ-1",
   "agent-factory waive PROJ PROJ-1 0",
+  "agent-factory eval reviewer",
   "gh api user",
   "glab api user",
   "curl https://example.com",
