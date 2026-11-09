@@ -53,7 +53,7 @@ import { writeLastPoll } from "./last-poll.js";
 import { designView, type DesignView } from "./design.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
-import type { Spend } from "./spend.js";
+import { NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import type { Acted } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
@@ -78,7 +78,13 @@ export type Unavailable = { readonly kind: "unavailable"; readonly reason: strin
 export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O>> };
 
 // a run that failed after it spent: its spend is still recorded (#131)
-export type FailedSpent = { readonly kind: "failed"; readonly reason: string; readonly spend: Spend };
+export type FailedSpent = {
+  readonly kind: "failed";
+  readonly reason: string;
+  readonly spend: Spend;
+  // the round's spend per run (#337)
+  readonly split?: RoundSpend;
+};
 
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 // what a design review's run reads (#236): the spec and design with these hashes, and for the verify pass the
@@ -131,6 +137,8 @@ export type Steps = {
           | Result<{
               readonly actOn: number;
               readonly spend: Spend;
+              // the round's spend per run: each finder's by its lens, and the verify pass's (#337)
+              readonly split?: RoundSpend;
               readonly acted?: Acted;
               readonly lenses?: Readonly<Record<string, number>>;
             }>
@@ -800,6 +808,7 @@ function reviewEnded(
   value: {
     readonly actOn: number;
     readonly spend: Spend;
+    readonly split?: RoundSpend;
     readonly acted?: Acted;
     readonly lenses?: Readonly<Record<string, number>>;
   },
@@ -812,11 +821,17 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
+      ...(value.split === undefined ? {} : { split: value.split }),
       ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });
+}
+
+// splitIn : a round's spend per run, as a field to spread; none when it has none (#337). Pure.
+function splitIn(ran: { readonly split?: RoundSpend }): { readonly split?: RoundSpend } {
+  return ran.split === undefined ? {} : { split: ran.split };
 }
 
 // failedSpent : a review that failed leaves its start alone, so a person looks; what it spent is still recorded, as a
@@ -825,13 +840,13 @@ async function failedSpent(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  ran: { readonly kind: "failed"; readonly reason: string; readonly spend?: Spend },
+  ran: { readonly kind: "failed"; readonly reason: string; readonly spend?: Spend; readonly split?: RoundSpend },
 ): Promise<Done> {
-  const spend = ran.spend;
-  if (spend !== undefined && (spend.usd > 0 || spend.tokens > 0)) {
+  const spend = ran.spend ?? NO_SPEND;
+  if (spend.usd > 0 || spend.tokens > 0) {
     const kept = await record({
       where: where(setup, state),
-      event: { at: at(setup), kind: "spent", phase: "review", head, spend },
+      event: { at: at(setup), kind: "spent", phase: "review", head, spend, ...splitIn(ran) },
     });
     if (kept.kind === "failed") {
       setup.log(`${state.ticket}: the failed review's spend was not recorded: ${kept.reason}`);

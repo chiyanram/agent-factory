@@ -46,6 +46,7 @@ import {
 } from "./lenses.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
+import type { RoundPart } from "../dispatch/spend.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { readProcess, type PluginDir, type Process } from "../process/read.js";
 import { attempt } from "./safe.js";
@@ -313,7 +314,14 @@ async function reuse(ctx: Ctx, pack: Pack, round: number): Promise<Result<Outcom
     : { kind: "ok", value: { kind: "reused", round, head: pack.head, actOn } };
 }
 
-type Pass = { readonly name: string; readonly model: string; readonly schema: string; readonly prompt: string };
+type Pass = {
+  readonly name: string;
+  readonly model: string;
+  readonly schema: string;
+  readonly prompt: string;
+  // the finder's lens or the verify pass, for the round's spend per run (#337)
+  readonly part: RoundPart;
+};
 
 // keep : the pass's answer, kept with the head; a full disk loses the record, never the round
 async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
@@ -346,6 +354,7 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
     prompt: withFloor(prompt),
     name: `reviewer-${ctx.setup.number}`,
     maxUsd: ctx.setup.maxUsd,
+    part: pass.part,
   });
   // every answer that spent tokens is kept, a failed pass too, so the retro sees what was spent
   const spent = ran.kind === "ok" ? ran.value.answer : ran.answer;
@@ -384,6 +393,7 @@ async function verifySubset(
     model,
     schema: VERIFY_SCHEMA,
     prompt: ctx.setup.prompts.verify,
+    part: { kind: "verify pass" },
   });
   if (ran.kind === "failed") {
     return ran;
@@ -486,6 +496,7 @@ async function findIn(ctx: Ctx, folder: string, lens: Lens, model: string): Prom
     model,
     schema: FIND_SCHEMA,
     prompt: ctx.setup.prompts.find,
+    part: { kind: "finder", lens: lens.name },
   });
   if (found.kind === "failed") {
     return found;

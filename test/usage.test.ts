@@ -90,45 +90,52 @@ describe("usage sums", () => {
     expect(lines[2]?.split(/\s{2,}/)).toEqual(["all", "implementer", "$0.00 0 tok", "$8.00 8000 tok", "$0.00 0 tok"]);
   });
 
-  it("splits each period, per project and per ticket, by run kind (#337)", () => {
+  it("splits each period, per project and per ticket, by run kind, and a ticket's finders by lens (#337)", () => {
     const runs = [
       spent("2026-11-02T10:00:00Z", 4, { kind: "design-reviewer" }),
       spent("2026-11-02T10:05:00Z", 1, { kind: "verify pass" }),
+      spent("2026-11-05T10:00:00Z", 3, { kind: "automated review" }),
       spent("2026-11-09T01:00:00Z", 2, { kind: "test-first" }),
       spent("2026-11-09T08:00:00Z", 3),
       spent("2026-11-09T09:00:00Z", 0, { spend: "unmeasured" }),
       spent("2026-11-09T10:00:00Z", 1, { kind: "cleanup" }),
-      spent("2026-11-09T11:00:00Z", 2, { kind: "automated review" }),
+      spent("2026-11-09T11:00:00Z", 2, { kind: "finder", lens: "errors" }),
+      spent("2026-11-09T11:00:00Z", 1, { kind: "finder", lens: "api" }),
+      spent("2026-11-09T11:00:00Z", 1, { kind: "verify pass" }),
       spent("2026-11-09T11:30:00Z", 5, { ticket: "PROJ-2" }),
       spent("2026-11-03T09:00:00Z", 6, { project: "atlas", ticket: "onboarder", kind: "onboarder" }),
     ];
     const lines = usageLines({ runs, now: NOW, windowHours: 5 });
     expect(lines.slice(1, -2)).toEqual([
       "             kind              today                 window                month",
-      "all          all               $13.00 13000 tok +1?  $11.00 11000 tok +1?  $24.00 24000 tok +1?",
+      "all          all               $15.00 15000 tok +1?  $13.00 13000 tok +1?  $29.00 29000 tok +1?",
       "             design-reviewer   $0.00 0 tok           $0.00 0 tok           $4.00 4000 tok",
-      "             verify pass       $0.00 0 tok           $0.00 0 tok           $1.00 1000 tok",
       "             test-first        $2.00 2000 tok        $0.00 0 tok           $2.00 2000 tok",
       "             implementer       $8.00 8000 tok +1?    $8.00 8000 tok +1?    $8.00 8000 tok +1?",
       "             cleanup           $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
-      "             automated review  $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
+      "             finder            $3.00 3000 tok        $3.00 3000 tok        $3.00 3000 tok",
+      "             verify pass       $1.00 1000 tok        $1.00 1000 tok        $2.00 2000 tok",
       "             onboarder         $0.00 0 tok           $0.00 0 tok           $6.00 6000 tok",
+      "             automated review  $0.00 0 tok           $0.00 0 tok           $3.00 3000 tok",
       "atlas        onboarder         $0.00 0 tok           $0.00 0 tok           $6.00 6000 tok",
       "  onboarder  onboarder         $0.00 0 tok           $0.00 0 tok           $6.00 6000 tok",
-      "ledger       all               $13.00 13000 tok +1?  $11.00 11000 tok +1?  $18.00 18000 tok +1?",
+      "ledger       all               $15.00 15000 tok +1?  $13.00 13000 tok +1?  $23.00 23000 tok +1?",
       "             design-reviewer   $0.00 0 tok           $0.00 0 tok           $4.00 4000 tok",
-      "             verify pass       $0.00 0 tok           $0.00 0 tok           $1.00 1000 tok",
       "             test-first        $2.00 2000 tok        $0.00 0 tok           $2.00 2000 tok",
       "             implementer       $8.00 8000 tok +1?    $8.00 8000 tok +1?    $8.00 8000 tok +1?",
       "             cleanup           $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
-      "             automated review  $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
-      "  PROJ-1     all               $8.00 8000 tok +1?    $6.00 6000 tok +1?    $13.00 13000 tok +1?",
+      "             finder            $3.00 3000 tok        $3.00 3000 tok        $3.00 3000 tok",
+      "             verify pass       $1.00 1000 tok        $1.00 1000 tok        $2.00 2000 tok",
+      "             automated review  $0.00 0 tok           $0.00 0 tok           $3.00 3000 tok",
+      "  PROJ-1     all               $10.00 10000 tok +1?  $8.00 8000 tok +1?    $18.00 18000 tok +1?",
       "             design-reviewer   $0.00 0 tok           $0.00 0 tok           $4.00 4000 tok",
-      "             verify pass       $0.00 0 tok           $0.00 0 tok           $1.00 1000 tok",
       "             test-first        $2.00 2000 tok        $0.00 0 tok           $2.00 2000 tok",
       "             implementer       $3.00 3000 tok +1?    $3.00 3000 tok +1?    $3.00 3000 tok +1?",
       "             cleanup           $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
-      "             automated review  $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
+      "             finder (api)      $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
+      "             finder (errors)   $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
+      "             verify pass       $1.00 1000 tok        $1.00 1000 tok        $2.00 2000 tok",
+      "             automated review  $0.00 0 tok           $0.00 0 tok           $3.00 3000 tok",
       "  PROJ-2     implementer       $5.00 5000 tok        $5.00 5000 tok        $5.00 5000 tok",
     ]);
   });
@@ -158,7 +165,7 @@ describe("agent-factory usage", () => {
     ...(spend === undefined ? {} : { spend }),
   });
 
-  it("names each record's run kind: the writer's mode, the review round, each design review run, the onboarder", async () => {
+  it("names each record's run kind: the writer's mode, each finder and verify pass of a round, an older round, each design review run, the onboarder", async () => {
     const head = "1".repeat(40);
     const designEnded = (step: string, spend: unknown) => ({
       at: "2026-11-09T08:00:00Z",
@@ -180,24 +187,49 @@ describe("agent-factory usage", () => {
       writerEnded("2026-11-09T09:30:00Z", { usd: 4, tokens: 4 }, "cleanup"),
       { at: "2026-11-09T10:00:00Z", kind: "review-ended", head, actOn: 0, spend: { usd: 5, tokens: 5 } },
       { at: "2026-11-09T10:30:00Z", kind: "spent", phase: "review", head, spend: { usd: 6, tokens: 6 } },
+      // a round's line with its spend per run (#337): each finder's by lens, and the verify pass's
+      {
+        at: "2026-11-09T11:00:00Z",
+        kind: "review-ended",
+        head,
+        actOn: 0,
+        spend: { usd: 6, tokens: 6 },
+        split: {
+          finders: { errors: { usd: 2, tokens: 2 }, api: { usd: 1, tokens: 1 } },
+          verify: { usd: 3, tokens: 3 },
+        },
+      },
+      // a failed round's, whose verify pass never ran
+      {
+        at: "2026-11-09T11:30:00Z",
+        kind: "spent",
+        phase: "review",
+        head,
+        spend: { usd: 2, tokens: 2 },
+        split: { finders: { errors: { usd: 2, tokens: 2 } }, verify: { usd: 0, tokens: 0 } },
+      },
     ]);
     write("ledger", "onboarder", [
       { at: "2026-11-09T07:00:00Z", kind: "spent", phase: "onboard", head, spend: { usd: 7, tokens: 7 } },
     ]);
     const read = await readSpends({ home });
     expect(read.problems).toEqual([]);
-    expect(read.runs.map((r) => [r.ticket, r.kind])).toEqual([
-      ["PROJ-1", "design-reviewer"],
-      ["PROJ-1", "verify pass"],
-      ["PROJ-1", "test-first"],
-      ["PROJ-1", "implementer"],
-      ["PROJ-1", "implementer"],
-      ["PROJ-1", "implementer"],
-      ["PROJ-1", "implementer"],
-      ["PROJ-1", "cleanup"],
-      ["PROJ-1", "automated review"],
-      ["PROJ-1", "automated review"],
-      ["onboarder", "onboarder"],
+    expect(read.runs.map((r) => [r.ticket, r.kind, r.lens ?? ""])).toEqual([
+      ["PROJ-1", "design-reviewer", ""],
+      ["PROJ-1", "verify pass", ""],
+      ["PROJ-1", "test-first", ""],
+      ["PROJ-1", "implementer", ""],
+      ["PROJ-1", "implementer", ""],
+      ["PROJ-1", "implementer", ""],
+      ["PROJ-1", "implementer", ""],
+      ["PROJ-1", "cleanup", ""],
+      ["PROJ-1", "automated review", ""],
+      ["PROJ-1", "automated review", ""],
+      ["PROJ-1", "finder", "errors"],
+      ["PROJ-1", "finder", "api"],
+      ["PROJ-1", "verify pass", ""],
+      ["PROJ-1", "finder", "errors"],
+      ["onboarder", "onboarder", ""],
     ]);
   });
 

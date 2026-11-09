@@ -14,7 +14,9 @@
 // A writer or review "ended" line carries the run's spend{usd, tokens} (#131), as the agent CLI reported it; a line
 // with none was not measured (an older line, or a run stopped before its result). A run that failed after it spent
 // writes a "spent" line instead: it ends nothing, so the start still reads as a run that never ended and goes to a
-// person, but its spend counts. `usage` and the caps sum them all.
+// person, but its spend counts. `usage` and the caps sum them all. A review round's line, ended or spent, also carries
+// split{finders, verify}: each finder's spend by its lens and the verify pass's, which sum to its spend (#337); an
+// older line has none.
 //
 // A design review (#236) runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
 // a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
@@ -26,7 +28,7 @@ import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
-import { addSpend, NO_SPEND, type Spend } from "./spend.js";
+import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 import { isActedRow, type Acted } from "../review/acted-on.js";
 
@@ -150,6 +152,8 @@ export type Event =
       readonly nextTry?: NextTry;
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // the same spend per run: each finder's by its lens, and the verify pass's (#337); none on an older line
+      readonly split?: RoundSpend;
       // the last full round's Act on and Consider findings at its head, each acted on or not by this head (#220);
       // none on a first round, a reused one, or an older line
       readonly acted?: Acted;
@@ -164,6 +168,8 @@ export type Event =
       readonly phase: Phase;
       readonly head: string;
       readonly spend: Spend;
+      // a review round's spend per run (#337); none on another phase's line or an older one
+      readonly split?: RoundSpend;
     }
   // one run of a design review (#236), at the spec and design hashes it read
   | {
@@ -333,6 +339,47 @@ function spendField(raw: unknown): { readonly spend?: Spend } | Bad {
   const usd = amount(prop(spend, "usd"));
   const tokens = amount(prop(spend, "tokens"));
   return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens } };
+}
+
+// spendIn : one spend figure, or BAD
+function spendIn(value: unknown): Spend | Bad {
+  const usd = amount(prop(value, "usd"));
+  const tokens = amount(prop(value, "tokens"));
+  return usd === BAD || tokens === BAD ? BAD : { usd, tokens };
+}
+
+// findersIn : each finder's spend by its lens, or BAD when it is not an object of spends
+function findersIn(raw: unknown): Readonly<Record<string, Spend>> | Bad {
+  const isMap = typeof raw === "object" && raw !== null && !Array.isArray(raw);
+  const entries = entriesOf(raw);
+  const finders = entries.flatMap(([lens, s]) => {
+    const spend = spendIn(s);
+    return spend === BAD ? [] : [[lens, spend] as const];
+  });
+  return isMap && finders.length === entries.length ? Object.fromEntries(finders) : BAD;
+}
+
+// splitField : a review round's spend per run (#337), as a field to spread: none on a line that has none
+function splitField(line: unknown): { readonly split?: RoundSpend } | Bad {
+  const split = prop(line, "split");
+  if (split === undefined) {
+    return {};
+  }
+  const verify = spendIn(prop(split, "verify"));
+  const finders = findersIn(prop(split, "finders"));
+  return verify === BAD || finders === BAD ? BAD : { split: { finders, verify } };
+}
+
+// spentOf : a spent line: its phase, head and spend, and a review round's spend per run (#337)
+function spentOf(raw: unknown, at: string): Event | Bad {
+  const phase = oneOf(raw, "phase", PHASES);
+  const head = str(raw, "head");
+  const spend = spendIn(prop(raw, "spend"));
+  const split = splitField(raw);
+  if (phase === BAD || head === BAD) {
+    return BAD;
+  }
+  return spend === BAD || split === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...split };
 }
 
 // cardField : a line's role card hash, as a field to spread: none on a line that has none (#236)
@@ -514,7 +561,7 @@ function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, 
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
-  const extras = [nextTryField(raw), spendField(raw), actedField(raw), lensesField(raw)];
+  const extras = [nextTryField(raw), spendField(raw), splitField(raw), actedField(raw), lensesField(raw)];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
   return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
     ? BAD
@@ -527,14 +574,7 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
   "ready-ended": readyEndedOf,
   "review-ended": reviewEndedOf,
   "verify-ended": verifyEndedOf,
-  spent: (raw, at) => {
-    const phase = oneOf(raw, "phase", PHASES);
-    const head = str(raw, "head");
-    const spend = spendField(raw);
-    return phase === BAD || head === BAD || spend === BAD || spend.spend === undefined
-      ? BAD
-      : { at, kind: "spent", phase, head, spend: spend.spend };
-  },
+  spent: spentOf,
   "design-ended": designEndedOf,
   pinged: (raw, at) => {
     const head = str(raw, "head");

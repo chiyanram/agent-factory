@@ -162,6 +162,12 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
+// a review round's spend per run (#337): each finder's by its lens, and the verify pass's
+const SPLIT = {
+  finders: { errors: { usd: 0.1, tokens: 10 }, api: { usd: 0.1, tokens: 15 } },
+  verify: { usd: 0.1, tokens: 15 },
+};
+
 describe("records", () => {
   const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
 
@@ -481,7 +487,12 @@ describe("tick", () => {
         kind: "available",
         run: async () => ({
           kind: "ok",
-          value: { actOn: 0, spend: { usd: 0.3, tokens: 40 }, lenses: { errors: 1, api: 0 } },
+          value: {
+            actOn: 0,
+            spend: { usd: 0.3, tokens: 40 },
+            split: SPLIT,
+            lenses: { errors: 1, api: 0 },
+          },
         }),
       },
     };
@@ -491,6 +502,7 @@ describe("tick", () => {
       kind: "review-ended",
       actOn: 0,
       spend: { usd: 0.3, tokens: 40 },
+      split: SPLIT,
       lenses: { errors: 1, api: 0 },
     });
   });
@@ -512,6 +524,17 @@ describe("tick", () => {
     expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, lenses: { errors: 2 } }] });
     writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: "two" } })}\n`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    // the round's spend per run (#337): kept; a split whose finders are not spends by lens fails the read
+    writeFileSync(path, `${JSON.stringify({ ...base, split: SPLIT })}\n`);
+    expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, split: SPLIT }] });
+    for (const bad of [
+      { finders: { errors: { usd: 1 } }, verify: { usd: 0, tokens: 0 } },
+      { finders: [], verify: { usd: 0, tokens: 0 } },
+      { finders: {} },
+    ]) {
+      writeFileSync(path, `${JSON.stringify({ ...base, split: bad })}\n`);
+      expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    }
   });
 
   it("the ready check gets the writer's evidence rows and records its reason; a local gate runs the verifier (#91)", async () => {
@@ -1111,6 +1134,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
           kind: "failed",
           reason: "the verify pass failed: budget",
           spend: { usd: 1.5, tokens: 200 },
+          split: { finders: { errors: { usd: 0.5, tokens: 80 } }, verify: { usd: 1, tokens: 120 } },
         }),
       },
     };
@@ -1124,7 +1148,13 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     // the start stays without an end, so a person looks; the spend is kept beside it
     expect(events.slice(-2)).toMatchObject([
       { kind: "started", phase: "review" },
-      { kind: "spent", phase: "review", head: H, spend: { usd: 1.5, tokens: 200 } },
+      {
+        kind: "spent",
+        phase: "review",
+        head: H,
+        spend: { usd: 1.5, tokens: 200 },
+        split: { finders: { errors: { usd: 0.5, tokens: 80 } }, verify: { usd: 1, tokens: 120 } },
+      },
     ]);
     const summary = summarize({ events, since: "2026-11-07T08:00:00Z" });
     expect(summary.spent).toEqual({ usd: 2.5, tokens: 300 });
@@ -1133,11 +1163,12 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
       "spent $2.50 and 300 tokens",
     );
     expect(ticketCapped({ usd: 1, tokens: 100 }, caps({ ticket: { usd: 2, tokens: "none" } }))).toBe("");
-    // usage counts it too
+    // usage counts it too, by run kind: the failed round's spend per run (#337)
     const spends = await readSpends({ home, project: "ledger" });
-    expect(spends.runs.map((r) => r.spend)).toEqual([
-      { usd: 1, tokens: 100 },
-      { usd: 1.5, tokens: 200 },
+    expect(spends.runs.map((r) => [r.kind, r.spend])).toEqual([
+      ["cleanup", { usd: 1, tokens: 100 }],
+      ["finder", { usd: 0.5, tokens: 80 }],
+      ["verify pass", { usd: 1, tokens: 120 }],
     ]);
   });
 

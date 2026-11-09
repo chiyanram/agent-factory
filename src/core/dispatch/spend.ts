@@ -36,6 +36,24 @@ export function addSpend(a: Spend, b: Spend): Spend {
   return { usd: a.usd + b.usd, tokens: a.tokens + b.tokens };
 }
 
+// RoundSpend : an automated review round's spend per run (#337): each finder's by its lens, and the verify pass's (its
+// rule and logic passes summed). Their sum is the round's spend.
+export type RoundSpend = { readonly finders: Readonly<Record<string, Spend>>; readonly verify: Spend };
+
+export const NO_ROUND_SPEND: RoundSpend = { finders: {}, verify: NO_SPEND };
+
+// RoundPart : which run of a round a model answer belongs to (#337)
+export type RoundPart = { readonly kind: "finder"; readonly lens: string } | { readonly kind: "verify pass" };
+
+// addRoundSpend : the round's spend with one more answer's, added to its part. Pure.
+export function addRoundSpend(round: RoundSpend, part: RoundPart, spend: Spend): RoundSpend {
+  if (part.kind === "verify pass") {
+    return { ...round, verify: addSpend(round.verify, spend) };
+  }
+  const was = round.finders[part.lens] ?? NO_SPEND;
+  return { ...round, finders: { ...round.finders, [part.lens]: addSpend(was, spend) } };
+}
+
 // the longest output line kept while it is printed: a result event carries the run's last message, never a whole file
 const MOST_LINE_CHARS = 1024 * 1024;
 

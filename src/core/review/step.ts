@@ -1,6 +1,7 @@
 // step — the reviewer as the dispatcher's review step (#103, #138). The table needs only the Act on count; every other
 // outcome maps onto it, with what the round spent (#131): every model answer of the round, a failed pass's too, is
-// metered, so a round that fails still hands the orchestrator its spend. The outcomes:
+// metered, so a round that fails still hands the orchestrator its spend; and each by its run, each finder's by its lens
+// and the verify pass's, for usage by run kind (#337). The outcomes:
 //   posted, reused, already   their Act on count; a posted round also rates the last full round's findings (#220),
 //                             and names each lens's unique verified findings (#237)
 //   no-progress               needs-human is on the change, which the table reads first next pass
@@ -16,7 +17,15 @@ import type { Acted } from "./acted-on.js";
 import { lensSetupOf, roundLenses } from "./finders.js";
 import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
 import { paths, reviewSetup } from "./settings.js";
-import { addSpend, NO_SPEND, spendOf, type Spend } from "../dispatch/spend.js";
+import {
+  addRoundSpend,
+  addSpend,
+  NO_ROUND_SPEND,
+  NO_SPEND,
+  spendOf,
+  type RoundSpend,
+  type Spend,
+} from "../dispatch/spend.js";
 
 type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
 // a posted round also rates the last full round's findings (#220), and names each lens's unique verified findings (#237)
@@ -52,15 +61,17 @@ function actOnOf(outcome: Outcome): ActOn {
   return mapAs(outcome.kind, outcome);
 }
 
-// Meter : what the round's model answers have spent so far
-type Meter = { spend: Spend };
+// Meter : what the round's model answers have spent so far, in all and per run (#337)
+type Meter = { spend: Spend; split: RoundSpend };
 
-// metered : the model, with each answer's spend added to the meter, whether the pass succeeded or not
+// metered : the model, with each answer's spend added to the meter, whether the pass succeeded or not; an answer of a
+// run that names no part is in the sum only
 function metered(model: Model, meter: Meter): Model {
   return async (run) => {
     const ran: ModelResult = await model(run);
     const spent = ran.kind === "ok" ? { usd: ran.value.costUsd, tokens: ran.value.tokens } : spendOf(ran.answer);
     meter.spend = addSpend(meter.spend, spent);
+    meter.split = run.part === undefined ? meter.split : addRoundSpend(meter.split, run.part, spent);
     return ran;
   };
 }
@@ -81,6 +92,12 @@ async function worstUsd(input: {
   return setup.kind === "ok"
     ? { kind: "ok", value: worstCase(roundLenses(setup.value.lenses).length, input.maxUsd) }
     : setup;
+}
+
+// splitOf : the round's spend per run, as a field to spread; none when the round ran no model, as when it reused a
+// verdict
+function splitOf(meter: Meter): { readonly split?: RoundSpend } {
+  return meter.spend.usd === 0 && meter.spend.tokens === 0 ? {} : { split: meter.split };
 }
 
 // reviewStep : available when the reviewer's settings are there
@@ -106,12 +123,12 @@ export function reviewStep(input: {
         return { kind: "failed", reason: "no open change to review" };
       }
       const setup = reviewSetup({ ...input, number: run.change.line.number, paths: p.value });
-      const meter: Meter = { spend: NO_SPEND };
+      const meter: Meter = { spend: NO_SPEND, split: NO_ROUND_SPEND };
       const round = await reviewRound({ ...setup, model: metered(setup.model, meter) });
       const mapped = round.kind === "ok" ? actOnOf(round.value) : round;
       return mapped.kind === "ok"
-        ? { kind: "ok", value: { ...mapped.value, spend: meter.spend } }
-        : { ...mapped, spend: meter.spend };
+        ? { kind: "ok", value: { ...mapped.value, spend: meter.spend, ...splitOf(meter) } }
+        : { ...mapped, spend: meter.spend, ...splitOf(meter) };
     },
   };
 }
