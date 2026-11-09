@@ -5,6 +5,7 @@
 //   FACTORY_UPSTREAM_PROXY=proxy.corp.example:8080    host and port only: no scheme, no user, no password
 
 import type { Upstream } from "./squid.js";
+import { settingOf } from "../settings/machine.js";
 
 export type UpstreamRead = Upstream | { readonly kind: "refused"; readonly reason: string };
 
@@ -28,6 +29,6 @@ function proxyOf(set: string): UpstreamRead {
 }
 
 export function upstreamOf(env: NodeJS.ProcessEnv): UpstreamRead {
-  const set = (env.FACTORY_UPSTREAM_PROXY ?? "").trim();
+  const set = (settingOf(env, "egress.upstreamProxy") ?? "").trim();
   return set === "" ? { kind: "none" } : proxyOf(set);
 }

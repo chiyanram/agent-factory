@@ -5,6 +5,7 @@
 // place nobody chose.
 
 import type { Box, BoxPlace, PinnedImage, Probe } from "./types.js";
+import { settingOf } from "../settings/machine.js";
 
 export type BoxChoice =
   | { readonly kind: "chosen"; readonly place: BoxPlace; readonly risks: readonly string[] }
@@ -25,7 +26,7 @@ const PLACES: readonly Place[] = [
 ];
 
 export function chooseBox(env: NodeJS.ProcessEnv): BoxChoice {
-  const set = env.FACTORY_BOX;
+  const set = settingOf(env, "runner");
   if (set === undefined || set.trim() === "") {
     return { kind: "refused", reason: "FACTORY_BOX is not set; set it to vm" };
   }

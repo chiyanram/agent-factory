@@ -18,6 +18,7 @@ import type { Gate } from "../dispatch/table.js";
 import { DEFAULT_EGRESS_IMAGE, upstreamOf, type Started, type Upstream } from "../egress/index.js";
 import type { Result } from "../forge/api.js";
 import { readProjectFile, type ProjectFile } from "../project.js";
+import { settingOf } from "../settings/machine.js";
 import type { BoxSetup } from "./boxrun.js";
 import type { BoxPlan } from "./steps.js";
 
@@ -56,7 +57,7 @@ function egressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<Egress> 
   if (upstream.kind === "refused") {
     return { kind: "failed", reason: upstream.reason };
   }
-  const image = pinImage(env.FACTORY_EGRESS_IMAGE ?? DEFAULT_EGRESS_IMAGE);
+  const image = pinImage(settingOf(env, "egress.image") ?? DEFAULT_EGRESS_IMAGE);
   return image.kind === "pinned"
     ? { kind: "ok", value: { upstream, image } }
     : { kind: "failed", reason: `FACTORY_EGRESS_IMAGE: ${image.reason}` };

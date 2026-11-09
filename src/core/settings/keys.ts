@@ -8,13 +8,17 @@
 //   locked      the highest layer that sets it wins; a lower layer may only repeat it
 //   preference  the lowest layer wins                                        (a model, a label)
 //
-// Every class but preference is a safety key: it only gets stricter in a lower layer. A key is read from the files
-// (team, project, user) or, for now, from its FACTORY_* variable only (the machine layer, machine.ts): those modules
-// still read their variable themselves, so a file value for one is not used yet and is reported, never applied.
+// Every class but preference is a safety key: it only gets stricter in a lower layer. A file key is read from the
+// files (team, project, user). A machine key is read from the files too, at its dotted name, and from its FACTORY_*
+// variable, the lowest layer (#254); a module reads its resolved value only through machine.ts, never the variable
+// (test/settings-read.test.ts fails on a direct read).
 
 import { DEFAULT_POLICY, MAX_CAP, MODES, POLICY_POINTS } from "../plugin/policy.js";
 import { checkPluginList } from "../process/plugins.js";
 import { TEST_FILES } from "../ready/floor.js";
+import { list, MACHINE_KEYS, oneOf, type MachineId, wholeNumber, word } from "./variables.js";
+
+export type { MachineId } from "./variables.js";
 
 export const CLASSES = ["ladder", "cap", "allow-list", "deny-list", "locked", "preference"] as const;
 export type KeyClass = (typeof CLASSES)[number];
@@ -33,9 +37,8 @@ type Common = {
   readonly about: string;
 };
 
-// a key the files hold, at this path of the JSON object
-export type FileKey = Common & {
-  readonly where: "file";
+type Held = Common & {
+  // where the files hold it, in the JSON object
   readonly path: readonly string[];
   readonly check: Check;
   // a ladder's values, from the loosest to the strictest
@@ -44,41 +47,22 @@ export type FileKey = Common & {
   readonly fallback?: unknown;
   // the engine's own value, which no layer can change (the approval floor)
   readonly fixed?: unknown;
+  // true when no project file reader checks it, so the layers check the project's value too
+  readonly checkProject?: true;
 };
 
-// a key read from its FACTORY_* variable only, for now
-export type MachineKey = Common & {
-  readonly where: "machine";
-  readonly env: string;
-  readonly ladder?: readonly string[];
-};
+// a key the files hold, at its path of the JSON object
+export type FileKey = Held & { readonly where: "file" };
+
+// a key the files hold at its dotted name, with its FACTORY_* variable as the machine layer below them (#254)
+export type MachineKey = Held & { readonly where: "machine"; readonly env: string };
 
 export type Key = FileKey | MachineKey;
 
-function word(value: unknown): boolean {
-  return typeof value === "string" && value !== "" && !value.includes("\u0000");
-}
-
-function words(value: unknown): boolean {
-  return Array.isArray(value) && value.length > 0 && value.every(word);
-}
-
-const oneOf =
-  (values: readonly string[]): Check =>
-  (value) =>
-    typeof value === "string" && values.includes(value) ? "" : `one of ${values.map((v) => `"${v}"`).join(", ")}`;
-
-const wholeNumber =
-  (most: number): Check =>
-  (value) =>
-    Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= most
-      ? ""
-      : `a whole number from 1 to ${most}`;
-
-const list: Check = (value) => (words(value) ? "" : 'a list of words, such as ["make"]');
-
 const hosts: Check = (value) =>
   Array.isArray(value) && value.every(word) ? "" : 'a list of host names, such as ["api.anthropic.com"]';
+
+const flag: Check = (value) => (typeof value === "boolean" ? "" : "true or false");
 
 const map: Check = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every(word)
@@ -153,6 +137,15 @@ const FILE_KEYS: readonly FileKey[] = [
     about: "the globs the test checks read as test files",
   },
   {
+    id: "ready.judgeFiles",
+    where: "file",
+    path: ["ready", "judgeFiles"],
+    class: "deny-list",
+    check: list,
+    fallback: [],
+    about: "the judge files this project adds to the built-in ones (read by ready/judge.ts judgeFiles, #231)",
+  },
+  {
     id: "egress.allow",
     where: "file",
     path: ["egress", "allow"],
@@ -198,38 +191,30 @@ const FILE_KEYS: readonly FileKey[] = [
     fixed: "tiny",
     about: "no lane above this one starts without a human approval; no layer or plugin can change it",
   },
-];
-
-const DRY: readonly string[] = ["0", "1"];
-
-function machine(id: string, env: string, keyClass: KeyClass, about: string): MachineKey {
-  return keyClass === "ladder"
-    ? { id, where: "machine", env, class: keyClass, ladder: DRY, about }
-    : { id, where: "machine", env, class: keyClass, about };
-}
-
-const MACHINE_KEYS: readonly MachineKey[] = [
-  machine("dryRun", "FACTORY_DRY_RUN", "ladder", "1 shows each write on the git host and makes none"),
-  machine("gitHost", "FACTORY_FORGE", "locked", "the git host's kind: gitlab or github"),
-  machine("gitHostName", "FACTORY_FORGE_HOST", "locked", "the git host's name, when it is not the public one"),
-  machine("identity", "FACTORY_IDENTITY", "locked", "own (your gh or glab login) or app (a GitHub App)"),
-  machine("runner", "FACTORY_BOX", "locked", "where a runner runs: vm"),
-  machine("egress.image", "FACTORY_EGRESS_IMAGE", "locked", "the egress proxy's image, pinned by digest"),
-  machine("egress.upstreamProxy", "FACTORY_UPSTREAM_PROXY", "preference", "at work: the company proxy, host:port"),
-  machine("rulebook", "FACTORY_RULEBOOK", "locked", "the rulebook plugin's folder"),
-  machine("review.findPrompt", "FACTORY_REVIEW_FIND", "locked", "the automated review's find instructions"),
-  machine("review.verifyPrompt", "FACTORY_REVIEW_VERIFY", "locked", "the automated review's verify instructions"),
-  machine("caps.usdPerRun", "FACTORY_MAX_USD", "cap", "the most one model run may spend, in US dollars"),
-  machine("caps.liveRuns", "FACTORY_MAX_RUNS", "cap", "the most live runs on this machine"),
-  machine("caps.gitHostTries", "FACTORY_MAX_TRIES", "cap", "the most tries of one git host call"),
-  machine("implementer.minutes", "FACTORY_WRITER_MINUTES", "cap", "the implementer's time per run"),
-  machine("implementer.stallMinutes", "FACTORY_WRITER_STALL_MINUTES", "cap", "silence that stops a run"),
-  machine("implementer.model", "FACTORY_WRITER_MODEL", "preference", "the implementer's model"),
-  machine("review.findModel", "FACTORY_FIND_MODEL", "preference", "the finder's model"),
-  machine("review.ruleModel", "FACTORY_RULE_MODEL", "preference", "the rule finder's model"),
-  machine("review.logicModel", "FACTORY_LOGIC_MODEL", "preference", "the logic finder's model"),
-  machine("claimLabel", "FACTORY_CLAIM_LABEL", "preference", "the label a claimed PR carries"),
-  machine("quietMinutes", "FACTORY_QUIET_MINUTES", "preference", "how long an open question may sit"),
+  {
+    id: "work",
+    where: "file",
+    path: ["work"],
+    class: "ladder",
+    ladder: [false, true].map(String),
+    check: flag,
+    fallback: false,
+    checkProject: true,
+    about:
+      "true for a work project: nothing is ever committed to its product repo (P9); once set, no lower layer unsets it",
+  },
+  {
+    id: "repoCommits",
+    where: "file",
+    path: ["repoCommits"],
+    class: "ladder",
+    ladder: [true, false].map(String),
+    check: flag,
+    fallback: false,
+    checkProject: true,
+    about:
+      "true lets the factory commit the spec, the brief and the glossary to the product repo (P9); refused at work",
+  },
 ];
 
 export const KEYS: readonly Key[] = [...FILE_KEYS, ...MACHINE_KEYS];
@@ -246,7 +231,7 @@ export function fileKeys(): readonly FileKey[] {
   return FILE_KEYS;
 }
 
-export function machineKeys(): readonly MachineKey[] {
+export function machineKeys(): readonly (MachineKey & { readonly id: MachineId })[] {
   return MACHINE_KEYS;
 }
 

@@ -11,6 +11,7 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { maxUsd } from "../review/settings.js";
+import { settingName, settingOf } from "../settings/machine.js";
 import { COMPLETION, STALL_MS, type Claude, type Completion } from "./run.js";
 
 export type WriterSettings = {
@@ -27,24 +28,27 @@ const MAX_MINUTES = 240;
 
 // minutesOf : the run's time limit in seconds. Pure.
 export function minutesOf(env: NodeJS.ProcessEnv): Result<number> {
-  const set = env.FACTORY_WRITER_MINUTES;
+  const set = settingOf(env, "implementer.minutes");
   const minutes = set === undefined ? DEFAULT_MINUTES : Number(set);
   return Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= MAX_MINUTES
     ? { kind: "ok", value: minutes * 60 }
-    : { kind: "failed", reason: `FACTORY_WRITER_MINUTES must be a whole number from 1 to ${MAX_MINUTES}` };
+    : {
+        kind: "failed",
+        reason: `${settingName("implementer.minutes")} must be a whole number from 1 to ${MAX_MINUTES}`,
+      };
 }
 
 // stallOf : the stall time in milliseconds; the setting may lower the default, never raise it. Pure.
 export function stallOf(env: NodeJS.ProcessEnv): Result<number> {
   const most = STALL_MS / 60_000;
-  const set = env.FACTORY_WRITER_STALL_MINUTES;
+  const set = settingOf(env, "implementer.stallMinutes");
   // "" reads as 0, which is refused
   const minutes = set === undefined ? most : Number(set);
   return Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= most
     ? { kind: "ok", value: minutes * 60_000 }
     : {
         kind: "failed",
-        reason: `FACTORY_WRITER_STALL_MINUTES must be a whole number from 1 to ${most}: it can only lower the stall time`,
+        reason: `${settingName("implementer.stallMinutes")} must be a whole number from 1 to ${most}: it can only lower the stall time`,
       };
 }
 
@@ -59,7 +63,7 @@ function timesOf(env: NodeJS.ProcessEnv): Result<{ readonly timeoutSeconds: numb
 }
 
 async function rulebookOf(env: NodeJS.ProcessEnv): Promise<Result<string>> {
-  const dir = env.FACTORY_RULEBOOK ?? "";
+  const dir = settingOf(env, "rulebook") ?? "";
   const manifest = join(dir, ".claude-plugin", "plugin.json");
   const found = isAbsolute(dir)
     ? await stat(manifest).then(
@@ -69,7 +73,7 @@ async function rulebookOf(env: NodeJS.ProcessEnv): Promise<Result<string>> {
     : false;
   return found
     ? { kind: "ok", value: dir }
-    : { kind: "failed", reason: `FACTORY_RULEBOOK must be the rulebook plugin's folder, with ${manifest}` };
+    : { kind: "failed", reason: `${settingName("rulebook")} must be the rulebook plugin's folder, with ${manifest}` };
 }
 
 export async function writerSettings(env: NodeJS.ProcessEnv): Promise<Result<WriterSettings>> {
@@ -88,7 +92,7 @@ export async function writerSettings(env: NodeJS.ProcessEnv): Promise<Result<Wri
         value: {
           rulebook: rulebook.value,
           ...times.value,
-          claude: { maxUsd: usd.value, model: env.FACTORY_WRITER_MODEL ?? "" },
+          claude: { maxUsd: usd.value, model: settingOf(env, "implementer.model") ?? "" },
           completion: COMPLETION,
         },
       }

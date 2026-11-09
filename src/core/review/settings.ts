@@ -22,37 +22,41 @@ import { recordsDirOf } from "../kept.js";
 import { claudeSessions, type Sessions } from "./live.js";
 import { claudeModel, runInFolder, type Model } from "./model.js";
 import type { ReviewSetup } from "./round.js";
+import { settingName, settingOf } from "../settings/machine.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
-function absolute(env: NodeJS.ProcessEnv, name: string): Result<string> {
-  const value = env[name] ?? "";
+function absolute(name: string, set: string | undefined): Result<string> {
+  const value = set ?? "";
   return isAbsolute(value)
     ? { kind: "ok", value }
     : { kind: "failed", reason: `${name} must be an absolute path, got ${JSON.stringify(value)}` };
 }
 
 export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
-  const value = env.FACTORY_MAX_USD ?? "";
+  const value = settingOf(env, "caps.usdPerRun") ?? "";
   return value === "" || /^\d+(\.\d+)?$/.test(value)
     ? { kind: "ok", value }
     : {
         kind: "failed",
-        reason: `FACTORY_MAX_USD must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(value)}`,
+        reason: `${settingName("caps.usdPerRun")} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(value)}`,
       };
 }
 
 function maxRuns(env: NodeJS.ProcessEnv): Result<number> {
-  const value = env.FACTORY_MAX_RUNS ?? "2";
+  const value = settingOf(env, "caps.liveRuns") ?? "2";
   return /^[1-9]\d{0,2}$/.test(value)
     ? { kind: "ok", value: Number(value) }
-    : { kind: "failed", reason: `FACTORY_MAX_RUNS must be a whole number from 1, got ${JSON.stringify(value)}` };
+    : {
+        kind: "failed",
+        reason: `${settingName("caps.liveRuns")} must be a whole number from 1, got ${JSON.stringify(value)}`,
+      };
 }
 
 function home(env: NodeJS.ProcessEnv): Result<string> {
   return env.FACTORY_HOME === undefined
     ? { kind: "ok", value: join(homedir(), ".factory") }
-    : absolute(env, "FACTORY_HOME");
+    : absolute("FACTORY_HOME", env.FACTORY_HOME);
 }
 
 export type Paths = {
@@ -77,11 +81,11 @@ function limits(env: NodeJS.ProcessEnv): Result<Limits> {
 type Places = { readonly repo: string; readonly rulebook: string; readonly home: string };
 
 function places(env: NodeJS.ProcessEnv): Result<Places> {
-  const repo = absolute(env, "FACTORY_REPO");
+  const repo = absolute("FACTORY_REPO", env.FACTORY_REPO);
   if (repo.kind === "failed") {
     return repo;
   }
-  const rulebook = absolute(env, "FACTORY_RULEBOOK");
+  const rulebook = absolute(settingName("rulebook"), settingOf(env, "rulebook"));
   if (rulebook.kind === "failed") {
     return rulebook;
   }
@@ -130,16 +134,16 @@ export function claudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 function prompts(env: NodeJS.ProcessEnv): ReviewSetup["prompts"] {
   return {
-    find: env.FACTORY_REVIEW_FIND ?? join(PROMPTS, "review-find.md"),
-    verify: env.FACTORY_REVIEW_VERIFY ?? join(PROMPTS, "review-verify.md"),
+    find: settingOf(env, "review.findPrompt") ?? join(PROMPTS, "review-find.md"),
+    verify: settingOf(env, "review.verifyPrompt") ?? join(PROMPTS, "review-verify.md"),
   };
 }
 
 function models(env: NodeJS.ProcessEnv): ReviewSetup["models"] {
   return {
-    find: env.FACTORY_FIND_MODEL ?? "sonnet",
-    rule: env.FACTORY_RULE_MODEL ?? "sonnet",
-    logic: env.FACTORY_LOGIC_MODEL ?? "opus",
+    find: settingOf(env, "review.findModel") ?? "sonnet",
+    rule: settingOf(env, "review.ruleModel") ?? "sonnet",
+    logic: settingOf(env, "review.logicModel") ?? "opus",
   };
 }
 
@@ -168,7 +172,7 @@ export function reviewSetup(input: {
     forge: input.forge,
     number: input.number,
     factory: input.factory,
-    label: env.FACTORY_CLAIM_LABEL ?? "agent::claimed",
+    label: settingOf(env, "claimLabel") ?? "agent::claimed",
     repo: p.repo,
     env,
     home: p.home,

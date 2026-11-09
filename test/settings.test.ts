@@ -11,6 +11,9 @@ import { fileKeys, machineKeys, type FileKey } from "../src/core/settings/keys.j
 import { layered, modesOf, pinOf } from "../src/core/settings/layers.js";
 import { keyLines } from "../src/core/settings/lines.js";
 import { canonical, didYouMean, resolve, type FileLayer, type Resolved } from "../src/core/settings/resolve.js";
+import { runEnv, settingOf } from "../src/core/settings/machine.js";
+import { maxUsd } from "../src/core/review/settings.js";
+import { evalSettings } from "../src/core/eval/harness.js";
 import { tempDir } from "./temp.js";
 
 let home = "";
@@ -56,11 +59,11 @@ function commitTeam(value: unknown): string {
 const BASE = { gate: "forge-ci", ready: { programs: ["make", "npm"], timeoutMinutes: 30 } };
 
 type Run = { readonly code: number; readonly out: string; readonly err: string };
-async function cli(argv: readonly string[]): Promise<Run> {
+async function cli(argv: readonly string[], env?: NodeJS.ProcessEnv): Promise<Run> {
   let out = "";
   let err = "";
   const code = await runCli(argv, {
-    env: { ...process.env, FACTORY_HOME: home },
+    env: { ...process.env, ...env, FACTORY_HOME: home },
     out: (t) => (out += t),
     err: (t) => (err += t),
     readSecret: async () => "",
@@ -184,15 +187,16 @@ const POOLS: Readonly<Record<string, readonly unknown[]>> = {
   "egress.allow": [["a.example.com"], ["a.example.com", "b.example.com"], ["c.example.com"]],
   connectors: [{}, { notify: "discord" }],
   plugins: [[], ["rulebook@chiyanram"], ["rulebook@chiyanram", "team@acme"]],
+  "ready.judgeFiles": [["ci/**"], ["ci/**", "build/**"]],
   "lanes.oneWayDoor": [["db/migrations/**"], ["infra/**"]],
   "approval.floor": ["tiny"],
+  work: [false, true],
+  repoCommits: [false, true],
 };
 
 function poolOf(key: FileKey): readonly unknown[] {
-  if (key.class === "ladder") {
-    return MODES;
-  }
-  return key.class === "cap" && key.id.startsWith("policy.") ? [1, 3, 5, 20] : (POOLS[key.id] ?? []);
+  const policy = key.class === "ladder" ? MODES : [1, 3, 5, 20];
+  return key.id.startsWith("policy.") ? policy : (POOLS[key.id] ?? []);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -430,11 +434,10 @@ describe("resolve: each class (#229)", () => {
     expect(modesOf(layer("team", { modes: "x" })).problems[0]?.text).toContain("must map keys to modes");
   });
 
-  it("an unknown key is a warning with did you mean; a key the machine layer holds says so", () => {
+  it("an unknown key is a warning with did you mean; a machine key is a key a file holds (#254)", () => {
     const r = resolved([layer("user", { egress: { alow: ["a.example.com"] }, caps: { usdPerRun: 2 } })]);
     expect(r.problems).toEqual([
       { level: "warning", text: expect.stringContaining("unknown key egress.alow; did you mean egress.allow?") },
-      { level: "warning", text: expect.stringContaining("caps.usdPerRun is read from FACTORY_MAX_USD only") },
     ]);
     expect(didYouMean("zzzzzzzz")).toBe("");
   });
@@ -548,6 +551,119 @@ describe("agent-factory config and team (#229)", () => {
     writeProject({ ...BASE, team: `acme@${"b".repeat(40)}` });
     expect((await cli(["team", "update", "ledger", "HEAD"])).err).toContain("is not a full commit id");
     expect((await cli(["team", "nope"])).code).toBe(64);
+  });
+});
+
+describe("every module reads the resolved settings (#254)", () => {
+  const withEnv = (layers: readonly FileLayer[], env: NodeJS.ProcessEnv): ReturnType<typeof resolve> =>
+    resolve({ layers, modes: modesOf(layers.find((l) => l.name === "team")).modes, env, problems: [] });
+
+  it("a machine key resolves through the files and its variable, the lowest layer, by its class", () => {
+    const team = layer("team", { caps: { usdPerRun: 1 }, implementer: { model: "opus" } });
+    const capped = withEnv([team], {});
+    expect(valueOf(capped, "caps.usdPerRun")).toMatchObject({ value: 1, sources: [{ layer: "team" }] });
+    expect(settingOf(runEnv({}, capped), "caps.usdPerRun")).toBe("1");
+    expect(maxUsd(runEnv({}, capped))).toEqual({ kind: "ok", value: "1" });
+    const lower = withEnv([team], { FACTORY_MAX_USD: "0.5", FACTORY_WRITER_MODEL: "sonnet" });
+    expect(valueOf(lower, "caps.usdPerRun")).toMatchObject({ value: 0.5, sources: [{ layer: "machine" }] });
+    expect(valueOf(lower, "implementer.model")?.value).toBe("sonnet");
+    expect(errors(lower)).toEqual([]);
+    const looser = withEnv([team], { FACTORY_MAX_USD: "5" });
+    expect(errors(looser)).toEqual([
+      "caps.usdPerRun: the machine layer (env FACTORY_MAX_USD) 5 is higher than 1; a cap key only gets stricter in a lower layer, and the team value is 1",
+    ]);
+    expect(errors(withEnv([team], { FACTORY_MAX_USD: "" }))[0]).toContain("cannot be compared");
+  });
+
+  it("runEnv puts only a file's values in the variables; a variable alone stays exactly as it is", () => {
+    const env = { FACTORY_MAX_USD: "2.50", FACTORY_DRY_RUN: "1" };
+    expect(runEnv(env, withEnv([], env))).toEqual(env);
+    const user = layer("user", { dryRun: "1", quietMinutes: 10 });
+    expect(runEnv({}, withEnv([user], {}))).toMatchObject({ FACTORY_DRY_RUN: "1", FACTORY_QUIET_MINUTES: "10" });
+    expect(errors(withEnv([layer("team", { dryRun: "1" })], { FACTORY_DRY_RUN: "0" }))[0]).toContain("is looser");
+    expect(errors(withEnv([layer("user", { caps: { usdPerRun: "lots" } })], {}))[0]).toContain("a dollar amount");
+  });
+
+  it("a team file's spend cap stops a run: dispatch and review refuse a looser variable, naming the key", async () => {
+    const commit = commitTeam({ caps: { usdPerRun: 1 } });
+    writeProject({ ...BASE, team: `acme@${commit}` });
+    for (const argv of [
+      ["dispatch", "ledger", "--once"],
+      ["review", "ledger", "7"],
+    ]) {
+      const r = await cli(argv, { FACTORY_MAX_USD: "5" });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("the settings layers refuse to start: caps.usdPerRun: the machine layer");
+      expect(r.err).toContain("the team value is 1");
+    }
+  });
+
+  it("a run prints the unknown-key warnings", async () => {
+    writeProject({ ...BASE, gatee: "local" });
+    const r = await cli(["review", "ledger", "7"], { FACTORY_DRY_RUN: "1" });
+    expect(r.err).toContain("agent-factory review: warning: ");
+    expect(r.err).toContain("unknown key gatee; did you mean gate?");
+  });
+
+  it("ready.judgeFiles is a deny-list key: every layer adds, and the reader gets them all", async () => {
+    const commit = commitTeam({ ready: { judgeFiles: ["ci/**"] } });
+    writeProject({ ...BASE, team: `acme@${commit}`, ready: { ...BASE.ready, judgeFiles: ["build/**"] } });
+    writeUser({ ready: { judgeFiles: ["ci/**", "deploy/**"] } });
+    expect(await readProjectFile({ home, project: "ledger" })).toMatchObject({
+      kind: "ok",
+      value: { ready: { judgeFiles: ["ci/**", "build/**", "deploy/**"] } },
+    });
+  });
+
+  it("P9: the commit opt-in is off by default, a project may turn it on, and it is refused at work", () => {
+    expect(valueOf(resolved([]), "repoCommits")?.value).toBe(false);
+    const on = resolved([layer("project", { repoCommits: true })]);
+    expect(valueOf(on, "repoCommits")?.value).toBe(true);
+    expect(errors(on)).toEqual([]);
+    const userOff = resolved([layer("project", { repoCommits: true }), layer("user", { repoCommits: false })]);
+    expect(valueOf(userOff, "repoCommits")?.value).toBe(false);
+    const atWork = resolved([layer("team", { work: true }), layer("project", { repoCommits: true })]);
+    expect(errors(atWork)).toEqual([
+      "repoCommits: /project.json:2 opts in to commits to the product repo, and /team.json:2 marks the project as work, where nothing is ever committed (P9)",
+    ]);
+    const unmark = resolved([layer("team", { work: true }), layer("project", { work: false })]);
+    expect(errors(unmark)[0]).toContain("work: the project layer (/project.json:2) false is looser than true");
+    expect(errors(resolved([layer("project", { repoCommits: "yes" })]))[0]).toContain("must be true or false");
+  });
+
+  it("start resolves the project's layers, and poll and the loop commands the user and machine layers", async () => {
+    const commit = commitTeam({ caps: { usdPerRun: 1 } });
+    writeProject({ ...BASE, team: `acme@${commit}` });
+    const start = await cli(["start", "ledger", "5"], { FACTORY_MAX_USD: "5" });
+    expect(start.code).toBe(1);
+    expect(start.err).toContain("agent-factory start: ");
+    expect(start.err).toContain("caps.usdPerRun: the machine layer");
+    writeUser({ claimLabl: "x" });
+    for (const argv of [["poll"], ["claim", "5"], ["reconcile"]]) {
+      const r = await cli(argv);
+      expect(r.err).toContain(`agent-factory ${argv[0]}: warning: `);
+      expect(r.err).toContain("unknown key claimLabl; did you mean claimLabel?");
+    }
+    writeUser({ caps: { usdPerRun: "lots" } });
+    const bad = await cli(["poll"]);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("caps.usdPerRun in");
+  });
+
+  it("the eval judge's spend cap and model are settings keys: a cap, and a preference", () => {
+    const team = layer("team", { eval: { judgeUsdPerRun: 0.2, judgeModel: "opus" } });
+    const flags = { drafts: false, allowPartial: false };
+    expect(evalSettings(runEnv({}, withEnv([team], {})), flags)).toMatchObject({
+      judgeUsd: "0.2",
+      judgeModel: "opus",
+    });
+    expect(errors(withEnv([team], { FACTORY_JUDGE_MAX_USD: "1" }))[0]).toContain(
+      "eval.judgeUsdPerRun: the machine layer (env FACTORY_JUDGE_MAX_USD) 1 is higher than 0.2",
+    );
+    expect(valueOf(withEnv([team], { FACTORY_JUDGE_MODEL: "sonnet" }), "eval.judgeModel")?.value).toBe("sonnet");
+    const poll = layer("user", { poll: { minutes: 10 } });
+    expect(settingOf(runEnv({}, withEnv([poll], {})), "poll.minutes")).toBe("10");
+    expect(errors(withEnv([layer("user", { poll: { minutes: 90 } })], {}))[0]).toContain("from 1 to 60");
   });
 });
 

@@ -10,6 +10,7 @@ import type { Result } from "./core/forge/api.js";
 import { evalReviewer, evalSettings, type EvalInput, type EvalSettings, type Written } from "./core/eval/harness.js";
 import { claudeModel, runInFolder } from "./core/review/model.js";
 import { claudeEnv } from "./core/review/settings.js";
+import { settingName, settingOf } from "./core/settings/machine.js";
 
 export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--allow-partial]
                                the automated review's eval (ADR-0015): each case the operator approved in
@@ -55,9 +56,13 @@ function inCi(env: NodeJS.ProcessEnv): boolean {
   return !["", "false"].includes(env.CI ?? "");
 }
 
-// badDollars : the first cap setting that is set but not a dollar amount, or ""
+// badDollars : why the first cap setting that is set is not a dollar amount, or ""
 function badDollars(env: NodeJS.ProcessEnv): string {
-  return ["FACTORY_MAX_USD", "FACTORY_JUDGE_MAX_USD"].find((k) => !DOLLARS.test(env[k] || "0")) ?? "";
+  const caps = ["caps.usdPerRun", "eval.judgeUsdPerRun"] as const;
+  const bad = caps.find((id) => !DOLLARS.test(settingOf(env, id) || "0"));
+  return bad === undefined
+    ? ""
+    : `${settingName(bad)} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(settingOf(env, bad))}`;
 }
 
 // refusal : why this pass may not run here, or ""
@@ -66,11 +71,14 @@ export function refusal(env: NodeJS.ProcessEnv): string {
   const checks: readonly (readonly [boolean, string])[] = [
     [inCi(env), "it runs on the host, never in CI: CI holds no model token (ADR-0015 E10)"],
     [
-      env.FACTORY_DRY_RUN === "1",
+      settingOf(env, "dryRun") === "1",
       "FACTORY_DRY_RUN is set, and an eval spends on model runs; run it without the dry run",
     ],
-    [bad !== "", `${bad} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(env[bad])}`],
-    [!isAbsolute(env.FACTORY_RULEBOOK ?? ""), "FACTORY_RULEBOOK must be the rulebook plugin folder, an absolute path"],
+    [bad !== "", bad],
+    [
+      !isAbsolute(settingOf(env, "rulebook") ?? ""),
+      "FACTORY_RULEBOOK must be the rulebook plugin folder, an absolute path",
+    ],
   ];
   return checks.find(([refused]) => refused)?.[1] ?? "";
 }
@@ -110,7 +118,7 @@ function inputOf(p: Parsed, s: EvalSettings, io: EvalIo, work: string): EvalInpu
     root: p.root,
     env: io.env,
     work,
-    rulebook: io.env.FACTORY_RULEBOOK ?? "",
+    rulebook: settingOf(io.env, "rulebook") ?? "",
     model: claudeModel({ bin: io.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(io.env), run: runInFolder }),
     settings: s,
     now: new Date(),

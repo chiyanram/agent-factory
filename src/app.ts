@@ -50,6 +50,9 @@ import { EVAL_HELP, evalCommand } from "./eval-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
+import { runSettings } from "./core/project.js";
+import { settingName, settingOf } from "./core/settings/machine.js";
+import type { MachineId } from "./core/settings/keys.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -166,10 +169,14 @@ function version(): string {
   return pkg.version;
 }
 
-async function poll({ json, io }: Args): Promise<number> {
-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+function poll(args: Args): Promise<number> {
+  return resolvedRun("poll", undefined, args.io, (io) => pollResolved({ ...args, io }));
+}
+
+async function pollResolved({ json, io }: Args): Promise<number> {
+  const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   if (label.trim() === "") {
-    io.err("agent-factory poll: FACTORY_CLAIM_LABEL is set but empty\n");
+    io.err(`agent-factory poll: ${settingName("claimLabel")} is set but empty\n`);
     return 1;
   }
   const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
@@ -296,6 +303,10 @@ async function startCommand({ positionals, yes, io }: Args): Promise<number> {
     io.err("usage: agent-factory start <project> <ticket> [--yes]\n");
     return 64;
   }
+  return resolvedRun("start", target.project, io, (resolved) => startResolved(target, yes, resolved));
+}
+
+async function startResolved(target: TicketArgs, yes: boolean, io: Io): Promise<number> {
   const branch = await branchAt(io, target);
   if (branch.kind === "failed") {
     io.err(`agent-factory start: refused: ${branch.reason}\n`);
@@ -429,8 +440,8 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
 
 type Command = { readonly name: string; readonly run: (args: Args) => Promise<number> };
 
-function minutesOf(env: NodeJS.ProcessEnv, name: string, fallback: number): number | "bad" {
-  const raw = env[name] ?? String(fallback);
+function minutesOf(env: NodeJS.ProcessEnv, id: MachineId, fallback: number): number | "bad" {
+  const raw = settingOf(env, id) ?? String(fallback);
   return /^[1-9]\d{0,5}$/.test(raw) ? Number(raw) : "bad";
 }
 
@@ -440,16 +451,16 @@ type DispatchSettings =
 
 function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
   const home = factoryHome(env);
-  const quiet = minutesOf(env, "FACTORY_QUIET_MINUTES", 30);
-  const every = minutesOf(env, "FACTORY_POLL_MINUTES", DEFAULT_POLL_MINUTES);
+  const quiet = minutesOf(env, "quietMinutes", 30);
+  const every = minutesOf(env, "poll.minutes", DEFAULT_POLL_MINUTES);
   if (home.kind === "refused") {
     return home;
   }
   if (every === "bad") {
-    return { kind: "refused", reason: "FACTORY_POLL_MINUTES must be a whole number of minutes" };
+    return { kind: "refused", reason: `${settingName("poll.minutes")} must be a whole number of minutes` };
   }
   return quiet === "bad"
-    ? { kind: "refused", reason: "FACTORY_QUIET_MINUTES must be a whole number of minutes" }
+    ? { kind: "refused", reason: `${settingName("quietMinutes")} must be a whole number of minutes` }
     : { home: home.path, quiet, poll: every };
 }
 
@@ -485,7 +496,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     return planned;
   }
   const { gate, plan } = planned.value;
-  const label = io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL;
+  const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   const writer = await writerSetup({
     env: io.env,
     home,
@@ -536,7 +547,7 @@ async function pass(
     home: settings.home,
     project,
     forge,
-    label: io.env.FACTORY_CLAIM_LABEL ?? DEFAULT_CLAIM_LABEL,
+    label: settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL,
     ...planned.value,
     now: () => Date.now(),
     quietMinutes: settings.quiet,
@@ -555,7 +566,7 @@ async function notifierFor(io: Io, home: string, project: string, mark: string):
   if (plugin.kind === "failed" || plugin.value === "") {
     return plugin.kind === "failed" ? plugin : { kind: "ok", value: NO_NOTIFY };
   }
-  if (io.env.FACTORY_DRY_RUN === "1") {
+  if (settingOf(io.env, "dryRun") === "1") {
     return { kind: "ok", value: dryNotify((line) => io.err(`${line}\n`)) };
   }
   const setup = await pluginSetup(home, io.env, webhookSecrets(tokenStore(io, home), BUNDLED_DISCORD));
@@ -587,6 +598,29 @@ async function dispatchReady(io: Io): Promise<DispatchSettings> {
     : settings;
 }
 
+// resolvedRun : the run with the project's settings layers resolved once on this host (#254): its modules read the
+// resolved values, and the warnings (an unknown key) are printed; a layer that loosens a safety key refuses it
+async function resolvedRun(
+  name: string,
+  project: string | undefined,
+  io: Io,
+  run: (resolved: Io) => Promise<number>,
+): Promise<number> {
+  const home = factoryHome(io.env);
+  const settings =
+    home.kind === "home"
+      ? await runSettings({ home: home.path, project, env: io.env })
+      : { kind: "failed" as const, reason: home.reason };
+  if (settings.kind === "failed") {
+    io.err(`agent-factory ${name}: ${settings.reason}\n`);
+    return 1;
+  }
+  for (const warning of settings.value.warnings) {
+    io.err(`agent-factory ${name}: warning: ${warning}\n`);
+  }
+  return run({ ...io, env: settings.value.env });
+}
+
 // dispatch : one pass (#103). Only --once: launchd or cron runs it every few minutes, and a lock keeps passes apart.
 async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise<number> {
   const [project] = positionals;
@@ -594,6 +628,10 @@ async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise
     io.err("usage: agent-factory dispatch <project> --once [--dry-run]\n");
     return 64;
   }
+  return resolvedRun("dispatch", project, io, (resolved) => dispatchResolved(project, dryRun, resolved));
+}
+
+async function dispatchResolved(project: string, dryRun: boolean, io: Io): Promise<number> {
   const settings = await dispatchReady(io);
   if ("kind" in settings) {
     io.err(`agent-factory dispatch: ${settings.reason}\n`);
@@ -657,10 +695,10 @@ function reviewTarget(positionals: readonly string[]): Target | "bad" {
 }
 
 function reviewPaths(env: NodeJS.ProcessEnv): ReturnType<typeof paths> {
-  return env.FACTORY_DRY_RUN === "1"
+  return settingOf(env, "dryRun") === "1"
     ? {
         kind: "failed",
-        reason: "FACTORY_DRY_RUN is set, and a reviewer spends on model runs; run it without the dry run",
+        reason: `${settingName("dryRun")} is set, and a reviewer spends on model runs; run it without the dry run`,
       }
     : paths(env);
 }
@@ -693,10 +731,14 @@ async function reviewCommand({ positionals, io }: Args): Promise<number> {
     io.err("usage: agent-factory review <project> <number>\n");
     return 64;
   }
+  return resolvedRun("review", target.project, io, (resolved) => reviewResolved(target, resolved));
+}
+
+function reviewResolved(target: Target, io: Io): Promise<number> {
   const p = reviewPaths(io.env);
   if (p.kind === "failed") {
     io.err(`agent-factory review: ${p.reason}\n`);
-    return 1;
+    return Promise.resolve(1);
   }
   return runReview(target, io, p.value);
 }
@@ -987,7 +1029,11 @@ const COMMANDS: readonly Command[] = [
   { name: "team", run: teamCli },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
-    run: ({ positionals, io }: Args) => Promise.resolve(run(positionals, io)),
+    // the writer's lint hook reads no setting, and prints only the lint's own output
+    run: ({ positionals, io }: Args) =>
+      name === "lint-edit"
+        ? Promise.resolve(run(positionals, io))
+        : resolvedRun(name, undefined, io, (resolved) => Promise.resolve(run(positionals, resolved))),
   })),
 ];
 

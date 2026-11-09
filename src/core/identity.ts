@@ -18,6 +18,7 @@
 // session runs unattended.
 
 import type { Exit, Result, Runner } from "./forge/api.js";
+import { settingOf } from "./settings/machine.js";
 
 export type IdentitySetting =
   | { readonly kind: "own" }
@@ -46,7 +47,7 @@ export function identitySetting(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: "github" | "gitlab";
 }): Result<IdentitySetting> {
-  const kind = input.env.FACTORY_IDENTITY ?? "own";
+  const kind = settingOf(input.env, "identity") ?? "own";
   if (kind === "own") {
     return { kind: "ok", value: { kind: "own" } };
   }

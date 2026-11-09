@@ -123,8 +123,8 @@ function modeFor(id: string, keyClass: string, mode: unknown): ModeRead {
 
 function modeOf(id: string, mode: unknown): ModeRead {
   const key = keyById(id);
-  return key === undefined || key.where !== "file"
-    ? { kind: "bad", why: `names ${JSON.stringify(id)}, which is not a settings key a file holds` }
+  return key === undefined
+    ? { kind: "bad", why: `names ${JSON.stringify(id)}, which is not a settings key` }
     : modeFor(id, key.class, mode);
 }
 

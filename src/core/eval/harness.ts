@@ -20,6 +20,7 @@ import { readKept } from "../kept.js";
 import type { Model } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
 import { reviewSetup } from "../review/settings.js";
+import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
 import {
   capped,
@@ -79,9 +80,9 @@ export function evalSettings(
   flags: { readonly drafts: boolean; readonly allowPartial: boolean },
 ): EvalSettings {
   return {
-    runUsd: env.FACTORY_MAX_USD || "2",
-    judgeUsd: env.FACTORY_JUDGE_MAX_USD || "0.50",
-    judgeModel: env.FACTORY_JUDGE_MODEL || "sonnet",
+    runUsd: settingOf(env, "caps.usdPerRun") || "2",
+    judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
+    judgeModel: settingOf(env, "eval.judgeModel") || "sonnet",
     judgePrompt: env.FACTORY_EVAL_JUDGE || join(PROMPTS, "eval-judge.md"),
     ...flags,
   };
