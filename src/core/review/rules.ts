@@ -8,6 +8,15 @@ import { prose } from "./fence.js";
 
 export type Pointer = { readonly domain: string; readonly reference: string };
 
+// BASELINE : the review checks every pack carries, whatever the AGENTS.md files say (#226). The one place the list
+// lives: the plugins ticket (#232) reads it from the process plugin instead, with this as the built-in default.
+export const BASELINE: readonly Pointer[] = [
+  { domain: "crq", reference: "review-process" },
+  { domain: "crq", reference: "code-review" },
+  { domain: "crq", reference: "verify-done" },
+  { domain: "code", reference: "smells" },
+];
+
 export type FileRules = {
   readonly pointers: readonly Pointer[];
   // repo paths, already resolved against the file's folder

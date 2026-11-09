@@ -21,8 +21,8 @@ the finding at the broken line and name the changed line that breaks it (ADR-001
 
 Give two verdicts, kept apart:
 
-- **Standards**: each rule in section 3 the diff breaks, and the smell baseline in section 4. A correctness finding
-  names its input, its state and the wrong result.
+- **Standards**: each rule in section 3 the diff breaks, and each baseline review check in section 4. A correctness
+  finding names its input, its state and the wrong result.
 - **Spec**: each acceptance criterion in section 5 that the diff does not meet, and anything the diff does that no
   criterion or the design in section 6 asks for. A design file listed in section 7 was edited by this MR: report it.
   When section 5 says there is no approved spec, report that one finding as it says and check no criterion. The MR

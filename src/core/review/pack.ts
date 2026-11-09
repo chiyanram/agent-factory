@@ -3,13 +3,15 @@
 // rewrite the rules it is reviewed against (ADR-0004); a change that targets another branch is refused. Seven sections:
 //   1 head · patch-id · merge-base       2 the change: its description, as data, and the diff against the merge-base,
 //   3 rules from the default branch        or, from round 2, the interdiff since the last reviewed head (a range-diff
-//   4 smell baseline + correctness lens    when the branch was rebased)
+//   4 baseline review checks + lens        when the branch was rebased)
 //   5 intent and acceptance criteria: the approved spec   6 the design the approved spec links
 //   7 rule files this change edits, flagged for the human
 // The contract is the ticket's spec, read from the project's spec store, never the change description: the change body
 // names the spec's hash, not its text (#164, #224). The spec counts only while its hash is the one the approval records;
 // a spec edited after approval, or never approved, is named in section 5 for the reviewer to report, and no spec in the
 // store fails the pack, so a review never runs with an empty contract.
+// Section 4 always holds the baseline review checks (rules.ts BASELINE), whatever the AGENTS.md files say; a pointer
+// to one of them is not repeated in section 3, and a missing one fails the pack (#226).
 // Every block sits in a fence longer than any backtick run inside it (fence.ts). One pack per head: a second call reuses
 // it. A step that fails leaves no pack behind, so a broken pack is never reused.
 
@@ -21,7 +23,7 @@ import { hostGit } from "../git.js";
 import { plainBranch } from "../branch.js";
 import { checkSpec, readSpec, type Spec, type SpecRead, type SpecStore } from "../spec.js";
 import { fence } from "./fence.js";
-import { agentsChain, readRules, type Pointer } from "./rules.js";
+import { agentsChain, BASELINE, readRules, type Pointer } from "./rules.js";
 
 export type Previous = { readonly kind: "none" } | { readonly kind: "head"; readonly sha: string };
 
@@ -118,12 +120,22 @@ function shapeProblem(input: PackInput): string {
   return plain ? previousProblem(input.previous) : `${input.mark}${c.number}: a branch name that is not plain`;
 }
 
-// checks that need no git: the rulebook, the previous head, the target branch, the branch names
+// missingBaseline : the first baseline review check the rulebook lacks, as the reason, or ""
+async function missingBaseline(rulebook: string): Promise<string> {
+  for (const p of BASELINE) {
+    const path = referencePath(rulebook, p);
+    if (!(await exists(path))) {
+      return `the rulebook ${JSON.stringify(rulebook)} has no baseline review check ${p.domain}/${p.reference} (${path}); it must be the plugin folder`;
+    }
+  }
+  return "";
+}
+
+// checks that need no git: the rulebook and its baseline review checks, the previous head, the target branch, the
+// branch names
 async function precheck(input: PackInput): Promise<string> {
-  const smells = await exists(join(input.rulebook, "skills", "code", "references", "smells.md"));
-  return smells
-    ? shapeProblem(input)
-    : `the rulebook must be the plugin folder (with skills/code/references/smells.md), got ${JSON.stringify(input.rulebook)}`;
+  const missing = await missingBaseline(input.rulebook);
+  return missing === "" ? shapeProblem(input) : missing;
 }
 
 type Heads = { readonly head: string; readonly master: string; readonly base: string };
@@ -369,7 +381,8 @@ async function rulesSection(p: Parts): Promise<Result<string>> {
     const text = await ruleText(p.git, p.h, file);
     blocks.push(fence({ title: file, text: text.kind === "ok" ? text.value : "", info: "markdown" }));
   }
-  const seen = new Set<string>();
+  // a baseline review check is in section 4 already
+  const seen = new Set<string>(BASELINE.map((b) => `${b.domain}/${b.reference}`));
   for (const ptr of p.rules.pointers) {
     const key = `${ptr.domain}/${ptr.reference}`;
     if (!seen.has(key)) {
@@ -470,14 +483,23 @@ async function editsSection(p: Parts): Promise<Result<string>> {
   return { kind: "ok", value: head + edited.map((f) => `- ${f}\n`).join("") };
 }
 
-type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly smells: string };
+type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly baseline: string };
 
-async function smellsText(rulebook: string): Promise<Result<string>> {
-  const path = join(rulebook, "skills", "code", "references", "smells.md");
-  return readFile(path, "utf8").then(
-    (value): Result<string> => ({ kind: "ok", value }),
-    (): Result<string> => ({ kind: "failed", reason: `cannot read the smell baseline ${path}` }),
-  );
+// baselineSection : each baseline review check, fenced as data
+async function baselineSection(rulebook: string): Promise<Result<string>> {
+  const blocks: string[] = [];
+  for (const b of BASELINE) {
+    const path = referencePath(rulebook, b);
+    const text = await readFile(path, "utf8").then(
+      (value): Result<string> => ({ kind: "ok", value }),
+      (): Result<string> => ({ kind: "failed", reason: `cannot read the baseline review check ${path}` }),
+    );
+    if (text.kind === "failed") {
+      return text;
+    }
+    blocks.push(fence({ title: `rulebook ${b.domain}/${b.reference}`, text: text.value, info: "markdown" }));
+  }
+  return { kind: "ok", value: blocks.join("") };
 }
 
 async function sections(p: Parts): Promise<Result<Sections>> {
@@ -489,13 +511,13 @@ async function sections(p: Parts): Promise<Result<Sections>> {
   if (rules.kind === "failed") {
     return rules;
   }
-  const smells = await smellsText(p.input.rulebook);
-  if (smells.kind === "failed") {
-    return smells;
+  const baseline = await baselineSection(p.input.rulebook);
+  if (baseline.kind === "failed") {
+    return baseline;
   }
   const edits = await editsSection(p);
   return edits.kind === "ok"
-    ? { kind: "ok", value: { change: change.value, rules: rules.value, edits: edits.value, smells: smells.value } }
+    ? { kind: "ok", value: { change: change.value, rules: rules.value, edits: edits.value, baseline: baseline.value } }
     : edits;
 }
 
@@ -511,7 +533,7 @@ async function render(p: Parts): Promise<Result<string>> {
     `\n## 1 · Head\n\n- head: ${h.head}\n- patch-id: ${p.patchId}\n- merge-base: ${h.base} (${input.defaultBranch} at ${h.master})\n- diff flags: ${DIFF_FLAGS.join(" ")}\n`,
     `\n## 2 · The change\n${s.value.change}`,
     `\n## 3 · Rules from ${input.defaultBranch}\n${s.value.rules}`,
-    `\n## 4 · Smell baseline and correctness lens\n${fence({ title: "rulebook code/smells", text: s.value.smells, info: "markdown" })}\nCorrectness lens: every correctness finding names its input, state and wrong result.\n`,
+    `\n## 4 · Baseline review checks and correctness lens\n${s.value.baseline}\nCorrectness lens: every correctness finding names its input, state and wrong result.\n`,
     `\n## 5 · Intent and acceptance criteria (the approved spec)\n${specSection(p)}`,
     `\n## 6 · The design the approved spec links\n${await designSection(p)}`,
     `\n## 7 · Rule files this change edits\n\n${s.value.edits}`,
