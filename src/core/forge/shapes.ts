@@ -4,7 +4,7 @@
 // keeps the first value out of place; the caller checks it once with r.done.
 
 import type { Note } from "../notes.js";
-import type { Post, PostField, Seat } from "../post.js";
+import type { BodyPost, Post, PostField, Seat } from "../post.js";
 import type { Reader } from "./read.js";
 import type {
   Anchor,
@@ -57,6 +57,15 @@ export function postOf(r: Reader, value: unknown): Post {
     fields: r.list(value, "fields").map((f) => fieldOf(r, f)),
     items: texts(r, value, "items"),
   };
+}
+
+// bodyPostOf : a PR body: a post, and the implementer's Markdown with the git host when it has them (#335). The adapter
+// that posts it cleans the Markdown again (renderBody), whatever cleaned it before.
+export function bodyPostOf(r: Reader, value: unknown): BodyPost {
+  const post = postOf(r, value);
+  return r.absent(value, "prBody")
+    ? post
+    : { ...post, prBody: { markdown: r.text(value, "prBody.markdown"), host: r.text(value, "prBody.host") } };
 }
 
 export function anchorOf(r: Reader, value: unknown): Anchor {
@@ -147,7 +156,7 @@ export function changeRequestOf(r: Reader, value: unknown): ChangeRequest {
     branch: r.text(value, "branch"),
     base: r.text(value, "base"),
     title: r.text(value, "title"),
-    body: postOf(r, r.at(value, "body")),
+    body: bodyPostOf(r, r.at(value, "body")),
   };
 }
 

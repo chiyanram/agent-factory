@@ -153,7 +153,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 |---|---|
 | spec | intent · lane · acceptance criteria (the form is open, see section 9) · design link · out of scope · planned files (optional) |
 | report | `.factory/report.json`: `done` with evidence per AC (and an optional `deferred` list), `asked` with questions, or `blocked` |
-| PR body | `.factory/pr.md`, written by the implementer and posted by the host (who owns it is open, see section 9) |
+| PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner (#335; ADR-0012 S13) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
 | finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), evidence and grade (each `cited`, `walked` or `ran`; the role cards name it grade), fix |
@@ -242,7 +242,7 @@ so work and personal logins never mix.
 | design findings skip the verify pass | they go through the verify pass |
 | one find pass for all rules (ADR-0004) | one finder run per lens, one shared verify pass |
 | `report.json` has no `deferred` list | an optional `deferred` list (cleanup) |
-| the PR body is built by the host | the host posts the implementer's `.factory/pr.md` |
+| the PR body is built by the host | the host posts the implementer's `.factory/pr.md` below its own lines, cleaned (#335, built) |
 | a team template copied once (ADR-0014 P3) | live settings layers, pinned by commit |
 | one runner kind, `vm`; the laptop is refused (`box/choose.ts:24`) | `srt` on the work laptop |
 | `claude` only | an agent CLI connector: claude and copilot |
@@ -258,6 +258,7 @@ so work and personal logins never mix.
   - S2: the deny list;
   - S3: new rows;
   - S8, S11 and S17: the `srt` runner on the laptop;
+  - S13: the implementer's PR body, cleaned (amended 2026-11-09, #335);
   - S14: role markers in posts and commits;
 - 0014: connectors vs plugins; P3 becomes settings layers;
 - 0015: the implementer's evals.
@@ -286,6 +287,5 @@ Each step widens only after its exit check passes. Map #30 keeps the current lis
 - **Acceptance criteria form:** Gherkin (the rulebook's GA1–GA6) or numbered lines (the spec template here). Decided in
   chiyanram/skills#237.
 - **Questions:** asked one at a time, or as one numbered round. Proposed: a project setting.
-- **The PR body:** the implementer writes it, as crq gives the PR phase to the build. To be confirmed.
 - **Copilot CLI and Claude plugins:** whether Copilot CLI loads them. If not, the engine passes it the plugin's skills
   folder (the #162 spike).

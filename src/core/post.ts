@@ -18,6 +18,12 @@
 // The template writes the seat prefix ("[writer] " and so on) and the labels, so a field never starts a line. A label
 // must be the factory's own plain words: renderPost refuses any other, as a result, never by throwing, so a caller
 // such as the dispatcher handles the refusal instead of stopping mid-run.
+//
+// One post may carry model text past the template: a PR body (BodyPost) may end with the implementer's own Markdown,
+// .factory/pr.md, and renderBody posts it only through cleanBody (pr-body.ts; ADR-0012 S13 as amended, #335). Notes and
+// comments render with renderPost, which never reads it.
+
+import { cleanBody } from "./pr-body.js";
 
 export type Seat = "writer" | "reviewer" | "coordinator";
 
@@ -29,6 +35,13 @@ export type Post = {
   readonly fields: readonly PostField[];
   readonly items: readonly string[];
 };
+
+// the implementer's PR body (#335): its Markdown as the run wrote it, and the project's git host, the one host its links
+// may point at
+export type PrBody = { readonly markdown: string; readonly host: string };
+
+// a PR body: the engine's own lines (the spec hash, the approval, the deferred list), then the implementer's Markdown
+export type BodyPost = Post & { readonly prBody?: PrBody };
 
 export type RenderResult =
   | { readonly kind: "ok"; readonly text: string }
@@ -89,4 +102,19 @@ export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): Ren
     ...post.items.map((item) => `- ${cleanField(item, limit)}`),
   ];
   return { kind: "ok", text: [...head, ...(body.length > 0 ? ["", ...body] : [])].join("\n") };
+}
+
+// PR_BODY_RULE : the line between the engine's own lines and the implementer's Markdown
+export const PR_BODY_RULE = "---";
+
+// renderBody : the full text of a PR body: the post as renderPost renders it, then, when there is one, the
+// implementer's Markdown after a rule, cleaned by cleanBody. The engine's lines come first, so no Markdown can stand in
+// for them.
+export function renderBody(post: BodyPost, limit: number = DEFAULT_FIELD_LIMIT): RenderResult {
+  const head = renderPost(post, limit);
+  if (head.kind === "refused" || post.prBody === undefined) {
+    return head;
+  }
+  const markdown = cleanBody(post.prBody.markdown, { host: post.prBody.host });
+  return markdown === "" ? head : { kind: "ok", text: `${head.text}\n\n${PR_BODY_RULE}\n\n${markdown}` };
 }

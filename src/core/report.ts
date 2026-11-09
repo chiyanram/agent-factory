@@ -323,12 +323,9 @@ function openFailure(error: unknown): ReportFile {
 
 // openReport : the report under a .factory already checked; O_NOFOLLOW refuses a symlink in the last step, O_NONBLOCK
 // keeps a FIFO from hanging the host
-async function openReport(worktree: string, before: Dir): Promise<ReportFile> {
+async function openReport(worktree: string, before: Dir, path: string = REPORT_PATH): Promise<ReportFile> {
   try {
-    const handle = await open(
-      join(worktree, REPORT_PATH),
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
+    const handle = await open(join(worktree, path), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       // .factory is still the folder that was checked, so the file opened is the one inside it
       const after = await realDir(join(worktree, ".factory"));
@@ -347,11 +344,20 @@ async function openReport(worktree: string, before: Dir): Promise<ReportFile> {
 // only from a read after the box has stopped: while the writer runs, a read (run.ts's poll) only starts the completion
 // window, since the writer can still change the folder between the checks and the open.
 export async function loadReport(input: { readonly worktree: string }): Promise<ReportFile> {
+  return loadFactoryFile({ worktree: input.worktree, path: REPORT_PATH });
+}
+
+// loadFactoryFile : one file of the run's hand-off in .factory (the report, or the implementer's PR body, #335), read
+// as carefully as the report: no symlink, a plain file, at most MAX_REPORT_BYTES, and only after the box has stopped
+export async function loadFactoryFile(input: {
+  readonly worktree: string;
+  readonly path: string;
+}): Promise<ReportFile> {
   const dir = await realDir(join(input.worktree, ".factory"));
   if (dir.kind !== "dir") {
     return dir.kind === "missing"
       ? { kind: "missing" }
       : { kind: "unreadable", reason: ".factory is not a plain folder" };
   }
-  return openReport(input.worktree, dir);
+  return openReport(input.worktree, dir, input.path);
 }
