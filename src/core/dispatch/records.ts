@@ -10,12 +10,16 @@
 // A check that fails (a ready check, a review with Act on findings, the local verifier) records nextTry{step, at} on
 // its "ended" line (#228): the writer's retry for it waits until then, at = now + min(10 s × 2^(n−1), 5 min) for the
 // step's n-th failure since the approval. The newest check line's nextTry is the one that holds.
+//
+// A writer or review "ended" line carries the run's spend{usd, tokens} (#131), as the agent CLI reported it; a line
+// with none was not measured (an older line, or a run stopped before its result). `usage` and the caps sum them.
 
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
+import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
@@ -88,6 +92,8 @@ export type Event =
       readonly evidence: readonly Evidence[];
       // the writer hung after its report and was stopped after the completion window (#182); false on older lines
       readonly hung: boolean;
+      // what the run spent (#131); none when it was not measured
+      readonly spend?: Spend;
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -117,6 +123,8 @@ export type Event =
       readonly head: string;
       readonly actOn: number;
       readonly nextTry?: NextTry;
+      // what the round's model runs spent (#131); none when it was not measured
+      readonly spend?: Spend;
     }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
@@ -238,11 +246,30 @@ function writerParts(raw: unknown): WriterParts | Bad {
   return evidence === BAD || hung === BAD ? BAD : { head, patch, evidence, hung };
 }
 
+// amount : a spend figure: a finite number, never below 0
+function amount(value: unknown): number | Bad {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : BAD;
+}
+
+// spendField : an ended line's spend, as a field to spread: none on a line that has none (#131)
+function spendField(raw: unknown): { readonly spend?: Spend } | Bad {
+  const spend = prop(raw, "spend");
+  if (spend === undefined) {
+    return {};
+  }
+  const usd = amount(prop(spend, "usd"));
+  const tokens = amount(prop(spend, "tokens"));
+  return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens } };
+}
+
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const mode = oneOf(raw, "mode", MODES);
   const outcome = oneOf(raw, "outcome", OUTCOMES);
   const parts = writerParts(raw);
-  return mode === BAD || outcome === BAD || parts === BAD ? BAD : { at, kind: "writer-ended", mode, outcome, ...parts };
+  const spend = spendField(raw);
+  return mode === BAD || outcome === BAD || parts === BAD || spend === BAD
+    ? BAD
+    : { at, kind: "writer-ended", mode, outcome, ...parts, ...spend };
 }
 
 // nextTryField : a check line's nextTry, as a field to spread: none on a line that has none (a pass, or older than
@@ -316,9 +343,10 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
   const next = nextTryField(raw);
-  return head === BAD || next === BAD || !Number.isSafeInteger(actOn)
+  const spend = spendField(raw);
+  return head === BAD || next === BAD || spend === BAD || !Number.isSafeInteger(actOn)
     ? BAD
-    : { at, kind: "review-ended", head, actOn: Number(actOn), ...next };
+    : { at, kind: "review-ended", head, actOn: Number(actOn), ...next, ...spend };
 }
 
 const PARSE: Readonly<Record<Kind, Parse>> = {
@@ -439,6 +467,8 @@ export type Summary = {
   readonly blocked: readonly string[];
   // the time of the newest line, or "" for none
   readonly lastAt: string;
+  // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
+  readonly spent: Spend;
 };
 
 export const EMPTY: Summary = {
@@ -459,6 +489,7 @@ export const EMPTY: Summary = {
   pingedAt: "",
   blocked: [],
   lastAt: "",
+  spent: NO_SPEND,
 };
 
 function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): Summary {
@@ -478,6 +509,7 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
     testFirstDone: s.testFirstDone || testFirst,
     rebaseRuns: s.rebaseRuns + Number(e.mode === "rebase"),
     ciRounds: s.ciRounds + Number(e.mode === "ci"),
+    spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   };
 }
 
@@ -513,6 +545,7 @@ const STEPS: Steps = {
     reviewRounds: s.reviewRounds + 1,
     reviewFailures: s.reviewFailures + Number(e.actOn > 0),
     nextTry: nextTryView(e.nextTry),
+    spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   }),
   "verify-ended": (s, e) => ({
     ...s,

@@ -4,6 +4,7 @@
 //   - the shared copy of each approval, once, on the ticket's open PR (#227)
 //   - forge-only actions (needs-human, release, ping, reconcile) for every ticket that has one
 //   - at most one run (writer, ready check or reviewer) per pass: runs at once is 1 (ADR-0012 S16)
+//   - no run at all while the project is at its day cap or its window share (#131; caps.ts), with one notice for it
 // A run's step is a seam. A step that is not built yet says so, and the pass records nothing for it, so the ticket is
 // decided the same way next time. A "started" record is written before a run and an "ended" one after it; a pass that
 // dies in between leaves the first alone, and the next pass hands that ticket to a person.
@@ -44,6 +45,9 @@ import {
   type Task,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
+import type { Spend } from "./spend.js";
+import { projectStop, type Caps, type Stop } from "./caps.js";
+import { readSpends } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
   decide,
@@ -75,6 +79,8 @@ export type Steps = {
       readonly evidence: readonly Evidence[];
       // the writer hung after its report, and the host stopped it after the completion window (#182)
       readonly hung: boolean;
+      // what the run spent (#131); none when it was not measured
+      readonly spend?: Spend;
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
@@ -84,7 +90,8 @@ export type Steps = {
     RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts,
     { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane }
   >;
-  readonly review: Step<RunInput, { readonly actOn: number }>;
+  // what the round spent: zero when it ran no model, as when it reused a verdict (#131)
+  readonly review: Step<RunInput, { readonly actOn: number; readonly spend: Spend }>;
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
 };
@@ -117,6 +124,8 @@ export type TickSetup = {
   readonly log: (line: string) => void;
   // a person's ping when a ticket needs them (#119); NO_NOTIFY when the project maps no notify plugin
   readonly notify: Notify;
+  // the ticket, day and window caps (#131)
+  readonly caps: Caps;
 };
 
 export type Decision = { readonly ticket: string; readonly action: Action };
@@ -300,6 +309,7 @@ async function stateOf(
         runs,
         now: setup.now(),
         quietMinutes: setup.quietMinutes,
+        caps: setup.caps,
       },
       approved,
       shared: sharedBefore(events.value, approved),
@@ -635,6 +645,7 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
           kind: "review-ended",
           head,
           actOn: ran.value.actOn,
+          spend: ran.value.spend,
           ...failedAt(setup, "review", ran.value.actOn > 0, state.runs.reviewFailures),
         },
       })
@@ -733,8 +744,57 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
   return later;
 }
 
-// runPass : the first run that can start, and no other: runs at once is 1
+const RUN_KINDS: ReadonlySet<ActionKind> = new Set(["writer", "ready", "review", "verify"]);
+
+// stopNow : whether a new run may start in the project; the runs are read only when a cap is set (#131)
+async function stopNow(setup: TickSetup): Promise<Stop> {
+  const { day, window } = setup.caps;
+  const set = [day.usd, day.tokens, window.tokens, window.machineTokens].some((l) => l !== "none");
+  if (!set) {
+    return { kind: "go" };
+  }
+  const project = await readSpends({ home: setup.home, project: setup.project });
+  const machine = window.machineTokens === "none" ? project : await readSpends({ home: setup.home });
+  return projectStop({ project: project.runs, machine: machine.runs, now: setup.now(), caps: setup.caps });
+}
+
+// noticed : one notice per stop and period: the period's key is kept in the project's runs folder
+async function noticed(setup: TickSetup, stop: Extract<Stop, { kind: "stop" }>, first: Later): Promise<void> {
+  const path = join(setup.home, "runs", setup.project, "caps-notice.json");
+  const before = await readFile(path, "utf8").catch(() => "");
+  const key = JSON.stringify({ notice: stop.notice });
+  if (before === key) {
+    return;
+  }
+  await writeFile(path, key, { mode: 0o600 }).catch(() => undefined);
+  await informed(setup, { kind: "paused", ticket: first.state.ticket, change: number(first.state), why: stop.why });
+}
+
+// paused : every run held while the project is at a cap, each recorded as unavailable, so the pass does not fail
+async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Promise<boolean> {
+  const [first] = runs;
+  const stop = first === undefined ? ({ kind: "go" } as const) : await stopNow(setup);
+  if (stop.kind === "go" || first === undefined) {
+    return false;
+  }
+  setup.log(`no new runs: ${stop.why}`);
+  await noticed(setup, stop, first);
+  for (const { state, action } of runs) {
+    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `held: ${stop.why}` } });
+  }
+  return true;
+}
+
+// runPass : the first run that can start, and no other: runs at once is 1; none while the project is at a cap
 async function runPass(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
+  const runs = later.filter((l) => RUN_KINDS.has(l.action.kind));
+  if (!(await paused(setup, runs, ran))) {
+    await firstRun(setup, later, ran);
+  }
+}
+
+// firstRun : the first run that can start; an unavailable step lets the next one try
+async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
   for (const { state, action } of later) {
     const pending = runAction(setup, state, action);
     const result = pending === "none" ? "none" : await pending;

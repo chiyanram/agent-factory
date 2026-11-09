@@ -346,7 +346,11 @@ The scripts read their settings from the environment.
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and every run of the dispatcher's writer | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `agent-factory review` refuses it | off |
 | `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
-| budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
+| `FACTORY_WINDOW_HOURS` | `usage`: the length of the subscription's usage window, in hours, from 1 to 24 (`window.hours`) | `5` |
+| `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
+| `FACTORY_MAX_USD_DAY`, `FACTORY_MAX_TOKENS_DAY` | `dispatch`: the most a project's runs may spend in a UTC day (`caps.usdPerProjectDay`, `caps.tokensPerProjectDay`); at either, no new run starts that day and one notice goes out (#131) | no cap |
+| `FACTORY_WINDOW_TOKENS`, `FACTORY_MACHINE_WINDOW_TOKENS` | `dispatch`: the factory's share of a subscription window, in tokens, for the project and for every project on this machine (`caps.windowTokens`, `caps.machineWindowTokens`). The share is the stop line: at it, no new run starts until the last `FACTORY_WINDOW_HOURS` hold less, and one notice goes out (#131) | no cap |
+| budget settings | the rest of ADR-0012 S16: runs at once and the model per phase are the keys above (`FACTORY_MAX_RUNS`, the `*_MODEL` keys). **Today:** `dispatch` starts one run per pass whatever `FACTORY_MAX_RUNS` says, and there is no run-hours setting yet (#131) | — |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
@@ -395,7 +399,9 @@ there.
   build files, the verify command's files and the test config (`src/core/ready/judge.ts`).
 - `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
   `.npmjs.org` for a
-  domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
+  domain and every subdomain; no wildcard, IP, scheme, port or path. A git host is refused, with its subdomains:
+  `github.com`, `gitlab.com` and the `FACTORY_FORGE_HOST` you set, because the runner has no git login and needs none;
+  the host clones, pushes and posts. Each project has its own proxy,
   `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
   no box runs for the project.
@@ -500,6 +506,35 @@ FACTORY_TEST_BOX_IMAGE="$(jq -r .image "$FACTORY_HOME/projects/<project>/box.jso
 It plants a canary and a `GH_TOKEN` in the host environment, runs `env` in a real box, and fails if either one, or any
 secret-like name the box was not given, is there. Where there is no image or no Sysbox, it is skipped and says why.
 
+### Check the egress proxy
+
+**Today:** the egress proxy is tested only on a fake docker. Each runner joins its project's `--internal` network,
+`factory-int-<project>`, and leaves only through the project's Squid proxy; that it holds on a real Docker host is
+proven only by this check (#130). Run it on the VM after the first `box build`, as the user that runs the dispatcher,
+with the same settings as a dispatch pass:
+
+```bash
+agent-factory egress check <project> --port 22
+```
+
+Name with `--port` each port a runner may reach on the host's gateway (setup lists the ports that listen on all
+interfaces, #136). It starts the project's proxy as a run does, then a fresh runner on an empty folder, and prints one
+line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each one on #130 with the output:
+
+- [ ] a host off the allowlist (`example.com`) is refused: the proxy answers 403;
+- [ ] a model call reaches `api.anthropic.com` through the proxy (any HTTP answer from it), and the same host on
+  port 80 is refused; `--model-host` names another model API;
+- [ ] a direct connection that skips the proxy (`1.1.1.1:443`) fails;
+- [ ] an outside name does not resolve in the runner, so DNS is no way out either;
+- [ ] on the host's gateway, every open port is one you named; close any other port, or bind it to `127.0.0.1`;
+- [ ] the inner Docker pulls `hello-world`, as Testcontainers does; the list needs `.docker.io` and
+  `production.cloudflare.docker.com`, and `--pull` names the image your ITs use;
+- [ ] a real model call, by the first writer run on the VM, goes through: the check reaches the host, not the model;
+- [ ] the open question: does the work build need a private-registry token? Run the work project's build in the
+  runner; if a registry answers 401, record it on #130.
+
+**Today:** `--internal` with Rancher Desktop's containerd engine is unverified; the laptop runner is stage B (#129).
+
 ## Run the loop
 
 **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
@@ -538,6 +573,15 @@ exists yet, so you run the triggers below by hand.
   the stall time (`FACTORY_WRITER_STALL_MINUTES`, 5 minutes) is stopped and `blocked`, so it goes to `needs-human`;
   its note shows its last five output lines, each cleaned by `post.ts` (#228). Time the machine spends asleep does not
   count: each 5 s poll adds at most 10 s of silence.
+  The host reads the stream's last line, the result event, for the run's cost and tokens (`total_cost_usd` and every
+  `usage` token, cache reads and writes too), and keeps them as `spend` on the run's `writer-ended` record; a review
+  round's `review-ended` record keeps what its passes spent the same way (#131). A run stopped before its result event
+  has no `spend`: `usage` counts it as unmeasured, never as free. The dollar figure is the CLI's own; on a
+  subscription it need not be what you are charged, so count tokens there (an open check on #131).
+  The caps then hold before each run, never during one (`src/core/dispatch/caps.ts`): per run, `FACTORY_MAX_USD` is
+  the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
+  and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice
+  per day or window. A run already going is never stopped for a cap, so a cap can be passed by the run that reaches it.
   Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
   in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
 - **Every run is fresh.** Start a new worker for every job. Never resume one: a resumed worker drops instructions.
@@ -700,6 +744,7 @@ and `#12` for `!12`.
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory dispatch <project> --once [--dry-run]` | one pass of the dispatcher's table over the project (see Triggers); exit 0, 1 when it cannot run, 2 when an action failed |
+| `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131) |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |
 | `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |

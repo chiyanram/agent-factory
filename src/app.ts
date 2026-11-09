@@ -35,7 +35,7 @@ import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
 import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
 import { reviewStep } from "./core/review/step.js";
-import { boxPlan } from "./core/ready/plan.js";
+import { boxPlan, type PlanRead } from "./core/ready/plan.js";
 import type { Identity } from "./core/identity.js";
 import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
@@ -47,12 +47,15 @@ import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
+import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
+import { USAGE_HELP, usageCommand } from "./usage-cli.js";
+import { capsOf, type Caps } from "./core/dispatch/caps.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -96,10 +99,10 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${LOOP_HELP}${EVAL_HELP}
+${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
 options:
   --help      show this help
   --version   show the package version
@@ -167,6 +170,19 @@ function version(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version: string };
   return pkg.version;
+}
+
+// usage : the spend table (#131), with the project's settings layers resolved when it names one
+function usage({ positionals, io }: Args): Promise<number> {
+  const [project] = positionals;
+  return resolvedRun("usage", project, io, (resolved) => {
+    const home = factoryHome(resolved.env);
+    if (home.kind === "refused") {
+      io.err(`agent-factory usage: ${home.reason}\n`);
+      return Promise.resolve(1);
+    }
+    return usageCommand(positionals, { ...resolved, home: home.path, now: Date.now });
+  });
 }
 
 function poll(args: Args): Promise<number> {
@@ -445,9 +461,7 @@ function minutesOf(env: NodeJS.ProcessEnv, id: MachineId, fallback: number): num
   return /^[1-9]\d{0,5}$/.test(raw) ? Number(raw) : "bad";
 }
 
-type DispatchSettings =
-  | { readonly home: string; readonly quiet: number; readonly poll: number }
-  | { readonly kind: "refused"; readonly reason: string };
+type DispatchSettings = PassSettings | { readonly kind: "refused"; readonly reason: string };
 
 function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
   const home = factoryHome(env);
@@ -459,9 +473,13 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
   if (every === "bad") {
     return { kind: "refused", reason: `${settingName("poll.minutes")} must be a whole number of minutes` };
   }
+  const caps = capsOf(env);
+  if (caps.kind === "failed") {
+    return { kind: "refused", reason: caps.reason };
+  }
   return quiet === "bad"
     ? { kind: "refused", reason: `${settingName("quietMinutes")} must be a whole number of minutes` }
-    : { home: home.path, quiet, poll: every };
+    : { home: home.path, quiet, poll: every, caps: caps.value };
 }
 
 type Planned = { readonly gate: Gate; readonly steps: Steps };
@@ -480,11 +498,10 @@ function tokenStore(io: Io, home: string): Result<TokenStore> {
   return opened.kind === "store" ? { kind: "ok", value: opened.store } : { kind: "failed", reason: opened.reason };
 }
 
-// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
-async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
-  const { forge, identity } = opened;
+// hostBoxPlan : the project's box plan on this host: the vm box and the project's egress proxy, through its docker
+function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
   const docker = hostDocker(io.env, io.system.run);
-  const planned = await boxPlan({
+  return boxPlan({
     env: io.env,
     home,
     project,
@@ -492,6 +509,30 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     boxesFor: (image) => [vmBox({ docker, image: image.ref, owner: { uid: io.system.uid, gid: io.system.gid } })],
     openEgress: (o) => openEgress({ ...o, dir: join(home, "egress"), docker }),
   });
+}
+
+// egressCli : `egress check <project>` with the project's resolved settings (egress-cli.ts)
+function egressCli(argv: readonly string[], io: Io): Promise<number> {
+  return egressCommand(argv, {
+    out: io.out,
+    err: io.err,
+    resolved: (project, go) =>
+      resolvedRun("egress", project, io, (resolved) => {
+        const home = factoryHome(resolved.env);
+        return home.kind === "home"
+          ? go({
+              docker: hostDocker(resolved.env, resolved.system.run),
+              plan: () => hostBoxPlan(resolved, home.path, project),
+            })
+          : Promise.resolve(1);
+      }),
+  });
+}
+
+// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
+async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
+  const { forge, identity } = opened;
+  const planned = await hostBoxPlan(io, home, project);
   if (planned.kind === "failed") {
     return planned;
   }
@@ -524,7 +565,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   return { kind: "ok", value: { gate, steps } };
 }
 
-type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number };
+type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number; readonly caps: Caps };
 
 // pass : the steps, then one locked pass with them
 async function pass(
@@ -552,6 +593,7 @@ async function pass(
     now: () => Date.now(),
     quietMinutes: settings.quiet,
     pollMinutes: settings.poll,
+    caps: settings.caps,
     repo: io.env.FACTORY_PROJECT ?? "",
     dryRun,
     log: (line) => io.out(`${line}\n`),
@@ -1021,6 +1063,7 @@ const COMMANDS: readonly Command[] = [
   { name: "app-token", run: appTokenCommand },
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
+  { name: "usage", run: usage },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
   { name: "plugin", run: pluginCli },
@@ -1063,6 +1106,10 @@ export function runCli(argv: readonly string[], io: Io): Promise<number> {
   // eval reads its own options (--drafts, --allow-partial)
   if (argv[0] === "eval") {
     return evalCommand(argv.slice(1), io);
+  }
+  // egress reads its own options (--port, --model-host, --pull)
+  if (argv[0] === "egress") {
+    return egressCli(argv.slice(1), io);
   }
   return ownOptions(argv, io) ?? mainCli(argv, io);
 }

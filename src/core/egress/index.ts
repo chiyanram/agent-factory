@@ -15,7 +15,7 @@ import { egressNames, startEgress, type Started } from "./start.js";
 export const DEFAULT_EGRESS_IMAGE =
   "ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c";
 
-export { parseAllowlist, type Allowlist } from "./allowlist.js";
+export { GIT_HOSTS, parseAllowlist, type Allowlist } from "./allowlist.js";
 export { squidConf, PROXY_PORT, type Upstream } from "./squid.js";
 export { proxyEnv, type ProxyAddress } from "./env.js";
 export { upstreamOf, type UpstreamRead } from "./upstream.js";
@@ -33,6 +33,8 @@ export type EgressSetup = {
   // a plain project name (spec.ts): it names the proxy, its network and its config folder
   readonly project: string;
   readonly allowlist: readonly string[];
+  // the project's own git host, refused on the list besides the public ones (allowlist.ts)
+  readonly gitHosts: readonly string[];
   readonly upstream: Upstream;
   readonly image: PinnedImage;
   // where the rendered configs are kept: <factory home>/egress; each project's in its own folder
@@ -58,7 +60,7 @@ async function writeConf(
 }
 
 export async function openEgress(setup: EgressSetup): Promise<Started> {
-  const list = parseAllowlist(setup.allowlist);
+  const list = parseAllowlist(setup.allowlist, setup.gitHosts);
   if (list.kind === "refused") {
     return { kind: "failed", reason: list.reason };
   }

@@ -33,6 +33,7 @@ export type PlanRead =
 export type EgressOpener = (input: {
   readonly project: string;
   readonly allowlist: readonly string[];
+  readonly gitHosts: readonly string[];
   readonly upstream: Upstream;
   readonly image: PinnedImage;
 }) => Promise<Started>;
@@ -46,7 +47,13 @@ export type PlanInput = {
   readonly openEgress: EgressOpener;
 };
 
-type Egress = { readonly upstream: Upstream; readonly image: PinnedImage };
+type Egress = { readonly upstream: Upstream; readonly image: PinnedImage; readonly gitHosts: readonly string[] };
+
+// ownGitHost : the project's own git host, such as a company GitLab, which the allowlist refuses too
+function ownGitHost(env: NodeJS.ProcessEnv): readonly string[] {
+  const host = (settingOf(env, "gitHostName") ?? "").trim();
+  return host === "" ? [] : [host];
+}
 
 // egressOf : the settings the project's proxy starts with. Pure.
 function egressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<Egress> {
@@ -59,7 +66,7 @@ function egressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<Egress> 
   }
   const image = pinImage(settingOf(env, "egress.image") ?? DEFAULT_EGRESS_IMAGE);
   return image.kind === "pinned"
-    ? { kind: "ok", value: { upstream, image } }
+    ? { kind: "ok", value: { upstream, image, gitHosts: ownGitHost(env) } }
     : { kind: "failed", reason: `FACTORY_EGRESS_IMAGE: ${image.reason}` };
 }
 

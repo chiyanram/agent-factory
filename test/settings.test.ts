@@ -14,6 +14,7 @@ import { canonical, didYouMean, resolve, type FileLayer, type Resolved } from ".
 import { runEnv, settingOf } from "../src/core/settings/machine.js";
 import { maxUsd } from "../src/core/review/settings.js";
 import { evalSettings } from "../src/core/eval/harness.js";
+import { capsOf } from "../src/core/dispatch/caps.js";
 import { tempDir } from "./temp.js";
 
 let home = "";
@@ -573,6 +574,19 @@ describe("every module reads the resolved settings (#254)", () => {
       "caps.usdPerRun: the machine layer (env FACTORY_MAX_USD) 5 is higher than 1; a cap key only gets stricter in a lower layer, and the team value is 1",
     ]);
     expect(errors(withEnv([team], { FACTORY_MAX_USD: "" }))[0]).toContain("cannot be compared");
+  });
+
+  it("a team's ticket and day caps reach the dispatcher, and a variable can only lower them (#131)", () => {
+    const team = layer("team", { caps: { usdPerTicket: 3, tokensPerProjectDay: 5000 } });
+    const fromTeam = withEnv([team], {});
+    expect(capsOf(runEnv({}, fromTeam))).toMatchObject({
+      kind: "ok",
+      value: { ticket: { usd: 3 }, day: { tokens: 5000 } },
+    });
+    expect(errors(withEnv([team], { FACTORY_MAX_USD_TICKET: "4" }))[0]).toContain(
+      "caps.usdPerTicket: the machine layer (env FACTORY_MAX_USD_TICKET) 4 is higher than 3",
+    );
+    expect(errors(withEnv([team], { FACTORY_MAX_TOKENS_DAY: "100" }))).toEqual([]);
   });
 
   it("runEnv puts only a file's values in the variables; a variable alone stays exactly as it is", () => {

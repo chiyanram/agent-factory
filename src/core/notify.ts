@@ -19,7 +19,9 @@ import type { TokenStore } from "./token/store.js";
 export type Ping =
   | { readonly kind: "needs-you"; readonly ticket: string; readonly change: number | "none"; readonly why: string }
   | { readonly kind: "asked"; readonly ticket: string; readonly change: number | "none" }
-  | { readonly kind: "ready"; readonly ticket: string; readonly change: number | "none"; readonly head: string };
+  | { readonly kind: "ready"; readonly ticket: string; readonly change: number | "none"; readonly head: string }
+  // the project is at a day cap or its window share (#131): no new run starts; ticket is the first one held
+  | { readonly kind: "paused"; readonly ticket: string; readonly change: number | "none"; readonly why: string };
 
 export type Notify = (ping: Ping) => Promise<Done>;
 
@@ -36,6 +38,7 @@ const TITLES: { readonly [K in Ping["kind"]]: (p: Extract<Ping, { kind: K }>) =>
   "needs-you": (p) => `${p.ticket} needs you: ${p.why}`,
   asked: (p) => `${p.ticket}: the writer asked a question that waits on you`,
   ready: (p) => `${p.ticket} is ready for you to review and merge at ${p.head.slice(0, 8)}`,
+  paused: (p) => `no new runs: ${p.why}`,
 };
 
 function titleAs<K extends Ping["kind"]>(kind: K, ping: Extract<Ping, { kind: K }>): string {
