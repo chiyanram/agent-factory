@@ -113,7 +113,7 @@ const HEAD_REF = "refs/factory/floor-head";
 
 // mergeBase : the default branch and the change's branch fetched, the change's tip checked against the head, and the
 // commit the change started from
-async function mergeBase(input: FloorInput): Promise<Result<string>> {
+export async function mergeBase(input: FloorInput): Promise<Result<string>> {
   const fetched = out(
     await git(input, [
       "fetch",
@@ -141,13 +141,13 @@ async function mergeBase(input: FloorInput): Promise<Result<string>> {
 }
 
 // Change : one file the diff touches, as git's rename detection pairs it
-type Change =
+export type Change =
   | { readonly kind: "added" | "modified"; readonly path: string }
   | { readonly kind: "deleted"; readonly path: string }
   | { readonly kind: "renamed"; readonly from: string; readonly path: string };
 
 // changesOf : the -z name-status list: a status, then one path, or two for a rename or a copy
-function changesOf(text: string): readonly Change[] {
+export function changesOf(text: string): readonly Change[] {
   const words = text.split("\0").filter((w) => w !== "");
   const word = (i: number): string => words[i] ?? "";
   const found: Change[] = [];

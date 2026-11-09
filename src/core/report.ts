@@ -87,7 +87,7 @@ export type ReportFile =
 
 // The words the writer's prompt carries, so the writer knows the schema it is held to.
 export const REPORT_INSTRUCTIONS = `When you stop, write ${REPORT_PATH} in the worktree and exit. Never commit it. It is JSON with one "status":
-- "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed.
+- "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed. Start each "criterion" with the criterion's id, AC-1 for the first, AC-2 for the second, and so on: a criterion with no row fails the ready check.
 - "asked": add "questions", one to five questions the spec does not answer. Never guess an answer.
 - "blocked": add "blocker", what stops you. Commit the work you have first.
 No other field. A missing or malformed report counts as blocked.`;

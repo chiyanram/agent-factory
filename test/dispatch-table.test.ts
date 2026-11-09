@@ -359,6 +359,40 @@ describe("decide: one row each", () => {
   });
 });
 
+describe("the lane the diff needs: raise only (#230)", () => {
+  const readAs = (lane: "tiny" | "bug" | "feature" | "one-way door", passed = true) =>
+    wrote({ ...reviewed(0), lastReady: { kind: "ended", head: H, passed, why: passed ? "" : "row 1", lane } });
+
+  it("a START in the tiny lane whose diff changes code stops for a person, whatever else the check found", () => {
+    for (const passed of [true, false]) {
+      expect(
+        decide(state({ approval: { kind: "started", at: APPROVED_AT, lane: "tiny" }, runs: readAs("bug", passed) })),
+      ).toEqual({
+        kind: "needs-human",
+        why: "the lane is raised from tiny to bug (the ready check read the real diff): the coordinator raises the spec's lane, and a human approves it",
+      });
+    }
+  });
+
+  it("an approved lane is raised to the one-way door, and never lowered by a lighter diff", () => {
+    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug" } as const;
+    expect(decide(state({ approval: bug, runs: readAs("one-way door") }))).toMatchObject({
+      kind: "needs-human",
+      why: expect.stringContaining("raised from bug to one-way door"),
+    });
+    // a feature whose diff only needs tiny or bug keeps its lane and goes on
+    expect(decide(state({ runs: readAs("tiny") }))).toEqual(decide(state()));
+    expect(decide(state({ runs: readAs("bug") }))).toEqual(decide(state()));
+  });
+
+  it("a lane read at an older head does not stop the new one", () => {
+    const old = wrote({
+      lastReady: { kind: "ended", head: "9".repeat(40), passed: true, why: "", lane: "one-way door" },
+    });
+    expect(decide(state({ runs: old }))).toEqual({ kind: "ready", head: H });
+  });
+});
+
 describe("backoff (#228)", () => {
   const at = (ms: number) => new Date(NOW + ms).toISOString();
   const failedReady = (nextTry: Summary["nextTry"], readyFailures = 1): Summary =>

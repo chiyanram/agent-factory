@@ -27,6 +27,9 @@ export type Spec = {
   readonly criteria: readonly string[];
   readonly design: string;
   readonly lane: Lane;
+  // the files the change plans to touch, from the optional "## Planned files": the engine checks the lane against them
+  // before the build (lane.ts, #230)
+  readonly planned: readonly string[];
   // the normalised text, and its hash: what an approval records and what the PR body carries
   readonly text: string;
   readonly hash: string;
@@ -81,6 +84,10 @@ export function template(ticket: string): string {
     "## Lane",
     "",
     "feature",
+    "",
+    "## Planned files",
+    "",
+    "- <a path the change will touch, one per line>",
     "",
   ].join("\n");
 }
@@ -194,7 +201,21 @@ type Fields = {
   readonly criteria: readonly string[];
   readonly design: string;
   readonly lane: string;
+  readonly planned: readonly string[];
 };
+
+// plannedOf : one path per line, a list marker and backticks dropped, placeholders left out
+function plannedOf(body: string): readonly string[] {
+  return body
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+        .replaceAll("`", "")
+        .trim(),
+    )
+    .filter((path) => real(path) && !path.startsWith("<"));
+}
 
 function fields(p: Parsed): Fields {
   const at = (name: string): string => p.sections.get(name) ?? "";
@@ -204,6 +225,7 @@ function fields(p: Parsed): Fields {
     criteria: numbered(at("acceptance criteria")),
     design: at("design"),
     lane: at("lane").toLowerCase(),
+    planned: plannedOf(at("planned files")),
   };
 }
 
@@ -238,6 +260,7 @@ export function checkSpec(raw: string): SpecCheck {
           criteria: f.criteria,
           design: f.design,
           lane: f.lane as Lane,
+          planned: f.planned,
           text,
           hash: specHash(text),
         },

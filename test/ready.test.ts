@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import type { Box, PinnedImage, Ran } from "../src/core/box/types.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
-import type { RunInput } from "../src/core/dispatch/tick.js";
+import type { ReadyFacts, RunInput } from "../src/core/dispatch/tick.js";
 import type { CommitStatus, Forge } from "../src/core/forge/types.js";
 import type { ProjectFile } from "../src/core/project.js";
 import type { Evidence } from "../src/core/report.js";
@@ -86,11 +86,16 @@ function plan(box: Box, file: ProjectFile = PROJECT, egress: EgressStarted = EGR
   };
 }
 
-function input(evidence: readonly Evidence[], at = head): RunInput & { readonly evidence: readonly Evidence[] } {
+function input(
+  evidence: readonly Evidence[],
+  at = head,
+  facts: ReadyFacts = { criteria: [], oneWayDoor: [] },
+): RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts {
   return {
     ticket: "PROJ-12",
     head: at,
     evidence,
+    ...facts,
     change: {
       kind: "open",
       line: {
@@ -123,7 +128,8 @@ describe("the ready check (#91, #138)", () => {
     const fake = fakeBox({ runs: [exited(0), exited(0)] });
     const seen: string[][] = [];
     const out = await ready(watched(fake, seen), [row("make test"), row("./gradlew check --tests 'A*'", "AC2")]);
-    expect(out).toEqual({ kind: "ok", value: { passed: true, why: "" } });
+    // the branch adds a Makefile: a code change, so the diff needs the bug lane (#230)
+    expect(out).toEqual({ kind: "ok", value: { passed: true, why: "", lane: "bug" } });
     expect(existsSync(join(p.root, "planted"))).toBe(false);
     const runs = fake.calls.flatMap((c) => (c.op === "run" ? [c.command] : []));
     expect(runs.map((c) => c.argv)).toEqual([
@@ -152,13 +158,13 @@ describe("the ready check (#91, #138)", () => {
     const fake = fakeBox({ runs: [exited(0), exited(2), exited(0)] });
     expect(await ready(fake.box, [row("make a"), row("make b", "AC2"), row("make c", "AC3")])).toEqual({
       kind: "ok",
-      value: { passed: false, why: "row 2 (AC2): make b exited 2" },
+      value: { passed: false, why: "row 2 (AC2): make b exited 2", lane: "bug" },
     });
     expect(fake.calls.filter((c) => c.op === "run")).toHaveLength(2);
     const slow = fakeBox({ runs: [{ kind: "timedOut", seconds: 60 }] });
     expect(await ready(slow.box, [row("make a")])).toEqual({
       kind: "ok",
-      value: { passed: false, why: "row 1 (AC1): make a ran out of time (60s)" },
+      value: { passed: false, why: "row 1 (AC1): make a ran out of time (60s)", lane: "bug" },
     });
   });
 
@@ -174,6 +180,33 @@ describe("the ready check (#91, #138)", () => {
       kind: "ok",
       value: { passed: false, why: "the writer gave no evidence rows to run again" },
     });
+  });
+
+  it("fails when an acceptance criterion has no evidence row, before any box starts (#230)", async () => {
+    const fake = fakeBox({});
+    const step = readyStep(plan(fake.box), statusForge([]));
+    const facts = { criteria: ["one", "two", "three"], oneWayDoor: [] };
+    const out =
+      step.kind === "available"
+        ? await step.run(input([row("make a", "AC-1"), row("make b", "AC-2")], head, facts))
+        : step;
+    expect(out).toEqual({
+      kind: "ok",
+      value: {
+        passed: false,
+        why: "no evidence row for AC-3: give each acceptance criterion a row whose criterion starts with its id",
+        lane: "bug",
+      },
+    });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("reads the one-way door from a diff that touches one of the project's one-way-door paths (#230)", async () => {
+    const fake = fakeBox({ runs: [exited(0)] });
+    const step = readyStep(plan(fake.box), statusForge([]));
+    const facts = { criteria: ["one"], oneWayDoor: ["Makefile"] };
+    const out = step.kind === "available" ? await step.run(input([row("make a", "AC-1")], head, facts)) : step;
+    expect(out).toEqual({ kind: "ok", value: { passed: true, why: "", lane: "one-way door" } });
   });
 
   it("a box that will not stop fails the run, so it is seen", async () => {
@@ -242,7 +275,7 @@ describe("the ready check's kept output (#199)", () => {
       stderr: "\u001b[31mBUILD FAILED\u001b[0m\n",
     };
     const out = await ready(fakeBox({ runs: [exited(0), ran] }).box, [row("make a"), row("make b", "AC2")]);
-    expect(out).toEqual({ kind: "ok", value: { passed: false, why: "row 2 (AC2): make b exited 1" } });
+    expect(out).toEqual({ kind: "ok", value: { passed: false, why: "row 2 (AC2): make b exited 1", lane: "bug" } });
     expect(await keptAt()).toEqual({
       kind: "ok",
       value: [
