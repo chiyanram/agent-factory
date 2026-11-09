@@ -7,6 +7,7 @@ import { readRecords, record, summarize, type Event } from "../src/core/dispatch
 import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
+import { start } from "../src/core/start.js";
 import { specHash } from "../src/core/spec.js";
 import { tempDir } from "./temp.js";
 
@@ -33,6 +34,9 @@ const SPEC = (lane: string) =>
   ].join("\n");
 
 const H = "1".repeat(40);
+// the shared copy of the approval approved() gives (#227)
+const COPY = (ticket: string, lane = "feature") =>
+  `[coordinator] approved by ram via terminal, spec ${specHash(SPEC(lane).replace("PROJ-1", ticket))}, design none`;
 let home = "";
 
 async function approved(ticket = "PROJ-1", lane = "feature"): Promise<void> {
@@ -73,6 +77,7 @@ function forge(changes: Changes, log: string[]): Forge {
     me: async () => ({ kind: "ok", value: "ram" }),
     change: notUsed,
     defaultBranch: notUsed,
+    branchExists: async () => ({ kind: "ok", value: false }),
     openChange: notUsed,
     notes: notUsed,
     lineFinding: notUsed,
@@ -234,7 +239,8 @@ describe("tick", () => {
     expect(runs).toEqual(["PROJ-1"]);
     expect(log).toContain("label +agent::claimed #12");
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
-    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toEqual(["started", "writer-ended"]);
+    // the approval's shared copy goes on the PR first, once (#227)
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toEqual(["shared", "started", "writer-ended"]);
   });
 
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
@@ -347,6 +353,7 @@ describe("tick", () => {
     expect(log).toContain("label -agent::claimed #12");
     expect(log).toContain("label -agent::claimed #9");
     expect(log.filter((l) => l.startsWith("note #14"))).toEqual([
+      `note #14 ${COPY("PROJ-3")}`,
       "note #14 [coordinator] ready for you at 11111111: the gate is green; review and merge",
     ]);
     expect(pings).toEqual([{ kind: "ready", ticket: "PROJ-3", change: 14, head: H }]);
@@ -481,6 +488,7 @@ describe("tick", () => {
     const pings: Ping[] = [];
     await tick(setup(changes, first, { notify: pinger(pings) }));
     expect(first.filter((l) => !l.startsWith("log"))).toEqual([
+      `note #12 ${COPY("PROJ-1")}`,
       "label +needs-human #12",
       "label -agent::claimed #12",
       "note #12 [coordinator] blocked: the writer's run changed nothing",
@@ -586,5 +594,148 @@ describe("tick", () => {
     writeFileSync(join(home, "runs", "ledger", ".lock"), "999999999");
     expect(await tick(setup({ team, open: [], merged: [] }, []))).toMatchObject({ kind: "ok" });
     expect(() => readFileSync(join(home, "runs", "ledger", ".lock"))).toThrow(/ENOENT/);
+  });
+});
+
+describe("START and approval (#227)", () => {
+  const where = (ticket = "PROJ-1") => ({ home, project: "ledger", ticket });
+
+  function spec(lane: string, ticket = "PROJ-1"): string {
+    const text = SPEC(lane).replace("PROJ-1", ticket);
+    mkdirSync(join(home, "specs", "ledger", ticket), { recursive: true });
+    writeFileSync(join(home, "specs", "ledger", ticket, "spec.md"), text);
+    return text;
+  }
+
+  async function started(at: string, ticket = "PROJ-1"): Promise<void> {
+    const done = await start({
+      where: where(ticket),
+      by: "ram",
+      via: "terminal",
+      at,
+      branch: "absent",
+      confirmed: false,
+    });
+    expect(done.kind).toBe("started");
+  }
+
+  async function approvedAt(text: string, at: string): Promise<void> {
+    const done = await approve({ where: where(), seenHash: specHash(text), by: "ram", at });
+    expect(done.kind).toBe("approved");
+  }
+
+  const decisions = async (changes: Changes = { team, open: [], merged: [] }): Promise<readonly string[]> => {
+    const log: string[] = [];
+    await tick(setup(changes, log, { dryRun: true }));
+    return log;
+  };
+
+  it("a tiny ticket's START lets its build begin; nothing else is needed", async () => {
+    spec("tiny");
+    expect(await decisions()).toEqual([]);
+    await started("2026-11-07T08:00:00Z");
+    expect(await decisions()).toEqual(["log PROJ-1: writer (fix): started; no run yet (dry run)"]);
+  });
+
+  it("a START in a lane that needs an approval waits for one; the approval lets the build begin", async () => {
+    const text = spec("feature");
+    await started("2026-11-07T08:00:00Z");
+    expect(await decisions()).toEqual([
+      "log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only (dry run)",
+    ]);
+    await approvedAt(text, "2026-11-07T09:00:00Z");
+    expect(await decisions()).toEqual(["log PROJ-1: writer (fix): approved; no run yet (dry run)"]);
+  });
+
+  it("a START whose spec is not written yet waits for the coordinator", async () => {
+    await started("2026-11-07T08:00:00Z");
+    expect(await decisions()).toEqual([
+      "log PROJ-1: wait: the ticket has a START; its spec is not written yet (dry run)",
+    ]);
+  });
+
+  it("a stale approval stops a START from building in an approval lane, and a bad START record breaks only its ticket", async () => {
+    const text = spec("bug");
+    await started("2026-11-07T08:00:00Z");
+    await approvedAt(text, "2026-11-07T09:00:00Z");
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", "423"));
+    expect(await decisions()).toEqual([
+      "log PROJ-1: wait: the spec or its design changed after its approval (dry run)",
+    ]);
+    mkdirSync(join(home, "starts", "ledger"), { recursive: true });
+    writeFileSync(join(home, "starts", "ledger", "PROJ-2.json"), JSON.stringify({ kind: "start", ticket: "PROJ-2" }));
+    expect((await decisions()).find((l) => l.includes("PROJ-2"))).toContain("broken");
+  });
+
+  // a ticket handed to a person: the writer's run changed nothing, and its PR carries needs-human
+  async function handedOver(): Promise<void> {
+    await record({
+      where: where(),
+      event: {
+        at: "2026-11-07T09:30:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "",
+        evidence: [],
+        hung: false,
+      },
+    });
+    await tick(setup({ team, open: [open()], merged: [] }, []));
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toContain("blocked");
+  }
+
+  const cleared = { team, open: [open({ labels: [] })], merged: [] };
+
+  it("the way back from needs-human, tiny: the label removed, the ticket waits; a new START picks it up", async () => {
+    spec("tiny");
+    await started("2026-11-07T09:00:00Z");
+    await handedOver();
+    expect(await decisions({ team, open: [open({ labels: ["needs-human"] })], merged: [] })).toEqual([
+      "log PROJ-1: wait: needs-human: a person decides (dry run)",
+    ]);
+    const held = await decisions(cleared);
+    expect(held.join(" ")).toContain("handed to a person earlier: the writer's run changed nothing; START again");
+    await started("2026-11-07T09:45:00Z");
+    expect(await decisions(cleared)).toEqual(["log PROJ-1: writer (fix): started; no run yet (dry run)"]);
+  });
+
+  it("the way back from needs-human, an approval lane: a new START is not enough; approving again picks it up", async () => {
+    const text = spec("feature");
+    await started("2026-11-07T08:00:00Z");
+    await approvedAt(text, "2026-11-07T09:00:00Z");
+    await handedOver();
+    await started("2026-11-07T09:45:00Z");
+    expect((await decisions(cleared)).join(" ")).toContain("handed to a person earlier");
+    await approvedAt(text, "2026-11-07T09:50:00Z");
+    expect(await decisions(cleared)).toEqual(["log PROJ-1: writer (fix): approved; no run yet (dry run)"]);
+  });
+
+  it("posts the shared copy of each approval once, through the posting template; a new approval posts again", async () => {
+    const text = spec("feature");
+    await approvedAt(text, "2026-11-07T08:00:00Z");
+    const changes = { team, open: [open({ labels: [] })], merged: [] };
+    const notes = async (): Promise<readonly string[]> => {
+      const log: string[] = [];
+      await tick(setup(changes, log));
+      return log.filter((l) => l.startsWith("note"));
+    };
+    expect(await notes()).toEqual([`note #12 ${COPY("PROJ-1")}`]);
+    expect(await notes()).toEqual([]);
+    await approvedAt(text, "2026-11-07T09:00:00Z");
+    expect(await notes()).toEqual([`note #12 ${COPY("PROJ-1")}`]);
+  });
+
+  it("a shared copy that fails to post is printed, and the pass goes on", async () => {
+    await approvedAt(spec("feature"), "2026-11-07T08:00:00Z");
+    const log: string[] = [];
+    const base = setup({ team, open: [open({ labels: [] })], merged: [] }, log);
+    const failing: Forge = { ...base.forge, note: async () => ({ kind: "failed", reason: "HTTP 502" }) };
+    expect(await tick({ ...base, forge: failing })).toMatchObject({ kind: "ok" });
+    expect(log).toContain("log PROJ-1: the shared copy of the approval did not go out: HTTP 502");
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).not.toContain("shared");
   });
 });

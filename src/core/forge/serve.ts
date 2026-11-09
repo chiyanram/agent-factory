@@ -70,6 +70,12 @@ const RUN: Readonly<Record<ForgeOp, Run>> = {
   me: async (f) => value(await f.me()),
   change: (f, i) => withInput(i, numberOf, async (x) => value(await f.change(x))),
   defaultBranch: async (f) => value(await f.defaultBranch()),
+  branchExists: (f, i) =>
+    withInput(
+      i,
+      (r, v) => ({ branch: r.text(v, "branch") }),
+      async (x) => value(await f.branchExists(x)),
+    ),
   notes: (f, i) => withInput(i, numberOf, async (x) => value(await f.notes(x))),
   ciConfig: async (f) => value(await f.ciConfig()),
   claimed: (f, i) =>

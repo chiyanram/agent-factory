@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, rmSync } from "node:fs";
+import { cpSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./temp.js";
 
@@ -63,5 +63,31 @@ describe("check-size (#138; ADR-0003)", () => {
       out: "too long: AGENTS.md: 200 lines; ADR-0003 allows fewer than 200\n",
     });
     expect(run("check-size.ts", fixture("size-ok"))).toEqual({ code: 0, out: "" });
+  });
+});
+
+describe("check-coordinator (#105, #227)", () => {
+  const script = join(ROOT, "scripts", "check-coordinator.ts");
+  const check = (args: readonly string[]) => {
+    const r = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+    return { code: r.status ?? -1, out: `${r.stdout}${r.stderr}` };
+  };
+
+  it("passes the shipped template, and fails a template that lets the coordinator approve", async () => {
+    expect(check([])).toEqual({ code: 0, out: "" });
+    const { claudeSettings } = await import("../src/core/coordinator.js");
+    const { SAMPLE } = await import("../scripts/check-coordinator.js");
+    const settings = claudeSettings(SAMPLE);
+    const loose = {
+      ...settings,
+      permissions: { ...settings.permissions, allow: [...settings.permissions.allow, "Bash(agent-factory approve *)"] },
+    };
+    const dir = tempDir("factory-wall-");
+    made.push(dir);
+    const file = join(dir, "settings.json");
+    writeFileSync(file, JSON.stringify(loose));
+    const r = check([file]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("Bash(agent-factory approve *) lets the coordinator run agent-factory approve");
   });
 });

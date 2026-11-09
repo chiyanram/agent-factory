@@ -165,6 +165,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     me: async () => unused("me"),
     change: async () => unused("change"),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
+    branchExists: async () => ({ kind: "ok", value: false }),
     addLabel: async ({ number, label }) => {
       log.push(`label ${number} ${label}`);
       return { kind: "ok" };
@@ -717,7 +718,7 @@ describe("the writer step: a later run on the change", () => {
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
     const fake = fakeBox({});
     const out = await run(setup(fake.box, forge(), []), FIX);
-    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("not approved (stale)") });
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the approval is stale") });
     expect(existsSync(join(p.root, "box-runs"))).toBe(false);
   });
 });

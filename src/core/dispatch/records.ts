@@ -1,7 +1,8 @@
 // records — what the dispatcher has done for each ticket, so a restart loses nothing (#103; ADR-0012 S3). One
 // append-only JSON-lines file per ticket: <FACTORY_HOME>/runs/<project>/<ticket>.jsonl. The dispatcher writes a line
 // before a run starts and one after it ends; the counts the table needs (ready-check failures, review rounds, CI
-// rounds: writer runs started for a red pipeline) are summed from the lines written since the ticket's latest approval, so approving again starts afresh.
+// rounds: writer runs started for a red pipeline) are summed from the lines written since the human's START or approval
+// that let the build begin (#227), so a new one starts afresh.
 //
 // A "started" line with no "ended" after it means the dispatcher died during that run: the summary says so, and the
 // table blocks the ticket for a person rather than guess whether the run pushed.
@@ -111,7 +112,9 @@ export type Event =
     }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
-  | { readonly at: string; readonly kind: "blocked"; readonly why: string };
+  | { readonly at: string; readonly kind: "blocked"; readonly why: string }
+  // the shared copy of this approval (shared.ts approvalKey) is on the ticket's PR (#227); it is posted once
+  | { readonly at: string; readonly kind: "shared"; readonly approval: string };
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 
@@ -294,6 +297,10 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const why = str(raw, "why");
     return why === BAD ? BAD : { at, kind: "blocked", why };
   },
+  shared: (raw, at) => {
+    const approval = str(raw, "approval");
+    return approval === BAD ? BAD : { at, kind: "shared", approval };
+  },
 };
 
 function parseLine(line: string): unknown {
@@ -460,6 +467,8 @@ const STEPS: Steps = {
   }),
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
+  // the copy counts nothing; tick reads it from every line, so a later START never posts it twice
+  shared: (s) => s,
 };
 
 function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {

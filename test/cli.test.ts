@@ -51,7 +51,7 @@ describe("agent-factory spec", () => {
     const run = await cli(["spec", "ledger", "PROJ-1"]);
     expect(run).toMatchObject({
       code: 0,
-      out: `spec ledger/PROJ-1 ${specHash(SPEC)} ${join(home, "specs", "ledger", "PROJ-1", "spec.md")}\n`,
+      out: `spec ledger/PROJ-1 ${specHash(SPEC)} ${join(home, "specs", "ledger", "PROJ-1", "spec.md")}\ndesign none\n`,
     });
   });
 
@@ -89,12 +89,24 @@ describe("agent-factory approve and approval", () => {
     expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(4);
     const approved = await cli(["approve", "ledger", "PROJ-1", hash]);
     expect(approved.code).toBe(0);
-    expect(approved.out).toMatch(new RegExp(`^approved ledger/PROJ-1 spec ${hash} by `));
+    expect(approved.out).toMatch(new RegExp(`^approved ledger/PROJ-1 spec ${hash} design none by `));
     expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(0);
     writeSpec(SPEC.replace("It works.", "It works, fast."));
     const stale = await cli(["approval", "ledger", "PROJ-1"]);
     expect(stale.code).toBe(3);
     expect(stale.out).toContain("approve again");
+  });
+
+  it("spec prints the design's hash, approve needs it, and an edit to the design makes the approval stale (#227)", async () => {
+    writeSpec(SPEC);
+    const design = "# Design\n\nOne table.\n";
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), design);
+    expect((await cli(["spec", "ledger", "PROJ-1"])).out).toContain(`\ndesign ${specHash(design)}\n`);
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC)])).err).toContain("design's hash is now");
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC), specHash(design)])).code).toBe(0);
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), `${design}Two tables.\n`);
+    const stale = await cli(["approval", "ledger", "PROJ-1"]);
+    expect(stale).toMatchObject({ code: 3, out: expect.stringContaining("approved design") });
   });
 
   it("approve refuses a short hash or a changed spec (1), and prints its usage when arguments are missing (64)", async () => {
@@ -222,7 +234,57 @@ describe("agent-factory app-token", () => {
   });
 });
 
+// a glab that answers the branch search: factory/PROJ-1 is there when `there`
+function branchGlab(there: boolean): string {
+  const body = JSON.stringify(there ? [{ name: "factory/PROJ-1" }] : []);
+  const path = join(home, "glab");
+  writeFileSync(
+    path,
+    `#!/bin/sh\ncase "$*" in\n  *repository/branches*) printf 'HTTP/2.0 200 OK\\r\\n\\r\\n%s' '${body}' ;;\n  *) exit 3 ;;\nesac\n`,
+    { mode: 0o755 },
+  );
+  return path;
+}
+
+describe("agent-factory start (#227)", () => {
+  const env = (there: boolean) => ({
+    FACTORY_HOME: home,
+    FACTORY_PROJECT: "a/ledger",
+    FACTORY_GLAB: branchGlab(there),
+  });
+
+  it("records a human's START; with factory/<ticket> on the git host it asks first (3) and --yes starts", async () => {
+    const run = await cli(["start", "ledger", "PROJ-1"], env(false));
+    expect(run).toMatchObject({ code: 0, out: expect.stringMatching(/^started ledger\/PROJ-1 by /) });
+    expect(JSON.parse(readFileSync(join(home, "starts", "ledger", "PROJ-1.json"), "utf8"))).toMatchObject({
+      kind: "start",
+      ticket: "PROJ-1",
+      via: "terminal",
+    });
+    rmSync(join(home, "starts"), { recursive: true });
+    const asked = await cli(["start", "ledger", "PROJ-1"], env(true));
+    expect(asked).toMatchObject({ code: 3, err: expect.stringContaining("already on the git host") });
+    expect((await cli(["start", "ledger", "PROJ-1", "--yes"], env(true))).code).toBe(0);
+  });
+
+  it("prints its usage without exactly a project and a plain ticket (64); a git host it cannot read refuses (1)", async () => {
+    expect((await cli(["start", "ledger"])).code).toBe(64);
+    expect((await cli(["start", "ledger", "../x"])).code).toBe(64);
+    const down = await cli(["start", "ledger", "PROJ-1"], {
+      FACTORY_HOME: home,
+      FACTORY_PROJECT: "a/b",
+      FACTORY_GLAB: join(home, "none"),
+    });
+    expect(down.code).toBe(1);
+  });
+});
+
 describe("agent-factory dispatch", () => {
+  it("refuses to start while the coordinator's settings are missing or looser than its wall (#105)", async () => {
+    const run = await cli(["dispatch", "ledger", "--once"], { FACTORY_HOME: home, FACTORY_PROJECT: "a/b" });
+    expect(run).toMatchObject({ code: 1, err: expect.stringContaining("no coordinator settings") });
+  });
+
   it("runs only one pass, named with --once, for one plain project (64 otherwise)", async () => {
     expect((await cli(["dispatch", "ledger"])).code).toBe(64);
     expect((await cli(["dispatch", "--once"])).code).toBe(64);

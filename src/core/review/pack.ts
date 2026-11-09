@@ -25,7 +25,8 @@ import { agentsChain, readRules, type Pointer } from "./rules.js";
 
 export type Previous = { readonly kind: "none" } | { readonly kind: "head"; readonly sha: string };
 
-// the approval a human gave the ticket's spec: the hash they saw, or none (a tiny lane, once START records exist)
+// the approval a human gave the ticket's spec: the hash they saw, or none; a tiny ticket's START stands for it, bound to the
+// spec as it is (round.ts approvalFor, #227)
 export type Approval =
   | { readonly kind: "approved"; readonly hash: string; readonly by: string; readonly at: string }
   | { readonly kind: "none" };
