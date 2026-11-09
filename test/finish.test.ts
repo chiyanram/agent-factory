@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   excludeFactory,
@@ -18,6 +17,7 @@ import type { Forge } from "../src/core/forge/types.js";
 import { openAsks } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import type { PushRequest } from "../src/core/push.js";
+import { tempDir } from "./temp.js";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -249,7 +249,7 @@ describe("noFactoryFolder", () => {
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", repo, ...args], { env: env(), encoding: "utf8" }).trim();
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), "factory-finish-"));
+    repo = tempDir("factory-finish-");
     git("init", "-q");
   });
   afterEach(() => rmSync(repo, { recursive: true, force: true }));

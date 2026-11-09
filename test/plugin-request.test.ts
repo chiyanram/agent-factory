@@ -1,16 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { DEFAULT_POLICY, pluginConfigOf, readPluginConfig } from "../src/core/plugin/config.js";
@@ -20,6 +10,7 @@ import { onTicket, readLog } from "../src/core/plugin/writes.js";
 import { readProjectFile } from "../src/core/project.js";
 import { specHash } from "../src/core/spec.js";
 import { REQUEST_COMMANDS } from "../src/request-cli.js";
+import { tempDir } from "./temp.js";
 
 const SPEC = [
   "# PROJ-1: renewals refuse a reserved loan",
@@ -46,7 +37,7 @@ let root = "";
 let home = "";
 let sent = "";
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "factory-request-"));
+  root = tempDir("factory-request-");
   home = join(root, "home");
   sent = join(root, "sent.jsonl");
   mkdirSync(join(home, "specs", "ledger", "PROJ-1"), { recursive: true });

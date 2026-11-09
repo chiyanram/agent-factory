@@ -1,17 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pluginEnv, readDescribe } from "../src/core/plugin/contract.js";
 import { testPlugin } from "../src/core/plugin/kit.js";
@@ -23,11 +11,11 @@ import {
   readRegistry,
   type Setup,
 } from "../src/core/plugin/registry.js";
+import { tempDir } from "./temp.js";
 
 let root = "";
 beforeEach(() => {
-  // the real path: on macOS tmpdir() is behind a symlink (/var -> /private/var), and a plugin is named by its real file
-  root = realpathSync(mkdtempSync(join(tmpdir(), "factory-plugin-")));
+  root = tempDir("factory-plugin-");
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -139,8 +127,10 @@ describe("the registry: pinned by its folder's sha256, run from a private copy (
     expect(statSync(join(root, "home", "plugins", entry.sha256)).mode & 0o777).toBe(0o700);
     const found = await callPlugin(setup(), call);
     expect(found).toMatchObject({ kind: "ok", value: { kind: "found", fields: { text: "PROJ-1" } } });
-    // its env held only what it may have
-    expect(okValue(found).fields.env).toEqual(["ECHO_SITE", "HOME", "LANG", "PATH"]);
+    // its env held only what it may have; macOS itself sets __CF_USER_TEXT_ENCODING in every process it starts
+    const env = okValue(found).fields.env;
+    const handed = Array.isArray(env) ? env.filter((name) => name !== "__CF_USER_TEXT_ENCODING") : env;
+    expect(handed).toEqual(["ECHO_SITE", "HOME", "LANG", "PATH"]);
     // the person's folder can change after review: the pinned copy still runs
     writeFileSync(path, `${readFileSync(path, "utf8")}\n// changed\n`);
     expect(await callPlugin(setup(), call)).toMatchObject({ kind: "ok" });

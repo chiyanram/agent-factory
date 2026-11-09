@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { openProjectForge } from "../src/core/forge/index.js";
 import { pluginForge } from "../src/core/forge/plugin.js";
@@ -11,6 +10,7 @@ import type { Change } from "../src/core/forge/types.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { makeFakes, type FakeAnswer } from "../src/core/plugin/fakes.js";
 import { addPlugin, type Setup } from "../src/core/plugin/registry.js";
+import { tempDir } from "./temp.js";
 
 // the bundled plugins are made by `npm run build` (scripts/build-plugins.mjs); make test builds first
 const BUNDLED = join(import.meta.dirname, "..", "plugins");
@@ -19,7 +19,7 @@ const NODE_DIR = dirname(process.execPath);
 let root = "";
 let home = "";
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "factory-forge-plugin-"));
+  root = tempDir("factory-forge-plugin-");
   home = join(root, "home");
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));

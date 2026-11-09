@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
 import { specHash } from "../src/core/spec.js";
+import { tempDir } from "./temp.js";
 
 const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
@@ -41,7 +41,7 @@ function writeSpec(text: string): void {
 }
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "factory-cli-"));
+  home = tempDir("factory-cli-");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   hostPush as realHostPush,
@@ -12,6 +11,7 @@ import {
   type PushRequest,
 } from "../src/core/push.js";
 import type { Identity } from "../src/core/identity.js";
+import { tempDir } from "./temp.js";
 
 // A real clone whose origin is https://github.com/o/r.git; the operator's global config (trusted) maps that URL to a
 // bare repository on disk, so a push really happens with no network.
@@ -39,7 +39,7 @@ const APP: Identity = {
 };
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "factory-push-"));
+  root = tempDir("factory-push-");
   const home = join(root, "home");
   mkdirSync(home);
   env = { PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: "1" };

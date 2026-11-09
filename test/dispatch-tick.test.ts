@@ -1,7 +1,6 @@
 import { NO_NOTIFY, type Notify, type Ping } from "../src/core/notify.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
@@ -9,6 +8,7 @@ import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
 import { specHash } from "../src/core/spec.js";
+import { tempDir } from "./temp.js";
 
 const SPEC = (lane: string) =>
   [
@@ -125,7 +125,7 @@ function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): 
 }
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "factory-dispatch-"));
+  home = tempDir("factory-dispatch-");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 

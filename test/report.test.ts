@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   decide,
@@ -12,6 +11,7 @@ import {
   validReport,
   type ReportFile,
 } from "../src/core/report.js";
+import { tempDir } from "./temp.js";
 
 const ok = { kind: "exited", code: 0 } as const;
 const file = (value: unknown): ReportFile => ({
@@ -174,7 +174,7 @@ describe("parseReport", () => {
 describe("loadReport", () => {
   let tree = "";
   beforeEach(() => {
-    tree = mkdtempSync(join(tmpdir(), "factory-report-"));
+    tree = tempDir("factory-report-");
   });
   afterEach(() => rmSync(tree, { recursive: true, force: true }));
 

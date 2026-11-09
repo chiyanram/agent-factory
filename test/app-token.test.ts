@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { jwt, mint, readAppConfig, type AppConfig, type Http, type HttpRequest } from "../src/core/app-token.js";
+import { tempDir } from "./temp.js";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const PEM = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
@@ -13,7 +13,7 @@ const me = { uid: process.getuid?.() ?? 0 };
 
 let home = "";
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "factory-app-"));
+  home = tempDir("factory-app-");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 

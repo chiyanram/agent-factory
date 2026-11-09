@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
 import { buildBox, checkLayer, PACKAGE_FILE, readBoxFile, type Packer } from "../src/core/box/built.js";
 import { packedOf } from "../src/core/box/pack.js";
 import { hostDocker } from "../src/core/box/docker.js";
+import { tempDir } from "./temp.js";
 
 const BASE_ID = `sha256:${"a".repeat(64)}`;
 const LAYER_ID = `sha256:${"b".repeat(64)}`;
@@ -33,7 +33,7 @@ function fakeDocker(ids: readonly string[], fail = ""): { readonly calls: Call[]
 
 let home = "";
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "factory-build-"));
+  home = tempDir("factory-build-");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 

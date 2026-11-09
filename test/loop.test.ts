@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Done, Result } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
@@ -591,17 +591,15 @@ describe("lint-edit, the writer's hook (#138; ADR-0011 D17)", () => {
 
   it("a clean file passes in silence; a failing lint exits 2 with the file, the command and its output", async () => {
     const calls: FolderCall[] = [];
-    // the hook names the file by its real path (macOS: /var is /private/var)
-    const real = realpathSync(p.clone);
     expect(await hook(edit(join(p.clone, "ok.txt")), calls)).toEqual({ code: 0, err: "" });
     const bad = await hook(edit(join(p.clone, "bad.txt")), calls);
     expect(bad.code).toBe(2);
-    expect(bad.err).toContain(`lint failed on ${join(real, "bad.txt")} (grep -n BAD):`);
+    expect(bad.err).toContain(`lint failed on ${join(p.clone, "bad.txt")} (grep -n BAD):`);
     expect(bad.err).toContain("1:BAD");
     // no shell: the command's words, then the file as one more word, in the session's folder
-    expect(calls[0]).toMatchObject({ bin: "grep", args: ["-n", "BAD", join(real, "ok.txt")], cwd: p.clone });
+    expect(calls[0]).toMatchObject({ bin: "grep", args: ["-n", "BAD", join(p.clone, "ok.txt")], cwd: p.clone });
     expect((await hook(edit(join(p.clone, "a b.txt")), calls)).code).toBe(2);
-    expect(calls.at(-1)?.args.at(-1)).toBe(join(real, "a b.txt"));
+    expect(calls.at(-1)?.args.at(-1)).toBe(join(p.clone, "a b.txt"));
   });
 
   it("skips a file that is gone, one outside the folder, and a tool call with no file; runs nothing for them", async () => {

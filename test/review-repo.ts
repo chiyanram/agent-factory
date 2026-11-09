@@ -2,10 +2,10 @@
 // and one with a non-ASCII name), edits two rule files and adds the design; then a second commit on it.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Change } from "../src/core/forge/types.js";
+import { tempDir } from "./temp.js";
 
 export type Project = {
   readonly root: string;
@@ -24,7 +24,7 @@ export const DESCRIPTION =
   "Intent (verbatim): totals must be right.\nAC1: total() returns the sum.\nDesign: docs/design/order.md";
 
 export function project(): Project {
-  const root = mkdtempSync(join(tmpdir(), "factory-review-"));
+  const root = tempDir("factory-review-");
   const home = join(root, "home");
   mkdirSync(home);
   const env = {

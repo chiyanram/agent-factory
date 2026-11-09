@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { callerCount, hostGit, plan, trustedPath, type GitRequest, type GitResult } from "../src/core/git.js";
+import { tempDir } from "./temp.js";
 
 // Real repos in a temp folder. The operator's config is a temp global file; the system config is off.
 let base = "";
@@ -54,7 +54,7 @@ function effective(values: string): readonly string[] {
 }
 
 beforeEach(() => {
-  base = mkdtempSync(join(tmpdir(), "hostgit-"));
+  base = tempDir("hostgit-");
   repo = join(base, "repo");
   ran = join(base, "ran");
   writeFileSync(join(base, "global.gitconfig"), "");

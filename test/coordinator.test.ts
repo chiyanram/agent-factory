@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeMd, claudeSettings, copilotArgs, type CoordinatorPlaces } from "../src/core/coordinator.js";
 import { installCoordinator, startCoordinator, type Interactive } from "../src/coordinator-cli.js";
+import { tempDir } from "./temp.js";
 
 const PLACES: CoordinatorPlaces = {
   pkg: "/opt/agent-factory",
@@ -225,7 +226,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
 describe("setup coordinator and the launcher (#106)", () => {
   let home = "";
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), "factory-coordinator-"));
+    home = tempDir("factory-coordinator-");
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 

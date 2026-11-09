@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readProjectFile } from "../src/core/project.js";
 import { commandArgv } from "../src/core/ready/command.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
+import { tempDir } from "./temp.js";
 
 let home = "";
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "factory-project-"));
+  home = tempDir("factory-project-");
   mkdirSync(join(home, "projects"));
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));

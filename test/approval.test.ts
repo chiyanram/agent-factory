@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approvalPath, approvalState, approve } from "../src/core/approval.js";
 import { specHash } from "../src/core/spec.js";
+import { tempDir } from "./temp.js";
 
 const SPEC = [
   "# PROJ-123: renewals refuse a reserved loan",
@@ -40,7 +40,7 @@ const writeSpec = (text: string): void => {
 const seen = (text: string): string => specHash(text);
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "factory-home-"));
+  home = tempDir("factory-home-");
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
