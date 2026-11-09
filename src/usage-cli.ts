@@ -1,6 +1,6 @@
 // usage-cli — agent-factory usage [<project>] (#131): what the orchestrator's runs spent today, in the current window
-// and this month, per project and per ticket, and the automated review's acted-on rate this month (#220), read from
-// the run records (src/core/dispatch/usage.ts). It reads only.
+// and this month, per project and per ticket, each by run kind (#337), and the automated review's acted-on rate this
+// month (#220), read from the run records (src/core/dispatch/usage.ts). It reads only.
 
 import { plainName } from "./core/spec.js";
 import { actedLines, readSpends, usageLines, WINDOW_HOURS, type Spends } from "./core/dispatch/usage.js";
@@ -15,7 +15,8 @@ export type UsageIo = {
 };
 
 export const USAGE_HELP = `  usage [<project>]            what the orchestrator's runs spent today, in the current window and this month, per
-                               project and ticket, and the automated review's acted-on rate, from the run records
+                               project and ticket, each by run kind, and the automated review's acted-on rate, from
+                               the run records
 `;
 
 function windowHours(env: NodeJS.ProcessEnv): number | "bad" {
