@@ -46,10 +46,12 @@ images/factory-box/   the base image of every vm box: git, Docker (run under Sys
 src/core/dispatch/    the dispatcher: the decision table, the per-ticket run records, and one locked pass (dispatch --once)
 src/core/review/      the reviewer: the context pack, one review round (find, verify, post), and the status box
 src/core/ready/       the ready check and the local verifier: branch code run in a fresh box, never on the host (#91)
+src/core/settings/    the settings layers: team, project, user and machine; each key's class; config show/check (#229)
 src/core/plugin/      the plugin contract: describe and call, the pinned registry, and the contract test kit (#134)
 plugins/              the bundled plugins: github and gitlab serve the forge seam (lib/ built from dist/); discord pings
-prompts/              the reviewer's default find and verify instructions
+prompts/              the reviewer's default find and verify instructions, and the eval's judge
 evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)
+src/core/eval/        agent-factory eval reviewer: the harness, the judge, the $100 cap and the results file (#215)
 tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
 docs/adr/             decision records
 docs/agents/          issue tracker, triage labels, domain-doc conventions

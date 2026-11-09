@@ -9,7 +9,8 @@
 //     "ready": {
 //       "programs": ["make", "./gradlew"],   the programs an evidence row may start with
 //       "timeoutMinutes": 30,                per command (default 30, at most 240)
-//       "testFiles": ["src/test/**"]         the floor guard's test files (default: ready/floor.ts TEST_FILES)
+//       "testFiles": ["src/test/**"],        the floor guard's test files (default: ready/floor.ts TEST_FILES)
+//       "judgeFiles": ["ci/**"]              more judge files (#231), added to ready/judge.ts's, never in their place
 //     },
 //     "egress": {
 //       "allow": ["api.anthropic.com"]       the hosts this project's boxes may reach (#130; egress/allowlist.ts);
@@ -23,6 +24,8 @@ import { codeOf, prop } from "./dispatch/records.js";
 import { plainName } from "./spec.js";
 import { parseAllowlist } from "./egress/allowlist.js";
 import { TEST_FILES } from "./ready/floor.js";
+import { READY_MINUTES } from "./settings/keys.js";
+import { layered, refusals } from "./settings/layers.js";
 
 // a command with no shell: argv[0] is the program
 export type Argv = readonly [string, ...string[]];
@@ -40,13 +43,15 @@ export type ProjectFile = {
     readonly timeoutSeconds: number;
     // the globs the floor guard reads as test files (#190)
     readonly testFiles: readonly string[];
+    // the judge files this project adds to the built-in ones (#231; ready/judge.ts judgeFiles); none is []
+    readonly judgeFiles: readonly string[];
   };
   // the hosts the project's boxes may reach, checked; empty when the file names none
   readonly egress: { readonly allow: readonly string[] };
 };
 
-const DEFAULT_MINUTES = 30;
-const MAX_MINUTES = 240;
+const DEFAULT_MINUTES = READY_MINUTES.default;
+const MAX_MINUTES = READY_MINUTES.most;
 
 function failed(path: string, why: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason: `${path}: ${why}` };
@@ -101,9 +106,21 @@ function readyOf(path: string, raw: unknown): Result<ProjectFile["ready"]> {
   if (testFiles === "bad") {
     return failed(path, `"ready.testFiles" must list globs, such as ["src/test/**", "**/*Spec.groovy"]`);
   }
+  const judgeFiles = judgeFilesOf(prop(ready, "judgeFiles"));
+  if (judgeFiles === "bad") {
+    return failed(path, `"ready.judgeFiles" must list globs, such as ["ci/**"]`);
+  }
   return minutes === "bad"
     ? failed(path, `"ready.timeoutMinutes" must be a whole number from 1 to ${MAX_MINUTES}`)
-    : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles } };
+    : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles, judgeFiles } };
+}
+
+// judgeFilesOf : the project's added judge files; a deny-list key, so none adds nothing and an empty list is fine
+function judgeFilesOf(value: unknown): readonly string[] | "bad" {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) && value.every(word) ? value.filter(word) : "bad";
 }
 
 function testFilesOf(value: unknown): readonly string[] | "bad" {
@@ -163,9 +180,12 @@ export type RawRead =
   | Missing
   | { readonly kind: "failed"; readonly reason: string };
 
-// readProjectRaw : the project's file as one JSON object; `missing` says what the caller needs it for
+// readProjectRaw : the project's settings as one JSON object in the project file's shape, with the team and user
+// layers resolved into it on this host (#229; settings/layers.ts); `missing` says what the caller needs it for. A
+// layer that loosens a safety key refuses the read, so no run starts on it. With no team pin and no user file, the
+// value is the project file's own, as it was before the layers.
 export async function readProjectRaw(
-  input: { readonly home: string; readonly project: string },
+  input: { readonly home: string; readonly project: string; readonly env?: NodeJS.ProcessEnv },
   missing: string,
 ): Promise<RawRead> {
   if (!plainName(input.project)) {
@@ -177,7 +197,21 @@ export async function readProjectRaw(
     return read;
   }
   const raw = parsed(read.value);
-  return isObject(raw) ? { kind: "ok", path, value: raw } : failed(path, "is not a JSON object");
+  return isObject(raw) ? withLayers(input, path, read.value, raw) : failed(path, "is not a JSON object");
+}
+
+async function withLayers(
+  input: { readonly home: string; readonly env?: NodeJS.ProcessEnv },
+  path: string,
+  text: string,
+  value: object,
+): Promise<RawRead> {
+  const env = input.env ?? process.env;
+  const resolved = await layered({ home: input.home, env, project: { path, text, value } });
+  const refused = refusals(resolved);
+  return refused === ""
+    ? { kind: "ok", path, value: resolved.effective }
+    : failed(path, `the settings layers refuse to start: ${refused}`);
 }
 
 function isObject(value: unknown): value is object {

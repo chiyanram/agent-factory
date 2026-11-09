@@ -27,8 +27,10 @@
 //   the head is not the writer's (a person pushed)             wait: stand off
 //   the same patch twice, or a run that changed nothing        needs-human
 //   writer done, no ready check at this head                   ready check
-//   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230)
-//   than the one a human approved or STARTed
+//   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230);
+//   than the one a human approved or STARTed                   a test check's stop at the same check is named too
+//   ready check stopped by a test check (#231)                 needs-human, the hits listed; a human's waiver at
+//                                                              this head, newer than that check, runs it again
 //   ready check failed                                         writer again        3 failures → needs-human
 //   ready check passed, no review at this head                 reviewer            3 rounds → needs-human
 //   Act on findings                                            writer again        3 rounds → needs-human
@@ -73,6 +75,11 @@ export type ApprovalView =
   // a START (and an approval), and the spec's planned files need a heavier lane than the spec's (#230)
   | { readonly kind: "raised"; readonly from: Lane; readonly to: Lane; readonly why: string };
 
+// a human's waiver of the test checks (#231; waiver.ts): the head it was given at, and when
+export type WaiverView =
+  | { readonly kind: "none" }
+  | { readonly kind: "waived"; readonly head: string; readonly at: string };
+
 export type ChangeView =
   | { readonly kind: "none" }
   | { readonly kind: "open"; readonly line: OpenLine }
@@ -87,6 +94,7 @@ export type TicketState = {
   readonly ticket: string;
   readonly gate: Gate;
   readonly approval: ApprovalView;
+  readonly waiver: WaiverView;
   readonly change: ChangeView;
   readonly runs: Summary;
   // milliseconds since the epoch
@@ -273,19 +281,36 @@ function saidLane(view: ApprovalView): Lane | "none" {
   return view.kind === "approved" || view.kind === "started" ? view.lane : "none";
 }
 
-// diffRaised : the ready check read a diff that needs a heavier lane than the one a human said yes to (#230): it stops
-// for a person, never for the writer, since only a raised spec and a new approval let it go on
-function diffRaised(s: TicketState, lane: Lane | undefined): Action | "next" {
+// raisedLaneWhy : why the ready check's diff stops the change, when it needs a heavier lane than the one a human said
+// yes to (#230); "" when it does not. A raise stops for a person, never for the writer: only a raised spec and a new
+// approval let it go on, and a waiver does not.
+function raisedLaneWhy(s: TicketState, lane: Lane | undefined): string {
   const said = saidLane(s.approval);
   return lane !== undefined && said !== "none" && above(lane, said)
-    ? { kind: "needs-human", why: raisedWhy({ from: said, to: lane, why: "the ready check read the real diff" }) }
-    : "next";
+    ? raisedWhy({ from: said, to: lane, why: "the ready check read the real diff" })
+    : "";
 }
 
+type LastReady = Extract<Summary["lastReady"], { kind: "ended" }>;
+
+// alsoStopped : the test checks' own stop at the same check, when they stopped it too and no waiver lifted it (#231)
+function alsoStopped(s: TicketState, head: string, r: LastReady): string {
+  const tests = r.human && !r.passed ? testChecksStopped(s, head, r) : { kind: "ready" as const, head };
+  return tests.kind === "needs-human" ? `; and ${tests.why}` : "";
+}
+
+// laneRaised : a lane raise goes to a person, naming the test checks' stop as well when both hit
 const laneRaised: Rule = (s) => {
   const r = s.runs.lastReady;
-  return r.kind === "ended" && r.head === writerHead(s) ? diffRaised(s, r.lane) : "next";
+  const head = writerHead(s);
+  const why = r.kind === "ended" && r.head === head ? raisedLaneWhy(s, r.lane) : "";
+  return why === "" || r.kind !== "ended" ? "next" : { kind: "needs-human", why: `${why}${alsoStopped(s, head, r)}` };
 };
+
+// waivedSince : a waiver given at this head after the ready check that stopped it
+function waivedSince(waiver: WaiverView, head: string, checkedAt: string): boolean {
+  return waiver.kind === "waived" && waiver.head === head && Date.parse(waiver.at) > Date.parse(checkedAt);
+}
 
 const ready: Rule = (s) => {
   const head = writerHead(s);
@@ -296,14 +321,25 @@ const ready: Rule = (s) => {
   if (r.passed) {
     return "next";
   }
+  return r.human ? testChecksStopped(s, head, r) : readyFailed(s, head, r.why);
+};
+
+// testChecksStopped : a test check hit is a person's to decide, until their waiver at this head runs the check again
+function testChecksStopped(s: TicketState, head: string, r: { readonly at: string; readonly why: string }): Action {
+  return waivedSince(s.waiver, head, r.at)
+    ? { kind: "ready", head }
+    : { kind: "needs-human", why: `the test checks stopped the change at ${head.slice(0, 8)}: ${r.why}` };
+}
+
+function readyFailed(s: TicketState, head: string, why: string): Action {
   return s.runs.readyFailures >= MAX_READY_FAILURES
     ? { kind: "needs-human", why: `the ready check failed ${s.runs.readyFailures} times` }
     : {
         kind: "writer",
         task: { kind: "ready-failed", head },
-        why: `the ready check failed at this head: ${r.why}`,
+        why: `the ready check failed at this head: ${why}`,
       };
-};
+}
 
 // the review at this head, or "none" when there is none yet
 function reviewHere(s: TicketState): number | "none" {

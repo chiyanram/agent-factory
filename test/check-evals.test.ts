@@ -4,16 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  fileProblems,
-  findingProblems,
-  kindProblem,
-  placeProblems,
-  readGolden,
-  shaProblem,
-  tableProblems,
-  tableRows,
-} from "../scripts/check-evals.js";
+import { fileProblems, kindProblem, placeProblems, shaProblem, tableProblems } from "../scripts/check-evals.js";
+import { findingProblems, readGolden, tableRows } from "../src/core/eval/golden.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -222,7 +214,8 @@ describe("check-evals on a repository", () => {
     expect(r.out).toContain("evals/reviewer/empty: a seeded case's golden.json must name its seed");
   });
 
-  it("passes this repository's own golden set", () => {
+  // it applies every case's patch to its base commit, so it grows with the golden set: a cold macOS runner took 6 s
+  it("passes this repository's own golden set", { timeout: 60_000 }, () => {
     expect(run(ROOT)).toEqual({ code: 0, out: "" });
   });
 });

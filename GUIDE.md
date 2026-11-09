@@ -24,7 +24,7 @@ it ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14, [review 
 ```
 work (default)  dispatcher + host push ──▶ your own gh / glab login ──▶ pushes branches, opens MRs, comments
 personal (opt.) dispatcher + host push ──▶ a bot: GitHub App <slug>[bot] or GitLab service account
-human           agent-factory start · agent-factory approve (local records) · reviews · merges with your own account
+human           agent-factory start · approve · waive (local records) · reviews · merges with your own account
 ```
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
@@ -170,10 +170,12 @@ The wall (`src/core/coordinator.ts`):
 - **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it. **Today:** the start commands
   too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`, `start-writer.sh`), since the loop is
   still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
-- **Denied:** `agent-factory approve` and `agent-factory start`: the AI never approves and never STARTs a ticket, so
-  you run them yourself in your own terminal (#227). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+- **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
+  STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
+  `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
+  `starts`, `waivers`,
   `projects`, `runs`, `secrets`, `coordinator`, `pending`, `writes`, `plugins.json` and `plugins`. Reading the
   secret paths: `~/.ssh`, `~/.gnupg`, the gh and glab logins, `~/.git-credentials`, `~/.netrc`, the cloud logins,
   `~/.docker/config.json`, `~/.npmrc`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, the Keychain and the
@@ -374,14 +376,15 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   "verify": ["make", "verify"],
   "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30, "testFiles": ["src/test/**", "**/*Spec.groovy"] },
   "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] },
-  "oneWayDoorPaths": ["db/migrations/**", "api/openapi.yaml"],
+  "lanes": { "oneWayDoor": ["db/migrations/**", "api/openapi.yaml"] },
   "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
   "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
 }
 ```
 
-`agent-factory project init <project> [--template <file>]` writes it: from a team's template, copied once and never
-read again and only when its fields read, or with no plugin and the default policy. It never replaces a file that is
+`agent-factory project init <project> [--template <file>]` writes it: from a template, copied once and never
+read again and only when its fields read, or with no plugin and the default policy. A team that keeps its settings
+live uses a team layer instead ([Settings layers](#settings-layers)). It never replaces a file that is
 there.
 
 - `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
@@ -394,17 +397,19 @@ there.
 - `ready.testFiles`: the globs the floor guard reads as test files; they replace the built-in list (`src/test/**`,
   `test/**`, `tests/**`, `__tests__/**`, `*Test.java`, `*Spec.groovy`, `*.test.*`, `*.spec.*`, `test_*.py`,
   `*_test.go` and the like; `src/core/ready/floor.ts`).
+- `ready.judgeFiles`: more globs for the judge files (#231), added to the built-in ones, never in their place: the
+  build files, the verify command's files and the test config (`src/core/ready/judge.ts`).
 - `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
   `.npmjs.org` for a
   domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
   `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
   no box runs for the project.
-- `oneWayDoorPaths`: globs for the paths whose change cannot be undone (stored data, a schema, a public contract, a
+- `lanes.oneWayDoor`: globs for the paths whose change cannot be undone (stored data, a schema, a public contract, a
   deploy). A change that touches one needs the one-way-door lane (#230): before the build when the spec's `## Planned
-  files` names one, and in the ready check when the diff touches one. It is a deny-list: none means none, and a value
-  that is not a list of globs is refused, so a typo never drops it. **Today:** it is read from this file through one
-  function (`oneWayDoorPathsOf` in `src/core/lane.ts`), which the settings layers (#229) take over.
+  files` names one, and in the ready check when the diff touches one. It is a deny-list key ([Settings](#settings)):
+  every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
+  drops it.
 - `plugins`: which registered plugin serves each extension point ([Plugins](#plugins)).
 - `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
   (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
@@ -413,6 +418,44 @@ there.
   with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
   for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
   turns a local gate into forge CI.
+
+### Settings layers
+
+The project file is one of three settings layers, all in the factory home and never in the repo (#229;
+[docs/DESIGN.md](docs/DESIGN.md) section 5 "Settings"). They are resolved on this host each time a project file is read,
+so before every run, and no run's agent is handed them. The coordinator's deny list covers each of them:
+`$FACTORY_HOME/user.json`, `$FACTORY_HOME/teams/**` and `$FACTORY_HOME/projects/**`, and the orchestrator refuses to
+start while one is missing (`wallProblems`).
+
+| layer | file | holds |
+|---|---|---|
+| team | `$FACTORY_HOME/teams/<team>/team.json`, a git clone, read at the commit the project pins | the project file's keys, plus `"modes": {"<key>": "locked" \| "default" \| "open"}` |
+| project | `$FACTORY_HOME/projects/<project>.json`; `"team": "<team>@<full commit>"` pins the team | the keys above |
+| user | `$FACTORY_HOME/user.json` | the same keys |
+| machine | the `FACTORY_*` variables | the keys that `config show` lists with an `env` source |
+
+Every key has a class, fixed in code (`src/core/settings/keys.ts`):
+
+| class | rule | keys |
+|---|---|---|
+| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun` |
+| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap` |
+| allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
+| deny-list | all layers add | `ready.testFiles`, `lanes.oneWayDoor` |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
+
+- A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
+  layer, its `file:line` and the team value. A team `locked` mode holds on any class.
+- `approval.floor` is the engine's: no lane above tiny starts without a human approval, and no layer can change it.
+- An unknown key is a warning with "did you mean" for one release, then an error.
+- With no team pin and no user file, every value is the project file's own, as before the layers.
+- `agent-factory config show <project>` prints each key's value, layer, `file:line` and class; `config check <project>`
+  resolves the layers, runs the project file's checks on the result, and exits 0 or 1; `team update <project>
+  [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
+  Fetch the team's clone yourself first; nothing here uses the network.
+- **Today:** the machine-layer keys are still read by each module from its own variable, so a file value for one is
+  reported by `config check` and not used.
 
 ### The box image
 
@@ -454,8 +497,8 @@ secret-like name the box was not given, is there. Where there is no image or no 
 to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, no LLM) starts. Each does one job on one
 story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
 questions and status to Jira or the issue through `agent-factory request` ([Writes](#writes)), and
-`agent-factory confirm` behind the person's yes; you never run `agent-factory approve` or `agent-factory start`, which
-are denied to you: the human runs them (#227). You edit and write only spec drafts in
+`agent-factory confirm` behind the person's yes; you never run `agent-factory approve`, `agent-factory start` or
+`agent-factory waive` or `agent-factory eval`, which are denied to you: the human runs them (#227, #231, #215). You edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.
@@ -536,27 +579,36 @@ START waits, since nothing runs without one. Each approval also gets one shared 
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
 each record when the writer may try again (`nextTry`, #228): 10 s after the step's first failure, doubling each time,
-never more than 5 minutes; until then the pass waits on that ticket, and the caps still hold. The ready check first runs the floor guard (#190): it reads the change's diff
+never more than 5 minutes; until then the pass waits on that ticket, and the caps still hold. The ready check first runs the floor guard (#190, #231): it reads the change's diff
 from its merge base with the default branch, on the host and with git only, and fails the check at once, with each
-`file:line`, when the diff lowers the bar (VB6, CR4):
+`file:line`, when the diff lowers the bar (VB6, CR4). The test checks (S1–S4):
+- a test file deleted, or moved out of the test files (a move inside them is followed), or fewer test cases in a test
+  file that stays (`@Test` and its kin, a Spock feature, `it(`, `test(`, `def test_`, `func Test`; a renamed case is
+  silent);
 - a skip or focus marker added in a test file (`@Disabled…`, `@Ignore…`, `@Requires({ false })`, `.skip`, `.only`,
   `xit(`, `fit(`, `pytest.mark.skip`, `xfail`, `t.Skip` and the like);
-- a test file deleted, or moved out of the test files (a move inside them is followed);
 - more assertion lines removed than added in a test file (`assert…`, `expect(`, `assertThat`, `verify(`, Go's
   `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting;
+- a judge file added, changed, moved or deleted: a build file or dependency manifest, a file the project's `verify`
+  command names or its program reads (`Makefile` for `make`, `package.json` for `npm`), jest, vitest or playwright
+  config, `junit-platform.properties`, `pytest.ini`, `conftest.py`, and the project's `ready.judgeFiles`.
+
+and the code checks:
 - a suppression added with no reason comment on the line above (`@SuppressWarnings`, `eslint-disable`,
   `@ts-ignore`, `NOSONAR`, `noqa` and the like), in any file;
 - a `catch` or `except` left empty: added so, or with its body removed.
 
-A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
-fails the step, so the check is never passed and a person looks. **Today:** there is no waiver: a hit a person
-agrees with still fails the check, so the change goes to them after the ready check's 3 failures and they land it by
-hand. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
+A test check hit goes to a person at once (`needs-human`, with the hits listed), never back to the writer; a code check
+hit sends the writer back like any failed ready check. A person who agrees with a test check hit runs
+`agent-factory waive <project> <ticket> <head>` and removes `needs-human`: the ready check runs again at that head and
+clears it. On a later head the test checks look again only at the files changed since the waiver's head, so a cleared
+file is flagged again only if it changes again. A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
+or the waiver fails the step, so the check is never passed and a person looks. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
 fools it or fails it; and Spock `where:` rows are not counted.
 
 The ready check then reads the lane the real diff needs, the same way (#230; `src/core/ready/lane.ts`): only docs,
 comments or the values of config keys that stay may be tiny; any other change, a moved file among them, needs at least
-bug; a path under the project's `oneWayDoorPaths` needs the one-way door. The lane is only ever raised: a diff that
+bug; a path under the project's `lanes.oneWayDoor` needs the one-way door. The lane is only ever raised: a diff that
 needs a heavier lane than the one a human approved, or STARTed in the tiny lane, goes to `needs-human`, and the way on
 is a raised `## Lane` in the spec and a human's approval of it. The same check runs before the build, on the spec's
 `## Planned files`: a planned file under a one-way-door path holds the ticket until the spec is raised and approved.
@@ -627,6 +679,7 @@ and `#12` for `!12`.
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash and the design's (`design none` with no `design.md` beside it), or every missing part (intent, numbered acceptance criteria, design, lane); an optional `## Planned files` lists the paths the change will touch, one per line, for the lane check before the build (#230); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
 | `agent-factory start <project> <ticket> [--yes]` | records a human's START in `$FACTORY_HOME/starts/<project>/<ticket>.json`: who, the front door (`via`) and when. It opens the ticket; in the tiny lane it also lets the build begin. When `factory/<ticket>` is already on the git host it asks first (exit 3), and `--yes` starts anyway. A human runs it; the coordinator's settings deny it (#227) |
 | `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, the design's (`none` when there is no `design.md` beside the spec), who, the front door and when. The hashes on the command line are the ones the human saw, as `agent-factory spec` printed them; a spec or design that no longer has exactly that hash is refused. A human runs it; the coordinator's settings deny it ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104, #227) |
+| `agent-factory waive <project> <ticket> <head>` | records the human's waiver of the test checks in `$FACTORY_HOME/waivers/<project>/<ticket>.json`: `kind: "test-change"`, the full commit id of the head the hits were listed at, who, the front door and when. The ready check clears the test check hits at that head; on a later head it looks again only at the files changed since, so a cleared file is flagged again only if it changes again. A waiver given again replaces it. A human runs it; the coordinator's settings deny it (#231) |
 | `agent-factory request <capability> --file <draft.json>` | asks for a `tracker.comment`, `tracker.create` or `notify` write on an approved ticket; the project's policy performs it at once (0), keeps it for `confirm` and prints that command (3), or refuses it (1) ([Writes](#writes)) |
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |

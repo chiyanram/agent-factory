@@ -125,9 +125,10 @@ checks and the lane check.
 _Avoid_: verify (for this step)
 
 **Test checks**: what the engine stops without a model: a test removed (S1), a skip added (S2), fewer assertions (S3),
-a judge file changed (S4). A human may clear one with a waiver scoped to the head. In code, the floor guard
-(`src/core/ready/floor.ts`) has S1 for deleted files, S2, S3, plus bare suppressions and empty catches; S4 and the
-waiver are #231.
+a judge file changed (S4). A hit goes to needs-human with the hits listed. A human may clear one with a waiver scoped
+to the head (`agent-factory waive`, a `test-change` record); a later head is checked again only where it changed
+since. In code: the floor guard (`src/core/ready/floor.ts`), which also stops bare suppressions and empty catches for
+the writer, and `src/core/waiver.ts` (#231).
 
 **Judge files**: tests, test config, the gate command and what it runs.
 _Avoid_: test setup, harness

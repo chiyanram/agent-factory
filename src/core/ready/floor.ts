@@ -1,26 +1,43 @@
-// floor — the floor guard of the ready check (#190; rulebook VB6, CR4). It reads the change's diff, from the merge base
-// with the default branch to the head, on the host and through hostGit: it runs no branch code, so it needs no box. It
-// reports only the moves that lower the bar; adding tests or removing a skip is silent:
+// floor — the floor guard of the ready check (#190, #231; rulebook VB6, CR4). It reads the change's diff, from the merge
+// base with the default branch to the head, on the host and through hostGit: it runs no branch code, so it needs no
+// box. It reports only the moves that lower the bar; adding tests or removing a skip is silent. The test checks
+// (GLOSSARY "Test checks", S1-S4):
 //
-//   skip      a skip marker added in a test file: @Disabled, @Ignore, @IgnoreIf, @Requires(false), @PendingFeature,
-//             .skip(, xit(, xdescribe(, pytest.mark.skip, t.Skip(
-//   deleted   a test file deleted with no new path (git's rename detection follows a move)
-//   assert    more assertion lines removed than added in a test file that stays: assert, expect(, assertThat,
+//   deleted   S1: a test file deleted with no new path (git's rename detection follows a move), or moved out of the
+//             test files
+//   cases     S1: fewer test cases in a test file that stays: @Test and its kin, a Spock feature, it( and test(,
+//             def test_, func Test; a renamed case is one removed and one added, so it is silent
+//   skip      S2: a skip marker added in a test file: @Disabled, @Ignore, @IgnoreIf, @Requires(false),
+//             @PendingFeature, .skip(, xit(, xdescribe(, pytest.mark.skip, t.Skip(
+//   assert    S3: more assertion lines removed than added in a test file that stays: assert, expect(, assertThat,
 //             verify(, and in a Spock spec every line of a then: or expect: block
-//   reason    a suppression added with no reason comment on the line above (CR4): @SuppressWarnings, NOSONAR,
+//   judge     S4: a judge file added, changed, moved or deleted (judge.ts: build files, the verify command's files,
+//             test config, and the project's own)
+//
+// and the code checks (CR4), which the writer can fix:
+//
+//   reason    a suppression added with no reason comment on the line above: @SuppressWarnings, NOSONAR,
 //             noinspection, eslint-disable, oxlint-disable, biome-ignore, @ts-ignore, @ts-expect-error, noqa,
 //             type: ignore, nolint
 //   catch     an empty catch block added: catch (…) {} or a catch whose next line closes it, or except: pass
 //
-// Today there is no waiver: a hit a person agrees with still fails the check, so such a change goes to a person after
-// the ready check's 3 failures, and the person lands it by hand. A guard that cannot read the diff fails, so the ready
-// check is never passed on a diff no one read. Nothing here throws.
+// A test check hit goes to a person (needs-human) with the hits listed; a code check hit sends the writer back. A
+// person who agrees with a test check hit waives it at that head (waiver.ts). With a waiver, the test checks look only
+// at the files the interdiff from the waiver's head to this head touches: a file the waiver cleared is flagged again
+// only if it changes again. A waiver whose head git cannot diff against clears nothing. A guard that cannot read the
+// diff fails, so the ready check is never passed on a diff no one read. Nothing here throws.
 
 import type { Result } from "../forge/api.js";
 import { globRegex } from "../ci-files.js";
 import { hostGit, type GitResult } from "../git.js";
 
-export type Hit = { readonly file: string; readonly line: number; readonly what: string };
+// check: "test" for a test check (S1-S4), which a person decides; "code" for a code check, which the writer fixes
+export type Hit = {
+  readonly file: string;
+  readonly line: number;
+  readonly what: string;
+  readonly check: "test" | "code";
+};
 
 export type FloorInput = {
   // the project's clone, read only through hostGit
@@ -32,6 +49,10 @@ export type FloorInput = {
   readonly head: string;
   // the globs that name test files
   readonly testFiles: readonly string[];
+  // the globs that name judge files (judge.ts judgeFiles)
+  readonly judgeFiles: readonly string[];
+  // the head of the ticket's waiver (waiver.ts), or "none"
+  readonly waived: string;
 };
 
 // the built-in test files, which a project file's ready.testFiles replaces
@@ -72,6 +93,10 @@ const ASSERT =
   /\bassert\b|\bassert\w*\s*[(!]|\bexpect\s*\(|\bassertThat\b|\bverify\s*\(|\b[tb]\.(?:Error|Fatal)f?\s*\(/;
 const SUPPRESS =
   /@SuppressWarnings\b|NOSONAR|\bnoinspection\b|eslint-disable|oxlint-disable|biome-ignore|@ts-ignore|@ts-expect-error|#\s*noqa\b|#\s*type:\s*ignore|\bnolint\b/;
+// a test case: JUnit's @Test and its kin, a Spock feature (a method named by a string), it( and test( (with .each),
+// an RSpec it "…", pytest's def test_, Go's func Test
+const CASE =
+  /@(?:[\w.]+\.)?(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b|^\s*def\s+["']|(?<![.\w$])(?:it|test)(?:\.each\b.*)?\s*\(|^\s*it\s+["']|\bdef\s+test_\w*\s*\(|\bfunc\s+Test\w*\s*\(/;
 const COMMENT = /^\s*(\/\/|#|\/\*|\*|--)\s*\S/;
 // a reason: a comment with at least one word in it, so a bare "/**/" or "*/" is none
 const REASON = /^\s*(?:\/\/|#|\/\*|\*|--).*[\p{L}\p{N}]/u;
@@ -218,7 +243,11 @@ function at(text: readonly string[], line: number): string {
 }
 
 function hit(file: string, line: number, what: string): Hit {
-  return { file, line, what };
+  return { file, line, what, check: "test" };
+}
+
+function codeHit(file: string, line: number, what: string): Hit {
+  return { file, line, what, check: "code" };
 }
 
 // fresh : the added lines that are new, not a line the same diff removed and put back (moved or re-indented)
@@ -238,7 +267,7 @@ function skips(f: File): readonly Hit[] {
 function reasonless(f: File): readonly Hit[] {
   return fresh(f)
     .filter((n) => SUPPRESS.test(at(f.after, n)) && !reasoned(f.after, n))
-    .map((n) => hit(f.change.path, n, "adds a suppression with no reason on the line above"));
+    .map((n) => codeHit(f.change.path, n, "adds a suppression with no reason on the line above"));
 }
 
 // reasoned : the line above is a comment with a word in it, and is not itself a suppression
@@ -256,7 +285,7 @@ function emptyCatches(f: File): readonly Hit[] {
   return [...new Set(near)]
     .toSorted((a, b) => a - b)
     .filter((n) => emptyCatchAt(f.after, n))
-    .map((n) => hit(f.change.path, n, "leaves an empty catch"));
+    .map((n) => codeHit(f.change.path, n, "leaves an empty catch"));
 }
 
 function emptyCatchAt(text: readonly string[], line: number): boolean {
@@ -326,7 +355,28 @@ function assertions(f: File): readonly Hit[] {
     : [];
 }
 
-const CHECKS: readonly ((f: File) => readonly Hit[])[] = [skips, assertions, reasonless, emptyCatches];
+// testCase : a line that opens a test case, not inside a comment
+function testCase(text: readonly string[], line: number): boolean {
+  const code = at(text, line);
+  return !COMMENT.test(code) && CASE.test(code);
+}
+
+// cases : fewer test cases in a test file that stays (S1)
+function cases(f: File): readonly Hit[] {
+  if (!f.test || f.change.kind === "added") {
+    return [];
+  }
+  const from = fromOf(f.change);
+  const removed = f.lines.removed.filter((n) => testCase(f.before, n));
+  const added = f.lines.added.filter((n) => testCase(f.after, n));
+  return removed.length > added.length
+    ? removed.map((n) =>
+        hit(from, n, `removes a test case (${removed.length} removed, ${added.length} added in this file)`),
+      )
+    : [];
+}
+
+const CHECKS: readonly ((f: File) => readonly Hit[])[] = [skips, cases, assertions, reasonless, emptyCatches];
 
 function textAt(input: FloorInput, commit: string, path: string): Promise<Result<readonly string[]>> {
   return git(input, ["cat-file", "blob", `${commit}:${path}`]).then((r) => {
@@ -394,17 +444,59 @@ function movedOut(input: FloorInput, change: Change): readonly Hit[] {
     : [];
 }
 
+const JUDGE_MOVES: Readonly<Record<Change["kind"], string>> = {
+  added: "adds a judge file",
+  modified: "changes a judge file",
+  renamed: "moves a judge file",
+  deleted: "deletes a judge file",
+};
+
+// judged : a change to a judge file (S4), at either of its paths
+function judged(input: FloorInput, change: Change): readonly Hit[] {
+  const paths = change.kind === "renamed" ? [change.from, change.path] : [change.path];
+  return paths.some((p) => isTestFile(p, input.judgeFiles)) ? [hit(change.path, 0, JUDGE_MOVES[change.kind])] : [];
+}
+
 async function hitsIn(input: FloorInput, base: string, change: Change): Promise<Result<readonly Hit[]>> {
   if (change.kind === "deleted") {
-    return {
-      kind: "ok",
-      value: isTestFile(change.path, input.testFiles) ? [hit(change.path, 0, "deletes a test file")] : [],
-    };
+    const deleted = isTestFile(change.path, input.testFiles) ? [hit(change.path, 0, "deletes a test file")] : [];
+    return { kind: "ok", value: [...deleted, ...judged(input, change)] };
   }
   const file = await fileOf(input, base, change);
   return file.kind === "ok"
-    ? { kind: "ok", value: [...movedOut(input, change), ...CHECKS.flatMap((c) => c(file.value))] }
+    ? {
+        kind: "ok",
+        value: [...judged(input, change), ...movedOut(input, change), ...CHECKS.flatMap((c) => c(file.value))],
+      }
     : file;
+}
+
+// interdiff : the paths the change touched since the waiver's head, or "none" when there is no waiver or git cannot
+// diff against its head (then the waiver clears nothing)
+async function interdiff(input: FloorInput): Promise<ReadonlySet<string> | "none"> {
+  if (input.waived === "none") {
+    return "none";
+  }
+  const listed = out(
+    await git(input, [
+      "diff",
+      "--name-only",
+      "--no-renames",
+      "-z",
+      "--no-color",
+      "--ignore-submodules=all",
+      input.waived,
+      input.head,
+    ]),
+    "list the files changed since the waiver",
+  );
+  return listed.kind === "ok" ? new Set(listed.value.split("\0").filter((w) => w !== "")) : "none";
+}
+
+// cleared : a change the waiver covers: none of its paths changed since the waiver's head
+function cleared(since: ReadonlySet<string> | "none", change: Change): boolean {
+  const paths = change.kind === "renamed" ? [change.from, change.path] : [change.path];
+  return since !== "none" && !paths.some((p) => since.has(p));
 }
 
 // floorGuard : every move in the diff that lowers the bar, in file order; none is a pass
@@ -429,22 +521,32 @@ export async function floorGuard(input: FloorInput): Promise<Result<readonly Hit
   if (listed.kind === "failed") {
     return listed;
   }
+  const since = await interdiff(input);
   const hits: Hit[] = [];
   for (const change of changesOf(listed.value)) {
     const found = await hitsIn(input, base.value, change);
     if (found.kind === "failed") {
       return found;
     }
-    hits.push(...found.value);
+    const waived = cleared(since, change);
+    hits.push(...found.value.filter((h) => !(waived && h.check === "test")));
   }
   return { kind: "ok", value: hits };
 }
 
 const MAX_SHOWN = 10;
 
-// hitsLine : the hits as one line for the run record and the writer's task
+// hitsLine : the hits as one line for the run record, and for the person (a test check) or the writer's task
 export function hitsLine(hits: readonly Hit[]): string {
   const shown = hits.slice(0, MAX_SHOWN).map((h) => `${h.file}${h.line > 0 ? `:${h.line}` : ""} ${h.what}`);
   const more = hits.length > MAX_SHOWN ? `; and ${hits.length - MAX_SHOWN} more` : "";
-  return `the floor guard: ${shown.join("; ")}${more}. Fix the code (VB6); one that must stay goes to a person, who lands it by hand`;
+  const next = hits.some((h) => h.check === "test")
+    ? "A person decides: a change that must stay is waived at this head with agent-factory waive"
+    : "Fix the code (VB6)";
+  return `the floor guard: ${shown.join("; ")}${more}. ${next}`;
+}
+
+// forHuman : whether the hits stop the change for a person: any test check hit does
+export function forHuman(hits: readonly Hit[]): boolean {
+  return hits.some((h) => h.check === "test");
 }

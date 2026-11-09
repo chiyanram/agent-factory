@@ -29,6 +29,7 @@ import type { Post } from "../post.js";
 import { needsApproval, oneWayDoorPathsOf, plannedCheck } from "../lane.js";
 import { plainName, type Lane, type Spec } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
+import { readWaiver } from "../waiver.js";
 import type { Evidence } from "../report.js";
 import {
   codeOf,
@@ -42,7 +43,16 @@ import {
   type Task,
 } from "./records.js";
 import { approvalKey, sharedNote } from "./shared.js";
-import { decide, goAt, type Action, type ApprovalView, type ChangeView, type Gate, type TicketState } from "./table.js";
+import {
+  decide,
+  goAt,
+  type Action,
+  type ApprovalView,
+  type ChangeView,
+  type Gate,
+  type TicketState,
+  type WaiverView,
+} from "./table.js";
 
 export const BRANCH_PREFIX = "factory/";
 
@@ -65,11 +75,12 @@ export type Steps = {
       readonly hung: boolean;
     }
   >;
-  // the ready check runs the writer's evidence rows again at the head; why names the first row that failed. It reads
-  // the lane the real diff needs (#230), and holds each acceptance criterion of the spec to an evidence row.
+  // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
+  // says a test check stopped it for a person (#231). It reads the lane the real diff needs (#230), and holds each
+  // acceptance criterion of the spec to an evidence row.
   readonly ready: Step<
     RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts,
-    { readonly passed: boolean; readonly why: string; readonly lane?: Lane }
+    { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane }
   >;
   readonly review: Step<RunInput, { readonly actOn: number }>;
   // the local verifier (#91): it posts its result as a commit status at the head
@@ -225,6 +236,19 @@ function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): Ch
   return only.kind === "open" ? { kind: "open", line: only } : { kind: "merged", line: only };
 }
 
+// waiverOf : the ticket's waiver of the test checks (#231), as the table sees it
+async function waiverOf(setup: TickSetup, ticket: string): Promise<Result<WaiverView>> {
+  const stored = await readWaiver({ home: setup.home, project: setup.project, ticket });
+  if (stored.kind === "refused") {
+    return { kind: "failed", reason: `${ticket}: ${stored.reason}` };
+  }
+  return {
+    kind: "ok",
+    value:
+      stored.kind === "record" ? { kind: "waived", head: stored.record.head, at: stored.record.at } : { kind: "none" },
+  };
+}
+
 // sharedBefore : whether the run records hold the shared copy of this approval
 function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none"): boolean {
   const key = approved === "none" ? "" : approvalKey(approved);
@@ -251,6 +275,10 @@ async function stateOf(
   if (events.kind === "failed") {
     return events;
   }
+  const waiver = await waiverOf(setup, ticket);
+  if (waiver.kind === "failed") {
+    return waiver;
+  }
   const since = goAt(said.value.view) || "1970-01-01T00:00:00Z";
   const runs = summarize({ events: events.value, since });
   const approved = said.value.record;
@@ -261,6 +289,7 @@ async function stateOf(
         ticket,
         gate: setup.gate,
         approval: said.value.view,
+        waiver: waiver.value,
         change: changeOf(ticket, lines),
         runs,
         now: setup.now(),
@@ -538,28 +567,30 @@ async function runReady(setup: TickSetup, state: TicketState, head: string): Pro
     evidence: evidenceOf(state),
     ...facts.value,
   });
-  return ran.kind === "ok" ? readyEnded(setup, state, head, ran.value) : ran;
+  return ran.kind === "ok"
+    ? record({ where: where(setup, state), event: readyEnded(setup, state, head, ran.value) })
+    : ran;
 }
 
-// readyEnded : the ready check's end, with the lane the diff needs (#230) and, when it failed, its next try
+// readyEnded : the ready check's end, with the lane the diff needs (#230); a stop for a person (#231) is marked so and
+// sets no next try for the writer
 function readyEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly passed: boolean; readonly why: string; readonly lane?: Lane },
-): Promise<Done> {
-  return record({
-    where: where(setup, state),
-    event: {
-      at: at(setup),
-      kind: "ready-ended",
-      head,
-      passed: value.passed,
-      why: value.why,
-      ...(value.lane === undefined ? {} : { lane: value.lane }),
-      ...failedAt(setup, "ready", !value.passed, state.runs.readyFailures),
-    },
-  });
+  value: { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane },
+): Event {
+  const forWriter = !value.passed && !value.human;
+  return {
+    at: at(setup),
+    kind: "ready-ended",
+    head,
+    passed: value.passed,
+    why: value.why,
+    ...(value.human ? { human: true } : {}),
+    ...(value.lane === undefined ? {} : { lane: value.lane }),
+    ...failedAt(setup, "ready", forWriter, state.runs.readyFailures),
+  };
 }
 
 async function runVerify(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {

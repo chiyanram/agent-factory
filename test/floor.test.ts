@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rmSync } from "node:fs";
-import { floorGuard, hitsLine, isTestFile, TEST_FILES, type Hit } from "../src/core/ready/floor.js";
+import { floorGuard, forHuman, hitsLine, isTestFile, TEST_FILES, type Hit } from "../src/core/ready/floor.js";
+import { judgeFiles } from "../src/core/ready/judge.js";
 import { project, type Project } from "./review-repo.js";
 
 let p: Project;
@@ -28,7 +29,16 @@ afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 async function guard(testFiles: readonly string[] = TEST_FILES) {
   const head = p.commitAll("the writer's change");
   p.git("push", "-q", "origin", "factory/PROJ-1");
-  return floorGuard({ repo: p.clone, env: p.env, base: "main", branch: "factory/PROJ-1", head, testFiles });
+  return floorGuard({
+    repo: p.clone,
+    env: p.env,
+    base: "main",
+    branch: "factory/PROJ-1",
+    head,
+    testFiles,
+    judgeFiles: [],
+    waived: "none",
+  });
 }
 
 async function hits(testFiles?: readonly string[]): Promise<readonly Hit[]> {
@@ -65,7 +75,9 @@ describe("the floor guard (#190)", () => {
   it("finds a deleted test file, and follows a moved one", async () => {
     p.git("rm", "-q", "src/test/groovy/OrderSpec.groovy");
     p.git("mv", "src/test/java/OldNameTest.java", "src/test/java/NewNameTest.java");
-    expect(await hits()).toEqual([{ file: "src/test/groovy/OrderSpec.groovy", line: 0, what: "deletes a test file" }]);
+    expect(await hits()).toEqual([
+      { file: "src/test/groovy/OrderSpec.groovy", line: 0, what: "deletes a test file", check: "test" },
+    ]);
   });
 
   it("finds removed assertions, but not a changed one, and follows them across a move", async () => {
@@ -127,7 +139,14 @@ describe("the floor guard (#190)", () => {
     p.write("a.txt", "a\n");
     const head = p.commitAll("a");
     p.git("push", "-q", "origin", "factory/PROJ-1");
-    const input = { repo: p.clone, env: p.env, branch: "factory/PROJ-1", testFiles: TEST_FILES };
+    const input = {
+      repo: p.clone,
+      env: p.env,
+      branch: "factory/PROJ-1",
+      testFiles: TEST_FILES,
+      judgeFiles: [],
+      waived: "none",
+    };
     expect(await floorGuard({ ...input, base: "no-such-branch", head })).toMatchObject({ kind: "failed" });
     expect(await floorGuard({ ...input, base: "main", head: "1".repeat(40) })).toMatchObject({
       kind: "failed",
@@ -269,15 +288,142 @@ describe("the floor guard (#190)", () => {
     expect(await hits()).toEqual([]);
   });
 
-  it("says the hits in one line, the first ten, and that one which must stay goes to a person", () => {
+  it("says the hits in one line, the first ten; a test check goes to a person, a code check to the writer", () => {
     const many = Array.from({ length: 12 }, (_, i) => ({
       file: `t${i}.test.ts`,
       line: i + 1,
       what: "adds a skip marker",
+      check: "test" as const,
     }));
     const line = hitsLine(many);
     expect(line).toContain("t0.test.ts:1 adds a skip marker");
     expect(line).toContain("and 2 more");
-    expect(line).toContain("goes to a person");
+    expect(line).toContain("A person decides");
+    expect(forHuman(many)).toBe(true);
+    const code = [{ file: "a.ts", line: 2, what: "leaves an empty catch", check: "code" as const }];
+    expect(hitsLine(code)).toContain("Fix the code (VB6)");
+    expect(forHuman(code)).toBe(false);
+  });
+});
+
+// the guard with the judge files a project with a local gate of `make verify` has, and a waiver at a head or none
+async function judgedAt(head: string, waived = "none"): Promise<readonly Hit[]> {
+  const out = await floorGuard({
+    repo: p.clone,
+    env: p.env,
+    base: "main",
+    branch: "factory/PROJ-1",
+    head,
+    testFiles: TEST_FILES,
+    judgeFiles: JUDGE,
+    waived,
+  });
+  if (out.kind === "failed") {
+    throw new Error(out.reason);
+  }
+  return out.value;
+}
+
+const JUDGE = judgeFiles({
+  gate: { kind: "local", verify: ["make", "verify", "-f", "ci/verify.mk"] },
+  ready: { programs: ["make"], timeoutSeconds: 60, testFiles: TEST_FILES, judgeFiles: ["checks/**"] },
+  egress: { allow: [] },
+});
+
+function pushed(message: string): string {
+  const head = p.commitAll(message);
+  p.git("push", "-q", "origin", "factory/PROJ-1");
+  return head;
+}
+
+const lines = (found: readonly Hit[]): readonly string[] => found.map((h) => `${h.file}:${h.line} ${h.what}`);
+
+describe("the judge files (S4, #231)", () => {
+  it("stops a build-file edit and a test-config edit, as test checks for a person", async () => {
+    p.write("build.gradle", "plugins { id 'java' }\n");
+    p.write("web/jest.config.js", "module.exports = { testMatch: [] };\n");
+    p.write("svc/conftest.py", "collect_ignore = ['test_cart.py']\n");
+    p.write("src/main/Order.java", "class Order {}\n");
+    const found = await judgedAt(pushed("judge files"));
+    expect(lines(found)).toEqual([
+      "build.gradle:0 adds a judge file",
+      "svc/conftest.py:0 adds a judge file",
+      "web/jest.config.js:0 adds a judge file",
+    ]);
+    expect(found.every((h) => h.check === "test")).toBe(true);
+  });
+
+  it("stops a change, a move or a deletion of the verify command's files and the project's own", async () => {
+    p.git("checkout", "-q", "main");
+    p.write("Makefile", "verify:\n\ttrue\n");
+    p.write("ci/verify.mk", "x:\n\ttrue\n");
+    p.write("checks/run.sh", "true\n");
+    p.write("pom.xml", "<project/>\n");
+    p.commitAll("judge files on main");
+    p.git("push", "-q", "origin", "main");
+    p.git("checkout", "-q", "-B", "factory/PROJ-1", "main");
+    p.write("Makefile", "verify:\n\t@true\n");
+    p.git("mv", "ci/verify.mk", "ci/other.mk");
+    p.git("rm", "-q", "checks/run.sh");
+    p.git("rm", "-q", "pom.xml");
+    expect(lines(await judgedAt(pushed("loosen the judges")))).toEqual([
+      "Makefile:0 changes a judge file",
+      "checks/run.sh:0 deletes a judge file",
+      "ci/other.mk:0 moves a judge file",
+      "pom.xml:0 deletes a judge file",
+    ]);
+  });
+});
+
+describe("fewer test cases in a test file that stays (S1, #231)", () => {
+  it("finds a removed @Test, Spock feature and it(, but not a renamed case or a moved file", async () => {
+    p.git("checkout", "-q", "main");
+    p.write("src/test/java/CartTest.java", "class CartTest {\n  @Test\n  void a() {}\n  @Test\n  void b() {}\n}\n");
+    p.write("web/cart.test.ts", "it('adds', () => {});\nit('drops', () => {});\nconst ok = /x/.test(s);\n");
+    p.write("src/test/groovy/CartSpec.groovy", "class CartSpec extends Specification {\n  def 'a'() {}\n}\n");
+    p.write("src/test/java/RenameTest.java", "class RenameTest {\n  @Test\n  void old() {}\n}\n");
+    p.commitAll("tests on main");
+    p.git("push", "-q", "origin", "main");
+    p.git("checkout", "-q", "-B", "factory/PROJ-1", "main");
+    p.write("src/test/java/CartTest.java", "class CartTest {\n  @Test\n  void a() {}\n}\n");
+    p.write("web/cart.test.ts", "it('adds', () => {});\n");
+    p.write("src/test/groovy/CartSpec.groovy", "class CartSpec extends Specification {\n}\n");
+    p.write("src/test/java/RenameTest.java", "class RenameTest {\n  @Test\n  void renamed() {}\n}\n");
+    expect(lines(await judgedAt(pushed("fewer cases")))).toEqual([
+      "src/test/groovy/CartSpec.groovy:2 removes a test case (1 removed, 0 added in this file)",
+      "src/test/java/CartTest.java:4 removes a test case (1 removed, 0 added in this file)",
+      "web/cart.test.ts:2 removes a test case (1 removed, 0 added in this file)",
+    ]);
+  });
+});
+
+describe("a human's waiver at a head (#231)", () => {
+  it("clears the hits at its head; a new head that changes the same file flags it again", async () => {
+    p.write("build.gradle", "plugins { id 'java' }\n");
+    p.write("src/main/Pay.java", "class Pay {\n  void a() {\n    try { go(); } catch (Exception e) {}\n  }\n}\n");
+    const first = pushed("a judge file and an empty catch");
+    expect(lines(await judgedAt(first))).toEqual([
+      "build.gradle:0 adds a judge file",
+      "src/main/Pay.java:3 leaves an empty catch",
+    ]);
+    // the waiver clears the test check at its head; a code check still goes to the writer
+    expect(lines(await judgedAt(first, first))).toEqual(["src/main/Pay.java:3 leaves an empty catch"]);
+    p.write("src/main/Pay.java", "class Pay {\n  void a() {\n    go();\n  }\n}\n");
+    const second = pushed("fix the catch");
+    // only the new interdiff is checked: build.gradle did not change again, so it stays cleared
+    expect(await judgedAt(second, first)).toEqual([]);
+    p.write("build.gradle", "plugins { id 'java'; id 'groovy' }\n");
+    p.write("svc/test_cart.py", "@pytest.mark.skip\ndef test_cart():\n    pass\n");
+    const third = pushed("change the judge file again, and add a skip");
+    expect(lines(await judgedAt(third, first))).toEqual([
+      "build.gradle:0 adds a judge file",
+      "svc/test_cart.py:1 adds a skip marker",
+    ]);
+  });
+
+  it("clears nothing when git cannot diff against the waiver's head", async () => {
+    p.write("build.gradle", "plugins { id 'java' }\n");
+    const head = pushed("a judge file");
+    expect(lines(await judgedAt(head, "2".repeat(40)))).toEqual(["build.gradle:0 adds a judge file"]);
   });
 });

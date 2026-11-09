@@ -128,8 +128,9 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "/work/project/.claude/settings.local.json",
       "/home/ram/.factory/approvals/ledger/PROJ-1.json",
       "/home/ram/.factory/starts/ledger/PROJ-1.json",
-      "/home/ram/.factory/settings.json",
-      "/home/ram/.factory/team/settings.json",
+      "/home/ram/.factory/user.json",
+      "/home/ram/.factory/teams/acme/team.json",
+      "/home/ram/.factory/teams/acme/.git/config",
       "/home/ram/.factory/rubrics/security.md",
       "/home/ram/.factory/projects/ledger.json",
       "/home/ram/.factory/projects/ledger/brief.md",
@@ -184,9 +185,19 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory approve",
       "agent-factory start ledger PROJ-1",
       "agent-factory spec ledger PROJ-1 && agent-factory start ledger PROJ-1 --yes",
+      "agent-factory eval reviewer",
+      "agent-factory eval reviewer . --allow-partial",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
     }
+  });
+
+  it("denies waive and any edit of the waivers: the AI never clears its own test check hit (#231)", () => {
+    for (const command of [`agent-factory waive ledger PROJ-1 ${"a".repeat(40)}`, "agent-factory waive"]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    expect(claudeSettings(PLACES).permissions.deny).toContain("Edit(//home/ram/.factory/waivers/**)");
+    expect(copilotArgs(PLACES)).toContain("shell(agent-factory waive)");
   });
 
   it("denies raw forge and network clients, git push, a second interpreter or shell, sudo and the App's token", () => {
@@ -241,6 +252,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(args).toContain("shell(agent-factory request)");
     expect(args).toContain("shell(agent-factory project)");
     expect(args).toContain("shell(agent-factory approve)");
+    expect(args[args.indexOf("shell(agent-factory eval)") - 1]).toBe("--deny-tool");
     expect(args).toContain("shell(agent-factory start)");
     expect(args[args.indexOf("shell(agent-factory approve)") - 1]).toBe("--deny-tool");
     expect(args.join(" ")).not.toContain("shell(agent-factory confirm)");
@@ -273,6 +285,16 @@ describe("the wall's check (#105, #227)", () => {
       [(p) => p.allow.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
       [(p) => p.ask.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
       [(p) => p.allow.push("Bash(agent-factory start:*)"), "agent-factory start"],
+      [(p) => p.ask.push("Bash(agent-factory waive *)"), "Bash(agent-factory waive *) lets"],
+      [
+        (p) => p.allow.push("Bash(agent-factory eval *)"),
+        "Bash(agent-factory eval *) lets the coordinator run agent-factory eval reviewer",
+      ],
+      [(p) => p.ask.push("Bash(agent-factory eval reviewer)"), "lets the coordinator run agent-factory eval reviewer"],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory eval"))),
+        "Bash(agent-factory eval) is missing",
+      ],
       [(p) => p.allow.push("Bash(gh *)"), "run gh api user"],
       [(p) => p.allow.push("Bash(glab api *)"), "run glab api user"],
       [(p) => p.allow.push("Bash(curl:*)"), "run curl"],
@@ -290,7 +312,22 @@ describe("the wall's check (#105, #227)", () => {
         (p) => (p.deny = p.deny.filter((r) => !r.includes("/starts/"))),
         "Edit(//home/ram/.factory/starts/**) is missing",
       ],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory waive"))),
+        "Bash(agent-factory waive) is missing",
+      ],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("/waivers/"))),
+        "Edit(//home/ram/.factory/waivers/**) is missing",
+      ],
       [(p) => (p.deny = p.deny.filter((r) => r !== "Edit(~/.claude/**)")), "Edit(~/.claude/**) is missing"],
+      // the settings layers (#229): the user file, the teams' clones, and the project home
+      ...["user.json", "teams/**", "projects/**"].map(
+        (tail): [(p: Rules & Record<string, unknown>) => void, string] => [
+          (p) => (p.deny = p.deny.filter((r) => r !== `Edit(//home/ram/.factory/${tail})`)),
+          `Edit(//home/ram/.factory/${tail}) is missing`,
+        ],
+      ),
       [(p) => (p.disableBypassPermissionsMode = "allow"), "bypass-permissions mode is not disabled"],
       [(p) => (p.defaultMode = "bypassPermissions"), "the default mode is bypassPermissions"],
     ];

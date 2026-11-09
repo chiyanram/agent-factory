@@ -13,12 +13,12 @@
 //
 // The engine acts on a lane's properties, never on its name (section 3). Today one property, approval, is read from
 // the default lanes below. The approval floor: every lane above the lowest needs a human's approval, and no settings
-// layer or process plugin can turn that off. lanesOf is the one door a lanes value from a plugin or a settings layer
-// comes through (#229 and the process plugin read theirs with it); it refuses any value that drops the floor.
+// layer or process plugin can turn that off. In the settings the floor is "approval.floor", a locked key fixed to tiny
+// (#229; settings/keys.ts). lanesOf is the one door a lanes value from a process plugin comes through; it refuses any
+// value that drops the floor.
 //
-// The one-way-door paths are a project setting, a deny-list: globs a layer may add to and never remove from. Today they
-// are the project file's "oneWayDoorPaths" (GUIDE.md "The project file"); oneWayDoorPathsOf is the one function that
-// reads them, so the settings layers (#229) can take the key over without touching a caller.
+// The one-way-door paths are a project setting, the deny-list key "lanes.oneWayDoor" (#229; settings/keys.ts): every
+// settings layer may add to it, and none may remove from it. oneWayDoorPathsOf reads it, resolved through the layers.
 
 import type { Result } from "./forge/api.js";
 import { globRegex } from "./ci-files.js";
@@ -118,7 +118,7 @@ export function raisedWhy(raise: { readonly from: Lane; readonly to: Lane; reado
   return `the lane is raised from ${raise.from} to ${raise.to} (${raise.why}): the coordinator raises the spec's lane, and a human approves it`;
 }
 
-const ONE_WAY_DOOR_KEY = "oneWayDoorPaths";
+const ONE_WAY_DOOR_KEY = "lanes.oneWayDoor";
 
 function globsOf(value: unknown): readonly string[] | "bad" {
   if (value === undefined) {
@@ -128,8 +128,8 @@ function globsOf(value: unknown): readonly string[] | "bad" {
   return ok ? value.filter((g): g is string => typeof g === "string") : "bad";
 }
 
-// oneWayDoorPathsOf : the project's one-way-door paths: none when the project has no file or no key; refused when the
-// key is there but not a list of globs, so a typo never drops them
+// oneWayDoorPathsOf : the project's one-way-door paths, with the team and user layers resolved in: none when the
+// project has no file or no key; refused when the key is there but not a list of globs, so a typo never drops them
 export async function oneWayDoorPathsOf(input: {
   readonly home: string;
   readonly project: string;
@@ -138,9 +138,11 @@ export async function oneWayDoorPathsOf(input: {
   if (raw.kind !== "ok") {
     return raw.kind === "missing" ? { kind: "ok", value: [] } : raw;
   }
-  const globs = globsOf(prop(raw.value, ONE_WAY_DOOR_KEY));
+  const globs = globsOf(prop(prop(raw.value, "lanes"), "oneWayDoor"));
   return globs === "bad"
-    ? failed(`${raw.path}: "${ONE_WAY_DOOR_KEY}" must list globs, such as ["db/migrations/**", "api/openapi.yaml"]`)
+    ? failed(
+        `${raw.path}: "${ONE_WAY_DOOR_KEY}" must list globs, such as {"lanes": {"oneWayDoor": ["db/migrations/**"]}}`,
+      )
     : { kind: "ok", value: globs };
 }
 

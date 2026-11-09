@@ -1,15 +1,17 @@
 // steps — the ready check and the local verifier as the dispatcher's steps (#91; #138). Both run branch code, so both
 // run only in a fresh box (boxrun.ts), and both read their commands from the project file, never from the branch.
 //
-//   ready    first the floor guard (floor.ts) reads the diff on the host: a skip, a deleted test, a removed assertion,
-//            a suppression with no reason or an empty catch fails the check at once, with its file:line, and no box
-//            runs; a guard that cannot read the diff fails the step, so a person looks. The lane check (lane.ts, #230)
-//            reads the lane the same diff needs, and the result carries it for the dispatcher to compare with the lane
-//            a human said yes to. An acceptance criterion with no evidence row (AC-n) fails the check. Then each
-//            evidence row of the writer's report runs again at the head. A row whose command needs a shell, or starts
-//            with a program the project file does not list, fails the check: the writer is sent back to fix it. A
-//            failed check keeps why it failed with the head (kept.ts), and a failed row's output with it, before its
-//            result is recorded: the writer's rework run reads it (#199).
+//   ready    first the floor guard (floor.ts) reads the diff on the host: a test check hit (a deleted test or test
+//            case, a skip, a removed assertion, a changed judge file) fails the check at once for a person
+//            (needs-human), with its file:line, unless the ticket's waiver (waiver.ts) clears it; a suppression with no
+//            reason or an empty catch fails it for the writer; no box runs on a hit. A guard that cannot read the diff
+//            or the waiver fails the step, so a person looks. The lane check (lane.ts, #230) reads the lane the same
+//            diff needs, and the result carries it for the dispatcher to compare with the lane a human said yes to. An
+//            acceptance criterion with no evidence row (AC-n) fails the check. Then each evidence row of the
+//            writer's report runs again at the head. A row whose command needs a shell, or starts with a program the
+//            project file does not list, fails the check: the writer is sent back to fix it. A failed check keeps
+//            why it failed with the head (kept.ts), and a failed row's output with it, before its result is recorded:
+//            the writer's rework run reads it (#199).
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
 //            as the commit status agent-factory/verify, for people and branch protection. The dispatcher decides from
 //            its own record of the run, never from the forge, where any other check could read as green. It posts
@@ -25,7 +27,8 @@ import type { Evidence } from "../report.js";
 import { commandArgv } from "./command.js";
 import { rowLine, runInBox, type BoxSetup, type Row } from "./boxrun.js";
 import type { Lane } from "../spec.js";
-import { floorGuard, hitsLine, type FloorInput } from "./floor.js";
+import { floorGuard, forHuman, hitsLine, type FloorInput } from "./floor.js";
+import { judgeFiles } from "./judge.js";
 import { diffLane } from "./lane.js";
 
 export const VERIFY_CONTEXT = "agent-factory/verify";
@@ -47,9 +50,16 @@ function failedRow(rows: readonly Row[]): Row | "none" {
   return rows.find((r) => r.ran.kind === "timedOut" || r.ran.code !== 0) ?? "none";
 }
 
-type Checked = { readonly passed: boolean; readonly why: string; readonly lane?: Lane };
+// human: the check stopped for a person (a test check hit), not for the writer
+// lane: the lane the diff needs (#230), once the lane check has read it
+type Checked = { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane };
 
 type ReadyInput = RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts;
+
+const PASSED: Checked = { passed: true, why: "", human: false };
+
+// the head of the ticket's waiver of the test checks (waiver.ts), or "none"
+export type WaiverHead = (ticket: string) => Promise<Result<string>>;
 
 // a check's result, and the row whose output shows why it failed: "none" when no row ran to fail (the floor guard, a
 // row that cannot run with no shell, no rows)
@@ -76,28 +86,41 @@ function argvs(evidence: readonly Evidence[], programs: readonly string[]): Resu
 function verdict(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
   const bad = failedRow(rows);
   if (bad === "none") {
-    return { passed: true, why: "", row: "none" };
+    return { ...PASSED, row: "none" };
   }
   const i = rows.indexOf(bad);
-  return { passed: false, why: `row ${i + 1} (${evidence[i]?.criterion ?? ""}): ${rowLine(bad)}`, row: bad };
+  return {
+    passed: false,
+    why: `row ${i + 1} (${evidence[i]?.criterion ?? ""}): ${rowLine(bad)}`,
+    human: false,
+    row: bad,
+  };
 }
 
-// floorInput : what the floor guard and the lane check read the diff with
-async function floorInput(plan: ReadyPlan, forge: Forge, open: Open, head: string): Promise<Result<FloorInput>> {
-  const base = await forge.defaultBranch();
-  return base.kind === "ok"
+type Guarding = { readonly plan: ReadyPlan; readonly forge: Forge; readonly waiver: WaiverHead };
+
+// floorInput : what the floor guard and the lane check read the diff with, the ticket's waiver among it
+async function floorInput(g: Guarding, open: Open, input: RunInput): Promise<Result<FloorInput>> {
+  const base = await g.forge.defaultBranch();
+  if (base.kind === "failed") {
+    return base;
+  }
+  const waived = await g.waiver(input.ticket);
+  return waived.kind === "ok"
     ? {
         kind: "ok",
         value: {
-          repo: plan.setup.repo,
-          env: plan.setup.env,
+          repo: g.plan.setup.repo,
+          env: g.plan.setup.env,
           base: base.value,
           branch: open.branch,
-          head,
-          testFiles: plan.project.ready.testFiles,
+          head: input.head,
+          testFiles: g.plan.project.ready.testFiles,
+          judgeFiles: judgeFiles(g.plan.project),
+          waived: waived.value,
         },
       }
-    : base;
+    : waived;
 }
 
 // floor : the floor guard on the change's diff, before any box runs; none is a pass
@@ -108,7 +131,7 @@ async function floor(at: FloorInput): Promise<Result<Checked>> {
   }
   return {
     kind: "ok",
-    value: hits.value.length === 0 ? { passed: true, why: "" } : { passed: false, why: hitsLine(hits.value) },
+    value: hits.value.length === 0 ? PASSED : { passed: false, why: hitsLine(hits.value), human: forHuman(hits.value) },
   };
 }
 
@@ -127,7 +150,7 @@ export function uncovered(criteria: readonly string[], evidence: readonly Eviden
 }
 
 // covered : a guarded diff whose every acceptance criterion has an evidence row runs the rows again; a missing row
-// fails the check, and counts towards its tries
+// fails the check for the writer, and counts towards its tries
 async function covered(plan: ReadyPlan, open: Open, input: ReadyInput, guarded: Checked): Promise<Result<Judged>> {
   if (!guarded.passed) {
     return { kind: "ok", value: judged(guarded) };
@@ -140,6 +163,7 @@ async function covered(plan: ReadyPlan, open: Open, input: ReadyInput, guarded: 
         value: judged({
           passed: false,
           why: `no evidence row for ${missing.join(", ")}: give each acceptance criterion a row whose criterion starts with its id`,
+          human: false,
         }),
       };
 }
@@ -154,23 +178,26 @@ async function guardedLane(at: FloorInput, input: ReadyInput): Promise<Result<Ch
   return lane.kind === "ok" ? { kind: "ok", value: { ...guarded.value, lane: lane.value.lane } } : lane;
 }
 
-async function check(plan: ReadyPlan, forge: Forge, open: Open, input: ReadyInput): Promise<Result<Judged>> {
+async function check(g: Guarding, open: Open, input: ReadyInput): Promise<Result<Judged>> {
   if (input.evidence.length === 0) {
-    return { kind: "ok", value: judged({ passed: false, why: "the writer gave no evidence rows to run again" }) };
+    return {
+      kind: "ok",
+      value: judged({ passed: false, why: "the writer gave no evidence rows to run again", human: false }),
+    };
   }
-  const at = await floorInput(plan, forge, open, input.head);
+  const at = await floorInput(g, open, input);
   const guarded = at.kind === "ok" ? await guardedLane(at.value, input) : at;
   if (guarded.kind === "failed") {
     return guarded;
   }
-  const ran = await covered(plan, open, input, guarded.value);
+  const ran = await covered(g.plan, open, input, guarded.value);
   return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, lane: guarded.value.lane } } : ran;
 }
 
 async function rerun(plan: ReadyPlan, open: Open, input: ReadyInput): Promise<Result<Judged>> {
   const parsed = argvs(input.evidence, plan.project.ready.programs);
   if (parsed.kind === "failed") {
-    return { kind: "ok", value: judged({ passed: false, why: parsed.reason }) };
+    return { kind: "ok", value: judged({ passed: false, why: parsed.reason, human: false }) };
   }
   const commands = parsed.value.flatMap((a) => (a.kind === "ok" ? [a.value] : []));
   const rows = await runInBox({
@@ -241,7 +268,7 @@ export function readyOutput(why: string, row: Row | "none"): string {
 // keep it fails the step, so a person looks
 async function recorded(plan: ReadyPlan, open: Open, head: string, j: Judged): Promise<Result<Checked>> {
   const lane = j.lane === undefined ? {} : { lane: j.lane };
-  const result = { kind: "ok", value: { passed: j.passed, why: j.why, ...lane } } as const;
+  const result = { kind: "ok", value: { passed: j.passed, why: j.why, human: j.human, ...lane } } as const;
   if (j.passed) {
     return result;
   }
@@ -250,13 +277,13 @@ async function recorded(plan: ReadyPlan, open: Open, head: string, j: Judged): P
   return output.kind === "ok" ? result : output;
 }
 
-async function readyAt(plan: ReadyPlan, forge: Forge, open: Open, input: ReadyInput): Promise<Result<Checked>> {
-  const checked = await check(plan, forge, open, input);
-  return checked.kind === "ok" ? recorded(plan, open, input.head, checked.value) : checked;
+async function readyAt(g: Guarding, open: Open, input: ReadyInput): Promise<Result<Checked>> {
+  const checked = await check(g, open, input);
+  return checked.kind === "ok" ? recorded(g.plan, open, input.head, checked.value) : checked;
 }
 
-// readyStep : the ready check, when there is a box and a project file
-export function readyStep(plan: BoxPlan, forge: Forge): Steps["ready"] {
+// readyStep : the ready check, when there is a box and a project file; waiver reads the ticket's waiver
+export function readyStep(plan: BoxPlan, forge: Forge, waiver: WaiverHead): Steps["ready"] {
   if (plan.kind === "unavailable") {
     return plan;
   }
@@ -266,7 +293,7 @@ export function readyStep(plan: BoxPlan, forge: Forge): Steps["ready"] {
       const open = openOf(input);
       return open === "none"
         ? { kind: "failed", reason: "no open change to check" }
-        : readyAt(plan, forge, open, input);
+        : readyAt({ plan, forge, waiver }, open, input);
     },
   };
 }

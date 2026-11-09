@@ -6,6 +6,7 @@
 //              catalog, requirements*.txt, go.mod)
 // Zero findings is not green: the box goes on every review, and no verdict ever undrafts or approves (#118).
 
+import { globRegex } from "../ci-files.js";
 import type { Result } from "../forge/api.js";
 
 export type Box = {
@@ -16,8 +17,36 @@ export type Box = {
 
 const PROTECTED =
   /^\.github\/workflows\/|^\.github\/actions\/|^\.gitlab-ci\.yml$|(^|\/)CODEOWNERS$|(^|\/)(AGENTS|CLAUDE|CLAUDE\.local)\.md$|(^|\/)\.claude\/|(^|\/)\.agents\//;
-const BUILD =
-  /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|libs\.versions\.toml|gradle-wrapper\.properties|requirements[^/]*\.txt|pyproject\.toml|go\.mod|go\.sum|Cargo\.toml|Cargo\.lock|Gemfile(\.lock)?|Makefile|Dockerfile)$/;
+// the build files and dependency manifests, as globs; the ready check's judge files (ready/judge.ts) start from them
+export const BUILD_FILES: readonly string[] = [
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "gradle.properties",
+  "libs.versions.toml",
+  "gradle-wrapper.properties",
+  "requirements*.txt",
+  "pyproject.toml",
+  "go.mod",
+  "go.sum",
+  "Cargo.toml",
+  "Cargo.lock",
+  "Gemfile",
+  "Gemfile.lock",
+  "Makefile",
+  "Dockerfile",
+].map((name) => `**/${name}`);
+
+// inGlobs : whether a path matches one of the globs; a glob that starts with **/ matches at the root too
+export function inGlobs(path: string, globs: readonly string[]): boolean {
+  return globs.some((g) => globRegex(g).test(path) || globRegex(g).test(`/${path}`));
+}
 
 type Reader = (path: string) => Promise<string>;
 
@@ -84,7 +113,7 @@ export async function statusBox(input: {
   readonly before: Reader;
   readonly after: Reader;
 }): Promise<Result<Box>> {
-  const build = input.touched.filter((f) => BUILD.test(f));
+  const build = input.touched.filter((f) => inGlobs(f, BUILD_FILES));
   const added: string[] = [];
   for (const file of build) {
     added.push(...(await newIn(file, input.before, input.after)));

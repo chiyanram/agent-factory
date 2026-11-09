@@ -111,7 +111,7 @@ describe("oneWayDoorPathsOf", () => {
     expect(await oneWayDoorPathsOf({ home, project: "ledger" })).toEqual({ kind: "ok", value: [] });
     write({ gate: "forge-ci" });
     expect(await oneWayDoorPathsOf({ home, project: "ledger" })).toEqual({ kind: "ok", value: [] });
-    write({ oneWayDoorPaths: ["db/migrations/**", "api/openapi.yaml"] });
+    write({ lanes: { oneWayDoor: ["db/migrations/**", "api/openapi.yaml"] } });
     expect(await oneWayDoorPathsOf({ home, project: "ledger" })).toEqual({
       kind: "ok",
       value: ["db/migrations/**", "api/openapi.yaml"],
@@ -119,10 +119,10 @@ describe("oneWayDoorPathsOf", () => {
   });
 
   it("refuses a key that is there but not a list of globs, so a typo never drops them", async () => {
-    write({ oneWayDoorPaths: "db/**" });
+    write({ lanes: { oneWayDoor: "db/**" } });
     expect(await oneWayDoorPathsOf({ home, project: "ledger" })).toMatchObject({
       kind: "failed",
-      reason: expect.stringContaining('"oneWayDoorPaths" must list globs'),
+      reason: expect.stringContaining('"lanes.oneWayDoor" must list globs'),
     });
   });
 });
@@ -169,7 +169,16 @@ describe("the lane the real diff needs, through hostGit (#230)", () => {
     const head = p.commitAll("the writer's change");
     p.git("push", "-q", "origin", "factory/PROJ-7");
     return diffLane(
-      { repo: p.clone, env: p.env, base: "main", branch: "factory/PROJ-7", head, testFiles: TEST_FILES },
+      {
+        repo: p.clone,
+        env: p.env,
+        base: "main",
+        branch: "factory/PROJ-7",
+        head,
+        testFiles: TEST_FILES,
+        judgeFiles: [],
+        waived: "none",
+      },
       oneWayDoor,
     );
   }
@@ -217,6 +226,8 @@ describe("the lane the real diff needs, through hostGit (#230)", () => {
         branch: "factory/PROJ-7",
         head: "0".repeat(40),
         testFiles: TEST_FILES,
+        judgeFiles: [],
+        waived: "none",
       },
       [],
     );
