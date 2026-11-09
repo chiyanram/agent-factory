@@ -10,7 +10,7 @@ import { github } from "./github.js";
 import { gitlab } from "./gitlab.js";
 import { FORGE_OPS, isForgeOp, type ForgeOp } from "./ops.js";
 import { reader, type Reader } from "./read.js";
-import { changeOf, changeRequestOf, lineFindingOf, postOf, statusOf } from "./shapes.js";
+import { bodyPostOf, changeOf, changeRequestOf, lineFindingOf, postOf, statusOf } from "./shapes.js";
 import { githubProject, gitlabProject } from "./target.js";
 import type { Forge, ForgeName } from "./types.js";
 
@@ -107,7 +107,7 @@ const RUN: Readonly<Record<ForgeOp, Run>> = {
   setBody: (f, i) =>
     withInput(
       i,
-      (r, v) => ({ number: r.int(v, "number"), post: postOf(r, r.at(v, "post")) }),
+      (r, v) => ({ number: r.int(v, "number"), post: bodyPostOf(r, r.at(v, "post")) }),
       async (x) => done(await f.setBody(x)),
     ),
   lineFinding: (f, i) =>

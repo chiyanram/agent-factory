@@ -100,7 +100,10 @@ function dryRun(forge: Forge, log: (line: string) => void): Forge {
     removeLabel: async (i) => (log(`DRY RUN: remove the label ${i.label} from ${m}${i.number}`), { kind: "ok" }),
     note: async (i) => (log(`DRY RUN: note on ${m}${i.number}: [${i.post.seat}] ${i.post.title}`), { kind: "ok" }),
     setBody: async (i) => (
-      log(`DRY RUN: set the body of ${m}${i.number}: [${i.post.seat}] ${i.post.title}`), { kind: "ok" }
+      log(
+        `DRY RUN: set the body of ${m}${i.number}: [${i.post.seat}] ${i.post.title}${i.post.prBody === undefined ? "" : ", with the implementer's PR body, cleaned"}`,
+      ),
+      { kind: "ok" }
     ),
     status: async (i) => (log(`DRY RUN: status ${i.context} ${i.state} at ${i.sha.slice(0, 8)}`), { kind: "ok" }),
     // a dry run opens no change, so there is no number to give back: the caller stops there

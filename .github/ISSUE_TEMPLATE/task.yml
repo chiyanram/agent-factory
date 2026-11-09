@@ -1,0 +1,16 @@
+name: Task
+description: A concrete step that ships nothing new, such as a repo, CI or docs change.
+labels: ["type:task", "needs-triage"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What is true when the task is done.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: The steps, if they are known.

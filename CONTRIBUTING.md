@@ -95,7 +95,10 @@ Releases are manual during the dev phase (#327). A merge to `main` runs the chec
 (`release.config.mjs`, #153) then runs after the checks pass, the same way as chiyanram/skills.
 
 - Pull requests are squash-merged with the PR title as the commit subject, so **the PR title decides the release**.
-  CI fails a title that is not a Conventional Commit, and a title, description or commit that holds a skip-ci marker.
+  CI fails a title that is not `type(scope): lower-case summary (#issue)`, such as `feat(box): one box seam (#112)`, and
+  a title, description or commit that holds a skip-ci marker. The issue can be in another repo:
+  `(chiyanram/skills#276)`. Only Dependabot (scope `deps`) and the release commit name no issue. chiyanram/skills and
+  chiyanram/rca-agent use the same rule (#327).
 - `feat` releases a minor version, `fix` and `perf` a patch, and `!` or a `BREAKING CHANGE:` footer a major one.
   `docs`, `chore`, `ci`, `style`, `refactor`, `test` and `build` release nothing.
 - A release is a tag `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`, which semantic-release writes; do not
