@@ -18,12 +18,17 @@ function shipped(): readonly string[] {
 describe("the published package (#171)", () => {
   it("ships every prompt and the box image the code reads at run time", () => {
     const files = shipped();
-    // the built-in role cards are in prompts/roles (#236)
+    // the built-in role cards are in prompts/roles (#236, #235)
     const prompts = readdirSync(join(ROOT, "prompts"), { recursive: true, withFileTypes: true })
       .filter((f) => f.isFile())
       .map((f) => relative(ROOT, join(f.parentPath, f.name)));
-    expect(prompts).toContain("prompts/roles/cleanup.md");
-    expect(prompts).toContain("prompts/roles/implementer.md");
+    expect(prompts).toEqual(
+      expect.arrayContaining([
+        "prompts/roles/cleanup.md",
+        "prompts/roles/onboarder.md",
+        "prompts/roles/implementer.md",
+      ]),
+    );
     expect(files).toEqual(expect.arrayContaining([...prompts, "images/factory-box/Dockerfile"]));
   });
 });

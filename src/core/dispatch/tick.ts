@@ -31,7 +31,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { needsApproval, needsDesignReview, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
+import { needsApproval, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
@@ -50,6 +50,7 @@ import {
 import { writeLastPoll } from "./last-poll.js";
 import { designView, type DesignView } from "./design.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
+import { needsDesignReview } from "../lane.js";
 import type { Spend } from "./spend.js";
 import { projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
@@ -102,6 +103,8 @@ export type Steps = {
       // the role card's hash, and what a cleanup run deferred (#236)
       readonly card?: string;
       readonly deferred?: readonly string[];
+      // each cite of the project's brief that went stale (#235)
+      readonly stale?: readonly string[];
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human

@@ -1,5 +1,5 @@
 // cards — one role card per role, read from the project's process plugin, or the engine's built-in card when no
-// plugin holds one (#236, #232; docs/DESIGN.md section 5 "The process plugin"):
+// plugin holds one (#236, #232, #235; docs/DESIGN.md section 5 "The process plugin"):
 //
 //   <plugin>/skills/<skill>/process/roles/<role>.md     the process plugin's card (read.ts finds the process folder)
 //   prompts/roles/<role>.md                             the engine's built-in card
@@ -22,6 +22,7 @@ import type { Result } from "../forge/api.js";
 import { DESIGN_SCHEMA } from "../design/findings.js";
 import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
+import { ANSWER_SCHEMA } from "../onboard/answer.js";
 import { processDir, type PluginDir } from "./read.js";
 
 const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts", "roles");
@@ -36,6 +37,9 @@ export const ROLE_TOOLS = {
   cleanup: WRITES,
   "design-reviewer": READS,
   "verify-pass": READS,
+  // its Bash is the build tool's help and task list only: the engine lists the commands itself and hands the run the
+  // list, so the run gets the read-only tools alone (#235; onboard/run.ts)
+  onboarder: [...READS, "Bash"],
 } as const;
 
 export type Role = keyof typeof ROLE_TOOLS;
@@ -47,6 +51,7 @@ export const MUST_NOT_SEE: Readonly<Record<Role, readonly string[]>> = {
   cleanup: ["review findings", "earlier verdicts"],
   "design-reviewer": ["the coordinator's conversation with the human"],
   "verify-pass": ["the implementer's report", "the coordinator's conversation with the human"],
+  onboarder: [],
 };
 
 // fieldsOf : every property name a JSON schema names, at any depth. Pure.
@@ -73,6 +78,7 @@ export const HAND_OFF: Readonly<Record<Role, readonly string[]>> = {
   cleanup: REPORT_FIELDS,
   "design-reviewer": fieldsOf(DESIGN_SCHEMA),
   "verify-pass": fieldsOf(VERIFY_SCHEMA),
+  onboarder: fieldsOf(ANSWER_SCHEMA),
 };
 
 export type Card = {

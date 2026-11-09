@@ -29,7 +29,8 @@ import type { PluginHash } from "../process/use.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 
-export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify";
+// "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
+export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
 // the two runs of a design review (#236)
 export type DesignStep = "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
@@ -115,6 +116,8 @@ export type Event =
       readonly card?: string;
       // what a cleanup run left for a person, as each would change behaviour (#236)
       readonly deferred?: readonly string[];
+      // each cite of the project's brief that went stale, for the retro (#235); none on a line that has none
+      readonly stale?: readonly string[];
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -147,7 +150,8 @@ export type Event =
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
     }
-  // what a run that failed spent (#131): a review round whose pass failed
+  // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
+  // or failed (#235)
   | {
       readonly at: string;
       readonly kind: "spent";
@@ -230,7 +234,7 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
   return allowed.find((a) => a === v) ?? BAD;
 }
 
-const PHASES = ["writer", "ready", "review", "verify", "design-review", "design-verify"] as const;
+const PHASES = ["writer", "ready", "review", "verify", "design-review", "design-verify", "onboard"] as const;
 const MODES = ["test-first", "fix", "rework", "ci", "rebase", "cleanup"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
 const RETRIED = ["ready", "review", "verify"] as const;
@@ -343,14 +347,28 @@ function deferredField(raw: unknown): { readonly deferred?: readonly string[] } 
   return Array.isArray(deferred) && deferred.every((d) => typeof d === "string") ? { deferred } : BAD;
 }
 
-// writerExtras : a writer line's optional fields, its spend, card and deferred list, as fields to spread, or BAD
+// staleField : a writer line's stale cites, as a field to spread: none on a line that has none (#235)
+function staleField(raw: unknown): { readonly stale?: readonly string[] } | Bad {
+  const stale = prop(raw, "stale");
+  if (stale === undefined) {
+    return {};
+  }
+  return Array.isArray(stale) && stale.every((s) => typeof s === "string") ? { stale } : BAD;
+}
+
+// writerExtras : a writer line's optional fields, its spend, card, deferred list and stale cites, as fields to spread,
+// or BAD
 function writerExtras(
   raw: unknown,
-): Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred"> | Bad {
+): Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred" | "stale"> | Bad {
   const spend = spendField(raw);
   const card = cardField(raw);
   const deferred = deferredField(raw);
-  return spend === BAD || card === BAD || deferred === BAD ? BAD : { ...spend, ...card, ...deferred };
+  const stale = staleField(raw);
+  if (spend === BAD || card === BAD) {
+    return BAD;
+  }
+  return deferred === BAD || stale === BAD ? BAD : { ...spend, ...card, ...deferred, ...stale };
 }
 
 function writerEndedOf(raw: unknown, at: string): Event | Bad {

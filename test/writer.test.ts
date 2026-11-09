@@ -23,6 +23,7 @@ import { minutesOf, stallOf } from "../src/core/writer/settings.js";
 import {
   FLOOR,
   FOREGROUND,
+  KNOWLEDGE,
   PROJECT_INSTRUCTIONS,
   runPrompt,
   writerStep,
@@ -1162,6 +1163,9 @@ describe("the writer step: role cards from the process plugin (#232)", () => {
   });
 });
 
+// the roles a ticket's flow runs from cards
+type Flow = Exclude<Role, "onboarder">;
+
 describe("a full run on each process: no plugin, the rulebook plugin, a team plugin (#232)", () => {
   const FIXTURES = join(import.meta.dirname, "..", "tests", "fixtures", "process");
   const BUILT_IN = join(import.meta.dirname, "..", "prompts", "roles");
@@ -1263,7 +1267,7 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
 
   // the whole flow with fake runs: the process, the design review and its verify pass, the implementer, then cleanup;
   // each run started from the card at cards[role]
-  async function fullRun(plugins: readonly PluginDir[], cards: Readonly<Record<Role, string>>) {
+  async function fullRun(plugins: readonly PluginDir[], cards: Readonly<Record<Flow, string>>) {
     const process = await readProcess(plugins);
     if (process.kind !== "ok") throw new Error(process.reason);
     const design = await designRuns(plugins);
@@ -1280,7 +1284,7 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     return { lanes: process.value.lanes, design: design.seen, fix: writing.fix, clean: writing.clean };
   }
 
-  const cardsIn = (dir: string): Readonly<Record<Role, string>> => {
+  const cardsIn = (dir: string): Readonly<Record<Flow, string>> => {
     const at = (role: Role) => join(dir, `${role}.md`);
     return {
       implementer: at("implementer"),
@@ -1325,5 +1329,52 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     expect(ran.design.map((r) => r.tools)).toEqual([["Read", "Grep"], ["Read"]]);
     expect(toolsAt(ran.fix.argv)).toBe("Read,Edit,Write,Bash,TodoWrite,Skill,Task");
     expect(toolsAt(ran.clean.argv)).toBe("Read,Edit,Write,TodoWrite,Skill,Task");
+  });
+});
+
+describe("the writer step: the project's brief and glossary (#235)", () => {
+  // an accepted brief, as agent-factory onboard accept leaves it: its cites keep each line's text
+  function accepted(cites: readonly { readonly file: string; readonly line: number; readonly text: string }[]): void {
+    const dir = join(home, "projects", "ledger");
+    mkdirSync(dir, { recursive: true });
+    const brief = "# ledger: brief\n\n- `make test` (`Makefile:1`, verified)\n";
+    const glossary = "# ledger: glossary\n\n- **Renewal**: a loan extended. _Avoid_: extension.\n";
+    writeFileSync(join(dir, "brief.md"), brief);
+    writeFileSync(join(dir, "glossary.md"), glossary);
+    writeFileSync(join(dir, "cites.json"), JSON.stringify(cites));
+    const record = { version: 1, kind: "knowledge", brief_hash: specHash(brief), glossary_hash: specHash(glossary) };
+    writeFileSync(join(dir, "knowledge.json"), JSON.stringify(record));
+  }
+
+  it("hands the run the accepted brief and glossary, and puts each stale cite in its record", async () => {
+    accepted([
+      { file: "svc/Main.java", line: 1, text: "class Main {}" },
+      { file: "svc/Main.java", line: 1, text: "class Gone {}" },
+    ]);
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    let brief = "";
+    const reading: Box = {
+      ...fake.box,
+      run: async (call) => {
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const dir = start?.op === "start" ? start.spec.worktree : "";
+        brief = readFileSync(join(dir, ".factory", "brief.md"), "utf8");
+        commitWork(dir, { commit: true, report: DONE, exit: 0 });
+        writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(DONE));
+        await fake.box.run(call);
+        return { kind: "exited", code: 0, stdout: "{}", stderr: "" };
+      },
+    };
+    const out = await run(setup(reading, forge(), []), FIX);
+    expect(brief).toContain("`make test`");
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringContaining(KNOWLEDGE) });
+    expect(valueOf(out).stale).toEqual(["svc/Main.java:1 is stale: its line changed"]);
+  });
+
+  it("a run with no accepted brief goes without one and reports nothing", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out).stale).toBeUndefined();
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.not.stringContaining(KNOWLEDGE) });
   });
 });

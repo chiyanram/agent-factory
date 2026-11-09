@@ -33,7 +33,8 @@ import type { Post } from "../post.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start } from "./clone.js";
-import { readTools, settingsOf, toolLines } from "./tools.js";
+import { readTools, settingsOf, TARGET_REF, toolLines } from "./tools.js";
+import { knownFor, type Known } from "../onboard/known.js";
 import type { Spend } from "../dispatch/spend.js";
 import { writerRun, type Ended } from "./run.js";
 import { ciText, taskText, verifyText } from "./task.js";
@@ -94,6 +95,8 @@ export type WriterOut = {
   readonly card?: string;
   // what a cleanup run left for a person, as each would change behaviour (#236)
   readonly deferred?: readonly string[];
+  // each cite of the project's brief that went stale, or why the run went without it (#235)
+  readonly stale?: readonly string[];
 };
 
 // the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
@@ -378,9 +381,37 @@ function withCard(result: Result<WriterOut>, work: Work): Result<WriterOut> {
   return result.kind === "ok" ? { kind: "ok", value: { ...result.value, card: work.card.sha256 } } : result;
 }
 
+// KNOWLEDGE : what the prompt says of the project's accepted brief and glossary, when the run has them (#235)
+export const KNOWLEDGE =
+  "Read .factory/brief.md and .factory/glossary.md first: the project's commands, modules and gotchas, and its terms, accepted by a human. Use the build, test and run commands the brief names, and the glossary's words.";
+
+// knowledgeOf : the accepted brief and glossary as clone files, as a field to spread
+function knowledgeOf(known: Known): Pick<Parameters<typeof makeClone>[1], "knowledge"> {
+  return known.files.kind === "text" ? { knowledge: { brief: known.files.brief, glossary: known.files.glossary } } : {};
+}
+
+// knowledgeLines : what the prompt says of the brief and glossary, when the run has them
+function knowledgeLines(known: Known): readonly string[] {
+  return known.files.kind === "text" ? [KNOWLEDGE] : [];
+}
+
+// withStale : each stale cite of the brief goes into the run record, for the retro (#235)
+function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
+  return result.kind === "ok" && known.stale.length > 0
+    ? { kind: "ok", value: { ...result.value, stale: known.stale } }
+    : result;
+}
+
 async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
   const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
   const settings = settingsOf(tools);
+  const known = await knownFor({
+    home: setup.home,
+    project: setup.project,
+    repo: setup.box.repo,
+    env: setup.box.env,
+    ref: TARGET_REF,
+  });
   const clone = await makeClone(setup.box, {
     start: p.start,
     spec: p.spec.text,
@@ -388,6 +419,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     task: work.task,
     settings,
     ...mergeOf(work, p.base),
+    ...knowledgeOf(known),
   });
   if (clone.kind === "failed") {
     return clone;
@@ -396,7 +428,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     card: work.card,
     mode: work.mode,
     names: { ticket: input.ticket, branch: clone.value.branch, head: clone.value.start, base: p.base },
-    tools: toolLines(tools),
+    tools: [...knowledgeLines(known), ...toolLines(tools)],
   });
   const ended = await writerRun({
     setup: setup.box,
@@ -412,7 +444,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     stallMs: setup.settings.stallMs,
   });
   const result = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
-  const out = withCard(result, work);
+  const out = withStale(withCard(result, work), known);
   const removed = await removeClone(clone.value.dir);
   return removed.kind === "ok" ? out : removed;
 }

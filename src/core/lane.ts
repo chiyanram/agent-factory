@@ -29,7 +29,9 @@ import { readProjectRaw } from "./project.js";
 import { LANES, type Lane, type Spec } from "./spec.js";
 
 // one lane's properties, in the lanes' order from the lightest
-export type LaneProps = { readonly name: Lane; readonly approval: boolean; readonly designReview: boolean };
+// designReview: whether the lane's spec and design get a design review (#236); a lane that does not say keeps the
+// default lane's
+export type LaneProps = { readonly name: Lane; readonly approval: boolean; readonly designReview?: boolean };
 
 // the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well, after a design
 // review (docs/DESIGN.md section 3)
