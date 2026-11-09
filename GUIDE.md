@@ -1,6 +1,6 @@
 # Guide
 
-How to set up the factory's identity, configure the scripts and run the loop. The coordinator session follows
+How to set up the factory's identity, configure the commands and run the loop. The coordinator follows
 [Run the loop](#run-the-loop) as its instructions. Words in **bold** are in [Terms](#terms).
 
 > **Target and today.** [ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) (map #30, 2026-11-06) is the
@@ -18,31 +18,32 @@ each one changed. npm builds the package on install. Never install from `main`: 
 
 ## Set up identity
 
-The factory pushes and posts with a forge login that **only code uses**: the dispatcher and the host push. No LLM holds
-it ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14, [review 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682431737)). Which login is set per project:
+The factory pushes and posts with a git host login that **only code uses**: the orchestrator and the host push. No
+model holds it ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14, [review 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682431737)). Which login is set per project:
 
 ```
-work (default)  dispatcher + host push ──▶ your own gh / glab login ──▶ pushes branches, opens MRs, comments
-personal (opt.) dispatcher + host push ──▶ a bot: GitHub App <slug>[bot] or GitLab service account
+work (default)  orchestrator + host push ──▶ your own gh / glab login ──▶ pushes branches, opens PRs, comments
+personal (opt.) orchestrator + host push ──▶ a bot: GitHub App <slug>[bot] or GitLab service account
 human           agent-factory start · approve · waive (local records) · reviews · merges with your own account
 ```
 
-Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
-and agent commits carry an `Agent: <seat>` trailer. The dispatcher's writer gets it from a `prepare-commit-msg` hook in
-its clone, mounted read-only, and the host push refuses a writer commit without it (#128). With your own login
+Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`
+(the implementer's, the automated review's and the coordinator's prefixes, which keep their names until #144 phase 4),
+and agent commits carry an `Agent: <seat>` trailer that names the role. The implementer gets it from a
+`prepare-commit-msg` hook in its clone, mounted read-only, and the host push refuses an implementer commit without it (#128). With your own login
 (`FACTORY_IDENTITY=own`, the default) there is nothing more to set up; the steps below are for a project that uses a
 bot. A bot's key belongs to a separate
 `factory` OS user on the VM, never to a file your own user can read.
 
-No writer holds a forge login: the writer runs only through `agent-factory dispatch <project>`, in the box, and
-the host pushes and posts for it. The bash `start-writer`, which gave the writer one, is gone (#138).
+No implementer holds a git host login: the implementer runs only through `agent-factory dispatch <project>`, on a
+runner, and the host pushes and posts for it. The bash `start-writer`, which gave it one, is gone (#138).
 
 ### GitLab
 
 | # | who | step | why |
 |---|---|---|---|
-| 1 | group owner | Create the service account `agent-<name>` (Group → Settings → Service accounts). | Free since GitLab 18.11, up to 100 per top-level group, no seat. |
-| 2 | group owner | Add it to the project as **Developer**. | It can push branches, open MRs and comment. |
+| 1 | group owner | Create the service account `agent-<name>` (Group → Settings → Service accounts). | Free since GitLab 18.11, up to 100 per top-level group, and it takes no paid user. |
+| 2 | group owner | Add it to the project as **Developer**. | It can push branches, open PRs and comment. |
 | 3 | group owner | Protect `master`: merge = Maintainers, push = no one. | An agent cannot merge into `master`. |
 | 4 | developer | Create a token for the account: scopes `api` and `write_repository`, expiry 365 days. Store it in glab's config with `glab auth login`. Never put it in an environment variable. | Agents never handle tokens. An environment variable leaks to every child process. |
 | 5 | developer | Set the git author for agent commits to `agent-<name>`. Every agent commit carries `Co-authored-by: <developer>`. | The human and the agent are both on the record. |
@@ -55,7 +56,7 @@ login, email or password. Its private key belongs to the `factory` OS user. Your
 sudo rule, and never reads the key ([#108](https://github.com/chiyanram/agent-factory/issues/108)).
 
 ```
-dispatcher, poll, host push (your user)
+orchestrator, poll, host push (your user)
   └─ sudo -n -u factory -- /usr/local/bin/agent-factory-app-token <owner/name>
        └─ factory user: reads ~factory/.config/agent-factory/github-app.json and the .pem (mode 600)
           signs a JWT, mints a token scoped to that one repository, caches it mode 600
@@ -79,13 +80,14 @@ Any process of your user can run the same sudo line and get a token. The coordin
 so start the coordinator only with `agent-factory coordinator`. The key itself stays out of reach either way.
 
 
-### Both forges
+### Both git hosts
 
-- Every agent post starts with its seat: `[coordinator]`, `[writer]` or `[reviewer]`.
-- A ticket's first writer run opens its change: after the first push of `factory/<ticket>`, the host opens a draft
+- Every agent post starts with its role's prefix: `[coordinator]`, `[writer]` (the implementer) or `[reviewer]` (the
+  automated review).
+- A ticket's first implementer run opens its change: after the first push of `factory/<ticket>`, the host opens a draft
   change onto the default branch, as the project's identity. Its title is the spec's title and its body names the
   ticket; the spec's text stays local. A change already open from that branch is reused, never doubled; two are left
-  to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). The writer step (#113) does this on a first run that
+  to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). The implementer step (#113) does this on a first run that
   committed; a first run that committed nothing opens no change, and the run's record says so.
 - On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses it, and
   the work is blocked with "touches CI config" and the files named (`src/core/ci-files.ts`, #115). The CI files are
@@ -95,62 +97,63 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   default branch's, so a merge or rebase onto the default branch passes, and an edited merge or a reset does not. A CI
   file that does not parse, an include it cannot read, or one that names a variable is refused. You make a CI change
   in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). `rules:` in `.gitlab-ci.yml` is not a gate: the branch's own copy runs.
-  The dispatcher's writer (#113) runs in the box and the host pushes, so the refusal applies to every writer commit.
+  The implementer (#113) runs on a runner and the host pushes, so the refusal applies to every implementer commit.
 - The backstop, in case a CI change gets through anyway; set it up once per project:
   - GitLab: mark every secret CI/CD variable **Protected**, so a pipeline on an agent branch never sees it. Optional:
     point Settings → CI/CD → General pipelines → CI/CD configuration file at a file in a separate project you
     protect (`.gitlab-ci.yml@group/ci-config`), so the branch's copy is not the one that runs. The GitLab docs list it
     on the Free tier ([pipeline settings](https://docs.gitlab.com/ci/pipelines/settings/)). **Today:** not yet tried.
-  - GitHub: keep secrets only in environments that need a reviewer's approval, never as plain repository secrets;
+  - GitHub: keep secrets only in environments that need a person's approval, never as plain repository secrets;
     and give a bot App no **Workflows** permission (step 1), so it cannot push a workflow change at all.
   - Check the backstop by hand. `agent-factory setup` does not check it, because the factory's identity must not hold
     the right to read CI variables or secrets (#115).
 - VM (`FACTORY_BOX=vm`): install Sysbox on the VM first ([#158](https://github.com/chiyanram/agent-factory/issues/158)).
-  The box runs its own Docker under `--runtime=sysbox-runc`, so its root is an unprivileged user on the VM. Without
-  Sysbox the box refuses to start; it never falls back to `--privileged` ([decision](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6704930024)).
-  The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the runner CLIs at pinned versions. A
+  The runner runs its own Docker under `--runtime=sysbox-runc`, so its root is an unprivileged user on the VM. Without
+  Sysbox the runner refuses to start; it never falls back to `--privileged` ([decision](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6704930024)).
+  The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the agent CLIs at pinned versions. A
   project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. `agent-factory box build` builds and
-  pins it ([The box image](#the-box-image)).
-- Work laptop (`FACTORY_BOX=laptop`): in Rancher Desktop, share no home folder with its VM. The writer's box is a
-  container there, with its own Docker inside ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)).
-- Whoever started the work does not approve it. Write this rule down for the team; a forge on a free plan cannot
+  pins it ([The runner image](#the-runner-image)).
+- Work laptop (`FACTORY_BOX=laptop`): in Rancher Desktop, share no home folder with its VM. The implementer's runner
+  is a container there, with its own Docker inside ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)).
+- Whoever started the work does not approve it. Write this rule down for the team; a git host on a free plan cannot
   enforce it.
 - When a developer leaves, revoke the GitLab token and block the account, or delete the App's key or the App.
 - Before the first run on a machine, open `claude` once in `FACTORY_REPO` and accept the trust prompt. Add
   `.claude/worktrees/`, `.claude/runs/` and `.claude/packs/` to the project's `.gitignore`.
-- Give the writer its quick tools in `docs/agents/commands.md` on the default branch, one plain line each (a fence
-  around them is fine): `lint-file: <command>` runs on each file the writer edits, with the file as its last word,
+- Give the implementer its quick tools in `docs/agents/commands.md` on the default branch, one plain line each (a fence
+  around them is fine): `lint-file: <command>` runs on each file the implementer edits, with the file as its last word,
   and `test-touched: <command>` runs the tests it touched. Either may be left out. The file is read from the default
   branch, never from the change's branch, because the lint runs as a hook with no permission prompt. The host writes
   the hook into a read-only `.factory/settings.json` in the clone and starts `claude` with `--settings` on it; the hook
-  runs `agent-factory lint-edit`, which the box has because `box build` installs this package in it.
+  runs `agent-factory lint-edit`, which the runner has because `box build` installs this package in it.
 
-**Known gap (today).** Agents run as the developer's OS user, so they can read the token in glab's config or the
-App's key. The Developer role and the App's permissions limit what a stolen credential can do. It is not a wall.
-**Target:** the writer runs in a box with no forge token ([Q1b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6680836108)). The coordinator is held back by
+**Known gap (today).** The coordinator and the automated review's runs still run as the developer's OS user, so they
+could read the token in glab's config or the App's key. The Developer role and the App's permissions limit what a
+stolen credential can do. It is not a wall. The implementer already runs on a runner with no git host token
+([Q1b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6680836108), #113). The coordinator is held back by
 deny rules only, because it runs as the same OS user ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S2).
 
-## Set up the box's model login
+## Set up the runner's model login
 
-The box gets one model-only token, never your full login (ADR-0012 S6, #136). `claude setup-token` makes a one-year
+The runner gets one model-only token, never your full login (ADR-0012 S6, #136). `claude setup-token` makes a one-year
 token that "can only make model requests". It needs a Claude Pro, Max, Ultra, Team or Enterprise plan. Copilot follows
 at stage B.
 
 | # | who | step | why |
 |---|---|---|---|
 | 1 | developer | Run `claude setup-token` and approve in the browser. The token prints once; do not paste it anywhere but step 2. | The command does not save the token anywhere. |
-| 2 | developer | Run `agent-factory setup claude` and paste the token at the hidden prompt. On the VM, run it as the user that runs the dispatcher: `sudo -u factory -H agent-factory setup claude`. | macOS keeps it in the login Keychain (passed to `security` on stdin, never in argv). Linux keeps it in `~/.factory/secrets/claude-token`, mode 600, in a folder of mode 700. A GitHub login (`gho_`, `ghp_`, `github_pat_`) is refused. |
-| 3 | developer | Run `agent-factory setup status`. It prints the box, its risks, and the token's days left; exit 0 means a box may start. | A box never starts with an expired token, or one with no expiry on record. |
+| 2 | developer | Run `agent-factory setup claude` and paste the token at the hidden prompt. On the VM, run it as the user that runs the orchestrator: `sudo -u factory -H agent-factory setup claude`. | macOS keeps it in the login Keychain (passed to `security` on stdin, never in argv). Linux keeps it in `~/.factory/secrets/claude-token`, mode 600, in a folder of mode 700. A GitHub login (`gho_`, `ghp_`, `github_pat_`) is refused. |
+| 3 | developer | Run `agent-factory setup status`. It prints the runner, its risks, and the token's days left; exit 0 means a runner may start. | A runner never starts with an expired token, or one with no expiry on record. |
 | 4 | developer | When `status` warns (7 days before expiry), repeat steps 1 and 2. | The token lasts one year. |
 
-The dispatcher's writer reads it before each run and passes it as `CLAUDE_CODE_OAUTH_TOKEN` with
-`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers. No other secret goes into the
-box: no forge token, no `PATH` or `HOME` of yours.
-The vm box takes each value through the docker CLI's environment (`docker exec --env NAME`), never its command line.
+The implementer step reads it before each run and passes it as `CLAUDE_CODE_OAUTH_TOKEN` with
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, which keeps it out of Bash, hooks and MCP servers. No other secret goes onto the
+runner: no git host token, no `PATH` or `HOME` of yours.
+The vm runner takes each value through the docker CLI's environment (`docker exec --env NAME`), never its command line.
 
 ## Set up the coordinator
 
-The coordinator runs in its own folder, with its own settings, so it cannot widen its own wall and your other Claude
+The coordinator runs in its own folder, with its own settings, so it cannot widen its own wall and your other Claude Code
 sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issues/106), ADR-0012 S2).
 
 1. `agent-factory setup coordinator` writes `$FACTORY_HOME/coordinator/.claude/settings.json` and a `CLAUDE.md` that
@@ -163,8 +166,8 @@ The wall (`src/core/coordinator.ts`):
 - **Runs with no prompt:** `agent-factory poll`, `spec`, `approval` and `status`, and `agent-factory request`, whose
   write the project's policy decides in code ([Writes](#writes)).
 - **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it. **Today:** the start commands
-  too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`), since the loop is
-  still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
+  too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`); they become denied once the
+  orchestrator runs every step of the loop (#113).
 - **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
   STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
   `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215).
@@ -179,7 +182,7 @@ The wall (`src/core/coordinator.ts`):
 - **Edits with no prompt** only spec drafts in `$FACTORY_HOME/specs`; any other edit asks you.
 - Bypass and auto mode are switched off.
 
-Check it once after setup: in the coordinator's session, ask it to read `~/.ssh/canary` (make an empty one first), a
+Check it once after setup: in the coordinator, ask it to read `~/.ssh/canary` (make an empty one first), a
 project's `.env`, and to edit a file of the package and a project's `.claude/settings.json`; each must be refused. **Today:**
 
 - Bash deny rules match a command as typed, and Claude Code's docs say they are no security boundary; the OS-level
@@ -188,47 +191,47 @@ project's `.env`, and to edit a file of the package and a project's `.claude/set
 - Copilot CLI has no read or edit rule by path, so under `agent-factory coordinator copilot` none of the Read or
   Edit denies above hold; only the command denies, and its folder plus `--add-dir`, do. The flags are not yet tried
   against a live Copilot CLI. Use Claude Code for the coordinator until they are.
-- The read-only mode of the settings is no wall: your own user owns the folder, so the session could rename or replace
+- The read-only mode of the settings is no wall: your own user owns the folder, so the coordinator could rename or replace
   the file with a command its Bash rules do not name. The wall holds once the folder belongs to the `factory` OS user
   (ADR-0012 S2) or the sandbox is on (#114).
-- The dispatcher does not yet refuse to start when these settings are loosened (ADR-0012 S2; #105).
-- Jira and Dynatrace reads come with their plugins (#134); writes to them go through `request` ([Writes](#writes)).
+- The orchestrator does not yet refuse to start when these settings are loosened (ADR-0012 S2; #105).
+- Jira and Dynatrace reads come with their connectors (#134); writes to them go through `request` ([Writes](#writes)).
 
-## Plugins
+## Connectors
 
-Every outside tool is reached through a plugin ([ADR-0014](docs/adr/0014-plugin-model.md), #134). A plugin is an
+Every outside tool is reached through a connector ([ADR-0014](docs/adr/0014-plugin-model.md), #134). A connector is an
 executable: `<exe> describe` prints one JSON object (its protocol, capabilities, declared writes, the env names it
 needs, and the programs it runs by name, `cli`), and `<exe> call` reads one JSON request on stdin and prints one JSON result, a sealed case of that
 capability, on stdout; its logs go to stderr. The core runs it with no shell, in a process group of its own that the
 timeout, the output cap and the end of the call kill whole, and with only `PATH`, `HOME`, `LANG` and the names it
-declared. A plugin may not declare a model or cloud login, a forge token, a `FACTORY_*` setting or a loader variable
-(`LD_*`, `DYLD_*`, `NODE_*` and the like); each uses its own CLI's login (`src/core/plugin/`).
+declared. A connector may not declare a model or cloud login, a git host token, a `FACTORY_*` setting or a loader
+variable (`LD_*`, `DYLD_*`, `NODE_*` and the like); each uses its own CLI's login (`src/core/plugin/`).
 
-A plugin is the folder its file sits in. `plugin add` takes the sha256 of every file in that folder, copies the
+A connector is the folder its file sits in. `plugin add` takes the sha256 of every file in that folder, copies the
 folder into `$FACTORY_HOME/plugins/<sha256>/` (mode 700) and records it in `$FACTORY_HOME/plugins.json` (mode 600);
 every call hashes the copy again and runs it, so a change to your own folder after review changes nothing. A file or
 folder that someone else could write to, or a symlink inside the folder, is refused.
 
 | command | does |
 |---|---|
-| `agent-factory plugin add <path\|name>` | inspects a plugin and pins it, as above; a name is a plugin bundled with the package, and nothing is fetched from the network. A name already added is refused: use `update` |
-| `agent-factory plugin update <name> [<sha256>]` | runs the test kit on the plugin's folder as it is now and shows its hash and the writes it adds (exit 3, nothing recorded); with that hash, records it, if it is still the same |
-| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer; and write fidelity: each write fixture's text (`input.text`, or a post in `input.post` or `input.body`, as the posting template renders it), and once more a tricky one, must reach the CLI byte for byte and whole (an argv word, stdin, or a JSON string that is the text itself), with no more calls than the fixture's `<case>.cli.json` lists answers. A plugin that writes must name its programs in `cli` (never an interpreter such as `node`); the kit then runs every call with a recording fake of each first on the plugin's `PATH`, answering from `<case>.cli.json`, so a named program is never the real one |
-| `agent-factory plugin list` | the registered plugins, with their writes and hashes |
+| `agent-factory plugin add <path\|name>` | inspects a connector and pins it, as above; a name is a connector bundled with the package, and nothing is fetched from the network. A name already added is refused: use `update` |
+| `agent-factory plugin update <name> [<sha256>]` | runs the test kit on the connector's folder as it is now and shows its hash and the writes it adds (exit 3, nothing recorded); with that hash, records it, if it is still the same |
+| `agent-factory plugin test <path\|name>` | the contract test kit: handshake; each `fixtures/<capability>/<case>.in.json` against its `.out.json`, for declared capabilities only; bad input; an unknown op; one JSON object on stdout; a canary in each declared env name that must not come back; no token in any answer; and write fidelity: each write fixture's text (`input.text`, or a post in `input.post` or `input.body`, as the posting template renders it), and once more a tricky one, must reach the CLI byte for byte and whole (an argv word, stdin, or a JSON string that is the text itself), with no more calls than the fixture's `<case>.cli.json` lists answers. A connector that writes must name its programs in `cli` (never an interpreter such as `node`); the kit then runs every call with a recording fake of each first on the connector's `PATH`, answering from `<case>.cli.json`, so a named program is never the real one |
+| `agent-factory plugin list` | the registered connectors, with their writes and hashes |
 
-A plugin's `PATH` is yours without relative folders and without folders others can write to. The coordinator may not
+A connector's `PATH` is yours without relative folders and without folders others can write to. The coordinator may not
 run `plugin` or edit `plugins.json` or the store (#106). **Today:**
 
-- The pin covers the plugin's folder, not the interpreter a script names (`#!/usr/bin/env node` takes the first
+- The pin covers the connector's folder, not the interpreter a script names (`#!/usr/bin/env node` takes the first
   `node` on that `PATH`) nor the CLI it calls; folders your own user can write, such as `~/.local/bin`, stay on the
   `PATH`, since most CLIs live there.
 - The fakes stand in only for the programs named in `cli`, found by name on the `PATH`: `describe` runs with the real
-  `PATH`, and a program not named, one run by an absolute path, or the network reached from the plugin's own code is
-  not held back by the kit.
+  `PATH`, and a program not named, one run by an absolute path, or the network reached from the connector's own code
+  is not held back by the kit.
 
-### The forge as a plugin
+### The git host as a connector
 
-The package bundles two plugins, `github` and `gitlab`: the factory's own forge adapters, built into
+The package bundles two connectors, `github` and `gitlab`: the factory's own git host adapters, built into
 `plugins/<name>/lib/` from the compiled package, so the pinned folder holds every module it runs. Each declares
 `forge.read` and `forge.write` and runs `gh` or `glab` from its `PATH` with that CLI's own login; the project comes in
 each request, so it needs no setting and no token. A project opts in with its project file:
@@ -237,53 +240,53 @@ each request, so it needs no setting and no token. A project opts in with its pr
 { "connectors": { "forge.read": "github", "forge.write": "github" } }
 ```
 
-Run `agent-factory plugin add github` once. The bundled plugins start with `#!/usr/bin/env node`, so `node` must be in
+Run `agent-factory plugin add github` once. The bundled connectors start with `#!/usr/bin/env node`, so `node` must be in
 a `PATH` folder only its owner can write; where it is not (some CI tool caches), `describe` exits 127, and a link to
-`node` in such a folder, put first on the `PATH`, fixes it. Then `dispatch <project>` makes every forge call of its pass through the
-plugin, and reads each answer back in the seam's own shapes, so a plugin that answers anything else fails that call.
-A forge call has the built-in adapter's room: an answer of up to 64 MiB, and time to wait out a rate limit on every
+`node` in such a folder, put first on the `PATH`, fixes it. Then `dispatch <project>` makes every git host call of its pass through the
+connector, and reads each answer back in the seam's own shapes, so a connector that answers anything else fails that
+call. A git host call has the built-in adapter's room: an answer of up to 64 MiB, and time to wait out a rate limit on every
 try. `FACTORY_DRY_RUN` still holds every write back, opening a change too. Without the mapping, the built-in adapter
 runs, as before.
 
-The plugin's name must be the forge's (`FACTORY_FORGE`), and each request names its forge, which the plugin checks.
-A setting the plugin cannot honour stops the pass instead of being dropped without a word: `FACTORY_GH`,
+The connector's name must be the git host's (`FACTORY_FORGE`), and each request names its git host, which the
+connector checks. A setting the connector cannot honour stops the pass instead of being dropped without a word: `FACTORY_GH`,
 `FACTORY_GLAB`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GH_HOST`, `GITLAB_TOKEN`, `GITLAB_HOST`, and a
 `FACTORY_FORGE_HOST` other than github.com or gitlab.com. **Today:**
 
 - Only `dispatch` opts in; `review`, `poll`, `status` and the loop commands still use the built-in adapter.
-- `FACTORY_IDENTITY=app` with a forge plugin is refused: the App's token would have to reach the plugin, and none may
-  hold one (ADR-0014 P11). App projects keep the built-in adapter.
-- A project on GitHub Enterprise or a self-managed GitLab keeps the built-in adapter, since the plugin gets no host
+- `FACTORY_IDENTITY=app` with a git host connector is refused: the App's token would have to reach the connector, and
+  none may hold one (ADR-0014 P11). App projects keep the built-in adapter.
+- A project on GitHub Enterprise or a self-managed GitLab keeps the built-in adapter, since the connector gets no host
   setting; so does one whose `gh` or `glab` login comes from a token in the environment.
-- The plugin tries a rate-limited request 4 times; `FACTORY_MAX_TRIES` does not reach it.
+- The connector tries a rate-limited request 4 times; `FACTORY_MAX_TRIES` does not reach it.
 
 ### Pings
 
-The dispatcher pings you on Discord when a ticket needs you (#119), through the bundled `discord` notify plugin:
+The orchestrator pings you on Discord when a ticket needs you (#119), through the bundled `discord` notify connector:
 - each hand-over its table makes on a change: CI red twice, the ready check's failures, the same patch twice, a run
   that never ended, and its other stops;
-- a writer run that ended blocked, or with a question that waits on your answer;
+- an implementer run that ended blocked, or with a question that waits on your answer;
 - a change ready for you to review and merge (the gate is green).
 
-Each goes once per event and head, as its forge note does. To set it up:
+Each goes once per event and head, as its git host note does. To set it up:
 1. In the Discord channel, Integrations → Webhooks → New Webhook, and copy its URL.
 2. `agent-factory setup discord` and paste it at the hidden prompt. It is kept like the claude token: the login
    Keychain on macOS, `~/.factory/secrets/discord-token` (mode 600) on Linux, never printed. On the VM run it as the
-   user that runs the dispatcher.
+   user that runs the orchestrator.
 3. `agent-factory plugin add discord`, and map `"notify": "discord"` in the project file's `connectors`.
 
-The core hands the webhook to the plugin inside the request on stdin, never in env or argv; the plugin's `curl` reads
+The core hands the webhook to the connector inside the request on stdin, never in env or argv; the connector's `curl` reads
 it from a 0600 config file it removes after, and the message from stdin. The text is a posting template, and every
 mention is switched off, so nothing pings `@everyone`. A ping only informs: one that fails never stops the pass or
-the ticket (the pass prints why, the forge note is the record) and is not tried again, and a reply in Discord is
+the ticket (the pass prints why, the git host note is the record) and is not tried again, and a reply in Discord is
 never an approval. `FACTORY_DRY_RUN=1` prints each ping instead. The coordinator's `request notify` goes through the
-same plugin, within its policy and cap ([Writes](#writes)). The webhook goes only to the package's own
-`plugins/discord/plugin`, matched by its real path, never to another plugin that calls itself `discord`. **Today:**
+same connector, within its policy and cap ([Writes](#writes)). The webhook goes only to the package's own
+`plugins/discord/plugin`, matched by its real path, never to another connector that calls itself `discord`. **Today:**
 
-- A stop the reviewer makes itself (open Act on findings, an empty change, a protected file, its round limit) and a
-  hand-over with no change to label ping no one yet; the forge note or the pass's error is the record.
-- The plugin runs `curl` with no proxy setting, so a host that reaches Discord only through a proxy sends no ping.
-- The text is the forge's posting template, so `&` and `<` show as `&amp;` and `&lt;` in Discord.
+- A stop the automated review makes itself (open Act on findings, an empty change, a protected file, its round
+  limit) and a hand-over with no change to label ping no one yet; the git host note or the pass's error is the record.
+- The connector runs `curl` with no proxy setting, so a host that reaches Discord only through a proxy sends no ping.
+- The text is the git host's posting template, so `&` and `<` show as `&amp;` and `&lt;` in Discord.
 
 ### Writes
 
@@ -296,7 +299,7 @@ The coordinator holds no login, so it never writes to a tracker or a chat itself
 2. It runs `agent-factory request <tracker.comment|tracker.create|notify> --file <draft.json>`. The core checks the
    draft, cleans every text field with the posting template (`[coordinator] …`, so no line starts a quick action, a
    mention, a reference or a link), and applies the policy.
-3. `allow`: the write goes out at once through the plugin the project file maps it to (exit 0). `confirm`: it is kept
+3. `allow`: the write goes out at once through the connector the project file maps it to (exit 0). `confirm`: it is kept
    in `$FACTORY_HOME/pending/`, nothing goes out, and `request` prints a command (exit 3):
    `agent-factory confirm <project>/<ticket>/<capability>/<id> '<the text>'`. The coordinator runs it, and the harness
    prompt shows you where the write goes and its exact text; your yes sends it. Say yes only when the prompt spells
@@ -306,64 +309,64 @@ The coordinator holds no login, so it never writes to a tracker or a chat itself
 A write goes out only when all of these hold, at `request` and again at `confirm`:
 
 - the ticket's approval is current (`agent-factory approval` says `approved`); a ticket with none gets no write;
-- the project file maps the capability to a plugin, and that plugin declared the write in its `describe`;
+- the project file maps the capability to a connector, and that connector declared the write in its `describe`;
 - the cap has room: it counts the writes since the ticket's latest approval, so approving again starts afresh. A write
-  the plugin failed still counts, since it may have gone out;
+  the connector failed still counts, since it may have gone out;
 - at `confirm`, the text you were shown is the kept text, byte for byte, leaving out the invisible word joiners the
   cleaning puts after `@`, `#` and `!` (no one can see them to check them), and the kept request is unchanged.
 
 Each write is logged in `$FACTORY_HOME/writes/<project>/<ticket>.jsonl` before it is sent, then its outcome; one
 ticket's writes run one at a time behind `<ticket>.lock`, which holds its process ID, so a lock left by a process
 that was killed is taken over. Cleaning drops every control and invisible format character (bidi controls and
-isolates, tag characters, the soft hyphen, variation selectors), so what the prompt shows is what is sent. A plugin answers a write with `{"kind": "done", "url": "…"}`; any other kind is a
-failure. `forge.write` is the dispatcher's alone, and no Jira status, assignee or field change has a capability.
+isolates, tag characters, the soft hyphen, variation selectors), so what the prompt shows is what is sent. A connector answers a write with `{"kind": "done", "url": "…"}`; any other kind is a
+failure. `forge.write` is the orchestrator's alone, and no Jira status, assignee or field change has a capability.
 **Today:**
 
 - The pending requests and the write log belong to your own user, so the coordinator's settings deny editing them,
   but a command its Bash rules do not name could still change them; they move to the `factory` OS user with the
   approvals (ADR-0012 S2).
-- No tracker or chat plugin is bundled yet, so a write needs a plugin you add yourself.
+- No tracker or chat connector is bundled yet, so a write needs a connector you add yourself.
 - Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
   `pending/` until you remove it.
 
 ## Settings
 
-The scripts read their settings from the environment.
+The commands read their settings from the environment.
 
 | setting | meaning | default |
 |---|---|---|
-| `FACTORY_FORGE` | the forge adapter | `gitlab` (or `github`) |
+| `FACTORY_FORGE` | the git host adapter | `gitlab` (or `github`) |
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` | — |
-| `FACTORY_REPO` | a local clone of that project; worktrees, packs and run files go in its `.claude/` | — |
+| `FACTORY_REPO` | a local clone of that project; worktrees, context packs and run files go in its `.claude/` | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
-| `FACTORY_QUESTIONS` | `dispatch`: how a writer run's questions are posted (`questions`, a preference). `round` posts every open question at once, in one numbered `[writer] OPEN:` note: each question with 2 to 4 lettered choices and the recommended one marked, so you reply with a letter per question (`1A 2B`) or `accept all`. `one-at-a-time` posts only the first and says how many wait; once it is answered, the next run asks again what is still open. Either way the writer never guesses (#320). **Today:** a report's plain-text question is still read, for one release, as one with no choices, which you answer in words | `round` |
+| `FACTORY_QUESTIONS` | `dispatch`: how an implementer run's questions are posted (`questions`, a preference). `round` posts every open question at once, in one numbered `[writer] OPEN:` note: each question with 2 to 4 lettered choices and the recommended one marked, so you reply with a letter per question (`1A 2B`) or `accept all`. `one-at-a-time` posts only the first and says how many wait; once it is answered, the next run asks again what is still open. Either way the implementer never guesses (#320). **Today:** a report's plain-text question is still read, for one release, as one with no choices, which you answer in words | `round` |
 | `FACTORY_POLL_MINUTES` | `dispatch`: how long the orchestrator loop waits between passes; each pass keeps it with its last-poll time, and while a loop is meant to be running `status` flags it `LATE` after 3 of these while a change is claimed | `5` |
-| `FACTORY_IDENTITY` | who `agent-factory` acts as on the forge: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
+| `FACTORY_IDENTITY` | who `agent-factory` acts as on the git host: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
 | `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
-| `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
+| `FACTORY_FORGE_HOST` | the git host's address; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_MAX_RUNS` | runs at once (`caps.liveRuns`): the most runs one `dispatch` pass starts, one after another, each only while the caps still allow it; `review` also refuses a machine at this many live runs | `1` |
 | `FACTORY_MAX_FINDERS` | `review.maxFinders`: the most finder runs one review round runs at once. A round counts as one run against `FACTORY_MAX_RUNS`, with up to this many model runs at a time. Before a round starts, its worst case, every finder it can pick and its two verify passes each at `FACTORY_MAX_USD`, must fit in the dollars left under the ticket's and the day's caps, or the round is held. The window caps count tokens, which no per-run cap bounds, so they hold only the next run (#237) | `4` |
 | `FACTORY_RUN_HOURS` | run hours (`runHours`): the hours in UTC, `HH-HH`, in which a `dispatch` pass may start a run, such as `22-06` across midnight or `00-24` for the whole day. Outside them a pass starts no run and lists each one as held; nothing is stopped mid-run, and nothing waits in the background: `dispatch` prints "run hours are 22-06 UTC; run `agent-factory dispatch <project>` again then", and the orchestrator loop ends after that pass. The tickets keep their records, so the next `dispatch` inside the hours starts their runs. A cap: a lower layer may only narrow the hours (#299) | any hour |
-| `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and every run of the dispatcher's writer | no cap |
-| `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `agent-factory review` refuses it | off |
-| `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
+| `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every finder and verify pass run, and every implementer run | no cap |
+| `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each git host write instead of making it, and end their line in "(dry run)"; reads still go to the git host; `agent-factory review` refuses it | off |
+| `FACTORY_BOX` | the runner kind ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each runner as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No runner starts without it | — (refused) |
 | `FACTORY_WINDOW_HOURS` | `usage`: the length of the subscription's usage window, in hours, from 1 to 24 (`window.hours`) | `5` |
 | `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
 | `FACTORY_MAX_USD_DAY`, `FACTORY_MAX_TOKENS_DAY` | `dispatch`: the most a project's runs may spend in a UTC day (`caps.usdPerProjectDay`, `caps.tokensPerProjectDay`); at either, no new run starts that day and one notice goes out (#131) | no cap |
 | `FACTORY_WINDOW_TOKENS`, `FACTORY_MACHINE_WINDOW_TOKENS` | `dispatch`: the factory's share of a subscription window, in tokens, for the project and for every project on this machine (`caps.windowTokens`, `caps.machineWindowTokens`). The share is the stop line: at it, no new run starts until the last `FACTORY_WINDOW_HOURS` hold less, and one notice goes out (#131) | no cap |
 | budget settings | the rest of ADR-0012 S16: runs at once, run hours and the model per phase are the keys above (`FACTORY_MAX_RUNS`, `FACTORY_RUN_HOURS`, the `*_MODEL` keys) | — |
-| `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
-| `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
-| `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
-| `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models: full model ids, never an alias such as `sonnet`, which is refused (ADR-0015 E9) | `claude-sonnet-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` |
-| `FACTORY_RULEBOOK` | **Deprecated** (#232; read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the writer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
-| `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
+| `FACTORY_WRITER_MODEL` | the implementer's model | Claude's default |
+| `FACTORY_WRITER_MINUTES` | the longest one implementer run may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
+| `FACTORY_WRITER_STALL_MINUTES` | the longest an implementer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
+| `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the automated review's models: full model ids, never an alias such as `sonnet`, which is refused (ADR-0015 E9) | `claude-sonnet-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` |
+| `FACTORY_RULEBOOK` | **Deprecated** (#232; read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the implementer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
+| `FACTORY_CLAUDE` | the `claude` CLI the automated review runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
-| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions. They replace the instructions only: the engine sends its floor ahead of them on every pass (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
+| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the finder's and the verify pass's instructions. They replace the instructions only: the engine sends its floor ahead of them on every run (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_MAX_TRIES` | tries per request on a rate limit | `4` |
 
 ### The project file
@@ -389,9 +392,10 @@ read again and only when its fields read, or with no connector, no plugin and th
 live uses a team layer instead ([Settings layers](#settings-layers)). It never replaces a file that is
 there.
 
-- `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
-  runs `verify` once at each head, and the dispatcher decides from its own record of that run, never from the forge,
-  where any other check (a bot, a preview) could read as green; a red check on the forge still sends the writer back.
+- `gate`: `forge-ci` when the git host's own CI is the gate; `local` when the project has none. Then the local
+  verifier runs `verify` once at each head, and the orchestrator decides from its own record of that run, never from
+  the git host, where any other check (a bot, a preview) could read as green; a red check on the git host still sends
+  the implementer back.
   It also posts the result as the commit status `agent-factory/verify` at the head, for people and branch protection.
   **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
 - `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
@@ -401,20 +405,20 @@ there.
   `*_test.go` and the like; `src/core/ready/floor.ts`).
 - `ready.judgeFiles`: more globs for the judge files (#231), added to the built-in ones, never in their place: the
   build files, the verify command's files and the test config (`src/core/ready/judge.ts`).
-- `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
+- `egress.allow`: the hosts this project's runners may reach, by name: `api.anthropic.com` (the implementer needs it), or
   `.npmjs.org` for a
   domain and every subdomain; no wildcard, IP, scheme, port or path. A git host is refused, with its subdomains:
   `github.com`, `gitlab.com` and the `FACTORY_FORGE_HOST` you set, because the runner has no git login and needs none;
   the host clones, pushes and posts. Each project has its own proxy,
-  `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
+  `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's runner never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
-  no box runs for the project.
+  no runner runs for the project.
 - `lanes.oneWayDoor`: globs for the paths whose change cannot be undone (stored data, a schema, a public contract, a
   deploy). A change that touches one needs the one-way-door lane (#230): before the build when the spec's `## Planned
   files` names one, and in the ready check when the diff touches one. It is a deny-list key ([Settings](#settings)):
   every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
   drops it.
-- `connectors`: which registered connector serves each extension point ([Plugins](#plugins); the engine's swappable
+- `connectors`: which registered connector serves each extension point ([Connectors](#connectors); the engine's swappable
   parts are connectors, `GLOSSARY.md`). Before #232 this map was called `plugins`; a `plugins` that holds a map is
   still read as the connectors for one release, and `config show` and `config check` warn about it. Both at once is
   refused.
@@ -432,11 +436,11 @@ there.
     floor fails it). Only when both pass does it write the pin to `$FACTORY_HOME/projects/<project>.plugins.json`. It
     does not run the eval set; `agent-factory eval reviewer` does, and spends money.
   - A listed plugin with no pin, or whose stored folder no longer has the pin's hash, is refused.
-  Each `dispatch` pass checks every pin, then copies each plugin into the writer's clone as `.factory/plugins/<n>`
+  Each `dispatch` pass checks every pin, then copies each plugin into the implementer's clone as `.factory/plugins/<n>`
   (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
   each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
   pass. The first plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
-  the writer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
+  the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
   the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
   and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
   above tiny stops the pass. **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
@@ -448,10 +452,10 @@ there.
 - `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
   (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
   `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3. A `forge.write` policy is refused.
-- With no file, the gate is forge CI and neither the ready check nor the verifier runs, and no write goes out. A file
+- With no file, the gate is git host CI and neither the ready check nor the verifier runs, and no write goes out. A file
   with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
   for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
-  turns a local gate into forge CI.
+  turns a local gate into git host CI.
 
 ### Project knowledge
 
@@ -473,7 +477,7 @@ onboarder:
 3. Every implementer run then gets them as `.factory/brief.md` and `.factory/glossary.md`. Each `file:line` they cite
    is checked against the default branch first; a stale one (its file gone, or its line changed or moved) is listed
    in the run's `writer-ended` record as `stale`, for the retro. A brief edited after its acceptance is not handed to
-   runs, and the record says so. **Today:** the reviewer's pack does not read them yet.
+   runs, and the record says so. **Today:** the automated review's context pack does not read them yet.
 
 Both commands are denied to the coordinator, and so is any edit of the project home.
 
@@ -519,9 +523,9 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 - Every module reads a machine key through `src/core/settings/machine.ts`, never its variable;
   `test/settings-read.test.ts` fails on a direct read.
 
-### The box image
+### The runner image
 
-Each project's box runs an image built on this machine, never pulled (#113):
+Each project's runner runs an image built on this machine, never pulled (#113):
 
 ```bash
 agent-factory box build <project>
@@ -530,7 +534,7 @@ agent-factory box build <project>
 It packs this package with `npm pack` and builds the base image with it installed (`images/factory-box`: Ubuntu
 24.04, Docker, Node 22, the agent CLIs, `agent-factory`), then, if
 `$FACTORY_HOME/projects/<project>/box.Dockerfile` exists, the project's own layer on top of it, and pins the result's
-ID in `$FACTORY_HOME/projects/<project>/box.json`. The dispatcher runs exactly that ID. A project Dockerfile must end
+ID in `$FACTORY_HOME/projects/<project>/box.json`. The orchestrator runs exactly that ID. A project Dockerfile must end
 on the base:
 
 ```dockerfile
@@ -539,25 +543,25 @@ FROM ${BASE}
 RUN apt-get update && apt-get install -y --no-install-recommends openjdk-21-jdk-headless
 ```
 
-Run it again after an upgrade of `agent-factory`, so the box runs the same version as the host. In a checkout, run
+Run it again after an upgrade of `agent-factory`, so the runner runs the same version as the host. In a checkout, run
 `npm run build` first: a package with no `dist/cli.js` is refused. Both images are tagged by their ID (`factory-box-base:<12 hex>`,
 `factory-box-<project>:<12 hex>`), so `docker image prune` keeps them.
 
-After the first build on the VM, prove that no host variable reaches the box (#181). In a checkout of this package, as
-the user that runs the dispatcher, run:
+After the first build on the VM, prove that no host variable reaches the runner (#181). In a checkout of this package,
+as the user that runs the orchestrator, run:
 
 ```bash
 FACTORY_TEST_BOX_IMAGE="$(jq -r .image "$FACTORY_HOME/projects/<project>/box.json")" npx vitest run test/vm-box-real.test.ts
 ```
 
-It plants a canary and a `GH_TOKEN` in the host environment, runs `env` in a real box, and fails if either one, or any
-secret-like name the box was not given, is there. Where there is no image or no Sysbox, it is skipped and says why.
+It plants a canary and a `GH_TOKEN` in the host environment, runs `env` on a real runner, and fails if either one, or any
+secret-like name the runner was not given, is there. Where there is no image or no Sysbox, it is skipped and says why.
 
 ### Check the egress proxy
 
 **Today:** the egress proxy is tested only on a fake docker. Each runner joins its project's `--internal` network,
 `factory-int-<project>`, and leaves only through the project's Squid proxy; that it holds on a real Docker host is
-proven only by this check (#130). Run it on the VM after the first `box build`, as the user that runs the dispatcher,
+proven only by this check (#130). Run it on the VM after the first `box build`, as the user that runs the orchestrator,
 with the same settings as a dispatch pass:
 
 ```bash
@@ -576,7 +580,7 @@ line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each
 - [ ] on the host's gateway, every open port is one you named; close any other port, or bind it to `127.0.0.1`;
 - [ ] the inner Docker pulls `hello-world`, as Testcontainers does; the list needs `.docker.io` and
   `production.cloudflare.docker.com`, and `--pull` names the image your ITs use;
-- [ ] a real model call, by the first writer run on the VM, goes through: the check reaches the host, not the model;
+- [ ] a real model call, by the first implementer run on the VM, goes through: the check reaches the host, not the model;
 - [ ] the open question: does the work build need a private-registry token? Run the work project's build in the
   runner; if a registry answers 401, record it on #130.
 
