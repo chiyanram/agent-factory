@@ -8,12 +8,13 @@
 //   ask     `agent-factory confirm` (the prompt shows the exact text of a kept write; the yes sends it), and, Today,
 //           the old loop commands, so none runs without a yes; they become deny once the orchestrator runs every step
 //           (#113)
-//   deny    `agent-factory approve` and `agent-factory start`: the AI never approves and never STARTs a ticket (#227,
-//           P6, P8); a human runs them at a front door. `agent-factory eval`: an eval pass is an extra task that spends
-//           on model runs (up to $100, ADR-0015 E11), and only a human starts one (#215). Raw git host and network clients, git push, a second
+//   deny    `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
+//           STARTs a ticket (#227, P6, P8) and never waives its own test check hit (#231); a human runs them at a
+//           front door. `agent-factory eval`: an eval pass is an extra task that spends on model runs (up to $100,
+//           ADR-0015 E11), and only a human starts one (#215). Raw git host and network clients, git push, a second
 //           interpreter or shell (a Read deny does not stop a program that opens files itself), sudo and the App
-//           token's wrapper; editing any .claude/ (the user's settings and each project's), the package, the START
-//           and approval records, the project home, the team and user settings layers, the local rubric folders, the
+//           token's wrapper; editing any .claude/ (the user's settings and each project's), the package, the START,
+//           approval and waiver records, the project home, the team and user settings layers, the local rubric folders, the
 //           secrets, the run records, the pending writes and the write log, and the plugin list;
 //           `agent-factory plugin` and `agent-factory project`; reading the secret paths
 //
@@ -42,9 +43,9 @@ const READS = ["poll", "spec", "approval", "status", "request", "--help", "--ver
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
-// the commands only a human runs: the AI never approves, never STARTs (#227), and never starts an eval pass, an extra
-// task that spends on model runs (#215)
-export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start", "agent-factory eval"];
+// the commands only a human runs: the AI never approves, never STARTs (#227), never waives a test check (#231), and
+// never starts an eval pass, an extra task that spends on model runs (#215)
+export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start", "agent-factory waive", "agent-factory eval"];
 
 const DENY_BASH = [
   ...HUMAN_ONLY,
@@ -156,6 +157,7 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${absolute(p.pkg)}/**)`,
     `Edit(${home}/approvals/**)`,
     `Edit(${home}/starts/**)`,
+    `Edit(${home}/waivers/**)`,
     // the settings layers (#229; settings/layers.ts): the user file, every team's clone and its team.json, and the
     // project home (each <project>.json and its <project>/ folder); and the rubric folders (#232)
     `Edit(${home}/user.json)`,
@@ -200,7 +202,7 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
 // path, so the session's folder and --add-dir are its only path scope. Today: untried against a live Copilot CLI.
 export function copilotArgs(p: CoordinatorPlaces): readonly string[] {
   const allow = READS.map((c) => `shell(agent-factory ${c})`);
-  // what is not allowed asks, so the old loop commands ask here as in Claude Code; approve and start are denied
+  // what is not allowed asks, so the old loop commands ask here as in Claude Code; approve, start and waive are denied
   const deny = DENY_BASH.map((c) => `shell(${c})`);
   return [
     "--add-dir",
@@ -228,6 +230,7 @@ export function claudeArgv(): Argv {
 const NEVER_LET = [
   "agent-factory approve PROJ PROJ-1 0",
   "agent-factory start PROJ PROJ-1",
+  "agent-factory waive PROJ PROJ-1 0",
   "agent-factory eval reviewer",
   "gh api user",
   "glab api user",

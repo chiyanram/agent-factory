@@ -192,6 +192,14 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     }
   });
 
+  it("denies waive and any edit of the waivers: the AI never clears its own test check hit (#231)", () => {
+    for (const command of [`agent-factory waive ledger PROJ-1 ${"a".repeat(40)}`, "agent-factory waive"]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    expect(claudeSettings(PLACES).permissions.deny).toContain("Edit(//home/ram/.factory/waivers/**)");
+    expect(copilotArgs(PLACES)).toContain("shell(agent-factory waive)");
+  });
+
   it("denies raw forge and network clients, git push, a second interpreter or shell, sudo and the App's token", () => {
     for (const command of [
       "gh api repos/o/r",
@@ -277,6 +285,7 @@ describe("the wall's check (#105, #227)", () => {
       [(p) => p.allow.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
       [(p) => p.ask.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
       [(p) => p.allow.push("Bash(agent-factory start:*)"), "agent-factory start"],
+      [(p) => p.ask.push("Bash(agent-factory waive *)"), "Bash(agent-factory waive *) lets"],
       [
         (p) => p.allow.push("Bash(agent-factory eval *)"),
         "Bash(agent-factory eval *) lets the coordinator run agent-factory eval reviewer",
@@ -302,6 +311,14 @@ describe("the wall's check (#105, #227)", () => {
       [
         (p) => (p.deny = p.deny.filter((r) => !r.includes("/starts/"))),
         "Edit(//home/ram/.factory/starts/**) is missing",
+      ],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory waive"))),
+        "Bash(agent-factory waive) is missing",
+      ],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("/waivers/"))),
+        "Edit(//home/ram/.factory/waivers/**) is missing",
       ],
       [(p) => (p.deny = p.deny.filter((r) => r !== "Edit(~/.claude/**)")), "Edit(~/.claude/**) is missing"],
       // the settings layers (#229): the user file, the teams' clones, and the project home

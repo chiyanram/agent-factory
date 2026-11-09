@@ -9,7 +9,8 @@
 //     "ready": {
 //       "programs": ["make", "./gradlew"],   the programs an evidence row may start with
 //       "timeoutMinutes": 30,                per command (default 30, at most 240)
-//       "testFiles": ["src/test/**"]         the floor guard's test files (default: ready/floor.ts TEST_FILES)
+//       "testFiles": ["src/test/**"],        the floor guard's test files (default: ready/floor.ts TEST_FILES)
+//       "judgeFiles": ["ci/**"]              more judge files (#231), added to ready/judge.ts's, never in their place
 //     },
 //     "egress": {
 //       "allow": ["api.anthropic.com"]       the hosts this project's boxes may reach (#130; egress/allowlist.ts);
@@ -42,6 +43,8 @@ export type ProjectFile = {
     readonly timeoutSeconds: number;
     // the globs the floor guard reads as test files (#190)
     readonly testFiles: readonly string[];
+    // the judge files this project adds to the built-in ones (#231; ready/judge.ts judgeFiles); none is []
+    readonly judgeFiles: readonly string[];
   };
   // the hosts the project's boxes may reach, checked; empty when the file names none
   readonly egress: { readonly allow: readonly string[] };
@@ -103,9 +106,21 @@ function readyOf(path: string, raw: unknown): Result<ProjectFile["ready"]> {
   if (testFiles === "bad") {
     return failed(path, `"ready.testFiles" must list globs, such as ["src/test/**", "**/*Spec.groovy"]`);
   }
+  const judgeFiles = judgeFilesOf(prop(ready, "judgeFiles"));
+  if (judgeFiles === "bad") {
+    return failed(path, `"ready.judgeFiles" must list globs, such as ["ci/**"]`);
+  }
   return minutes === "bad"
     ? failed(path, `"ready.timeoutMinutes" must be a whole number from 1 to ${MAX_MINUTES}`)
-    : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles } };
+    : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles, judgeFiles } };
+}
+
+// judgeFilesOf : the project's added judge files; a deny-list key, so none adds nothing and an empty list is fine
+function judgeFilesOf(value: unknown): readonly string[] | "bad" {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) && value.every(word) ? value.filter(word) : "bad";
 }
 
 function testFilesOf(value: unknown): readonly string[] | "bad" {

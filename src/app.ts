@@ -12,6 +12,7 @@ import type { Forge } from "./core/forge/types.js";
 import { checkSpec, designHash, plainName, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { start } from "./core/start.js";
+import { readWaiver, waive } from "./core/waiver.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, vmBox, type Built } from "./core/box/index.js";
@@ -63,6 +64,10 @@ commands:
                                record the human's approval of the spec and the design with exactly those hashes (all 64
                                characters, as spec printed them; no design hash is none). A human runs it; the
                                coordinator's settings deny it
+  waive <project> <ticket> <head>
+                               record the human's waiver of the test checks at that head (the full commit id the
+                               hits were listed at): the ready check clears them, and flags a cleared file again only
+                               if a later head changes it. A human runs it; the coordinator's settings deny it
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
   review <project> <number>    one review round on a claimed change: pack, find, verify, threads, status box, summary;
                                the contract is the approved spec of the ticket its factory/<ticket> branch names;
@@ -361,6 +366,37 @@ async function approveCommand({ positionals, io }: Args): Promise<number> {
   return 0;
 }
 
+// waive : a human's waiver of the test checks at one head, at the terminal (#231)
+async function waiveCommand({ positionals, io }: Args): Promise<number> {
+  const [project, ticket, head] = positionals;
+  const target = startTarget([project, ticket].flatMap((n) => (n === undefined ? [] : [n])));
+  if (positionals.length !== 3 || target === "bad") {
+    io.err("usage: agent-factory waive <project> <ticket> <the full commit id of the head>\n");
+    return 64;
+  }
+  const result = await waiveAt(io, target, String(head));
+  if (result.kind === "refused") {
+    io.err(`agent-factory waive: refused: ${result.reason}\n`);
+    return 1;
+  }
+  const r = result.record;
+  io.out(`waived the test checks of ${r.project}/${r.ticket} at ${r.head} by ${r.by} at ${r.at}\n`);
+  return 0;
+}
+
+async function waiveAt(io: Io, target: TicketArgs, head: string): ReturnType<typeof waive> {
+  const home = factoryHome(io.env);
+  return home.kind === "home"
+    ? waive({
+        where: { home: home.path, ...target },
+        head,
+        by: await whoApproves(io.env),
+        via: "terminal",
+        at: new Date().toISOString(),
+      })
+    : home;
+}
+
 async function approvalCommand({ positionals, io }: Args): Promise<number> {
   const [project, ticket] = positionals;
   if (project === undefined || ticket === undefined) {
@@ -458,7 +494,13 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   const steps: Steps = {
     ...STEPS_TODAY,
     writer: writerStep(writer),
-    ready: readyStep(plan, forge),
+    ready: readyStep(plan, forge, async (ticket) => {
+      const stored = await readWaiver({ home, project, ticket });
+      if (stored.kind === "refused") {
+        return { kind: "failed", reason: stored.reason };
+      }
+      return { kind: "ok", value: stored.kind === "record" ? stored.record.head : "none" };
+    }),
     review: await reviewStepFor(io.env, forge, project),
     verify: verifyStep(plan, forge),
   };
@@ -924,6 +966,7 @@ const COMMANDS: readonly Command[] = [
   { name: "spec", run: spec },
   { name: "start", run: startCommand },
   { name: "approve", run: approveCommand },
+  { name: "waive", run: waiveCommand },
   { name: "approval", run: approvalCommand },
   { name: "app-token", run: appTokenCommand },
   { name: "dispatch", run: dispatchCommand },

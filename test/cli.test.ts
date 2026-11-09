@@ -279,6 +279,29 @@ describe("agent-factory start (#227)", () => {
   });
 });
 
+describe("agent-factory waive (#231)", () => {
+  it("records a human's waiver of the test checks at the full head; a short head or no project refuses", async () => {
+    const head = "c".repeat(40);
+    const run = await cli(["waive", "ledger", "PROJ-1", head], { FACTORY_HOME: home });
+    expect(run).toMatchObject({
+      code: 0,
+      out: expect.stringContaining(`waived the test checks of ledger/PROJ-1 at ${head}`),
+    });
+    expect(JSON.parse(readFileSync(join(home, "waivers", "ledger", "PROJ-1.json"), "utf8"))).toMatchObject({
+      kind: "test-change",
+      ticket: "PROJ-1",
+      head,
+      via: "terminal",
+    });
+    expect(await cli(["waive", "ledger", "PROJ-1", "cccc"], { FACTORY_HOME: home })).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("full commit id"),
+    });
+    expect((await cli(["waive", "ledger", "PROJ-1"])).code).toBe(64);
+    expect((await cli(["waive", "../x", "PROJ-1", head])).code).toBe(64);
+  });
+});
+
 describe("agent-factory dispatch", () => {
   it("refuses to start while the coordinator's settings are missing or looser than its wall (#105)", async () => {
     const run = await cli(["dispatch", "ledger", "--once"], { FACTORY_HOME: home, FACTORY_PROJECT: "a/b" });

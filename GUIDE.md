@@ -24,7 +24,7 @@ it ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) S14, [review 
 ```
 work (default)  dispatcher + host push ──▶ your own gh / glab login ──▶ pushes branches, opens MRs, comments
 personal (opt.) dispatcher + host push ──▶ a bot: GitHub App <slug>[bot] or GitLab service account
-human           agent-factory start · agent-factory approve (local records) · reviews · merges with your own account
+human           agent-factory start · approve · waive (local records) · reviews · merges with your own account
 ```
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`,
@@ -170,11 +170,12 @@ The wall (`src/core/coordinator.ts`):
 - **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it. **Today:** the start commands
   too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`, `start-writer.sh`), since the loop is
   still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
-- **Denied:** `agent-factory approve` and `agent-factory start`: the AI never approves and never STARTs a ticket, so
-  you run them yourself in your own terminal (#227). `agent-factory eval`: an eval pass spends on model runs (up to
-  $100), and only a human starts one (#215). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+- **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
+  STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
+  `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
+  `starts`, `waivers`,
   `projects`, `runs`, `secrets`, `coordinator`, `pending`, `writes`, `plugins.json` and `plugins`. Reading the
   secret paths: `~/.ssh`, `~/.gnupg`, the gh and glab logins, `~/.git-credentials`, `~/.netrc`, the cloud logins,
   `~/.docker/config.json`, `~/.npmrc`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, the Keychain and the
@@ -395,6 +396,8 @@ there.
 - `ready.testFiles`: the globs the floor guard reads as test files; they replace the built-in list (`src/test/**`,
   `test/**`, `tests/**`, `__tests__/**`, `*Test.java`, `*Spec.groovy`, `*.test.*`, `*.spec.*`, `test_*.py`,
   `*_test.go` and the like; `src/core/ready/floor.ts`).
+- `ready.judgeFiles`: more globs for the judge files (#231), added to the built-in ones, never in their place: the
+  build files, the verify command's files and the test config (`src/core/ready/judge.ts`).
 - `egress.allow`: the hosts this project's boxes may reach, by name: `api.anthropic.com` (the writer needs it), or
   `.npmjs.org` for a
   domain and every subdomain; no wildcard, IP, scheme, port or path. Each project has its own proxy,
@@ -489,7 +492,7 @@ to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, n
 story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
 questions and status to Jira or the issue through `agent-factory request` ([Writes](#writes)), and
 `agent-factory confirm` behind the person's yes; you never run `agent-factory approve`, `agent-factory start` or
-`agent-factory eval`, which are denied to you: the human runs them (#227, #215). You edit and write only spec drafts in
+`agent-factory waive` or `agent-factory eval`, which are denied to you: the human runs them (#227, #231, #215). You edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.
@@ -570,22 +573,31 @@ START waits, since nothing runs without one. Each approval also gets one shared 
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
 each record when the writer may try again (`nextTry`, #228): 10 s after the step's first failure, doubling each time,
-never more than 5 minutes; until then the pass waits on that ticket, and the caps still hold. The ready check first runs the floor guard (#190): it reads the change's diff
+never more than 5 minutes; until then the pass waits on that ticket, and the caps still hold. The ready check first runs the floor guard (#190, #231): it reads the change's diff
 from its merge base with the default branch, on the host and with git only, and fails the check at once, with each
-`file:line`, when the diff lowers the bar (VB6, CR4):
+`file:line`, when the diff lowers the bar (VB6, CR4). The test checks (S1–S4):
+- a test file deleted, or moved out of the test files (a move inside them is followed), or fewer test cases in a test
+  file that stays (`@Test` and its kin, a Spock feature, `it(`, `test(`, `def test_`, `func Test`; a renamed case is
+  silent);
 - a skip or focus marker added in a test file (`@Disabled…`, `@Ignore…`, `@Requires({ false })`, `.skip`, `.only`,
   `xit(`, `fit(`, `pytest.mark.skip`, `xfail`, `t.Skip` and the like);
-- a test file deleted, or moved out of the test files (a move inside them is followed);
 - more assertion lines removed than added in a test file (`assert…`, `expect(`, `assertThat`, `verify(`, Go's
   `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting;
+- a judge file added, changed, moved or deleted: a build file or dependency manifest, a file the project's `verify`
+  command names or its program reads (`Makefile` for `make`, `package.json` for `npm`), jest, vitest or playwright
+  config, `junit-platform.properties`, `pytest.ini`, `conftest.py`, and the project's `ready.judgeFiles`.
+
+and the code checks:
 - a suppression added with no reason comment on the line above (`@SuppressWarnings`, `eslint-disable`,
   `@ts-ignore`, `NOSONAR`, `noqa` and the like), in any file;
 - a `catch` or `except` left empty: added so, or with its body removed.
 
-A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
-fails the step, so the check is never passed and a person looks. **Today:** there is no waiver: a hit a person
-agrees with still fails the check, so the change goes to them after the ready check's 3 failures and they land it by
-hand. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
+A test check hit goes to a person at once (`needs-human`, with the hits listed), never back to the writer; a code check
+hit sends the writer back like any failed ready check. A person who agrees with a test check hit runs
+`agent-factory waive <project> <ticket> <head>` and removes `needs-human`: the ready check runs again at that head and
+clears it. On a later head the test checks look again only at the files changed since the waiver's head, so a cleared
+file is flagged again only if it changes again. A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
+or the waiver fails the step, so the check is never passed and a person looks. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
 fools it or fails it; and Spock `where:` rows are not counted. Then it runs each evidence row of the writer's report again at the head,
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
 project's own proxy; nothing of the branch runs on the host. Each box run starts that proxy afresh, inside the
@@ -648,6 +660,7 @@ and `#12` for `!12`.
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash and the design's (`design none` with no `design.md` beside it), or every missing part (intent, numbered acceptance criteria, design, lane); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
 | `agent-factory start <project> <ticket> [--yes]` | records a human's START in `$FACTORY_HOME/starts/<project>/<ticket>.json`: who, the front door (`via`) and when. It opens the ticket; in the tiny lane it also lets the build begin. When `factory/<ticket>` is already on the git host it asks first (exit 3), and `--yes` starts anyway. A human runs it; the coordinator's settings deny it (#227) |
 | `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, the design's (`none` when there is no `design.md` beside the spec), who, the front door and when. The hashes on the command line are the ones the human saw, as `agent-factory spec` printed them; a spec or design that no longer has exactly that hash is refused. A human runs it; the coordinator's settings deny it ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104, #227) |
+| `agent-factory waive <project> <ticket> <head>` | records the human's waiver of the test checks in `$FACTORY_HOME/waivers/<project>/<ticket>.json`: `kind: "test-change"`, the full commit id of the head the hits were listed at, who, the front door and when. The ready check clears the test check hits at that head; on a later head it looks again only at the files changed since, so a cleared file is flagged again only if it changes again. A waiver given again replaces it. A human runs it; the coordinator's settings deny it (#231) |
 | `agent-factory request <capability> --file <draft.json>` | asks for a `tracker.comment`, `tracker.create` or `notify` write on an approved ticket; the project's policy performs it at once (0), keeps it for `confirm` and prints that command (3), or refuses it (1) ([Writes](#writes)) |
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |

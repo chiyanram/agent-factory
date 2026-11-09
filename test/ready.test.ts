@@ -27,10 +27,15 @@ let p: Project;
 let head = "";
 beforeEach(() => {
   p = project("feat/x");
-  // a branch whose own Makefile would write outside the folder if anything ran it on the host
-  p.git("checkout", "-q", "feat/x");
+  // a branch whose Makefile would write outside the folder if anything ran it on the host. The Makefile comes from
+  // main, so the change itself touches no judge file (#231)
   p.write("Makefile", `test:\n\ttouch ${join(p.root, "planted")}\n`);
-  head = p.commitAll("planted target");
+  p.commitAll("planted target");
+  p.git("push", "-q", "origin", "main");
+  p.git("checkout", "-q", "feat/x");
+  p.git("merge", "-q", "--no-edit", "main");
+  p.write("svc/Extra.java", "class Extra {}\n");
+  head = p.commitAll("a change");
   p.git("push", "-q", "origin", "feat/x");
   p.git("checkout", "-q", "main");
 });
@@ -39,11 +44,13 @@ beforeEach(() => {
   egressStarts = 0;
 });
 
+const NO_WAIVER = async () => ({ kind: "ok", value: "none" }) as const;
+
 const exited = (code: number): Ran => ({ kind: "exited", code, stdout: "", stderr: "" });
 
 const PROJECT: ProjectFile = {
   gate: { kind: "local", verify: ["make", "verify"] },
-  ready: { programs: ["make", "./gradlew"], timeoutSeconds: 60, testFiles: TEST_FILES },
+  ready: { programs: ["make", "./gradlew"], timeoutSeconds: 60, testFiles: TEST_FILES, judgeFiles: [] },
   egress: { allow: ["repo.maven.apache.org"] },
 };
 
@@ -114,7 +121,7 @@ function input(evidence: readonly Evidence[], at = head): RunInput & { readonly 
 const row = (command: string, criterion = "AC1"): Evidence => ({ criterion, command, result: "ok" });
 
 async function ready(box: Box, evidence: readonly Evidence[], at = head) {
-  const step = readyStep(plan(box), statusForge([]));
+  const step = readyStep(plan(box), statusForge([]), NO_WAIVER);
   return step.kind === "available" ? step.run(input(evidence, at)) : step;
 }
 
@@ -123,7 +130,7 @@ describe("the ready check (#91, #138)", () => {
     const fake = fakeBox({ runs: [exited(0), exited(0)] });
     const seen: string[][] = [];
     const out = await ready(watched(fake, seen), [row("make test"), row("./gradlew check --tests 'A*'", "AC2")]);
-    expect(out).toEqual({ kind: "ok", value: { passed: true, why: "" } });
+    expect(out).toEqual({ kind: "ok", value: { passed: true, why: "", human: false } });
     expect(existsSync(join(p.root, "planted"))).toBe(false);
     const runs = fake.calls.flatMap((c) => (c.op === "run" ? [c.command] : []));
     expect(runs.map((c) => c.argv)).toEqual([
@@ -152,13 +159,13 @@ describe("the ready check (#91, #138)", () => {
     const fake = fakeBox({ runs: [exited(0), exited(2), exited(0)] });
     expect(await ready(fake.box, [row("make a"), row("make b", "AC2"), row("make c", "AC3")])).toEqual({
       kind: "ok",
-      value: { passed: false, why: "row 2 (AC2): make b exited 2" },
+      value: { passed: false, why: "row 2 (AC2): make b exited 2", human: false },
     });
     expect(fake.calls.filter((c) => c.op === "run")).toHaveLength(2);
     const slow = fakeBox({ runs: [{ kind: "timedOut", seconds: 60 }] });
     expect(await ready(slow.box, [row("make a")])).toEqual({
       kind: "ok",
-      value: { passed: false, why: "row 1 (AC1): make a ran out of time (60s)" },
+      value: { passed: false, why: "row 1 (AC1): make a ran out of time (60s)", human: false },
     });
   });
 
@@ -172,7 +179,7 @@ describe("the ready check (#91, #138)", () => {
     const none = fakeBox({});
     expect(await ready(none.box, [])).toEqual({
       kind: "ok",
-      value: { passed: false, why: "the writer gave no evidence rows to run again" },
+      value: { passed: false, why: "the writer gave no evidence rows to run again", human: false },
     });
   });
 
@@ -242,7 +249,7 @@ describe("the ready check's kept output (#199)", () => {
       stderr: "\u001b[31mBUILD FAILED\u001b[0m\n",
     };
     const out = await ready(fakeBox({ runs: [exited(0), ran] }).box, [row("make a"), row("make b", "AC2")]);
-    expect(out).toEqual({ kind: "ok", value: { passed: false, why: "row 2 (AC2): make b exited 1" } });
+    expect(out).toEqual({ kind: "ok", value: { passed: false, why: "row 2 (AC2): make b exited 1", human: false } });
     expect(await keptAt()).toEqual({
       kind: "ok",
       value: [
@@ -415,6 +422,70 @@ describe("the floor guard in the ready check (#190)", () => {
   });
 });
 
+describe("the test checks in the ready check (#231)", () => {
+  // a change on feat/x that touches one file, pushed; its head
+  function changed(path: string, text: string): string {
+    p.git("checkout", "-q", "feat/x");
+    p.write(path, text);
+    const at = p.commitAll(`touch ${path}`);
+    p.git("push", "-q", "origin", "feat/x");
+    p.git("checkout", "-q", "main");
+    return at;
+  }
+
+  async function readyWith(waived: string, at: string) {
+    const fake = fakeBox({ runs: [exited(0)] });
+    const step = readyStep(plan(fake.box), statusForge([]), async (ticket) => {
+      expect(ticket).toBe("PROJ-12");
+      return { kind: "ok", value: waived };
+    });
+    const out = step.kind === "available" ? await step.run(input([row("make test")], at)) : step;
+    return { out, calls: fake.calls };
+  }
+
+  it("stops a planted build-file edit for a person, the hit listed, and runs no box", async () => {
+    const at = changed("build.gradle", "plugins { id 'java' }\n");
+    const { out, calls } = await readyWith("none", at);
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: { passed: false, human: true, why: expect.stringContaining("build.gradle adds a judge file") },
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("stops a planted test-config edit, and the verify command's own Makefile", async () => {
+    const config = changed("vitest.config.ts", "export default {};\n");
+    expect((await readyWith("none", config)).out).toMatchObject({
+      value: { human: true, why: expect.stringContaining("vitest.config.ts adds a judge file") },
+    });
+    const make = changed("Makefile", "test:\n\ttrue\n");
+    expect((await readyWith("none", make)).out).toMatchObject({
+      value: { human: true, why: expect.stringContaining("Makefile changes a judge file") },
+    });
+  });
+
+  it("passes at the waiver's head; a new head that changes the same file is stopped again", async () => {
+    const first = changed("build.gradle", "plugins { id 'java' }\n");
+    expect((await readyWith(first, first)).out).toEqual({
+      kind: "ok",
+      value: { passed: true, why: "", human: false },
+    });
+    const second = changed("build.gradle", "plugins { id 'groovy' }\n");
+    expect((await readyWith(first, second)).out).toMatchObject({
+      value: { passed: false, human: true, why: expect.stringContaining("build.gradle") },
+    });
+  });
+
+  it("fails the step when the waiver cannot be read, so a person looks", async () => {
+    const step = readyStep(plan(fakeBox({}).box), statusForge([]), async () => ({
+      kind: "failed",
+      reason: "waivers/ledger/PROJ-12.json is not a waiver record",
+    }));
+    const out = step.kind === "available" ? await step.run(input([row("make test")])) : step;
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("not a waiver record") });
+  });
+});
+
 describe("the box run's egress", () => {
   it("starts the project's proxy before the box, once per run, and puts the box on the project's network", async () => {
     const fake = fakeBox({ runs: [exited(0)] });
@@ -428,6 +499,7 @@ describe("the box run's egress", () => {
     const step = readyStep(
       plan(fake.box, PROJECT, { kind: "failed", reason: "docker create: no such image" }),
       statusForge([]),
+      NO_WAIVER,
     );
     const out = step.kind === "available" ? await step.run(input([row("make test")])) : step;
     expect(out).toEqual({

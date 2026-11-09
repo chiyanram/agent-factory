@@ -26,6 +26,8 @@
 //   the head is not the writer's (a person pushed)             wait: stand off
 //   the same patch twice, or a run that changed nothing        needs-human
 //   writer done, no ready check at this head                   ready check
+//   ready check stopped by a test check (#231)                 needs-human, the hits listed; a human's waiver at
+//                                                              this head, newer than that check, runs it again
 //   ready check failed                                         writer again        3 failures → needs-human
 //   ready check passed, no review at this head                 reviewer            3 rounds → needs-human
 //   Act on findings                                            writer again        3 rounds → needs-human
@@ -66,6 +68,11 @@ export type ApprovalView =
   // an approval, and no START: nothing runs without one
   | { readonly kind: "unstarted" };
 
+// a human's waiver of the test checks (#231; waiver.ts): the head it was given at, and when
+export type WaiverView =
+  | { readonly kind: "none" }
+  | { readonly kind: "waived"; readonly head: string; readonly at: string };
+
 export type ChangeView =
   | { readonly kind: "none" }
   | { readonly kind: "open"; readonly line: OpenLine }
@@ -80,6 +87,7 @@ export type TicketState = {
   readonly ticket: string;
   readonly gate: Gate;
   readonly approval: ApprovalView;
+  readonly waiver: WaiverView;
   readonly change: ChangeView;
   readonly runs: Summary;
   // milliseconds since the epoch
@@ -260,6 +268,11 @@ const samePatch: Rule = (s) => {
     : "next";
 };
 
+// waivedSince : a waiver given at this head after the ready check that stopped it
+function waivedSince(waiver: WaiverView, head: string, checkedAt: string): boolean {
+  return waiver.kind === "waived" && waiver.head === head && Date.parse(waiver.at) > Date.parse(checkedAt);
+}
+
 const ready: Rule = (s) => {
   const head = writerHead(s);
   const r = s.runs.lastReady;
@@ -269,14 +282,25 @@ const ready: Rule = (s) => {
   if (r.passed) {
     return "next";
   }
+  return r.human ? testChecksStopped(s, head, r) : readyFailed(s, head, r.why);
+};
+
+// testChecksStopped : a test check hit is a person's to decide, until their waiver at this head runs the check again
+function testChecksStopped(s: TicketState, head: string, r: { readonly at: string; readonly why: string }): Action {
+  return waivedSince(s.waiver, head, r.at)
+    ? { kind: "ready", head }
+    : { kind: "needs-human", why: `the test checks stopped the change at ${head.slice(0, 8)}: ${r.why}` };
+}
+
+function readyFailed(s: TicketState, head: string, why: string): Action {
   return s.runs.readyFailures >= MAX_READY_FAILURES
     ? { kind: "needs-human", why: `the ready check failed ${s.runs.readyFailures} times` }
     : {
         kind: "writer",
         task: { kind: "ready-failed", head },
-        why: `the ready check failed at this head: ${r.why}`,
+        why: `the ready check failed at this head: ${why}`,
       };
-};
+}
 
 // the review at this head, or "none" when there is none yet
 function reviewHere(s: TicketState): number | "none" {
