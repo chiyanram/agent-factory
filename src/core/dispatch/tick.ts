@@ -16,6 +16,7 @@ import { NEEDS_HUMAN } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
+import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
 import { plainName } from "../spec.js";
 import type { Evidence } from "../report.js";
@@ -72,6 +73,8 @@ export type TickSetup = {
   // print each decision and act on none
   readonly dryRun: boolean;
   readonly log: (line: string) => void;
+  // a person's ping when a ticket needs them (#119); NO_NOTIFY when the project maps no notify plugin
+  readonly notify: Notify;
 };
 
 export type Decision = { readonly ticket: string; readonly action: Action };
@@ -195,6 +198,7 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
     () => setup.forge.removeLabel({ number: n, label: setup.label }),
     () => say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields: [], items: [] }),
     () => record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } }),
+    () => informed(setup, { kind: "needs-you", ticket: state.ticket, change: n, why }),
   ];
   for (const step of steps) {
     const done = await step();
@@ -236,9 +240,38 @@ async function ping(setup: TickSetup, state: TicketState, head: string): Promise
     fields: [],
     items: [],
   });
-  return said.kind === "ok"
-    ? record({ where: where(setup, state), event: { at: at(setup), kind: "pinged", head } })
-    : said;
+  const pinged =
+    said.kind === "ok"
+      ? await record({ where: where(setup, state), event: { at: at(setup), kind: "pinged", head } })
+      : said;
+  return pinged.kind === "ok"
+    ? informed(setup, { kind: "ready", ticket: state.ticket, change: number(state), head })
+    : pinged;
+}
+
+// informed : a person pinged; a ping only informs, so one that fails is printed and the pass goes on (#119)
+async function informed(setup: TickSetup, message: Ping): Promise<Done> {
+  const sent = await setup.notify(message);
+  if (sent.kind === "failed") {
+    setup.log(`${message.ticket}: the ping did not go out (the forge note is the record): ${sent.reason}`);
+  }
+  return { kind: "ok" };
+}
+
+// writerPing : a writer run that ended on a person: a question that waits on them, or a blocked run
+function writerPing(state: TicketState, outcome: "done" | "asked" | "blocked"): Ping | "none" {
+  const change = number(state);
+  if (outcome === "asked") {
+    return { kind: "asked", ticket: state.ticket, change };
+  }
+  return outcome === "blocked"
+    ? {
+        kind: "needs-you",
+        ticket: state.ticket,
+        change,
+        why: "the writer's run is blocked; its note on the change says why",
+      }
+    : "none";
 }
 
 async function reconcile(setup: TickSetup, state: TicketState): Promise<Done> {
@@ -300,9 +333,27 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task });
   // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person
-  return ran.kind === "ok"
-    ? record({ where: place, event: { at: at(setup), kind: "writer-ended", mode, ...ran.value } })
-    : ran;
+  return ran.kind === "ok" ? writerEnded(setup, state, mode, ran.value) : ran;
+}
+
+type WriterValue = Extract<
+  Awaited<ReturnType<Extract<Steps["writer"], { kind: "available" }>["run"]>>,
+  { kind: "ok" }
+>["value"];
+
+// writerEnded : the run's end recorded, then the person pinged when it ended on them
+async function writerEnded(
+  setup: TickSetup,
+  state: TicketState,
+  mode: ReturnType<typeof modeOf>,
+  value: WriterValue,
+): Promise<Done> {
+  const ended = await record({
+    where: where(setup, state),
+    event: { at: at(setup), kind: "writer-ended", mode, ...value },
+  });
+  const message = writerPing(state, value.outcome);
+  return ended.kind === "ok" && message !== "none" ? informed(setup, message) : ended;
 }
 
 // startCheck : the "started" line of a ready check or a review, or why it cannot start

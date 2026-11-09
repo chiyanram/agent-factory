@@ -13,8 +13,10 @@ import { projectPath, readyFieldsOf } from "./core/project.js";
 import { attempt } from "./core/review/safe.js";
 import { plainName } from "./core/spec.js";
 import { pluginSetup, type PluginIo } from "./plugin-cli.js";
+import type { Secrets } from "./core/plugin/registry.js";
 
-type Io = Omit<PluginIo, "pkg">;
+// the plugin io, and the secrets a call carries (the Discord webhook for a notify request, #119)
+type Io = Omit<PluginIo, "pkg"> & { readonly secrets: Secrets };
 
 function refused(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -75,7 +77,11 @@ async function requestCommand(argv: readonly string[], io: Io): Promise<number> 
   if (draft.kind === "failed") {
     return fail(io, "request", draft.reason);
   }
-  return said(io, "request", await request(await pluginSetup(io.home, io.env), words.capability, draft.value));
+  return said(
+    io,
+    "request",
+    await request(await pluginSetup(io.home, io.env, io.secrets), words.capability, draft.value),
+  );
 }
 
 // draftText : a draft from the spec drafts folder only, where the coordinator writes, so request reads no other file
@@ -106,7 +112,7 @@ async function confirmCommand(argv: readonly string[], io: Io): Promise<number> 
     return 64;
   }
   const [id = "", text = ""] = parsed.positionals;
-  return said(io, "confirm", await confirm(await pluginSetup(io.home, io.env), id, text));
+  return said(io, "confirm", await confirm(await pluginSetup(io.home, io.env, io.secrets), id, text));
 }
 
 async function templateText(template: string | undefined): Promise<Result<string>> {

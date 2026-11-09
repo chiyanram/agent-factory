@@ -1,3 +1,4 @@
+import { NO_NOTIFY, type Notify, type Ping } from "../src/core/notify.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -98,6 +99,14 @@ function forge(changes: Changes, log: string[]): Forge {
 
 const team = [{ name: "ram", level: "maintainer", bot: false }] as const;
 
+// a notifier that keeps each ping, or fails every one when told to
+function pinger(pings: Ping[], fail = false): Notify {
+  return async (ping) => {
+    pings.push(ping);
+    return fail ? { kind: "failed", reason: "discord is down" } : { kind: "ok" };
+  };
+}
+
 function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): TickSetup {
   return {
     home,
@@ -108,6 +117,7 @@ function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): 
     steps: STEPS_TODAY,
     now: () => Date.parse("2026-11-07T10:00:00Z"),
     quietMinutes: 30,
+    notify: NO_NOTIFY,
     dryRun: false,
     log: (l) => log.push(`log ${l}`),
     ...over,
@@ -276,15 +286,19 @@ describe("tick", () => {
       merged: [{ number: 9, branch: "factory/PROJ-9", fork: false }],
     };
     const log: string[] = [];
-    await tick(setup(changes, log));
+    const pings: Ping[] = [];
+    await tick(setup(changes, log, { notify: pinger(pings) }));
     expect(log).toContain("label -agent::claimed #12");
     expect(log).toContain("label -agent::claimed #9");
     expect(log.filter((l) => l.startsWith("note #14"))).toEqual([
       "note #14 [coordinator] ready for you at 11111111: the gate is green; review and merge",
     ]);
+    expect(pings).toEqual([{ kind: "ready", ticket: "PROJ-3", change: 14, head: H }]);
     const again: string[] = [];
-    await tick(setup(changes, again));
+    await tick(setup(changes, again, { notify: pinger(pings) }));
     expect(again.filter((l) => l.startsWith("note #14"))).toEqual([]);
+    // pinged once, as the note
+    expect(pings).toHaveLength(1);
   });
 
   it("the ready check gets the writer's evidence rows and records its reason; a local gate runs the verifier (#91)", async () => {
@@ -408,16 +422,47 @@ describe("tick", () => {
     });
     const changes = { team, open: [open()], merged: [] };
     const first: string[] = [];
-    await tick(setup(changes, first));
+    const pings: Ping[] = [];
+    await tick(setup(changes, first, { notify: pinger(pings) }));
     expect(first.filter((l) => !l.startsWith("log"))).toEqual([
       "label +needs-human #12",
       "label -agent::claimed #12",
       "note #12 [coordinator] blocked: the writer's run changed nothing",
     ]);
+    expect(pings).toEqual([
+      { kind: "needs-you", ticket: "PROJ-1", change: 12, why: "the writer's run changed nothing" },
+    ]);
     const second: string[] = [];
-    await tick(setup(changes, second));
+    await tick(setup(changes, second, { notify: pinger(pings) }));
+    expect(pings).toHaveLength(1);
     expect(second.filter((l) => !l.startsWith("log"))).toEqual([]);
     expect(second.join(" ")).toContain("approve again");
+  });
+
+  it("pings when the writer asked or was blocked; a ping that fails is printed and never stops the pass (#119)", async () => {
+    await approved();
+    const changes = { team, open: [open({ labels: [] })], merged: [] };
+    for (const [outcome, kind] of [
+      ["asked", "asked"],
+      ["blocked", "needs-you"],
+    ] as const) {
+      const log: string[] = [];
+      const pings: Ping[] = [];
+      const steps: Steps = {
+        ...STEPS_TODAY,
+        writer: {
+          kind: "available",
+          run: async () => ({ kind: "ok", value: { head: H, outcome, patch: "p1", evidence: [], hung: false } }),
+        },
+      };
+      const ran = await tick(setup(changes, log, { steps, notify: pinger(pings, true) }));
+      expect(ran).toMatchObject({ kind: "ok" });
+      expect(pings.map((p) => p.kind)).toEqual([kind]);
+      expect(log.join("\n")).toContain(
+        "PROJ-1: the ping did not go out (the forge note is the record): discord is down",
+      );
+      rmSync(join(home, "runs"), { recursive: true, force: true });
+    }
   });
 
   it("forge-only actions come before the one run, so no ping waits behind an hour-long writer", async () => {

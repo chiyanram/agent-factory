@@ -12,11 +12,11 @@
 //   no token out  no answer holds a token: ghp_, gho_, ghu_, ghs_, ghr_, github_pat_, glpat-, ATATT, xox?-, sk-ant-,
 //                 or a JWT
 //
-//   write fidelity  a plugin that writes names the programs it runs in describe's cli; each write fixture that carries a
-//                 text (input.text, or a post in input.post or input.body, rendered as post.ts renders it), and once
-//                 more with a tricky text, must hand that text to the CLI byte for byte and whole: an argv word, stdin,
-//                 or a string in JSON on either that is the text itself; and it may call the CLI no more often than
-//                 the fixture's <case>.cli.json lists answers
+//   write fidelity  a plugin that writes names the programs it runs in describe's cli. Each write fixture that carries a
+//                 text (input.text, or a post in input.post or input.body, rendered as post.ts renders it) and lists
+//                 the CLI's answers in its <case>.cli.json, and once more with a tricky text, must hand that text to
+//                 the CLI byte for byte and whole: an argv word, stdin, or a string in JSON on either that is the
+//                 text itself; and it may call the CLI no more often than <case>.cli.json lists answers
 //
 // A plugin that names a cli runs every check with the kit's fakes first on its PATH (fakes.ts), so the kit never reaches
 // the real CLI or the network; a fixture's <case>.cli.json lists the fakes' answers, in order. The caps and the timeout
@@ -265,6 +265,13 @@ async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown
   );
 }
 
+// isFidelityCase : a write fixture that carries a text and lists the CLI's answers in its .cli.json, so it reaches the
+// CLI; one that lists none (a refusal before any call: no webhook, a bad input) has no text to check
+function isFidelityCase(entry: Entry, f: Fixture): boolean {
+  const writes = entry.writes.some((w) => w === f.capability);
+  return writes && f.answers.length > 0 && textsOf(field(parsed(f.input), "input")).length > 0;
+}
+
 // fidelity : each write fixture that carries a text, and the first once more with TRICKY
 async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]): Promise<readonly Check[]> {
   if (entry.writes.length === 0) {
@@ -273,9 +280,7 @@ async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]
   if (entry.cli.length === 0) {
     return [check("write fidelity", false, "the plugin writes but names no program in describe's cli")];
   }
-  const writes = fixtures.filter(
-    (f) => entry.writes.some((w) => w === f.capability) && textsOf(field(parsed(f.input), "input")).length > 0,
-  );
+  const writes = fixtures.filter((f) => isFidelityCase(entry, f));
   const [first] = writes;
   if (first === undefined) {
     return [check("write fidelity", false, "no write fixture carries a text (input.text, input.post or input.body)")];

@@ -37,7 +37,9 @@ type Vault = {
 };
 
 const SERVICE = "agent-factory";
-const SETUP = "run: agent-factory setup claude";
+function setupHint(runner: Runner): string {
+  return `run: agent-factory setup ${runner}`;
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -94,7 +96,7 @@ function withMeta(vault: Vault, home: string): TokenStore {
       const meta = asMeta((await readMetas(home))[runner]);
       return meta.kind === "meta"
         ? { kind: "found", token: read.token, meta: meta.meta }
-        : { kind: "missing", reason: `the ${runner} token has no expiry on record; ${SETUP}` };
+        : { kind: "missing", reason: `the ${runner} token has no expiry on record; ${setupHint(runner)}` };
     },
   };
 }
@@ -105,7 +107,8 @@ export function keychainVault(run: Cli, env: NodeJS.ProcessEnv): Vault {
   return {
     where: "the macOS login Keychain",
     write: async (runner, token) => {
-      // checkToken allows only [A-Za-z0-9._-], so the line needs no quoting
+      // checkToken allows only [A-Za-z0-9._-] and checkWebhook a Discord URL of letters, digits, ".", "/", ":", "_"
+      // and "-": neither holds a space, a quote or a backslash, so the line needs no quoting
       const exit = await run({
         bin: "security",
         args: ["-i"],
@@ -127,7 +130,7 @@ export function keychainVault(run: Cli, env: NodeJS.ProcessEnv): Vault {
         return { kind: "found", token: secret(exit.stdout.trim()) };
       }
       return /could not be found/i.test(exit.stderr)
-        ? { kind: "missing", reason: `no ${runner} token in the Keychain; ${SETUP}` }
+        ? { kind: "missing", reason: `no ${runner} token in the Keychain; ${setupHint(runner)}` }
         : { kind: "failed", reason: `security could not read the ${runner} token (exit ${exit.code})` };
     },
   };
@@ -196,7 +199,7 @@ export function fileVault(home: string, owner: Owner): Vault {
       try {
         return await readTokenFile(fileOf(runner), owner);
       } catch {
-        return { kind: "missing", reason: `no ${runner} token at ${fileOf(runner)}; ${SETUP}` };
+        return { kind: "missing", reason: `no ${runner} token at ${fileOf(runner)}; ${setupHint(runner)}` };
       }
     },
   };

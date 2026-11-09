@@ -2,12 +2,23 @@
 // (`claude setup-token` prints it once), pastes it at a hidden prompt, and setup stores it: no agent ever sees it, and
 // it is never printed, logged or put in an env file. The dispatcher calls boxTokenFrom before each run.
 
-import { boxToken, checkToken, metaFor, tokenAge, type Age, type BoxToken, type Meta } from "./rules.js";
+import {
+  boxToken,
+  checkToken,
+  checkWebhook,
+  metaFor,
+  tokenAge,
+  webhookMeta,
+  type Age,
+  type BoxToken,
+  type Meta,
+} from "./rules.js";
 import type { TokenStore } from "./store.js";
 
 export {
   boxToken,
   checkToken,
+  checkWebhook,
   metaFor,
   secret,
   tokenAge,
@@ -67,4 +78,21 @@ export async function boxTokenFrom(input: { readonly store: TokenStore; readonly
   return stored.kind === "found"
     ? boxToken({ token: stored.token, meta: stored.meta, now: input.now })
     : { kind: "refused", reason: stored.reason };
+}
+
+// saveDiscordWebhook : the webhook the dispatcher pings through (#119), checked, then kept like the claude token
+export async function saveDiscordWebhook(input: {
+  readonly store: TokenStore;
+  readonly pasted: string;
+  readonly now: Date;
+}): Promise<Saved> {
+  const checked = checkWebhook(input.pasted);
+  if (checked.kind === "refused") {
+    return { kind: "refused", reason: `not stored: ${checked.reason}` };
+  }
+  const meta = webhookMeta(input.now);
+  const put = await input.store.put({ runner: "discord", token: checked.token, meta });
+  return put.kind === "ok"
+    ? { kind: "saved", where: input.store.where, meta }
+    : { kind: "refused", reason: put.reason };
 }
