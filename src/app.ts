@@ -212,15 +212,22 @@ function onboardCli({ positionals, io }: Args): Promise<number> {
           { env: resolved.env, log: (line) => io.err(`${line}\n`) },
           { home: home.path, project: name, plugins: await pluginSetup(home.path, resolved.env) },
         );
-        return opened.kind === "ok"
-          ? onboardSetup({
-              env: resolved.env,
-              forge: opened.value.forge,
-              home: home.path,
-              project: name,
-              now: Date.now,
-            })
-          : opened;
+        if (opened.kind === "failed") {
+          return opened;
+        }
+        const used = await runPlugins({ home: home.path, project: name, env: resolved.env });
+        if (used.kind === "failed") {
+          return used;
+        }
+        io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
+        return onboardSetup({
+          env: resolved.env,
+          forge: opened.value.forge,
+          home: home.path,
+          project: name,
+          now: Date.now,
+          plugins: used.value.plugins,
+        });
       },
     });
   });
