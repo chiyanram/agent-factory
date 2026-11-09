@@ -1,8 +1,9 @@
 // usage-cli — agent-factory usage [<project>] (#131): what the orchestrator's runs spent today, in the current window
-// and this month, per project and per ticket, read from the run records (src/core/dispatch/usage.ts). It reads only.
+// and this month, per project and per ticket, and the automated review's acted-on rate this month (#220), read from
+// the run records (src/core/dispatch/usage.ts). It reads only.
 
 import { plainName } from "./core/spec.js";
-import { readSpends, usageLines, WINDOW_HOURS, type Spends } from "./core/dispatch/usage.js";
+import { actedLines, readSpends, usageLines, WINDOW_HOURS, type Spends } from "./core/dispatch/usage.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
 export type UsageIo = {
@@ -14,7 +15,7 @@ export type UsageIo = {
 };
 
 export const USAGE_HELP = `  usage [<project>]            what the orchestrator's runs spent today, in the current window and this month, per
-                               project and ticket, from the run records
+                               project and ticket, and the automated review's acted-on rate, from the run records
 `;
 
 function windowHours(env: NodeJS.ProcessEnv): number | "bad" {
@@ -33,7 +34,11 @@ function projectArg(positionals: readonly string[]): { readonly project?: string
 
 // printed : the table on stdout and each problem on stderr; 1 when there was one
 function printed(io: UsageIo, spends: Spends, hours: number): number {
-  for (const line of usageLines({ runs: spends.runs, now: io.now(), windowHours: hours })) {
+  const lines = [
+    ...usageLines({ runs: spends.runs, now: io.now(), windowHours: hours }),
+    ...actedLines({ acted: spends.acted, now: io.now() }),
+  ];
+  for (const line of lines) {
     io.out(`${line}\n`);
   }
   for (const problem of spends.problems) {
