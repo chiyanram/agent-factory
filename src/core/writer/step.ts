@@ -28,7 +28,8 @@ import type { Approver, Spec } from "../spec.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start, type FileText } from "./clone.js";
-import { readTools, settingsOf, toolLines } from "./tools.js";
+import { readTools, settingsOf, TARGET_REF, toolLines } from "./tools.js";
+import { knownFor, type Known } from "../onboard/known.js";
 import type { Spend } from "../dispatch/spend.js";
 import { writerRun, type Ended } from "./run.js";
 import { ciText, taskText, verifyText } from "./task.js";
@@ -94,6 +95,8 @@ export type WriterOut = {
   readonly hung: boolean;
   // what the run spent (#131); none when the host started no run, or the run printed no result event
   readonly spend?: Spend;
+  // each cite of the project's brief that went stale, or why the run went without it (#235)
+  readonly stale?: readonly string[];
 };
 
 // readPrompts : the package's writer prompts
@@ -331,9 +334,37 @@ function mergeOf(work: Work, base: string): { readonly merge?: string } {
   return work.mode === "merge" ? { merge: base } : {};
 }
 
+// KNOWLEDGE : what the prompt says of the project's accepted brief and glossary, when the run has them (#235)
+export const KNOWLEDGE =
+  "Read .factory/brief.md and .factory/glossary.md first: the project's commands, modules and gotchas, and its terms, accepted by a human. Use the build, test and run commands the brief names, and the glossary's words.";
+
+// knowledgeOf : the accepted brief and glossary as clone files, as a field to spread
+function knowledgeOf(known: Known): Pick<Parameters<typeof makeClone>[1], "knowledge"> {
+  return known.files.kind === "text" ? { knowledge: { brief: known.files.brief, glossary: known.files.glossary } } : {};
+}
+
+// knowledgeLines : what the prompt says of the brief and glossary, when the run has them
+function knowledgeLines(known: Known): readonly string[] {
+  return known.files.kind === "text" ? [KNOWLEDGE] : [];
+}
+
+// withStale : each stale cite of the brief goes into the run record, for the retro (#235)
+function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
+  return result.kind === "ok" && known.stale.length > 0
+    ? { kind: "ok", value: { ...result.value, stale: known.stale } }
+    : result;
+}
+
 async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
   const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
   const settings = settingsOf(tools);
+  const known = await knownFor({
+    home: setup.home,
+    project: setup.project,
+    repo: setup.box.repo,
+    env: setup.box.env,
+    ref: TARGET_REF,
+  });
   const clone = await makeClone(setup.box, {
     start: p.start,
     spec: p.spec.text,
@@ -341,6 +372,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     task: work.task,
     settings,
     ...mergeOf(work, p.base),
+    ...knowledgeOf(known),
   });
   if (clone.kind === "failed") {
     return clone;
@@ -351,7 +383,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     ticket: input.ticket,
     branch: clone.value.branch,
     head: clone.value.start,
-    tools: toolLines(tools),
+    tools: [...knowledgeLines(known), ...toolLines(tools)],
     base: p.base,
   });
   const ended = await writerRun({
@@ -366,7 +398,8 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     completion: setup.settings.completion,
     stallMs: setup.settings.stallMs,
   });
-  const out = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
+  const result = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
+  const out = withStale(result, known);
   const removed = await removeClone(clone.value.dir);
   return removed.kind === "ok" ? out : removed;
 }

@@ -11,7 +11,8 @@
 //   deny    `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
 //           STARTs a ticket (#227, P6, P8) and never waives its own test check hit (#231); a human runs them at a
 //           front door. `agent-factory eval`: an eval pass is an extra task that spends on model runs (up to $100,
-//           ADR-0015 E11), and only a human starts one (#215). Raw git host and network clients, git push, a second
+//           ADR-0015 E11), and only a human starts one (#215). `agent-factory onboard`: the onboarder's run and a
+//           human's acceptance of the brief it stages (#235). Raw git host and network clients, git push, a second
 //           interpreter or shell (a Read deny does not stop a program that opens files itself), sudo and the App
 //           token's wrapper; editing any .claude/ (the user's settings and each project's), the package, the START,
 //           approval and waiver records, the project home, the team and user settings layers, the local rubric folders, the
@@ -44,8 +45,15 @@ const READS = ["poll", "spec", "approval", "status", "request", "--help", "--ver
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
 // the commands only a human runs: the AI never approves, never STARTs (#227), never waives a test check (#231), and
-// never starts an eval pass, an extra task that spends on model runs (#215)
-export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start", "agent-factory waive", "agent-factory eval"];
+// never starts an eval pass, an extra task that spends on model runs (#215), nor the onboarder's run or its acceptance,
+// which a human reviews (#235)
+export const HUMAN_ONLY = [
+  "agent-factory approve",
+  "agent-factory start",
+  "agent-factory waive",
+  "agent-factory eval",
+  "agent-factory onboard",
+];
 
 const DENY_BASH = [
   ...HUMAN_ONLY,
