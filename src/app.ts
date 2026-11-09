@@ -35,7 +35,7 @@ import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
 import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
 import { reviewStep } from "./core/review/step.js";
-import { boxPlan } from "./core/ready/plan.js";
+import { boxPlan, type PlanRead } from "./core/ready/plan.js";
 import type { Identity } from "./core/identity.js";
 import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
@@ -47,6 +47,7 @@ import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
+import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
@@ -100,7 +101,7 @@ commands:
 ${USAGE_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${LOOP_HELP}${EVAL_HELP}
+${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
 options:
   --help      show this help
   --version   show the package version
@@ -494,11 +495,10 @@ function tokenStore(io: Io, home: string): Result<TokenStore> {
   return opened.kind === "store" ? { kind: "ok", value: opened.store } : { kind: "failed", reason: opened.reason };
 }
 
-// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
-async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
-  const { forge, identity } = opened;
+// hostBoxPlan : the project's box plan on this host: the vm box and the project's egress proxy, through its docker
+function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
   const docker = hostDocker(io.env, io.system.run);
-  const planned = await boxPlan({
+  return boxPlan({
     env: io.env,
     home,
     project,
@@ -506,6 +506,30 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     boxesFor: (image) => [vmBox({ docker, image: image.ref, owner: { uid: io.system.uid, gid: io.system.gid } })],
     openEgress: (o) => openEgress({ ...o, dir: join(home, "egress"), docker }),
   });
+}
+
+// egressCli : `egress check <project>` with the project's resolved settings (egress-cli.ts)
+function egressCli(argv: readonly string[], io: Io): Promise<number> {
+  return egressCommand(argv, {
+    out: io.out,
+    err: io.err,
+    resolved: (project, go) =>
+      resolvedRun("egress", project, io, (resolved) => {
+        const home = factoryHome(resolved.env);
+        return home.kind === "home"
+          ? go({
+              docker: hostDocker(resolved.env, resolved.system.run),
+              plan: () => hostBoxPlan(resolved, home.path, project),
+            })
+          : Promise.resolve(1);
+      }),
+  });
+}
+
+// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
+async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
+  const { forge, identity } = opened;
+  const planned = await hostBoxPlan(io, home, project);
   if (planned.kind === "failed") {
     return planned;
   }
@@ -1078,6 +1102,10 @@ export function runCli(argv: readonly string[], io: Io): Promise<number> {
   // eval reads its own options (--drafts, --allow-partial)
   if (argv[0] === "eval") {
     return evalCommand(argv.slice(1), io);
+  }
+  // egress reads its own options (--port, --model-host, --pull)
+  if (argv[0] === "egress") {
+    return egressCli(argv.slice(1), io);
   }
   return ownOptions(argv, io) ?? mainCli(argv, io);
 }
