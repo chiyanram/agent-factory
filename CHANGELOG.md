@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.24.0](https://github.com/chiyanram/agent-factory/compare/v0.23.0...v0.24.0) (2026-11-09)
+
+### ✨ Features
+
+* **ready** — judge files (S4), fewer test cases (S1), and a human waiver scoped to the head · [#231](https://github.com/chiyanram/agent-factory/issues/231) (PR [#252](https://github.com/chiyanram/agent-factory/pull/252))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.24.0`
+
 ## [0.23.0](https://github.com/chiyanram/agent-factory/compare/v0.22.0...v0.23.0) (2026-11-09)
 
 ### ✨ Features
