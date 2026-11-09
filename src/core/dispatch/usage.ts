@@ -9,33 +9,36 @@ import { join } from "node:path";
 import { plainName } from "../spec.js";
 import type { Result } from "../forge/api.js";
 import { readRecords, type DesignStep, type Event, type Phase, type WriterMode } from "./records.js";
-import { addSpend, NO_SPEND, type Spend } from "./spend.js";
+import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 
-// what a run was, in the glossary's role names (#337), as far as its record tells: an automated review's round records
-// its finder runs and its verify pass as one spend, so the round is one kind; a design review records each of its two
-// runs, the design-reviewer's and the verify pass's. A spent line from the ready check or the local verifier, which run
-// no model, is never written; it is named for what it is all the same.
+// what a run was, in the glossary's role names (#337), as far as its record tells: an automated review's round line
+// splits its spend into each finder's, by lens, and the verify pass's; an older round line that has no split is one
+// "automated review". A design review records each of its two runs, the design-reviewer's and the verify pass's. A
+// spent line from the ready check or the local verifier, which run no model, is never written; it is named for what it
+// is all the same.
 export type RunKind =
   | "design-reviewer"
-  | "verify pass"
   | "test-first"
   | "implementer"
   | "cleanup"
-  | "automated review"
+  | "finder"
+  | "verify pass"
   | "onboarder"
+  | "automated review"
   | "ready check"
   | "local verifier";
 
-// the order the kinds are shown in: a ticket's runs in the order they come
+// the order the kinds are shown in: the glossary's order of the roles, then the older round lines
 export const RUN_KINDS: readonly RunKind[] = [
   "design-reviewer",
-  "verify pass",
   "test-first",
   "implementer",
   "cleanup",
-  "automated review",
+  "finder",
+  "verify pass",
   "onboarder",
+  "automated review",
   "ready check",
   "local verifier",
 ];
@@ -46,6 +49,8 @@ export type Spent = {
   readonly ticket: string;
   readonly at: string;
   readonly kind: RunKind;
+  // a finder's lens (#337)
+  readonly lens?: string;
   readonly spend: Spend | "unmeasured";
 };
 
@@ -118,6 +123,32 @@ function kindOf(e: Spending): RunKind {
   return e.kind === "review-ended" ? "automated review" : KIND_OF_PHASE[e.phase];
 }
 
+// spentOf : a spending line's runs: a review round's split into each finder's, by lens, and the verify pass's when it
+// spent; any other line, or a round line with no split, is one run of its kind. Pure.
+function spentOf(e: Spending, project: string, ticket: string): readonly Spent[] {
+  const split = splitOf(e);
+  return split === undefined
+    ? [{ project, ticket, at: e.at, kind: kindOf(e), spend: e.spend ?? "unmeasured" }]
+    : splitRuns(split, { project, ticket, at: e.at });
+}
+
+// splitOf : a review round line's spend per run; none on another line, or an older one (#337). Pure.
+function splitOf(e: Spending): RoundSpend | undefined {
+  return e.kind === "review-ended" || e.kind === "spent" ? e.split : undefined;
+}
+
+// splitRuns : a round's runs: each finder's, by lens, and the verify pass's when it spent. Pure.
+function splitRuns(split: RoundSpend, where: Pick<Spent, "project" | "ticket" | "at">): readonly Spent[] {
+  const { project, ticket, at } = where;
+  const verify = split.verify.usd > 0 || split.verify.tokens > 0 ? [split.verify] : [];
+  return [
+    ...Object.entries(split.finders).map(
+      ([lens, spend]): Spent => ({ project, ticket, at, kind: "finder", lens, spend }),
+    ),
+    ...verify.map((spend): Spent => ({ project, ticket, at, kind: "verify pass", spend })),
+  ];
+}
+
 type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[] };
 
 // ticketSpends : every measured or unmeasured run of one ticket, and its acted-on rows, or why its records cannot be
@@ -130,9 +161,7 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
   return {
     kind: "ok",
     value: {
-      runs: events.value
-        .filter(spending)
-        .map((e) => ({ project, ticket, at: e.at, kind: kindOf(e), spend: e.spend ?? "unmeasured" })),
+      runs: events.value.filter(spending).flatMap((e) => spentOf(e, project, ticket)),
       acted: events.value.flatMap((e) =>
         e.kind === "review-ended" && e.acted !== undefined ? [{ project, at: e.at, rows: e.acted.rows }] : [],
       ),
@@ -192,9 +221,22 @@ function row(name: string, kind: string, runs: readonly Spent[], p: Periods): re
   return [name, kind, cell(totalOf(runs, p.day)), cell(totalOf(runs, p.window)), cell(totalOf(runs, p.month))];
 }
 
-// groupRows : one group's rows: its one kind on one row; or with more kinds, a row for them all, then one per kind (#337)
-function groupRows(name: string, runs: readonly Spent[], p: Periods): readonly (readonly string[])[] {
-  const kinds = RUN_KINDS.filter((k) => runs.some((r) => r.kind === k));
+// kindName : a run's kind as its row names it: a finder by its lens in a ticket's rows. Pure.
+function kindName(r: Spent, byLens: boolean): string {
+  return byLens && r.lens !== undefined ? `finder (${r.lens})` : r.kind;
+}
+
+// kindsIn : the kind names of a group's runs, in RUN_KINDS order, and a finder's lenses by name. Pure.
+function kindsIn(runs: readonly Spent[], byLens: boolean): readonly string[] {
+  return RUN_KINDS.flatMap((k) =>
+    [...new Set(runs.filter((r) => r.kind === k).map((r) => kindName(r, byLens)))].toSorted(),
+  );
+}
+
+// groupRows : one group's rows: its one kind on one row; or with more kinds, a row for them all, then one per kind; a
+// ticket's finders one per lens (#337)
+function groupRows(name: string, runs: readonly Spent[], p: Periods, byLens = false): readonly (readonly string[])[] {
+  const kinds = kindsIn(runs, byLens);
   const [only] = kinds;
   if (kinds.length === 1 && only !== undefined) {
     return [row(name, only, runs, p)];
@@ -205,7 +247,7 @@ function groupRows(name: string, runs: readonly Spent[], p: Periods): readonly (
       row(
         "",
         k,
-        runs.filter((r) => r.kind === k),
+        runs.filter((r) => kindName(r, byLens) === k),
         p,
       ),
     ),
@@ -242,6 +284,7 @@ export function usageLines(input: {
           `  ${ticket}`,
           ofProject.filter((r) => r.ticket === ticket),
           p,
+          true,
         ),
       );
     }
@@ -250,7 +293,7 @@ export function usageLines(input: {
     `usage at ${new Date(input.now).toISOString()}: days and months in UTC, the window is the last ${input.windowHours} h`,
     ...aligned(table),
     "+N? is N runs with no spend reported (stopped before their result): not in the sums",
-    "automated review is a round's finder runs and its verify pass, recorded as one spend; verify pass is a design review's",
+    "automated review is an older round's finder runs and verify pass, recorded before their spend was split (#337)",
   ];
 }
 

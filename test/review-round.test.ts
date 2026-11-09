@@ -10,6 +10,7 @@ import { renderPost, type Post } from "../src/core/post.js";
 import { claudeArgs, readAnswer, type Model, type ModelResult, type ModelRun } from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
 import { reviewStep, worstCase } from "../src/core/review/step.js";
+import type { RoundPart } from "../src/core/dispatch/spend.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
 
@@ -881,7 +882,13 @@ describe("reviewStep", () => {
     // the round's spend goes to the run record (#131): each pass of the fake model costs $0.10 and 10 tokens
     expect(step.kind === "available" ? await step.run(input(12)) : step).toEqual({
       kind: "ok",
-      value: { actOn: 1, lenses: { baseline: 1 }, spend: { usd: 0.2, tokens: 20 } },
+      value: {
+        actOn: 1,
+        lenses: { baseline: 1 },
+        spend: { usd: 0.2, tokens: 20 },
+        // and per run: the finder's by its lens, and the verify pass's (#337)
+        split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.1, tokens: 10 } },
+      },
     });
     const movedStep = reviewStep({
       env: env(),
@@ -924,6 +931,8 @@ describe("reviewStep", () => {
       kind: "failed",
       reason: expect.stringContaining("pass failed"),
       spend: { usd: expect.closeTo(0.8, 9), tokens: 40 },
+      // the failed verify pass's spend is its own (#337)
+      split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.7, tokens: 30 } },
     });
   });
 });
@@ -1054,6 +1063,24 @@ describe("one finder per lens (#237)", () => {
     await reviewRound(setup(forge(fresh()), counted, { maxFinders: 2 }));
     expect(ran.filter((r) => r.lens !== "verify")).toHaveLength(4);
     expect(most).toBe(2);
+  });
+
+  it("names each model run's part, each finder's lens and the verify pass, so its spend is split (#337)", async () => {
+    lenses();
+    apiRubric();
+    const parts: (RoundPart | undefined)[] = [];
+    const inner = byLens({ errors: [FINDING] }, []);
+    const tagged: Model = async (run) => {
+      parts.push(run.part);
+      return inner(run);
+    };
+    await reviewRound(setup(forge(fresh()), tagged));
+    const lensOfPart = (x: RoundPart | undefined): readonly string[] => (x?.kind === "finder" ? [x.lens] : []);
+    expect(parts.flatMap(lensOfPart).toSorted()).toEqual(["api", "errors", "smells"]);
+    // every other run is a verify pass, and there is one
+    const verify = parts.filter((x) => x?.kind === "verify pass");
+    expect(verify.length).toBeGreaterThan(0);
+    expect(parts).toHaveLength(3 + verify.length);
   });
 
   it("puts a round's worst case at every finder and both verify passes at the per-run cap", () => {

@@ -10,7 +10,7 @@
 import { execFile } from "node:child_process";
 import type { Exit } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
-import { spendOf } from "../dispatch/spend.js";
+import { spendOf, type RoundPart } from "../dispatch/spend.js";
 
 export type ModelRun = {
   // the folder the run reads: ./pack.md, ./code/, and for verify ./findings.json
@@ -24,6 +24,8 @@ export type ModelRun = {
   readonly maxUsd: string;
   // a role card's tools, each one of READ_ONLY; none given is all of READ_ONLY
   readonly tools?: readonly string[];
+  // which run of an automated review round this is, so its spend is metered per run (#337); none outside a round
+  readonly part?: RoundPart;
 };
 
 const READ_ONLY = ["Read", "Grep", "Glob"];
