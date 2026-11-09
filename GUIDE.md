@@ -550,8 +550,8 @@ exists yet, so you run the triggers below by hand.
   The host reads the stream's last line, the result event, for the run's cost and tokens (`total_cost_usd` and every
   `usage` token, cache reads and writes too), and keeps them as `spend` on the run's `writer-ended` record; a review
   round's `review-ended` record keeps what its passes spent the same way (#131). A run stopped before its result event
-  has no `spend`: `usage` counts it as unmeasured, never as free. On a subscription the CLI still reports the tokens,
-  and its dollar figure is what they would cost on the API.
+  has no `spend`: `usage` counts it as unmeasured, never as free. The dollar figure is the CLI's own; on a
+  subscription it need not be what you are charged, so count tokens there (an open check on #131).
   Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
   in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
   **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the

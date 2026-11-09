@@ -1,7 +1,7 @@
 // spend — what one model run spent, as the agent CLI reports it (#131; docs/DESIGN.md section 3 "Limits"). Every run
 // records its spend in its run record: the writer from the result event of its stream-json output, the reviewer from
-// each pass's JSON answer. On a subscription the CLI still reports the tokens, so the caps can count them; its dollar
-// figure is what the same tokens would cost on the API.
+// each pass's JSON answer. The tokens are what the CLI counted; the dollar figure is the CLI's own, which on a
+// subscription need not be what the subscription is charged (an open check on #131), so the caps there count tokens.
 //
 // A run that ends with no result event (a stall, a timeout, a box that failed) reports nothing: its record carries no
 // spend, and `usage` counts it as unmeasured, never as free.
