@@ -102,9 +102,15 @@ export type Steps = {
     | Unavailable
     | {
         readonly kind: "available";
-        readonly run: (
-          input: RunInput,
-        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend }> | FailedSpent>;
+        readonly run: (input: RunInput) => Promise<
+          | Result<{
+              readonly actOn: number;
+              readonly spend: Spend;
+              // per lens that ran, its verified findings no other lens reported; none for a round that ran no lens
+              readonly lenses?: Readonly<Record<string, number>>;
+            }>
+          | FailedSpent
+        >;
       };
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
@@ -670,7 +676,7 @@ function reviewEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly actOn: number; readonly spend: Spend },
+  value: { readonly actOn: number; readonly spend: Spend; readonly lenses?: Readonly<Record<string, number>> },
 ): Promise<Done> {
   return record({
     where: where(setup, state),
@@ -680,6 +686,7 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
+      ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });

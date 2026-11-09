@@ -130,6 +130,8 @@ export type Event =
       readonly nextTry?: NextTry;
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // per lens that ran, its verified findings no other lens reported (#237); none when the round ran no lens
+      readonly lenses?: Readonly<Record<string, number>>;
     }
   // what a run that failed spent (#131): a review round whose pass failed
   | {
@@ -368,14 +370,44 @@ function verifyEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "verify-ended", head, passed, ...next };
 }
 
+// entriesOf : an object's own entries; none for anything else. Pure.
+function entriesOf(value: unknown): readonly [string, unknown][] {
+  return typeof value === "object" && value !== null ? Object.entries(value) : [];
+}
+
+// lensesField : a review line's per-lens unique findings (#237), as a field to spread; none on an older line
+function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, number>> } | Bad {
+  const lenses = prop(raw, "lenses");
+  if (lenses === undefined) {
+    return {};
+  }
+  const entries = entriesOf(lenses);
+  return entries.length > 0 && entries.every(([, n]) => Number.isSafeInteger(n))
+    ? { lenses: Object.fromEntries(entries.map(([lens, n]) => [lens, Number(n)])) }
+    : BAD;
+}
+
+// reviewExtras : a review line's optional fields, its nextTry, its spend and its lenses, as fields to spread, or BAD
+function reviewExtras(raw: unknown):
+  | {
+      readonly nextTry?: NextTry;
+      readonly spend?: Spend;
+      readonly lenses?: Readonly<Record<string, number>>;
+    }
+  | Bad {
+  const next = nextTryField(raw);
+  const spend = spendField(raw);
+  const lenses = lensesField(raw);
+  return next === BAD || spend === BAD || lenses === BAD ? BAD : { ...next, ...spend, ...lenses };
+}
+
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
-  const next = nextTryField(raw);
-  const spend = spendField(raw);
-  return head === BAD || next === BAD || spend === BAD || !Number.isSafeInteger(actOn)
+  const extras = reviewExtras(raw);
+  return head === BAD || extras === BAD || !Number.isSafeInteger(actOn)
     ? BAD
-    : { at, kind: "review-ended", head, actOn: Number(actOn), ...next, ...spend };
+    : { at, kind: "review-ended", head, actOn: Number(actOn), ...extras };
 }
 
 const PARSE: Readonly<Record<Kind, Parse>> = {
