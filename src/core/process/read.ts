@@ -2,7 +2,7 @@
 // review baseline, read from the first plugin that holds a process, or the engine's built-in process when none does.
 // The engine runs alone: with no plugin, or with plugins that hold no process, every value is the built-in one.
 //
-//   <plugin>/skills/<skill>/process/lanes.json    {"lanes": [{"lane": "tiny", "approval": false, …}, …]}
+//   <plugin>/skills/<skill>/process/lanes.json    {"lanes": [{"lane": "tiny", "approval": false, "lenses": "1", …}, …]}
 //   <plugin>/skills/<skill>/process/review.json   {"baseline": [{"skill": "crq", "reference": "review-process"}, …]}
 //
 // The plugin's "lane" is the engine's lane name. Every lanes value comes through lanesOf (lane.ts), which refuses one
@@ -67,11 +67,11 @@ async function jsonAt(path: string): Promise<Result<unknown> | { readonly kind: 
   }
 }
 
-// the plugin's lane shape, {"lane", "approval", …}, as lanesOf reads it, {"name", "approval"}
+// the plugin's lane shape, {"lane", "approval", "lenses", …}, as lanesOf reads it, {"name", "approval", "lenses"}
 function engineLanes(raw: unknown): unknown {
   const lanes = prop(raw, "lanes");
   return Array.isArray(lanes)
-    ? lanes.map((l: unknown) => ({ name: prop(l, "lane"), approval: prop(l, "approval") }))
+    ? lanes.map((l: unknown) => ({ name: prop(l, "lane"), approval: prop(l, "approval"), lenses: prop(l, "lenses") }))
     : undefined;
 }
 

@@ -52,10 +52,10 @@ describe("the approval floor (#230)", () => {
   });
 
   it("reads a lane's approval from the project's lanes: a process may make tiny need one; a lane left out needs one", () => {
-    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true }));
+    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true, lenses: l.lenses }));
     expect(needsApproval("tiny", strict)).toBe(true);
     expect(needsApproval("tiny", DEFAULT_LANES)).toBe(false);
-    expect(needsApproval("bug", [{ name: "tiny", approval: false }])).toBe(true);
+    expect(needsApproval("bug", [{ name: "tiny", approval: false, lenses: 1 }])).toBe(true);
   });
 
   it("refuses a plugin or settings value that drops the approval above the lightest lane", () => {
@@ -75,6 +75,29 @@ describe("the approval floor (#230)", () => {
   it("refuses a value that is not a list of lanes, rather than read it as none", () => {
     for (const value of [undefined, [], {}, [{ name: "tiny" }], [{ name: "chore", approval: true }]]) {
       expect(lanesOf(value, "team settings")).toMatchObject({ kind: "failed" });
+    }
+  });
+});
+
+describe("the lens count of a lane (#237)", () => {
+  it("reads it as a lanes file writes it, and keeps the default lane's count when it is left out", () => {
+    const lanes = (lenses: readonly unknown[]) =>
+      lanesOf(
+        DEFAULT_LANES.map((l, i) =>
+          lenses[i] === undefined ? { name: l.name, approval: l.approval } : { ...l, lenses: lenses[i] },
+        ),
+        "plugin",
+      );
+    expect(lanes(["1", "~3", 2, "all, on the strongest model"])).toEqual({
+      kind: "ok",
+      value: DEFAULT_LANES.map((l, i) => ({ ...l, lenses: [1, 3, 2, "all"][i] })),
+    });
+    expect(lanes([])).toEqual({ kind: "ok", value: DEFAULT_LANES });
+  });
+
+  it("refuses a count that is not one, rather than run no lens", () => {
+    for (const bad of ["none", "0", 0, -1, 1.5, true]) {
+      expect(lanesOf([{ name: "tiny", approval: false, lenses: bad }], "plugin")).toMatchObject({ kind: "failed" });
     }
   });
 });

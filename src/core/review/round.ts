@@ -7,8 +7,12 @@
 //     patch-id as the last round reuses its verdict, with no model run; when that verdict still has Act on findings the
 //     writer made no progress, and the change goes to the human (ADR-0011 D14). An empty change goes there too.
 //   3 After 3 rounds the change goes to the human (#22 Q5).
-//   4 FIND, then VERIFY once per kind (rule findings on one model, logic on another), each a fresh read-only run in a
-//     folder that holds only the pack and the code with every rule file removed (code.ts, model.ts).
+//   4 FIND, one fresh finder run per lens the blast radius picks, in parallel (lenses.ts, finders.ts): the lane's lens
+//     count from the process, every lens on the strongest model (the logic model) for a one-way door, and the
+//     test-integrity lens when an existing test changed. Their findings merge by file:line and rule, then VERIFY once
+//     per kind (rule findings on one model, logic on another). Each is a fresh read-only run in a folder that holds
+//     only its pack and the code with every rule file removed (code.ts, model.ts). Each lens's unique verified
+//     findings are kept with the head and posted in the summary, so a lens that adds none can be retired (#237).
 //   5 Before anything is posted, the head must still be the reviewed one; else MOVED, and nothing is posted.
 //   6 One thread per Act on and Consider finding at its file:line; then the status box (status.ts) labels needs-human for
 //     a protected file not listed before; then one summary note, last, since it marks the round done: a round that
@@ -16,7 +20,7 @@
 
 import type { LaneProps } from "../lane.js";
 import { withFloor } from "./never.js";
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
 import { goAhead } from "../start.js";
@@ -26,9 +30,20 @@ import type { Change, Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
+import { actedSince, keepTracked, type Acted } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
+import { BASELINE, lensPack, lensSetupOf, roundLenses, rubricText, touchedOf, type LensSetup } from "./finders.js";
+import {
+  mergeFindings,
+  pickLenses,
+  uniqueByLens,
+  type Lens,
+  type LensCount,
+  type Merged,
+  type Touched,
+} from "./lenses.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
@@ -54,6 +69,8 @@ import {
 
 export const NEEDS_HUMAN = "needs-human";
 export const MAX_ROUNDS = 3;
+// the most verify passes a round runs: one per kind, rule and logic
+export const VERIFY_PASSES = 2;
 
 export type ReviewSetup = {
   readonly forge: Forge;
@@ -80,6 +97,8 @@ export type ReviewSetup = {
   // the live runs on this machine, and how many may run at once (live.ts)
   readonly sessions: Sessions;
   readonly maxRuns: number;
+  // the most finder runs at once (review.maxFinders): the round counts as one run, with up to this many model runs
+  readonly maxFinders: number;
 };
 
 export type Outcome =
@@ -91,6 +110,10 @@ export type Outcome =
       readonly costUsd: number;
       // every token the round's passes spent (#131)
       readonly tokens: number;
+      // the last full round's Act on and Consider findings, each acted on or not since its head (#220)
+      readonly acted: Acted | "none";
+      // per lens that ran, its verified findings no other lens reported (#237)
+      readonly lenses: Readonly<Record<string, number>>;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -298,7 +321,13 @@ async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
   await attempt(async () => {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await appendFile(
-      join(dir, `reviewer-${pass.replace(/[^a-z]+/g, "-").replace(/-$/, "")}.jsonl`),
+      join(
+        dir,
+        `reviewer-${pass
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/-$/, "")}.jsonl`,
+      ),
       `${JSON.stringify(answer)}\n`,
       { mode: 0o600 },
     );
@@ -330,12 +359,16 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
 
 type Spent = { readonly costUsd: number; readonly find: number; readonly verify: number };
 
+// a finding after the merge: the lens that kept it, and every lens that reported it
+type Found = Merged<Finding>;
+type FoundSorted = Found & { readonly bucket: Sorted["bucket"]; readonly why: string };
+
 type Checked = { readonly verdicts: readonly Verdict[]; readonly answer: ModelAnswer | "none" };
 
 async function verifySubset(
   ctx: Ctx,
   folder: string,
-  subset: readonly Finding[],
+  subset: readonly Found[],
   kind: "rule" | "logic",
 ): Promise<Result<Checked>> {
   const wrote = await attempt(
@@ -360,7 +393,7 @@ async function verifySubset(
 
 // checked : the verdicts on this subset only; a verdict on a finding of the other kind is dropped, so one pass cannot
 // overrule the other
-function checked(subset: readonly Finding[], answer: ModelAnswer): Result<Checked> {
+function checked(subset: readonly Found[], answer: ModelAnswer): Result<Checked> {
   const read = readVerdicts(answer.output);
   if (read.kind === "failed") {
     return read;
@@ -373,7 +406,7 @@ function checked(subset: readonly Finding[], answer: ModelAnswer): Result<Checke
 async function verifyKind(
   ctx: Ctx,
   folder: string,
-  findings: readonly Finding[],
+  findings: readonly Found[],
   kind: "rule" | "logic",
 ): Promise<Result<Checked>> {
   const subset = findings.filter((f) => f.kind === kind);
@@ -382,21 +415,31 @@ async function verifyKind(
     : verifySubset(ctx, folder, subset, kind);
 }
 
-function spentOf(found: ModelAnswer, verified: readonly (ModelAnswer | "none")[]): Spent {
+function spentOf(found: readonly ModelAnswer[], verified: readonly (ModelAnswer | "none")[]): Spent {
   const answers = verified.filter((a): a is ModelAnswer => a !== "none");
+  const sum = (list: readonly ModelAnswer[], of: (a: ModelAnswer) => number) => list.reduce((s, a) => s + of(a), 0);
   return {
-    costUsd: found.costUsd + answers.reduce((s, a) => s + a.costUsd, 0),
-    find: found.tokens,
-    verify: answers.reduce((s, a) => s + a.tokens, 0),
+    costUsd: sum(found, (a) => a.costUsd) + sum(answers, (a) => a.costUsd),
+    find: sum(found, (a) => a.tokens),
+    verify: sum(answers, (a) => a.tokens),
   };
 }
+
+// the lenses a round runs, and whether on the strongest model
+type Plan = { readonly lenses: readonly Lens[]; readonly strongest: boolean };
+
+type Reviewed = {
+  readonly sorted: readonly FoundSorted[];
+  readonly spent: Spent;
+  readonly lenses: Readonly<Record<string, number>>;
+};
 
 async function verifyAll(
   ctx: Ctx,
   folder: string,
-  found: ModelAnswer,
-  findings: readonly Finding[],
-): Promise<Result<{ readonly sorted: readonly Sorted[]; readonly spent: Spent }>> {
+  found: readonly ModelAnswer[],
+  findings: readonly Found[],
+): Promise<Result<{ readonly sorted: readonly FoundSorted[]; readonly spent: Spent }>> {
   const rule = await verifyKind(ctx, folder, findings, "rule");
   const logic = rule.kind === "ok" ? await verifyKind(ctx, folder, findings, "logic") : rule;
   if (rule.kind === "failed" || logic.kind === "failed") {
@@ -411,60 +454,226 @@ async function verifyAll(
   };
 }
 
-type Reviewed = { readonly sorted: readonly Sorted[]; readonly spent: Spent };
+// a folder (0700) for one run, in the private runs folder
+async function runFolder(ctx: Ctx): Promise<Result<string>> {
+  const dir = ctx.setup.runsDir;
+  return attempt(async () => {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    return mkdtemp(join(dir, "review-"));
+  }, `cannot make a run folder in ${dir}`);
+}
 
-async function findAndVerify(ctx: Ctx, run: string, pack: Pack): Promise<Result<Reviewed>> {
+// placed : the code at the head, with no rule file, and this run's pack, in the folder
+async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promise<Result<void>> {
   const copied = await copyCode({
     repo: ctx.setup.repo,
     sha: pack.head,
-    into: join(run, "code"),
+    into: join(folder, "code"),
     env: ctx.setup.env,
     prune: "rules",
   });
-  if (copied.kind === "failed") {
-    return copied;
-  }
-  const placed = await attempt(() => copyFile(pack.path, join(run, "pack.md")), `cannot copy the pack ${pack.path}`);
-  if (placed.kind === "failed") {
-    return placed;
-  }
-  const found = await runPass(ctx, run, {
-    name: "find",
-    model: ctx.setup.models.find,
+  return copied.kind === "failed"
+    ? copied
+    : attempt(() => writeFile(join(folder, "pack.md"), text), `cannot write the pack into ${folder}`);
+}
+
+type Finder = { readonly lens: string; readonly findings: readonly Finding[]; readonly answer: ModelAnswer };
+
+// findIn : one finder run for one lens, in a folder that holds its pack
+async function findIn(ctx: Ctx, folder: string, lens: Lens, model: string): Promise<Result<Finder>> {
+  const found = await runPass(ctx, folder, {
+    name: lens.name === BASELINE.name ? "find" : `find (${lens.name})`,
+    model,
     schema: FIND_SCHEMA,
     prompt: ctx.setup.prompts.find,
   });
   if (found.kind === "failed") {
     return found;
   }
-  const findings = readFindings(found.value.output);
-  return findings.kind === "ok" ? verifyAll(ctx, run, found.value, findings.value) : findings;
+  const findings = readFindings(found.value.output, lens.name);
+  return findings.kind === "ok"
+    ? { kind: "ok", value: { lens: lens.name, findings: findings.value, answer: found.value } }
+    : findings;
 }
 
-// passes : find, then verify per kind, in a fresh folder with the pack and the code at the head; the folder goes after
+type Shared = { readonly pack: Pack; readonly text: string; readonly model: string };
+
+// findLens : one lens's finder, in its own fresh folder with the pack and its rubric as section 8; the folder goes after
+async function findLens(ctx: Ctx, lens: Lens, rubric: string, shared: Shared): Promise<Result<Finder>> {
+  const folder = await runFolder(ctx);
+  if (folder.kind === "failed") {
+    return folder;
+  }
+  try {
+    const ready = await placed(ctx, folder.value, shared.pack, lensPack(shared.text, lens, rubric));
+    return ready.kind === "ok" ? await findIn(ctx, folder.value, lens, shared.model) : ready;
+  } finally {
+    await rm(folder.value, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+// rubrics : every picked lens's rubric, read before any finder runs, so a missing one spends nothing
+async function rubrics(ctx: Ctx, plan: Plan, pack: Pack, references: string): Promise<Result<readonly string[]>> {
+  const read = await Promise.all(
+    plan.lenses.map((lens) => rubricText(lens, { ...ctx.setup, references, master: pack.master })),
+  );
+  const bad = read.find((r) => r.kind === "failed");
+  return bad?.kind === "failed" ? bad : { kind: "ok", value: read.map((r) => (r.kind === "ok" ? r.value : "")) };
+}
+
+// findAll : every picked lens's finder, in parallel, at most review.maxFinders at once; one that fails fails the round,
+// after all have ended, so each run's spend is metered
+async function findAll(
+  ctx: Ctx,
+  plan: Plan,
+  read: readonly string[],
+  shared: Shared,
+): Promise<Result<readonly Finder[]>> {
+  const most = Math.max(1, ctx.setup.maxFinders);
+  const ran: Result<Finder>[] = [];
+  for (let at = 0; at < plan.lenses.length; at += most) {
+    const batch = plan.lenses.slice(at, at + most);
+    ran.push(...(await Promise.all(batch.map((lens, i) => findLens(ctx, lens, read[at + i] ?? "", shared)))));
+  }
+  const bad = ran.find((r) => r.kind === "failed");
+  return bad?.kind === "failed" ? bad : { kind: "ok", value: ran.flatMap((r) => (r.kind === "ok" ? [r.value] : [])) };
+}
+
+// Inputs : what every finder shares: the pack's text and each picked lens's rubric
+type Inputs = { readonly text: string; readonly rubrics: readonly string[] };
+
+// inputs : the pack's text and the rubrics, read before any run, so a missing one spends nothing
+async function inputs(ctx: Ctx, pack: Pack, plan: Plan): Promise<Result<Inputs>> {
+  const own = await reviewProcess(ctx.setup.plugins);
+  if (own.kind === "failed") {
+    return own;
+  }
+  const text = await readFile(pack.path, "utf8").catch(() => undefined);
+  const read =
+    text === undefined
+      ? failed(`cannot read the pack ${pack.path}`)
+      : await rubrics(ctx, plan, pack, own.value.references);
+  return read.kind === "ok" ? { kind: "ok", value: { text: text ?? "", rubrics: read.value } } : read;
+}
+
+// throughVerify : the merged findings, through the verify pass, with each lens's unique verified findings
+async function throughVerify(ctx: Ctx, run: string, plan: Plan, finders: readonly Finder[]): Promise<Result<Reviewed>> {
+  const sorted = await verifyAll(
+    ctx,
+    run,
+    finders.map((f) => f.answer),
+    mergeFindings(finders),
+  );
+  if (sorted.kind === "failed") {
+    return sorted;
+  }
+  const lenses = uniqueByLens(
+    plan.lenses.map((l) => l.name),
+    sorted.value.sorted,
+  );
+  return { kind: "ok", value: { ...sorted.value, lenses } };
+}
+
+async function findAndVerify(ctx: Ctx, run: string, pack: Pack, plan: Plan): Promise<Result<Reviewed>> {
+  const given = await inputs(ctx, pack, plan);
+  if (given.kind === "failed") {
+    return given;
+  }
+  const ready = await placed(ctx, run, pack, given.value.text);
+  if (ready.kind === "failed") {
+    return ready;
+  }
+  // a one-way door runs every lens on the strongest model the review pins: the logic model (#22 Q4)
+  const model = plan.strongest ? ctx.setup.models.logic : ctx.setup.models.find;
+  const finders = await findAll(ctx, plan, given.value.rubrics, { pack, text: given.value.text, model });
+  return finders.kind === "ok" ? throughVerify(ctx, run, plan, finders.value) : finders;
+}
+
+// lensInputs : the project's lens settings and its process, which holds each lane's lens count
+async function lensInputs(ctx: Ctx): Promise<Result<{ readonly setup: LensSetup; readonly own: Process }>> {
+  const setup = await lensSetupOf(ctx.setup);
+  if (setup.kind === "failed") {
+    return setup;
+  }
+  const own = await readProcess(ctx.setup.plugins);
+  return own.kind === "ok" ? { kind: "ok", value: { setup: setup.value, own: own.value } } : own;
+}
+
+// touchedFiles : the files the change touches, and whether each was there before
+async function touchedFiles(ctx: Ctx, pack: Pack): Promise<Result<readonly Touched[]>> {
+  const status = await hostGit({
+    args: ["diff", "--name-status", "--no-renames", "-z", pack.base, pack.head],
+    repo: { kind: "repo", path: ctx.setup.repo },
+    env: ctx.setup.env,
+    stdin: { kind: "none" },
+  });
+  return status.kind === "ok"
+    ? { kind: "ok", value: touchedOf(status.stdout) }
+    : failed("cannot list the files the change touches, to pick its lenses");
+}
+
+// countOf : the lane's lens count in the project's process; every lens for a lane it leaves out. Pure.
+function countOf(own: Process, lane: Pack["lane"]): LensCount {
+  return own.lanes.find((l) => l.name === lane)?.lenses ?? "all";
+}
+
+// planFor : the lenses the blast radius picks: the spec's lane and its lens count from the process, the touched files,
+// the one-way-door paths and the test files; the baseline lens when none applies, so a round never runs no finder
+async function planFor(ctx: Ctx, pack: Pack): Promise<Result<Plan>> {
+  const given = await lensInputs(ctx);
+  if (given.kind === "failed") {
+    return given;
+  }
+  const files = await touchedFiles(ctx, pack);
+  if (files.kind === "failed") {
+    return files;
+  }
+  const { setup, own } = given.value;
+  const pick = pickLenses({
+    lenses: roundLenses(setup.lenses),
+    lane: pack.lane,
+    count: countOf(own, pack.lane),
+    touched: files.value,
+    oneWayDoor: setup.oneWayDoor,
+    testFiles: setup.testFiles,
+  });
+  return { kind: "ok", value: pick.lenses.length === 0 ? { ...pick, lenses: [BASELINE] } : pick };
+}
+
+// passes : the finders, then verify per kind, in fresh folders with the pack and the code at the head; the folders go
+// after
 async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
-  const dir = ctx.setup.runsDir;
-  const run = await attempt(async () => {
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    return mkdtemp(join(dir, "review-"));
-  }, `cannot make a run folder in ${dir}`);
+  const plan = await planFor(ctx, pack);
+  if (plan.kind === "failed") {
+    return plan;
+  }
+  const run = await runFolder(ctx);
   if (run.kind === "failed") {
     return run;
   }
   try {
-    return await findAndVerify(ctx, run.value, pack);
+    const reviewed = await findAndVerify(ctx, run.value, pack, plan.value);
+    if (reviewed.kind === "ok") {
+      await keep(ctx, "lenses", { lane: pack.lane, strongest: plan.value.strongest, unique: reviewed.value.lenses });
+    }
+    return reviewed;
   } finally {
     await rm(run.value, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219)
+// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219); every thread shows the finder's
+// grade and evidence (#237)
 function threadPost(f: Sorted, criteria: readonly string[]): Post {
   const quote = quoteOf(f, criteria);
   return {
     seat: "reviewer",
     title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.category}, ${f.rule}): ${f.finding}`,
-    fields: [...(quote === "" ? [] : [{ label: "Criterion", value: quote }]), { label: "Fix", value: f.fix }],
+    fields: [
+      ...(quote === "" ? [] : [{ label: "Criterion", value: quote }]),
+      { label: "Fix", value: f.fix },
+      { label: "Evidence", value: `${f.grade} · ${f.evidence}` },
+    ],
     items: [],
   };
 }
@@ -562,11 +771,25 @@ async function threadsAndLabel(
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
-async function post(
-  ctx: Ctx,
-  pack: Pack,
-  result: { readonly sorted: readonly Sorted[]; readonly spent: Spent },
-): Promise<Result<Outcome>> {
+// actedOf : keeps this round's findings for the next round's rate, and rates the last full round's against this head;
+// neither can fail the round (#220)
+async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promise<Acted | "none"> {
+  const at = { recordsDir: ctx.setup.recordsDir, change: ctx.setup.number, head };
+  await keepTracked(at, sorted);
+  const last = ctx.past.last;
+  return last.kind === "round"
+    ? actedSince({ ...at, repo: ctx.setup.repo, env: ctx.setup.env, since: last.head })
+    : "none";
+}
+
+// lensesLine : each lens that ran and its verified findings no other lens reported. Pure.
+function lensesLine(lenses: Readonly<Record<string, number>>): string {
+  return Object.entries(lenses)
+    .map(([lens, n]) => `${lens} ${n}`)
+    .join(" · ");
+}
+
+async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outcome>> {
   const box = await boxFor(ctx, pack);
   if (box.kind === "failed") {
     return box;
@@ -581,6 +804,7 @@ async function post(
   if (kept.kind === "failed") {
     return kept;
   }
+  const acted = await actedOf(ctx, pack.head, result.sorted);
   const labelled = await threadsAndLabel(ctx, box.value, result.sorted, pack.criteria);
   if (labelled.kind === "failed") {
     return labelled;
@@ -592,7 +816,10 @@ async function post(
     ctx,
     `round ${round} · head ${pack.head} · patch-id ${pack.patchId} · ${countsLine(c)}`,
     summaryItems(result.sorted, box.value, pack.criteria),
-    [{ label: "Spent at this head", value: spent }],
+    [
+      { label: "Spent at this head", value: spent },
+      { label: "Unique findings per lens", value: lensesLine(result.lenses) },
+    ],
   );
   return summary.kind === "ok"
     ? {
@@ -604,6 +831,8 @@ async function post(
           counts: c,
           costUsd: result.spent.costUsd,
           tokens: result.spent.find + result.spent.verify,
+          acted,
+          lenses: result.lenses,
         },
       }
     : summary;

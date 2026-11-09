@@ -21,7 +21,7 @@ import type { Result } from "../forge/api.js";
 import type { Change } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import { plainBranch } from "../branch.js";
-import { checkSpec, readSpec, type Spec, type SpecRead, type SpecStore } from "../spec.js";
+import { checkSpec, readSpec, type Lane, type Spec, type SpecRead, type SpecStore } from "../spec.js";
 import { fence } from "./fence.js";
 import { agentsChain, BASELINE, readRules, type Pointer } from "./rules.js";
 
@@ -67,6 +67,10 @@ export type Pack = {
   // the approved spec's acceptance criteria, as section 5 numbers them (1 is the first); none when no spec is approved.
   // A Spec finding names one as its rule, AC<n>, and the round quotes that line from here, never from the model (#219).
   readonly criteria: readonly string[];
+  // the lane the spec names, approved or not: it picks the round's lenses (#237)
+  readonly lane: Lane;
+  // the default branch's commit the rules came from: a lens's rubric file is read there too (#237)
+  readonly master: string;
 };
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -284,7 +288,7 @@ async function unresolved(rulebook: string, pointers: readonly Pointer[]): Promi
 // The spec as section 5 sees it: the approved one, or one whose hash no approval records
 type Contract =
   | { readonly kind: "approved"; readonly spec: Spec; readonly by: string; readonly at: string }
-  | { readonly kind: "unapproved"; readonly hash: string; readonly approval: Approval };
+  | { readonly kind: "unapproved"; readonly hash: string; readonly lane: Lane; readonly approval: Approval };
 
 function unread(read: Exclude<SpecRead, { readonly kind: "found" }>, name: string): string {
   return read.kind === "missing"
@@ -317,7 +321,7 @@ async function contract(source: SpecSource): Promise<Result<Contract>> {
     value:
       a.kind === "approved" && a.hash === spec.value.hash
         ? { kind: "approved", spec: spec.value, by: a.by, at: a.at }
-        : { kind: "unapproved", hash: spec.value.hash, approval: a },
+        : { kind: "unapproved", hash: spec.value.hash, lane: spec.value.lane, approval: a },
   };
 }
 
@@ -656,6 +660,11 @@ function criteriaOf(c: Contract): readonly string[] {
   return c.kind === "approved" ? c.spec.criteria : [];
 }
 
+// laneOf : the lane the spec names, approved or not (#237). Pure.
+function laneOf(c: Contract): Lane {
+  return c.kind === "approved" ? c.spec.lane : c.lane;
+}
+
 // buildPack : the pack for the change's head, from the cache when it is there.
 export async function buildPack(input: PackInput): Promise<Result<Pack>> {
   const git = gitFor(input);
@@ -672,6 +681,8 @@ export async function buildPack(input: PackInput): Promise<Result<Pack>> {
     patchId: p.value.patchId,
     base: p.value.h.base,
     criteria: criteriaOf(c),
+    lane: laneOf(c),
+    master: p.value.h.master,
   };
   if (await exists(path)) {
     return { kind: "ok", value: { ...pack, reused: true } };

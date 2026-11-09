@@ -7,24 +7,32 @@
 //                  (tiny 1, bug and feature about 3) takes the first ones in the settings' order. The test-integrity
 //                  lens runs whenever an existing test file changed, on top of the count, and never otherwise. The diff
 //                  size reaches the pick through the lane, which the ready check sets from the real diff.
-//   mergeFindings  one finder run per lens; the same file:line with the same rule is one finding, kept at its first
-//                  report and naming every lens that reported it, then renumbered F1…Fn for the one verify pass.
+//   mergeFindings  one finder run per lens; the same file:line with the same rule is one finding: the report with the
+//                  stronger grade (ran, then walked, then cited) is kept, or the lower ID, the earlier report, when the
+//                  grades tie, as the rulebook's verify-pass card says. It names every lens that reported it, and the
+//                  list is renumbered F1…Fn for the one verify pass.
 //   uniqueByLens   per lens, the verified findings no other lens reported, so a lens that adds none after 20 PRs can be
 //                  retired (DESIGN.md section 6). Dismissed findings do not count.
 //
-// Not yet here (#237, after #232): the lenses settings key, a finder run per lens from the finder role card, the
-// lens and grade fields on a finding, and the per-lens count in the run record.
+// The round (round.ts) runs one finder per picked lens with what finders.ts gives it, and keeps uniqueByLens with the
+// head; the instructions are still the engine's prompts, not the finder role card, until the eval baseline (#216).
 
 import { isTestFile } from "../ready/floor.js";
-import { matches } from "../lane.js";
+import { matches, type LensCount } from "../lane.js";
+import { GRADES, type Grade } from "./verdicts.js";
+
+// the lens a round runs when the project names none: one finder on the baseline review checks, as before lenses
+export const BASELINE_LENS = "baseline";
 
 // the lens that reviews every edit to an existing test (DESIGN.md section 5; its rubric: chiyanram/skills#235)
 export const TEST_INTEGRITY = "test-integrity";
 
-// where a lens's rubric comes from: a skill in an enabled plugin, or a file in the repo on the default branch
+// where a lens's rubric comes from: a skill in an enabled plugin (its SKILL.md, or one of its references), a file in
+// the repo on the default branch, or the baseline review checks alone, which every finder sees already
 export type Rubric =
-  | { readonly kind: "skill"; readonly plugin: string; readonly skill: string }
-  | { readonly kind: "file"; readonly path: string };
+  | { readonly kind: "skill"; readonly plugin: string; readonly skill: string; readonly reference?: string }
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "baseline" };
 
 export type Lens = {
   readonly name: string;
@@ -38,8 +46,7 @@ export type Lens = {
 // a file the change touches, and whether it was there before the change
 export type Touched = { readonly path: string; readonly existed: boolean };
 
-// how many lenses a lane runs: its lens count, or every lens
-export type LensCount = number | "all";
+export type { LensCount };
 
 export type Pick = {
   readonly lenses: readonly Lens[];
@@ -75,20 +82,32 @@ export function pickLenses(input: {
   return { lenses: [...counted, ...integrity], strongest };
 }
 
-// a finding as a finder reports it, with the lens that ran it
-type Reported = { readonly id: string; readonly file: string; readonly line: number; readonly rule: string };
+// a finding as a finder reports it
+type Reported = {
+  readonly id: string;
+  readonly file: string;
+  readonly line: number;
+  readonly rule: string;
+  readonly grade: Grade;
+};
 
 export type Merged<F extends Reported> = F & { readonly lenses: readonly string[] };
 
-type Kept<F> = { readonly finding: F; readonly lenses: string[] };
+type Kept<F> = { finding: F; readonly lenses: string[] };
 
-// keepOne : one report into the findings kept so far, by file, line and rule
+// keepOne : one report into the findings kept so far, by file, line and rule; a later report replaces the kept one only
+// when its grade is stronger, so a tie keeps the earlier, lower ID
 function keepOne<F extends Reported>(kept: Map<string, Kept<F>>, lens: string, f: F): void {
   const key = JSON.stringify([f.file, f.line, f.rule]);
   const seen = kept.get(key);
   if (seen === undefined) {
     kept.set(key, { finding: f, lenses: [lens] });
-  } else if (!seen.lenses.includes(lens)) {
+    return;
+  }
+  if (GRADES.indexOf(f.grade) > GRADES.indexOf(seen.finding.grade)) {
+    seen.finding = f;
+  }
+  if (!seen.lenses.includes(lens)) {
     seen.lenses.push(lens);
   }
 }

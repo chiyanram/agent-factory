@@ -159,7 +159,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 | PR body | `.factory/pr.md`, written by the implementer and posted by the host (who owns it is open, see section 9) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
-| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), evidence and grade (each `cited`, `walked` or `ran`; the role cards name it grade), fix |
+| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), grade (how strong the proof is: `cited`, `walked` or `ran`), evidence (the proof itself), finding (the plain description), fix; the finder gives all but the lens, which the engine adds (decided on #30, 2026-11-09) |
 | verdict | id, bucket (`act_on`, `consider`, `noted`, `dismissed`), why |
 
 **Tests are judged twice:**
@@ -241,7 +241,7 @@ so work and personal logins never mix.
 | a ticket starts from an approval file, and the lane comes from the approval (`dispatch/table.ts:44`) | START opens it, approval releases the build, and the lane is checked from the diff |
 | one approval kind, local, nothing on the git host (ADR-0012 S1) | approval by lane, many front doors, a bot-written copy on the git host |
 | the floor guard (`ready/floor.ts`) checks skips, deleted test files, fewer asserts, bare suppressions and empty catches, with no waiver | plus judge files (S4), test-case removal within a file, and a waiver scoped to the head (#231) |
-| findings have no lens or evidence grade (`review/verdicts.ts`) | `lens` and `evidence: cited / walked / ran` |
+| findings have no lens or evidence grade (`review/verdicts.ts`) | `lens`, `grade` (`cited` / `walked` / `ran`) and `evidence` |
 | design findings skip the verify pass | they go through the verify pass |
 | one find pass for all rules (ADR-0004) | one finder run per lens, one shared verify pass |
 | `report.json` has no `deferred` list | an optional `deferred` list (cleanup) |

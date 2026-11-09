@@ -1,7 +1,8 @@
 // step — the reviewer as the dispatcher's review step (#103, #138). The table needs only the Act on count; every other
 // outcome maps onto it, with what the round spent (#131): every model answer of the round, a failed pass's too, is
 // metered, so a round that fails still hands the orchestrator its spend. The outcomes:
-//   posted, reused, already   their Act on count
+//   posted, reused, already   their Act on count; a posted round also rates the last full round's findings (#220),
+//                             and names each lens's unique verified findings (#237)
 //   no-progress               needs-human is on the change, which the table reads first next pass
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 
@@ -11,16 +12,29 @@ import type { Forge } from "../forge/types.js";
 import type { Steps } from "../dispatch/tick.js";
 import type { Sessions } from "./live.js";
 import type { Model, ModelResult } from "./model.js";
-import { reviewRound, type Outcome } from "./round.js";
+import type { Acted } from "./acted-on.js";
+import { lensSetupOf, roundLenses } from "./finders.js";
+import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
 import { paths, reviewSetup } from "./settings.js";
 import { addSpend, NO_SPEND, spendOf, type Spend } from "../dispatch/spend.js";
 
 type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
-type ActOn = Result<{ readonly actOn: number }>;
+// a posted round also rates the last full round's findings (#220), and names each lens's unique verified findings (#237)
+type ActOn = Result<{
+  readonly actOn: number;
+  readonly acted?: Acted;
+  readonly lenses?: Readonly<Record<string, number>>;
+}>;
 type Mappers = { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => ActOn };
 
 const MAP: Mappers = {
-  posted: (o) => ({ kind: "ok", value: { actOn: o.counts.act_on } }),
+  posted: (o) => ({
+    kind: "ok",
+    value:
+      o.acted === "none"
+        ? { actOn: o.counts.act_on, lenses: o.lenses }
+        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses },
+  }),
   reused: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   already: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   "no-progress": () => ({ kind: "ok", value: { actOn: 1 } }),
@@ -51,6 +65,24 @@ function metered(model: Model, meter: Meter): Model {
   };
 }
 
+// worstCase : the most a round spends with this many finders, each run at the per-run cap ("" for none): the finders
+// and the verify passes; "unbounded" with no per-run cap. Pure.
+export function worstCase(finders: number, maxUsd: string): number | "unbounded" {
+  return maxUsd === "" ? "unbounded" : (finders + VERIFY_PASSES) * Number(maxUsd);
+}
+
+// worstUsd : the worst case of a round of this project: every lens its settings let a round pick (#237)
+async function worstUsd(input: {
+  readonly home: string;
+  readonly project: string;
+  readonly maxUsd: string;
+}): Promise<Result<number | "unbounded">> {
+  const setup = await lensSetupOf(input);
+  return setup.kind === "ok"
+    ? { kind: "ok", value: worstCase(roundLenses(setup.value.lenses).length, input.maxUsd) }
+    : setup;
+}
+
 // reviewStep : available when the reviewer's settings are there
 export function reviewStep(input: {
   readonly env: NodeJS.ProcessEnv;
@@ -65,8 +97,10 @@ export function reviewStep(input: {
   if (p.kind === "failed") {
     return { kind: "unavailable", reason: `the reviewer is not set up: ${p.reason}` };
   }
+  const { home, maxUsd } = p.value;
   return {
     kind: "available",
+    worstUsd: () => worstUsd({ home, project: input.project, maxUsd }),
     run: async (run) => {
       if (run.change.kind !== "open") {
         return { kind: "failed", reason: "no open change to review" };

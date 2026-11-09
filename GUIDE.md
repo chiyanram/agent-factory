@@ -4,8 +4,8 @@ How to set up the factory's identity, configure the scripts and run the loop. Th
 [Run the loop](#run-the-loop) as its instructions. Words in **bold** are in [Terms](#terms).
 
 > **Target and today.** [ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) (map #30, 2026-11-06) is the
-> decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The bash scripts do not follow it
-> yet. Each place where they still differ is marked **Today:**.
+> decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The code does not follow it
+> everywhere yet. Each place where it still differs is marked **Today:**.
 
 ## Install a pinned version
 
@@ -345,6 +345,7 @@ The scripts read their settings from the environment.
 | `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
 | `FACTORY_MAX_RUNS` | runs at once (`caps.liveRuns`): the most runs one `dispatch` pass starts, one after another, each only while the caps still allow it; `review` also refuses a machine at this many live runs | `1` |
+| `FACTORY_MAX_FINDERS` | `review.maxFinders`: the most finder runs one review round runs at once. A round counts as one run against `FACTORY_MAX_RUNS`, with up to this many model runs at a time. Before a round starts, its worst case, every finder it can pick and its two verify passes each at `FACTORY_MAX_USD`, must fit in the dollars left under the ticket's and the day's caps, or the round is held. The window caps count tokens, which no per-run cap bounds, so they hold only the next run (#237) | `4` |
 | `FACTORY_RUN_HOURS` | run hours (`runHours`): the hours in UTC, `HH-HH`, in which a `dispatch` pass may start a run, such as `22-06` across midnight or `00-24` for the whole day. Outside them a pass starts no run and lists each one as held; nothing is stopped mid-run, and nothing waits in the background: `dispatch` prints "run hours are 22-06 UTC; run `agent-factory dispatch <project>` again then", and the orchestrator loop ends after that pass. The tickets keep their records, so the next `dispatch` inside the hours starts their runs. A cap: a lower layer may only narrow the hours (#299) | any hour |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and every run of the dispatcher's writer | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `agent-factory review` refuses it | off |
@@ -658,7 +659,7 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    enough.
 5. **Run the queue.** Follow the triggers below. Done when the MR is merged or carries `needs-human`.
 6. **Retro.** After about one merge in ten, turn each lesson into a rule change, strongest fix first: architecture →
-   types → lint → test → docs. Read `tokens.sh <mr>` for what each phase cost. In the pilot, compare it with one
+   types → lint → test → docs. Read `agent-factory usage <project>` for what each ticket cost. In the pilot, compare it with one
    `/crq` session on a like change at the same budget; a phase that does not change outcomes is retired.
 
 ### Triggers
@@ -802,7 +803,7 @@ and `#12` for `!12`.
 |---|---|
 | `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks, `conflict` (`yes`, `no`, or `unknown` while the git host has not checked); plus each merged MR that still carries the claim; `--json` prints the records |
 | `agent-factory claim <mr>` / `agent-factory release <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed or not open; `release` of an MR with no claim says so and is not an error |
-| `agent-factory review <project> <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then a find pass and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. It refuses an MR that already has a live writer or reviewer, and a machine at `FACTORY_MAX_RUNS`, and holds `.claude/runs/reviewer-<mr>.pid` while it runs. A change that touches a file whose name holds a control character is refused, for a person to review. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/` |
+| `agent-factory review <project> <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then one finder run per lens the blast radius picks (`review.lenses`; the lane's lens count; every lens on the logic model for a one-way door; the test-integrity lens when an existing test changed), in parallel, their findings merged by `file:line` and rule, and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. It refuses an MR that already has a live writer or reviewer, and a machine at `FACTORY_MAX_RUNS`, and holds `.claude/runs/reviewer-<mr>.pid` while it runs. A change that touches a file whose name holds a control character is refused, for a person to review. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/`, with each lens's unique verified findings |
 | (context pack) | built by `review`, one per head, under `$FACTORY_REPO/.claude/packs/`: rules from the default branch only; an unresolved rule pointer or link stops it. The intent and acceptance criteria come from the approved spec of the ticket the MR's `factory/<ticket>` branch names, read from `<home>/specs/<project>/` and checked against `<home>/approvals/<project>/`; the design from that spec's `## Design` link, as the default branch holds it. A spec edited after approval, or never approved, is named in the pack for the reviewer to report; no spec in the store stops it. The MR description is data in the pack, never the contract |
 | `agent-factory status <mr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text. The line it prints starts with "orchestrator last ran N min ago", flagged `LATE` after 3 poll intervals while any change is claimed (#103) |
 | `agent-factory ask -- <mr> <sha> "<question>"` | posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The dispatcher's writer does not run it: it writes its question to `report.json`, and the host posts it |
@@ -814,10 +815,9 @@ and `#12` for `!12`.
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory dispatch <project> [--once] [--dry-run]` | the orchestrator loop over the project: a pass of the dispatcher's table, then the next after `FACTORY_POLL_MINUTES` while a ticket is in flight, ending by itself when none is, or after a pass whose runs a cap or a step not set up held back (see Triggers); `--once` is one pass, and `--dry-run` one pass that acts on nothing; exit 0, 1 when it cannot run (another loop runs, or 3 passes in a row failed), 2 when an action failed |
-| `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131) |
+| `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131). Then the automated review's acted-on rate this month, all and per project, per lens (the rule or logic finder), per category and per bucket: each full round keeps its Act on and Consider findings at `.claude/runs/<change>/<head>/findings.json`, and the next full round counts one acted on when `git diff -U0` from that head changed a line of its file within 5 lines of it; no model decides it. A merge of the default branch into the branch can count too, so the rate is an upper bound (#220, ADR-0015 R4) |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |
-| `tokens.sh <mr>` | the tokens one MR spent, by phase (writer, find, verify), from the records kept per head; reads no forge |
 | `agent-factory reconcile` | removes each claim and run worktree with no live run, and each claim left on a merged MR; a live-run list it cannot read releases nothing. It never removes a writer's worktree that holds unlanded work (#189): commits no remote branch holds, after a fetch, or uncommitted files. For an open MR it labels `needs-human` before any claim is released, pushes the commits on top of the MR's branch through the host push, with a blocked run's guards (fast-forward only, no `.factory`, no CI file), and posts one note naming the commits, the push and every uncommitted file, which it never commits. It tells you once for what the worktree holds, until that changes. A merged or closed MR gets no label and no push. A folder that is not one of the clone's worktrees, or a worktree it cannot fetch for, is kept and labels nothing. A reviewer's worktree is removed as before. `FACTORY_DRY_RUN=1` fetches nothing and says which it would keep |
 
 `poll` keeps no state, so a restart re-reads everything. It reads the forge through its CLI (`gh api`, `glab api`),
@@ -890,8 +890,8 @@ it is a prompt instruction at most.
   push refuses a commit that adds or changes one ("touches the agent's settings", `src/core/agent-settings.ts`). As
   for CI, a version equal to the default branch's passes, so a merge of main is fine. A person makes that change in
   their own commit.
-- **Enforced: host git runs no planted program.** Every git call the scripts make on a project's clone goes through
-  `hgit` (`scripts/lib/git.sh`), and every one the TypeScript package makes through `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
+- **Enforced: host git runs no planted program.** Every git call the factory makes on a project's clone goes through
+  `hostGit` (`src/core/git.ts`): hooks, `core.fsmonitor`, filter and diff drivers, `sshCommand`, credential helpers
   and the rest come from your own system and global config only, never from the repo's. A repo whose own config
   sets an external diff, a merge driver, a URL rewrite or an `http.*` setting is refused (#87,
   [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)). **Decided:** the git
@@ -901,9 +901,7 @@ it is a prompt instruction at most.
 - **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
   `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
   and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126), and
-  the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)). **Today:** the bash
-  writer still holds a forge login, writes its evidence into the MR description itself and marks the MR ready; none of
-  that goes through the template until the writer runs in the box (#109, #113).
+  the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
 - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106). **Today:** an edit elsewhere asks you rather than being refused.
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,
