@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildPack, type PackInput } from "../src/core/review/pack.js";
 import { specHash } from "../src/core/spec.js";
@@ -320,5 +320,49 @@ describe("buildPack: the approved spec (#224)", () => {
     expect(rules).toContain("BIGSTART");
     expect(rules).toContain("TITLED-RULES");
     expect(rules).not.toContain("binary");
+  });
+});
+
+describe("buildPack: the baseline review checks (#226)", () => {
+  const CHECKS = ["REVIEW-PROCESS-CHECKS", "CODE-REVIEW-CHECKS", "VERIFY-DONE-CHECKS", "SMELLS-BASELINE"];
+
+  it("holds the baseline review checks in section 4, fenced as data, for a change with no AGENTS.md pointer", async () => {
+    addToMain("AGENTS.md", "# Root\n\nROOT-RULES\n");
+    addToMain("svc/AGENTS.md", "# svc\n\nSVC-RULES\n");
+    const text = await pack();
+    expect(section(text, 3)).not.toContain("rulebook");
+    const four = section(text, 4);
+    for (const title of ["crq/review-process", "crq/code-review", "crq/verify-done", "code/smells"]) {
+      expect(four).toContain(`### rulebook ${title}\n\n\`\`\`\`markdown\n`);
+    }
+    for (const check of CHECKS) {
+      expect(four).toContain(check);
+    }
+  });
+
+  it("sends a baseline reference an AGENTS.md pointer also names once, in section 4", async () => {
+    const before = readFileSync(join(p.clone, "AGENTS.md"), "utf8");
+    addToMain(
+      "AGENTS.md",
+      `${before}- Review: use the \`crq\` skill (rulebook plugin) and read its \`code-review\` reference.\n`,
+    );
+    const text = await pack();
+    expect(section(text, 3)).not.toContain("CODE-REVIEW-CHECKS");
+    expect(section(text, 3)).toContain("LLM-TESTS-RULES");
+    expect(text.split("CODE-REVIEW-CHECKS").length - 1).toBe(1);
+    expect(section(text, 4)).toContain("CODE-REVIEW-CHECKS");
+  });
+
+  it("fails with the reason when a baseline review check is missing from the rulebook, and leaves no pack", async () => {
+    const rulebook = join(p.root, "rulebook");
+    cpSync(RULEBOOK, rulebook, { recursive: true });
+    rmSync(join(rulebook, "skills", "crq", "references", "verify-done.md"));
+    expect(await buildPack(input({ rulebook }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringMatching(
+        /baseline review check crq\/verify-done .*skills\/crq\/references\/verify-done\.md/,
+      ),
+    });
+    expect(existsSync(join(p.root, "packs")) ? readdirSync(join(p.root, "packs")) : []).toEqual([]);
   });
 });
