@@ -8,7 +8,7 @@ import type { Box, BoxSpec, Command, Ran } from "../src/core/box/types.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import type { Task } from "../src/core/dispatch/records.js";
 import { keepText, recordsDirOf } from "../src/core/kept.js";
-import { VERIFY_FILE } from "../src/core/ready/steps.js";
+import { READY_FILE, VERIFY_FILE } from "../src/core/ready/steps.js";
 import { keepActOn } from "../src/core/review/act-on.js";
 import type { Sorted } from "../src/core/review/verdicts.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
@@ -21,6 +21,7 @@ import { specHash } from "../src/core/spec.js";
 import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, stallOf } from "../src/core/writer/settings.js";
 import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
@@ -774,15 +775,35 @@ describe("the writer step: a rework run (#171)", () => {
     expect(pushes).toEqual([{ lease: p.head2, branch: "feat/x" }]);
   });
 
-  it("hands the writer the evidence row the ready check saw fail", async () => {
+  it("hands the writer the ready check's kept output at the head, capped (#199)", async () => {
+    const at = { recordsDir: recordsDirOf(p.clone), change: 12, head: p.head2 };
+    const output = `# The ready check failed\n\nrow 1 (AC1): make test exited 2\n\n${"x".repeat(MAX_TASK_CHARS)}`;
+    expect((await keepText(at, READY_FILE, output)).kind).toBe("ok");
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const seen: Seen[] = [];
     await run(
       setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []),
-      { kind: "ready-failed", why: "AC1 `make test` exited 2" },
+      { kind: "ready-failed", head: p.head2 },
       openLine(),
     );
-    expect(seen[0]?.task).toContain("This one failed:\n\nAC1 `make test` exited 2");
+    expect(seen[0]?.task).toContain("row 1 (AC1): make test exited 2");
+    expect(seen[0]?.task?.length).toBeLessThanOrEqual(MAX_TASK_CHARS + 100);
+    expect(seen[0]?.task).toContain(`(cut at ${MAX_TASK_CHARS} characters)`);
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^rework PROJ-1/) });
+  });
+
+  it("gives a person the change when the ready check kept nothing at the head, naming where it looked", async () => {
+    const fake = fakeBox({});
+    const told = forge();
+    const out = await run(setup(fake.box, told, []), { kind: "ready-failed", head: p.head2 }, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(told.log).toEqual([
+      "label 12 needs-human",
+      expect.stringMatching(
+        new RegExp(`note 12 .*the rework run has no task: nothing kept at .*12/${p.head2}/ready\\.txt`),
+      ),
+    ]);
+    expect(fake.calls).toEqual([]);
   });
 
   it("gives a person the change when no Act on findings are kept at the head, and starts no box", async () => {

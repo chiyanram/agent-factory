@@ -1,6 +1,6 @@
 // task — what the host hands a rework or CI run, written to .factory/task.md (#171; decided on #30, 2026-11-08). The
 // writer has no forge login, so everything it must act on comes from the host, capped:
-//   ready-failed  the first evidence row that failed at the head, from the run record
+//   ready-failed  why the ready check failed at the head and the failed row's output, kept by the ready check (#199)
 //   act-on        the factory's own Act on findings at the head (review/act-on.ts), never a forge thread
 //   ci-red        the failed jobs' names and the end of each log (Forge.failedJobs)
 //   verify-failed the local verifier's own output at the head, kept by the verifier (kept.ts)
@@ -9,6 +9,8 @@
 import type { Task } from "../dispatch/records.js";
 import type { Result } from "../forge/api.js";
 import type { FailedJob } from "../forge/types.js";
+import { readKept } from "../kept.js";
+import { READY_FILE } from "../ready/steps.js";
 import { readActOn, type ActOn } from "../review/act-on.js";
 
 // the whole file at most, so one long log or finding list cannot fill the writer's context
@@ -42,20 +44,6 @@ export function actOnText(findings: readonly ActOn[]): string {
       "The factory's review found these at the head. Fix each one, or say in your report why it is wrong.",
       "",
       ...findings.map(finding),
-    ].join("\n"),
-  );
-}
-
-// readyText : the failed evidence row as the writer reads it. Pure.
-export function readyText(why: string): string {
-  return capped(
-    [
-      "# The ready check failed",
-      "",
-      "The host ran your evidence rows again at the head, in a fresh box. This one failed:",
-      "",
-      why,
-      "",
     ].join("\n"),
   );
 }
@@ -94,8 +82,13 @@ export async function taskText(
   source: TaskSource,
 ): Promise<Result<string>> {
   switch (task.kind) {
-    case "ready-failed":
-      return { kind: "ok", value: readyText(task.why) };
+    case "ready-failed": {
+      const kept = await readKept(
+        { recordsDir: source.recordsDir, change: source.change, head: task.head },
+        READY_FILE,
+      );
+      return kept.kind === "ok" ? { kind: "ok", value: capped(kept.value) } : kept;
+    }
     case "act-on": {
       const found = await readActOn({ recordsDir: source.recordsDir, change: source.change, head: task.head });
       return found.kind === "ok" ? { kind: "ok", value: actOnText(found.value) } : found;
