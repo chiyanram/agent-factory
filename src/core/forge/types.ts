@@ -103,6 +103,8 @@ export type Forge = {
   me(): Promise<Result<string>>;
   change(input: { readonly number: number }): Promise<Result<Change>>;
   defaultBranch(): Promise<Result<string>>;
+  // whether this branch is on the git host, in the repository itself (#227: a START asks first when factory/<ticket> is)
+  branchExists(input: { readonly branch: string }): Promise<Result<boolean>>;
   // fails unless the forge kept the label
   addLabel(input: { readonly number: number; readonly label: string }): Promise<Done>;
   // succeeds when the label is gone afterwards, even if someone removed it first

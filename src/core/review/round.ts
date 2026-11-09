@@ -17,6 +17,7 @@
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
+import { goAhead } from "../start.js";
 import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
@@ -28,7 +29,7 @@ import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
-import { buildPack, type Pack, type SpecSource } from "./pack.js";
+import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { attempt } from "./safe.js";
 import { plainName } from "../spec.js";
 import { statusBox, type Box } from "./status.js";
@@ -130,22 +131,40 @@ async function specFor(ctx: Ctx): Promise<Result<SpecSource>> {
       `${s.forge.mark}${s.number} is on ${branch}, not ${BRANCH_PREFIX}<ticket>, so it names no spec to review against; a person reviews it`,
     );
   }
-  const stored = await readApproval({ home: s.home, project: s.project, ticket });
-  if (stored.kind === "refused") {
-    return failed(stored.reason);
+  const approval = await approvalFor({ home: s.home, project: s.project, ticket });
+  return approval.kind === "failed"
+    ? approval
+    : {
+        kind: "ok",
+        value: {
+          store: { kind: "local", root: join(s.home, "specs") },
+          project: s.project,
+          ticket,
+          approval: approval.value,
+        },
+      };
+}
+
+// approvalFor : the ticket's approval record; with none, a tiny ticket's START stands for it, bound to the spec as it
+// is now, since tiny needs START only (#227)
+async function approvalFor(where: {
+  readonly home: string;
+  readonly project: string;
+  readonly ticket: string;
+}): Promise<Result<Approval>> {
+  const stored = await readApproval(where);
+  if (stored.kind !== "missing") {
+    return stored.kind === "refused"
+      ? failed(stored.reason)
+      : {
+          kind: "ok",
+          value: { kind: "approved", hash: stored.record.spec_hash, by: stored.record.by, at: stored.record.at },
+        };
   }
-  return {
-    kind: "ok",
-    value: {
-      store: { kind: "local", root: join(s.home, "specs") },
-      project: s.project,
-      ticket,
-      approval:
-        stored.kind === "record"
-          ? { kind: "approved", hash: stored.record.spec_hash, by: stored.record.by, at: stored.record.at }
-          : { kind: "none" },
-    },
-  };
+  const go = await goAhead(where);
+  return go.kind === "go" && go.said === "started"
+    ? { kind: "ok", value: { kind: "approved", hash: go.spec.hash, by: go.by, at: go.at } }
+    : { kind: "ok", value: { kind: "none" } };
 }
 
 async function packFor(ctx: Ctx): Promise<Result<Pack>> {

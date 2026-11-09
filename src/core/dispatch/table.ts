@@ -1,13 +1,20 @@
-// table — the dispatcher's one decision table (#103; ADR-0012 S3). Pure: it reads one ticket's state (its local
-// approval, its change on the forge as poll reports it, and the run records) and gives one action. Every row that can
-// repeat has a stop, after which a person decides.
+// table — the orchestrator's one decision table (#103; ADR-0012 S3). Pure: it reads one ticket's state (what a human
+// said: its START and its approval; its change on the git host as poll reports it; and the run records) and gives one
+// action. Every row that can repeat has a stop, after which a person decides.
+//
+// Nothing starts unless a human starts it (P8, #227). A ticket's build may begin only after a human's word:
+//   tiny                          its START
+//   bug, feature, one-way door    its START and its approval, bound to the spec's and the design's hashes (the
+//                                 approval floor); an approval with no START waits, since nothing runs without one
+// A START in a lane that needs an approval, or a START whose spec the coordinator has not written yet, waits.
 //
 //   the change is merged and still claimed                     reconcile (remove the claim)
 //   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
 //   needs-human on the change                                  wait: a person decides
 //   a run started and never ended (the dispatcher died)        needs-human: check what that run pushed
-//   no approval, or a stale one                                release a claim, else wait
-//   a maintainer's /stop newer than the approval               wait; approving again lifts it
+//   no START, no approval above tiny, an approval with no       release a claim, else wait
+//   START, or a stale approval
+//   a maintainer's /stop newer than that START or approval     wait; a new START (tiny) or approval lifts it
 //   an open question                                           wait
 //   a pipeline state the factory does not know                 needs-human
 //   claimed, but this dispatcher never ran on it               wait: someone else holds it
@@ -35,8 +42,9 @@
 //
 // Two rules hold over every row. A wait on a claimed change that has been quiet (no record, no comment) for
 // FACTORY_QUIET_MINUTES releases the claim, so a stuck change goes back to the queue. A stop the dispatcher already
-// handed to a person is not handed over again: removing needs-human does not lift it; approving again does, and starts
-// every count afresh.
+// handed to a person is not handed over again: removing needs-human does not lift it. The way back from needs-human
+// (#227, #151 gap 1): a person removes the label and STARTs again (tiny) or approves the spec again (the other lanes);
+// the newer record starts every count afresh, and the next pass picks the ticket up.
 //
 // Today: a merge conflict has no row, since poll does not report mergeability yet; the writer is not sent to rebase.
 
@@ -44,10 +52,19 @@ import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
 import type { Retried, Summary, Task } from "./records.js";
 
+// what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
+// is the newer of the two records, and the run records count from then
 export type ApprovalView =
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
+  | { readonly kind: "started"; readonly at: string; readonly lane: "tiny" }
   | { readonly kind: "stale" }
-  | { readonly kind: "missing" };
+  | { readonly kind: "missing" }
+  // a START, and a spec whose lane needs an approval the ticket does not have
+  | { readonly kind: "unapproved"; readonly lane: Lane }
+  // a START, and no spec ready yet: the coordinator writes it
+  | { readonly kind: "unwritten" }
+  // an approval, and no START: nothing runs without one
+  | { readonly kind: "unstarted" };
 
 export type ChangeView =
   | { readonly kind: "none" }
@@ -110,35 +127,60 @@ const interrupted: Rule = (s) => {
     : "next";
 };
 
+// goAt : when a human's START or approval let the build begin, or "" while nothing does
+export function goAt(view: ApprovalView): string {
+  return view.kind === "approved" || view.kind === "started" ? view.at : "";
+}
+
+type Held = Exclude<ApprovalView, { kind: "approved" } | { kind: "started" }>;
+type HeldMap = { readonly [V in Held as V["kind"]]: V };
+
+const HELD: { readonly [K in keyof HeldMap]: (view: HeldMap[K]) => string } = {
+  stale: () => "the spec or its design changed after its approval",
+  missing: () => "the ticket has no START and no approval",
+  unapproved: (v) => `the ${v.lane} lane needs a human's approval; the ticket has a START only`,
+  unwritten: () => "the ticket has a START; its spec is not written yet",
+  unstarted: () => "approved, no START: a human STARTs the ticket first",
+};
+
+function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): string {
+  return HELD[kind](view);
+}
+
+// heldWhy : why nothing a human said lets the build begin, or "" when something does
+function heldWhy(view: ApprovalView): string {
+  return view.kind === "approved" || view.kind === "started" ? "" : heldAs(view.kind, view);
+}
+
 const approval: Rule = (s) => {
-  if (s.approval.kind === "approved") {
+  const why = heldWhy(s.approval);
+  if (why === "") {
     return "next";
   }
   const line = open(s);
-  const why = s.approval.kind === "stale" ? "the spec changed after its approval" : "the ticket has no approval";
   return line !== "none" && line.claimed ? { kind: "release", why } : { kind: "wait", why };
 };
 
-// newerStop : a /stop that is newer than the approval; an undated one counts as newer
-function newerStop(line: OpenLine, approvedAt: string): boolean {
-  return line.stop.kind === "stopped"
-    ? Date.parse(line.stop.at) > Date.parse(approvedAt)
-    : line.stop.kind === "undated";
+// newerStop : a /stop that is newer than the START or approval; an undated one counts as newer
+function newerStop(line: OpenLine, at: string): boolean {
+  return line.stop.kind === "stopped" ? Date.parse(line.stop.at) > Date.parse(at) : line.stop.kind === "undated";
 }
 
 const stopped: Rule = (s) => {
   const line = open(s);
-  const held = line !== "none" && s.approval.kind === "approved" && newerStop(line, s.approval.at);
+  const at = goAt(s.approval);
+  const held = line !== "none" && at !== "" && newerStop(line, at);
   return held
-    ? { kind: "wait", why: "a maintainer's /stop is newer than the approval; approve again to go on" }
+    ? {
+        kind: "wait",
+        why: "a maintainer's /stop is newer than the START or approval; START (tiny) or approve again to go on",
+      }
     : "next";
 };
 
-// quiet : nothing on the change since the newest of our record, its last comment and the approval
+// quiet : nothing on the change since the newest of our record, its last comment and the START or approval
 function quiet(s: TicketState, line: OpenLine): boolean {
-  const times = [s.runs.lastAt, line.lastNoteAt, s.approval.kind === "approved" ? s.approval.at : ""]
-    .map(Date.parse)
-    .filter(Number.isFinite);
+  const times = [s.runs.lastAt, line.lastNoteAt, goAt(s.approval)].map(Date.parse).filter(Number.isFinite);
   return times.length > 0 && s.now - Math.max(...times) > s.quietMinutes * 60_000;
 }
 
@@ -190,7 +232,8 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
 // the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
-  return w.kind === "none" ? { kind: "writer", task: nextTask(s), why: "approved; no run yet" } : after(s, w);
+  const said = s.approval.kind === "started" ? "started" : "approved";
+  return w.kind === "none" ? { kind: "writer", task: nextTask(s), why: `${said}; no run yet` } : after(s, w);
 };
 
 function writerHead(s: TicketState): string {
@@ -379,7 +422,10 @@ function backedOff(state: TicketState, action: Action): Action {
 // once : a stop already handed to a person waits; removing needs-human does not lift it
 function once(state: TicketState, action: Action): Action {
   return action.kind === "needs-human" && state.runs.blocked.includes(action.why)
-    ? { kind: "wait", why: `handed to a person earlier: ${action.why}; approve again to go on` }
+    ? {
+        kind: "wait",
+        why: `handed to a person earlier: ${action.why}; START again (tiny) or approve again to go on`,
+      }
     : action;
 }
 

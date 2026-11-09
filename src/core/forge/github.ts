@@ -2,6 +2,7 @@
 // GraphQL for lists, with every list paged to its end (#71). Owner, name and label go in as GraphQL variables, never
 // into the query text. Only branches in the repository itself are supported: the writer pushes there.
 
+import { plainBranch } from "../branch.js";
 import type { Note } from "../notes.js";
 import { graphql, rest, restText, type Client, type Done, type Result } from "./api.js";
 import { reader } from "./read.js";
@@ -370,6 +371,16 @@ export function github(client: Client, project: GithubProject): Forge {
       }
       const r = reader("github repository");
       return r.done(r.text(answer.value, "default_branch"));
+    },
+    // matching-refs answers every ref that starts with the name (factory/T1 also finds factory/T10), so the exact ref
+    // is looked for in the list; a plain branch name has no character a URL path must escape
+    async branchExists(input) {
+      if (!plainBranch(input.branch)) {
+        return { kind: "failed", reason: `github: not a plain branch name: ${JSON.stringify(input.branch)}` };
+      }
+      return getJson(`${repo}/git/matching-refs/heads/${input.branch}`, "github refs", (v, r) =>
+        r.list(v, "").some((ref) => r.text(ref, "ref") === `refs/heads/${input.branch}`),
+      );
     },
     async addLabel(input) {
       const answer = await rest(client, {

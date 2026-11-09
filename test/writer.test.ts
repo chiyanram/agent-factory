@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
+import { start as startTicket } from "../src/core/start.js";
 import type { Box, BoxSpec, Command, Ran } from "../src/core/box/types.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import type { Task } from "../src/core/dispatch/records.js";
@@ -70,6 +71,16 @@ beforeEach(async () => {
     at: "2026-11-08T08:00:00Z",
   });
   if (done.kind !== "approved") throw new Error(`the test spec was not approved: ${done.kind}`);
+  // nothing runs without a START (#227)
+  const startedTicket = await startTicket({
+    where: { home, project: "ledger", ticket: "PROJ-1" },
+    by: "ram",
+    via: "terminal",
+    at: "2026-11-08T07:00:00Z",
+    branch: "absent",
+    confirmed: false,
+  });
+  if (startedTicket.kind !== "started") throw new Error(`the test ticket was not started: ${startedTicket.kind}`);
 });
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
@@ -165,6 +176,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     me: async () => unused("me"),
     change: async () => unused("change"),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
+    branchExists: async () => ({ kind: "ok", value: false }),
     addLabel: async ({ number, label }) => {
       log.push(`label ${number} ${label}`);
       return { kind: "ok" };
@@ -717,7 +729,7 @@ describe("the writer step: a later run on the change", () => {
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
     const fake = fakeBox({});
     const out = await run(setup(fake.box, forge(), []), FIX);
-    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("not approved (stale)") });
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the approval is stale") });
     expect(existsSync(join(p.root, "box-runs"))).toBe(false);
   });
 });

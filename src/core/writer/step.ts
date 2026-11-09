@@ -11,7 +11,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { approvalState } from "../approval.js";
+import { goAhead, type GoAhead } from "../start.js";
 import type { BoxToken } from "../token/rules.js";
 import type { Task } from "../dispatch/records.js";
 import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/tick.js";
@@ -21,7 +21,7 @@ import type { Forge, ForgeName } from "../forge/types.js";
 import type { Identity } from "../identity.js";
 import type { PushRequest } from "../push.js";
 import { CLEAN, REPORT_INSTRUCTIONS, type Evidence, type Outcome } from "../report.js";
-import type { Spec } from "../spec.js";
+import type { Approver, Spec } from "../spec.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start, type FileText } from "./clone.js";
@@ -158,7 +158,7 @@ export function outOf(ended: Ended, next: Next): WriterOut {
 
 type Prepared = {
   readonly spec: Spec;
-  readonly approver: { readonly by: string; readonly at: string };
+  readonly approver: Approver;
   readonly start: Start;
   readonly base: string;
   readonly login: Readonly<Record<string, string>>;
@@ -181,11 +181,23 @@ async function loginOf(setup: WriterSetup): Promise<Result<Readonly<Record<strin
   return token.kind === "ready" ? { kind: "ok", value: token.env } : { kind: "failed", reason: token.reason };
 }
 
+// goFor : what lets the build begin: an approval, or a START in the tiny lane (#227)
+async function goFor(setup: WriterSetup, ticket: string): Promise<Result<Extract<GoAhead, { kind: "go" }>>> {
+  const go = await goAhead({ home: setup.home, project: setup.project, ticket });
+  if (go.kind === "go") {
+    return { kind: "ok", value: go };
+  }
+  return {
+    kind: "failed",
+    reason: `nothing a human said lets ${ticket} build: ${go.kind === "held" ? go.why : go.reason}`,
+  };
+}
+
 // prepare : the approved spec, the default branch, where the run starts, and the box's model login
 async function prepare(setup: WriterSetup, input: Input): Promise<Result<Prepared>> {
-  const approval = await approvalState({ home: setup.home, project: setup.project, ticket: input.ticket });
-  if (approval.kind !== "approved") {
-    return { kind: "failed", reason: `the spec of ${input.ticket} is not approved (${approval.kind})` };
+  const go = await goFor(setup, input.ticket);
+  if (go.kind === "failed") {
+    return go;
   }
   const base = await setup.forge.defaultBranch();
   if (base.kind === "failed") {
@@ -196,13 +208,13 @@ async function prepare(setup: WriterSetup, input: Input): Promise<Result<Prepare
     return start;
   }
   const login = await loginOf(setup);
-  const { spec, record } = approval;
+  const { spec } = go.value;
   return login.kind === "ok"
     ? {
         kind: "ok",
         value: {
           spec,
-          approver: { by: record.by, at: record.at },
+          approver: { by: go.value.by, at: go.value.at, said: go.value.said },
           start: start.value,
           base: base.value,
           login: login.value,
@@ -239,7 +251,7 @@ function openFor(setup: WriterSetup, p: Prepared, branch: string): () => Promise
         title,
         fields: [
           { label: "spec", value: p.spec.hash },
-          { label: "approved", value: `locally by ${p.approver.by} at ${p.approver.at}` },
+          { label: p.approver.said ?? "approved", value: `locally by ${p.approver.by} at ${p.approver.at}` },
         ],
         items: [],
       },
