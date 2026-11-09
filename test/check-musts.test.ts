@@ -17,7 +17,7 @@ const findings = (file: string, text: string, allow: readonly Allow[] = []) =>
   scan([{ file, text }], allow).findings.map((f) => f.split(": ").slice(0, 2).join(": "));
 
 describe("scan", () => {
-  it("finds gh or glab named in src/ outside the forge seam, and a gh or glab command in a top-level script", () => {
+  it("finds gh or glab named in src/ outside the forge seam, and a gh or glab command in any bash script", () => {
     expect(findings("src/core/x.ts", 'run({ bin: "gh" });\nconst b = `glab`;\n')).toEqual([
       "src/core/x.ts:1: forge-seam",
       "src/core/x.ts:2: forge-seam",
@@ -28,13 +28,15 @@ describe("scan", () => {
       "scripts/a.sh:2: forge-seam",
       "scripts/a.sh:3: forge-seam",
     ]);
-    expect(findings("scripts/lib/forge.sh", "gh pr list\n")).toEqual([]);
+    expect(findings("scripts/lib/forge.sh", "gh pr list\n")).toEqual(["scripts/lib/forge.sh:1: forge-seam"]);
     expect(findings("scripts/a.sh", "# gh pr list\nforge_pr 1\necho high\n")).toEqual([]);
   });
 
-  it("finds git named in src/ outside hostGit, and a git command in a top-level script; a message is not a call", () => {
+  it("finds git named in src/ outside hostGit, and a git command in a bash script but hgit's own; a message is not a call", () => {
     expect(findings("src/core/x.ts", 'execFile("git", ["status"]);\n')).toEqual(["src/core/x.ts:1: host-git"]);
     expect(findings("src/core/git.ts", 'execFile("git", ["status"]);\n')).toEqual([]);
+    expect(findings("scripts/lib/git.sh", 'git -C "$d" status\n')).toEqual([]);
+    expect(findings("scripts/lib/runs.sh", 'git -C "$d" status\n')).toEqual(["scripts/lib/runs.sh:1: host-git"]);
     expect(findings("src/core/x.ts", 'failed("git push failed");\n')).toEqual([]);
     expect(findings("scripts/a.sh", 'tip=$(git rev-parse HEAD)\ngit -C "$d" fetch\nhgit -C "$d" fetch\n')).toEqual([
       "scripts/a.sh:1: host-git",

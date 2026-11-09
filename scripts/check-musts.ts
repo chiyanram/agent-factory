@@ -1,14 +1,14 @@
 // check-musts — each AGENTS.md MUST that code can check, as a check (#221; ADR-0015 R5): a rule that code can check
 // should not depend on the LLM reviewer. A finding names file:line, the rule and the MUST it breaks.
 //
-//   forge-seam        no "gh" or "glab" in src/ outside src/core/forge/, and no gh or glab command in a top-level
-//                     bash script (scripts/lib/, scripts/bin/ and the App wrapper scripts/github-app.sh are the bash seam)
-//   host-git          no "git" in src/ outside src/core/git.ts (hostGit), and no git command in a top-level bash script
-//                     (scripts/lib/git.sh holds hgit)
+//   forge-seam        no "gh" or "glab" in src/ outside src/core/forge/, and no gh or glab command in a bash script
+//                     under scripts/: bash has no forge seam any more (#285)
+//   host-git          no "git" in src/ outside src/core/git.ts (hostGit), and no git command in a bash script under
+//                     scripts/ but scripts/lib/git.sh, which holds hgit
 //   spawn-seam        node:child_process only in the files below that run a program, so a forge or git call cannot
 //                     hide behind a variable: a new one needs a reviewed entry here
 //   forge-token       no forge token variable (GH_TOKEN, GITLAB_TOKEN, ...) in src/ outside src/core/forge/, nor in a
-//                     top-level bash script, so no LLM seat is handed one (ADR-0012 S2, S6)
+//                     bash script under scripts/, so no LLM seat is handed one (ADR-0012 S2, S6)
 //   skip-permissions  no skip-permissions flag or bypass mode for an agent CLI (claude, copilot) in src/ or a bash
 //                     script (ADR-0012 S11)
 //   disable-comment   no lint or type-check disable comment in any tracked code file: fix the code (#148)
@@ -57,8 +57,8 @@ const SKIP_WHY = "give no LLM seat a skip-permissions flag (ADR-0012 S11)";
 
 const inSrc = (f: string): boolean => f.startsWith("src/") && f.endsWith(".ts");
 const topScript = (f: string): boolean => /^scripts\/[^/]+\.sh$/.test(f);
-const forgeSh = (f: string): boolean => topScript(f) && f !== "scripts/github-app.sh";
 const anySh = (f: string): boolean => f.startsWith("scripts/") && f.endsWith(".sh");
+const gitSh = (f: string): boolean => anySh(f) && f !== "scripts/lib/git.sh";
 const code = (f: string): boolean => /\.(?:ts|mts|cts|js|mjs|cjs)$/.test(f) && !f.startsWith("tests/fixtures/");
 
 // a bash command word: at the start of a line or after a separator, $( or a keyword
@@ -73,7 +73,7 @@ export const RULES: readonly LineRule[] = [
     comments: false,
     why: FORGE_WHY,
   },
-  { rule: "forge-seam", applies: forgeSh, bad: command("gh|glab"), comments: false, why: FORGE_WHY },
+  { rule: "forge-seam", applies: anySh, bad: command("gh|glab"), comments: false, why: FORGE_WHY },
   {
     rule: "host-git",
     applies: (f) => inSrc(f) && f !== "src/core/git.ts",
@@ -81,7 +81,7 @@ export const RULES: readonly LineRule[] = [
     comments: false,
     why: GIT_WHY,
   },
-  { rule: "host-git", applies: topScript, bad: command("git"), comments: false, why: GIT_WHY },
+  { rule: "host-git", applies: gitSh, bad: command("git"), comments: false, why: GIT_WHY },
   {
     rule: "spawn-seam",
     applies: inSrc,
@@ -91,7 +91,7 @@ export const RULES: readonly LineRule[] = [
   },
   {
     rule: "forge-token",
-    applies: (f) => (inSrc(f) && !f.startsWith("src/core/forge/")) || forgeSh(f),
+    applies: (f) => (inSrc(f) && !f.startsWith("src/core/forge/")) || anySh(f),
     bad: /\b(?:GH|GITHUB|GH_ENTERPRISE|GITHUB_ENTERPRISE|GLAB|GITLAB|CI_JOB)_TOKEN\b/,
     comments: false,
     why: TOKEN_WHY,
@@ -145,18 +145,6 @@ export const ALLOW: readonly Allow[] = [
   { file: "src/core/review/model.ts", rule: "spawn-seam", has: "node:child_process", why: "the reviewer's claude run" },
   { file: "src/core/review/live.ts", rule: "spawn-seam", has: "node:child_process", why: "claude agents --json" },
   { file: "src/cli.ts", rule: "spawn-seam", has: "node:child_process", why: "the operator's interactive session" },
-  {
-    file: "scripts/start-writer.sh",
-    rule: "host-git",
-    has: '\\"\\$(git rev-parse HEAD)\\"',
-    why: "text of the writer's prompt: the writer runs it in its own worktree, not the host",
-  },
-  {
-    file: "scripts/github-app.sh",
-    rule: "host-git",
-    has: 'setting() { git config --get "factory.$1"',
-    why: "reads factory.* keys only; git config --get runs no hook or program",
-  },
   {
     file: "test/floor.test.ts",
     rule: "disable-comment",
