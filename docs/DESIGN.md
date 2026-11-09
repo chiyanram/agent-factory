@@ -268,9 +268,9 @@ ADR-0006 (a service account per developer) is already replaced by 0012 S14.
 | 0 | eval set: the automated review's golden set (ADR-0015); 10 past tickets once there is run history | #213–#217 | a baseline recorded |
 | 1 | safety core | #224 #226 #227 #228 #230 #231 #131 #103 | planted tests: a deleted test, a skip, fewer asserts, a lower lane and a stalled run each stop |
 | 1, alongside | fixes found on the way | #185 #199 #200 #138 | `make lint` and `make test` |
-| 2 | plugins, role cards and settings | #229 #232 (with chiyanram/skills#237) | a run with no plugin, with the rulebook, and with a stand-in team plugin |
-| 3 | **ledger pilot**, with project setup by the onboarder | #62 (with #158, #130 on the VM) | the targets in section 6 |
-| 4 | aruvii: tiny and docs tickets first, then bug, then feature | #233 #234 #35 #38 #40 #41 #42 #43 #44; the automated review changes of ADR-0015 #218–#221 | the same targets |
+| 2 | plugins, role cards, the new runs and settings | #229 #232 #236 (with chiyanram/skills#237) | a run with no plugin, with the rulebook, and with a stand-in team plugin |
+| 3 | **ledger pilot**, with project setup by the onboarder | #235 #62 (with #158, #130 on the VM) | the targets in section 6 |
+| 4 | aruvii: tiny and docs tickets first, then bug, then feature | #233 #234 #237 #35 #38 #40 #41 #42 #43 #44; the automated review changes of ADR-0015 #218–#221 | the same targets |
 | 5 | work laptop | #162 #114 #198 | the same targets on the small laptop; specs never in git |
 | 6 | colleagues | Jira approval · spec PR · team template | the same targets with 2–3 colleagues |
 | later | web app (#120) · signed approvals on laptops · scheduled extra tasks · the RCA agent | — | — |
