@@ -20,6 +20,16 @@ _Avoid_: the system, the code (for the engine)
 queued, in flight or finished. In code: `src/core/dispatch/`, `agent-factory dispatch`.
 _Avoid_: dispatcher, scheduler, control plane
 
+**Orchestrator loop**: `agent-factory dispatch <project>` without `--once`: one pass, then another after the poll
+interval, while any ticket a human STARTed or approved is in flight. A human's command starts it (`dispatch`, or
+`start` and `approve` in the background); it ends by itself when no ticket is in flight. No cron job runs it. In
+code: `src/core/dispatch/orchestrator-loop.ts`.
+_Avoid_: daemon, cron job, scheduler
+
+**In flight** (a ticket): the orchestrator carries it on without a person: a run is due or backing off, a ping is due,
+or CI is running. A ticket that is merged or closed, has asked a person, stopped at `needs-human`, or waits on a
+human (a START, an approval, a merge, a `/stop`) is not. In code: `inFlight` in `src/core/dispatch/table.ts`.
+
 **Task**: a kind of work the factory does, defined once and run many times: implement, automated review, rework,
 retro. Each task answers five questions: what triggers it, what it reads and writes, what it triggers next, where a
 human re-enters, and what stops two runs doing the same work.
