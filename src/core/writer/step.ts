@@ -326,7 +326,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
   const clone = await makeClone(setup.box, {
     start: p.start,
     spec: p.spec.text,
-    rulebook: setup.settings.rulebook,
+    plugins: setup.settings.plugins,
     task: work.task,
     settings,
     ...mergeOf(work, p.base),
@@ -351,6 +351,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     timeoutSeconds: setup.settings.timeoutSeconds,
     claude: setup.settings.claude,
     settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
+    plugins: setup.settings.plugins.length,
     completion: setup.settings.completion,
     stallMs: setup.settings.stallMs,
   });

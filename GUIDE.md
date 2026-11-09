@@ -358,7 +358,7 @@ The scripts read their settings from the environment.
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
-| `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path. Its process (`skills/<skill>/process/lanes.json` and `review.json`) gives the review's baseline checks; with no process there, or no `review.json`, the review keeps the built-in baseline (crq review-process, code-review and verify-done, code smells). A lanes file that drops the approval for a lane above tiny stops the review (#232). **Today:** this folder stands in for the `plugins` list, and the lanes are checked but the dispatcher still uses the built-in ones. The dispatcher's writer needs it too: it must hold `.claude-plugin/plugin.json`, and the host copies it into the writer's clone as `.factory/rulebook`, read-only, loaded with `claude --plugin-dir` | — |
+| `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path. Its process (`skills/<skill>/process/lanes.json` and `review.json`) gives the review's baseline checks; with no process there, or no `review.json`, the review keeps the built-in baseline (crq review-process, code-review and verify-done, code smells). A lanes file that drops the approval for a lane above tiny stops the review (#232). **Today:** this folder stands in for the `plugins` list, and the lanes are checked but the dispatcher still uses the built-in ones. **Deprecated for the writer** (#232): the dispatcher's writer reads it only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass, with a warning; read for one release. With neither, the writer runs with no plugin | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
@@ -430,7 +430,11 @@ there.
     floor fails it). Only when both pass does it write the pin to `$FACTORY_HOME/projects/<project>.plugins.json`. It
     does not run the eval set; `agent-factory eval reviewer` does, and spends money.
   - A listed plugin with no pin, or whose stored folder no longer has the pin's hash, is refused.
-  **Today:** runs do not use the pins yet; the writer and the review still read `FACTORY_RULEBOOK` (#232).
+  Each `dispatch` pass checks every pin, then copies each plugin into the writer's clone as `.factory/plugins/<n>`
+  (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
+  each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
+  pass. **Today:** the review still reads `FACTORY_RULEBOOK` (#232), and a pin moved while a ticket is in flight
+  applies to that ticket's next run, not only to the next ticket; the records show the change.
 - `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
   [docs/DESIGN.md](docs/DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing

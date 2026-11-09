@@ -40,6 +40,7 @@ import type { Identity } from "./core/identity.js";
 import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
 import { writerStep } from "./core/writer/step.js";
+import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
@@ -466,7 +467,7 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
     : { home: home.path, quiet, poll: every };
 }
 
-type Planned = { readonly gate: Gate; readonly steps: Steps };
+type Planned = { readonly gate: Gate; readonly steps: Steps; readonly plugins: readonly PluginHash[] };
 
 type Project = { readonly forge: Forge; readonly identity: Identity };
 
@@ -498,6 +499,11 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     return planned;
   }
   const { gate, plan } = planned.value;
+  const used = await runPlugins({ home, project, env: io.env });
+  if (used.kind === "failed") {
+    return used;
+  }
+  io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
   const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   const writer = await writerSetup({
     env: io.env,
@@ -509,6 +515,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     identity,
     store: tokenStore(io, home),
     pusher: hostPush,
+    plugins: used.value.plugins.map((p) => p.dir),
   });
   const steps: Steps = {
     ...STEPS_TODAY,
@@ -523,7 +530,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     review: await reviewStepFor(io.env, forge, project),
     verify: verifyStep(plan, forge),
   };
-  return { kind: "ok", value: { gate, steps } };
+  return { kind: "ok", value: { gate, steps, plugins: hashesOf(used.value.plugins) } };
 }
 
 type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number };

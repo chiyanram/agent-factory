@@ -22,6 +22,8 @@ export type WriterInput = {
   readonly identity: Identity;
   readonly store: Result<TokenStore>;
   readonly pusher: Pusher;
+  // the plugins' folders, in order (process/use.ts)
+  readonly plugins: readonly string[];
 };
 
 function pushTarget(input: WriterInput): Result<PushTarget> {
@@ -59,7 +61,7 @@ export async function writerSetup(input: WriterInput): Promise<Result<WriterSetu
   if (where.kind === "failed") {
     return where;
   }
-  const settings = await writerSettings(input.env);
+  const settings = writerSettings(input.env, input.plugins);
   if (settings.kind === "failed") {
     return settings;
   }

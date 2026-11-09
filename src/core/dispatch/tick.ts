@@ -17,6 +17,7 @@
 // project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or none>", for
 // people to see. It never starts anything: the orchestrator decides only from the local records.
 
+import type { PluginHash } from "../process/use.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -117,6 +118,8 @@ export type TickSetup = {
   readonly log: (line: string) => void;
   // a person's ping when a ticket needs them (#119); NO_NOTIFY when the project maps no notify plugin
   readonly notify: Notify;
+  // the plugins this pass's runs use, each with its hash, for the run records (#232); none when it lists none
+  readonly plugins?: readonly PluginHash[];
 };
 
 export type Decision = { readonly ticket: string; readonly action: Action };
@@ -485,7 +488,7 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
   // a person, never a claim with no record, which would look like someone else's
   const started = await record({
     where: place,
-    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) },
+    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state), plugins: usedBy(setup) },
   });
   const claimed = started.kind === "ok" ? await claim(setup, state) : started;
   if (claimed.kind === "failed") {
@@ -516,6 +519,11 @@ async function writerEnded(
   return ended.kind === "ok" && message !== "none" ? informed(setup, message) : ended;
 }
 
+// usedBy : the plugins and hashes a run of this pass records
+function usedBy(setup: TickSetup): readonly PluginHash[] {
+  return setup.plugins ?? [];
+}
+
 // startCheck : the "started" line of a ready check or a review, or why it cannot start
 async function startCheck(
   setup: TickSetup,
@@ -523,7 +531,10 @@ async function startCheck(
   phase: "ready" | "review" | "verify",
   head: string,
 ): Promise<Done> {
-  return record({ where: where(setup, state), event: { at: at(setup), kind: "started", phase, mode: "none", head } });
+  return record({
+    where: where(setup, state),
+    event: { at: at(setup), kind: "started", phase, mode: "none", head, plugins: usedBy(setup) },
+  });
 }
 
 // failedAt : a failed check's nextTry, as a field to spread; n counts this failure (#228)
