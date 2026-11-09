@@ -297,10 +297,10 @@ export function readSpec(request: { readonly store: SpecStore } & Ticket): Promi
 export type Approver = { readonly by: string; readonly at: string };
 
 // prBlock : the part of a PR body that records what was approved: the spec itself, its hash and who approved it when.
-// The dispatcher (#103) puts it in the PR body it opens, and the reviewer's pack reads the PR body (pack section 5), so
-// the reviewer checks the change against this exact spec. The spec is the person's own approved text, so it goes in
-// as written, inside a fence longer than any it holds: in a code block, GitHub and GitLab run no quick action, ping
-// nobody and close nothing. The approver line is cleaned.
+// The reviewer's pack does not read it: it reads the spec from the store and checks its hash against the approval
+// (pack section 5, #224). The spec is the person's own approved text, so it goes in as written, inside a fence longer
+// than any it holds: in a code block, GitHub and GitLab run no quick action, ping nobody and close nothing. The
+// approver line is cleaned.
 export function prBlock(request: { readonly spec: Spec; readonly approver: Approver }): string {
   const { spec, approver } = request;
   const longest = Math.max(2, ...Array.from(spec.text.matchAll(/`+/g), (m) => m[0].length));

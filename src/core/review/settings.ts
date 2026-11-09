@@ -8,7 +8,8 @@
 //   FACTORY_MAX_USD               the most one model run may spend, in US dollars (ADR-0011 D14)
 //   FACTORY_CLAUDE                the claude CLI (default: claude)
 //   FACTORY_MAX_RUNS              live runs allowed on this machine at once (default 2)
-//   FACTORY_HOME                  the run folders go in <home>/review-runs (default ~/.factory)
+//   FACTORY_HOME                  the run folders go in <home>/review-runs; the spec and its approval are read from
+//                                 <home>/specs and <home>/approvals (default ~/.factory)
 //
 // The claude CLI gets only the environment it needs (CLAUDE_ENV): no forge token, no FACTORY_* (ADR-0012 S2).
 
@@ -155,6 +156,8 @@ export function reviewSetup(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: Forge;
   readonly factory: string;
+  // the project whose specs and approvals the review reads (<home>/specs/<project>, <home>/approvals/<project>)
+  readonly project: string;
   readonly number: number;
   readonly paths: Paths;
   readonly model?: Model;
@@ -168,6 +171,8 @@ export function reviewSetup(input: {
     label: env.FACTORY_CLAIM_LABEL ?? "agent::claimed",
     repo: p.repo,
     env,
+    home: p.home,
+    project: input.project,
     rulebook: p.rulebook,
     packDir: join(p.repo, ".claude", "packs"),
     recordsDir: recordsDirOf(p.repo),

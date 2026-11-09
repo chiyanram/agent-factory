@@ -40,6 +40,7 @@ export function reviewStep(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: Forge;
   readonly factory: string;
+  readonly project: string;
   readonly model?: Model;
   readonly sessions?: Sessions;
 }): Step<RunInput, { readonly actOn: number }> {

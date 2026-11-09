@@ -10,12 +10,16 @@ import { claudeArgs, readAnswer, type Model, type ModelResult, type ModelRun } f
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
 import { reviewStep } from "../src/core/review/step.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
-import { changeAt, project, RULEBOOK, type Project } from "./review-repo.js";
+import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
 
 let p: Project;
 beforeEach(() => {
   p = project();
+  approveSpec(home());
 });
+
+// where specs and approvals live: ledger/PROJ-1 is approved there
+const home = (): string => join(p.root, "factory");
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
 const FINDING = {
@@ -130,6 +134,8 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     label: "agent::claimed",
     repo: p.clone,
     env: p.env,
+    home: home(),
+    project: "ledger",
     rulebook: RULEBOOK,
     packDir: join(p.root, "packs"),
     recordsDir: join(p.root, "records"),
@@ -184,7 +190,7 @@ describe("reviewRound", () => {
   });
 
   it("shows each run the pack and the whole head, never a rule file, a symlink or a .gitattributes rewrite", async () => {
-    p.git("checkout", "-q", "feat/x");
+    p.git("checkout", "-q", "factory/PROJ-1");
     p.write("CLAUDE.md", "MR RULES");
     p.write(".claude/settings.json", "{}");
     p.write("other/untouched.txt", "untouched\n");
@@ -197,7 +203,7 @@ describe("reviewRound", () => {
     symlinkSync("CLAUDE.md", join(p.clone, "link.md"));
     p.git("add", "-A");
     p.git("commit", "-q", "-m", "link");
-    p.git("push", "-q", "origin", "feat/x");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
     const head = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const seen: Seen[] = [];
@@ -260,9 +266,9 @@ describe("reviewRound", () => {
     // the same head again is left alone
     expect(await reviewRound(setup(f, model([], [])))).toMatchObject({ kind: "ok", value: { kind: "already" } });
     // a new head with the same patch (a rebase-free amend of the message only) reuses
-    p.git("checkout", "-q", "feat/x");
+    p.git("checkout", "-q", "factory/PROJ-1");
     p.git("commit", "-q", "--amend", "-m", "same patch, new message");
-    p.git("push", "-q", "-f", "origin", "feat/x");
+    p.git("push", "-q", "-f", "origin", "factory/PROJ-1");
     const head = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const seen: Seen[] = [];
@@ -285,9 +291,9 @@ describe("reviewRound", () => {
     await reviewRound(
       setup(first, model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "x" }])], [])),
     );
-    p.git("checkout", "-q", "feat/x");
+    p.git("checkout", "-q", "factory/PROJ-1");
     p.git("commit", "-q", "--amend", "-m", "same patch");
-    p.git("push", "-q", "-f", "origin", "feat/x");
+    p.git("push", "-q", "-f", "origin", "factory/PROJ-1");
     const head = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const before = log.posts.length;
@@ -346,15 +352,11 @@ describe("reviewRound", () => {
   });
 
   it("an empty change goes to the human with no model run", async () => {
-    p.git("checkout", "-q", "-b", "feat/empty", "main");
-    p.git("push", "-q", "origin", "feat/empty");
-    const main = p.git("rev-parse", "HEAD");
-    p.git("checkout", "-q", "main");
+    const main = p.git("rev-parse", "main");
+    p.git("push", "-q", "-f", "origin", "main:factory/PROJ-1");
     const log = fresh();
     const seen: Seen[] = [];
-    const out = await reviewRound(
-      setup(forge(log, { change: changeAt(main, { sourceBranch: "feat/empty" }) }), model([], seen)),
-    );
+    const out = await reviewRound(setup(forge(log, { change: changeAt(main) }), model([], seen)));
     expect(out).toMatchObject({ kind: "ok", value: { kind: "no-progress", why: "the change is empty" } });
     expect(seen).toEqual([]);
     expect(log.labels).toEqual(["needs-human"]);
@@ -370,9 +372,9 @@ describe("reviewRound", () => {
       author: { name: "ram" },
       at: "t",
     });
-    p.git("checkout", "-q", "feat/x");
+    p.git("checkout", "-q", "factory/PROJ-1");
     p.git("commit", "-q", "--amend", "-m", "same patch");
-    p.git("push", "-q", "-f", "origin", "feat/x");
+    p.git("push", "-q", "-f", "origin", "factory/PROJ-1");
     const head = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const notes = [round(1, p.head1), round(2, p.head1), round(3, p.head2)];
@@ -406,11 +408,11 @@ describe("reviewRound", () => {
   });
 
   it("lists a protected file in the box and labels needs-human once; a file listed before does not relabel", async () => {
-    p.git("checkout", "-q", "feat/x");
+    p.git("checkout", "-q", "factory/PROJ-1");
     p.write(".github/workflows/ci.yml", "on: push\n");
     p.write("package.json", JSON.stringify({ dependencies: { "left-pad": "1.0.0" } }));
     p.commitAll("ci");
-    p.git("push", "-q", "origin", "feat/x");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
     const head = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const log = fresh();
@@ -421,10 +423,10 @@ describe("reviewRound", () => {
     expect(summary).toContain("- Build · package.json");
     expect(summary).toContain("- New dependency · left-pad (package.json)");
     // a later round that lists the same file again does not label
-    p.git("checkout", "-q", "feat/x");
+    p.git("checkout", "-q", "factory/PROJ-1");
     p.write("svc/Main.java", "class Main { int total() { return 3; } }\n");
     p.commitAll("more");
-    p.git("push", "-q", "origin", "feat/x");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
     const later = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const again = fresh();
@@ -602,6 +604,64 @@ describe("pass records", () => {
   });
 });
 
+describe("reviewRound: the approved spec (#224)", () => {
+  const packText = (): string => {
+    const [only] = readdirSync(join(p.root, "packs"));
+    return only === undefined ? "" : readFileSync(join(p.root, "packs", only), "utf8");
+  };
+
+  it("reviews against the ticket's approved spec from the store, named by the change's factory/<ticket> branch", async () => {
+    await reviewRound(setup(forge(fresh()), model([findAnswer([])], [])));
+    const text = packText();
+    expect(text).toContain("## 5 · Intent and acceptance criteria (the approved spec)");
+    expect(text).toContain("1. SPEC-AC1: total() returns the sum.");
+    expect(text).toContain("approved by ram at t");
+  });
+
+  it("names a spec edited after approval in the pack, for the reviewer to report", async () => {
+    writeSpec(home(), specText().replace("SPEC-AC2: an empty order totals 0.", "SPEC-AC2: totals 1."));
+    await reviewRound(setup(forge(fresh()), model([findAnswer([])], [])));
+    expect(packText()).toContain("it changed after a human approved it");
+  });
+
+  it("names a spec with no approval record in the pack", async () => {
+    rmSync(join(home(), "approvals"), { recursive: true, force: true });
+    await reviewRound(setup(forge(fresh()), model([findAnswer([])], [])));
+    expect(packText()).toContain("has no approval");
+  });
+
+  it("runs no model and posts nothing when the store has no spec for the ticket", async () => {
+    rmSync(join(home(), "specs"), { recursive: true, force: true });
+    const log = fresh();
+    const seen: Seen[] = [];
+    expect(await reviewRound(setup(forge(log), model([findAnswer([])], seen)))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("there is no spec for ledger/PROJ-1"),
+    });
+    expect(seen).toEqual([]);
+    expect(log.posts).toEqual([]);
+  });
+
+  it("refuses a change that is not on factory/<ticket>: it names no spec", async () => {
+    p.git("push", "-q", "origin", `${p.head2}:refs/heads/feat/y`);
+    const seen: Seen[] = [];
+    const change = changeAt(p.head2, { sourceBranch: "feat/y" });
+    expect(await reviewRound(setup(forge(fresh(), { change }), model([findAnswer([])], seen)))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("not factory/<ticket>"),
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it("refuses an approval record it cannot read, rather than reading it as no approval", async () => {
+    writeFileSync(join(home(), "approvals", "ledger", "PROJ-1.json"), "not json");
+    expect(await reviewRound(setup(forge(fresh()), model([findAnswer([])], [])))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("not valid JSON"),
+    });
+  });
+});
+
 describe("claudeArgs", () => {
   it("is restricted, with no MCP servers, Read, Grep and Glob only, a budget cap and a schema; never resumed", () => {
     const args = claudeArgs({
@@ -646,7 +706,7 @@ describe("reviewStep", () => {
       line: {
         kind: "open",
         number,
-        branch: "feat/x",
+        branch: "factory/PROJ-1",
         fork: false,
         lastNoteAt: "",
         head: p.head2,
@@ -659,24 +719,39 @@ describe("reviewStep", () => {
       },
     },
   });
-  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_RULEBOOK: RULEBOOK, FACTORY_HOME: p.root });
+  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_RULEBOOK: RULEBOOK, FACTORY_HOME: home() });
   const none = async () => ({ kind: "ok" as const, value: [] });
 
   it("is unavailable without its settings, and refuses a bad one", () => {
-    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram" })).toMatchObject({ kind: "unavailable" });
+    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram", project: "ledger" })).toMatchObject({
+      kind: "unavailable",
+    });
     expect(
-      reviewStep({ env: { ...env(), FACTORY_MAX_RUNS: "0" }, forge: forge(fresh()), factory: "ram" }),
+      reviewStep({
+        env: { ...env(), FACTORY_MAX_RUNS: "0" },
+        forge: forge(fresh()),
+        factory: "ram",
+        project: "ledger",
+      }),
     ).toMatchObject({ kind: "unavailable", reason: expect.stringContaining("FACTORY_MAX_RUNS") });
   });
 
   it("gives the table the Act on count of a posted round, and fails when the head moved", async () => {
     const m = () => model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "x" }])], []);
-    const step = reviewStep({ env: env(), forge: forge(fresh()), factory: "ram", model: m(), sessions: none });
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      model: m(),
+      sessions: none,
+    });
     expect(step.kind === "available" ? await step.run(input(12)) : step).toEqual({ kind: "ok", value: { actOn: 1 } });
     const movedStep = reviewStep({
       env: env(),
       forge: forge(fresh(), { moveTo: "f".repeat(40) }),
       factory: "ram",
+      project: "ledger",
       model: m(),
       sessions: none,
     });

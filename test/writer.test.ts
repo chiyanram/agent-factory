@@ -56,7 +56,7 @@ let p: Project;
 let home = "";
 let rulebook = "";
 beforeEach(async () => {
-  p = project();
+  p = project("feat/x");
   home = join(p.root, "home-w");
   rulebook = join(p.root, "rulebook");
   mkdirSync(join(rulebook, ".claude-plugin"), { recursive: true });
