@@ -1,3 +1,4 @@
+import { FLOOR } from "../src/core/review/never.js";
 import { readActOn } from "../src/core/review/act-on.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -259,6 +260,20 @@ describe("reviewRound", () => {
       setup(forge(log), model([findAnswer([])], []), { plugins: [{ label: "rulebook", dir: RULEBOOK }, other] }),
     );
     expect(log.posts.at(-1)).toContain("No findings");
+  });
+
+  it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {
+    const bare = join(p.root, "bare-find.md");
+    writeFileSync(bare, "Find what breaks. Report each finding.\n");
+    const seen: Seen[] = [];
+    await reviewRound(
+      setup(forge(fresh()), model([findAnswer([FINDING]), verdicts([])], seen), {
+        prompts: { find: bare, verify: PROMPTS.verify },
+      }),
+    );
+    expect(seen.map((s) => s.run.prompt.startsWith(FLOOR))).toEqual([true, true]);
+    expect(seen[0]?.run.prompt).toContain("approve or merge");
+    expect(seen[0]?.run.prompt.endsWith("Find what breaks. Report each finding.\n")).toBe(true);
   });
 
   it("a head that moved during the review posts nothing: MOVED", async () => {
