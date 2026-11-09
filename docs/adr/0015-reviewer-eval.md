@@ -49,7 +49,7 @@ The rubric changes from #188:
 |---|---|---|
 | R1 | Keep the four buckets, the Standards and Spec axes, and the 3-round cap. | They match Google, Bugbot and Pocock. |
 | R2 | Drop the unused severity. Tag each finding with a Martian category (bug, security, concurrency, data, api, perf, test_gap, doc_defect, style, speculative). | The eval can then report recall per category. |
-| R3 | A Spec finding quotes the criterion from the PR body. | As Pocock's code-review skill does. |
+| R3 | A Spec finding quotes the criterion it fails. Since #224 the criterion comes from the approved spec, not the PR body; the finding names it as its rule, `AC<n>`, and the engine quotes the line (amended on #219, 2026-11-09). | As Pocock's code-review skill does. |
 | R4 | Record the acted-on rate: a finding counts when a later commit fixes it. | It is the only metric that works on live PRs. |
 | R5 | Each `AGENTS.md` MUST becomes a code check (oxlint or grep) where it can be. | A rule that code can check should not depend on an LLM. |
 

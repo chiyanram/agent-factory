@@ -40,6 +40,7 @@ import {
   counts,
   countsLine,
   FIND_SCHEMA,
+  quoteOf,
   readFindings,
   readVerdicts,
   sortFindings,
@@ -436,21 +437,23 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
   }
 }
 
-function threadPost(f: Sorted): Post {
+// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219)
+function threadPost(f: Sorted, criteria: readonly string[]): Post {
+  const quote = quoteOf(f, criteria);
   return {
     seat: "reviewer",
     title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.rule}): ${f.finding}`,
-    fields: [{ label: "Fix", value: f.fix }],
+    fields: [...(quote === "" ? [] : [{ label: "Criterion", value: quote }]), { label: "Fix", value: f.fix }],
     items: [],
   };
 }
 
-async function threads(ctx: Ctx, sorted: readonly Sorted[]): Promise<Done> {
+async function threads(ctx: Ctx, sorted: readonly Sorted[], criteria: readonly string[]): Promise<Done> {
   for (const f of sorted.filter((x) => x.bucket === "act_on" || x.bucket === "consider")) {
     const posted = await ctx.setup.forge.lineFinding({
       change: ctx.change,
       at: { file: f.file, line: f.line },
-      post: threadPost(f),
+      post: threadPost(f, criteria),
     });
     if (posted.kind === "failed") {
       return posted;
@@ -487,13 +490,20 @@ async function boxFor(ctx: Ctx, pack: Pack): Promise<Result<Box>> {
   return statusBox({ touched, before: (p) => show(ctx, pack.base, p), after: (p) => show(ctx, pack.head, p) });
 }
 
-function findingLines(sorted: readonly Sorted[], axis: "standards" | "spec", name: string): readonly string[] {
+function findingLine(f: Sorted, name: string, criteria: readonly string[]): string {
+  const quote = quoteOf(f, criteria);
+  const line = `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule}: ${f.finding} (${f.why})`;
+  return quote === "" ? line : `${line} · criterion ${quote}`;
+}
+
+function findingLines(
+  sorted: readonly Sorted[],
+  axis: "standards" | "spec",
+  name: string,
+  criteria: readonly string[],
+): readonly string[] {
   const mine = sorted.filter((f) => f.axis === axis);
-  return mine.length === 0
-    ? [`${name} · none`]
-    : mine.map(
-        (f) => `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule}: ${f.finding} (${f.why})`,
-      );
+  return mine.length === 0 ? [`${name} · none`] : mine.map((f) => findingLine(f, name, criteria));
 }
 
 function boxLines(box: Box): readonly string[] {
@@ -504,13 +514,13 @@ function boxLines(box: Box): readonly string[] {
   ];
 }
 
-function summaryItems(sorted: readonly Sorted[], box: Box): readonly string[] {
+function summaryItems(sorted: readonly Sorted[], box: Box, criteria: readonly string[]): readonly string[] {
   const zero =
     sorted.length === 0 ? ["No findings. That is not a pass: the human still reviews before merge (ADR-0012 S10)"] : [];
   return [
     ...zero,
-    ...findingLines(sorted, "standards", "Standards"),
-    ...findingLines(sorted, "spec", "Spec"),
+    ...findingLines(sorted, "standards", "Standards", criteria),
+    ...findingLines(sorted, "spec", "Spec", criteria),
     ...boxLines(box),
   ];
 }
@@ -523,8 +533,13 @@ function freshProtected(ctx: Ctx, box: Box): readonly string[] {
 }
 
 // threadsAndLabel : the threads, then needs-human for a protected file not listed before
-async function threadsAndLabel(ctx: Ctx, box: Box, sorted: readonly Sorted[]): Promise<Done> {
-  const posted = await threads(ctx, sorted);
+async function threadsAndLabel(
+  ctx: Ctx,
+  box: Box,
+  sorted: readonly Sorted[],
+  criteria: readonly string[],
+): Promise<Done> {
+  const posted = await threads(ctx, sorted, criteria);
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
@@ -547,7 +562,7 @@ async function post(
   if (kept.kind === "failed") {
     return kept;
   }
-  const labelled = await threadsAndLabel(ctx, box.value, result.sorted);
+  const labelled = await threadsAndLabel(ctx, box.value, result.sorted, pack.criteria);
   if (labelled.kind === "failed") {
     return labelled;
   }
@@ -557,7 +572,7 @@ async function post(
   const summary = await note(
     ctx,
     `round ${round} · head ${pack.head} · patch-id ${pack.patchId} · ${countsLine(c)}`,
-    summaryItems(result.sorted, box.value),
+    summaryItems(result.sorted, box.value, pack.criteria),
     [{ label: "Spent at this head", value: spent }],
   );
   return summary.kind === "ok"

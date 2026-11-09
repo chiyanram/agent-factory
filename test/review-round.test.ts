@@ -190,6 +190,33 @@ describe("reviewRound", () => {
     expect(readdirSync(join(p.root, "runs"))).toEqual([]);
   });
 
+  it("quotes the approved spec's criterion a Spec finding fails, in its thread and the summary (#219)", async () => {
+    const log = fresh();
+    const spec = { ...FINDING, axis: "spec", rule: "AC2", finding: "an empty order totals 1" };
+    const stray = { ...FINDING, axis: "spec", rule: "AC9", finding: "names a criterion the spec lacks" };
+    const standards = { ...FINDING, rule: "AC2" };
+    const m = model(
+      [
+        findAnswer([spec, stray, standards]),
+        verdicts([
+          { id: "F1", bucket: "act_on", why: "real" },
+          { id: "F2", bucket: "consider", why: "maybe" },
+          { id: "F3", bucket: "consider", why: "maybe" },
+        ]),
+      ],
+      [],
+    );
+    await reviewRound(setup(forge(log), m));
+    expect(log.threads[0]).toContain("- Criterion: 2. SPEC-AC2: an empty order totals 0.\n- Fix: return the sum");
+    expect(log.threads[1]).toContain("- Criterion: AC9 is not in the approved spec");
+    expect(log.threads[2]).not.toContain("Criterion");
+    const summary = log.posts.at(-1) ?? "";
+    expect(summary).toContain(
+      "- Spec · Act on F1 svc/Main.java:1 AC2: an empty order totals 1 (real) · criterion 2. SPEC-AC2: an empty order totals 0.",
+    );
+    expect(summary).toContain("- Standards · Consider F3 svc/Main.java:1 AC2: returns 2 (maybe)\n");
+  });
+
   it("shows each run the pack and the whole head, never a rule file, a symlink or a .gitattributes rewrite", async () => {
     p.git("checkout", "-q", "factory/PROJ-1");
     p.write("CLAUDE.md", "MR RULES");

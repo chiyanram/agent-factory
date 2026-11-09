@@ -64,6 +64,9 @@ export type Pack = {
   readonly patchId: string;
   readonly base: string;
   readonly reused: boolean;
+  // the approved spec's acceptance criteria, as section 5 numbers them (1 is the first); none when no spec is approved.
+  // A Spec finding names one as its rule, AC<n>, and the round quotes that line from here, never from the model (#219).
+  readonly criteria: readonly string[];
 };
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -459,6 +462,7 @@ function specSection(p: Parts): string {
       fence({ title: "approval", text: `approved by ${c.by} at ${c.at}` }),
       fence({ title: "intent", text: c.spec.intent, info: "markdown" }),
       fence({ title: "acceptance criteria", text: criteria, info: "markdown" }),
+      "\nA Spec finding that fails a criterion gives `AC<n>` as its rule, where n is the criterion's number here; the review quotes that line from this spec.\n",
     ].join("");
   }
   const why =
@@ -648,6 +652,11 @@ async function written(path: string, p: Parts): Promise<Result<string>> {
   return text.kind === "ok" ? write(path, text.value) : text;
 }
 
+// criteriaOf : the acceptance criteria a Spec finding may quote: the approved spec's, or none (#219)
+function criteriaOf(c: Contract): readonly string[] {
+  return c.kind === "approved" ? c.spec.criteria : [];
+}
+
 // buildPack : the pack for the change's head, from the cache when it is there.
 export async function buildPack(input: PackInput): Promise<Result<Pack>> {
   const git = gitFor(input);
@@ -657,7 +666,14 @@ export async function buildPack(input: PackInput): Promise<Result<Pack>> {
     return p;
   }
   const path = packPath(input, p.value.h.head);
-  const pack = { path, head: p.value.h.head, patchId: p.value.patchId, base: p.value.h.base };
+  const c = p.value.contract;
+  const pack = {
+    path,
+    head: p.value.h.head,
+    patchId: p.value.patchId,
+    base: p.value.h.base,
+    criteria: criteriaOf(c),
+  };
   if (await exists(path)) {
     return { kind: "ok", value: { ...pack, reused: true } };
   }
