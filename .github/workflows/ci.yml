@@ -90,15 +90,15 @@ jobs:
         run: |
           marker='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks: *true'
           if printf '%s\n%s\n' "$TITLE" "$BODY" | grep -qiE "$marker" || git log --format=%B "origin/$BASE_REF..$HEAD_SHA" | grep -qiE "$marker"; then
-            echo "::error::The title, description or a commit message contains a skip-ci marker. The squash merge would carry it to main and skip the release. Reword it."
+            echo "::error::The title, description or a commit message contains a skip-ci marker. The squash merge would carry it to main and skip the checks there. Reword it."
             exit 1
           fi
 
-  # Runs on a push to main, or from "Run workflow" on main when a push was skipped. GitHub skips every workflow for a
-  # push whose commit message holds the skip-ci marker anywhere, so never quote that marker in a commit.
+  # Runs only from "Run workflow" on main: during the dev phase a merge does not release (#327). A push to main runs
+  # the checks alone.
   release:
     needs: [lint-and-test, test-macos]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
