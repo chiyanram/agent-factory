@@ -60,7 +60,6 @@ async function fetched(job: BoxJob): Promise<Result<string>> {
       args,
       repo: { kind: "repo", path: job.setup.repo },
       env: job.setup.env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "none" },
     });
   const fetch = await git(["fetch", "-q", "origin", `+refs/heads/${job.branch}:${ref}`]);

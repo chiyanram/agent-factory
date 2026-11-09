@@ -14,6 +14,8 @@
 //     a protected file not listed before; then one summary note, last, since it marks the round done: a round that
 //     failed halfway runs again. No verdict ever approves or undrafts, and zero findings is not a pass (#118).
 
+import type { LaneProps } from "../lane.js";
+import { withFloor } from "./never.js";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
@@ -30,8 +32,7 @@ import { prop } from "../dispatch/records.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
-import { readProcess } from "../process/read.js";
-import { settingName } from "../settings/machine.js";
+import { readProcess, type PluginDir, type Process } from "../process/read.js";
 import { attempt } from "./safe.js";
 import { plainName } from "../spec.js";
 import { statusBox, type Box } from "./status.js";
@@ -40,6 +41,7 @@ import {
   counts,
   countsLine,
   FIND_SCHEMA,
+  quoteOf,
   readFindings,
   readVerdicts,
   sortFindings,
@@ -64,7 +66,8 @@ export type ReviewSetup = {
   // where specs and approvals live (<home>/specs, <home>/approvals), and the project they are kept under
   readonly home: string;
   readonly project: string;
-  readonly rulebook: string;
+  // the project's plugins, in order: the first that holds a process gives the lanes, baseline and references (#232)
+  readonly plugins: readonly PluginDir[];
   readonly packDir: string;
   // where each pass's answer is kept, per change and head (ADR-0011 D16)
   readonly recordsDir: string;
@@ -126,7 +129,7 @@ async function defaultBranch(ctx: Ctx): Promise<Result<string>> {
 
 // specFor : the change's contract: the spec of the ticket its factory/<ticket> branch names, and that ticket's approval.
 // An approval record that cannot be read is refused, never read as no approval.
-async function specFor(ctx: Ctx): Promise<Result<SpecSource>> {
+async function specFor(ctx: Ctx, lanes: readonly LaneProps[]): Promise<Result<SpecSource>> {
   const s = ctx.setup;
   const branch = ctx.change.sourceBranch;
   const ticket = branch.startsWith(BRANCH_PREFIX) ? branch.slice(BRANCH_PREFIX.length) : "";
@@ -135,7 +138,7 @@ async function specFor(ctx: Ctx): Promise<Result<SpecSource>> {
       `${s.forge.mark}${s.number} is on ${branch}, not ${BRANCH_PREFIX}<ticket>, so it names no spec to review against; a person reviews it`,
     );
   }
-  const approval = await approvalFor({ home: s.home, project: s.project, ticket });
+  const approval = await approvalFor({ home: s.home, project: s.project, ticket, lanes });
   return approval.kind === "failed"
     ? approval
     : {
@@ -155,6 +158,7 @@ async function approvalFor(where: {
   readonly home: string;
   readonly project: string;
   readonly ticket: string;
+  readonly lanes: readonly LaneProps[];
 }): Promise<Result<Approval>> {
   const stored = await readApproval(where);
   if (stored.kind !== "missing") {
@@ -171,20 +175,38 @@ async function approvalFor(where: {
     : { kind: "ok", value: { kind: "none" } };
 }
 
+// the review reads its checks from a plugin; the built-in review references are still to come (#232)
+const NO_REFERENCES =
+  'the review needs a plugin that holds its review references: list one in the project\'s "plugins" and pin it';
+
+// reviewProcess : the project's process, and the folder its references are read from: the process plugin's, or with
+// no process plugin the first plugin's; none is refused
+async function reviewProcess(
+  plugins: readonly PluginDir[],
+): Promise<Result<Process & { readonly references: string }>> {
+  const own = await readProcess(plugins);
+  if (own.kind === "failed") {
+    return own;
+  }
+  const references = [own.value.dir, ...plugins.map((p) => p.dir)].find((d) => d !== "") ?? "";
+  return references === ""
+    ? { kind: "failed", reason: NO_REFERENCES }
+    : { kind: "ok", value: { ...own.value, references } };
+}
+
 async function packFor(ctx: Ctx): Promise<Result<Pack>> {
   const branch = await defaultBranch(ctx);
   if (branch.kind === "failed") {
     return branch;
   }
-  const spec = await specFor(ctx);
-  if (spec.kind === "failed") {
-    return spec;
-  }
   const s = ctx.setup;
-  // the rulebook folder stands in for the project's plugin list until plugins are fetched and pinned (#232)
-  const own = await readProcess([{ label: settingName("rulebook"), dir: s.rulebook }]);
+  const own = await reviewProcess(s.plugins);
   if (own.kind === "failed") {
     return own;
+  }
+  const spec = await specFor(ctx, own.value.lanes);
+  if (spec.kind === "failed") {
+    return spec;
   }
   const last = ctx.past.last;
   return buildPack({
@@ -192,7 +214,7 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
     env: s.env,
     change: ctx.change,
     defaultBranch: branch.value,
-    rulebook: s.rulebook,
+    rulebook: own.value.references,
     baseline: own.value.baseline,
     previous: last.kind === "round" ? { kind: "head", sha: last.head } : { kind: "none" },
     spec: spec.value,
@@ -292,7 +314,7 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
     folder,
     model: pass.model,
     schema: pass.schema,
-    prompt,
+    prompt: withFloor(prompt),
     name: `reviewer-${ctx.setup.number}`,
     maxUsd: ctx.setup.maxUsd,
   });
@@ -436,21 +458,23 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
   }
 }
 
-function threadPost(f: Sorted): Post {
+// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219)
+function threadPost(f: Sorted, criteria: readonly string[]): Post {
+  const quote = quoteOf(f, criteria);
   return {
     seat: "reviewer",
-    title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.rule}): ${f.finding}`,
-    fields: [{ label: "Fix", value: f.fix }],
+    title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.category}, ${f.rule}): ${f.finding}`,
+    fields: [...(quote === "" ? [] : [{ label: "Criterion", value: quote }]), { label: "Fix", value: f.fix }],
     items: [],
   };
 }
 
-async function threads(ctx: Ctx, sorted: readonly Sorted[]): Promise<Done> {
+async function threads(ctx: Ctx, sorted: readonly Sorted[], criteria: readonly string[]): Promise<Done> {
   for (const f of sorted.filter((x) => x.bucket === "act_on" || x.bucket === "consider")) {
     const posted = await ctx.setup.forge.lineFinding({
       change: ctx.change,
       at: { file: f.file, line: f.line },
-      post: threadPost(f),
+      post: threadPost(f, criteria),
     });
     if (posted.kind === "failed") {
       return posted;
@@ -464,7 +488,6 @@ async function show(ctx: Ctx, rev: string, path: string): Promise<string> {
     args: ["show", `${rev}:${path}`],
     repo: { kind: "repo", path: ctx.setup.repo },
     env: ctx.setup.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return shown.kind === "ok" ? shown.stdout : "";
@@ -475,7 +498,6 @@ async function boxFor(ctx: Ctx, pack: Pack): Promise<Result<Box>> {
     args: ["diff", "--name-only", "--no-renames", "-z", pack.base, pack.head],
     repo: { kind: "repo", path: ctx.setup.repo },
     env: ctx.setup.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   if (names.kind !== "ok") {
@@ -487,13 +509,20 @@ async function boxFor(ctx: Ctx, pack: Pack): Promise<Result<Box>> {
   return statusBox({ touched, before: (p) => show(ctx, pack.base, p), after: (p) => show(ctx, pack.head, p) });
 }
 
-function findingLines(sorted: readonly Sorted[], axis: "standards" | "spec", name: string): readonly string[] {
+function findingLine(f: Sorted, name: string, criteria: readonly string[]): string {
+  const quote = quoteOf(f, criteria);
+  const line = `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule} (${f.category}): ${f.finding} (${f.why})`;
+  return quote === "" ? line : `${line} · criterion ${quote}`;
+}
+
+function findingLines(
+  sorted: readonly Sorted[],
+  axis: "standards" | "spec",
+  name: string,
+  criteria: readonly string[],
+): readonly string[] {
   const mine = sorted.filter((f) => f.axis === axis);
-  return mine.length === 0
-    ? [`${name} · none`]
-    : mine.map(
-        (f) => `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule}: ${f.finding} (${f.why})`,
-      );
+  return mine.length === 0 ? [`${name} · none`] : mine.map((f) => findingLine(f, name, criteria));
 }
 
 function boxLines(box: Box): readonly string[] {
@@ -504,13 +533,13 @@ function boxLines(box: Box): readonly string[] {
   ];
 }
 
-function summaryItems(sorted: readonly Sorted[], box: Box): readonly string[] {
+function summaryItems(sorted: readonly Sorted[], box: Box, criteria: readonly string[]): readonly string[] {
   const zero =
     sorted.length === 0 ? ["No findings. That is not a pass: the human still reviews before merge (ADR-0012 S10)"] : [];
   return [
     ...zero,
-    ...findingLines(sorted, "standards", "Standards"),
-    ...findingLines(sorted, "spec", "Spec"),
+    ...findingLines(sorted, "standards", "Standards", criteria),
+    ...findingLines(sorted, "spec", "Spec", criteria),
     ...boxLines(box),
   ];
 }
@@ -523,8 +552,13 @@ function freshProtected(ctx: Ctx, box: Box): readonly string[] {
 }
 
 // threadsAndLabel : the threads, then needs-human for a protected file not listed before
-async function threadsAndLabel(ctx: Ctx, box: Box, sorted: readonly Sorted[]): Promise<Done> {
-  const posted = await threads(ctx, sorted);
+async function threadsAndLabel(
+  ctx: Ctx,
+  box: Box,
+  sorted: readonly Sorted[],
+  criteria: readonly string[],
+): Promise<Done> {
+  const posted = await threads(ctx, sorted, criteria);
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
@@ -547,7 +581,7 @@ async function post(
   if (kept.kind === "failed") {
     return kept;
   }
-  const labelled = await threadsAndLabel(ctx, box.value, result.sorted);
+  const labelled = await threadsAndLabel(ctx, box.value, result.sorted, pack.criteria);
   if (labelled.kind === "failed") {
     return labelled;
   }
@@ -557,7 +591,7 @@ async function post(
   const summary = await note(
     ctx,
     `round ${round} · head ${pack.head} · patch-id ${pack.patchId} · ${countsLine(c)}`,
-    summaryItems(result.sorted, box.value),
+    summaryItems(result.sorted, box.value, pack.criteria),
     [{ label: "Spent at this head", value: spent }],
   );
   return summary.kind === "ok"

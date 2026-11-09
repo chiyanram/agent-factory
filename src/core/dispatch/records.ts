@@ -21,9 +21,11 @@ import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
+import type { PluginHash } from "../process/use.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 
-export type Phase = "writer" | "ready" | "review" | "verify";
+// "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
+export type Phase = "writer" | "ready" | "review" | "verify" | "onboard";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
 // never rebases (#103: nothing force-pushes; the name predates that decision and stays, so older lines still read)
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase";
@@ -82,6 +84,8 @@ export type Event =
       readonly phase: Phase;
       readonly mode: WriterMode | "none";
       readonly head: string;
+      // each plugin the run used and its hash (#232); absent on older lines
+      readonly plugins?: readonly PluginHash[];
     }
   | {
       readonly at: string;
@@ -96,6 +100,8 @@ export type Event =
       readonly hung: boolean;
       // what the run spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // each cite of the project's brief that went stale, for the retro (#235); none on a line that has none
+      readonly stale?: readonly string[];
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -128,7 +134,8 @@ export type Event =
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
     }
-  // what a run that failed spent (#131): a review round whose pass failed
+  // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
+  // or failed (#235)
   | {
       readonly at: string;
       readonly kind: "spent";
@@ -193,7 +200,7 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
   return allowed.find((a) => a === v) ?? BAD;
 }
 
-const PHASES = ["writer", "ready", "review", "verify"] as const;
+const PHASES = ["writer", "ready", "review", "verify", "onboard"] as const;
 const MODES = ["test-first", "fix", "rework", "ci", "rebase"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
 const RETRIED = ["ready", "review", "verify"] as const;
@@ -209,7 +216,23 @@ function startedOf(raw: unknown, at: string): Event | Bad {
   const phase = oneOf(raw, "phase", PHASES);
   const mode = oneOf(raw, "mode", [...MODES, "none"] as const);
   const head = str(raw, "head");
-  return phase === BAD || mode === BAD || head === BAD ? BAD : { at, kind: "started", phase, mode, head };
+  if (phase === BAD || mode === BAD || head === BAD) {
+    return BAD;
+  }
+  const plugins = hashesIn(prop(raw, "plugins"));
+  return plugins === undefined
+    ? { at, kind: "started", phase, mode, head }
+    : { at, kind: "started", phase, mode, head, plugins };
+}
+
+// hashesIn : a started line's plugins and their hashes; none on an older line, or one that holds no list
+function hashesIn(value: unknown): readonly PluginHash[] | undefined {
+  const list = Array.isArray(value) ? value : [];
+  const hashes = list.flatMap((h: unknown) => {
+    const [ref, sha256] = [prop(h, "ref"), prop(h, "sha256")];
+    return typeof ref === "string" && typeof sha256 === "string" ? [{ ref, sha256 }] : [];
+  });
+  return Array.isArray(value) ? hashes : undefined;
 }
 
 function rowOf(row: unknown): Evidence | Bad {
@@ -272,14 +295,30 @@ function spendField(raw: unknown): { readonly spend?: Spend } | Bad {
   return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens } };
 }
 
+// staleField : a writer line's stale cites, as a field to spread: none on a line that has none (#235)
+function staleField(raw: unknown): { readonly stale?: readonly string[] } | Bad {
+  const stale = prop(raw, "stale");
+  if (stale === undefined) {
+    return {};
+  }
+  return Array.isArray(stale) && stale.every((s) => typeof s === "string") ? { stale } : BAD;
+}
+
+// writerExtras : a writer line's optional fields, its spend and its stale cites, as fields to spread, or BAD
+function writerExtras(raw: unknown): { readonly spend?: Spend; readonly stale?: readonly string[] } | Bad {
+  const spend = spendField(raw);
+  const stale = staleField(raw);
+  return spend === BAD || stale === BAD ? BAD : { ...spend, ...stale };
+}
+
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const mode = oneOf(raw, "mode", MODES);
   const outcome = oneOf(raw, "outcome", OUTCOMES);
   const parts = writerParts(raw);
-  const spend = spendField(raw);
-  return mode === BAD || outcome === BAD || parts === BAD || spend === BAD
+  const extras = writerExtras(raw);
+  return mode === BAD || outcome === BAD || parts === BAD || extras === BAD
     ? BAD
-    : { at, kind: "writer-ended", mode, outcome, ...parts, ...spend };
+    : { at, kind: "writer-ended", mode, outcome, ...parts, ...extras };
 }
 
 // nextTryField : a check line's nextTry, as a field to spread: none on a line that has none (a pass, or older than

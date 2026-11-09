@@ -2,7 +2,8 @@
 // branch touches a reviewer input, it must add an evals/reviewer/results/*.json that proves the change:
 //   proof      not partial, no draft case ("proof": true)
 //   inputs     each prompt's git blob SHA is the one the change has (prompts/review-find.md, review-verify.md,
-//              eval-judge.md), and the pass ran at a commit on this branch ("head" is an ancestor of HEAD)
+//              eval-judge.md), each model is the one src/core/review/pinned.ts pins (find, rule, logic, judge;
+//              ADR-0015 E9, #213), and the pass ran at a commit on this branch ("head" is an ancestor of HEAD)
 //   recall     recall_at_act_on.overall.recall is not below evals/reviewer/baseline.json's (E3)
 //   clean      0 clean-floor hits (E2)
 // With no baseline.json yet (#216), a reviewer-input change is refused: there is nothing to prove it against.
@@ -10,8 +11,11 @@
 // reads from the pull request event (GITHUB_EVENT_PATH; no token, no API call). Without that event, as in a local run,
 // a baseline change is refused. The new baseline must itself be a proof pass with 0 clean-floor hits.
 //
-// The reviewer inputs today are the prompts below. The model and rulebook pins join REVIEWER_INPUTS and the input
-// check when they land (#213, then the plugin pins with #232). No model call, no token: it reads git and JSON only.
+// The reviewer inputs today are the prompts below. A results file must also have run with the model pins. The pins
+// file itself becomes a reviewer input with the first baseline (#216): until then no change to it can be proven, and
+// it lands before the baseline (ADR-0015, build order 1 before 4). The rulebook's pin is the project's plugin pin,
+// kept in the factory home and not in this repository (#232), so inputs.rulebook is not checked here yet. No model
+// call, no token: it reads git, JSON and the model pins' leaf module only.
 //
 //   node scripts/check-eval-proof.ts [ROOT]     (make lint)
 //
@@ -22,6 +26,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const PROMPTS = {
   find: "prompts/review-find.md",
@@ -30,6 +35,11 @@ export const PROMPTS = {
 } as const;
 type PromptKey = keyof typeof PROMPTS;
 const PROMPT_KEYS: readonly PromptKey[] = ["find", "verify", "judge"];
+
+// the model pins: a leaf module, loaded from the checkout under check
+export const MODELS = "src/core/review/pinned.ts";
+type ModelKey = "find" | "rule" | "logic" | "judge";
+const MODEL_KEYS: readonly ModelKey[] = ["find", "rule", "logic", "judge"];
 
 export const BASELINE = "evals/reviewer/baseline.json";
 export const LABEL = "eval-baseline-approved";
@@ -51,6 +61,8 @@ export type Facts = {
   readonly baseline: string | undefined;
   // each prompt's git blob SHA in the change, "" when it is not there
   readonly prompts: Readonly<Record<PromptKey, string>>;
+  // each pinned model in the change, "" when the pins cannot be read
+  readonly models: Readonly<Record<ModelKey, string>>;
   readonly onBranch: (sha: string) => boolean;
   // the pull request's labels, or undefined when this run has no pull request event
   readonly labels: readonly string[] | undefined;
@@ -89,11 +101,16 @@ export function passProblems(value: unknown): readonly string[] {
 // inputProblems : why the inputs a results document ran with are not the change's. Pure.
 export function inputProblems(value: unknown, facts: Facts): readonly string[] {
   const prompts = field(field(value, "inputs"), "prompts");
+  const models = field(field(value, "inputs"), "models");
   const head = field(value, "head");
   const ran = typeof head === "string" && SHA.test(head) && facts.onBranch(head);
   return [
     ...PROMPT_KEYS.filter((k) => field(prompts, k) !== facts.prompts[k]).map(
       (k) => `inputs.prompts.${k} is ${String(field(prompts, k))}, not ${PROMPTS[k]} as changed (${facts.prompts[k]})`,
+    ),
+    ...MODEL_KEYS.filter((k) => facts.models[k] === "" || field(models, k) !== facts.models[k]).map(
+      (k) =>
+        `inputs.models.${k} is ${String(field(models, k))}, not the pin in ${MODELS} (${facts.models[k] || "none"})`,
     ),
     ...(ran ? [] : [`head ${String(head)} is not a commit on this branch`]),
   ];
@@ -197,7 +214,21 @@ function blob(root: string, file: string): string {
   return existsSync(join(root, file)) ? git(root, ["hash-object", "--", file]).out.trim() : "";
 }
 
-function readFacts(root: string, base: string, env: NodeJS.ProcessEnv): Facts {
+// modelPins : the pinned models in the checkout; "" for each when its pins module is missing or not as expected
+async function modelPins(root: string): Promise<Readonly<Record<ModelKey, string>>> {
+  const path = join(root, MODELS);
+  const pins: unknown = existsSync(path) ? await import(pathToFileURL(path).href).catch(() => undefined) : undefined;
+  const review = field(pins, "REVIEW_MODELS");
+  const text = (v: unknown): string => (typeof v === "string" ? v : "");
+  return {
+    find: text(field(review, "find")),
+    rule: text(field(review, "rule")),
+    logic: text(field(review, "logic")),
+    judge: text(field(pins, "JUDGE_MODEL")),
+  };
+}
+
+async function readFacts(root: string, base: string, env: NodeJS.ProcessEnv): Promise<Facts> {
   const pairs = nameStatus(git(root, ["diff", "--name-status", "--no-renames", "-z", base]).out);
   const untracked = git(root, ["ls-files", "-z", "-o", "--exclude-standard"])
     .out.split("\0")
@@ -209,23 +240,24 @@ function readFacts(root: string, base: string, env: NodeJS.ProcessEnv): Facts {
     results: new Map(added.filter((f) => RESULTS.test(f)).map((f) => [f, read(root, f) ?? ""])),
     baseline: read(root, BASELINE),
     prompts: { find: blob(root, PROMPTS.find), verify: blob(root, PROMPTS.verify), judge: blob(root, PROMPTS.judge) },
+    models: await modelPins(root),
     onBranch: (sha) => git(root, ["merge-base", "--is-ancestor", sha, "HEAD"]).code === 0,
     labels: eventLabels(env),
   };
 }
 
-function main(root: string, env: NodeJS.ProcessEnv): readonly string[] {
+async function main(root: string, env: NodeJS.ProcessEnv): Promise<readonly string[]> {
   const ref = baseRef(env);
   const base = git(root, ["merge-base", ref, "HEAD"]);
   if (base.code !== 0) {
     return [`cannot find the default branch ${ref} to compare with; fetch it or set FACTORY_BASE_REF`];
   }
-  const f = readFacts(root, base.out.trim(), env);
+  const f = await readFacts(root, base.out.trim(), env);
   return [...baselineProblems(f), ...proofProblems(f)];
 }
 
 if (process.argv[1] === import.meta.filename) {
-  const problems = main(process.argv[2] ?? ".", process.env);
+  const problems = await main(process.argv[2] ?? ".", process.env);
   for (const problem of problems) {
     console.log(problem);
   }

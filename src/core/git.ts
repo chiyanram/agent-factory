@@ -18,7 +18,6 @@ import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join, resolve, sep } from "node:path";
 
 export type RepoTarget = { readonly kind: "repo"; readonly path: string } | { readonly kind: "none" };
-export type OwnHelper = { readonly kind: "helper"; readonly value: string } | { readonly kind: "none" };
 export type Input = { readonly kind: "text"; readonly text: string } | { readonly kind: "none" };
 
 export type GitRequest = {
@@ -27,8 +26,6 @@ export type GitRequest = {
   readonly repo: RepoTarget;
   // the environment git starts from: normally process.env
   readonly env: NodeJS.ProcessEnv;
-  // the factory's own GitHub App helper ("!<path>/github-app.sh git-credential"), the one repo-set helper kept
-  readonly ownHelper: OwnHelper;
   readonly stdin: Input;
 };
 
@@ -161,7 +158,6 @@ export type ConfigRead =
       readonly kind: "read";
       readonly trusted: readonly Override[];
       readonly repoSet: readonly string[];
-      readonly repoHelpers: ReadonlyMap<string, readonly string[]>;
     }
   | Refused;
 
@@ -194,28 +190,13 @@ async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Pro
   if (scoped.code !== 0) {
     return { kind: "refused", reason: "cannot list the repo's own config keys (git 2.26 or later is needed)" };
   }
-  const repoSet = repoKeys(scoped.stdout);
-  const repoHelpers = new Map<string, readonly string[]>();
-  for (const key of repoSet.filter((k) => ruleFor(k).kind === "helper")) {
-    const local = await run(git, ["-C", dir, "config", "--local", "--null", "--get-all", key], env, NO_INPUT);
-    // 1: the key is set only in the worktree's config; anything else is an error
-    if (local.code !== 0 && local.code !== 1) {
-      return { kind: "refused", reason: `cannot read the repo's ${key}` };
-    }
-    repoHelpers.set(
-      key,
-      local.stdout.split("\0").filter((v) => v.length > 0),
-    );
-  }
-  return { kind: "read", trusted, repoSet, repoHelpers };
+  return { kind: "read", trusted, repoSet: repoKeys(scoped.stdout) };
 }
 
 type Step = { readonly kind: "add"; readonly overrides: readonly Override[] } | Refused;
 
 type Context = {
   readonly values: (key: string) => readonly string[];
-  readonly repoHelpers: (key: string) => readonly string[];
-  readonly ownHelper: OwnHelper;
 };
 
 function lastOr(ctx: Context, key: string, neutral: string): Override {
@@ -239,15 +220,10 @@ function refuseStep(ctx: Context, key: string): Step {
       };
 }
 
-// helperStep : an empty helper clears the list so far, then the trusted helpers, then the factory's own if the repo
-// names it exactly.
+// helperStep : an empty helper clears the list so far, then the trusted helpers; no helper the repo sets is kept, as in
+// scripts/lib/git.sh
 function helperStep(ctx: Context, key: string): Step {
-  const own =
-    ctx.ownHelper.kind === "helper" && ctx.repoHelpers(key).includes(ctx.ownHelper.value) ? [ctx.ownHelper.value] : [];
-  return {
-    kind: "add",
-    overrides: [{ key, value: "" }, ...[...ctx.values(key), ...own].map((value) => ({ key, value }))],
-  };
+  return { kind: "add", overrides: [{ key, value: "" }, ...ctx.values(key).map((value) => ({ key, value }))] };
 }
 
 function step(ctx: Context, key: string): Step {
@@ -273,17 +249,8 @@ function step(ctx: Context, key: string): Step {
 export type Plan = { readonly kind: "ok"; readonly overrides: readonly Override[] } | Refused;
 
 // plan : the GIT_CONFIG_COUNT entries for one call, or the first refusal.
-export function plan(
-  trusted: readonly Override[],
-  repoSet: readonly string[],
-  repoHelpers: (key: string) => readonly string[],
-  ownHelper: OwnHelper,
-): Plan {
-  const ctx: Context = {
-    values: (key) => trusted.filter((t) => t.key === key).map((t) => t.value),
-    repoHelpers,
-    ownHelper,
-  };
+export function plan(trusted: readonly Override[], repoSet: readonly string[]): Plan {
+  const ctx: Context = { values: (key) => trusted.filter((t) => t.key === key).map((t) => t.value) };
   const start: Plan = { kind: "ok", overrides: ALWAYS.map((o) => lastOr(ctx, o.key, o.value)) };
   return repoSet.reduce<Plan>((acc, key) => {
     if (acc.kind === "refused") {
@@ -327,10 +294,7 @@ export async function hostGit(request: GitRequest): Promise<GitResult> {
   const base: NodeJS.ProcessEnv = { ...request.env, PATH: path, GIT_TERMINAL_PROMPT: "0" };
   const dir = request.repo.kind === "repo" ? request.repo.path : "/";
   const config = await readConfig(git.path, dir, base);
-  const decided =
-    config.kind === "read"
-      ? plan(config.trusted, config.repoSet, (key) => config.repoHelpers.get(key) ?? [], request.ownHelper)
-      : config;
+  const decided = config.kind === "read" ? plan(config.trusted, config.repoSet) : config;
   if (decided.kind === "refused") {
     return decided;
   }

@@ -103,6 +103,16 @@ function ladderStep(key: Key, state: State, entry: Entry): Step {
     : rankStep(state, entry, was, now);
 }
 
+// withinStep : a cap that is not a number (the run hours): a value within the one above wins; any other is refused
+function withinStep(inside: (lower: unknown, upper: unknown) => boolean, state: State, entry: Entry): Step {
+  if (!inside(entry.value, state.value)) {
+    return { state, problem: `${show(entry.value)} is not within ${show(state.value)}` };
+  }
+  return canonical(entry.value) === canonical(state.value)
+    ? { state, problem: "" }
+    : { state: { value: entry.value, sources: [entry.source] }, problem: "" };
+}
+
 // capStep : the lowest wins; a higher value is refused
 function capStep(state: State, entry: Entry): Step {
   const [was, now] = [state.value, entry.value];
@@ -157,7 +167,7 @@ type ClassStep = (key: Key, state: State, entry: Entry, mode: TeamMode) => Step;
 
 const STEPS: Readonly<Record<KeyClass, ClassStep>> = {
   ladder: (key, state, entry) => ladderStep(key, state, entry),
-  cap: (_key, state, entry) => capStep(state, entry),
+  cap: (key, state, entry) => (key.within === undefined ? capStep(state, entry) : withinStep(key.within, state, entry)),
   "allow-list": (_key, state, entry, mode) => allowStep(state, entry, mode),
   "deny-list": (_key, state, entry) => denyStep(state, entry),
   locked: (_key, state, entry) => lockedStep(state, entry),

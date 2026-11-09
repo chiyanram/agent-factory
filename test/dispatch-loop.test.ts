@@ -298,19 +298,36 @@ describe("the orchestrator loop (#305)", () => {
     expect(loop.lines.some((l) => l.includes("run `agent-factory dispatch ledger` again then"))).toBe(true);
   });
 
+  it("ends after a pass outside the run hours, saying when they are (#299)", async () => {
+    await approved();
+    const runs: string[] = [];
+    // the loop's clock says 10:00 UTC; the run hours are the night
+    const caps = { ...NO_CAPS, runHours: { from: 22, to: 6, text: "22-06" } };
+    const loop = loopWith(() => ({ team, open: [open()], merged: [] }), writer("done", runs), caps);
+    const why = "run hours are 22-06 UTC; run `agent-factory dispatch ledger` again then";
+    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false, held: [why] } });
+    expect(runs).toEqual([]);
+    expect(loop.slept).toEqual([]);
+    expect(loop.lines).toContain(`no run could start; the orchestrator loop ends: ${why}`);
+    expect(await statusLine()).toBe(
+      `no orchestrator loop running; the last loop ended at 2026-11-07T10:00:00.000Z: ${why}; posted #12`,
+    );
+  });
+
   it("goes on when one run is held and another starts; a later clean end clears status's stopped line", async () => {
     const writerRun = { kind: "writer", task: { kind: "fix" }, why: "x" } as const;
     const unset = { kind: "unavailable", reason: "no runner" } as const;
     expect(
-      heldBack(
-        [
-          { ticket: "PROJ-1", action: { kind: "ready", head: H }, result: unset },
-          { ticket: "PROJ-2", action: writerRun, result: { kind: "ok" } },
-        ],
-        "ledger",
-      ),
+      heldBack({ project: "ledger", caps: NO_CAPS }, [
+        { ticket: "PROJ-1", action: { kind: "ready", head: H }, result: unset },
+        { ticket: "PROJ-2", action: writerRun, result: { kind: "ok" } },
+      ]),
     ).toEqual([]);
-    expect(heldBack([{ ticket: "PROJ-1", action: { kind: "wait", why: "CI" }, result: unset }], "ledger")).toEqual([]);
+    expect(
+      heldBack({ project: "ledger", caps: NO_CAPS }, [
+        { ticket: "PROJ-1", action: { kind: "wait", why: "CI" }, result: unset },
+      ]),
+    ).toEqual([]);
     await approved();
     expect(await loopWith(() => ({ team, open: [open()], merged: [] })).run()).toMatchObject({
       value: { held: [expect.any(String)] },

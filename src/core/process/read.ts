@@ -19,11 +19,13 @@ import { BASELINE, type Pointer } from "../review/rules.js";
 export type Process = {
   // where it came from, as a person reads it
   readonly from: string;
+  // the folder of the plugin that holds it, where its references are; "" for the built-in process
+  readonly dir: string;
   readonly lanes: readonly LaneProps[];
   readonly baseline: readonly Pointer[];
 };
 
-export const BUILT_IN: Process = { from: "the built-in process", lanes: DEFAULT_LANES, baseline: BASELINE };
+export const BUILT_IN: Process = { from: "the built-in process", dir: "", lanes: DEFAULT_LANES, baseline: BASELINE };
 
 // one plugin on disk: what to call it, and its folder
 export type PluginDir = { readonly label: string; readonly dir: string };
@@ -36,7 +38,7 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
 const NAME = /^[A-Za-z0-9_-]+$/;
 
 // processDir : the plugin's first skills/<skill>/process folder with a lanes file, by skill name; "" when none
-async function processDir(dir: string): Promise<string> {
+export async function processDir(dir: string): Promise<string> {
   const skills = await readdir(join(dir, "skills")).catch((): string[] => []);
   for (const skill of skills.toSorted()) {
     const lanes = join(dir, "skills", skill, "process", "lanes.json");
@@ -107,14 +109,14 @@ async function baselineAt(dir: string): Promise<Result<readonly Pointer[]>> {
   return baselineOf(path, raw.value);
 }
 
-async function processAt(label: string, dir: string): Promise<Result<Process>> {
+async function processAt(label: string, plugin: string, dir: string): Promise<Result<Process>> {
   const lanes = await lanesAt(dir);
   if (lanes.kind === "failed") {
     return lanes;
   }
   const baseline = await baselineAt(dir);
   return baseline.kind === "ok"
-    ? { kind: "ok", value: { from: `${label} (${dir})`, lanes: lanes.value, baseline: baseline.value } }
+    ? { kind: "ok", value: { from: `${label} (${dir})`, dir: plugin, lanes: lanes.value, baseline: baseline.value } }
     : baseline;
 }
 
@@ -124,7 +126,7 @@ export async function readProcess(plugins: readonly PluginDir[]): Promise<Result
   for (const plugin of plugins) {
     const dir = await processDir(plugin.dir);
     if (dir !== "") {
-      return processAt(plugin.label, dir);
+      return processAt(plugin.label, plugin.dir, dir);
     }
   }
   return { kind: "ok", value: BUILT_IN };

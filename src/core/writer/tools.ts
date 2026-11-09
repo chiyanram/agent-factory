@@ -52,19 +52,21 @@ export function toolLines(tools: Tools): readonly string[] {
   ];
 }
 
+// the default branch, as readTools fetches it into the project's clone before each run
+export const TARGET_REF = "refs/factory/writer-target";
+
 // readTools : the tools on the default branch of the project's clone; none when the file is not there
 export async function readTools(input: {
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
   readonly base: string;
 }): Promise<Tools> {
-  const ref = "refs/factory/writer-target";
+  const ref = TARGET_REF;
   const git = (args: readonly string[]) =>
     hostGit({
       args,
       repo: { kind: "repo", path: input.repo },
       env: input.env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "none" },
     });
   const fetched = await git(["fetch", "-q", "origin", `+refs/heads/${input.base}:${ref}`]);

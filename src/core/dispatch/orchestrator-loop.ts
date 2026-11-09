@@ -16,7 +16,7 @@
 //
 // A loop never waits on what only a person can change. A pass that starts no run because every run it could start is
 // held back, by a step that is not set up (the writer's runner, the ready check's) or by a cap (the project's day, the
-// window's share), ends the loop after that pass, with why and what to do: set the step up, or run `dispatch` again
+// window's share) or by the run hours (#299), ends the loop after that pass, with why and what to do: set the step up, or run `dispatch` again
 // tomorrow, or once the window has room. The loop writes how it ended to <home>/runs/<project>/loop-end.json, and
 // `status` shows a loop that ended that way.
 //
@@ -35,6 +35,7 @@ import {
   holder,
   lock,
   RUN_KINDS,
+  runHoursEnd,
   tick,
   type Decided,
   type Guard,
@@ -75,12 +76,18 @@ const STEP_NAMES: Readonly<Record<string, string>> = {
   verify: "the local verifier",
 };
 
-// heldBack : why no run started in a pass that had runs to start, or none when one started or none was due. Pure.
-export function heldBack(ran: readonly Ran[], project: string): readonly string[] {
+// heldBack : why no run started in a pass that had runs to start, or none when one started or none was due: outside
+// the run hours, when they are (runHoursEnd, #299); else each step not set up and each cap. Pure.
+export function heldBack(setup: Pick<TickSetup, "project" | "caps">, ran: readonly Ran[]): readonly string[] {
   const runs = ran.filter((r) => RUN_KINDS.has(r.action.kind));
   if (runs.length === 0 || runs.some((r) => r.result.kind !== "unavailable")) {
     return [];
   }
+  const closed = runHoursEnd(setup, ran);
+  return closed === "none" ? heldWhy(runs, setup.project) : [closed];
+}
+
+function heldWhy(runs: readonly Ran[], project: string): readonly string[] {
   const again = `run \`agent-factory dispatch ${project}\` again`;
   const why = runs.map((r) => {
     const reason = r.result.kind === "unavailable" ? r.result.reason : "";
@@ -109,7 +116,12 @@ export function flying(decided: readonly Decided[]): readonly string[] {
   return decided.flatMap((d) => ("kind" in d || !inFlight(d.state) ? [] : [d.state.ticket]));
 }
 
-type Step = { readonly kind: "pass"; readonly ran: readonly Ran[]; readonly flying: readonly string[] };
+type Step = {
+  readonly kind: "pass";
+  readonly ran: readonly Ran[];
+  readonly flying: readonly string[];
+  readonly setup: TickSetup;
+};
 
 // passAndLook : one locked pass, then the tickets still in flight
 async function passAndLook(loop: LoopSetup): Promise<Result<Step>> {
@@ -124,7 +136,7 @@ async function passAndLook(loop: LoopSetup): Promise<Result<Step>> {
   const decided = await decideAll(setup.value);
   return decided.kind === "failed"
     ? decided
-    : { kind: "ok", value: { kind: "pass", ran: ran.value, flying: flying(decided.value) } };
+    : { kind: "ok", value: { kind: "pass", ran: ran.value, flying: flying(decided.value), setup: setup.value } };
 }
 
 type Count = { passes: number; failedInRow: number; failedActions: boolean; held: readonly string[] };
@@ -149,7 +161,7 @@ function afterPass(loop: LoopSetup, count: Count, step: Step): "end" | "wait" {
     loop.log("no ticket is in flight; the orchestrator loop ends");
     return "end";
   }
-  count.held = heldBack(step.ran, loop.project);
+  count.held = heldBack(step.setup, step.ran);
   if (count.held.length > 0) {
     loop.log(`no run could start; the orchestrator loop ends: ${count.held.join("; and ")}`);
     return "end";

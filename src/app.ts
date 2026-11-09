@@ -29,7 +29,7 @@ import {
   type TokenStore,
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
-import { STEPS_TODAY, tick, type Steps, type TickSetup } from "./core/dispatch/tick.js";
+import { runHoursEnd, STEPS_TODAY, tick, type Steps, type TickSetup } from "./core/dispatch/tick.js";
 import { loopFile, loopRunning, orchestratorLoop } from "./core/dispatch/orchestrator-loop.js";
 import type { Gate } from "./core/dispatch/table.js";
 import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
@@ -41,6 +41,9 @@ import type { Identity } from "./core/identity.js";
 import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
 import { writerStep } from "./core/writer/step.js";
+import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
+import { readProcess, type PluginDir } from "./core/process/read.js";
+import type { LaneProps } from "./core/lane.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
@@ -56,6 +59,8 @@ import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
+import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
+import { onboardSetup } from "./core/onboard/settings.js";
 import { capsOf, type Caps } from "./core/dispatch/caps.js";
 
 const HELP = `usage: agent-factory <command>
@@ -108,7 +113,7 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${USAGE_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
@@ -195,6 +200,40 @@ function usage({ positionals, io }: Args): Promise<number> {
       return Promise.resolve(1);
     }
     return usageCommand(positionals, { ...resolved, home: home.path, now: Date.now });
+  });
+}
+
+// onboard : the onboarder's run, or a human's acceptance of what it staged (#235), with the project's settings resolved
+function onboardCli({ positionals, io }: Args): Promise<number> {
+  const project = positionals[0] === "accept" ? positionals[1] : positionals[0];
+  return resolvedRun("onboard", project, io, (resolved) => {
+    const home = factoryHome(resolved.env);
+    if (home.kind === "refused") {
+      io.err(`agent-factory onboard: ${home.reason}\n`);
+      return Promise.resolve(1);
+    }
+    return onboardCommand(positionals, {
+      home: home.path,
+      out: io.out,
+      err: io.err,
+      now: Date.now,
+      by: () => whoApproves(resolved.env),
+      setup: async (name) => {
+        const opened = await openProjectForge(
+          { env: resolved.env, log: (line) => io.err(`${line}\n`) },
+          { home: home.path, project: name, plugins: await pluginSetup(home.path, resolved.env) },
+        );
+        return opened.kind === "ok"
+          ? onboardSetup({
+              env: resolved.env,
+              forge: opened.value.forge,
+              home: home.path,
+              project: name,
+              now: Date.now,
+            })
+          : opened;
+      },
+    });
   });
 }
 
@@ -287,7 +326,6 @@ async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
     args: ["config", "--get", "user.name"],
     repo: { kind: "none" },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   const gitName = name.kind === "ok" ? name.stdout.trim() : "";
@@ -524,7 +562,12 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
     : { home: home.path, quiet, poll: every, caps: caps.value };
 }
 
-type Planned = { readonly gate: Gate; readonly steps: Steps };
+type Planned = {
+  readonly gate: Gate;
+  readonly steps: Steps;
+  readonly plugins: readonly PluginHash[];
+  readonly lanes: readonly LaneProps[];
+};
 
 type Project = { readonly forge: Forge; readonly identity: Identity };
 
@@ -579,6 +622,15 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     return planned;
   }
   const { gate, plan } = planned.value;
+  const used = await runPlugins({ home, project, env: io.env });
+  if (used.kind === "failed") {
+    return used;
+  }
+  io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
+  const own = await readProcess(used.value.plugins);
+  if (own.kind === "failed") {
+    return own;
+  }
   const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   const writer = await writerSetup({
     env: io.env,
@@ -590,6 +642,8 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     identity,
     store: tokenStore(io, home),
     pusher: hostPush,
+    plugins: used.value.plugins.map((p) => p.dir),
+    lanes: own.value.lanes,
   });
   const steps: Steps = {
     ...STEPS_TODAY,
@@ -601,10 +655,13 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
       }
       return { kind: "ok", value: stored.kind === "record" ? stored.record.head : "none" };
     }),
-    review: await reviewStepFor(io.env, forge, project),
+    review: await reviewStepFor(io.env, forge, project, used.value.plugins),
     verify: verifyStep(plan, forge),
   };
-  return { kind: "ok", value: { gate, steps } };
+  return {
+    kind: "ok",
+    value: { gate, steps, plugins: hashesOf(used.value.plugins), lanes: own.value.lanes },
+  };
 }
 
 type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number; readonly caps: Caps };
@@ -676,6 +733,10 @@ async function onePass(project: string, dryRun: boolean, io: Io, settings: PassS
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);
     return 1;
+  }
+  const closed = runHoursEnd({ project, caps: settings.caps }, passed.value);
+  if (closed !== "none") {
+    io.err(`agent-factory dispatch: ${closed}\n`);
   }
   return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
 }
@@ -770,10 +831,11 @@ async function reviewStepFor(
   env: NodeJS.ProcessEnv,
   forge: Forge,
   project: string,
+  plugins: readonly PluginDir[],
 ): Promise<ReturnType<typeof reviewStep>> {
   const factory = await factoryLogin(forge);
   return factory.kind === "ok"
-    ? reviewStep({ env, forge, factory: factory.value, project })
+    ? reviewStep({ env, forge, factory: factory.value, project, plugins })
     : { kind: "unavailable", reason: factory.reason };
 }
 
@@ -819,7 +881,7 @@ function reviewPaths(env: NodeJS.ProcessEnv): ReturnType<typeof paths> {
     : paths(env);
 }
 
-async function runReview(target: Target, io: Io, p: Paths): Promise<number> {
+async function runReview(target: Target, io: Io, p: Paths, plugins: readonly PluginDir[]): Promise<number> {
   const { project, number: n } = target;
   const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
   if (opened.kind === "failed") {
@@ -830,7 +892,9 @@ async function runReview(target: Target, io: Io, p: Paths): Promise<number> {
   const factory = await factoryLogin(forge);
   const round =
     factory.kind === "ok"
-      ? await reviewRound(reviewSetup({ env: io.env, forge, factory: factory.value, project, number: n, paths: p }))
+      ? await reviewRound(
+          reviewSetup({ env: io.env, forge, factory: factory.value, project, number: n, paths: p, plugins }),
+        )
       : factory;
   if (round.kind === "failed") {
     io.err(`agent-factory review: ${round.reason}\n`);
@@ -850,13 +914,15 @@ async function reviewCommand({ positionals, io }: Args): Promise<number> {
   return resolvedRun("review", target.project, io, (resolved) => reviewResolved(target, resolved));
 }
 
-function reviewResolved(target: Target, io: Io): Promise<number> {
+async function reviewResolved(target: Target, io: Io): Promise<number> {
   const p = reviewPaths(io.env);
-  if (p.kind === "failed") {
-    io.err(`agent-factory review: ${p.reason}\n`);
-    return Promise.resolve(1);
+  const used = p.kind === "ok" ? await runPlugins({ home: p.value.home, project: target.project, env: io.env }) : p;
+  if (used.kind === "failed" || p.kind === "failed") {
+    io.err(`agent-factory review: ${used.kind === "failed" ? used.reason : ""}\n`);
+    return 1;
   }
-  return runReview(target, io, p.value);
+  io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
+  return runReview(target, io, p.value, used.value.plugins);
 }
 
 // app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the
@@ -1138,6 +1204,7 @@ const COMMANDS: readonly Command[] = [
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
   { name: "usage", run: usage },
+  { name: "onboard", run: onboardCli },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
   { name: "plugin", run: pluginCli },
