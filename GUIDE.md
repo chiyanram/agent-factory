@@ -718,7 +718,9 @@ START waits, since nothing runs without one. In a lane with a design review, the
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
 fails is tried again after the same backoff, three times, then waits for a person (#236). After the implementer's
 done run (not a merge run), a cleanup run on the same branch tidies the branch's own lines from the cleanup role card,
-runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body;
+runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body,
+above the implementer's own PR body, `.factory/pr.md`, which the host posts cleaned after each implementer run that
+ended done (#335);
 the ready check then runs the cleanup's evidence rows. Each approval also gets one shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
@@ -927,6 +929,10 @@ it is a prompt instruction at most.
   `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
   and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126), and
   the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
+  One exception, the PR body (#335): below its own templated lines, the host posts the implementer's
+  `.factory/pr.md` as Markdown, only through the cleaner (`src/core/pr-body.ts`). It drops raw HTML, breaks every `@`,
+  puts `\` before a line that starts with `/`, breaks each reference after a closing keyword (`Fixes #12`), turns links to any host but the project's git host into plain text,
+  and caps the length; tables, headings and lists stay. Notes and comments stay fixed templates.
 - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106). **Today:** an edit elsewhere asks you rather than being refused.
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,

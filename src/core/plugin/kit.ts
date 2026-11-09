@@ -26,8 +26,8 @@ import { randomBytes } from "node:crypto";
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { reader } from "../forge/read.js";
-import { postOf } from "../forge/shapes.js";
-import { renderPost } from "../post.js";
+import { bodyPostOf } from "../forge/shapes.js";
+import { renderBody } from "../post.js";
 import { PROTOCOL, pluginEnv, readResult } from "./contract.js";
 import { makeFakes, stringsIn, type FakeAnswer, type FakeCall } from "./fakes.js";
 import { DEFAULT_LIMITS, runPlugin, type Ran } from "./exec.js";
@@ -201,11 +201,12 @@ function leakedIn(setup: Setup, text: string): boolean {
 // an emoji, a mention, a reference, a link and a line that would be a quick action
 const TRICKY = 'it\'s "q" $HOME `x` \\ ünï 😀 @team #1 www.example.com\n/approve';
 
-// rendered : a post as post.ts renders it, or none when the value is not a post
+// rendered : a post as post.ts renders it (a PR body with its cleaned Markdown, #335), or none when the value is not a
+// post
 function rendered(value: unknown): readonly string[] {
   const r = reader("post");
-  const post = r.done(postOf(r, value));
-  const text = post.kind === "ok" ? renderPost(post.value) : undefined;
+  const post = r.done(bodyPostOf(r, value));
+  const text = post.kind === "ok" ? renderBody(post.value) : undefined;
   return text?.kind === "ok" ? [text.text] : [];
 }
 

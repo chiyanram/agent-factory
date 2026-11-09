@@ -1,7 +1,7 @@
 // types — the forge seam (ADR-0010): one interface, a GitHub and a GitLab adapter, the same shapes from both. No bash
 // script calls a forge any more (#138).
 
-import type { Post } from "../post.js";
+import type { BodyPost, Post } from "../post.js";
 import type { Note } from "../notes.js";
 import type { Done, Result } from "./api.js";
 
@@ -98,7 +98,7 @@ export type ChangeRequest = {
   readonly branch: string;
   readonly base: string;
   readonly title: string;
-  readonly body: Post;
+  readonly body: BodyPost;
 };
 
 export type Forge = {
@@ -118,8 +118,8 @@ export type Forge = {
   // one comment, rendered from the posting template (#126), so no free text is ever posted
   note(input: { readonly number: number; readonly post: Post }): Promise<Done>;
   // the change's description replaced, rendered from the posting template like a note (#236: the cleanup run's
-  // deferred list goes in the PR body)
-  setBody(input: { readonly number: number; readonly post: Post }): Promise<Done>;
+  // deferred list goes in the PR body), then the implementer's Markdown, cleaned (renderBody, #335)
+  setBody(input: { readonly number: number; readonly post: BodyPost }): Promise<Done>;
   // every comment, oldest first
   notes(input: { readonly number: number }): Promise<Result<readonly Note[]>>;
   // one comment at file:line on the change's head; when the forge refuses that line, an unanchored one that names it
