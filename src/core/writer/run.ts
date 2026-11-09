@@ -22,7 +22,17 @@
 import type { Argv } from "../project.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
-import { decide, endingOf, loadReport, validReport, type Ending, type Outcome, type RunEnd } from "../report.js";
+import {
+  decide,
+  endingOf,
+  loadFactoryFile,
+  loadReport,
+  validReport,
+  type Ending,
+  type Outcome,
+  type RunEnd,
+} from "../report.js";
+import { PR_BODY_PATH } from "../pr-body.js";
 import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { pluginPaths, type Clone } from "./clone.js";
@@ -73,6 +83,9 @@ export type Ended = {
   readonly patch: string;
   // what the run spent, as its result event reported it (#131)
   readonly spend: Spend | "unmeasured";
+  // the PR body the run wrote in .factory/pr.md, as it wrote it, when it ended done (#335); the host cleans it before
+  // it posts it (renderBody)
+  readonly pr?: string;
 };
 
 // only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
@@ -357,15 +370,27 @@ async function committed(run: WriterRun): Promise<Result<{ readonly tip: string;
   return patch.kind === "ok" ? { kind: "ok", value: { tip: sha, patch: patch.value } } : patch;
 }
 
-// writerRun : the run, then its outcome, the branch's tip and the patch. A failure here is the host's, not the run's.
+// prOf : the PR body a done run wrote, read after the box stopped, as a field to spread; none when it wrote none, or
+// one the host cannot read safely (a symlink, too large)
+async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: string }> {
+  if (outcome.kind !== "done") {
+    return {};
+  }
+  const file = await loadFactoryFile({ worktree: run.clone.repo, path: PR_BODY_PATH });
+  return file.kind === "text" && file.text.trim() !== "" ? { pr: file.text } : {};
+}
+
+// writerRun : the run, then its outcome, the branch's tip, the patch and the PR body it wrote. A failure here is the
+// host's, not the run's.
 export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
   const { end, spend } = await inBox(run);
   const outcome = decide({
     end,
     file: end.kind === "failed" ? { kind: "missing" } : await loadReport({ worktree: run.clone.repo }),
   });
+  const pr = await prOf(run, outcome);
   const tip = await committed(run);
   return tip.kind === "ok"
-    ? { kind: "ok", value: { outcome, ending: endingOf(end), spend, ...tip.value } }
+    ? { kind: "ok", value: { outcome, ending: endingOf(end), spend, ...pr, ...tip.value } }
     : { kind: "failed", reason: `cannot read what the run committed: ${tip.reason}` };
 }

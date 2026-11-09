@@ -164,8 +164,8 @@ the engine, and its body is what the model reads.
 **Coordinator**: the role that talks with the human: research, questions, spec and design. It never approves and
 never starts a run.
 
-**Implementer**: the role that builds the spec and proves each AC (writing the PR body is open; see
-`docs/DESIGN.md`).
+**Implementer**: the role that builds the spec, proves each AC and writes the PR body (`.factory/pr.md`), which the
+host posts cleaned (#335).
 _Avoid_: writer
 
 **Test-first**: in the bug lane, the separate run that writes the failing test before the implementer runs.

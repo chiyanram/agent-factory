@@ -12,6 +12,8 @@ import { FORGE_OPS, type ForgeOp } from "./ops.js";
 import { reader, type Reader } from "./read.js";
 import { changeOf, changesOf, ciConfigOf, failedJobsOf, notesOf, numbersOf } from "./shapes.js";
 import { markOf } from "./target.js";
+import type { BodyPost } from "../post.js";
+import { cleanBody } from "../pr-body.js";
 import type { Change, Changes, CiConfig, FailedJob, Forge, ForgeName } from "./types.js";
 
 export type PluginTarget = {
@@ -94,6 +96,14 @@ async function opened(target: PluginTarget, input: object): Promise<Result<numbe
   return r.done(r.int(done.value, ""));
 }
 
+// cleanedBody : a PR body whose Markdown is cleaned before it leaves the host (#335): a plugin gets no model text that
+// cleanBody has not seen, whether or not it cleans it again
+export function cleanedBody(post: BodyPost): BodyPost {
+  return post.prBody === undefined
+    ? post
+    : { ...post, prBody: { ...post.prBody, markdown: cleanBody(post.prBody.markdown, { host: post.prBody.host }) } };
+}
+
 // pluginForge : the Forge that one forge plugin serves
 export function pluginForge(target: PluginTarget): Forge {
   return {
@@ -106,13 +116,13 @@ export function pluginForge(target: PluginTarget): Forge {
     addLabel: (i) => written(target, "addLabel", i),
     removeLabel: (i) => written(target, "removeLabel", i),
     note: (i) => written(target, "note", i),
-    setBody: (i) => written(target, "setBody", i),
+    setBody: (i) => written(target, "setBody", { ...i, post: cleanedBody(i.post) }),
     notes: (i): Promise<Result<readonly Note[]>> => read(target, "notes", i, notesOf),
     lineFinding: (i) => written(target, "lineFinding", i),
     status: (i) => written(target, "status", i),
     ciConfig: (): Promise<Result<CiConfig>> => read(target, "ciConfig", {}, ciConfigOf),
     claimed: (i) => read(target, "claimed", i, numbersOf),
-    openChange: (i) => opened(target, i),
+    openChange: (i) => opened(target, { ...i, body: cleanedBody(i.body) }),
     changes: (i): Promise<Result<Changes>> => read(target, "changes", i, changesOf),
     failedJobs: (i): Promise<Result<readonly FailedJob[]>> => read(target, "failedJobs", i, failedJobsOf),
   };
