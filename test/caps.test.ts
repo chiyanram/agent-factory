@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { capsOf, heldWords, NO_CAPS, projectStop, roomAt, ticketCapped } from "../src/core/dispatch/caps.js";
+import { capsOf, heldWords, NO_CAPS, overCaps, projectStop, roomAt, ticketCapped } from "../src/core/dispatch/caps.js";
 import { hoursOf, openAt, within } from "../src/core/dispatch/hours.js";
 import { keyById } from "../src/core/settings/keys.js";
+import { settingName } from "../src/core/settings/machine.js";
 import { claudeArgv } from "../src/core/writer/run.js";
 import type { Spent } from "../src/core/dispatch/usage.js";
 
@@ -183,5 +184,25 @@ describe("run hours (#299)", () => {
     expect(within("01-03", "00-24")).toBe(true);
     expect(within("21-06", "22-06")).toBe(false);
     expect(within("bad", "22-06")).toBe(false);
+  });
+});
+
+describe("overCaps: a review round's worst case against the dollar caps (#237)", () => {
+  const caps = { ...NO_CAPS, ticket: { usd: 5, tokens: "none" }, day: { usd: 10, tokens: "none" } } as const;
+  const spent = (usd: number) => ({ usd, tokens: 0 });
+
+  it("holds a round that could pass the ticket's or the day's cap, naming the cap and what is left", () => {
+    expect(overCaps({ worst: 3, ticket: spent(2), day: spent(0), caps })).toBe("");
+    expect(overCaps({ worst: 3.5, ticket: spent(2), day: spent(0), caps })).toContain(
+      `more than the $3.00 left under ${settingName("caps.usdPerTicket")}`,
+    );
+    expect(overCaps({ worst: 3, ticket: spent(0), day: spent(8), caps })).toContain(
+      `more than the $2.00 left under ${settingName("caps.usdPerProjectDay")}`,
+    );
+  });
+
+  it("never holds an unbounded worst case, or a project with no dollar caps", () => {
+    expect(overCaps({ worst: "unbounded", ticket: spent(5), day: spent(10), caps })).toBe("");
+    expect(overCaps({ worst: 100, ticket: spent(5), day: spent(10), caps: NO_CAPS })).toBe("");
   });
 });
