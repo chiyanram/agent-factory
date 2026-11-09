@@ -134,11 +134,11 @@ export type Event =
       readonly nextTry?: NextTry;
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
-      // per lens that ran, its verified findings no other lens reported (#237); none when the round ran no lens
-      readonly lenses?: Readonly<Record<string, number>>;
       // the last full round's Act on and Consider findings at its head, each acted on or not by this head (#220);
       // none on a first round, a reused one, or an older line
       readonly acted?: Acted;
+      // per lens that ran, its verified findings no other lens reported (#237); none when the round ran no lens
+      readonly lenses?: Readonly<Record<string, number>>;
     }
   // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
   // or failed (#235)
@@ -394,6 +394,17 @@ function verifyEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "verify-ended", head, passed, ...next };
 }
 
+// actedField : a review line's acted-on rows, as a field to spread: none on a line that has none (#220)
+function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
+  const acted = prop(raw, "acted");
+  if (acted === undefined) {
+    return {};
+  }
+  const since = str(acted, "since");
+  const rows = prop(acted, "rows");
+  return since !== BAD && Array.isArray(rows) && rows.every(isActedRow) ? { acted: { since, rows } } : BAD;
+}
+
 // entriesOf : an object's own entries; none for anything else. Pure.
 function entriesOf(value: unknown): readonly [string, unknown][] {
   return typeof value === "object" && value !== null ? Object.entries(value) : [];
@@ -409,17 +420,6 @@ function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, 
   return entries.length > 0 && entries.every(([, n]) => Number.isSafeInteger(n))
     ? { lenses: Object.fromEntries(entries.map(([lens, n]) => [lens, Number(n)])) }
     : BAD;
-}
-
-// actedField : a review line's acted-on rows, as a field to spread: none on a line that has none (#220)
-function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
-  const acted = prop(raw, "acted");
-  if (acted === undefined) {
-    return {};
-  }
-  const since = str(acted, "since");
-  const rows = prop(acted, "rows");
-  return since !== BAD && Array.isArray(rows) && rows.every(isActedRow) ? { acted: { since, rows } } : BAD;
 }
 
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {

@@ -116,7 +116,6 @@ export type Steps = {
               readonly actOn: number;
               readonly spend: Spend;
               readonly acted?: Acted;
-              // per lens that ran, its verified findings no other lens reported; none for a round that ran no lens
               readonly lenses?: Readonly<Record<string, number>>;
             }>
           | FailedSpent
