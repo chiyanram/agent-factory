@@ -171,7 +171,8 @@ The wall (`src/core/coordinator.ts`):
   too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`, `start-writer.sh`), since the loop is
   still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
 - **Denied:** `agent-factory approve` and `agent-factory start`: the AI never approves and never STARTs a ticket, so
-  you run them yourself in your own terminal (#227). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+  you run them yourself in your own terminal (#227). `agent-factory eval`: an eval pass spends on model runs (up to
+  $100), and only a human starts one (#215). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
   `projects`, `runs`, `secrets`, `coordinator`, `pending`, `writes`, `plugins.json` and `plugins`. Reading the
@@ -448,8 +449,8 @@ secret-like name the box was not given, is there. Where there is no image or no 
 to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, no LLM) starts. Each does one job on one
 story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
 questions and status to Jira or the issue through `agent-factory request` ([Writes](#writes)), and
-`agent-factory confirm` behind the person's yes; you never run `agent-factory approve` or `agent-factory start`, which
-are denied to you: the human runs them (#227). You edit and write only spec drafts in
+`agent-factory confirm` behind the person's yes; you never run `agent-factory approve`, `agent-factory start` or
+`agent-factory eval`, which are denied to you: the human runs them (#227, #215). You edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.

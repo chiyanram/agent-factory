@@ -9,7 +9,8 @@
 //           the old loop commands, so none runs without a yes; they become deny once the orchestrator runs every step
 //           (#113)
 //   deny    `agent-factory approve` and `agent-factory start`: the AI never approves and never STARTs a ticket (#227,
-//           P6, P8); a human runs them at a front door. Raw git host and network clients, git push, a second
+//           P6, P8); a human runs them at a front door. `agent-factory eval`: an eval pass is an extra task that spends
+//           on model runs (up to $100, ADR-0015 E11), and only a human starts one (#215). Raw git host and network clients, git push, a second
 //           interpreter or shell (a Read deny does not stop a program that opens files itself), sudo and the App
 //           token's wrapper; editing any .claude/ (the user's settings and each project's), the package, the START
 //           and approval records, the project home, the team and user settings layers, the local rubric folders, the
@@ -41,8 +42,9 @@ const READS = ["poll", "spec", "approval", "status", "request", "--help", "--ver
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
-// the commands only a human runs: the AI never approves and never STARTs (#227)
-export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start"];
+// the commands only a human runs: the AI never approves, never STARTs (#227), and never starts an eval pass, an extra
+// task that spends on model runs (#215)
+export const HUMAN_ONLY = ["agent-factory approve", "agent-factory start", "agent-factory eval"];
 
 const DENY_BASH = [
   ...HUMAN_ONLY,
@@ -225,6 +227,7 @@ export function claudeArgv(): Argv {
 const NEVER_LET = [
   "agent-factory approve PROJ PROJ-1 0",
   "agent-factory start PROJ PROJ-1",
+  "agent-factory eval reviewer",
   "gh api user",
   "glab api user",
   "curl https://example.com",

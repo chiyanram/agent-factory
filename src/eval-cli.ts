@@ -18,7 +18,7 @@ export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--allow-partial]
                                evals/reviewer/results/<date>-<sha>.json. <repo> is this repository's checkout (default
                                .). --drafts runs draft cases too (never proof). It refuses a pass that could spend over
                                $100 unless --allow-partial, which stops at the cap and marks the result partial. Host
-                               only: refused in CI. Exit 0 written, 3 written but partial, 1 refused
+                               only: refused in CI. A human runs it; the coordinator's settings deny it. Exit 0 written, 3 written but partial, 1 refused
 `;
 
 export type EvalIo = {

@@ -184,6 +184,8 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory approve",
       "agent-factory start ledger PROJ-1",
       "agent-factory spec ledger PROJ-1 && agent-factory start ledger PROJ-1 --yes",
+      "agent-factory eval reviewer",
+      "agent-factory eval reviewer . --allow-partial",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
     }
@@ -241,6 +243,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(args).toContain("shell(agent-factory request)");
     expect(args).toContain("shell(agent-factory project)");
     expect(args).toContain("shell(agent-factory approve)");
+    expect(args[args.indexOf("shell(agent-factory eval)") - 1]).toBe("--deny-tool");
     expect(args).toContain("shell(agent-factory start)");
     expect(args[args.indexOf("shell(agent-factory approve)") - 1]).toBe("--deny-tool");
     expect(args.join(" ")).not.toContain("shell(agent-factory confirm)");
@@ -273,6 +276,15 @@ describe("the wall's check (#105, #227)", () => {
       [(p) => p.allow.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
       [(p) => p.ask.push("Bash(agent-factory approve *)"), "Bash(agent-factory approve *) lets"],
       [(p) => p.allow.push("Bash(agent-factory start:*)"), "agent-factory start"],
+      [
+        (p) => p.allow.push("Bash(agent-factory eval *)"),
+        "Bash(agent-factory eval *) lets the coordinator run agent-factory eval reviewer",
+      ],
+      [(p) => p.ask.push("Bash(agent-factory eval reviewer)"), "lets the coordinator run agent-factory eval reviewer"],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory eval"))),
+        "Bash(agent-factory eval) is missing",
+      ],
       [(p) => p.allow.push("Bash(gh *)"), "run gh api user"],
       [(p) => p.allow.push("Bash(glab api *)"), "run glab api user"],
       [(p) => p.allow.push("Bash(curl:*)"), "run curl"],
