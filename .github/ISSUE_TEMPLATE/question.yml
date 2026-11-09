@@ -1,0 +1,27 @@
+name: Open question for the map
+description: Something the design has not decided yet.
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: One question, phrased so it can be answered with a decision.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What would resolve it?
+      options:
+        - Research (facts from docs or sources)
+        - Prototype (build something throwaway)
+        - Grilling (a decision by the operator)
+        - Task (a concrete step)
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Where it came from
+      description: The ticket, file or design section that raised it.
