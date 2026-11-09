@@ -17,8 +17,8 @@
 #   when the repo sets core.sshcommand ssh · core.askpass, core.alternaterefscommand, gpg.ssh.defaultkeycommand,
 #                      core.gitproxy and filter.<n>.clean/smudge/process "" (git then runs none) · filter.<n>.required
 #                      false · diff.<n>.textconv cat · remote.<n>.uploadpack/receivepack the plain programs
-#   credential helpers each helper key the repo sets is blanked, then its trusted helpers are added back. The one
-#                      repo helper kept is this factory's own App helper (GUIDE §Set up identity, GitHub step 5).
+#   credential helpers each helper key the repo sets is blanked, then its trusted helpers are added back; no repo
+#                      helper is kept.
 # hgit refuses, and runs nothing, when the repo sets a key that has no safe neutral value and no trusted one:
 # diff.external, diff.<n>.command and merge.<n>.driver (git dies on an empty one); url.<x>.insteadof and
 # url.<x>.pushinsteadof (they send a fetch or a push elsewhere); and http.[<url>.]proxy, remote.<n>.proxy, sslverify and
@@ -110,7 +110,6 @@ hg_overrides() {
   }
   hg_repo=$(printf '%s\n' "$hg_scoped" \
     | awk -F '\t' '$1 == "local" || $1 == "worktree" { print substr($0, index($0, "\t") + 1) }' | sort -u)
-  hg_own="!$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/github-app.sh git-credential"
   while IFS= read -r hg_key; do
     case $hg_key in
       '') ;;
@@ -128,15 +127,7 @@ hg_overrides() {
         hg_refuse "$hg_key" || return 1 ;;
       credential.helper | credential.*.helper)
         hg_pair "$hg_key" ''                                         # an empty helper clears the list so far
-        hg_trusted "$hg_key" | while IFS= read -r hg_h; do hg_pair "$hg_key" "$hg_h"; done
-        hg_local=$("$hg_git" -C "$1" config --local --get-all "$hg_key" 2> /dev/null); hg_rc=$?
-        case $hg_rc in
-          0 | 1) ;;                                                  # 1: set only in the worktree's config
-          *) echo "hgit: refused: cannot read the repo's $hg_key; nothing run" >&2; return 1 ;;
-        esac
-        if printf '%s\n' "$hg_local" | grep -qxF "$hg_own"; then
-          hg_pair "$hg_key" "$hg_own"
-        fi ;;
+        hg_trusted "$hg_key" | while IFS= read -r hg_h; do hg_pair "$hg_key" "$hg_h"; done ;;
     esac
   done <<LIST
 $hg_repo
