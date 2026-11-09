@@ -273,7 +273,7 @@ const ready: Rule = (s) => {
     ? { kind: "needs-human", why: `the ready check failed ${s.runs.readyFailures} times` }
     : {
         kind: "writer",
-        task: { kind: "ready-failed", why: r.why },
+        task: { kind: "ready-failed", head },
         why: `the ready check failed at this head: ${r.why}`,
       };
 };

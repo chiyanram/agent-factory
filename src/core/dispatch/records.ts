@@ -25,8 +25,8 @@ export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase";
 export type Task =
   | { readonly kind: "test-first" }
   | { readonly kind: "fix" }
-  // the ready check failed at the writer's head; why names the first row that failed
-  | { readonly kind: "ready-failed"; readonly why: string }
+  // the ready check failed at this head; why it failed is kept with the head (kept.ts, #199)
+  | { readonly kind: "ready-failed"; readonly head: string }
   // the factory's review at this head left Act on findings
   | { readonly kind: "act-on"; readonly head: string }
   // CI is red at this head

@@ -558,7 +558,7 @@ and posts what it committed. A `rework` or `ci` run (#171) works the same way, w
 
 | the run is for | `.factory/task.md` holds |
 |---|---|
-| a failed ready check | the evidence row that failed at the head, or the floor guard's `file:line` hits |
+| a failed ready check | why it failed at the head (the evidence row that failed, with the last 200 lines of its stdout and stderr, or the floor guard's `file:line` hits), kept at `.claude/runs/<change>/<head>/ready.txt` before the result is recorded |
 | an open Act on | the review's own Act on findings, kept at `.claude/runs/<change>/<head>/act-on.json` before it posts them; never a forge thread |
 | red forge CI | each failed job's name and the last 200 lines of its log, for the first 3 jobs (GitHub check runs and statuses, GitLab pipeline jobs) |
 | a failed local verifier | the verifier's own output, kept at `.claude/runs/<change>/<head>/verify.txt` before it posts the status |
