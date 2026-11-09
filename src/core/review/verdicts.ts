@@ -1,15 +1,18 @@
 // verdicts — what the find pass found and how the verify pass sorted it (#22 Q1, Q2). Model output is data: every
 // field is checked, ids are renumbered F1…Fn (so a verdict can never match two findings), and a "code/" path prefix is
 // dropped (so a thread anchors). A finding the verify pass gives no verdict is kept as Consider, never dropped.
-// Nothing here posts: the post template (#126) makes every field inert.
+// Nothing here posts: the post template (#126) makes every field inert. Each finding carries a category, what it is
+// (the Martian categories, ADR-0015 R2), and keeps its severity, how much it matters (decided on #218, 2026-11-09).
 
 import { prop } from "../dispatch/records.js";
+import { CATEGORIES, type Category } from "../eval/golden.js";
 import type { Result } from "../forge/api.js";
 
 export type Axis = "standards" | "spec";
 export type Kind = "rule" | "logic";
 export type Severity = "blocker" | "warning" | "nit";
 export type Bucket = "act_on" | "consider" | "noted" | "dismissed";
+export type { Category };
 
 export type Finding = {
   readonly id: string;
@@ -18,6 +21,7 @@ export type Finding = {
   readonly file: string;
   readonly line: number;
   readonly rule: string;
+  readonly category: Category;
   readonly severity: Severity;
   readonly finding: string;
   readonly fix: string;
@@ -27,7 +31,7 @@ export type Sorted = Finding & { readonly bucket: Bucket; readonly why: string }
 
 const FINDING_SCHEMA = {
   type: "object",
-  required: ["id", "axis", "kind", "file", "line", "rule", "severity", "finding", "fix"],
+  required: ["id", "axis", "kind", "file", "line", "rule", "category", "severity", "finding", "fix"],
   properties: {
     id: { type: "string" },
     axis: { enum: ["standards", "spec"] },
@@ -35,6 +39,7 @@ const FINDING_SCHEMA = {
     file: { type: "string" },
     line: { type: "integer" },
     rule: { type: "string" },
+    category: { enum: CATEGORIES },
     severity: { enum: ["blocker", "warning", "nit"] },
     finding: { type: "string" },
     fix: { type: "string" },
@@ -78,13 +83,21 @@ function text(value: unknown): string | Bad {
   return typeof value === "string" ? value : BAD;
 }
 
-type Fields = { readonly axis: Axis; readonly kind: Kind; readonly severity: Severity };
+type Fields = {
+  readonly axis: Axis;
+  readonly kind: Kind;
+  readonly category: Category;
+  readonly severity: Severity;
+};
 
 function enums(raw: unknown): Fields | Bad {
   const axis = oneOf(prop(raw, "axis"), ["standards", "spec"] as const);
   const kind = oneOf(prop(raw, "kind"), ["rule", "logic"] as const);
+  const category = oneOf(prop(raw, "category"), CATEGORIES);
   const severity = oneOf(prop(raw, "severity"), ["blocker", "warning", "nit"] as const);
-  return axis === BAD || kind === BAD || severity === BAD ? BAD : { axis, kind, severity };
+  return axis === BAD || kind === BAD || category === BAD || severity === BAD
+    ? BAD
+    : { axis, kind, category, severity };
 }
 
 type Words = { readonly file: string; readonly rule: string; readonly finding: string; readonly fix: string };
