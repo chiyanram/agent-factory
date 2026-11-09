@@ -36,6 +36,7 @@ import type {
   FailedJob,
   Forge,
   Level,
+  Mergeable,
   MergedChange,
   OpenChange,
   Person,
@@ -69,6 +70,15 @@ export function pipeline(head: HeadPipeline): Pipeline {
     : (STATUS[head.status.toUpperCase()] ?? { kind: "unknown", raw: head.status });
 }
 
+// mergeableOf : conflicts says the merge request cannot merge; CAN_BE_MERGED that it can. Any other merge status
+// (UNCHECKED, CHECKING, CANNOT_BE_MERGED_RECHECK) is unknown until GitLab has checked it. Pure.
+export function mergeableOf(conflicts: unknown, status: unknown): Mergeable {
+  if (conflicts === true) {
+    return "conflict";
+  }
+  return status === "CAN_BE_MERGED" ? "clean" : "unknown";
+}
+
 // GitLab's access levels: 40 Maintainer, 50 Owner; 30 Developer; lower is a guest or less.
 function level(access: number): Level {
   return access >= 40 ? "maintainer" : access >= 30 ? "developer" : "guest";
@@ -90,7 +100,7 @@ const MEMBERS = `query($project: ID!, $after: String) { project(fullPath: $proje
 const OPEN = `query($project: ID!, $after: String) { project(fullPath: $project) {
   mergeRequests(state: opened, first: 50, after: $after, sort: CREATED_ASC) {
     pageInfo { hasNextPage endCursor }
-    nodes { iid draft diffHeadSha sourceBranch sourceProjectId targetProjectId
+    nodes { iid draft diffHeadSha sourceBranch sourceProjectId targetProjectId conflicts mergeStatusEnum
       labels(first: 100) { pageInfo { hasNextPage } nodes { title } }
       headPipeline { status }
       notes(filter: ONLY_COMMENTS, last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
@@ -249,6 +259,7 @@ export function gitlab(client: Client, project: string): Forge {
         draft: r.bool(node, "draft"),
         labels: r.list(node, "labels.nodes").map((l) => r.text(l, "title")),
         pipeline: pipeline(headPipeline),
+        mergeable: mergeableOf(r.at(node, "conflicts"), r.at(node, "mergeStatusEnum")),
         comments: r.list(node, "notes.nodes").map((n) => comment(r, n)),
       },
       more: r.bool(node, "notes.pageInfo.hasPreviousPage"),

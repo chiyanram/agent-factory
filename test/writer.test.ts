@@ -243,6 +243,7 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       testFirst: "test {{ticket}}",
       rework: "rework {{ticket}}",
       ci: "ci {{ticket}}",
+      merge: "merge {{ticket}} with origin/{{base}}",
     },
     forge: told.forge,
     push: { forge: "github", host: "github.com", project: "o/r", identity: { kind: "own" }, env: p.env },
@@ -273,6 +274,7 @@ const openLine = (over: Partial<OpenChange> = {}): RunInput["change"] => ({
     needsHuman: false,
     stop: { kind: "none" },
     asks: 0,
+    mergeable: "clean",
     ...over,
   },
 });
@@ -726,6 +728,44 @@ describe("the writer step: a later run on the change", () => {
     expect(none.calls).toEqual([]);
   });
 
+  it("hands a merge run the default branch as origin/main, and pushes its merge as a fast-forward (#103)", async () => {
+    // main moves on after the branch was cut
+    p.write("svc/Other.java", "class Other {}\n");
+    const mainTip = p.commitAll("feat: other");
+    p.git("push", "-q", "origin", "main");
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const merging: Box = {
+      ...fake.box,
+      run: async (call) => {
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const dir = start?.op === "start" ? start.spec.worktree : "";
+        boxGit(dir, "merge", "-q", "--no-edit", "origin/main");
+        writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(DONE));
+        await fake.box.run(call);
+        return { kind: "exited", code: 0, stdout: "{}", stderr: "" };
+      },
+    };
+    const pushes: { lease: string; branch: string }[] = [];
+    const told = forge();
+    const out = await run(setup(merging, told, pushes), { kind: "conflict", head: p.head2 }, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+    const { head } = valueOf(out);
+    expect(command(fake).stdin).toMatchObject({
+      kind: "text",
+      text: expect.stringMatching(/^merge PROJ-1 with origin\/main/),
+    });
+    // a merge on top of the branch: its first parent the old head, its second main; the lease was the old head
+    expect(origin("refs/heads/feat/x")).toBe(head);
+    expect(origin(`${head}^1`)).toBe(p.head2);
+    expect(origin(`${head}^2`)).toBe(mainTip);
+    expect(pushes).toEqual([{ lease: p.head2, branch: "feat/x" }]);
+    const message = execFileSync("git", ["log", "-1", "--format=%B", head], {
+      cwd: join(p.root, "origin.git"),
+      encoding: "utf8",
+    });
+    expect(message).toContain("Agent: writer");
+  });
+
   it("refuses a ticket whose spec is no longer approved", async () => {
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
     const fake = fakeBox({});
@@ -903,7 +943,13 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
 describe("the writer's words and settings", () => {
   it("fills the prompt with the run's names, then the project's instructions and tools, then the report's schema", () => {
     const text = promptFor({
-      prompts: { fix: "fix {{ticket}} on {{branch}} at {{head}} ({{ticket}})", testFirst: "t", rework: "r", ci: "c" },
+      prompts: {
+        fix: "fix {{ticket}} on {{branch}} at {{head}} ({{ticket}})",
+        testFirst: "t",
+        rework: "r",
+        ci: "c",
+        merge: "m",
+      },
       mode: "fix",
       ticket: "PROJ-1",
       branch: "factory/PROJ-1",
@@ -919,8 +965,8 @@ describe("the writer's words and settings", () => {
   });
 
   it("tells the writer of every mode to keep its subagents and commands in the foreground (#192)", () => {
-    const prompts = { fix: "f", testFirst: "t", rework: "r", ci: "c" };
-    const modes = ["fix", "test-first", "rework", "ci"] as const;
+    const prompts = { fix: "f", testFirst: "t", rework: "r", ci: "c", merge: "m" };
+    const modes = ["fix", "test-first", "rework", "ci", "merge"] as const;
     const texts = modes.map((mode) =>
       promptFor({ prompts, mode, ticket: "PROJ-1", branch: "b", head: "h", tools: [] }),
     );

@@ -30,6 +30,7 @@ import type {
   FailedJob,
   Forge,
   Level,
+  Mergeable,
   MergedChange,
   OpenChange,
   Person,
@@ -48,6 +49,14 @@ const ROLLUP: Readonly<Record<string, Pipeline>> = {
   PENDING: { kind: "running" },
   EXPECTED: { kind: "running" },
 };
+
+// GitHub's MergeableState in the seam's words: CONFLICTING, MERGEABLE, or UNKNOWN while GitHub still computes it
+const MERGEABLE: Readonly<Record<string, Mergeable>> = { MERGEABLE: "clean", CONFLICTING: "conflict" };
+
+// mergeableOf : the pull request's MergeableState; anything else, or none, is unknown. Pure.
+export function mergeableOf(state: unknown): Mergeable {
+  return typeof state === "string" ? (MERGEABLE[state] ?? "unknown") : "unknown";
+}
 
 export function pipeline(
   rollup: { readonly kind: "none" } | { readonly kind: "state"; readonly state: string },
@@ -78,7 +87,7 @@ const COLLABORATORS = `query($owner: String!, $name: String!, $after: String) { 
 const OPEN = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   pullRequests(states: [OPEN], first: 50, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
-    nodes { number isDraft headRefOid headRefName isCrossRepository
+    nodes { number isDraft headRefOid headRefName isCrossRepository mergeable
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       comments(last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } } }`;
@@ -258,6 +267,7 @@ export function github(client: Client, project: GithubProject): Forge {
             ? { kind: "none" }
             : { kind: "state", state: r.text(rollup, "state") },
         ),
+        mergeable: mergeableOf(r.at(node, "mergeable")),
         comments: r.list(node, "comments.nodes").map((n) => comment(r, n)),
       },
       more: r.bool(node, "comments.pageInfo.hasPreviousPage"),

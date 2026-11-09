@@ -19,6 +19,10 @@ export type Anchor =
 
 export type ChangeState = "opened" | "merged" | "closed";
 
+// Whether a change merges into its target as it stands (#103): conflict, clean, or unknown while the git host has not
+// worked it out yet (GitHub and GitLab both check it lazily, after a push to either branch).
+export type Mergeable = "clean" | "conflict" | "unknown";
+
 export type Change = {
   readonly number: number;
   readonly state: ChangeState;
@@ -46,6 +50,8 @@ export type OpenChange = {
   readonly draft: boolean;
   readonly labels: readonly string[];
   readonly pipeline: Pipeline;
+  // whether it merges into its target as it stands
+  readonly mergeable: Mergeable;
   // every comment, oldest first
   readonly comments: readonly Note[];
 };

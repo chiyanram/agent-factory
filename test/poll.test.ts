@@ -23,6 +23,7 @@ const change = (number: number, o: Partial<OpenChange> = {}): OpenChange => ({
   draft: true,
   labels: [],
   pipeline: { kind: "success" },
+  mergeable: "clean",
   comments: [],
   ...o,
 });
@@ -111,8 +112,10 @@ describe("format", () => {
   it("writes one line per change, with the forge's mark", () => {
     const line = one(change(12, { labels: ["agent::claimed"], comments: [n("ram", "/stop", "2026-11-02T10:00:00Z")] }));
     expect(format({ line, mark: "!" })).toBe(
-      "!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00.000Z asks=0",
+      "!12 head=12345678 draft=yes claimed=yes pipeline=success needs_human=no stop=2026-11-02T10:00:00.000Z asks=0 conflict=no",
     );
+    expect(format({ line: { ...line, mergeable: "conflict" }, mark: "!" })).toMatch(/ conflict=yes$/);
+    expect(format({ line: { ...line, mergeable: "unknown" }, mark: "!" })).toMatch(/ conflict=unknown$/);
     expect(format({ line: { ...line, stop: { kind: "undated" } }, mark: "!" })).toContain(" stop=undated ");
     expect(format({ line: { kind: "merged", number: 9, branch: "factory/T-9", fork: false }, mark: "#" })).toBe(
       "#9 merged claimed=yes",

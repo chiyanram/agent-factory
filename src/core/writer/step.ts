@@ -4,9 +4,11 @@
 //   2 the writer's clone (clone.ts), the run in a fresh box (run.ts), the outcome from its report
 //   3 the host pushes and posts (finish.ts): on a first run it pushes, opens the draft change (#164) and claims it
 //   4 the run folder goes, however the run ended
-// It runs test-first, fix, rework and CI (#171). A rework or CI run gets its task in .factory/task.md (task.ts): the
-// failed evidence row, the factory's own Act on findings, or the failed CI jobs and their logs' ends. A task the host
-// cannot read goes to a person: the host says why on the change, labelled needs-human.
+// It runs test-first, fix, rework and CI (#171), and merge (#103). A rework or CI run gets its task in .factory/task.md
+// (task.ts): the failed evidence row, the factory's own Act on findings, or the failed CI jobs and their logs' ends. A
+// task the host cannot read goes to a person: the host says why on the change, labelled needs-human. A merge run, for a
+// change that conflicts with its target, gets the default branch fetched into its clone as origin/<default>, merges it
+// in and resolves the conflicts; the push stays a fast-forward, so nothing rebases or force-pushes.
 
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -39,15 +41,17 @@ export type Prompts = {
   readonly testFirst: string;
   readonly rework: string;
   readonly ci: string;
+  readonly merge: string;
 };
 
 // the modes this step runs, each with its prompt
-export type RunMode = "test-first" | "fix" | "rework" | "ci";
+export type RunMode = "test-first" | "fix" | "rework" | "ci" | "merge";
 const PROMPT_FILES = {
   fix: "writer.md",
   testFirst: "writer-test-first.md",
   rework: "writer-rework.md",
   ci: "writer-ci.md",
+  merge: "writer-merge.md",
 };
 
 // where the host pushes to, and as whom (#108)
@@ -90,13 +94,14 @@ export type WriterOut = {
 export async function readPrompts(): Promise<Result<Prompts>> {
   try {
     const read = (file: string) => readFile(join(PROMPTS, file), "utf8");
-    const [fix, testFirst, rework, ci] = await Promise.all([
+    const [fix, testFirst, rework, ci, merge] = await Promise.all([
       read(PROMPT_FILES.fix),
       read(PROMPT_FILES.testFirst),
       read(PROMPT_FILES.rework),
       read(PROMPT_FILES.ci),
+      read(PROMPT_FILES.merge),
     ]);
-    return { kind: "ok", value: { fix, testFirst, rework, ci } };
+    return { kind: "ok", value: { fix, testFirst, rework, ci, merge } };
   } catch {
     return { kind: "failed", reason: `cannot read the writer prompts in ${PROMPTS}` };
   }
@@ -107,6 +112,7 @@ const TEMPLATE: Readonly<Record<RunMode, keyof Prompts>> = {
   fix: "fix",
   rework: "rework",
   ci: "ci",
+  merge: "merge",
 };
 
 // the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
@@ -133,12 +139,15 @@ export function promptFor(input: {
   readonly head: string;
   // what the prompt says of the project's quick tools (tools.ts)
   readonly tools: readonly string[];
+  // the project's default branch, which a merge run merges in
+  readonly base?: string;
 }): string {
   const template = input.prompts[TEMPLATE[input.mode]];
   const filled = template
     .replaceAll("{{ticket}}", input.ticket)
     .replaceAll("{{branch}}", input.branch)
-    .replaceAll("{{head}}", input.head);
+    .replaceAll("{{head}}", input.head)
+    .replaceAll("{{base}}", input.base ?? "");
   const tools = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
   return `${filled.trimEnd()}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
 }
@@ -306,6 +315,11 @@ async function finished(
 // what one run does: its prompt's mode, and the task the host hands it
 type Work = { readonly mode: RunMode; readonly task: FileText };
 
+// mergeOf : a merge run's default branch, which the clone fetches in, as a field to spread
+function mergeOf(work: Work, base: string): { readonly merge?: string } {
+  return work.mode === "merge" ? { merge: base } : {};
+}
+
 async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
   const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
   const settings = settingsOf(tools);
@@ -315,6 +329,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     rulebook: setup.settings.rulebook,
     task: work.task,
     settings,
+    ...mergeOf(work, p.base),
   });
   if (clone.kind === "failed") {
     return clone;
@@ -326,6 +341,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     branch: clone.value.branch,
     head: clone.value.start,
     tools: toolLines(tools),
+    base: p.base,
   });
   const ended = await writerRun({
     setup: setup.box,
@@ -422,6 +438,15 @@ async function verifyPlan(
     : { kind: "hand-over", reason: `the CI run has no task: ${kept.reason}; a person takes it` };
 }
 
+// mergePlan : a merge run for a conflict: no task file, the default branch fetched into the clone (inClone)
+function mergePlan(_setup: WriterSetup, input: Input): Promise<Planned> {
+  return Promise.resolve(
+    input.change.kind === "open"
+      ? { kind: "run", work: { mode: "merge", task: { kind: "none" } } }
+      : { kind: "hand-over", reason: "a merge run needs an open change" },
+  );
+}
+
 const plain = (mode: "test-first" | "fix"): Promise<Planned> =>
   Promise.resolve({ kind: "run", work: { mode, task: { kind: "none" } } });
 
@@ -438,6 +463,7 @@ const PLANNERS: Planners = {
   "act-on": reworkPlan,
   "ci-red": ciPlan,
   "verify-failed": verifyPlan,
+  conflict: mergePlan,
 };
 
 function planOn<K extends keyof TaskMap>(
