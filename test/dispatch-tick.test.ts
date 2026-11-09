@@ -1212,9 +1212,13 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     const day = { usd: 1, tokens: "none" } as const;
     const ran = await tick(setup(two(), log, { steps, caps: caps({ runsAtOnce: 2, day }) }));
     expect(runs).toHaveLength(1);
-    expect(log.some((l) => l.startsWith("log no new runs: today (2026-11-07, UTC) the project spent $2.00"))).toBe(
-      true,
-    );
+    expect(
+      log.some((l) =>
+        l.startsWith(
+          "log no new runs: the project-day cap is reached: today (2026-11-07, UTC) the project spent $2.00",
+        ),
+      ),
+    ).toBe(true);
     expect(ran).toMatchObject({ kind: "ok" });
   });
 
