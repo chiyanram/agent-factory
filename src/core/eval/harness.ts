@@ -19,6 +19,7 @@ import { ACT_ON_FILE, isActOn, type ActOn } from "../review/act-on.js";
 import { readKept } from "../kept.js";
 import type { Model } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
+import { JUDGE_MODEL } from "../review/pinned.js";
 import { reviewSetup } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
@@ -82,7 +83,7 @@ export function evalSettings(
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
     judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
-    judgeModel: settingOf(env, "eval.judgeModel") || "sonnet",
+    judgeModel: settingOf(env, "eval.judgeModel") || JUDGE_MODEL,
     judgePrompt: env.FACTORY_EVAL_JUDGE || join(PROMPTS, "eval-judge.md"),
     ...flags,
   };
@@ -132,7 +133,6 @@ async function git(repo: string, env: NodeJS.ProcessEnv, args: readonly string[]
     args,
     repo: { kind: "repo", path: repo },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return r.kind === "ok" ? r.stdout.trim() : "";
@@ -172,7 +172,8 @@ function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, descripti
     factory: LOGIN,
     project: PROJECT,
     number: run,
-    paths: { repo: cloned.repo, rulebook: ctx.rulebook, home, maxUsd: ctx.settings.runUsd, maxRuns: 1 },
+    paths: { repo: cloned.repo, home, maxUsd: ctx.settings.runUsd, maxRuns: 1 },
+    plugins: [{ label: "the eval's plugin", dir: ctx.rulebook }],
     model: ctx.capped,
     sessions: async () => ({ kind: "ok", value: [] }),
   });

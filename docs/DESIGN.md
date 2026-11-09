@@ -251,7 +251,7 @@ so work and personal logins never mix.
 | old words in code and docs (forge, box, dispatcher, writer, plugin for a connector) | the glossary's words (#144) |
 
 **ADRs to update** as the work lands:
-- 0004: a finder per lens;
+- 0004: a finder per lens (amended 2026-11-09);
 - 0011: lanes and phases become plugin data;
 - 0012:
   - S1: approval;

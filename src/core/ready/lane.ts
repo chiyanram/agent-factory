@@ -37,7 +37,6 @@ function git(input: FloorInput, args: readonly string[]): Promise<GitResult> {
     args,
     repo: { kind: "repo", path: input.repo },
     env: { ...input.env, GIT_NO_REPLACE_OBJECTS: "1", GIT_LITERAL_PATHSPECS: "1" },
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }

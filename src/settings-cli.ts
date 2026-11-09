@@ -187,7 +187,6 @@ async function headOf(io: SettingsIo, team: string): Promise<Result<string>> {
     args: ["rev-parse", "--verify", "HEAD^{commit}"],
     repo: { kind: "repo", path: teamDir(io.home, team) },
     env: io.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return got.kind === "ok"

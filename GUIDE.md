@@ -342,7 +342,8 @@ The scripts read their settings from the environment.
 | `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
 | `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
-| `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
+| `FACTORY_MAX_RUNS` | runs at once (`caps.liveRuns`): the most runs one `dispatch` pass starts, one after another, each only while the caps still allow it; `review` also refuses a machine at this many live runs | `1` |
+| `FACTORY_RUN_HOURS` | run hours (`runHours`): the hours in UTC, `HH-HH`, in which a `dispatch` pass may start a run, such as `22-06` across midnight or `00-24` for the whole day. Outside them a pass starts no run and lists each one as held; nothing is stopped mid-run, and nothing waits in the background: `dispatch` prints "run hours are 22-06 UTC; run `agent-factory dispatch <project>` again then", and the orchestrator loop ends after that pass. The tickets keep their records, so the next `dispatch` inside the hours starts their runs. A cap: a lower layer may only narrow the hours (#299) | any hour |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and every run of the dispatcher's writer | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `agent-factory review` refuses it | off |
 | `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
@@ -350,16 +351,16 @@ The scripts read their settings from the environment.
 | `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
 | `FACTORY_MAX_USD_DAY`, `FACTORY_MAX_TOKENS_DAY` | `dispatch`: the most a project's runs may spend in a UTC day (`caps.usdPerProjectDay`, `caps.tokensPerProjectDay`); at either, no new run starts that day and one notice goes out (#131) | no cap |
 | `FACTORY_WINDOW_TOKENS`, `FACTORY_MACHINE_WINDOW_TOKENS` | `dispatch`: the factory's share of a subscription window, in tokens, for the project and for every project on this machine (`caps.windowTokens`, `caps.machineWindowTokens`). The share is the stop line: at it, no new run starts until the last `FACTORY_WINDOW_HOURS` hold less, and one notice goes out (#131) | no cap |
-| budget settings | the rest of ADR-0012 S16: runs at once and the model per phase are the keys above (`FACTORY_MAX_RUNS`, the `*_MODEL` keys). **Today:** `dispatch` starts one run per pass whatever `FACTORY_MAX_RUNS` says, and there is no run-hours setting yet (#131) | — |
+| budget settings | the rest of ADR-0012 S16: runs at once, run hours and the model per phase are the keys above (`FACTORY_MAX_RUNS`, `FACTORY_RUN_HOURS`, the `*_MODEL` keys) | — |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
-| `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
-| `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path. Its process (`skills/<skill>/process/lanes.json` and `review.json`) gives the review's baseline checks; with no process there, or no `review.json`, the review keeps the built-in baseline (crq review-process, code-review and verify-done, code smells). A lanes file that drops the approval for a lane above tiny stops the review (#232). **Today:** this folder stands in for the `plugins` list, and the lanes are checked but the dispatcher still uses the built-in ones. The dispatcher's writer needs it too: it must hold `.claude-plugin/plugin.json`, and the host copies it into the writer's clone as `.factory/rulebook`, read-only, loaded with `claude --plugin-dir` | — |
+| `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models: full model ids, never an alias such as `sonnet`, which is refused (ADR-0015 E9) | `claude-sonnet-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` |
+| `FACTORY_RULEBOOK` | **Deprecated** (#232; read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the writer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
-| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
+| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions. They replace the instructions only: the engine sends its floor ahead of them on every pass (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_MAX_TRIES` | tries per request on a rate limit | `4` |
 
 ### The project file
@@ -428,7 +429,15 @@ there.
     floor fails it). Only when both pass does it write the pin to `$FACTORY_HOME/projects/<project>.plugins.json`. It
     does not run the eval set; `agent-factory eval reviewer` does, and spends money.
   - A listed plugin with no pin, or whose stored folder no longer has the pin's hash, is refused.
-  **Today:** runs do not use the pins yet; the writer and the review still read `FACTORY_RULEBOOK` (#232).
+  Each `dispatch` pass checks every pin, then copies each plugin into the writer's clone as `.factory/plugins/<n>`
+  (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
+  each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
+  pass. The first plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
+  the writer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
+  the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
+  and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
+  above tiny stops the pass. **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
+  only to the next ticket; the records show the change. The review cannot run with no plugin yet (#232).
 - `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
   [docs/DESIGN.md](docs/DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing
@@ -631,7 +640,8 @@ The dispatcher's decision table is code: [`src/core/dispatch/table.ts`](src/core
 [review 9](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682943767)). Its header lists every row and every stop; the code is the source of truth. `agent-factory dispatch
 <project> --once` runs one pass: it decides each ticket with a START or an approval record (and each change on a
 `factory/<ticket>` branch),
-posts and labels as the project's identity, and starts at most one run. A lock keeps two passes apart, and
+posts and labels as the project's identity, and starts at most `FACTORY_MAX_RUNS` runs (default 1), one after another,
+and none outside `FACTORY_RUN_HOURS`. A lock keeps two passes apart, and
 `--dry-run` prints the decisions and acts on none.
 
 No cron or launchd job runs the orchestrator: a human's command starts the **orchestrator loop**, and it ends by
@@ -642,7 +652,7 @@ a `/stop`); a loop with nothing in flight ends after its first pass. It never wa
 a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
 what to do. A step that is not set up says so ("the writer is not set up: …; set it up, then run `agent-factory
 dispatch <project>` again"); the project-day cap says to run it again tomorrow; the window's share says when the
-window has room ("the window is full until HH:MM UTC"). Three failed passes in a row end it too. `agent-factory start` and `approve` start it in
+window has room ("the window is full until HH:MM UTC"); a pass outside the run hours names the hours. Three failed passes in a row end it too. `agent-factory start` and `approve` start it in
 the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
 While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
 the runs a pass may start, hold in each pass. A laptop that sleeps stops the loop; run `dispatch` again and it carries

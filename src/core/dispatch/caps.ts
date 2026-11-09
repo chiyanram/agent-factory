@@ -10,6 +10,10 @@
 //                    project and for every project on this machine; the share is the stop line: at it, no new run
 //                    starts until the window (window.hours) has room again, and one notice goes out
 //
+//   runs at once     caps.liveRuns: the most runs one dispatch pass starts (default 1), one after another, each only
+//                    while the caps above still allow it; the review step also refuses a machine at this many live runs
+//   run hours        runHours: the hours, in UTC, in which a pass may start a run (hours.ts); outside them none starts
+//
 // Nothing is killed mid-run: a cap only keeps the next run from starting, so a run may end past it. On a subscription
 // the CLI's dollar figure is notional, so the token caps are the ones that count there. A run with no spend recorded
 // (stopped before its result) adds nothing.
@@ -18,6 +22,7 @@ import type { Result } from "../forge/api.js";
 import { settingName, settingOf } from "../settings/machine.js";
 import type { MachineId } from "../settings/keys.js";
 import type { Spend } from "./spend.js";
+import { HOURS_HINT, hoursOf, type RunHours } from "./hours.js";
 import { periodsAt, totalOf, WINDOW_HOURS, type Spent } from "./usage.js";
 
 // a cap left unset is no cap
@@ -28,13 +33,22 @@ export type Caps = {
   readonly day: { readonly usd: Limit; readonly tokens: Limit };
   readonly window: { readonly tokens: Limit; readonly machineTokens: Limit };
   readonly windowHours: number;
+  // runs at once: the most runs one pass starts
+  readonly runsAtOnce: number;
+  // the hours a pass may start a run in; "any" when no layer sets them
+  readonly runHours: RunHours | "any";
 };
+
+// runs at once when no layer sets it (ADR-0012 S16)
+export const RUNS_AT_ONCE = 1;
 
 export const NO_CAPS: Caps = {
   ticket: { usd: "none", tokens: "none" },
   day: { usd: "none", tokens: "none" },
   window: { tokens: "none", machineTokens: "none" },
   windowHours: WINDOW_HOURS,
+  runsAtOnce: RUNS_AT_ONCE,
+  runHours: "any",
 };
 
 type Read = { readonly id: MachineId; readonly whole: boolean };
@@ -60,12 +74,31 @@ function limitOf(env: NodeJS.ProcessEnv, read: Read): Result<Limit> {
       };
 }
 
-function hoursOf(env: NodeJS.ProcessEnv): Result<number> {
+function hoursOfWindow(env: NodeJS.ProcessEnv): Result<number> {
   const raw = settingOf(env, "window.hours") ?? String(WINDOW_HOURS);
   const n = Number(raw);
   return Number.isSafeInteger(n) && n >= 1 && n <= 24
     ? { kind: "ok", value: n }
     : { kind: "failed", reason: `${settingName("window.hours")} must be a whole number of hours from 1 to 24` };
+}
+
+// runsAtOnceOf : runs at once, a whole number from 1
+export function runsAtOnceOf(env: NodeJS.ProcessEnv): Result<number> {
+  const raw = settingOf(env, "caps.liveRuns") ?? String(RUNS_AT_ONCE);
+  return /^[1-9]\d{0,2}$/.test(raw)
+    ? { kind: "ok", value: Number(raw) }
+    : {
+        kind: "failed",
+        reason: `${settingName("caps.liveRuns")} must be a whole number from 1, got ${JSON.stringify(raw)}`,
+      };
+}
+
+function runHoursOf(env: NodeJS.ProcessEnv): Result<RunHours | "any"> {
+  const raw = settingOf(env, "runHours");
+  const hours = raw === undefined ? "any" : hoursOf(raw);
+  return hours !== "bad"
+    ? { kind: "ok", value: hours }
+    : { kind: "failed", reason: `${settingName("runHours")} must be ${HOURS_HINT}, got ${JSON.stringify(raw)}` };
 }
 
 // the six limits, in the order Caps holds them
@@ -78,15 +111,32 @@ const READS: readonly Read[] = [
   { id: "caps.machineWindowTokens", whole: true },
 ];
 
-// capsFrom : the six limits, in READS order, as Caps. Pure.
-function capsFrom(limits: readonly Limit[], windowHours: number): Caps {
+type Runs = { readonly windowHours: number; readonly runsAtOnce: number; readonly runHours: RunHours | "any" };
+
+// capsFrom : the six limits, in READS order, and the runs' limits, as Caps. Pure.
+function capsFrom(limits: readonly Limit[], runs: Runs): Caps {
   const at = (i: number): Limit => limits[i] ?? "none";
   return {
     ticket: { usd: at(0), tokens: at(1) },
     day: { usd: at(2), tokens: at(3) },
     window: { tokens: at(4), machineTokens: at(5) },
-    windowHours,
+    ...runs,
   };
+}
+
+function runsOf(env: NodeJS.ProcessEnv): Result<Runs> {
+  const windowHours = hoursOfWindow(env);
+  const runsAtOnce = runsAtOnceOf(env);
+  const runHours = runHoursOf(env);
+  if (windowHours.kind === "failed") {
+    return windowHours;
+  }
+  if (runsAtOnce.kind === "failed") {
+    return runsAtOnce;
+  }
+  return runHours.kind === "ok"
+    ? { kind: "ok", value: { windowHours: windowHours.value, runsAtOnce: runsAtOnce.value, runHours: runHours.value } }
+    : runHours;
 }
 
 // capsOf : the caps from the resolved settings, each checked; a bad one refuses the pass
@@ -96,9 +146,9 @@ export function capsOf(env: NodeJS.ProcessEnv): Result<Caps> {
   if (bad?.kind === "failed") {
     return bad;
   }
-  const hours = hoursOf(env);
+  const runs = runsOf(env);
   const limits = read.map((r) => (r.kind === "ok" ? r.value : "none"));
-  return hours.kind === "ok" ? { kind: "ok", value: capsFrom(limits, hours.value) } : hours;
+  return runs.kind === "ok" ? { kind: "ok", value: capsFrom(limits, runs.value) } : runs;
 }
 
 function reached(spent: number, limit: Limit): boolean {
