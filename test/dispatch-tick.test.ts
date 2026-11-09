@@ -255,6 +255,62 @@ describe("tick", () => {
     );
   });
 
+  it("two failures in a row skip the step until each nextTry (#228)", async () => {
+    await approved();
+    const H2 = "2".repeat(40);
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    await record({
+      where,
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p1",
+        evidence: [],
+        hung: false,
+      },
+    });
+    const wrote: string[] = [];
+    let head = H;
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      ready: { kind: "available", run: async () => ({ kind: "ok", value: { passed: false, why: "row 1" } }) },
+      writer: {
+        kind: "available",
+        run: async (input) => {
+          wrote.push(input.task.kind);
+          head = H2;
+          return { kind: "ok", value: { head: H2, outcome: "done", patch: "p2", evidence: [], hung: false } };
+        },
+      },
+    };
+    const pass = async (time: string) => {
+      const changes = { team, open: [open({ head })], merged: [] };
+      await tick(setup(changes, [], { steps, now: () => Date.parse(time) }));
+    };
+    const nextTry = async () => {
+      const read = await readRecords(where);
+      const last = read.kind === "ok" ? read.value.at(-1) : undefined;
+      return last?.kind === "ready-ended" ? last.nextTry : undefined;
+    };
+    // the first failure: the writer's retry waits 10 s
+    await pass("2026-11-07T10:00:00Z");
+    expect(await nextTry()).toEqual({ step: "ready", at: "2026-11-07T10:00:10.000Z" });
+    await pass("2026-11-07T10:00:09Z");
+    expect(wrote).toEqual([]);
+    await pass("2026-11-07T10:00:10Z");
+    expect(wrote).toEqual(["ready-failed"]);
+    // the second failure: 20 s
+    await pass("2026-11-07T10:01:00Z");
+    expect(await nextTry()).toEqual({ step: "ready", at: "2026-11-07T10:01:20.000Z" });
+    await pass("2026-11-07T10:01:19Z");
+    expect(wrote).toEqual(["ready-failed"]);
+    await pass("2026-11-07T10:01:20Z");
+    expect(wrote).toEqual(["ready-failed", "ready-failed"]);
+  });
+
   it("a stale approval releases the claim; a merged change is reconciled; a green gate is pinged once", async () => {
     await approved("PROJ-1");
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC("feature").replace("409", "423"));

@@ -211,6 +211,12 @@ function runFields(ending: Ending): readonly PostField[] {
   return ending.kind === "hung" ? [{ label: "run", value: hungLine(ending) }] : [];
 }
 
+// runItems : a stalled run's last output lines, so a person sees where it stopped (#228); each one is cleaned as an
+// item of the post
+function runItems(ending: Ending): readonly string[] {
+  return ending.kind === "stalled" ? ending.last : [];
+}
+
 async function post(input: FinishInput, post: Post): Promise<Done> {
   return input.forge.note({ number: input.change, post });
 }
@@ -229,7 +235,7 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
     seat: block.by === "writer" ? "writer" : "coordinator",
     title: `blocked: ${why}`,
     fields: runFields(input.ending),
-    items: [],
+    items: runItems(input.ending),
   });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
 }

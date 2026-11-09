@@ -3,7 +3,11 @@
 //   1 the project's egress proxy, then the box, with the clone mounted and only the model login and the proxy settings
 //   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), the rulebook as a plugin, and
 //     no settings from the branch: --setting-sources user drops its .claude/settings.json, hooks, env and .mcp.json,
-//     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08)
+//     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08). Its output is
+//     streamed (stream-json, which -p takes only with --verbose): one JSON event a line, the last one the result with
+//     the cost, so the host hears the run while it works. A run that prints nothing for the stall time (5 minutes) is
+//     stopped and blocked, its last lines shown (#228). Only awake time counts: each poll adds at most two polls'
+//     worth, so an hour the machine slept between two polls adds ten seconds, not an hour.
 //   3 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the exit.
 //     While the writer runs, the host polls the clone for a report the schema accepts. Once one is there, the writer
 //     has a 60 s completion window: an agent whose child (gh, an MCP server) keeps stdout open never exits on its own,
@@ -36,6 +40,9 @@ export type Completion = { readonly pollMs: number; readonly windowMs: number; r
 
 export const COMPLETION: Completion = { pollMs: 5000, windowMs: 60_000, graceMs: 30_000 };
 
+// the stall time (#228): the longest a run may print nothing, while the machine is awake; a setting can only lower it
+export const STALL_MS = 5 * 60_000;
+
 // the writer's settings file in the clone, for claude --settings (tools.ts), or none
 export type SettingsArg = { readonly kind: "none" } | { readonly kind: "file"; readonly path: string };
 
@@ -49,6 +56,7 @@ export type WriterRun = {
   readonly claude: Claude;
   readonly settings: SettingsArg;
   readonly completion: Completion;
+  readonly stallMs: number;
 };
 
 export type Ended = {
@@ -76,7 +84,8 @@ export function claudeArgv(claude: Claude, settings: SettingsArg = { kind: "none
     "--plugin-dir",
     RULEBOOK_DIR,
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     ...(claude.maxUsd === "" ? [] : ["--max-budget-usd", claude.maxUsd]),
     ...(claude.model === "" ? [] : ["--model", claude.model]),
     ...(settings.kind === "file" ? ["--settings", settings.path] : []),
@@ -95,6 +104,55 @@ export function runEnd(ran: Ran): RunEnd {
   }
 }
 
+// the most lines a stalled run shows, and the most characters kept of each: an event can be a whole file
+const SHOWN_LINES = 5;
+const LINE_CHARS = 300;
+
+// Tail : the last lines the run printed, and the line it is still printing
+export type Tail = { readonly lines: readonly string[]; readonly partial: string };
+
+export const NO_TAIL: Tail = { lines: [], partial: "" };
+
+function cutLine(line: string): string {
+  // never end on half of a surrogate pair
+  return line.length <= LINE_CHARS ? line : line.slice(0, LINE_CHARS).replace(/[\uD800-\uDBFF]$/, "");
+}
+
+// tailOf : the tail after one more piece of output. Pure.
+export function tailOf(tail: Tail, chunk: string): Tail {
+  const [first = "", ...rest] = chunk.split("\n");
+  const current = cutLine(tail.partial + cutLine(first));
+  if (rest.length === 0) {
+    return { lines: tail.lines, partial: current };
+  }
+  const ended = [current, ...rest.slice(0, -1)].filter((l) => l.trim() !== "").map(cutLine);
+  return { lines: [...tail.lines, ...ended].slice(-SHOWN_LINES), partial: cutLine(rest.at(-1) ?? "") };
+}
+
+// lastLines : the lines a person sees of a stalled run, oldest first. Pure.
+export function lastLines(tail: Tail): readonly string[] {
+  return [...tail.lines, tail.partial].filter((l) => l.trim() !== "").slice(-SHOWN_LINES);
+}
+
+// Heard : what the host has heard of the run so far: when it last printed (ms; 0 for never), and its tail
+type Heard = { at: number; tail: Tail };
+
+// quietAfter : how long the run has printed nothing, in awake time, after one more poll. Each poll adds the time since
+// the last poll, or since the last output if that came later, but never more than two polls: a poll that took longer
+// waited out a sleeping machine (or a clock that jumped), and that time does not count (#228). Pure.
+export function quietAfter(input: {
+  readonly quiet: number;
+  readonly last: number;
+  readonly heard: number;
+  readonly now: number;
+  readonly pollMs: number;
+}): number {
+  const most = 2 * input.pollMs;
+  return input.heard > input.last
+    ? Math.min(input.now - input.heard, most)
+    : input.quiet + Math.min(input.now - input.last, most);
+}
+
 // inBox : the agent's run, start to stop; the run's end, or why the box itself failed
 async function inBox(run: WriterRun): Promise<RunEnd> {
   const session = await startBox(run.setup, {
@@ -105,21 +163,44 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
   if (session.kind === "failed") {
     return { kind: "failed", reason: session.reason };
   }
+  const heard: Heard = { at: 0, tail: NO_TAIL };
   const running = run.setup.box.run({
     session: session.value,
     command: {
       argv: claudeArgv(run.claude, run.settings),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
+      watch: (chunk) => {
+        heard.at = Date.now();
+        heard.tail = tailOf(heard.tail, chunk);
+      },
     },
   });
-  const end = await watched(run, running);
-  return stoppedEnd(run, session.value, running, end);
+  const end = await watched(run, running, heard);
+  return stoppedEnd(run, session.value, running, { end, heard });
+}
+
+// afterStop : the end of a run the host stopped. Pure.
+function afterStop(run: WriterRun, end: Exclude<Watched, { kind: "ran" }>, heard: Heard): RunEnd {
+  switch (end.kind) {
+    case "hung":
+      return { kind: "hungAfterReport", windowSeconds: Math.round(run.completion.windowMs / 1000) };
+    case "stalled":
+      return { kind: "stalled", seconds: Math.round(run.stallMs / 1000), last: lastLines(heard.tail) };
+    case "overdue":
+      return { kind: "timedOut", seconds: run.timeoutSeconds };
+  }
 }
 
 // stoppedEnd : the box stopped, then the run's end; a box that did not stop may still be writing: its report is never
 // read
-async function stoppedEnd(run: WriterRun, session: Session, running: Promise<Ran>, end: Watched): Promise<RunEnd> {
+async function stoppedEnd(
+  run: WriterRun,
+  session: Session,
+  running: Promise<Ran>,
+  watch: { readonly end: Watched; readonly heard: Heard },
+): Promise<RunEnd> {
+  const { end } = watch;
   const stopped = await run.setup.box.stop(session);
   if (stopped.kind === "failed") {
     return { kind: "failed", reason: `the box did not stop: ${stopped.reason}` };
@@ -129,14 +210,16 @@ async function stoppedEnd(run: WriterRun, session: Session, running: Promise<Ran
   }
   // the stop ends the command; its own end says nothing more, and the host waits for it only so long
   await settled(running, run.completion.graceMs);
-  return end.kind === "hung"
-    ? { kind: "hungAfterReport", windowSeconds: Math.round(run.completion.windowMs / 1000) }
-    : { kind: "timedOut", seconds: run.timeoutSeconds };
+  return afterStop(run, end, watch.heard);
 }
 
-// Watched : the run's own end; "hung", still running after a valid report and its window; or "overdue", still
-// running past its timeout and the grace with no valid report
-type Watched = { readonly kind: "ran"; readonly ran: Ran } | { readonly kind: "hung" } | { readonly kind: "overdue" };
+// Watched : the run's own end; "hung", still running after a valid report and its window; "stalled", silent for the
+// stall time with no valid report; or "overdue", still running past its timeout and the grace with no valid report
+type Watched =
+  | { readonly kind: "ran"; readonly ran: Ran }
+  | { readonly kind: "hung" }
+  | { readonly kind: "stalled" }
+  | { readonly kind: "overdue" };
 
 const TICK: unique symbol = Symbol("tick");
 
@@ -150,22 +233,43 @@ async function settled(running: Promise<Ran>, ms: number): Promise<Ran | typeof 
   return Promise.race([running, after(ms)]);
 }
 
-// watched : the run, watched until it ends, a valid report's window closes, or the host's deadline passes. A poll only
-// starts the window: the run is decided from the report read after the box stopped.
-async function watched(run: WriterRun, running: Promise<Ran>): Promise<Watched> {
+// watched : the run, watched until it ends, a valid report's window closes, it is silent for the stall time, or the
+// host's deadline passes. A poll only starts the window: the run is decided from the report read after the box
+// stopped. A valid report wins over a stall: a writer that wrote one and went quiet gets its window.
+async function watched(run: WriterRun, running: Promise<Ran>, heard: Heard): Promise<Watched> {
   const deadline = Date.now() + run.timeoutSeconds * 1000 + run.completion.graceMs;
+  let on: On = { kind: "on", quiet: 0, last: Date.now() };
   for (;;) {
     const ran = await settled(running, Math.min(run.completion.pollMs, deadline - Date.now()));
     if (ran !== TICK) {
       return { kind: "ran", ran };
     }
-    if (Date.now() >= deadline) {
-      return { kind: "overdue" };
-    }
-    if (validReport(await loadReport({ worktree: run.clone.repo }))) {
+    const next = await polled(run, heard, on, deadline);
+    if (next.kind === "window") {
       return inWindow(run, running);
     }
+    if (next.kind !== "on") {
+      return next;
+    }
+    on = next;
   }
+}
+
+// On : a run still going after a poll, with its quiet time so far and when that poll was
+type On = { readonly kind: "on"; readonly quiet: number; readonly last: number };
+type Polled = On | { readonly kind: "window" } | { readonly kind: "stalled" } | { readonly kind: "overdue" };
+
+// polled : one poll of a run still going: past the deadline, a valid report there, silent too long, or on
+async function polled(run: WriterRun, heard: Heard, on: On, deadline: number): Promise<Polled> {
+  const now = Date.now();
+  if (now >= deadline) {
+    return { kind: "overdue" };
+  }
+  if (validReport(await loadReport({ worktree: run.clone.repo }))) {
+    return { kind: "window" };
+  }
+  const quiet = quietAfter({ quiet: on.quiet, last: on.last, heard: heard.at, now, pollMs: run.completion.pollMs });
+  return quiet >= run.stallMs ? { kind: "stalled" } : { kind: "on", quiet, last: now };
 }
 
 // inWindow : the window after a valid report; the box's own timeout firing in it is a hang after that report too, so

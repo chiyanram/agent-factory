@@ -1,5 +1,5 @@
-// A fake box for the tests of every caller of the box seam (#112): each run gets the next scripted answer, and every
-// call is recorded, so no test needs a container runtime.
+// A fake box for the tests of every caller of the box seam (#112): each run gets the next scripted answer, its stdout
+// handed to the command's watcher first, and every call is recorded, so no test needs a container runtime.
 
 import type { Box, BoxPlace, BoxSpec, Command, Copy, Done, Probe, Ran, Session } from "../src/core/box/types.js";
 
@@ -11,6 +11,17 @@ export type BoxCall =
   | { readonly op: "stop"; readonly session: Session };
 
 export type FakeBox = { readonly box: Box; readonly calls: BoxCall[]; readonly live: Set<string> };
+
+// answered : the scripted answer, or a failure naming the run that has none; an exit's stdout goes to the watcher first
+function answered(command: Command, answer: Ran | undefined, n: number): Ran {
+  if (answer === undefined) {
+    return { kind: "failed", reason: `fake: no answer for run ${n}: ${command.argv.join(" ")}` };
+  }
+  if (answer.kind === "exited") {
+    command.watch?.(answer.stdout);
+  }
+  return answer;
+}
 
 export function fakeBox(input: {
   readonly place?: BoxPlace;
@@ -42,9 +53,7 @@ export function fakeBox(input: {
         return { kind: "failed", reason: `fake: box ${session.id} is not running` };
       }
       ran += 1;
-      return (
-        input.runs?.[ran - 1] ?? { kind: "failed", reason: `fake: no answer for run ${ran}: ${command.argv.join(" ")}` }
-      );
+      return answered(command, input.runs?.[ran - 1], ran);
     },
     copyIn: async (copy) => {
       calls.push({ op: "copyIn", copy });

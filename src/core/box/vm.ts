@@ -45,8 +45,12 @@ export function vmBox(setup: VmBoxSetup): Box {
   // the boxes this Box started and has not stopped, with the variables each run sees
   const live = new Map<string, BoxSpec>();
 
-  const call = (args: readonly string[], env: NodeJS.ProcessEnv = docker.env, stdin = ""): Promise<Exit> =>
-    docker.run({ bin: docker.bin, args, stdin, env });
+  const call = (
+    args: readonly string[],
+    env: NodeJS.ProcessEnv = docker.env,
+    stdin = "",
+    watch?: (chunk: string) => void,
+  ): Promise<Exit> => docker.run({ bin: docker.bin, args, stdin, env, ...(watch === undefined ? {} : { watch }) });
 
   const step = async (args: readonly string[]): Promise<Done> => {
     const exit = await call(args);
@@ -123,6 +127,7 @@ export function vmBox(setup: VmBoxSetup): Box {
         execArgs({ name: session.id, command, envNames: Object.keys(spec.env) }),
         { ...docker.env, ...spec.env },
         command.stdin.kind === "text" ? command.stdin.text : "",
+        command.watch,
       );
       return readRan({ exit, timeoutSeconds: command.timeoutSeconds, elapsedSeconds: (now() - began) / 1000 });
     },

@@ -353,6 +353,7 @@ The scripts read their settings from the environment.
 | budget settings | **planned** ([review 11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6683060877)): the factory's share of your budget (Copilot limit at work, Claude subscription at home), the stop line, runs at once, per-run caps, the model per phase and run hours, per project and machine | set after the pilot |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
+| `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder the reviewer reads rules from (`skills/<domain>/references/`); `review` and the dispatcher's review step need it, by absolute path. The dispatcher's writer needs it too: it must hold `.claude-plugin/plugin.json`, and the host copies it into the writer's clone as `.factory/rulebook`, read-only, loaded with `claude --plugin-dir` | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
@@ -474,6 +475,10 @@ exists yet, so you run the triggers below by hand.
   its timeout and is `blocked`; past the timeout and a 30 s grace the host stops the box itself, since the box's
   timeout stops counting once `claude` exits and a child holding stdout open would keep the pass waiting. The window's
   edge is not exact: a run that exits as the window closes may still read as hung.
+  The writer streams its output (`--output-format stream-json`). A run with no valid report that prints nothing for
+  the stall time (`FACTORY_WRITER_STALL_MINUTES`, 5 minutes) is stopped and `blocked`, so it goes to `needs-human`;
+  its note shows its last five output lines, each cleaned by `post.ts` (#228). Time the machine spends asleep does not
+  count: each 5 s poll adds at most 10 s of silence.
   Every writer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
   in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
   **Today:** the bash `start-writer` still tells the writer to push, post with `agent-factory ask` and mark the MR ready; the
@@ -515,7 +520,9 @@ ended goes to a person. A ticket's change is the one on `factory/<ticket>` in th
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: approve again to go on,
-which also starts every count afresh. The ready check first runs the floor guard (#190): it reads the change's diff
+which also starts every count afresh. A failed ready check, a review with Act on findings and a failed local verifier
+each record when the writer may try again (`nextTry`, #228): 10 s after the step's first failure, doubling each time,
+never more than 5 minutes; until then the pass waits on that ticket, and the caps still hold. The ready check first runs the floor guard (#190): it reads the change's diff
 from its merge base with the default branch, on the host and with git only, and fails the check at once, with each
 `file:line`, when the diff lowers the bar (VB6, CR4):
 - a skip or focus marker added in a test file (`@Disabled…`, `@Ignore…`, `@Requires({ false })`, `.skip`, `.only`,

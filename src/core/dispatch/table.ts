@@ -29,6 +29,10 @@
 //   CI running, none yet, or a manual job                      wait
 //   gate green                                                 ping the human once; never undraft
 //
+// A writer run that retries a failed check (the ready check, a review's Act on findings, the local verifier) waits
+// until the nextTry that check recorded (#228; records.ts): 10 s after its first failure, doubling, at most 5 minutes.
+// The caps above still hold: a step out of tries goes to a person, whatever its next try.
+//
 // Two rules hold over every row. A wait on a claimed change that has been quiet (no record, no comment) for
 // FACTORY_QUIET_MINUTES releases the claim, so a stuck change goes back to the queue. A stop the dispatcher already
 // handed to a person is not handed over again: removing needs-human does not lift it; approving again does, and starts
@@ -38,7 +42,7 @@
 
 import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
-import type { Summary, Task } from "./records.js";
+import type { Retried, Summary, Task } from "./records.js";
 
 export type ApprovalView =
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
@@ -351,6 +355,27 @@ function first(state: TicketState): Action {
   return { kind: "wait", why: "nothing to do" };
 }
 
+// the check whose failure each retrying task answers
+const RETRIES: Readonly<Partial<Record<Task["kind"], Retried>>> = {
+  "ready-failed": "ready",
+  "act-on": "review",
+  "verify-failed": "verify",
+};
+
+const STEP_NAMES: Readonly<Record<Retried, string>> = {
+  ready: "ready check",
+  review: "review",
+  verify: "local verifier",
+};
+
+// backedOff : a writer run that retries a failed check waits until that check's next try (#228)
+function backedOff(state: TicketState, action: Action): Action {
+  const next = state.runs.nextTry;
+  const retries = action.kind === "writer" ? RETRIES[action.task.kind] : undefined;
+  const early = next.kind === "set" && next.step === retries && state.now < Date.parse(next.at);
+  return early ? { kind: "wait", why: `the ${STEP_NAMES[next.step]} failed; the next try is at ${next.at}` } : action;
+}
+
 // once : a stop already handed to a person waits; removing needs-human does not lift it
 function once(state: TicketState, action: Action): Action {
   return action.kind === "needs-human" && state.runs.blocked.includes(action.why)
@@ -369,5 +394,5 @@ function released(state: TicketState, action: Action): Action {
 
 // decide : the one action for this ticket now, with the two rules that hold over every row.
 export function decide(state: TicketState): Action {
-  return released(state, once(state, first(state)));
+  return released(state, once(state, backedOff(state, first(state))));
 }

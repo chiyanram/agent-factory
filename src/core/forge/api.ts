@@ -23,6 +23,8 @@ export type Call = {
   readonly args: readonly string[];
   readonly stdin: string;
   readonly env: NodeJS.ProcessEnv;
+  // each piece of stdout as it comes, before the call ends (#228); the Exit still holds all of it
+  readonly watch?: (chunk: string) => void;
 };
 export type Exit = { readonly code: number; readonly stdout: string; readonly stderr: string };
 // Runs one CLI call. The real one is runProcess; a test passes its own.
@@ -63,6 +65,10 @@ export const runProcess: Runner = (call) =>
         resolve({ code, stdout, stderr: stderr.length > 0 || error === null ? stderr : error.message });
       },
     );
+    const { watch } = call;
+    if (watch !== undefined) {
+      child.stdout?.on("data", (chunk: unknown) => watch(String(chunk)));
+    }
     // a CLI that exits without reading its input closes the pipe; its exit already says what happened
     child.stdin?.on("error", () => undefined);
     child.stdin?.end(call.stdin);

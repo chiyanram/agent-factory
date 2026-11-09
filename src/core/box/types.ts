@@ -35,6 +35,9 @@ export type Command = {
   readonly argv: readonly [string, ...string[]];
   readonly stdin: Input;
   readonly timeoutSeconds: number;
+  // each piece of the command's stdout as it comes, while it runs (#228: the writer's stall stop); Ran still holds all
+  // of it at the end
+  readonly watch?: (chunk: string) => void;
 };
 
 export type Failed = { readonly kind: "failed"; readonly reason: string };

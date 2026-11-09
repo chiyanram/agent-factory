@@ -44,9 +44,12 @@ function fakeDocker(
   // the answer under the first two arguments, else under the first one
   const pick = <T>(table: Readonly<Record<string, T>>, c: Call): T | undefined =>
     table[c.args.slice(0, 2).join(" ")] ?? table[c.args[0] ?? ""];
+  // the output goes to the call's watcher first, as docker streams it
   const run: Runner = async (c) => {
     calls.push(c);
-    return pick(answers, c) ?? pick(fallback, c)?.(c) ?? OK;
+    const exit = pick(answers, c) ?? pick(fallback, c)?.(c) ?? OK;
+    c.watch?.(exit.stdout);
+    return exit;
   };
   return { calls, run };
 }
@@ -67,7 +70,7 @@ const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as 
 
 // the docker CLI as app.ts makes it, from the host's environment, on a fake docker that records each call
 boxContract("vm on a fake docker", (host) => {
-  const fake = fakeDocker();
+  const fake = fakeDocker({}, { code: 0, stdout: "streamed\n", stderr: "" });
   let n = 0;
   const made = vmBox({
     docker: hostDocker(host, fake.run),
