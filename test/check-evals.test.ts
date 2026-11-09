@@ -4,16 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  fileProblems,
-  findingProblems,
-  kindProblem,
-  placeProblems,
-  readGolden,
-  shaProblem,
-  tableProblems,
-  tableRows,
-} from "../scripts/check-evals.js";
+import { fileProblems, kindProblem, placeProblems, shaProblem, tableProblems } from "../scripts/check-evals.js";
+import { findingProblems, readGolden, tableRows } from "../src/core/eval/golden.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
