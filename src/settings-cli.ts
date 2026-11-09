@@ -148,6 +148,20 @@ function pinText(pin: Pin | "none"): string {
   return pin === "none" ? "no team" : `team ${pin.team}@${pin.commit.slice(0, 12)}`;
 }
 
+// checkProblems : what config check finds in the project's resolved settings, for a command that checks before it
+// moves a pin (plugin update)
+export async function checkProblems(
+  io: Pick<SettingsIo, "home" | "env">,
+  project: string,
+): Promise<Result<readonly Problem[]>> {
+  const loaded = await loadProject(io.home, project);
+  if (loaded.kind === "failed") {
+    return loaded;
+  }
+  const layers = await layered({ home: io.home, env: io.env, project: loaded.value });
+  return { kind: "ok", value: allProblems(loaded.value.path, layers) };
+}
+
 async function check(io: SettingsIo, project: string): Promise<number> {
   const loaded = await loadProject(io.home, project);
   if (loaded.kind === "failed") {
