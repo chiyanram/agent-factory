@@ -29,6 +29,18 @@ jobs:
       - run: make test
       - run: make build
 
+  # The factory runs on stock macOS laptops, where tmpdir() sits behind a symlink and bash is 3.2; a test that passes on
+  # Linux can fail there (#196, #222). make test only: lint and build give the same answer on both.
+  test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: make test
+
   # Pull requests are squash-merged with the PR title as the commit subject, so the title is what semantic-release
   # reads on main (#153).
   pr-title:
@@ -68,7 +80,7 @@ jobs:
   # Runs on a push to main, or from "Run workflow" on main when a push was skipped. GitHub skips every workflow for a
   # push whose commit message holds the skip-ci marker anywhere, so never quote that marker in a commit.
   release:
-    needs: lint-and-test
+    needs: [lint-and-test, test-macos]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10

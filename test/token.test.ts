@@ -1,15 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Call, Runner } from "../src/core/forge/api.js";
 import {
@@ -24,6 +14,7 @@ import {
   tokenAge,
   type TokenStore,
 } from "../src/core/token/index.js";
+import { tempDir } from "./temp.js";
 
 const TOKEN = "sk-ant-oat01-AbCdEf0123456789_xyz-TOKEN";
 const NOW = new Date("2026-11-07T10:00:00Z");
@@ -108,7 +99,7 @@ describe("the Linux file store", () => {
     get: async () => ({ kind: "missing", reason: "" }),
   };
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), "factory-token-"));
+    home = tempDir("factory-token-");
     const opened = openStore({
       platform: "linux",
       home,
@@ -210,7 +201,7 @@ describe("the macOS Keychain store", () => {
 
 describe("files the store writes", () => {
   it("never puts a token in tokens.json", async () => {
-    const home = mkdtempSync(join(tmpdir(), "factory-token-"));
+    const home = tempDir("factory-token-");
     const opened = openStore({
       platform: "linux",
       home,

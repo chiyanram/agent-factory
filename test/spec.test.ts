@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   checkSpec,
@@ -13,6 +12,7 @@ import {
   type Spec,
   type SpecRead,
 } from "../src/core/spec.js";
+import { tempDir } from "./temp.js";
 
 const GOOD = [
   "# PROJ-123: renewals refuse a reserved loan",
@@ -157,7 +157,7 @@ describe("specHash", () => {
 describe("the spec stores", () => {
   let root = "";
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "specs-"));
+    root = tempDir("specs-");
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 

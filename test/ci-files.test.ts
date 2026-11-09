@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gitlabIncludes, globRegex, noCiFiles } from "../src/core/ci-files.js";
 import { ciConfigOf } from "../src/core/forge/gitlab.js";
 import type { CiConfig } from "../src/core/forge/types.js";
+import { tempDir } from "./temp.js";
 
 describe("gitlabIncludes (#115)", () => {
   it("reads every form of a local include at any depth, child pipelines too; leaves out files kept elsewhere", () => {
@@ -112,7 +112,7 @@ describe("noCiFiles: the host push refuses a change to CI (#115; ADR-0012 S9)", 
 
   // main holds the CI; the agent branch starts from it
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "factory-ci-"));
+    root = tempDir("factory-ci-");
     execFileSync("git", ["init", "-q", "--bare", "-b", "main", join(root, "origin.git")], { env: env() });
     repo = join(root, "clone");
     execFileSync("git", ["clone", "-q", join(root, "origin.git"), repo], { env: env() });

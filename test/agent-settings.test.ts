@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isAgentSetting, noAgentSettings } from "../src/core/agent-settings.js";
+import { tempDir } from "./temp.js";
 
 describe("isAgentSetting (#110)", () => {
   it("names the root settings, their folders' files, in any letter case, and nothing else", () => {
@@ -44,7 +44,7 @@ describe("noAgentSettings: the host push refuses a change to the agent's setting
 
   // main holds the instructions but no .claude folder; the agent branch starts from it
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "factory-settings-"));
+    root = tempDir("factory-settings-");
     execFileSync("git", ["init", "-q", "--bare", "-b", "main", join(root, "origin.git")], { env: env() });
     repo = join(root, "clone");
     execFileSync("git", ["clone", "-q", join(root, "origin.git"), repo], { env: env() });

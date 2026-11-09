@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const made: string[] = [];
@@ -14,7 +14,7 @@ afterEach(() => {
 
 // a fresh git repository holding tests/fixtures/<name>, as make lint sees a checkout
 function fixture(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "factory-lint-"));
+  const dir = tempDir("factory-lint-");
   made.push(dir);
   cpSync(join(ROOT, "tests", "fixtures", name), dir, { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: dir });
@@ -41,6 +41,18 @@ describe("check-links (#138)", () => {
     const bad = run("check-links.ts", fixture("links-nonascii"));
     expect(bad).toMatchObject({ code: 1, out: expect.stringContaining("café.md:3: nope.md") });
     expect(run("check-links.ts", fixture("links-ok"))).toEqual({ code: 0, out: "" });
+  });
+});
+
+describe("check-temp-dirs (#222)", () => {
+  it("fails on a test that calls tmpdir itself, naming file:line and the helper; passes the helper itself", () => {
+    expect(run("check-temp-dirs.ts", fixture("temp-bare"))).toEqual({
+      code: 1,
+      out:
+        "test/a.test.ts:5: calls tmpdir itself; make the folder with tempDir() from test/temp.ts, which answers its real path\n" +
+        "check-temp-dirs: 1 call(s) to tmpdir in test/\n",
+    });
+    expect(run("check-temp-dirs.ts", fixture("temp-ok"))).toEqual({ code: 0, out: "" });
   });
 });
 

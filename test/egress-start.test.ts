@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
 import type { PinnedImage } from "../src/core/box/types.js";
@@ -12,6 +11,7 @@ import {
   startEgress,
   upstreamOf,
 } from "../src/core/egress/index.js";
+import { tempDir } from "./temp.js";
 
 const IMAGE: PinnedImage = { kind: "pinned", ref: `ubuntu/squid@sha256:${"b".repeat(64)}` };
 const OK: Exit = { code: 0, stdout: "", stderr: "" };
@@ -145,7 +145,7 @@ describe("startEgress", () => {
 describe("openEgress", () => {
   let dir = "";
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "egress-"));
+    dir = tempDir("egress-");
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -195,7 +195,7 @@ describe("egressNames", () => {
 describe("openEgress for two projects", () => {
   let dir = "";
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "egress-"));
+    dir = tempDir("egress-");
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });

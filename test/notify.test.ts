@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Result } from "../src/core/forge/api.js";
 import { dryNotify, notifyPluginOf, pingPost, pluginNotify, webhookSecrets } from "../src/core/notify.js";
@@ -8,6 +7,7 @@ import { renderPost } from "../src/core/post.js";
 import { makeFakes } from "../src/core/plugin/fakes.js";
 import { addPlugin, type Setup } from "../src/core/plugin/registry.js";
 import { checkWebhook, saveDiscordWebhook, secret, type TokenStore } from "../src/core/token/index.js";
+import { tempDir } from "./temp.js";
 
 const BUNDLED = join(import.meta.dirname, "..", "plugins", "discord", "plugin");
 const NODE_DIR = dirname(process.execPath);
@@ -16,7 +16,7 @@ const HOOK = "https://discord.com/api/webhooks/1234567890/abcdefghijklmnopqrstuv
 let root = "";
 let home = "";
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "factory-notify-"));
+  root = tempDir("factory-notify-");
   home = join(root, "home");
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));

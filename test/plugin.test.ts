@@ -1,17 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pluginEnv, readDescribe } from "../src/core/plugin/contract.js";
 import { testPlugin } from "../src/core/plugin/kit.js";
@@ -23,11 +11,11 @@ import {
   readRegistry,
   type Setup,
 } from "../src/core/plugin/registry.js";
+import { tempDir } from "./temp.js";
 
 let root = "";
 beforeEach(() => {
-  // the real path: on macOS tmpdir() is behind a symlink (/var -> /private/var), and a plugin is named by its real file
-  root = realpathSync(mkdtempSync(join(tmpdir(), "factory-plugin-")));
+  root = tempDir("factory-plugin-");
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
