@@ -137,7 +137,7 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     env: p.env,
     home: home(),
     project: "ledger",
-    rulebook: RULEBOOK,
+    plugins: [{ label: "rulebook", dir: RULEBOOK }],
     packDir: join(p.root, "packs"),
     recordsDir: join(p.root, "records"),
     runsDir: join(p.root, "runs"),
@@ -243,6 +243,22 @@ describe("reviewRound", () => {
     await reviewRound(setup(forge(log), model([findAnswer([])], [])));
     expect(log.posts.at(-1)).toContain("No findings. That is not a pass: the human still reviews before merge");
     expect(log.threads).toEqual([]);
+  });
+
+  it("reads its references from the project's plugins; with none, it stops with the reason and posts nothing (#232)", async () => {
+    const log = fresh();
+    const out = await reviewRound(setup(forge(log), model([], []), { plugins: [] }));
+    expect(out).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("needs a plugin that holds its review"),
+    });
+    expect(log.posts).toEqual([]);
+    // a plugin with no process still serves the built-in baseline's references
+    const other = { label: "team@acme", dir: join(p.root, "none") };
+    await reviewRound(
+      setup(forge(log), model([findAnswer([])], []), { plugins: [{ label: "rulebook", dir: RULEBOOK }, other] }),
+    );
+    expect(log.posts.at(-1)).toContain("No findings");
   });
 
   it("a head that moved during the review posts nothing: MOVED", async () => {
@@ -721,11 +737,12 @@ describe("reviewStep", () => {
       },
     },
   });
-  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_RULEBOOK: RULEBOOK, FACTORY_HOME: home() });
+  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_HOME: home() });
+  const plugins = [{ label: "rulebook", dir: RULEBOOK }];
   const none = async () => ({ kind: "ok" as const, value: [] });
 
   it("is unavailable without its settings, and refuses a bad one", () => {
-    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram", project: "ledger" })).toMatchObject({
+    expect(reviewStep({ env: {}, forge: forge(fresh()), factory: "ram", project: "ledger", plugins })).toMatchObject({
       kind: "unavailable",
     });
     expect(
@@ -734,6 +751,7 @@ describe("reviewStep", () => {
         forge: forge(fresh()),
         factory: "ram",
         project: "ledger",
+        plugins,
       }),
     ).toMatchObject({ kind: "unavailable", reason: expect.stringContaining("FACTORY_MAX_RUNS") });
   });
@@ -745,6 +763,7 @@ describe("reviewStep", () => {
       forge: forge(fresh()),
       factory: "ram",
       project: "ledger",
+      plugins,
       model: m(),
       sessions: none,
     });
@@ -754,6 +773,7 @@ describe("reviewStep", () => {
       forge: forge(fresh(), { moveTo: "f".repeat(40) }),
       factory: "ram",
       project: "ledger",
+      plugins,
       model: m(),
       sessions: none,
     });
