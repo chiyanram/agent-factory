@@ -26,6 +26,9 @@
 //   the writer was blocked and a person removed needs-human    writer again
 //   the head is not the writer's (a person pushed)             wait: stand off
 //   the same patch twice, or a run that changed nothing        needs-human
+//   the change conflicts with its target (poll's conflict)     implementer merges the default branch in
+//                                                              1 failure → needs-human (still conflicting after the
+//                                                              merge run); nothing rebases or force-pushes
 //   writer done, no ready check at this head                   ready check
 //   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230);
 //   than the one a human approved or STARTed                   a test check's stop at the same check is named too
@@ -50,8 +53,6 @@
 // handed to a person is not handed over again: removing needs-human does not lift it. The way back from needs-human
 // (#227, #151 gap 1): a person removes the label and STARTs again (tiny) or approves the spec again (the other lanes);
 // the newer record starts every count afresh, and the next pass picks the ticket up.
-//
-// Today: a merge conflict has no row, since poll does not report mergeability yet; the writer is not sent to rebase.
 
 import { above, raisedWhy } from "../lane.js";
 import type { Lane } from "../spec.js";
@@ -116,6 +117,8 @@ export type Action =
 export const MAX_READY_FAILURES = 3;
 export const MAX_REVIEW_ROUNDS = 3;
 export const MAX_CI_ROUNDS = 2;
+// merge runs for a conflict at one head: the first that leaves the change still conflicting goes to a person
+export const MAX_CONFLICT_RUNS = 1;
 
 type Rule = (s: TicketState) => Action | "next";
 
@@ -274,6 +277,26 @@ const samePatch: Rule = (s) => {
   return w.patch === s.runs.previousPatch
     ? { kind: "needs-human", why: "the writer made the same patch twice" }
     : "next";
+};
+
+// conflict : a change that does not merge into its target sends the implementer to merge the default branch in. The
+// head is the writer's (headMoved stands off otherwise), so a conflict right after a merge run is that run's failure.
+const conflict: Rule = (s) => {
+  const line = open(s);
+  if (line === "none" || line.mergeable !== "conflict") {
+    return "next";
+  }
+  const w = s.runs.lastWriter;
+  return w.kind === "ended" && w.mode === "rebase"
+    ? {
+        kind: "needs-human",
+        why: `the change still conflicts with its target after ${MAX_CONFLICT_RUNS} merge run; a person merges the default branch in`,
+      }
+    : {
+        kind: "writer",
+        task: { kind: "conflict", head: line.head },
+        why: "the change conflicts with its target: merge the default branch in",
+      };
 };
 
 // saidLane : the lane a human said yes to: approved, or STARTed in a lane that needs no approval
@@ -445,6 +468,7 @@ const RULES: readonly Rule[] = [
   writerAgain,
   headMoved,
   samePatch,
+  conflict,
   laneRaised,
   ready,
   review,

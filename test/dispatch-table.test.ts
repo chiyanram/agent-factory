@@ -3,6 +3,7 @@ import { backoffMs, EMPTY, type Summary } from "../src/core/dispatch/records.js"
 import {
   decide,
   MAX_CI_ROUNDS,
+  MAX_CONFLICT_RUNS,
   MAX_READY_FAILURES,
   MAX_REVIEW_ROUNDS,
   type TicketState,
@@ -27,6 +28,7 @@ function line(over: Partial<OpenLine> = {}): OpenLine {
     needsHuman: false,
     stop: { kind: "none" },
     asks: 0,
+    mergeable: "clean",
     ...over,
   };
 }
@@ -253,6 +255,52 @@ describe("decide: one row each", () => {
         }),
       ),
     ).toMatchObject({ kind: "needs-human", why: expect.stringContaining("changed nothing") });
+  });
+
+  it("a change that conflicts with its target sends the implementer to merge the default branch in (#103)", () => {
+    const conflicting = { kind: "open", line: line({ mergeable: "conflict" }) } as const;
+    // after any run but a merge run, and before the ready check, the review or the gate: they read a change that
+    // cannot merge
+    expect(decide(state({ change: conflicting, runs: wrote() }))).toEqual({
+      kind: "writer",
+      task: { kind: "conflict", head: H },
+      why: expect.stringContaining("merge the default branch in"),
+    });
+    expect(decide(state({ change: conflicting }))).toMatchObject({ kind: "writer", task: { kind: "conflict" } });
+    // a git host that has not checked yet, or a clean change, has no row of its own
+    expect(decide(state({ change: { kind: "open", line: line({ mergeable: "unknown" }) } }))).toEqual({
+      kind: "ping",
+      head: H,
+    });
+  });
+
+  it("a change that still conflicts after one merge run goes to a person: 1 failure → needs-human (#103)", () => {
+    const merged = wrote({
+      lastWriter: { kind: "ended", mode: "rebase", head: H, outcome: "done", patch: "p2", evidence: [] },
+      previousPatch: "p1",
+    });
+    expect(decide(state({ change: { kind: "open", line: line({ mergeable: "conflict" }) }, runs: merged }))).toEqual({
+      kind: "needs-human",
+      why: expect.stringContaining(`still conflicts with its target after ${MAX_CONFLICT_RUNS} merge run`),
+    });
+    // a merge run that cleared the conflict goes on: the ready check at its new head
+    expect(decide(state({ runs: merged }))).toEqual({ kind: "ready", head: H });
+  });
+
+  it("a conflict keeps the order of the rows above it: a person's push, the same patch twice, a question (#103)", () => {
+    const at = (over: Partial<OpenLine>) => ({ kind: "open", line: line({ mergeable: "conflict", ...over }) }) as const;
+    expect(decide(state({ change: at({ head: "2".repeat(40) }) }))).toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("a person pushed"),
+    });
+    expect(decide(state({ change: at({}), runs: wrote({ previousPatch: "p1" }) }))).toMatchObject({
+      kind: "needs-human",
+      why: expect.stringContaining("same patch"),
+    });
+    expect(decide(state({ change: at({ asks: 1, lastNoteAt: "2026-11-07T09:55:00Z" }) }))).toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("question"),
+    });
   });
 
   it("writer done with no ready check at this head: the ready check", () => {

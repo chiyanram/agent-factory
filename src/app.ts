@@ -31,6 +31,7 @@ import {
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
 import { STEPS_TODAY, tick, type Steps } from "./core/dispatch/tick.js";
 import type { Gate } from "./core/dispatch/table.js";
+import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
 import { paths, reviewSetup, type Paths } from "./core/review/settings.js";
 import { reviewStep } from "./core/review/step.js";
@@ -51,6 +52,7 @@ import { checkWall, installCoordinator, startCoordinator, type Interactive } fro
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
+import type { MachineId } from "./core/settings/keys.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -105,6 +107,7 @@ options:
 
 settings:
   FACTORY_QUIET_MINUTES  dispatch: how long an open question may sit before the claim is released (default 30)
+  FACTORY_POLL_MINUTES   dispatch: how often cron or launchd runs it; status flags it late after 3 of these (default 5)
   FACTORY_HOME         where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
   FACTORY_FORGE        gitlab (default) or github
   FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
@@ -437,24 +440,28 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
 
 type Command = { readonly name: string; readonly run: (args: Args) => Promise<number> };
 
-function quietMinutes(env: NodeJS.ProcessEnv): number | "bad" {
-  const raw = settingOf(env, "quietMinutes") ?? "30";
+function minutesOf(env: NodeJS.ProcessEnv, id: MachineId, fallback: number): number | "bad" {
+  const raw = settingOf(env, id) ?? String(fallback);
   return /^[1-9]\d{0,5}$/.test(raw) ? Number(raw) : "bad";
 }
 
 type DispatchSettings =
-  | { readonly home: string; readonly quiet: number }
+  | { readonly home: string; readonly quiet: number; readonly poll: number }
   | { readonly kind: "refused"; readonly reason: string };
 
 function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
   const home = factoryHome(env);
-  const quiet = quietMinutes(env);
+  const quiet = minutesOf(env, "quietMinutes", 30);
+  const every = minutesOf(env, "poll.minutes", DEFAULT_POLL_MINUTES);
   if (home.kind === "refused") {
     return home;
   }
+  if (every === "bad") {
+    return { kind: "refused", reason: `${settingName("poll.minutes")} must be a whole number of minutes` };
+  }
   return quiet === "bad"
     ? { kind: "refused", reason: `${settingName("quietMinutes")} must be a whole number of minutes` }
-    : { home: home.path, quiet };
+    : { home: home.path, quiet, poll: every };
 }
 
 type Planned = { readonly gate: Gate; readonly steps: Steps };
@@ -517,7 +524,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   return { kind: "ok", value: { gate, steps } };
 }
 
-type PassSettings = { readonly home: string; readonly quiet: number };
+type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number };
 
 // pass : the steps, then one locked pass with them
 async function pass(
@@ -544,6 +551,8 @@ async function pass(
     ...planned.value,
     now: () => Date.now(),
     quietMinutes: settings.quiet,
+    pollMinutes: settings.poll,
+    repo: io.env.FACTORY_PROJECT ?? "",
     dryRun,
     log: (line) => io.out(`${line}\n`),
     notify: notify.value,

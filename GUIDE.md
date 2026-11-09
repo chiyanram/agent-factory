@@ -238,7 +238,7 @@ The package bundles two plugins, `github` and `gitlab`: the factory's own forge 
 each request, so it needs no setting and no token. A project opts in with its project file:
 
 ```json
-{ "plugins": { "forge.read": "github", "forge.write": "github" } }
+{ "connectors": { "forge.read": "github", "forge.write": "github" } }
 ```
 
 Run `agent-factory plugin add github` once. The bundled plugins start with `#!/usr/bin/env node`, so `node` must be in
@@ -274,7 +274,7 @@ Each goes once per event and head, as its forge note does. To set it up:
 2. `agent-factory setup discord` and paste it at the hidden prompt. It is kept like the claude token: the login
    Keychain on macOS, `~/.factory/secrets/discord-token` (mode 600) on Linux, never printed. On the VM run it as the
    user that runs the dispatcher.
-3. `agent-factory plugin add discord`, and map `"notify": "discord"` in the project file's `plugins`.
+3. `agent-factory plugin add discord`, and map `"notify": "discord"` in the project file's `connectors`.
 
 The core hands the webhook to the plugin inside the request on stdin, never in env or argv; the plugin's `curl` reads
 it from a 0600 config file it removes after, and the message from stdin. The text is a posting template, and every
@@ -342,6 +342,7 @@ The scripts read their settings from the environment.
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude`. **Today:** the bash scripts default `FACTORY_GH` to `scripts/bin/gh`, the App |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
+| `FACTORY_POLL_MINUTES` | `dispatch`: how often launchd or cron runs it; each pass keeps it with its last-poll time, and `status` flags the orchestrator `LATE` after 3 of these while a change is claimed | `5` |
 | `FACTORY_IDENTITY` | who `agent-factory` acts as on the forge: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
 | `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
 | `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
@@ -377,13 +378,14 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30, "testFiles": ["src/test/**", "**/*Spec.groovy"] },
   "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] },
   "lanes": { "oneWayDoor": ["db/migrations/**", "api/openapi.yaml"] },
-  "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
+  "connectors": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
+  "plugins": ["rulebook@chiyanram"],
   "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
 }
 ```
 
 `agent-factory project init <project> [--template <file>]` writes it: from a template, copied once and never
-read again and only when its fields read, or with no plugin and the default policy. A team that keeps its settings
+read again and only when its fields read, or with no connector, no plugin and the default policy. A team that keeps its settings
 live uses a team layer instead ([Settings layers](#settings-layers)). It never replaces a file that is
 there.
 
@@ -410,7 +412,14 @@ there.
   files` names one, and in the ready check when the diff touches one. It is a deny-list key ([Settings](#settings)):
   every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
   drops it.
-- `plugins`: which registered plugin serves each extension point ([Plugins](#plugins)).
+- `connectors`: which registered connector serves each extension point ([Plugins](#plugins); the engine's swappable
+  parts are connectors, `GLOSSARY.md`). Before #232 this map was called `plugins`; a `plugins` that holds a map is
+  still read as the connectors for one release, and `config show` and `config check` warn about it. Both at once is
+  refused.
+- `plugins`: the Claude Code plugins the project installs, each `name@marketplace`, in order, each name once
+  ([docs/DESIGN.md](docs/DESIGN.md) section 5 "Plugins"). It is a locked key, so a user layer cannot drop or swap the
+  process plugin. None listed means the engine runs alone, on its built-in process. **Today:** the list is checked and
+  locked only; no plugin is fetched, pinned by hash or handed to a run yet (#232).
 - `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
   [docs/DESIGN.md](docs/DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing
@@ -446,7 +455,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
-| locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor` |
 | preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `poll.minutes` |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
@@ -645,7 +654,17 @@ When the host cannot build the task (nothing kept at the head, or red CI with no
 change and labels it `needs-human`. `dispatch` also does these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
-start. Run the table below by hand for the rest. There is no merge-conflict row yet.
+start. Run the table below by hand for the rest.
+
+A change that does not merge into its target (`poll` shows `conflict=yes`) sends the implementer on a merge run (#103):
+the host fetches the default branch into the run's clone as `origin/<default>`, the implementer merges it in and
+resolves the conflicts, and the host pushes the merge as a fast-forward. Nothing rebases or force-pushes. A change that
+still conflicts after that one merge run goes to a person. `conflict=unknown` (the git host has not checked yet) has
+no row. Each pass that polled writes its last-poll time to `$FACTORY_HOME/runs/<project>/last-poll.json` (a dry run
+does not), and `agent-factory status` puts "orchestrator last ran N min ago" at the head of its line, flagged `LATE`
+when that is more than 3 poll intervals (`FACTORY_POLL_MINUTES`) ago while any change is claimed: a stopped cron or
+launchd job shows up there, instead of claimed changes that just sit. Flaky jobs are not yet rerun with failure
+signatures (#132): red CI sends the writer back.
 The order is fixed: writer done → ready check → reviewer → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
 Poll the forge about every 5 minutes. Limits: one run per MR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
@@ -663,7 +682,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | a run is silent too long, hits a cap, or fails | `block <mr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
 | you restart | `reconcile`: every claim without a live run goes back to the queue |
 | `poll` shows `stop=<time>` newer than the ticket's approval (a maintainer's `/stop`), or a human pushes to the branch | stand off that MR; approving again lifts the stop |
-| a merge conflict | `start-writer` to rebase; if that fails, `needs-human` |
+| a merge conflict (`conflict=yes`) | `dispatch` sends the implementer to merge the default branch in; if it still conflicts, `needs-human`. Never rebase or force-push |
 | a claimed MR with no live run has a stale approval (`agent-factory approval` exits 3) or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved MR; `claim` it again when the human answers |
 | the usage limit is near | pause every run |
 
@@ -677,12 +696,12 @@ and `#12` for `!12`.
 
 | script | does |
 |---|---|
-| `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks; plus each merged MR that still carries the claim; `--json` prints the records |
+| `agent-factory poll` | one line per open MR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks, `conflict` (`yes`, `no`, or `unknown` while the git host has not checked); plus each merged MR that still carries the claim; `--json` prints the records |
 | `agent-factory claim <mr>` / `agent-factory release <mr>` | adds or removes the claim label; `claim` refuses an MR already claimed or not open; `release` of an MR with no claim says so and is not an error |
 | `start-writer.sh [--test-first] <mr>` | starts a fresh writer in its own worktree at the MR head; refuses an MR with a live run, and a machine at its run limit; replaces a dead run's worktree only when it holds nothing to land, and refuses one with uncommitted files, commits no remote branch has, or that git cannot check (#189: `reconcile` hands it to you); `--test-first` starts a run that commits only a bug's failing test and stops |
 | `agent-factory review <project> <mr>` | one review round on a claimed MR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then a find pass and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status box; one summary note, last. It refuses an MR that already has a live writer or reviewer, and a machine at `FACTORY_MAX_RUNS`, and holds `.claude/runs/reviewer-<mr>.pid` while it runs. A change that touches a file whose name holds a control character is refused, for a person to review. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<mr>/<head>/` |
 | (context pack) | built by `review`, one per head, under `$FACTORY_REPO/.claude/packs/`: rules from the default branch only; an unresolved rule pointer or link stops it. The intent and acceptance criteria come from the approved spec of the ticket the MR's `factory/<ticket>` branch names, read from `<home>/specs/<project>/` and checked against `<home>/approvals/<project>/`; the design from that spec's `## Design` link, as the default branch holds it. A spec edited after approval, or never approved, is named in the pack for the reviewer to report; no spec in the store stops it. The MR description is data in the pack, never the contract |
-| `agent-factory status <mr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text |
+| `agent-factory status <mr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text. The line it prints starts with "orchestrator last ran N min ago", flagged `LATE` after 3 poll intervals while any change is claimed (#103) |
 | `agent-factory ask -- <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The target: the writer writes the question to `report.json` and the host posts it |
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash and the design's (`design none` with no `design.md` beside it), or every missing part (intent, numbered acceptance criteria, design, lane); an optional `## Planned files` lists the paths the change will touch, one per line, for the lane check before the build (#230); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
 | `agent-factory start <project> <ticket> [--yes]` | records a human's START in `$FACTORY_HOME/starts/<project>/<ticket>.json`: who, the front door (`via`) and when. It opens the ticket; in the tiny lane it also lets the build begin. When `factory/<ticket>` is already on the git host it asks first (exit 3), and `--yes` starts anyway. A human runs it; the coordinator's settings deny it (#227) |
@@ -714,7 +733,7 @@ counted. A run is live while `claude agents --json` lists its session (`writer-<
 ### Escalation
 
 The human gets: every OPEN design question, every `[writer] OPEN:` question, `needs-human` after 3 rounds, a merge
-conflict a writer could not rebase, a standing rule that contradicts what you see, and anything irreversible. You
+conflict a writer could not merge, a standing rule that contradicts what you see, and anything irreversible. You
 keep the conversation and the open questions. The dispatcher keeps polling, claims, retries of flaky jobs, and
 starting and restarting workers. **Today** you keep those too, until it exists.
 

@@ -189,7 +189,7 @@ async function projectCommand(argv: readonly string[], io: Io): Promise<number> 
     return fail(io, "project init", done.reason);
   }
   io.out(
-    `wrote ${done.value}: map each capability to a plugin under "plugins"; add gate and ready.programs before the ready check runs\n`,
+    `wrote ${done.value}: map each capability to a connector under "connectors"; add gate and ready.programs before the ready check runs\n`,
   );
   return 0;
 }

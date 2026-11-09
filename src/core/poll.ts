@@ -1,7 +1,7 @@
 // poll — one record of facts per open change, read from the forge as it is now (#36, #102). The dispatcher (#103)
 // decides; poll only reports. It keeps no state between runs, so a restart loses nothing (ADR-0002).
 //
-//   !12 head=1a2b3c4d draft=yes claimed=no pipeline=success needs_human=no stop=no asks=0
+//   !12 head=1a2b3c4d draft=yes claimed=no pipeline=success needs_human=no stop=no asks=0 conflict=no
 //   !9 merged claimed=yes
 //
 //   claimed      the change carries the claim label (FACTORY_CLAIM_LABEL, default agent::claimed)
@@ -12,6 +12,8 @@
 //                else no; "undated" when its time does not parse. The dispatcher holds the change while that stop is
 //                newer than the ticket's local approval, so approving again lifts it.
 //   asks         [coordinator] OPEN: and [writer] OPEN: notes with no note from a project member after them (#128)
+//   conflict     yes when the change does not merge into its target as it stands, no when it does, unknown while the
+//                git host has not checked it yet (#103)
 //
 // There is no approved field: an approval is a local permission (`agent-factory approve`, ADR-0012 S1), never a note.
 // Who wrote a note is told by notes.ts: the factory's login AND a seat prefix make an agent note; everything else is a
@@ -22,7 +24,7 @@
 
 import { classify, openAsks, type Note, type Readers } from "./notes.js";
 import type { Result } from "./forge/api.js";
-import type { Changes, Forge, OpenChange, Person, Pipeline } from "./forge/types.js";
+import type { Changes, Forge, Mergeable, OpenChange, Person, Pipeline } from "./forge/types.js";
 
 // stopped: the /stop's time, as ISO 8601 UTC; undated: a /stop whose time did not parse, which holds the change until a
 // human looks, since no approval can be shown to be newer.
@@ -45,6 +47,7 @@ export type OpenLine = {
   readonly needsHuman: boolean;
   readonly stop: Stop;
   readonly asks: number;
+  readonly mergeable: Mergeable;
 };
 
 export type MergedLine = {
@@ -109,6 +112,7 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
     needsHuman: change.labels.includes("needs-human"),
     stop: stop({ comments: change.comments, readers, maintainers }),
     asks: openAsks({ notes: change.comments, readers }),
+    mergeable: change.mergeable,
   };
 }
 
@@ -140,6 +144,8 @@ function pipelineWord(p: Pipeline): string {
   return p.kind === "unknown" ? `unknown:${p.raw.replace(/[^A-Za-z0-9_]/g, "_")}` : p.kind;
 }
 
+const CONFLICT_WORD: Readonly<Record<Mergeable, string>> = { conflict: "yes", clean: "no", unknown: "unknown" };
+
 // format : one line, as the coordinator and the human read it.
 export function format(input: { readonly line: PollLine; readonly mark: string }): string {
   const { line, mark } = input;
@@ -149,7 +155,8 @@ export function format(input: { readonly line: PollLine; readonly mark: string }
   const stopped = line.stop.kind === "stopped" ? line.stop.at : line.stop.kind === "undated" ? "undated" : "no";
   return (
     `${mark}${line.number} head=${line.head.slice(0, 8)} draft=${yn(line.draft)} claimed=${yn(line.claimed)}` +
-    ` pipeline=${pipelineWord(line.pipeline)} needs_human=${yn(line.needsHuman)} stop=${stopped} asks=${line.asks}`
+    ` pipeline=${pipelineWord(line.pipeline)} needs_human=${yn(line.needsHuman)} stop=${stopped} asks=${line.asks}` +
+    ` conflict=${CONFLICT_WORD[line.mergeable]}`
   );
 }
 

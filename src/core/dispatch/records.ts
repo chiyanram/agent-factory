@@ -18,7 +18,8 @@ import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify";
-// what the writer was started for
+// what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
+// never rebases (#103: nothing force-pushes; the name predates that decision and stays, so older lines still read)
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase";
 
 // what one writer run is for, and so what the host hands the writer (#171). The record keeps only its mode.
@@ -32,7 +33,9 @@ export type Task =
   // CI is red at this head
   | { readonly kind: "ci-red"; readonly head: string }
   // the local verifier failed at this head (a local gate, #91); its output is kept with the head (kept.ts)
-  | { readonly kind: "verify-failed"; readonly head: string };
+  | { readonly kind: "verify-failed"; readonly head: string }
+  // the change does not merge into the default branch at this head: merge the default branch in (#103)
+  | { readonly kind: "conflict"; readonly head: string };
 
 const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
   "test-first": "test-first",
@@ -41,6 +44,7 @@ const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
   "act-on": "rework",
   "ci-red": "ci",
   "verify-failed": "ci",
+  conflict: "rebase",
 };
 
 // modeOf : the mode a task is recorded as. Pure.

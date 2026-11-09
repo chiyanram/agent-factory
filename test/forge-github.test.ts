@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { github, pipeline } from "../src/core/forge/github.js";
+import { github, mergeableOf, pipeline } from "../src/core/forge/github.js";
 import type { Change } from "../src/core/forge/types.js";
 import type { Post } from "../src/core/post.js";
 import { fake, field, ok, type Scripted } from "./fake-forge.js";
@@ -29,6 +29,7 @@ type PrOptions = {
   readonly labels?: readonly string[];
   readonly comments?: readonly unknown[];
   readonly older?: string;
+  readonly mergeable?: string;
 };
 const pr = (number: number, o: PrOptions = {}) => ({
   number,
@@ -36,6 +37,7 @@ const pr = (number: number, o: PrOptions = {}) => ({
   headRefOid: `${number}`.repeat(8).slice(0, 8) + "ffffffff",
   headRefName: `factory/T-${number}`,
   isCrossRepository: false,
+  mergeable: o.mergeable ?? "MERGEABLE",
   labels: { pageInfo: { hasNextPage: false }, nodes: (o.labels ?? []).map((name) => ({ name })) },
   commits: { nodes: [{ commit: { statusCheckRollup: o.rollup === undefined ? null : o.rollup } }] },
   comments: {
@@ -56,6 +58,26 @@ const merged = (numbers: readonly number[]) =>
       },
     },
   });
+
+describe("mergeable (#103)", () => {
+  it("reads GitHub's MergeableState: CONFLICTING is a conflict; UNKNOWN, none or anything else is unknown", () => {
+    expect(["MERGEABLE", "CONFLICTING", "UNKNOWN", null, undefined, "NEW"].map(mergeableOf)).toEqual([
+      "clean",
+      "conflict",
+      "unknown",
+      "unknown",
+      "unknown",
+      "unknown",
+    ]);
+  });
+
+  it("asks for it with the open pull requests, and reports a conflicting one", async () => {
+    const f = fake("github", [collaborators([]), open([pr(4, { mergeable: "CONFLICTING" })]), merged([])]);
+    const result = await github(f.client, project).changes({ label: "agent::claimed" });
+    expect(result).toMatchObject({ kind: "ok", value: { open: [{ number: 4, mergeable: "conflict" }] } });
+    expect(f.calls[1]?.args.join(" ")).toContain("mergeable");
+  });
+});
 
 describe("pipeline (#124)", () => {
   it("maps every check rollup state, and no checks at all is none", () => {
@@ -107,6 +129,7 @@ describe("changes", () => {
             draft: false,
             labels: ["agent::claimed"],
             pipeline: { kind: "running" },
+            mergeable: "clean",
             comments: [
               { body: "[writer] OPEN: which port?", author: { name: "chiyanram" }, at: "2026-11-02T12:00:00Z" },
             ],

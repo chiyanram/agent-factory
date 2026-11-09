@@ -30,9 +30,9 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
   });
 
   it("reads a file with only the plugin fields as no ready settings; once one ready field is there, it checks them all", async () => {
-    write({ plugins: { notify: "discord" }, policy: {} });
+    write({ connectors: { notify: "discord" }, policy: {} });
     expect(await read()).toMatchObject({ kind: "missing", reason: expect.stringContaining("no gate yet") });
-    write({ plugins: {}, verify: ["make", "verify"] });
+    write({ connectors: {}, verify: ["make", "verify"] });
     expect(await read()).toMatchObject({ kind: "failed", reason: expect.stringContaining('"gate"') });
     write([]);
     expect(await read()).toMatchObject({ kind: "failed", reason: expect.stringContaining("not a JSON object") });

@@ -1,7 +1,8 @@
 // project — the project file on this machine (ADR-0014 P3): <FACTORY_HOME>/projects/<project>.json. Never a repo
 // file, so a branch cannot choose its own gate or the programs its evidence may run (ADR-0012 S12; #91). This reader
-// takes only what the ready check, the local verifier and the box's egress need; the plugin fields, "plugins" and
-// "policy", are read by plugin/config.ts (#134), and fields it does not know are left alone.
+// takes only what the ready check, the local verifier and the box's egress need; the connector fields, "connectors"
+// and "policy", are read by plugin/config.ts (#134), the "plugins" list by process/plugins.ts (#232), and fields it
+// does not know are left alone.
 //
 //   {
 //     "gate": "forge-ci" | "local",          where the gate's result comes from

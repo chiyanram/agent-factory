@@ -14,6 +14,7 @@
 // (test/settings-read.test.ts fails on a direct read).
 
 import { DEFAULT_POLICY, MAX_CAP, MODES, POLICY_POINTS } from "../plugin/policy.js";
+import { checkPluginList } from "../process/plugins.js";
 import { TEST_FILES } from "../ready/floor.js";
 import { list, MACHINE_KEYS, oneOf, type MachineId, wholeNumber, word } from "./variables.js";
 
@@ -154,13 +155,22 @@ const FILE_KEYS: readonly FileKey[] = [
     about: "the hosts the project's runners may reach",
   },
   {
-    id: "plugins",
+    id: "connectors",
     where: "file",
-    path: ["plugins"],
+    path: ["connectors"],
     class: "locked",
     check: map,
     fallback: {},
     about: "the connector that serves each extension point (ADR-0014 P3)",
+  },
+  {
+    id: "plugins",
+    where: "file",
+    path: ["plugins"],
+    class: "locked",
+    check: checkPluginList,
+    fallback: [],
+    about: "the plugins the project installs, each name@marketplace, in order; none runs the built-in process",
   },
   ...POLICY_POINTS.flatMap(policyKeys),
   {

@@ -160,6 +160,8 @@ function fakeGlab(): string {
                 sourceBranch: "factory/PROJ-12",
                 sourceProjectId: 1,
                 targetProjectId: 1,
+                conflicts: false,
+                mergeStatusEnum: "CAN_BE_MERGED",
                 labels: { pageInfo: { hasNextPage: false }, nodes: [{ title: "agent::claimed" }] },
                 headPipeline: { status: "SUCCESS", sha: "1a2b3c4d5e6f" },
                 notes: {
@@ -201,7 +203,7 @@ describe("agent-factory poll", () => {
     const run = await cli(["poll"], env);
     expect(run).toEqual({
       code: 0,
-      out: "!9 merged claimed=yes\n!12 head=1a2b3c4d draft=no claimed=yes pipeline=success needs_human=no stop=no asks=1\n",
+      out: "!9 merged claimed=yes\n!12 head=1a2b3c4d draft=no claimed=yes pipeline=success needs_human=no stop=no asks=1 conflict=no\n",
       err: "",
     });
     const json = await cli(["poll", "--json"], env);

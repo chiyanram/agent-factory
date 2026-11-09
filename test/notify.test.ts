@@ -179,7 +179,7 @@ describe("the pings (#119)", () => {
     expect(lines).toEqual(["DRY RUN: notify: PROJ-1: the writer asked a question that waits on you"]);
     expect(await notifyPluginOf({ home, project: "ledger" })).toEqual({ kind: "ok", value: "" });
     mkdirSync(join(home, "projects"), { recursive: true });
-    writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify({ plugins: { notify: "discord" } }));
+    writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify({ connectors: { notify: "discord" } }));
     expect(await notifyPluginOf({ home, project: "ledger" })).toEqual({ kind: "ok", value: "discord" });
   });
 });

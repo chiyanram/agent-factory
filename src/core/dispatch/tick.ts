@@ -8,7 +8,8 @@
 // decided the same way next time. A "started" record is written before a run and an "ended" one after it; a pass that
 // dies in between leaves the first alone, and the next pass hands that ticket to a person.
 //
-// A lock file keeps two passes from running at once (cron every few minutes, a run of an hour).
+// A lock file keeps two passes from running at once (cron every few minutes, a run of an hour). Each pass that polled
+// writes its last-poll time (last-poll.ts), so `status` shows a stopped orchestrator.
 //
 // The ticket list (#227) is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
 // the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
@@ -42,6 +43,7 @@ import {
   type Retried,
   type Task,
 } from "./records.js";
+import { writeLastPoll } from "./last-poll.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
   decide,
@@ -106,6 +108,10 @@ export type TickSetup = {
   readonly gate: Gate;
   readonly now: () => number;
   readonly quietMinutes: number;
+  // how often cron or launchd runs the pass (FACTORY_POLL_MINUTES), kept with the last-poll time for status
+  readonly pollMinutes: number;
+  // the repository on the git host (FACTORY_PROJECT): status finds the last-poll time by it
+  readonly repo: string;
   // print each decision and act on none
   readonly dryRun: boolean;
   readonly log: (line: string) => void;
@@ -834,6 +840,31 @@ export async function lock(input: { readonly home: string; readonly project: str
   }
 }
 
+// acted : a dry run prints each decision and acts on none; a real pass writes its last-poll time, then acts
+async function acted(setup: TickSetup, decided: readonly Decided[]): Promise<readonly Ran[]> {
+  if (setup.dryRun) {
+    decided.forEach((d) =>
+      setup.log(
+        "kind" in d
+          ? `${d.ticket}: broken: ${d.reason} (dry run)`
+          : `${d.state.ticket}: ${describe(d.action)} (dry run)`,
+      ),
+    );
+    return [];
+  }
+  await polled(setup);
+  return actAll(setup, decided);
+}
+
+// polled : the pass's last-poll time; one that cannot be written is printed, and status then shows the pass as late
+async function polled(setup: TickSetup): Promise<void> {
+  const last = { at: at(setup), pollMinutes: setup.pollMinutes, forge: setup.forge.name, repo: setup.repo };
+  const written = await writeLastPoll({ home: setup.home, project: setup.project, poll: last });
+  if (written.kind === "failed") {
+    setup.log(`the last-poll time was not written: ${written.reason}`);
+  }
+}
+
 // tick : one locked pass
 export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
   if (!plainName(setup.project)) {
@@ -848,17 +879,7 @@ export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
     if (decided.kind === "failed") {
       return decided;
     }
-    if (setup.dryRun) {
-      decided.value.forEach((d) =>
-        setup.log(
-          "kind" in d
-            ? `${d.ticket}: broken: ${d.reason} (dry run)`
-            : `${d.state.ticket}: ${describe(d.action)} (dry run)`,
-        ),
-      );
-      return { kind: "ok", value: [] };
-    }
-    return { kind: "ok", value: await actAll(setup, decided.value) };
+    return { kind: "ok", value: await acted(setup, decided.value) };
   } finally {
     await held.release();
   }

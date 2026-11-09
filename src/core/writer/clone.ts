@@ -7,12 +7,15 @@
 //   3 origin is the project's forge URL, so the host can push from it; the commits get the writer's author name
 //   4 a prepare-commit-msg hook gives every commit the writer makes its "Agent: writer" trailer (#128); the host's push
 //     refuses a commit without it, so a commit made past the hook never leaves
-//   5 .factory holds the approved spec, the rulebook and, for a rework or CI run, the task (task.ts); the agent's
+//   5 for a merge run (#103), the default branch is fetched the same way and kept as origin/<default>, for the writer
+//     to merge in: the box cannot reach the git host itself
+//   6 .factory holds the approved spec, the rulebook and, for a rework or CI run, the task (task.ts); the agent's
 //     settings, those files and the repo's git config and hooks are mounted read-only (ADR-0012 S12)
 // A branch that holds .factory, or a symlink where a read-only path goes, is refused: the host writes into .factory,
 // and docker would mount a symlink's target from the host. Nothing here throws.
 
 import { AGENT_SETTINGS } from "../agent-settings.js";
+import { plainBranch } from "../branch.js";
 import { cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { excludeFactory } from "../finish.js";
@@ -31,9 +34,12 @@ export type FileText = { readonly kind: "none" } | { readonly kind: "text"; read
 export const SETTINGS_FILE = ".factory/settings.json";
 
 // the hook git runs on every commit, merge and amend; --no-verify does not skip it. The host's own git never runs it.
+// `git merge --no-edit` hands it a message with no final newline, and interpret-trailers then puts the trailer in the
+// subject's paragraph, where git does not read it as one (#103): the hook ends the message with a newline first.
 const TRAILER_HOOK = [
   "#!/bin/sh",
   "# agent-factory: every commit of the writer carries its seat (#128)",
+  '[ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && printf \'\\n\' >> "$1"',
   `exec git interpret-trailers --in-place --if-exists replace --trailer "${agentTrailer({ seat: "writer" })}" "$1"`,
   "",
 ].join("\n");
@@ -166,6 +172,8 @@ type Files = {
   readonly rulebook: string;
   readonly task: FileText;
   readonly settings: FileText;
+  // a merge run's default branch, fetched in as origin/<it>
+  readonly merge?: string;
 };
 
 // the optional files the host writes, each by its path
@@ -196,8 +204,39 @@ async function factoryFiles(repo: string, files: Files): Promise<Result<readonly
   );
 }
 
-// checkedOut : the new repo in `dir`, at the start, on the run's branch; the start's commit
-async function checkedOut(setup: CloneSetup, dir: string, start: Start): Promise<Result<Checkout>> {
+// fetchBase : the default branch, through the project's clone, into the new repo as origin/<base> (a merge run)
+async function fetchBase(setup: CloneSetup, repo: string, base: string): Promise<Result<string>> {
+  if (!plainBranch(base)) {
+    return { kind: "failed", reason: `the default branch is not a plain branch name: ${JSON.stringify(base)}` };
+  }
+  const ref = "refs/factory/writer-base";
+  const fetched = await git(setup.env, setup.repo, ["fetch", "-q", "origin", `+refs/heads/${base}:${ref}`]);
+  return fetched.kind === "ok"
+    ? git(setup.env, repo, ["fetch", "-q", "--no-tags", setup.repo, `+${ref}:refs/remotes/origin/${base}`])
+    : fetched;
+}
+
+// filled : the new repo filled, and for a merge run the default branch fetched in; the start's commit
+async function filled(
+  setup: CloneSetup,
+  repo: string,
+  ref: string,
+  branch: string,
+  merge: string | undefined,
+): Promise<Result<string>> {
+  const head = await fill(setup, repo, ref, branch);
+  const based = head.kind === "ok" && merge !== undefined ? await fetchBase(setup, repo, merge) : head;
+  return based.kind === "ok" ? head : based;
+}
+
+// checkedOut : the new repo in `dir`, at the start, on the run's branch, with the default branch for a merge run; the
+// start's commit
+async function checkedOut(
+  setup: CloneSetup,
+  dir: string,
+  start: Start,
+  merge: string | undefined,
+): Promise<Result<Checkout>> {
   const repo = join(dir, "repo");
   const ref = `refs/factory/writer-${start.branch.replaceAll("/", "-")}`;
   const tip = await fetchStart(setup, start, ref);
@@ -208,7 +247,7 @@ async function checkedOut(setup: CloneSetup, dir: string, start: Start): Promise
   if (made.kind === "failed") {
     return made;
   }
-  const head = await fill(setup, repo, ref, start.branch);
+  const head = await filled(setup, repo, ref, start.branch, merge);
   if (head.kind === "failed") {
     return head;
   }
@@ -222,7 +261,7 @@ async function prepared(
   setup: CloneSetup,
   input: Files & { readonly dir: string; readonly start: Start },
 ): Promise<Result<Clone>> {
-  const out = await checkedOut(setup, input.dir, input.start);
+  const out = await checkedOut(setup, input.dir, input.start, input.merge);
   if (out.kind === "failed") {
     return out;
   }

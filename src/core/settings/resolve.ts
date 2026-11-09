@@ -7,6 +7,7 @@
 // and the team value, and the run does not start. A key no class knows is a warning with "did you mean", for one
 // release, before it becomes an error (#229).
 
+import { isOldConnectors, OLD_CONNECTORS } from "../process/plugins.js";
 import { pathKey } from "./lines.js";
 import { KEYS, PROJECT_META, TEAM_META, type Key, type KeyClass } from "./keys.js";
 
@@ -314,8 +315,17 @@ export function resolve(input: Input): Resolution {
     (text): Problem => ({ level: "error", text }),
   );
   const unknown = input.layers.flatMap(unknownKeys);
+  const old = input.layers.flatMap(oldNames);
   const project = input.layers.find((l) => l.name === "project");
-  return { values, problems: [...input.problems, ...errors, ...unknown], effective: effectiveOf(project, values) };
+  const problems = [...input.problems, ...errors, ...unknown, ...old];
+  return { values, problems, effective: effectiveOf(project, values) };
+}
+
+// oldNames : a key still read under its old name, for one release, with a warning (#232)
+function oldNames(layer: FileLayer): readonly Problem[] {
+  const plugins: unknown = Reflect.get(layer.value, "plugins");
+  const place = where({ layer: layer.name, file: layer.file, line: layer.lines.get(pathKey(["plugins"])) ?? 0 });
+  return isOldConnectors(plugins) ? [{ level: "warning", text: `${place}: ${OLD_CONNECTORS}` }] : [];
 }
 
 // atWork : P9, nothing is committed to a work project's product repo, so its opt-in is refused
