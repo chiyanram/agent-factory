@@ -2,27 +2,34 @@
 // review step (#138). A value that is set but not valid is refused, never replaced by the default.
 //
 //   FACTORY_REPO                  the project's clone; packs go to <repo>/.claude/packs, pass answers to <repo>/.claude/runs
-//   FACTORY_RULEBOOK              the rulebook plugin folder, the one that holds skills/<domain>/references/
 //   FACTORY_REVIEW_FIND / _VERIFY the instructions (default: the package's prompts/review-*.md)
-//   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   default sonnet, sonnet, opus (#22 Q4)
+//   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   full model ids, never an alias (ADR-0015 E9, #213);
+//                                 default REVIEW_MODELS (pinned.ts)
 //   FACTORY_MAX_USD               the most one model run may spend, in US dollars (ADR-0011 D14)
 //   FACTORY_CLAUDE                the claude CLI (default: claude)
-//   FACTORY_MAX_RUNS              live runs allowed on this machine at once (default 2)
+//   FACTORY_MAX_RUNS              runs at once: live runs allowed on this machine (default 1, ADR-0012 S16)
 //   FACTORY_HOME                  the run folders go in <home>/review-runs; the spec and its approval are read from
 //                                 <home>/specs and <home>/approvals (default ~/.factory)
 //
-// The claude CLI gets only the environment it needs (CLAUDE_ENV): no forge token, no FACTORY_* (ADR-0012 S2).
+// The plugins come from the project's pinned list (process/use.ts, #232): the process plugin's folder holds the review
+// references (skills/<domain>/references/). The claude CLI gets only the environment it needs (CLAUDE_ENV): no forge token, no FACTORY_* (ADR-0012 S2).
 
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
+import { runsAtOnceOf } from "../dispatch/caps.js";
 import { recordsDirOf } from "../kept.js";
 import { claudeSessions, type Sessions } from "./live.js";
 import { claudeModel, runInFolder, type Model } from "./model.js";
 import type { ReviewSetup } from "./round.js";
 import { settingName, settingOf } from "../settings/machine.js";
+import { PINNED_HINT, pinnedModel, type MachineId } from "../settings/variables.js";
+import { REVIEW_MODELS } from "./pinned.js";
+
+export { REVIEW_MODELS } from "./pinned.js";
+import type { PluginDir } from "../process/read.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
@@ -43,14 +50,17 @@ export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
       };
 }
 
-function maxRuns(env: NodeJS.ProcessEnv): Result<number> {
-  const value = settingOf(env, "caps.liveRuns") ?? "2";
-  return /^[1-9]\d{0,2}$/.test(value)
-    ? { kind: "ok", value: Number(value) }
-    : {
-        kind: "failed",
-        reason: `${settingName("caps.liveRuns")} must be a whole number from 1, got ${JSON.stringify(value)}`,
-      };
+const MODEL_KEYS = { find: "review.findModel", rule: "review.ruleModel", logic: "review.logicModel" } as const;
+
+// unpinnedModel : the refusal of the first of these model keys that is set to an alias, or ""
+export function unpinnedModel(env: NodeJS.ProcessEnv, ids: readonly MachineId[]): string {
+  const bad = ids.find((id) => {
+    const value = settingOf(env, id);
+    return value !== undefined && !pinnedModel(value);
+  });
+  return bad === undefined
+    ? ""
+    : `${settingName(bad)} must be ${PINNED_HINT}, got ${JSON.stringify(settingOf(env, bad))}`;
 }
 
 function home(env: NodeJS.ProcessEnv): Result<string> {
@@ -61,7 +71,6 @@ function home(env: NodeJS.ProcessEnv): Result<string> {
 
 export type Paths = {
   readonly repo: string;
-  readonly rulebook: string;
   readonly home: string;
   readonly maxUsd: string;
   readonly maxRuns: number;
@@ -74,27 +83,27 @@ function limits(env: NodeJS.ProcessEnv): Result<Limits> {
   if (usd.kind === "failed") {
     return usd;
   }
-  const runs = maxRuns(env);
+  const runs = runsAtOnceOf(env);
   return runs.kind === "ok" ? { kind: "ok", value: { maxUsd: usd.value, maxRuns: runs.value } } : runs;
 }
 
-type Places = { readonly repo: string; readonly rulebook: string; readonly home: string };
+type Places = { readonly repo: string; readonly home: string };
 
 function places(env: NodeJS.ProcessEnv): Result<Places> {
   const repo = absolute("FACTORY_REPO", env.FACTORY_REPO);
   if (repo.kind === "failed") {
     return repo;
   }
-  const rulebook = absolute(settingName("rulebook"), settingOf(env, "rulebook"));
-  if (rulebook.kind === "failed") {
-    return rulebook;
-  }
   const h = home(env);
-  return h.kind === "ok" ? { kind: "ok", value: { repo: repo.value, rulebook: rulebook.value, home: h.value } } : h;
+  return h.kind === "ok" ? { kind: "ok", value: { repo: repo.value, home: h.value } } : h;
 }
 
-// paths : the settings, each checked; a value that is set but not valid is refused
+// paths : the settings, each checked; a value that is set but not valid is refused, and so is a model alias
 export function paths(env: NodeJS.ProcessEnv): Result<Paths> {
+  const alias = unpinnedModel(env, Object.values(MODEL_KEYS));
+  if (alias !== "") {
+    return { kind: "failed", reason: alias };
+  }
   const where = places(env);
   if (where.kind === "failed") {
     return where;
@@ -141,9 +150,9 @@ function prompts(env: NodeJS.ProcessEnv): ReviewSetup["prompts"] {
 
 function models(env: NodeJS.ProcessEnv): ReviewSetup["models"] {
   return {
-    find: settingOf(env, "review.findModel") ?? "sonnet",
-    rule: settingOf(env, "review.ruleModel") ?? "sonnet",
-    logic: settingOf(env, "review.logicModel") ?? "opus",
+    find: settingOf(env, MODEL_KEYS.find) ?? REVIEW_MODELS.find,
+    rule: settingOf(env, MODEL_KEYS.rule) ?? REVIEW_MODELS.rule,
+    logic: settingOf(env, MODEL_KEYS.logic) ?? REVIEW_MODELS.logic,
   };
 }
 
@@ -164,6 +173,8 @@ export function reviewSetup(input: {
   readonly project: string;
   readonly number: number;
   readonly paths: Paths;
+  // the project's plugins, in order (process/use.ts)
+  readonly plugins: readonly PluginDir[];
   readonly model?: Model;
   readonly sessions?: Sessions;
 }): ReviewSetup {
@@ -177,7 +188,7 @@ export function reviewSetup(input: {
     env,
     home: p.home,
     project: input.project,
-    rulebook: p.rulebook,
+    plugins: input.plugins,
     packDir: join(p.repo, ".claude", "packs"),
     recordsDir: recordsDirOf(p.repo),
     runsDir: join(p.home, "review-runs"),

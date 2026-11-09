@@ -16,7 +16,7 @@
 import { join } from "node:path";
 import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import { approvalState, currentSpec } from "./approval.js";
-import { needsApproval, plannedCheck, raisedWhy } from "./lane.js";
+import { needsApproval, plannedCheck, raisedWhy, type LaneProps } from "./lane.js";
 import { plainName, type Refused, type Spec, type Ticket } from "./spec.js";
 
 export type StartRecord = {
@@ -131,13 +131,13 @@ export type GoAhead =
   | { readonly kind: "held"; readonly why: string }
   | Refused;
 
-async function tinyStart(where: Where, held: string): Promise<GoAhead> {
+async function tinyStart(where: Where & Lanes, held: string): Promise<GoAhead> {
   const stored = await readStart(where);
   if (stored.kind !== "record") {
     return stored.kind === "missing" ? { kind: "held", why: held } : stored;
   }
   const current = await currentSpec(where);
-  const tiny = current.kind === "spec" && !needsApproval(current.spec.lane);
+  const tiny = current.kind === "spec" && !needsApproval(current.spec.lane, where.lanes);
   return tiny
     ? { kind: "go", said: "started", spec: current.spec, by: stored.record.by, at: stored.record.at }
     : { kind: "held", why: `${held}, and a START alone builds only the tiny lane` };
@@ -170,11 +170,14 @@ async function planned(where: Where, go: GoAhead): Promise<GoAhead> {
 }
 
 // goAhead : whether the ticket's build may begin, and on whose word; the lane is checked against the planned files
-export async function goAhead(where: Where): Promise<GoAhead> {
+// the project's lanes (process/read.ts, #232); the default lanes when a caller gives none
+export type Lanes = { readonly lanes?: readonly LaneProps[] | undefined };
+
+export async function goAhead(where: Where & Lanes): Promise<GoAhead> {
   return planned(where, await saidGo(where));
 }
 
-async function saidGo(where: Where): Promise<GoAhead> {
+async function saidGo(where: Where & Lanes): Promise<GoAhead> {
   const approval = await approvalState(where);
   switch (approval.kind) {
     case "approved":

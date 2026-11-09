@@ -1,21 +1,20 @@
-// settings — what the writer step reads from the environment (#113), each value checked. Pure but for one stat.
+// settings — what the writer step reads from the environment (#113), each value checked, and the plugins the pass
+// hands it (process/use.ts, #232). Pure.
 //
-//   FACTORY_RULEBOOK         the rulebook plugin folder (it holds .claude-plugin/plugin.json); copied into each run
 //   FACTORY_WRITER_MINUTES   how long one writer run may take (default 60, at most 240)
 //   FACTORY_WRITER_STALL_MINUTES  how long a run may print nothing before the host stops it (#228): a cap, so it can
 //                            only be lowered, from 1 to 5 (default 5)
 //   FACTORY_MAX_USD          the most one run may spend, in US dollars (ADR-0011 D14); unset: no cap
 //   FACTORY_WRITER_MODEL     the writer's model; unset: Claude's default
 
-import { stat } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { maxUsd } from "../review/settings.js";
 import { settingName, settingOf } from "../settings/machine.js";
 import { COMPLETION, STALL_MS, type Claude, type Completion } from "./run.js";
 
 export type WriterSettings = {
-  readonly rulebook: string;
+  // the plugins' folders, in the project's order: each is copied into the run and loaded with --plugin-dir (#232)
+  readonly plugins: readonly string[];
   readonly timeoutSeconds: number;
   readonly claude: Claude;
   readonly completion: Completion;
@@ -62,25 +61,7 @@ function timesOf(env: NodeJS.ProcessEnv): Result<{ readonly timeoutSeconds: numb
   return stall.kind === "ok" ? { kind: "ok", value: { timeoutSeconds: timeout.value, stallMs: stall.value } } : stall;
 }
 
-async function rulebookOf(env: NodeJS.ProcessEnv): Promise<Result<string>> {
-  const dir = settingOf(env, "rulebook") ?? "";
-  const manifest = join(dir, ".claude-plugin", "plugin.json");
-  const found = isAbsolute(dir)
-    ? await stat(manifest).then(
-        (s) => s.isFile(),
-        () => false,
-      )
-    : false;
-  return found
-    ? { kind: "ok", value: dir }
-    : { kind: "failed", reason: `${settingName("rulebook")} must be the rulebook plugin's folder, with ${manifest}` };
-}
-
-export async function writerSettings(env: NodeJS.ProcessEnv): Promise<Result<WriterSettings>> {
-  const rulebook = await rulebookOf(env);
-  if (rulebook.kind === "failed") {
-    return rulebook;
-  }
+export function writerSettings(env: NodeJS.ProcessEnv, plugins: readonly string[]): Result<WriterSettings> {
   const times = timesOf(env);
   if (times.kind === "failed") {
     return times;
@@ -90,7 +71,7 @@ export async function writerSettings(env: NodeJS.ProcessEnv): Promise<Result<Wri
     ? {
         kind: "ok",
         value: {
-          rulebook: rulebook.value,
+          plugins,
           ...times.value,
           claude: { maxUsd: usd.value, model: settingOf(env, "implementer.model") ?? "" },
           completion: COMPLETION,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { capsOf, NO_CAPS, projectStop, ticketCapped } from "../src/core/dispatch/caps.js";
+import { hoursOf, openAt, within } from "../src/core/dispatch/hours.js";
 import { keyById } from "../src/core/settings/keys.js";
 import { claudeArgv } from "../src/core/writer/run.js";
 import type { Spent } from "../src/core/dispatch/usage.js";
@@ -40,7 +41,19 @@ describe("the caps are cap-class settings keys", () => {
         day: { usd: 20, tokens: 1_000_000 },
         window: { tokens: 500, machineTokens: 800 },
         windowHours: 3,
+        runsAtOnce: 1,
+        runHours: "any",
       },
+    });
+    expect(capsOf({ FACTORY_MAX_RUNS: "3", FACTORY_RUN_HOURS: "22-06" })).toMatchObject({
+      kind: "ok",
+      value: { runsAtOnce: 3, runHours: { from: 22, to: 6, text: "22-06" } },
+    });
+    expect(capsOf({ FACTORY_MAX_RUNS: "0" })).toMatchObject({ reason: expect.stringContaining("FACTORY_MAX_RUNS") });
+    expect(capsOf({ FACTORY_RUN_HOURS: "9-17" })).toEqual({
+      kind: "failed",
+      reason:
+        'FACTORY_RUN_HOURS must be hours in UTC as "HH-HH", from 00 to 24, such as "22-06"; not empty, got "9-17"',
     });
     expect(capsOf({ FACTORY_MAX_USD_DAY: "0" })).toEqual({
       kind: "failed",
@@ -51,7 +64,7 @@ describe("the caps are cap-class settings keys", () => {
   });
 
   it("per run: the writer's run carries the run cap as --max-budget-usd", () => {
-    const argv = claudeArgv({ maxUsd: "2", model: "" });
+    const argv = claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1);
     expect(argv.slice(argv.indexOf("--max-budget-usd"), argv.indexOf("--max-budget-usd") + 2)).toEqual([
       "--max-budget-usd",
       "2",
@@ -126,5 +139,27 @@ describe("the project's stop: the day cap, then the window share, then the machi
     const caps = { ...NO_CAPS, day: { usd: "none" as const, tokens: 1 } };
     const unmeasured: Spent = { project: "ledger", ticket: "PROJ-1", at: "2026-11-09T11:00:00Z", spend: "unmeasured" };
     expect(projectStop({ project: [unmeasured], machine: [], now: NOW, caps })).toEqual({ kind: "go" });
+  });
+});
+
+describe("run hours (#299)", () => {
+  it("reads HH-HH in UTC, wrapping past midnight; refuses an empty or malformed one", () => {
+    expect(hoursOf("22-06")).toEqual({ from: 22, to: 6, text: "22-06" });
+    expect(["06-06", "24-00", "9-17", "25-01", "", 6, undefined].map(hoursOf)).toEqual(Array(7).fill("bad"));
+    const night = hoursOf("22-06");
+    const all = hoursOf("00-24");
+    if (night === "bad" || all === "bad") {
+      throw new Error("unreadable");
+    }
+    const hour = (h: number) => Date.UTC(2026, 10, 7, h, 30);
+    expect([21, 22, 23, 0, 5, 6].map((h) => openAt(night, hour(h)))).toEqual([false, true, true, true, true, false]);
+    expect([0, 12, 23].every((h) => openAt(all, hour(h)))).toBe(true);
+  });
+
+  it("a lower value is within the one above only when every hour of it is", () => {
+    expect(within("23-05", "22-06")).toBe(true);
+    expect(within("01-03", "00-24")).toBe(true);
+    expect(within("21-06", "22-06")).toBe(false);
+    expect(within("bad", "22-06")).toBe(false);
   });
 });
