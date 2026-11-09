@@ -7,27 +7,23 @@
 //
 // A policy names only the writes the coordinator may request: tracker.comment, tracker.create and notify. forge.write
 // is the dispatcher's and has no policy here. A cap counts the writes since the ticket's latest approval (writes.ts).
-// What the file leaves out keeps the defaults below; a field that is there but not valid is refused.
+// What the file leaves out keeps the defaults (policy.ts); a field that is there but not valid is refused.
 
 import type { Result } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
 import { readProjectRaw } from "../project.js";
 import { isPoint, PLUGIN_NAME, type ExtensionPoint } from "./contract.js";
+import {
+  DEFAULT_POLICY,
+  MAX_CAP,
+  POLICY_POINTS,
+  type Mode,
+  type Policy,
+  type PolicyPoint,
+  type Rule,
+} from "./policy.js";
 
-export const POLICY_POINTS = ["tracker.comment", "tracker.create", "notify"] as const;
-export type PolicyPoint = (typeof POLICY_POINTS)[number];
-
-export type Mode = "allow" | "confirm" | "deny";
-export type Rule = { readonly mode: Mode; readonly cap: number };
-export type Policy = Readonly<Record<PolicyPoint, Rule>>;
-
-// ADR-0014 P5
-export const DEFAULT_POLICY: Policy = {
-  "tracker.comment": { mode: "allow", cap: 5 },
-  "tracker.create": { mode: "confirm", cap: 1 },
-  notify: { mode: "allow", cap: 3 },
-};
-export const MAX_CAP = 20;
+export { DEFAULT_POLICY, MAX_CAP, POLICY_POINTS, type Mode, type Policy, type PolicyPoint, type Rule };
 
 export type PluginConfig = {
   readonly plugins: ReadonlyMap<ExtensionPoint, string>;
