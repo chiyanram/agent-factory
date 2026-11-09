@@ -20,7 +20,7 @@ import { readKept } from "../kept.js";
 import type { Model } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
 import { JUDGE_MODEL } from "../review/pinned.js";
-import { reviewSetup } from "../review/settings.js";
+import { MAX_FINDERS, reviewSetup } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
 import {
@@ -172,7 +172,7 @@ function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, descripti
     factory: LOGIN,
     project: PROJECT,
     number: run,
-    paths: { repo: cloned.repo, home, maxUsd: ctx.settings.runUsd, maxRuns: 1 },
+    paths: { repo: cloned.repo, home, maxUsd: ctx.settings.runUsd, maxRuns: 1, maxFinders: MAX_FINDERS },
     plugins: [{ label: "the eval's plugin", dir: ctx.rulebook }],
     model: ctx.capped,
     sessions: async () => ({ kind: "ok", value: [] }),

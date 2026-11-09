@@ -14,6 +14,12 @@
 //                    while the caps above still allow it; the review step also refuses a machine at this many live runs
 //   run hours        runHours: the hours, in UTC, in which a pass may start a run (hours.ts); outside them none starts
 //
+// A review round starts several model runs: a finder per lens, at most review.maxFinders at once, and its verify passes
+// (#237). It counts as one run against runs at once. Before it starts, its worst case, every finder it can pick and
+// its verify passes each at caps.usdPerRun, must fit in the dollars left under the ticket's and the day's caps, or it
+// is held (overCaps). The window caps count tokens, which no per-run cap bounds, so they hold the next run only; with
+// no caps.usdPerRun the worst case is unbounded and only the caps above apply.
+//
 // Nothing is killed mid-run: a cap only keeps the next run from starting, so a run may end past it. On a subscription
 // the CLI's dollar figure is notional, so the token caps are the ones that count there. A run with no spend recorded
 // (stopped before its result) adds nothing.
@@ -285,4 +291,29 @@ export function heldWords(stop: Extract<Stop, { kind: "stop" }>, project: string
   return stop.period === "day"
     ? `the project-day cap is reached: ${stop.why}; ${again} tomorrow`
     : `the window is full until ${hhmm(stop.until)}: ${stop.why}; ${again} then`;
+}
+
+// overCaps : why a run whose worst case is `worst` dollars could pass the ticket's or the day's dollar cap, given what
+// each has spent; "" when it fits, or when the worst case is unbounded. Pure.
+export function overCaps(input: {
+  readonly worst: number | "unbounded";
+  readonly ticket: Spend;
+  readonly day: Spend;
+  readonly caps: Caps;
+}): string {
+  const { worst, caps } = input;
+  if (worst === "unbounded") {
+    return "";
+  }
+  const left: readonly (readonly [Limit, number, MachineId])[] = [
+    [caps.ticket.usd, input.ticket.usd, "caps.usdPerTicket"],
+    [caps.day.usd, input.day.usd, "caps.usdPerProjectDay"],
+  ];
+  const over = left.find(([limit, spent]) => limit !== "none" && spent + worst > limit);
+  if (over === undefined) {
+    return "";
+  }
+  const [limit, spent, id] = over;
+  const room = Math.max(0, Number(limit) - spent);
+  return `the review could spend up to $${worst.toFixed(2)} (every finder it can pick and its verify passes, each at ${settingName("caps.usdPerRun")}), more than the $${room.toFixed(2)} left under ${settingName(id)}`;
 }

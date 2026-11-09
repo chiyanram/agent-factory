@@ -203,7 +203,10 @@ export function readVerdicts(output: unknown): Result<readonly Verdict[]> {
 }
 
 // sortFindings : every finding in exactly one bucket; one the verify pass skipped is Consider
-export function sortFindings(findings: readonly Finding[], verdicts: readonly Verdict[]): readonly Sorted[] {
+export function sortFindings<F extends Finding>(
+  findings: readonly F[],
+  verdicts: readonly Verdict[],
+): readonly (F & { readonly bucket: Bucket; readonly why: string })[] {
   return findings.map((f) => {
     const v = verdicts.find((x) => x.id === f.id);
     return { ...f, bucket: v?.bucket ?? "consider", why: v?.why ?? "the verify pass gave no verdict" };

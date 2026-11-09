@@ -469,7 +469,7 @@ describe("tick", () => {
     expect(pings).toHaveLength(1);
   });
 
-  it("a review round records its Act on count and what it spent (#131)", async () => {
+  it("a review round records its Act on count, what it spent (#131) and each lens's unique findings (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
     const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
@@ -479,7 +479,10 @@ describe("tick", () => {
       ...STEPS_TODAY,
       review: {
         kind: "available",
-        run: async () => ({ kind: "ok", value: { actOn: 0, spend: { usd: 0.3, tokens: 40 } } }),
+        run: async () => ({
+          kind: "ok",
+          value: { actOn: 0, spend: { usd: 0.3, tokens: 40 }, lenses: { errors: 1, api: 0 } },
+        }),
       },
     };
     expect(await tick(setup({ team, open: [open()], merged: [] }, [], { steps }))).toMatchObject({ kind: "ok" });
@@ -488,6 +491,7 @@ describe("tick", () => {
       kind: "review-ended",
       actOn: 0,
       spend: { usd: 0.3, tokens: 40 },
+      lenses: { errors: 1, api: 0 },
     });
   });
 
@@ -502,6 +506,11 @@ describe("tick", () => {
     writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: -1, tokens: 7 } })}\n`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
     writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: 1 } })}\n`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    // each lens's unique findings (#237): kept, and a count that is not one fails the read
+    writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: 2 } })}\n`);
+    expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, lenses: { errors: 2 } }] });
+    writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: "two" } })}\n`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
   });
 
@@ -1130,6 +1139,49 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
       { usd: 1, tokens: 100 },
       { usd: 1.5, tokens: 200 },
     ]);
+  });
+
+  it("holds a review round whose worst case could pass the ticket's dollar cap, with no start line (#237)", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({
+      where,
+      event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
+    });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    const rounds: string[] = [];
+    const review = (worst: number | "unbounded"): Steps => ({
+      ...STEPS_TODAY,
+      review: {
+        kind: "available",
+        worstUsd: async () => ({ kind: "ok", value: worst }),
+        run: async (input) => (rounds.push(input.ticket), { kind: "ok", value: { actOn: 0, spend: NO_SPEND } }),
+      },
+    });
+    const ticket = { usd: 3, tokens: "none" } as const;
+    // $1 spent of a $3 cap: a worst case of $4 could pass it, so the round is held before its start line
+    const held = await tick(
+      setup({ team, open: [open()], merged: [] }, [], { steps: review(4), caps: caps({ ticket }) }),
+    );
+    expect(held).toMatchObject({
+      kind: "ok",
+      value: [
+        {
+          held: true,
+          result: {
+            kind: "unavailable",
+            reason: expect.stringContaining("could spend up to $4.00 (every finder it can pick and its verify passes"),
+          },
+        },
+      ],
+    });
+    expect(rounds).toEqual([]);
+    const read = await readRecords(where);
+    expect((read.kind === "ok" ? read.value : []).map((e) => e.kind)).not.toContain("started");
+    // an unbounded worst case, with no per-run cap, starts the round (overCaps is tested on its own)
+    await tick(setup({ team, open: [open()], merged: [] }, [], { steps: review("unbounded"), caps: caps({ ticket }) }));
+    expect(rounds).toEqual(["PROJ-1"]);
   });
 
   it("once a person takes the failed round back, the ticket at its cap goes to needs-human, not to another run", async () => {

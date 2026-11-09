@@ -60,5 +60,17 @@ By the design review on #30 (`docs/DESIGN.md` sections 4, 5 and 7; #232, #237):
   "two or three isolated reviewer agents" was same-model copies with the same brief; a lens is a different brief, and
   its findings still meet one verify pass.
 
-**Today:** the engine runs one find pass for all rules, and findings carry no lens or grade (#237). The floor is sent
-with every pass from #302.
+**Built (#237):** the project lists its lenses in the settings key `review.lenses`, each a rubric (a skill or reference
+in an enabled plugin, or a repo file read from the default branch) with optional `paths` and `lanes`; with none, one
+finder runs on the baseline review checks. The engine picks the lenses from the spec's lane, its lens count in the
+process plugin's lanes file, the one-way-door paths and the touched files: a one-way door runs every lens on the
+strongest pinned model, the logic model. The built-in test-integrity lens, the crq `test-integrity` reference, runs
+whenever an existing test file changed. Each finder is a fresh run in its own folder, its rubric as section 8 of the
+pack; the finders run in parallel. The finder gives `grade` and `evidence`; the engine stamps `lens`. Two lenses that
+report the same `file:line` and rule are merged in code before the verify pass: the stronger grade is kept, then the
+lower ID. Each lens's unique verified findings go in the round's summary, beside the head's pass answers and in the
+run record's `review-ended` line.
+
+**Today:** the find and verify instructions are still the engine's `prompts/review-*.md`, not the role cards: they
+cannot change until the eval baseline exists (#216, `scripts/check-eval-proof.ts`), so a finder learns its lens from
+the pack and its grade and evidence from the JSON schema. The floor is sent with every pass from #302.
