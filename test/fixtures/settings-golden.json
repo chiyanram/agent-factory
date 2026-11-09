@@ -1,0 +1,182 @@
+[
+  {
+    "name": "project: own test globs",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ],\n    \"testFiles\": [\n      \"checks/**\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: empty test globs",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ],\n    \"testFiles\": []\n  }\n}\n"
+  },
+  {
+    "name": "project: test globs not a list",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ],\n    \"testFiles\": \"checks/**\"\n  }\n}\n"
+  },
+  {
+    "name": "project: an empty test glob",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ],\n    \"testFiles\": [\n      \"\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: plugin fields only",
+    "text": "{\n  \"plugins\": {\n    \"notify\": \"discord\"\n  },\n  \"policy\": {}\n}\n"
+  },
+  {
+    "name": "project: verify without gate",
+    "text": "{\n  \"plugins\": {},\n  \"verify\": [\n    \"make\",\n    \"verify\"\n  ]\n}\n"
+  },
+  {
+    "name": "project: a list",
+    "text": "[]\n"
+  },
+  {
+    "name": "project: local gate and egress",
+    "text": "{\n  \"gate\": \"local\",\n  \"verify\": [\n    \"make\",\n    \"verify\"\n  ],\n  \"ready\": {\n    \"programs\": [\n      \"make\",\n      \"./gradlew\"\n    ],\n    \"timeoutMinutes\": 10\n  },\n  \"egress\": {\n    \"allow\": [\n      \"repo.maven.apache.org\",\n      \"api.anthropic.com\",\n      \".gradle.org\",\n      \"services.gradle.org\"\n    ]\n  },\n  \"capabilities\": {\n    \"forge\": \"github\"\n  }\n}\n"
+  },
+  {
+    "name": "project: forge-ci gate",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: not json",
+    "text": "{not json"
+  },
+  {
+    "name": "project: unknown gate",
+    "text": "{\n  \"gate\": \"ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: local without verify",
+    "text": "{\n  \"gate\": \"local\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: verify a string",
+    "text": "{\n  \"gate\": \"local\",\n  \"verify\": \"make verify\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: verify empty",
+    "text": "{\n  \"gate\": \"local\",\n  \"verify\": [],\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: no ready",
+    "text": "{\n  \"gate\": \"forge-ci\"\n}\n"
+  },
+  {
+    "name": "project: no programs",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": []\n  }\n}\n"
+  },
+  {
+    "name": "project: an empty program",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\",\n      \"\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: timeout 0",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ],\n    \"timeoutMinutes\": 0\n  }\n}\n"
+  },
+  {
+    "name": "project: timeout 241",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ],\n    \"timeoutMinutes\": 241\n  }\n}\n"
+  },
+  {
+    "name": "project: egress a list",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  },\n  \"egress\": [\n    \"a.com\"\n  ]\n}\n"
+  },
+  {
+    "name": "project: egress a number",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  },\n  \"egress\": {\n    \"allow\": [\n      1\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "project: egress empty",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  },\n  \"egress\": {\n    \"allow\": []\n  }\n}\n"
+  },
+  {
+    "name": "project: egress wildcard",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  },\n  \"egress\": {\n    \"allow\": [\n      \"*.a.com\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: tracker plugins, no policy",
+    "text": "{\n  \"plugins\": {\n    \"tracker.comment\": \"tracker\",\n    \"tracker.create\": \"tracker\",\n    \"notify\": \"tracker\"\n  },\n  \"policy\": {}\n}\n"
+  },
+  {
+    "name": "plugin-request: tracker plugins, confirm policy",
+    "text": "{\n  \"plugins\": {\n    \"tracker.comment\": \"tracker\",\n    \"tracker.create\": \"tracker\",\n    \"notify\": \"tracker\"\n  },\n  \"policy\": {\n    \"tracker.comment\": {\n      \"mode\": \"confirm\",\n      \"cap\": 2\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: notify tracker",
+    "text": "{\n  \"plugins\": {\n    \"notify\": \"tracker\"\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: no plugins",
+    "text": "{\n  \"plugins\": {}\n}\n"
+  },
+  {
+    "name": "plugin-request: notify quiet",
+    "text": "{\n  \"plugins\": {\n    \"notify\": \"quiet\"\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: policy for forge.write",
+    "text": "{\n  \"policy\": {\n    \"forge.write\": {\n      \"mode\": \"allow\",\n      \"cap\": 1\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: policy for context.read",
+    "text": "{\n  \"policy\": {\n    \"context.read\": {\n      \"mode\": \"allow\",\n      \"cap\": 1\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: a bad mode",
+    "text": "{\n  \"policy\": {\n    \"notify\": {\n      \"mode\": \"sometimes\",\n      \"cap\": 1\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: cap 0",
+    "text": "{\n  \"policy\": {\n    \"notify\": {\n      \"mode\": \"allow\",\n      \"cap\": 0\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: cap 21",
+    "text": "{\n  \"policy\": {\n    \"notify\": {\n      \"mode\": \"allow\",\n      \"cap\": 21\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: an extra field",
+    "text": "{\n  \"policy\": {\n    \"notify\": {\n      \"mode\": \"allow\",\n      \"cap\": 1,\n      \"extra\": 1\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: policy a list",
+    "text": "{\n  \"policy\": []\n}\n"
+  },
+  {
+    "name": "plugin-request: the init file",
+    "text": "{\n  \"plugins\": {},\n  \"policy\": {\n    \"tracker.comment\": {\n      \"mode\": \"allow\",\n      \"cap\": 5\n    },\n    \"tracker.create\": {\n      \"mode\": \"confirm\",\n      \"cap\": 1\n    },\n    \"notify\": {\n      \"mode\": \"allow\",\n      \"cap\": 3\n    }\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: a template",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  },\n  \"plugins\": {\n    \"notify\": \"discord\"\n  }\n}\n"
+  },
+  {
+    "name": "plugin-request: a template without ready",
+    "text": "{\n  \"gate\": \"forge-ci\",\n  \"plugins\": {\n    \"notify\": \"discord\"\n  }\n}\n"
+  },
+  {
+    "name": "forge-plugin: not json",
+    "text": "not json"
+  },
+  {
+    "name": "forge-plugin: notify only",
+    "text": "{\n  \"plugins\": {\n    \"notify\": \"discord\"\n  }\n}\n"
+  },
+  {
+    "name": "forge-plugin: forge.read only",
+    "text": "{\n  \"plugins\": {\n    \"forge.read\": \"github\"\n  }\n}\n"
+  },
+  {
+    "name": "forge-plugin: forge read and write",
+    "text": "{\n  \"plugins\": {\n    \"forge.read\": \"github\",\n    \"forge.write\": \"github\"\n  }\n}\n"
+  },
+  {
+    "name": "ready: local",
+    "text": "{\n  \"gate\": \"local\",\n  \"verify\": [\n    \"make\",\n    \"verify\"\n  ],\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "ready: local with egress",
+    "text": "{\n  \"gate\": \"local\",\n  \"verify\": [\n    \"make\",\n    \"verify\"\n  ],\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  },\n  \"egress\": {\n    \"allow\": [\n      \"repo.maven.apache.org\"\n    ]\n  }\n}\n"
+  },
+  {
+    "name": "ready: a typo in the gate",
+    "text": "{\n  \"gate\": \"locl\",\n  \"ready\": {\n    \"programs\": [\n      \"make\"\n    ]\n  }\n}\n"
+  }
+]

@@ -379,8 +379,9 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
 }
 ```
 
-`agent-factory project init <project> [--template <file>]` writes it: from a team's template, copied once and never
-read again and only when its fields read, or with no plugin and the default policy. It never replaces a file that is
+`agent-factory project init <project> [--template <file>]` writes it: from a template, copied once and never
+read again and only when its fields read, or with no plugin and the default policy. A team that keeps its settings
+live uses a team layer instead ([Settings layers](#settings-layers)). It never replaces a file that is
 there.
 
 - `gate`: `forge-ci` when the forge's own CI is the gate; `local` when the project has none. Then the local verifier
@@ -407,6 +408,44 @@ there.
   with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
   for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
   turns a local gate into forge CI.
+
+### Settings layers
+
+The project file is one of three settings layers, all in the factory home and never in the repo (#229;
+[docs/DESIGN.md](docs/DESIGN.md) section 5 "Settings"). They are resolved on this host each time a project file is read,
+so before every run, and no run's agent is handed them. The coordinator's deny list covers each of them:
+`$FACTORY_HOME/user.json`, `$FACTORY_HOME/teams/**` and `$FACTORY_HOME/projects/**`, and the orchestrator refuses to
+start while one is missing (`wallProblems`).
+
+| layer | file | holds |
+|---|---|---|
+| team | `$FACTORY_HOME/teams/<team>/team.json`, a git clone, read at the commit the project pins | the project file's keys, plus `"modes": {"<key>": "locked" \| "default" \| "open"}` |
+| project | `$FACTORY_HOME/projects/<project>.json`; `"team": "<team>@<full commit>"` pins the team | the keys above |
+| user | `$FACTORY_HOME/user.json` | the same keys |
+| machine | the `FACTORY_*` variables | the keys that `config show` lists with an `env` source |
+
+Every key has a class, fixed in code (`src/core/settings/keys.ts`):
+
+| class | rule | keys |
+|---|---|---|
+| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun` |
+| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap` |
+| allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
+| deny-list | all layers add | `ready.testFiles`, `lanes.oneWayDoor` |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
+
+- A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
+  layer, its `file:line` and the team value. A team `locked` mode holds on any class.
+- `approval.floor` is the engine's: no lane above tiny starts without a human approval, and no layer can change it.
+- An unknown key is a warning with "did you mean" for one release, then an error.
+- With no team pin and no user file, every value is the project file's own, as before the layers.
+- `agent-factory config show <project>` prints each key's value, layer, `file:line` and class; `config check <project>`
+  resolves the layers, runs the project file's checks on the result, and exits 0 or 1; `team update <project>
+  [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
+  Fetch the team's clone yourself first; nothing here uses the network.
+- **Today:** the machine-layer keys are still read by each module from its own variable, so a file value for one is
+  reported by `config check` and not used, and `lanes.oneWayDoor` waits for the lane check (#230).
 
 ### The box image
 
