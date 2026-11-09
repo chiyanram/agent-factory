@@ -10,6 +10,8 @@ const SPEC =
 
 let home = "";
 const started: { readonly bin: string; readonly args: readonly string[]; readonly cwd: string }[] = [];
+// the background commands a test asked for: the fake starts none of them (#305)
+const backgrounded: { readonly args: readonly string[]; readonly log: string }[] = [];
 // this test's own ids: a test never runs as root, and the platform is linux so no Keychain is touched
 const ME = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 type Run = { readonly code: number; readonly out: string; readonly err: string };
@@ -31,6 +33,7 @@ async function cli(
       ...ME,
       run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
       interactive: async (call) => (started.push(call), 0),
+      background: async (call) => (backgrounded.push(call), { kind: "ok", value: 4242 }),
     },
   });
   return { code, out, err };
@@ -42,6 +45,7 @@ function writeSpec(text: string): void {
 
 beforeEach(() => {
   home = tempDir("factory-cli-");
+  backgrounded.length = 0;
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -281,6 +285,40 @@ describe("agent-factory start (#227)", () => {
   });
 });
 
+describe("start and approve start the orchestrator loop (#305)", () => {
+  const env = () => ({ FACTORY_HOME: home, FACTORY_PROJECT: "a/ledger", FACTORY_GLAB: branchGlab(false) });
+  const LOG = () => join(home, "runs", "ledger", "loop.log");
+
+  it("start starts a loop in the background when none runs; approve too; never one that runs", async () => {
+    const first = await cli(["start", "ledger", "PROJ-1"], env());
+    expect(first.code).toBe(0);
+    expect(first.out).toContain("started the orchestrator loop for ledger (pid 4242)");
+    expect(backgrounded).toEqual([{ args: ["dispatch", "ledger"], log: LOG() }]);
+    // a loop runs: its file names a live pid (this test's own)
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(join(home, "runs", "ledger", "loop.pid"), `${process.pid}:x`);
+    writeSpec(SPEC);
+    const approved = await cli(["approve", "ledger", "PROJ-1", specHash(SPEC)]);
+    expect(approved).toMatchObject({
+      code: 0,
+      out: expect.stringContaining(`the orchestrator loop for ledger is already running (pid ${process.pid})`),
+    });
+    expect(backgrounded.length).toBe(1);
+    // the loop that wrote the file died: approve starts a new one
+    writeFileSync(join(home, "runs", "ledger", "loop.pid"), "999999999:x");
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC)])).out).toContain("started the orchestrator loop");
+    expect(backgrounded.length).toBe(2);
+  });
+
+  it("--no-loop starts none, and a refused START or approval starts none", async () => {
+    expect((await cli(["start", "ledger", "PROJ-1", "--no-loop"], env())).code).toBe(0);
+    writeSpec(SPEC);
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC), "--no-loop"])).code).toBe(0);
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash("other")])).code).toBe(1);
+    expect(backgrounded).toEqual([]);
+  });
+});
+
 describe("agent-factory waive (#231)", () => {
   it("records a human's waiver of the test checks at the full head; a short head or no project refuses", async () => {
     const head = "c".repeat(40);
@@ -310,8 +348,10 @@ describe("agent-factory dispatch", () => {
     expect(run).toMatchObject({ code: 1, err: expect.stringContaining("no coordinator settings") });
   });
 
-  it("runs only one pass, named with --once, for one plain project (64 otherwise)", async () => {
-    expect((await cli(["dispatch", "ledger"])).code).toBe(64);
+  it("takes exactly one project (64 otherwise); without --once it is the loop, refused like a pass (#305)", async () => {
+    const loop = await cli(["dispatch", "ledger"], { FACTORY_HOME: home, FACTORY_PROJECT: "a/b" });
+    expect(loop).toMatchObject({ code: 1, err: expect.stringContaining("no coordinator settings") });
+    expect((await cli(["dispatch"])).code).toBe(64);
     expect((await cli(["dispatch", "--once"])).code).toBe(64);
     expect((await cli(["dispatch", "ledger", "extra", "--once"])).code).toBe(64);
   });

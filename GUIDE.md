@@ -34,7 +34,7 @@ its clone, mounted read-only, and the host push refuses a writer commit without 
 bot. A bot's key belongs to a separate
 `factory` OS user on the VM, never to a file your own user can read.
 
-No writer holds a forge login: the writer runs only through `agent-factory dispatch <project> --once`, in the box, and
+No writer holds a forge login: the writer runs only through `agent-factory dispatch <project>`, in the box, and
 the host pushes and posts for it. The bash `start-writer`, which gave the writer one, is gone (#138).
 
 ### GitLab
@@ -338,7 +338,7 @@ The scripts read their settings from the environment.
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
-| `FACTORY_POLL_MINUTES` | `dispatch`: how often launchd or cron runs it; each pass keeps it with its last-poll time, and `status` flags the orchestrator `LATE` after 3 of these while a change is claimed | `5` |
+| `FACTORY_POLL_MINUTES` | `dispatch`: how long the orchestrator loop waits between passes; each pass keeps it with its last-poll time, and while a loop is meant to be running `status` flags it `LATE` after 3 of these while a change is claimed | `5` |
 | `FACTORY_IDENTITY` | who `agent-factory` acts as on the forge: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
 | `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
 | `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
@@ -673,8 +673,25 @@ The dispatcher's decision table is code: [`src/core/dispatch/table.ts`](src/core
 [review 9](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682943767)). Its header lists every row and every stop; the code is the source of truth. `agent-factory dispatch
 <project> --once` runs one pass: it decides each ticket with a START or an approval record (and each change on a
 `factory/<ticket>` branch),
-posts and labels as the project's identity, and starts at most `FACTORY_MAX_RUNS` runs (default 1), one after another, and none outside `FACTORY_RUN_HOURS`. Run it from launchd or cron every few
-minutes; a lock keeps two passes apart, and `--dry-run` prints the decisions and acts on none. Each pass keeps its
+posts and labels as the project's identity, and starts at most `FACTORY_MAX_RUNS` runs (default 1), one after another,
+and none outside `FACTORY_RUN_HOURS`. A lock keeps two passes apart, and
+`--dry-run` prints the decisions and acts on none.
+
+No cron or launchd job runs the orchestrator: a human's command starts the **orchestrator loop**, and it ends by
+itself (#305). `agent-factory dispatch <project>` without `--once` runs one pass, then waits `FACTORY_POLL_MINUTES`
+and runs the next, while any ticket with a START or an approval is in flight. It ends when each such ticket is
+finished (merged or closed), has asked a person, stopped at `needs-human`, or waits on a human (an approval, a merge,
+a `/stop`); a loop with nothing in flight ends after its first pass. It never waits on what only a person can change:
+a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
+what to do. A step that is not set up says so ("the writer is not set up: …; set it up, then run `agent-factory
+dispatch <project>` again"); the project-day cap says to run it again tomorrow; the window's share says when the
+window has room ("the window is full until HH:MM UTC"); outside the run hours it says when they are. Three
+failed passes in a row end it too. `agent-factory start` and `approve` start it in
+the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
+While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
+the runs a pass may start, hold in each pass. A laptop that sleeps stops the loop; run `dispatch` again and it carries
+on from the records. It never opens a ticket: the ticket list is the START and approval records and the
+`factory/<ticket>` changes. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
 ended goes to a person. A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
@@ -756,21 +773,24 @@ the host fetches the default branch into the run's clone as `origin/<default>`, 
 resolves the conflicts, and the host pushes the merge as a fast-forward. Nothing rebases or force-pushes. A change that
 still conflicts after that one merge run goes to a person. `conflict=unknown` (the git host has not checked yet) has
 no row. Each pass that polled writes its last-poll time to `$FACTORY_HOME/runs/<project>/last-poll.json` (a dry run
-does not), and `agent-factory status` puts "orchestrator last ran N min ago" at the head of its line, flagged `LATE`
-when that is more than 3 poll intervals (`FACTORY_POLL_MINUTES`) ago while any change is claimed: a stopped cron or
-launchd job shows up there, instead of claimed changes that just sit. Flaky jobs are not yet rerun with failure
+does not), and `agent-factory status` puts "orchestrator last ran N min ago" at the head of its line. While a loop is
+meant to be running (its `loop.pid` is there), it is flagged `LATE` when that is more than 3 poll intervals
+(`FACTORY_POLL_MINUTES`) ago while any change is claimed: a loop that stopped shows up there, instead of claimed changes
+that just sit. With no loop it says "no orchestrator loop running". When the last loop stopped while a ticket was still
+in flight (a step not set up, a cap, failed passes) it adds when and why, from `$FACTORY_HOME/runs/<project>/loop-end.json`;
+otherwise it names `agent-factory dispatch <project>` while a change is claimed. Flaky jobs are not yet rerun with failure
 signatures (#132): red CI sends the writer back.
 The order is fixed: writer done → ready check → reviewer → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
-Poll the forge about every 5 minutes. Limits: one run per MR, at most `FACTORY_MAX_RUNS` at once, and at most one
+The orchestrator loop polls the forge every `FACTORY_POLL_MINUTES` (5) while a ticket is in flight. Limits: one run per MR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
 
 | when the forge shows | do |
 |---|---|
-| the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `agent-factory dispatch <project> --once`: it claims the change and starts the writer in a box; for a bug, the test-first run first |
-| a bug's test-first run ended with a pushed `test:` commit and `asks=0` | `agent-factory dispatch <project> --once` starts the fix run |
+| the MR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `agent-factory dispatch <project>` (`approve` starts it): it claims the change and starts the writer in a box; for a bug, the test-first run first |
+| a bug's test-first run ended with a pushed `test:` commit and `asks=0` | the orchestrator loop starts the fix run |
 | the writer's report is `done` and the host pushed and posted it | the ready check runs its evidence rows at the head in a box, then `agent-factory review <project> <mr>` |
-| an open Act on thread, or the gate is red, with `needs_human=no` | `agent-factory dispatch <project> --once` starts a rework run; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
-| the evidence fails at the head | `agent-factory dispatch <project> --once` starts a rework run; after 3 failures, label `needs-human` |
+| an open Act on thread, or the gate is red, with `needs_human=no` | the orchestrator loop starts a rework run; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not a writer |
+| the evidence fails at the head | the orchestrator loop starts a rework run; after 3 failures, label `needs-human` |
 | the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` in a box and posts `agent-factory/verify` at the head; it failing sends the writer back, as red CI does |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the MR is merged | retro (step 6, about one in ten); sweep the worktree |
@@ -798,13 +818,13 @@ and `#12` for `!12`.
 | `agent-factory status <mr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text. The line it prints starts with "orchestrator last ran N min ago", flagged `LATE` after 3 poll intervals while any change is claimed (#103) |
 | `agent-factory ask -- <mr> <sha> "<question>"` | posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The dispatcher's writer does not run it: it writes its question to `report.json`, and the host posts it |
 | `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash and the design's (`design none` with no `design.md` beside it), or every missing part (intent, numbered acceptance criteria, design, lane); an optional `## Planned files` lists the paths the change will touch, one per line, for the lane check before the build (#230); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
-| `agent-factory start <project> <ticket> [--yes]` | records a human's START in `$FACTORY_HOME/starts/<project>/<ticket>.json`: who, the front door (`via`) and when. It opens the ticket; in the tiny lane it also lets the build begin. When `factory/<ticket>` is already on the git host it asks first (exit 3), and `--yes` starts anyway. A human runs it; the coordinator's settings deny it (#227) |
-| `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, the design's (`none` when there is no `design.md` beside the spec), who, the front door and when. The hashes on the command line are the ones the human saw, as `agent-factory spec` printed them; a spec or design that no longer has exactly that hash is refused. A human runs it; the coordinator's settings deny it ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104, #227) |
+| `agent-factory start <project> <ticket> [--yes] [--no-loop]` | records a human's START in `$FACTORY_HOME/starts/<project>/<ticket>.json`: who, the front door (`via`) and when. It opens the ticket; in the tiny lane it also lets the build begin. When `factory/<ticket>` is already on the git host it asks first (exit 3), and `--yes` starts anyway. It starts the orchestrator loop in the background when none runs; `--no-loop` does not (#305). A human runs it; the coordinator's settings deny it (#227) |
+| `agent-factory approve <project> <ticket> <spec hash> [<design hash>] [--no-loop]` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, the design's (`none` when there is no `design.md` beside the spec), who, the front door and when. The hashes on the command line are the ones the human saw, as `agent-factory spec` printed them; a spec or design that no longer has exactly that hash is refused. It starts the orchestrator loop in the background when none runs; `--no-loop` does not (#305). A human runs it; the coordinator's settings deny it ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104, #227) |
 | `agent-factory waive <project> <ticket> <head>` | records the human's waiver of the test checks in `$FACTORY_HOME/waivers/<project>/<ticket>.json`: `kind: "test-change"`, the full commit id of the head the hits were listed at, who, the front door and when. The ready check clears the test check hits at that head; on a later head it looks again only at the files changed since, so a cleared file is flagged again only if it changes again. A waiver given again replaces it. A human runs it; the coordinator's settings deny it (#231) |
 | `agent-factory request <capability> --file <draft.json>` | asks for a `tracker.comment`, `tracker.create` or `notify` write on an approved ticket; the project's policy performs it at once (0), keeps it for `confirm` and prints that command (3), or refuses it (1) ([Writes](#writes)) |
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
-| `agent-factory dispatch <project> --once [--dry-run]` | one pass of the dispatcher's table over the project (see Triggers); exit 0, 1 when it cannot run, 2 when an action failed |
+| `agent-factory dispatch <project> [--once] [--dry-run]` | the orchestrator loop over the project: a pass of the dispatcher's table, then the next after `FACTORY_POLL_MINUTES` while a ticket is in flight, ending by itself when none is, or after a pass whose runs a cap or a step not set up held back (see Triggers); `--once` is one pass, and `--dry-run` one pass that acts on nothing; exit 0, 1 when it cannot run (another loop runs, or 3 passes in a row failed), 2 when an action failed |
 | `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131) |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |

@@ -603,3 +603,29 @@ function capped(state: TicketState, action: Action): Action {
 export function decide(state: TicketState): Action {
   return released(state, once(state, capped(state, backedOff(state, first(state)))));
 }
+
+// the waits on the machine, not on a person: CI that has not finished at this head
+const MACHINE_WAITS: ReadonlySet<string | undefined> = new Set([WAITS.running, WAITS.none]);
+
+// inFlight : whether the orchestrator loop carries the ticket on (#305): a run to start, a ping to send, a run that
+// backs off before its next try, or CI still running. A ticket is not in flight once it is finished (merged or
+// closed), has asked a person, has stopped at needs-human, waits on a human's START or approval, or waits on a person
+// in any other way (a green gate before the merge, a person's push, a /stop). It reads only the ticket's state, as
+// decide does, so the loop and the pass never disagree.
+export function inFlight(state: TicketState): boolean {
+  const action = decide(state);
+  return RUNS.has(action.kind) || action.kind === "ping" || (HELD_KINDS.has(action.kind) && carried(first(state)));
+}
+
+// the actions decide makes of a row it holds back: a wait (a backoff, CI) or the claim given back on a quiet change
+const HELD_KINDS: ReadonlySet<Action["kind"]> = new Set(["wait", "release"]);
+
+// a design run that backs off before its next try (#236): the engine carries it on by itself
+function designLater(why: string): boolean {
+  return Object.values(DESIGN_STEP).some((step) => why.startsWith(`the ${step} failed; the next try is at`));
+}
+
+// carried : a row the engine carries on by itself: a run, a wait on CI, or a design run's backoff
+function carried(row: Action): boolean {
+  return RUNS.has(row.kind) || (row.kind === "wait" && (MACHINE_WAITS.has(row.why) || designLater(row.why)));
+}

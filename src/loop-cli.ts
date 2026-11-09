@@ -107,7 +107,7 @@ function homeOf(env: NodeJS.ProcessEnv): Result<string> {
     : { kind: "failed", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(home)}` };
 }
 
-// withLiveness : status's line, headed by when the orchestrator last ran (#103; last-poll.ts)
+// withLiveness : status's line, headed by when the orchestrator last ran and whether its loop runs (#103, #305)
 async function withLiveness(
   io: LoopIo,
   forge: Forge,
@@ -202,6 +202,7 @@ export const LOOP_HELP = `  claim <number>               add the claim label to 
   status <number> <sha> "<line>"
                                post one [coordinator] note; refused when the head is no longer <sha>; its line starts
                                with when the orchestrator last ran, LATE after 3 poll intervals while a change is claimed
+                               and a loop is meant to be running; with no loop, that none runs
   ask <number> <sha> "<question>"
                                post one [writer] OPEN: note, an open ask until a person answers; the same head rule
   block <number> "<reason>" [<log>]

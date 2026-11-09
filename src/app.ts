@@ -29,7 +29,8 @@ import {
   type TokenStore,
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
-import { runHoursEnd, STEPS_TODAY, tick, type Steps } from "./core/dispatch/tick.js";
+import { runHoursEnd, STEPS_TODAY, tick, type Steps, type TickSetup } from "./core/dispatch/tick.js";
+import { loopFile, loopRunning, orchestratorLoop } from "./core/dispatch/orchestrator-loop.js";
 import type { Gate } from "./core/dispatch/table.js";
 import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
 import { reviewRound, type Outcome } from "./core/review/round.js";
@@ -70,13 +71,15 @@ commands:
   poll                         one line of facts per open change, read from the forge
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
   spec --template <ticket>     print an empty spec to fill in
-  start <project> <ticket> [--yes]
+  start <project> <ticket> [--yes] [--no-loop]
                                a human's START: open the ticket (in the tiny lane it also lets the build begin); asks
                                first, exit 3, when factory/<ticket> is already on the git host; --yes is the answer.
+                               It starts the orchestrator loop in the background when none runs (--no-loop: not).
                                A human runs it; the coordinator's settings deny it
-  approve <project> <ticket> <hash> [<design hash>]
+  approve <project> <ticket> <hash> [<design hash>] [--no-loop]
                                record the human's approval of the spec and the design with exactly those hashes (all 64
-                               characters, as spec printed them; no design hash is none). A human runs it; the
+                               characters, as spec printed them; no design hash is none), and start the orchestrator
+                               loop in the background when none runs (--no-loop: not). A human runs it; the
                                coordinator's settings deny it
   waive <project> <ticket> <head>
                                record the human's waiver of the test checks at that head (the full commit id the
@@ -86,9 +89,13 @@ commands:
   review <project> <number>    one review round on a claimed change: pack, find, verify, threads, status box, summary;
                                the contract is the approved spec of the ticket its factory/<ticket> branch names;
                                exit 0 posted or reused, 3 when the head moved, 1 otherwise
-  dispatch <project> --once    one pass of the orchestrator over the project's started and approved tickets and their
-                               PRs: decides each with the table and acts (--dry-run: decides and acts on none); it
-                               refuses to start while the coordinator's settings are looser than its wall
+  dispatch <project> [--once]  the orchestrator loop over the project's started and approved tickets and their PRs:
+                               a pass decides each with the table and acts, then waits FACTORY_POLL_MINUTES while a
+                               ticket is in flight, and ends by itself when none is, or when a cap or a step not set
+                               up holds every run back (it says why and when to run it again); --once: one pass
+                               (--dry-run: one pass that decides and acts on none). It refuses to start while the
+                               coordinator's settings are looser than its wall, and while another loop runs for the
+                               project
   app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
                                repository, as JSON {token, login, expiresAt}
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
@@ -119,7 +126,7 @@ options:
 
 settings:
   FACTORY_QUIET_MINUTES  dispatch: how long an open question may sit before the claim is released (default 30)
-  FACTORY_POLL_MINUTES   dispatch: how often cron or launchd runs it; status flags it late after 3 of these (default 5)
+  FACTORY_POLL_MINUTES   dispatch: the wait between the loop's passes; status flags a loop late after 3 (default 5)
   FACTORY_HOME         where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
   FACTORY_FORGE        gitlab (default) or github
   FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
@@ -138,6 +145,7 @@ type Args = {
   readonly once: boolean;
   readonly dryRun: boolean;
   readonly yes: boolean;
+  readonly noLoop: boolean;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -158,6 +166,9 @@ export type Io = {
     readonly run: CliRunner;
     // a program on this terminal, for the coordinator's session
     readonly interactive: Interactive;
+    // this command line, run again in the background with these words, its output appended to log; it outlives this
+    // command and gives its pid (the orchestrator loop, #305). A test passes a fake that starts nothing.
+    readonly background: (call: { readonly args: readonly string[]; readonly log: string }) => Promise<Result<number>>;
   };
 };
 
@@ -362,13 +373,42 @@ async function branchAt(
 }
 
 // start : a human's START at the terminal (#227). It asks first, exit 3, when the ticket's branch is on the git host.
-async function startCommand({ positionals, yes, io }: Args): Promise<number> {
+async function startCommand({ positionals, yes, noLoop, io }: Args): Promise<number> {
   const target = startTarget(positionals);
   if (target === "bad") {
-    io.err("usage: agent-factory start <project> <ticket> [--yes]\n");
+    io.err("usage: agent-factory start <project> <ticket> [--yes] [--no-loop]\n");
     return 64;
   }
-  return resolvedRun("start", target.project, io, (resolved) => startResolved(target, yes, resolved));
+  return resolvedRun("start", target.project, io, async (resolved) => {
+    const code = await startResolved(target, yes, resolved);
+    return code === 0 && !noLoop ? withLoop("start", io, target.project) : code;
+  });
+}
+
+// withLoop : the orchestrator loop for the project, started in the background when none runs (#305), after a human's
+// START or approval. The record is kept either way: a loop that cannot start is printed, and the exit stays 0.
+async function withLoop(name: string, io: Io, project: string): Promise<number> {
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    return 0;
+  }
+  const running = await loopRunning({ home: home.path, project });
+  if (running !== "none") {
+    io.out(`the orchestrator loop for ${project} is already running (pid ${running})\n`);
+    return 0;
+  }
+  const log = join(dirname(loopFile(home.path, project)), "loop.log");
+  const started = await io.system.background({ args: ["dispatch", project], log });
+  if (started.kind === "failed") {
+    io.err(
+      `agent-factory ${name}: the orchestrator loop did not start: ${started.reason}; run agent-factory dispatch ${project}\n`,
+    );
+    return 0;
+  }
+  io.out(
+    `started the orchestrator loop for ${project} (pid ${started.value}); it ends when no ticket is in flight; log ${log}\n`,
+  );
+  return 0;
 }
 
 async function startResolved(target: TicketArgs, yes: boolean, io: Io): Promise<number> {
@@ -413,11 +453,11 @@ function approveArgs(positionals: readonly string[]): ApproveArgs | "bad" {
   return given ? { project, ticket: String(ticket), hash: String(hash), design: String(design) } : "bad";
 }
 
-async function approveCommand({ positionals, io }: Args): Promise<number> {
+async function approveCommand({ positionals, noLoop, io }: Args): Promise<number> {
   const args = approveArgs(positionals);
   if (args === "bad") {
     io.err(
-      "usage: agent-factory approve <project> <ticket> <the full spec hash> [<the design hash>], as agent-factory spec printed them\n",
+      "usage: agent-factory approve <project> <ticket> <the full spec hash> [<the design hash>] [--no-loop], as agent-factory spec printed them\n",
     );
     return 64;
   }
@@ -441,7 +481,7 @@ async function approveCommand({ positionals, io }: Args): Promise<number> {
   }
   const r = result.record;
   io.out(`approved ${project}/${ticket} spec ${r.spec_hash} design ${r.design_hash} by ${r.by} at ${r.at}\n`);
-  return 0;
+  return noLoop ? 0 : withLoop("approve", io, project);
 }
 
 // waive : a human's waiver of the test checks at one head, at the terminal (#231)
@@ -636,14 +676,14 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
 
 type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number; readonly caps: Caps };
 
-// pass : the steps, then one locked pass with them
-async function pass(
+// passSetup : the steps, and every setting of one pass with them
+async function passSetup(
   project: string,
   dryRun: boolean,
   io: Io,
   settings: PassSettings,
   opened: Project,
-): Promise<ReturnType<typeof tick>> {
+): Promise<Result<TickSetup>> {
   const { forge } = opened;
   const planned = await stepsFor(io, opened, settings.home, project);
   if (planned.kind === "failed") {
@@ -653,21 +693,24 @@ async function pass(
   if (notify.kind === "failed") {
     return notify;
   }
-  return tick({
-    home: settings.home,
-    project,
-    forge,
-    label: settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL,
-    ...planned.value,
-    now: () => Date.now(),
-    quietMinutes: settings.quiet,
-    pollMinutes: settings.poll,
-    caps: settings.caps,
-    repo: io.env.FACTORY_PROJECT ?? "",
-    dryRun,
-    log: (line) => io.out(`${line}\n`),
-    notify: notify.value,
-  });
+  return {
+    kind: "ok",
+    value: {
+      home: settings.home,
+      project,
+      forge,
+      label: settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL,
+      ...planned.value,
+      now: () => Date.now(),
+      quietMinutes: settings.quiet,
+      pollMinutes: settings.poll,
+      caps: settings.caps,
+      repo: io.env.FACTORY_PROJECT ?? "",
+      dryRun,
+      log: (line) => io.out(`${line}\n`),
+      notify: notify.value,
+    },
+  };
 }
 
 // notifierFor : the pings of a pass (#119): through the notify plugin the project file maps, with the webhook from the
@@ -684,13 +727,19 @@ async function notifierFor(io: Io, home: string, project: string, mark: string):
   return { kind: "ok", value: pluginNotify({ setup, plugin: plugin.value, project, mark }) };
 }
 
-async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
-  // the project file may map the forge to a plugin (#134); then every forge call of the pass goes through it
+// setupNow : one pass's settings, the project's git host opened afresh. The project file may map the forge to a plugin
+// (#134); then every forge call of the pass goes through it.
+async function setupNow(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<Result<TickSetup>> {
   const opened = await openProjectForge(
     { env: io.env, log: (line) => io.err(`${line}\n`) },
     { home: settings.home, project, plugins: await pluginSetup(settings.home, io.env) },
   );
-  const passed = opened.kind === "ok" ? await pass(project, dryRun, io, settings, opened.value) : opened;
+  return opened.kind === "ok" ? passSetup(project, dryRun, io, settings, opened.value) : opened;
+}
+
+async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
+  const setup = await setupNow(project, dryRun, io, settings);
+  const passed = setup.kind === "ok" ? await tick(setup.value) : setup;
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);
     return 1;
@@ -736,23 +785,46 @@ async function resolvedRun(
   return run({ ...io, env: settings.value.env });
 }
 
-// dispatch : one pass (#103). Only --once: launchd or cron runs it every few minutes, and a lock keeps passes apart.
+// dispatch : the orchestrator loop (#305), or with --once one pass (#103). A human's command starts it; no cron or
+// launchd job does. A lock keeps passes apart, and another keeps a second loop out. A dry run is one pass: it acts on
+// nothing, so a loop of them would never end.
 async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise<number> {
   const [project] = positionals;
-  if (project === undefined || positionals.length !== 1 || !once) {
-    io.err("usage: agent-factory dispatch <project> --once [--dry-run]\n");
+  if (project === undefined || positionals.length !== 1) {
+    io.err("usage: agent-factory dispatch <project> [--once] [--dry-run]\n");
     return 64;
   }
-  return resolvedRun("dispatch", project, io, (resolved) => dispatchResolved(project, dryRun, resolved));
+  return resolvedRun("dispatch", project, io, (resolved) =>
+    dispatchResolved(project, once || dryRun, dryRun, resolved),
+  );
 }
 
-async function dispatchResolved(project: string, dryRun: boolean, io: Io): Promise<number> {
+async function dispatchResolved(project: string, once: boolean, dryRun: boolean, io: Io): Promise<number> {
   const settings = await dispatchReady(io);
   if ("kind" in settings) {
     io.err(`agent-factory dispatch: ${settings.reason}\n`);
     return 1;
   }
-  return onePass(project, dryRun, io, settings);
+  return once ? onePass(project, dryRun, io, settings) : loopPasses(project, io, settings);
+}
+
+// loopPasses : passes until no ticket is in flight; exit 0, 1 when it cannot run or stopped on failed passes, 2 when an
+// action failed
+async function loopPasses(project: string, io: Io, settings: PassSettings): Promise<number> {
+  const ended = await orchestratorLoop({
+    home: settings.home,
+    project,
+    pollMinutes: settings.poll,
+    setup: () => setupNow(project, false, io, settings),
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    log: (line) => io.out(`${line}\n`),
+    now: Date.now,
+  });
+  if (ended.kind === "failed") {
+    io.err(`agent-factory dispatch: ${ended.reason}\n`);
+    return 1;
+  }
+  return ended.value.failedActions ? 2 : 0;
 }
 
 // the login the factory posts as, or "" when the forge cannot say (the reviewer then counts no earlier round)
@@ -1205,6 +1277,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       "dry-run": { type: "boolean" },
       template: { type: "boolean" },
       yes: { type: "boolean" },
+      "no-loop": { type: "boolean" },
     },
   });
   if (values.version === true) {
@@ -1222,6 +1295,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
     once: values.once === true,
     dryRun: values["dry-run"] === true,
     yes: values.yes === true,
+    noLoop: values["no-loop"] === true,
     positionals: positionals.slice(1),
     io,
   });

@@ -42,7 +42,7 @@ src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab
 src/core/egress/      the egress proxy: the allowlist, the Squid config, and the --internal network the box joins (#130)
 src/core/box/         the box seam: one Box interface; FACTORY_BOX picks the place, openBox refuses a box that does not work
 images/factory-box/   the base image of every vm box: git, Docker (run under Sysbox), Node and the pinned runner CLIs (#113)
-src/core/dispatch/    the dispatcher: the decision table, the per-ticket run records, and one locked pass (dispatch --once)
+src/core/dispatch/    the dispatcher: the decision table, the per-ticket run records, one locked pass, and the loop (#305)
 src/core/review/      the reviewer: the context pack, one review round (find, verify, post), and the status box
 src/core/design/      the design review's two read-only runs before the approval: design-reviewer, then verify pass (#236)
 src/core/onboard/     the onboarder: a project's brief and glossary, staged in the project home for a human, read by every run (#235)
