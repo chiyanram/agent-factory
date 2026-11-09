@@ -221,9 +221,9 @@ describe("reviewRound", () => {
     expect(log.threads[2]).not.toContain("Criterion");
     const summary = log.posts.at(-1) ?? "";
     expect(summary).toContain(
-      "- Spec · Act on F1 svc/Main.java:1 AC2: an empty order totals 1 (real) · criterion 2. SPEC-AC2: an empty order totals 0.",
+      "- Spec · Act on F1 svc/Main.java:1 AC2 (bug): an empty order totals 1 (real) · criterion 2. SPEC-AC2: an empty order totals 0.",
     );
-    expect(summary).toContain("- Standards · Consider F3 svc/Main.java:1 AC2: returns 2 (maybe)\n");
+    expect(summary).toContain("- Standards · Consider F3 svc/Main.java:1 AC2 (bug): returns 2 (maybe)\n");
   });
 
   it("shows each run the pack and the whole head, never a rule file, a symlink or a .gitattributes rewrite", async () => {

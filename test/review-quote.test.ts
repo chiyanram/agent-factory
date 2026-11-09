@@ -9,6 +9,7 @@ const F: Finding = {
   line: 3,
   rule: "AC2",
   severity: "blocker",
+  category: "bug",
   finding: "an empty order totals 1",
   fix: "return 0",
 };
