@@ -192,6 +192,7 @@ const POOLS: Readonly<Record<string, readonly unknown[]>> = {
   plugins: [[], ["rulebook@chiyanram"], ["rulebook@chiyanram", "team@acme"]],
   "ready.judgeFiles": [["ci/**"], ["ci/**", "build/**"]],
   "lanes.oneWayDoor": [["db/migrations/**"], ["infra/**"]],
+  "review.lenses": [[], [{ name: "api", rubric: { file: "docs/review/api.md" } }]],
   "approval.floor": ["tiny"],
   work: [false, true],
   repoCommits: [false, true],
