@@ -15,6 +15,8 @@ export type Made = { readonly box: Box; readonly handed: () => readonly Handed[]
 // a host with only what any machine has; the canary test adds its own to a copy
 const HOST: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", HOME: "/home/op", LANG: "C" };
 const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
+// a command that prints one line; each box's maker answers it with that line
+export const STREAMED = { argv: ["echo", "streamed"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
 
 // every word a box handed on: each argument, and each variable's name and value
 function words(handed: readonly Handed[]): readonly string[] {
@@ -64,6 +66,20 @@ export function boxContract(name: string, make: (host: NodeJS.ProcessEnv) => Mad
         command: { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 },
       });
       expect(ran).toMatchObject({ kind: "exited", code: 0 });
+      await box.stop(started.session);
+    });
+
+    it("hands a command's watcher its output as it comes, all of it, and keeps the tail it asked for (#228)", async () => {
+      const { box } = make(HOST);
+      const started = await box.start(full);
+      if (started.kind !== "started") throw new Error("start failed");
+      const heard: string[] = [];
+      const ran = await box.run({
+        session: started.session,
+        command: { ...STREAMED, keep: "tail", watch: (chunk) => heard.push(chunk) },
+      });
+      expect(ran).toMatchObject({ kind: "exited", code: 0, stdout: "streamed\n" });
+      expect(heard.join("")).toBe("streamed\n");
       await box.stop(started.session);
     });
 

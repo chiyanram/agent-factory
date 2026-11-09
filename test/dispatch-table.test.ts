@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, type Summary } from "../src/core/dispatch/records.js";
+import { backoffMs, EMPTY, type Summary } from "../src/core/dispatch/records.js";
 import {
   decide,
   MAX_CI_ROUNDS,
@@ -356,5 +356,49 @@ describe("decide: one row each", () => {
       kind: "wait",
       why: expect.stringContaining("human reviews and merges"),
     });
+  });
+});
+
+describe("backoff (#228)", () => {
+  const at = (ms: number) => new Date(NOW + ms).toISOString();
+  const failedReady = (nextTry: Summary["nextTry"], readyFailures = 1): Summary =>
+    wrote({ lastReady: { kind: "ended", head: H, passed: false, why: "row 1" }, readyFailures, nextTry });
+
+  it("waits 10 s after the first failure, doubling each time, never more than 5 minutes", () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 20].map(backoffMs)).toEqual([
+      10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000,
+    ]);
+  });
+
+  it("skips the writer's retry of a failed step until its next try, then runs it", () => {
+    const runs = failedReady({ kind: "set", step: "ready", at: at(10_000) });
+    expect(decide(state({ runs }))).toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining(`the ready check failed; the next try is at ${at(10_000)}`),
+    });
+    expect(decide(state({ runs, now: NOW + 10_000 }))).toMatchObject({
+      kind: "writer",
+      task: { kind: "ready-failed" },
+    });
+  });
+
+  it("backs off a review with Act on findings and a failed local verifier, each by its own step", () => {
+    const review = wrote({ ...reviewed(2), nextTry: { kind: "set", step: "review", at: at(20_000) } });
+    expect(decide(state({ runs: review }))).toMatchObject({ kind: "wait" });
+    expect(decide(state({ runs: review, now: NOW + 20_000 }))).toMatchObject({ kind: "writer" });
+    const verify = wrote({
+      ...reviewed(0),
+      lastVerify: { kind: "ended", head: H, passed: false },
+      nextTry: { kind: "set", step: "verify", at: at(10_000) },
+    });
+    expect(decide(state({ gate: "local", runs: verify }))).toMatchObject({ kind: "wait" });
+    // another step's next try holds nothing back
+    const other = wrote({ ...reviewed(2), nextTry: { kind: "set", step: "ready", at: at(60_000) } });
+    expect(decide(state({ runs: other }))).toMatchObject({ kind: "writer" });
+  });
+
+  it("keeps the caps: a step that is out of tries goes to a person, whatever its next try", () => {
+    const runs = failedReady({ kind: "set", step: "ready", at: at(60_000) }, MAX_READY_FAILURES);
+    expect(decide(state({ runs }))).toMatchObject({ kind: "needs-human" });
   });
 });

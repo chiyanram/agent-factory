@@ -6,8 +6,8 @@
 // to do. So a stale session never runs a command in, or removes, someone else's container.
 
 import { randomUUID } from "node:crypto";
-import type { Exit, Runner } from "../forge/api.js";
-import type { Box, BoxSpec, Copy, Done, Probe, Ran, Session, Started } from "./types.js";
+import type { Call, Exit, Runner } from "../forge/api.js";
+import type { Box, BoxSpec, Command, Copy, Done, Probe, Ran, Session, Started } from "./types.js";
 import {
   checkSpec,
   execArgs,
@@ -38,6 +38,17 @@ export type VmBoxSetup = {
 
 type Failed = { readonly kind: "failed"; readonly reason: string };
 
+// what a run's output is handed to, and how much of it is kept (#228)
+type Output = Pick<Call, "watch" | "keep">;
+
+// outputOf : the command's watcher and keep, only those it set. Pure.
+function outputOf(command: Command): Output {
+  return {
+    ...(command.watch === undefined ? {} : { watch: command.watch }),
+    ...(command.keep === undefined ? {} : { keep: command.keep }),
+  };
+}
+
 export function vmBox(setup: VmBoxSetup): Box {
   const { docker, owner } = setup;
   const newName = setup.newName ?? (() => `factory-box-${randomUUID()}`);
@@ -45,8 +56,12 @@ export function vmBox(setup: VmBoxSetup): Box {
   // the boxes this Box started and has not stopped, with the variables each run sees
   const live = new Map<string, BoxSpec>();
 
-  const call = (args: readonly string[], env: NodeJS.ProcessEnv = docker.env, stdin = ""): Promise<Exit> =>
-    docker.run({ bin: docker.bin, args, stdin, env });
+  const call = (
+    args: readonly string[],
+    env: NodeJS.ProcessEnv = docker.env,
+    stdin = "",
+    output: Output = {},
+  ): Promise<Exit> => docker.run({ bin: docker.bin, args, stdin, env, ...output });
 
   const step = async (args: readonly string[]): Promise<Done> => {
     const exit = await call(args);
@@ -123,6 +138,7 @@ export function vmBox(setup: VmBoxSetup): Box {
         execArgs({ name: session.id, command, envNames: Object.keys(spec.env) }),
         { ...docker.env, ...spec.env },
         command.stdin.kind === "text" ? command.stdin.text : "",
+        outputOf(command),
       );
       return readRan({ exit, timeoutSeconds: command.timeoutSeconds, elapsedSeconds: (now() - began) / 1000 });
     },

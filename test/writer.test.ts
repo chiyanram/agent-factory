@@ -17,8 +17,8 @@ import type { ChangeRequest, FailedJob, Forge, OpenChange } from "../src/core/fo
 import { renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
-import { claudeArgv } from "../src/core/writer/run.js";
-import { minutesOf } from "../src/core/writer/settings.js";
+import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
+import { minutesOf, stallOf } from "../src/core/writer/settings.js";
 import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
@@ -124,6 +124,8 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
 
 // the completion window, shortened for the tests (#182)
 const FAST = { pollMs: 20, windowMs: 150, graceMs: 200 };
+// the stall time (#228), long enough that no other test's run stalls
+const STALL_MS = 60_000;
 
 // a writer that does its work and writes its report, then never exits on its own: a child keeps its stdout open. The
 // host's stop ends it.
@@ -216,7 +218,13 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       env: { ...p.env, GITHUB_TOKEN: "host-only" },
       runsDir: join(p.root, "box-runs"),
     },
-    settings: { rulebook, timeoutSeconds: 3600, claude: { maxUsd: "2", model: "" }, completion: FAST },
+    settings: {
+      rulebook,
+      timeoutSeconds: 3600,
+      claude: { maxUsd: "2", model: "" },
+      completion: FAST,
+      stallMs: STALL_MS,
+    },
     prompts: {
       fix: "fix {{ticket}} on {{branch}} at {{head}}",
       testFirst: "test {{ticket}}",
@@ -489,6 +497,109 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     };
     const out = await run(setup(slow, forge(), []), FIX);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+  });
+});
+
+describe("the stall stop (#228)", () => {
+  const STALL = 200;
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // a forge that also keeps each post in full, to read its items
+  function keeping(): Told & { readonly posts: string[] } {
+    const told = forge();
+    const posts: string[] = [];
+    const note: Forge["note"] = async (input) => {
+      const r = renderPost(input.post);
+      posts.push(r.kind === "ok" ? r.text : r.reason);
+      return told.forge.note(input);
+    };
+    return { ...told, posts, forge: { ...told.forge, note } };
+  }
+
+  it("stops a run that goes silent at the stall time: blocked, needs-human, with its last lines shown", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const base = hanging(fake, { commit: true, report: { status: "done" }, exit: 0 }, []);
+    const silent: Box = {
+      ...base,
+      run: async (call) => {
+        const ran = base.run(call);
+        for (const line of ["line 1", "line 2", "line 3", "line 4", "line 5", "line 6"]) {
+          call.command.watch?.(`{"type":"assistant","text":"${line}"}\n`);
+        }
+        // a last line with no line break is still shown; an @mention in it is made inert by post.ts
+        call.command.watch?.("waiting on @someone");
+        return ran;
+      },
+    };
+    const told = keeping();
+    const s = setup(silent, told, []);
+    const began = Date.now();
+    const out = await run({ ...s, settings: { ...s.settings, stallMs: STALL } }, FIX);
+    expect(Date.now() - began).toBeGreaterThanOrEqual(STALL);
+    expect(Date.now() - began).toBeLessThan(5000);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+    expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
+    expect(told.log).toContain("label 41 needs-human");
+    const post = told.posts.at(-1) ?? "";
+    expect(post).toMatch(/^\[coordinator\] blocked: the run printed nothing for 0 s; the host stopped it/);
+    // the last five lines, oldest first, each cleaned for the forge
+    const items = post.split("\n").filter((l) => l.startsWith("- "));
+    expect(items).toHaveLength(5);
+    expect(items[0]).toContain("line 3");
+    expect(items.at(-1)).toBe("- waiting on @\u2060someone");
+    expect(post).not.toContain("line 2");
+  });
+
+  it("never stops a run that streams steadily for longer than the stall time", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const base = writer(fake, { commit: true, report: { status: "done" }, exit: 0 }, []);
+    const streaming: Box = {
+      ...base,
+      run: async (call) => {
+        await base.run(call);
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const dir = start?.op === "start" ? start.spec.worktree : "";
+        // nothing reads the writer's output after the run: it keeps only the tail, so no cap stops a long run
+        expect(call.command.keep).toBe("tail");
+        for (let i = 0; i < 12; i += 1) {
+          await pause(STALL / 4);
+          call.command.watch?.(`{"type":"assistant","n":${i}}\n`);
+        }
+        writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(DONE));
+        return { kind: "exited", code: 0, stdout: "", stderr: "" };
+      },
+    };
+    const s = setup(streaming, forge(), []);
+    const began = Date.now();
+    const out = await run({ ...s, settings: { ...s.settings, stallMs: STALL } }, FIX);
+    // the run went on for three stall times and ended on its own
+    expect(Date.now() - began).toBeGreaterThanOrEqual(3 * STALL);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", hung: false } });
+  });
+
+  it("does not count time the machine was asleep: a poll that took long adds at most two polls of quiet", () => {
+    // awake: each poll adds the time since the last one
+    expect(quietAfter({ quiet: 0, last: 0, heard: 0, now: 5000, pollMs: 5000 })).toBe(5000);
+    // asleep for an hour between two polls: that hour is not quiet time
+    expect(quietAfter({ quiet: 5000, last: 5000, heard: 0, now: 3_605_000, pollMs: 5000 })).toBe(15_000);
+    // output since the last poll starts the quiet again from it
+    expect(quietAfter({ quiet: 200_000, last: 5000, heard: 8000, now: 10_000, pollMs: 5000 })).toBe(2000);
+  });
+
+  it("keeps the run's last lines small: five at most, each cut", () => {
+    const tail = ["a\nb", "\n\nc\nd\ne\nf", "g\n", `${"x".repeat(5000)}\n`].reduce(tailOf, NO_TAIL);
+    const last = lastLines(tail);
+    expect(last.slice(0, 4)).toEqual(["c", "d", "e", "fg"]);
+    expect(last.at(-1)?.length).toBeLessThan(1000);
+    expect(lastLines(NO_TAIL)).toEqual([]);
+  });
+
+  it("is 5 minutes unless FACTORY_WRITER_STALL_MINUTES lowers it; it can never be raised", () => {
+    expect(stallOf({})).toEqual({ kind: "ok", value: 300_000 });
+    expect(stallOf({ FACTORY_WRITER_STALL_MINUTES: "2" })).toEqual({ kind: "ok", value: 120_000 });
+    for (const bad of ["0", "6", "1.5", "x", ""]) {
+      expect(stallOf({ FACTORY_WRITER_STALL_MINUTES: bad }).kind).toBe("failed");
+    }
   });
 });
 
@@ -783,7 +894,7 @@ describe("the writer's words and settings", () => {
     expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
   });
 
-  it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, the cap and model only when set", () => {
+  it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, streamed output, the cap and model only when set", () => {
     // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
     // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
     expect(claudeArgv({ maxUsd: "", model: "" })).toEqual([
@@ -795,7 +906,8 @@ describe("the writer's words and settings", () => {
       "--plugin-dir",
       ".factory/rulebook",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
     ]);
     expect(claudeArgv({ maxUsd: "2", model: "opus" }).slice(-4)).toEqual(["--max-budget-usd", "2", "--model", "opus"]);
   });

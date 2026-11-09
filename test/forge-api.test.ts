@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphql, readAnswer, rest, waitSeconds } from "../src/core/forge/api.js";
+import { graphql, processRunner, readAnswer, rest, waitSeconds } from "../src/core/forge/api.js";
 import { fake, field, ok } from "./fake-forge.js";
 
 const GET = { path: "repos/o/r/pulls/12", method: "GET", body: { kind: "none" } } as const;
@@ -142,5 +142,29 @@ describe("readAnswer", () => {
       expect(read.value.headers.get("x-a")).toBe("b: c");
       expect(read.value.body).toBe('{"a":1}');
     }
+  });
+});
+
+describe("processRunner (#228)", () => {
+  // 3000 lines of "x": 6000 bytes, past a cap of 1000
+  const LOUD = { bin: "sh", args: ["-c", "yes x | head -n 3000"], stdin: "", env: { PATH: process.env.PATH } };
+  const run = processRunner({ maxBuffer: 1000, tailChars: 100 });
+
+  it("stops a call whose output passes the cap when it keeps all of it", async () => {
+    expect((await run(LOUD)).code).not.toBe(0);
+  });
+
+  it("never stops a call that keeps only the tail: the watcher hears all of it, the exit holds the end", async () => {
+    const heard: string[] = [];
+    const exit = await run({ ...LOUD, keep: "tail", watch: (chunk) => heard.push(chunk) });
+    expect(exit.code).toBe(0);
+    expect(heard.join("")).toBe("x\n".repeat(3000));
+    expect(exit.stdout).toBe("x\n".repeat(50));
+  });
+
+  it("gives a tail call's exit code and stderr, and a program that cannot start fails", async () => {
+    const failed = await run({ ...LOUD, args: ["-c", "echo no >&2; exit 3"], keep: "tail" });
+    expect(failed).toEqual({ code: 3, stdout: "", stderr: "no\n" });
+    expect((await run({ ...LOUD, bin: "/nonexistent/bin", keep: "tail" })).code).not.toBe(0);
   });
 });

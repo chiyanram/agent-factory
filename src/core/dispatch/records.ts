@@ -5,6 +5,10 @@
 //
 // A "started" line with no "ended" after it means the dispatcher died during that run: the summary says so, and the
 // table blocks the ticket for a person rather than guess whether the run pushed.
+//
+// A check that fails (a ready check, a review with Act on findings, the local verifier) records nextTry{step, at} on
+// its "ended" line (#228): the writer's retry for it waits until then, at = now + min(10 s × 2^(n−1), 5 min) for the
+// step's n-th failure since the approval. The newest check line's nextTry is the one that holds.
 
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -43,6 +47,23 @@ export function modeOf(task: Task): WriterMode {
   return MODE_OF[task.kind];
 }
 
+// the checks whose failure sends the writer back, and so back off before it goes (#228)
+export type Retried = "ready" | "review" | "verify";
+export type NextTry = { readonly step: Retried; readonly at: string };
+
+const FIRST_BACKOFF_MS = 10_000;
+const MOST_BACKOFF_MS = 5 * 60_000;
+
+// backoffMs : how long the writer waits after a step's n-th failure: 10 s, doubling, at most 5 minutes. Pure.
+export function backoffMs(n: number): number {
+  return Math.min(FIRST_BACKOFF_MS * 2 ** Math.max(0, n - 1), MOST_BACKOFF_MS);
+}
+
+// nextTryOf : the next try after a step's n-th failure, from now (ms since the epoch). Pure.
+export function nextTryOf(retried: Retried, n: number, now: number): NextTry {
+  return { step: retried, at: new Date(now + backoffMs(n)).toISOString() };
+}
+
 export type Event =
   | {
       readonly at: string;
@@ -70,10 +91,24 @@ export type Event =
       readonly head: string;
       readonly passed: boolean;
       readonly why: string;
+      // only when it failed (#228)
+      readonly nextTry?: NextTry;
     }
   // the local verifier's run (#91); its result is the commit status it posted
-  | { readonly at: string; readonly kind: "verify-ended"; readonly head: string; readonly passed: boolean }
-  | { readonly at: string; readonly kind: "review-ended"; readonly head: string; readonly actOn: number }
+  | {
+      readonly at: string;
+      readonly kind: "verify-ended";
+      readonly head: string;
+      readonly passed: boolean;
+      readonly nextTry?: NextTry;
+    }
+  | {
+      readonly at: string;
+      readonly kind: "review-ended";
+      readonly head: string;
+      readonly actOn: number;
+      readonly nextTry?: NextTry;
+    }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
   | { readonly at: string; readonly kind: "blocked"; readonly why: string };
@@ -132,6 +167,7 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
 const PHASES = ["writer", "ready", "review", "verify"] as const;
 const MODES = ["test-first", "fix", "rework", "ci", "rebase"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
+const RETRIED = ["ready", "review", "verify"] as const;
 
 // each event by its kind, so a handler per kind is typed without an assertion (TypeScript's correlated unions)
 type EventMap = { readonly [E in Event as E["kind"]]: E };
@@ -198,25 +234,50 @@ function writerEndedOf(raw: unknown, at: string): Event | Bad {
   return mode === BAD || outcome === BAD || parts === BAD ? BAD : { at, kind: "writer-ended", mode, outcome, ...parts };
 }
 
+// nextTryField : a check line's nextTry, as a field to spread: none on a line that has none (a pass, or older than
+// #228), BAD when it is there but not one
+function nextTryField(raw: unknown): { readonly nextTry?: NextTry } | Bad {
+  const next = prop(raw, "nextTry");
+  if (next === undefined) {
+    return {};
+  }
+  const retried = oneOf(next, "step", RETRIED);
+  const at = str(next, "at");
+  return retried === BAD || at === BAD || Number.isNaN(Date.parse(at)) ? BAD : { nextTry: { step: retried, at } };
+}
+
+// whyOf : a ready line's reason; a line older than the reasons has none
+function whyOf(raw: unknown): string | Bad {
+  return prop(raw, "why") === undefined ? "" : str(raw, "why");
+}
+
 function readyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
-  const why = prop(raw, "why") === undefined ? "" : str(raw, "why");
-  return head === BAD || why === BAD || typeof passed !== "boolean"
-    ? BAD
-    : { at, kind: "ready-ended", head, passed, why };
+  const why = whyOf(raw);
+  const next = nextTryField(raw);
+  if (head === BAD || why === BAD || next === BAD) {
+    return BAD;
+  }
+  return typeof passed === "boolean" ? { at, kind: "ready-ended", head, passed, why, ...next } : BAD;
 }
 
 function verifyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
-  return head === BAD || typeof passed !== "boolean" ? BAD : { at, kind: "verify-ended", head, passed };
+  const next = nextTryField(raw);
+  return head === BAD || next === BAD || typeof passed !== "boolean"
+    ? BAD
+    : { at, kind: "verify-ended", head, passed, ...next };
 }
 
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
-  return head === BAD || !Number.isSafeInteger(actOn) ? BAD : { at, kind: "review-ended", head, actOn: Number(actOn) };
+  const next = nextTryField(raw);
+  return head === BAD || next === BAD || !Number.isSafeInteger(actOn)
+    ? BAD
+    : { at, kind: "review-ended", head, actOn: Number(actOn), ...next };
 }
 
 const PARSE: Readonly<Record<Kind, Parse>> = {
@@ -312,6 +373,11 @@ export type Summary = {
     | { readonly kind: "none" }
     | { readonly kind: "ended"; readonly head: string; readonly actOn: number };
   readonly ciRounds: number;
+  // reviews with Act on findings, and local verifier runs that failed: each one's n for its backoff (#228)
+  readonly reviewFailures: number;
+  readonly verifyFailures: number;
+  // when the writer may retry the step the newest check failed (#228)
+  readonly nextTry: { readonly kind: "none" } | ({ readonly kind: "set" } & NextTry);
   readonly rebaseRuns: number;
   readonly pingedAt: string;
   // every reason the dispatcher already handed the ticket to a person for
@@ -331,6 +397,9 @@ export const EMPTY: Summary = {
   reviewRounds: 0,
   lastReview: { kind: "none" },
   ciRounds: 0,
+  reviewFailures: 0,
+  verifyFailures: 0,
+  nextTry: { kind: "none" },
   rebaseRuns: 0,
   pingedAt: "",
   blocked: [],
@@ -357,6 +426,11 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
   };
 }
 
+// nextTryView : the summary's nextTry from a check line. Pure.
+function nextTryView(next: NextTry | undefined): Summary["nextTry"] {
+  return next === undefined ? { kind: "none" } : { kind: "set", ...next };
+}
+
 type Steps = { readonly [K in Kind]: (s: Summary, e: EventMap[K]) => Summary };
 
 const STEPS: Steps = {
@@ -367,17 +441,22 @@ const STEPS: Steps = {
     interrupted: { kind: "none" },
     lastReady: { kind: "ended", head: e.head, passed: e.passed, why: e.why },
     readyFailures: s.readyFailures + Number(!e.passed),
+    nextTry: nextTryView(e.nextTry),
   }),
   "review-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
     lastReview: { kind: "ended", head: e.head, actOn: e.actOn },
     reviewRounds: s.reviewRounds + 1,
+    reviewFailures: s.reviewFailures + Number(e.actOn > 0),
+    nextTry: nextTryView(e.nextTry),
   }),
   "verify-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
     lastVerify: { kind: "ended", head: e.head, passed: e.passed },
+    verifyFailures: s.verifyFailures + Number(!e.passed),
+    nextTry: nextTryView(e.nextTry),
   }),
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),

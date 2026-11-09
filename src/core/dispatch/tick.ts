@@ -20,7 +20,7 @@ import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
 import { plainName } from "../spec.js";
 import type { Evidence } from "../report.js";
-import { codeOf, modeOf, readRecords, record, summarize, type Task } from "./records.js";
+import { codeOf, modeOf, nextTryOf, readRecords, record, summarize, type Retried, type Task } from "./records.js";
 import { decide, type Action, type ApprovalView, type ChangeView, type Gate, type TicketState } from "./table.js";
 
 export const BRANCH_PREFIX = "factory/";
@@ -366,6 +366,11 @@ async function startCheck(
   return record({ where: where(setup, state), event: { at: at(setup), kind: "started", phase, mode: "none", head } });
 }
 
+// failedAt : a failed check's nextTry, as a field to spread; n counts this failure (#228)
+function failedAt(setup: TickSetup, step: Retried, failed: boolean, before: number) {
+  return failed ? { nextTry: nextTryOf(step, before + 1, setup.now()) } : {};
+}
+
 // the rows the writer's last done run gave, which the ready check runs again
 function evidenceOf(state: TicketState): readonly Evidence[] {
   const w = state.runs.lastWriter;
@@ -382,7 +387,14 @@ async function runReady(setup: TickSetup, state: TicketState, head: string): Pro
   return ran.kind === "ok"
     ? record({
         where: where(setup, state),
-        event: { at: at(setup), kind: "ready-ended", head, passed: ran.value.passed, why: ran.value.why },
+        event: {
+          at: at(setup),
+          kind: "ready-ended",
+          head,
+          passed: ran.value.passed,
+          why: ran.value.why,
+          ...failedAt(setup, "ready", !ran.value.passed, state.runs.readyFailures),
+        },
       })
     : ran;
 }
@@ -397,7 +409,13 @@ async function runVerify(setup: TickSetup, state: TicketState, head: string): Pr
   return ran.kind === "ok"
     ? record({
         where: where(setup, state),
-        event: { at: at(setup), kind: "verify-ended", head, passed: ran.value.passed },
+        event: {
+          at: at(setup),
+          kind: "verify-ended",
+          head,
+          passed: ran.value.passed,
+          ...failedAt(setup, "verify", !ran.value.passed, state.runs.verifyFailures),
+        },
       })
     : ran;
 }
@@ -412,7 +430,13 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
   return ran.kind === "ok"
     ? record({
         where: where(setup, state),
-        event: { at: at(setup), kind: "review-ended", head, actOn: ran.value.actOn },
+        event: {
+          at: at(setup),
+          kind: "review-ended",
+          head,
+          actOn: ran.value.actOn,
+          ...failedAt(setup, "review", ran.value.actOn > 0, state.runs.reviewFailures),
+        },
       })
     : ran;
 }

@@ -324,6 +324,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     claude: setup.settings.claude,
     settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
     completion: setup.settings.completion,
+    stallMs: setup.settings.stallMs,
   });
   const out = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
   const removed = await removeClone(clone.value.dir);

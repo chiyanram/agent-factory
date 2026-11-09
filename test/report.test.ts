@@ -217,3 +217,17 @@ describe("loadReport", () => {
     });
   });
 });
+
+describe("a stalled run (#228)", () => {
+  it("is blocked, its stall time in minutes when whole, else in seconds", () => {
+    const missing = { kind: "missing" } as const;
+    expect(decide({ end: { kind: "stalled", seconds: 300, last: [] }, file: missing })).toEqual({
+      kind: "blocked",
+      reason: "the run printed nothing for 5 min; the host stopped it",
+      by: "host",
+    });
+    expect(decide({ end: { kind: "stalled", seconds: 90, last: [] }, file: missing })).toMatchObject({
+      reason: "the run printed nothing for 90 s; the host stopped it",
+    });
+  });
+});

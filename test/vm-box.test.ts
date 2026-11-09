@@ -44,9 +44,12 @@ function fakeDocker(
   // the answer under the first two arguments, else under the first one
   const pick = <T>(table: Readonly<Record<string, T>>, c: Call): T | undefined =>
     table[c.args.slice(0, 2).join(" ")] ?? table[c.args[0] ?? ""];
+  // the output goes to the call's watcher first, as docker streams it
   const run: Runner = async (c) => {
     calls.push(c);
-    return pick(answers, c) ?? pick(fallback, c)?.(c) ?? OK;
+    const exit = pick(answers, c) ?? pick(fallback, c)?.(c) ?? OK;
+    c.watch?.(exit.stdout);
+    return exit;
   };
   return { calls, run };
 }
@@ -67,7 +70,7 @@ const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as 
 
 // the docker CLI as app.ts makes it, from the host's environment, on a fake docker that records each call
 boxContract("vm on a fake docker", (host) => {
-  const fake = fakeDocker();
+  const fake = fakeDocker({}, { code: 0, stdout: "streamed\n", stderr: "" });
   let n = 0;
   const made = vmBox({
     docker: hostDocker(host, fake.run),
@@ -179,6 +182,18 @@ describe("vm box: start", () => {
 });
 
 describe("vm box: run", () => {
+  it("hands docker the command's watcher and its keep, and sets neither when the command does not (#228)", async () => {
+    const fake = fakeDocker();
+    const vm = box(fake);
+    const started = await vm.start(SPEC);
+    if (started.kind !== "started") throw new Error("start failed");
+    const watch = (): void => undefined;
+    await vm.run({ session: started.session, command: { ...TRUE, keep: "tail", watch } });
+    expect(fake.calls.at(-1)).toMatchObject({ keep: "tail", watch });
+    await vm.run({ session: started.session, command: TRUE });
+    expect(Object.keys(fake.calls.at(-1) ?? {})).not.toContain("keep");
+  });
+
   it("runs as the box user in /work under timeout, the value in docker's environment only", async () => {
     const fake = fakeDocker();
     const vm = box(fake);

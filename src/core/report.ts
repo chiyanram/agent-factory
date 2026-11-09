@@ -8,7 +8,7 @@
 //   blocker    "…"                                          required when blocked
 //
 // Anything else is blocked, with the reason: a missing, unreadable or malformed report, an unknown status, a field the
-// schema does not name, a non-zero exit, a timeout, a cap hit, or a box that failed. No outcome is guessed.
+// schema does not name, a non-zero exit, a timeout, a stall, a cap hit, or a box that failed. No outcome is guessed.
 //
 // The writer controls its worktree, so the read is careful: .factory and the report must be a real folder and a real
 // regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Decide from it only once the
@@ -42,17 +42,26 @@ export type RunEnd =
   // (#182): decided from the report, like a clean exit
   | { readonly kind: "hungAfterReport"; readonly windowSeconds: number }
   | { readonly kind: "timedOut"; readonly seconds: number }
+  // the run printed nothing for the stall time and the host stopped its box (#228); last: its last output lines
+  | { readonly kind: "stalled"; readonly seconds: number; readonly last: readonly string[] }
   | { readonly kind: "cap"; readonly what: string }
   | { readonly kind: "failed"; readonly reason: string };
 
-// how a run decided from its report ended: on its own, or stopped by the host after the completion window
-export type Ending = { readonly kind: "clean" } | { readonly kind: "hung"; readonly windowSeconds: number };
+// how a run ended, for the post: on its own; stopped by the host after the completion window, and decided from its
+// report; or stopped by the host for printing nothing, with the last lines it printed (#228)
+export type Ending =
+  | { readonly kind: "clean" }
+  | { readonly kind: "hung"; readonly windowSeconds: number }
+  | { readonly kind: "stalled"; readonly last: readonly string[] };
 
 export const CLEAN: Ending = { kind: "clean" };
 
 // endingOf : the ending a run end gives the outcome. Pure.
 export function endingOf(end: RunEnd): Ending {
-  return end.kind === "hungAfterReport" ? { kind: "hung", windowSeconds: end.windowSeconds } : CLEAN;
+  if (end.kind === "hungAfterReport") {
+    return { kind: "hung", windowSeconds: end.windowSeconds };
+  }
+  return end.kind === "stalled" ? { kind: "stalled", last: end.last } : CLEAN;
 }
 
 // hungLine : what a person reads about a hung run. Pure.
@@ -209,6 +218,11 @@ export function parseReport(text: string): Outcome {
     : READ[status]!(body);
 }
 
+// spoken : a stall time in minutes when it is whole minutes, else in seconds. Pure.
+function spoken(seconds: number): string {
+  return seconds > 0 && seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`;
+}
+
 function ended(end: RunEnd): string {
   switch (end.kind) {
     case "exited":
@@ -217,6 +231,8 @@ function ended(end: RunEnd): string {
       return `the writer hung after its report for ${end.windowSeconds} s`;
     case "timedOut":
       return `the run was stopped after ${end.seconds}s`;
+    case "stalled":
+      return `the run printed nothing for ${spoken(end.seconds)}; the host stopped it`;
     case "cap":
       return `the run hit a cap: ${end.what}`;
     case "failed":

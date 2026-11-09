@@ -93,9 +93,10 @@ describe("openBox", () => {
   });
 });
 
-// a fake box hands on only what it is given: each spec's env, and each command's argv
+// a fake box hands on only what it is given: each spec's env, and each command's argv; every run prints one line
 boxContract("fake", () => {
-  const fake = fakeBox({ runs: [EXIT_0, EXIT_0, EXIT_0, EXIT_0] });
+  const printed = { ...EXIT_0, stdout: "streamed\n" };
+  const fake = fakeBox({ runs: [printed, printed, printed, printed] });
   return {
     box: fake.box,
     handed: (): readonly Handed[] =>

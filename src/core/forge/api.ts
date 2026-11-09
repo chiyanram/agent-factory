@@ -12,7 +12,7 @@
 // more than 5 minutes. Any other status fails at once and
 // names it. Nothing here throws: every outcome is a sealed result.
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 export type Failed = { readonly kind: "failed"; readonly reason: string };
 export type Result<T> = { readonly kind: "ok"; readonly value: T } | Failed;
@@ -23,7 +23,13 @@ export type Call = {
   readonly args: readonly string[];
   readonly stdin: string;
   readonly env: NodeJS.ProcessEnv;
+  // each piece of stdout as it comes, before the call ends (#228)
+  readonly watch?: (chunk: string) => void;
+  // "all" (the default): the Exit holds all of stdout, and a call that prints past the cap is stopped. "tail": the Exit
+  // holds only stdout's and stderr's ends, and no cap applies, for a long run whose output only a watcher reads (#228)
+  readonly keep?: Keep;
 };
+export type Keep = "all" | "tail";
 export type Exit = { readonly code: number; readonly stdout: string; readonly stderr: string };
 // Runs one CLI call. The real one is runProcess; a test passes its own.
 export type Runner = (call: Call) => Promise<Exit>;
@@ -52,21 +58,63 @@ export type GraphqlRequest = { readonly query: string; readonly variables: Reado
 
 export type Answer = { readonly status: number; readonly headers: ReadonlyMap<string, string>; readonly body: string };
 
-export const runProcess: Runner = (call) =>
-  new Promise((resolve) => {
+// the most output a call keeps: all of it up to the cap, or only its end
+export type Limits = { readonly maxBuffer: number; readonly tailChars: number };
+export const LIMITS: Limits = { maxBuffer: 64 * 1024 * 1024, tailChars: 64 * 1024 };
+
+type Child = ReturnType<typeof spawn>;
+
+// fed : the child's input given, and its stdout handed to the watcher as it comes
+function fed(child: Child, call: Call): void {
+  const { watch } = call;
+  if (watch !== undefined) {
+    child.stdout?.on("data", (chunk: unknown) => watch(String(chunk)));
+  }
+  // a CLI that exits without reading its input closes the pipe; its exit already says what happened
+  child.stdin?.on("error", () => undefined);
+  child.stdin?.end(call.stdin);
+}
+
+function keptAll(call: Call, limits: Limits): Promise<Exit> {
+  return new Promise((resolve) => {
     const child = execFile(
       call.bin,
       [...call.args],
-      { env: call.env, maxBuffer: 64 * 1024 * 1024 },
+      { env: call.env, maxBuffer: limits.maxBuffer },
       (error, stdout, stderr) => {
         const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1;
         resolve({ code, stdout, stderr: stderr.length > 0 || error === null ? stderr : error.message });
       },
     );
-    // a CLI that exits without reading its input closes the pipe; its exit already says what happened
-    child.stdin?.on("error", () => undefined);
-    child.stdin?.end(call.stdin);
+    fed(child, call);
   });
+}
+
+// keptTail : the call with only the ends of its output kept, so a run that prints for hours holds little memory
+function keptTail(call: Call, limits: Limits): Promise<Exit> {
+  return new Promise((resolve) => {
+    const child = spawn(call.bin, [...call.args], { env: call.env });
+    const kept = { stdout: "", stderr: "" };
+    const keep = (name: "stdout" | "stderr") => (chunk: unknown) => {
+      kept[name] = (kept[name] + String(chunk)).slice(-limits.tailChars);
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", keep("stdout"));
+    child.stderr?.on("data", keep("stderr"));
+    // a program that cannot start: 'close' may follow, and the first answer stands
+    child.on("error", (error) => resolve({ code: 1, stdout: kept.stdout, stderr: error.message }));
+    child.on("close", (code) => resolve({ code: code ?? 1, ...kept }));
+    fed(child, call);
+  });
+}
+
+// processRunner : a Runner over real processes, within these limits; a test passes smaller ones
+export function processRunner(limits: Limits = LIMITS): Runner {
+  return (call) => (call.keep === "tail" ? keptTail(call, limits) : keptAll(call, limits));
+}
+
+export const runProcess: Runner = processRunner();
 
 export const realSleep: Sleeper = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
