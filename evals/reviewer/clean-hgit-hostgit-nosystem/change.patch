@@ -1,0 +1,118 @@
+diff --git a/scripts/lib/git.sh b/scripts/lib/git.sh
+index 90cbd75..3f8eee2 100644
+--- a/scripts/lib/git.sh
++++ b/scripts/lib/git.sh
+@@ -6,7 +6,7 @@
+ # core.fsmonitor on `git status`, a pre-push hook on push, a filter driver on checkout. hgit runs git so that every
+ # such key comes from trusted config only.
+ #
+-#   trusted   the system and global config, and -c on the command line: the operator's own
++#   trusted   the system (unless GIT_CONFIG_NOSYSTEM) and global config, and -c on the command line: the operator's own
+ #   untrusted the repo's local and worktree config, and what it includes: a branch or a writer may have written it
+ #
+ # Each key below gets its last trusted value or a neutral one, passed as GIT_CONFIG_COUNT entries (command scope,
+@@ -86,9 +86,15 @@ hg_refuse() {
+   return 1
+ }
+ 
++# hg_nosystem : true when GIT_CONFIG_NOSYSTEM is a true value. git then skips the system config, but an explicit
++# --system reads it anyway, so hgit must skip it too or it adds back a value the operator turned off (#167).
++hg_nosystem() {
++  case $(printf '%s' "${GIT_CONFIG_NOSYSTEM:-}" | tr '[:upper:]' '[:lower:]') in '' | 0 | false | no | off) return 1 ;; esac
++}
++
+ # hg_overrides DIR : the overrides for the repo at DIR, NUL-separated. Fails when hg_refuse refuses.
+ hg_overrides() {
+-  hg_tr=$({ "$hg_git" config --system --list; "$hg_git" config --global --list; } 2> /dev/null)
++  hg_tr=$({ hg_nosystem || "$hg_git" config --system --list; "$hg_git" config --global --list; } 2> /dev/null)
+   for hg_kv in core.fsmonitor=false core.hookspath=/dev/null core.pager=cat core.editor=true sequence.editor=true \
+       gpg.program=gpg gpg.openpgp.program=gpg gpg.x509.program=gpgsm gpg.ssh.program=ssh-keygen \
+       protocol.ext.allow=never submodule.recurse=false fetch.recursesubmodules=false; do
+diff --git a/src/core/git.ts b/src/core/git.ts
+index 819bd9e..3b8214d 100644
+--- a/src/core/git.ts
++++ b/src/core/git.ts
+@@ -4,7 +4,7 @@
+ // A branch or a writer can write the repo's own config (.git/config, a worktree's config.worktree, a file they include)
+ // or a hook. Plain git on the host would then run that program as the operator, outside any box. hostGit runs git so
+ // that every key that names a program comes from trusted config only:
+-//   trusted   the system and global config: the operator's own
++//   trusted   the system (unless GIT_CONFIG_NOSYSTEM) and global config: the operator's own
+ //   untrusted the repo's local and worktree config, and what it includes: a branch or a writer may have written it
+ // Each such key gets its last trusted value or a neutral one, passed as GIT_CONFIG_COUNT entries (command scope), as
+ // Sandcastle's src/hostGitConfig.ts does (study on #83, section 3.3). A repo-set key that has no safe neutral value and
+@@ -165,15 +165,25 @@ export type ConfigRead =
+     }
+   | Refused;
+ 
++// readsSystem : false when GIT_CONFIG_NOSYSTEM is a true value. git then skips the system config, but an explicit
++// --system reads it anyway, so hostGit must skip it too or it adds back a value the operator turned off (#167).
++function readsSystem(env: NodeJS.ProcessEnv): boolean {
++  return /^(|0|false|no|off)$/i.test(env.GIT_CONFIG_NOSYSTEM ?? "");
++}
++
++// trustedList : one trusted config file as `git config --null --list` prints it. An unreadable file reads as empty,
++// which leaves the neutral values: the safe side.
++async function trustedList(git: string, scope: "--system" | "--global", env: NodeJS.ProcessEnv): Promise<string> {
++  const read = await run(git, ["config", scope, "--null", "--list"], env, NO_INPUT);
++  return read.code === 0 ? read.stdout : "";
++}
++
+ // readConfig : the trusted config and the keys the repo sets. A repo read that fails is a refusal, never an empty
+ // list: an empty list would leave every repo key unchecked (git before 2.26 has no --show-scope).
+ async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Promise<ConfigRead> {
+-  const system = await run(git, ["config", "--system", "--null", "--list"], env, NO_INPUT);
+-  const global = await run(git, ["config", "--global", "--null", "--list"], env, NO_INPUT);
+-  // an unreadable trusted file leaves the neutral values, which is the safe side
+   const trusted = [
+-    ...parseList(system.code === 0 ? system.stdout : ""),
+-    ...parseList(global.code === 0 ? global.stdout : ""),
++    ...parseList(readsSystem(env) ? await trustedList(git, "--system", env) : ""),
++    ...parseList(await trustedList(git, "--global", env)),
+   ];
+   const scoped = await run(
+     git,
+diff --git a/test/git.test.ts b/test/git.test.ts
+index 64cab93..bf28ff4 100644
+--- a/test/git.test.ts
++++ b/test/git.test.ts
+@@ -188,6 +188,20 @@ describe("hostGit keeps what the operator chose", () => {
+     ]);
+   });
+ 
++  it("does not add back a system helper that GIT_CONFIG_NOSYSTEM turns off (#167)", async () => {
++    const system = join(base, "system.gitconfig");
++    writeFileSync(system, "[credential]\n\thelper = system-helper\n");
++    git(["config", "credential.helper", "!/evil"]);
++    const read = (nosystem: string) =>
++      hostGit(
++        request(["config", "--get-all", "credential.helper"], {
++          env: { ...env, GIT_CONFIG_SYSTEM: system, GIT_CONFIG_NOSYSTEM: nosystem },
++        }),
++      );
++    expect(effective(ok(await read("1")))).toEqual([]);
++    expect(effective(ok(await read("")))).toEqual(["system-helper"]);
++  });
++
+   it("keeps the factory's own App helper at its exact path, never a look-alike", async () => {
+     const own = "!/opt/agent-factory/scripts/github-app.sh git-credential";
+     const key = "credential.https://github.com.helper";
+diff --git a/tests/git.test.sh b/tests/git.test.sh
+index 476933d..25ca51c 100644
+--- a/tests/git.test.sh
++++ b/tests/git.test.sh
+@@ -82,6 +82,14 @@ expect_eq "the operator's own helper is kept, and only it" store-trusted \
+   "$(hgit -C "$base/repo" config --get-all credential.helper | effective)"
+ : > "$GIT_CONFIG_GLOBAL"
+ 
++setup
++printf '[credential]\n\thelper = system-helper\n' > "$base/system.gitconfig"
++git -C "$base/repo" config credential.helper "!$base/evil-helper"
++expect_eq "a system helper that GIT_CONFIG_NOSYSTEM turns off is not added back (#167)" "" \
++  "$(GIT_CONFIG_SYSTEM="$base/system.gitconfig" hgit -C "$base/repo" config --get-all credential.helper | effective)"
++expect_eq "with GIT_CONFIG_NOSYSTEM off, the system helper is kept" system-helper \
++  "$(GIT_CONFIG_SYSTEM="$base/system.gitconfig" GIT_CONFIG_NOSYSTEM= hgit -C "$base/repo" config --get-all credential.helper | effective)"
++
+ setup
+ own="!$REPO_ROOT/scripts/github-app.sh git-credential"
+ git -C "$base/repo" config --add credential.https://github.com.helper ""

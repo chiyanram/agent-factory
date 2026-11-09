@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/loop.ts",
+    "line": 314,
+    "issue": "fetch --prune deletes the remote-tracking ref of a branch the forge removed after a squash merge; its commits are then on no remote ref, so rev-list HEAD --not --remotes reads landed work as unlanded and reconcile labels, notes and pushes it again (the #189 review finding this fixed).",
+    "severity": "warning",
+    "category": "data"
+  }
+]

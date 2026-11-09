@@ -1,0 +1,287 @@
+diff --git a/GUIDE.md b/GUIDE.md
+index a82e08c..45462a8 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -400,6 +400,16 @@ Run it again after an upgrade of `agent-factory`, so the box runs the same versi
+ `npm run build` first: a package with no `dist/cli.js` is refused. Both images are tagged by their ID (`factory-box-base:<12 hex>`,
+ `factory-box-<project>:<12 hex>`), so `docker image prune` keeps them.
+ 
++After the first build on the VM, prove that no host variable reaches the box (#181). In a checkout of this package, as
++the user that runs the dispatcher, run:
++
++```bash
++FACTORY_TEST_BOX_IMAGE="$(jq -r .image "$FACTORY_HOME/projects/<project>/box.json")" npx vitest run test/vm-box-real.test.ts
++```
++
++It plants a canary and a `GH_TOKEN` in the host environment, runs `env` in a real box, and fails if either one, or any
++secret-like name the box was not given, is there. Where there is no image or no Sysbox, it is skipped and says why.
++
+ ## Run the loop
+ 
+ **You own the conversation, never the code or the queue.** You are the **coordinator**: the one AI the human talks
+diff --git a/test/box-contract.ts b/test/box-contract.ts
+index d219f3d..b86e894 100644
+--- a/test/box-contract.ts
++++ b/test/box-contract.ts
+@@ -1,12 +1,32 @@
+ // The contract every Box keeps (#112), whatever its place. The fake box and the vm box (#113, on a fake docker) run it
+ // here; the laptop box (#129) runs the same suite, so a caller can never tell the places apart.
++//
++// A box is made from a host environment, as app.ts makes it from its own, and shows what it handed to the runtime it
++// drives: each call's argv and environment. So the suite can prove no host variable reaches the run (#181).
+ 
++import { randomUUID } from "node:crypto";
+ import { describe, expect, it } from "vitest";
+ import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
+ 
++// one call the box made of its runtime (the docker CLI for vm), or what a fake box was given
++export type Handed = { readonly argv: readonly string[]; readonly env: Readonly<Record<string, string | undefined>> };
++export type Made = { readonly box: Box; readonly handed: () => readonly Handed[] };
++
++// a host with only what any machine has; the canary test adds its own to a copy
++const HOST: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", HOME: "/home/op", LANG: "C" };
++const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
++
++// every word a box handed on: each argument, and each variable's name and value
++function words(handed: readonly Handed[]): readonly string[] {
++  return handed.flatMap((h) => [
++    ...h.argv,
++    ...Object.entries(h.env).flatMap(([name, value]) => (value === undefined ? [name] : [name, value])),
++  ]);
++}
++
+ const IMAGE: PinnedImage = { kind: "pinned", ref: `factory-box@sha256:${"a".repeat(64)}` };
+ 
+-export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec> = {}): void {
++export function boxContract(name: string, make: (host: NodeJS.ProcessEnv) => Made, spec: Partial<BoxSpec> = {}): void {
+   const full: BoxSpec = {
+     image: IMAGE,
+     worktree: "/tmp/wt",
+@@ -18,8 +38,24 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
+   };
+ 
+   describe(`box contract: ${name}`, () => {
++    it("hands the run no host variable it was not given, by name or by value (#181; ADR-0012 S6, S15)", async () => {
++      const canary = `canary-${randomUUID()}`;
++      const ghToken = `ghp_${randomUUID().replaceAll("-", "")}`;
++      const made = make({ ...HOST, FACTORY_CANARY: canary, GH_TOKEN: ghToken });
++      const started = await made.box.start({ ...full, env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-declared" } });
++      if (started.kind !== "started") throw new Error("start failed");
++      await made.box.run({ session: started.session, command: { ...TRUE, stdin: { kind: "text", text: "a prompt" } } });
++      await made.box.stop(started.session);
++      const handed = words(made.handed());
++      // what the spec declares does reach the run, so the check below looks at the run's real input
++      expect(handed).toContain("CLAUDE_CODE_OAUTH_TOKEN");
++      // names, not only values: a redacting runner can hide a value
++      const leaks = ["FACTORY_CANARY", canary, "GH_TOKEN", ghToken];
++      expect(handed.filter((w) => leaks.some((l) => w.includes(l)))).toEqual([]);
++    });
++
+     it("runs a command in a started box and gives back its exit", async () => {
+-      const box = make();
++      const { box } = make(HOST);
+       const started = await box.start(full);
+       expect(started.kind).toBe("started");
+       if (started.kind !== "started") return;
+@@ -32,7 +68,7 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
+     });
+ 
+     it("refuses a run in a stopped box", async () => {
+-      const box = make();
++      const { box } = make(HOST);
+       const started = await box.start(full);
+       if (started.kind !== "started") throw new Error("start failed");
+       await box.stop(started.session);
+@@ -44,7 +80,7 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
+     });
+ 
+     it("stops a box that is already gone", async () => {
+-      const box = make();
++      const { box } = make(HOST);
+       const started = await box.start(full);
+       if (started.kind !== "started") throw new Error("start failed");
+       expect(await box.stop(started.session)).toEqual({ kind: "ok" });
+@@ -52,7 +88,7 @@ export function boxContract(name: string, make: () => Box, spec: Partial<BoxSpec
+     });
+ 
+     it("starts each box apart from the others", async () => {
+-      const box = make();
++      const { box } = make(HOST);
+       const one = await box.start(full);
+       const two = await box.start(full);
+       if (one.kind !== "started" || two.kind !== "started") throw new Error("start failed");
+diff --git a/test/box.test.ts b/test/box.test.ts
+index 5fea65f..d727886 100644
+--- a/test/box.test.ts
++++ b/test/box.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from "vitest";
+ import { chooseBox, openBox, pinImage } from "../src/core/box/index.js";
+-import { boxContract } from "./box-contract.js";
++import { boxContract, type Handed } from "./box-contract.js";
+ import { fakeBox } from "./fake-box.js";
+ 
+ const EXIT_0 = { kind: "exited", code: 0, stdout: "", stderr: "" } as const;
+@@ -93,4 +93,14 @@ describe("openBox", () => {
+   });
+ });
+ 
+-boxContract("fake", () => fakeBox({ runs: [EXIT_0, EXIT_0, EXIT_0, EXIT_0] }).box);
++// a fake box hands on only what it is given: each spec's env, and each command's argv
++boxContract("fake", () => {
++  const fake = fakeBox({ runs: [EXIT_0, EXIT_0, EXIT_0, EXIT_0] });
++  return {
++    box: fake.box,
++    handed: (): readonly Handed[] =>
++      fake.calls.flatMap((c): readonly Handed[] =>
++        c.op === "start" ? [{ argv: [], env: c.spec.env }] : c.op === "run" ? [{ argv: c.command.argv, env: {} }] : [],
++      ),
++  };
++});
+diff --git a/test/vm-box-real.test.ts b/test/vm-box-real.test.ts
+new file mode 100644
+index 0000000..efab83f
+--- /dev/null
++++ b/test/vm-box-real.test.ts
+@@ -0,0 +1,109 @@
++// The vm box on a real docker (#181; ADR-0012 S6, S15): the box-contract canary proves what the box hands the docker
++// CLI; this proves what the process inside the box actually sees. It needs Sysbox and a built box image, so it runs on
++// the VM and is skipped elsewhere, always with the reason:
++//
++//   FACTORY_TEST_BOX_IMAGE=<the image ID from agent-factory box build> npx vitest run test/vm-box-real.test.ts
++
++import { randomUUID } from "node:crypto";
++import { afterEach, describe, expect, it } from "vitest";
++import { pinImage } from "../src/core/box/choose.js";
++import { hostDocker } from "../src/core/box/docker.js";
++import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
++import { vmBox } from "../src/core/box/vm.js";
++import { runProcess } from "../src/core/forge/api.js";
++
++// a name that looks like a secret: one of these in the box must be one the spec declared
++const SECRET_LIKE = /TOKEN|KEY|SECRET|PASSWORD/i;
++
++const network = `factory-canary-${randomUUID().slice(0, 8)}`;
++const docker = hostDocker(process.env, runProcess);
++const dockerCli = (args: readonly string[]) => docker.run({ bin: docker.bin, args, stdin: "", env: docker.env });
++
++afterEach(async () => {
++  await dockerCli(["network", "rm", network]);
++});
++
++// the host the dispatcher runs on, with a canary and a forge token planted in it
++const planted = { canary: `canary-${randomUUID()}`, ghToken: `ghp_${randomUUID().replaceAll("-", "")}` };
++const host = { ...process.env, FACTORY_CANARY: planted.canary, GH_TOKEN: planted.ghToken };
++
++type Opened =
++  | { readonly kind: "ready"; readonly box: Box; readonly image: PinnedImage }
++  | { readonly kind: "skip"; readonly why: string };
++
++// the box user takes the ids of the user running this test, as the dispatcher's own
++const OWNER = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
++
++// pinned : the image named, which must be pinned: a typo fails the run, never skips it
++function pinned(ref: string): PinnedImage {
++  const image = pinImage(ref);
++  if (image.kind === "refused") {
++    throw new Error(image.reason);
++  }
++  return image;
++}
++
++// opened : the vm box over the real docker, or why there is none here
++async function opened(ref: string): Promise<Opened> {
++  if (ref === "") {
++    return { kind: "skip", why: "set FACTORY_TEST_BOX_IMAGE to an image ID from agent-factory box build to run this" };
++  }
++  const image = pinned(ref);
++  const box = vmBox({ docker: hostDocker(host, runProcess), image: image.ref, owner: OWNER });
++  const probe = await box.probe();
++  return probe.kind === "ready"
++    ? { kind: "ready", box, image }
++    : { kind: "skip", why: `no vm box here: ${probe.reason}` };
++}
++
++// envIn : what `env` prints in a fresh box with this spec
++async function envIn(box: Box, spec: BoxSpec): Promise<string> {
++  const started = await box.start(spec);
++  if (started.kind !== "started") {
++    throw new Error(started.reason);
++  }
++  const ran = await box.run({
++    session: started.session,
++    command: { argv: ["env"], stdin: { kind: "none" }, timeoutSeconds: 60 },
++  });
++  await box.stop(started.session);
++  if (ran.kind !== "exited") {
++    throw new Error(`env did not run: ${JSON.stringify(ran)}`);
++  }
++  return ran.stdout;
++}
++
++// the names in the output of `env`, one variable a line
++function namesOf(stdout: string): readonly string[] {
++  return stdout
++    .split("\n")
++    .filter((l) => l.includes("="))
++    .map((l) => l.slice(0, l.indexOf("=")));
++}
++
++describe("the vm box on a real docker (#181)", () => {
++  it("shows the run no host variable: not the canary, not GH_TOKEN, no undeclared secret-like name", async (ctx) => {
++    const found = await opened(process.env.FACTORY_TEST_BOX_IMAGE ?? "");
++    if (found.kind === "skip") {
++      ctx.skip(found.why);
++    }
++    if (found.kind !== "ready") return;
++    const made = await dockerCli(["network", "create", "--internal", network]);
++    expect(made).toMatchObject({ code: 0 });
++    const spec: BoxSpec = {
++      image: found.image,
++      worktree: process.cwd(),
++      readOnly: [],
++      env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-declared" },
++      proxy: "http://factory-egress-canary:3128",
++      network,
++    };
++    const stdout = await envIn(found.box, spec);
++    const names = namesOf(stdout);
++    // the declared variable is there, so this is the run's real environment
++    expect(names).toContain("CLAUDE_CODE_OAUTH_TOKEN");
++    expect(names.filter((n) => n === "FACTORY_CANARY" || n === "GH_TOKEN")).toEqual([]);
++    expect([planted.canary, planted.ghToken].filter((v) => stdout.includes(v))).toEqual([]);
++    expect(names.filter((n) => SECRET_LIKE.test(n) && !Object.hasOwn(spec.env, n))).toEqual([]);
++  });
++});
+diff --git a/test/vm-box.test.ts b/test/vm-box.test.ts
+index 7517885..4377a80 100644
+--- a/test/vm-box.test.ts
++++ b/test/vm-box.test.ts
+@@ -1,6 +1,7 @@
+ import { describe, expect, it } from "vitest";
+ import type { Call, Exit, Runner } from "../src/core/forge/api.js";
+ import type { BoxSpec, PinnedImage } from "../src/core/box/types.js";
++import { hostDocker } from "../src/core/box/docker.js";
+ import { vmBox } from "../src/core/box/vm.js";
+ import { checkSpec, readRan } from "../src/core/box/vm-plan.js";
+ import { boxContract } from "./box-contract.js";
+@@ -64,7 +65,18 @@ function box(fake: { readonly run: Runner }, now: () => number = () => 0) {
+ const argv = (calls: readonly Call[]): string[] => calls.map((c) => c.args.join(" "));
+ const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
+ 
+-boxContract("vm on a fake docker", () => box(fakeDocker()));
++// the docker CLI as app.ts makes it, from the host's environment, on a fake docker that records each call
++boxContract("vm on a fake docker", (host) => {
++  const fake = fakeDocker();
++  let n = 0;
++  const made = vmBox({
++    docker: hostDocker(host, fake.run),
++    image: IMAGE.ref,
++    owner: OWNER,
++    newName: () => `factory-box-${++n}`,
++  });
++  return { box: made, handed: () => fake.calls.map((c) => ({ argv: c.args, env: c.env })) };
++});
+ 
+ describe("vm box: probe", () => {
+   it("is ready when docker answers, Sysbox is installed and the image is here", async () => {

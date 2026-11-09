@@ -1,0 +1,32 @@
+diff --git a/src/core/writer/clone.ts b/src/core/writer/clone.ts
+index 5c6413c..65027d5 100644
+--- a/src/core/writer/clone.ts
++++ b/src/core/writer/clone.ts
+@@ -13,7 +13,9 @@
+ // and docker would mount a symlink's target from the host. Nothing here throws.
+ 
+ import { AGENT_SETTINGS } from "../agent-settings.js";
++import { execFile } from "node:child_process";
+ import { cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
++import { promisify } from "node:util";
+ import { join } from "node:path";
+ import { excludeFactory } from "../finish.js";
+ import type { Result } from "../forge/api.js";
+@@ -100,10 +102,16 @@ function atHead(start: Start, tip: string): Result<string> {
+       };
+ }
+ 
++// plainFetch : the fetch is the slow step and hostGit reads the config three times first, so it runs git itself
++async function plainFetch(repo: string, refspec: string): Promise<Result<string>> {
++  const ran = await promisify(execFile)("git", ["-C", repo, "fetch", "-q", "origin", refspec]).catch((e: Error) => e);
++  return ran instanceof Error ? { kind: "failed", reason: `cannot fetch: ${ran.message}` } : { kind: "ok", value: "" };
++}
++
+ // fetchStart : the start's ref in the project's clone, and its commit
+ async function fetchStart(setup: CloneSetup, start: Start, ref: string): Promise<Result<string>> {
+   const from = start.kind === "branch" ? start.branch : start.base;
+-  const fetched = await git(setup.env, setup.repo, ["fetch", "-q", "origin", `+refs/heads/${from}:${ref}`]);
++  const fetched = await plainFetch(setup.repo, `+refs/heads/${from}:${ref}`);
+   const tip = fetched.kind === "ok" ? await git(setup.env, setup.repo, ["rev-parse", ref]) : fetched;
+   return tip.kind === "ok" ? atHead(start, tip.value) : tip;
+ }

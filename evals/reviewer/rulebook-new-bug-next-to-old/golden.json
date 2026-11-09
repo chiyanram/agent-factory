@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/plugin/exec.ts",
+    "line": 66,
+    "issue": "The cap now trips at exactly maxBytes, so a plugin whose stdout and stderr together hold exactly maxBytes is killed and its call fails, though the contract allows at most maxBytes. It must stay > .",
+    "severity": "blocker",
+    "category": "bug"
+  }
+]

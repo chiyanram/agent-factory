@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/finish.ts",
+    "line": 197,
+    "issue": "The host push no longer runs noAgentSettings, so a writer commit that adds or changes .claude/, .agents/, AGENTS.md or CLAUDE.md is pushed: the writer can plant settings or instructions for the next session (#110; ADR-0012 S12). noAgentSettings is now called nowhere.",
+    "severity": "blocker",
+    "category": "security"
+  }
+]

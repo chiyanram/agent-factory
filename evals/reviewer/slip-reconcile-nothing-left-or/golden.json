@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/loop.ts",
+    "line": 354,
+    "issue": "nothingLeft says nothing is left when either list is empty, so a worktree with unlanded commits but no uncommitted files (or the other way round) is read as empty and removed: the dead writer's work is lost (#189). It must be && .",
+    "severity": "blocker",
+    "category": "data"
+  }
+]

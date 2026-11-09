@@ -1,0 +1,13 @@
+diff --git a/src/core/notify.ts b/src/core/notify.ts
+index 94e54c0..666b7f1 100644
+--- a/src/core/notify.ts
++++ b/src/core/notify.ts
+@@ -116,7 +116,7 @@ export async function notifyPluginOf(files: {
+ // discord is ever handed it; any other plugin or capability gets no secret
+ export function webhookSecrets(store: Result<TokenStore>, bundled: string): Secrets {
+   return async (call) => {
+-    if (call.capability !== "notify" || !(await sameFile(call.source, bundled))) {
++    if (call.capability !== "notify" || call.plugin !== "discord") {
+       return { kind: "ok", value: {} };
+     }
+     const stored = store.kind === "ok" ? await store.value.get("discord") : store;

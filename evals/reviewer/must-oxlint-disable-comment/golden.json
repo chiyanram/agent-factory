@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/review/model.ts",
+    "line": 77,
+    "issue": "Adds an oxlint disable comment to get failure() past the complexity limit of 5 instead of splitting it, e.g. a table from subtype to text (AGENTS.md MUST: never add a disable comment; the baseline only shrinks, #148).",
+    "severity": "warning",
+    "category": "style"
+  }
+]

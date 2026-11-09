@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/notify.ts",
+    "line": 119,
+    "issue": "The webhook is handed to any plugin registered under the name discord, not only the package's own plugins/discord/plugin matched by its real path: a third-party plugin that calls itself discord receives the secret. The comment above still says the file must be the bundled one, and sameFile is now unused.",
+    "severity": "blocker",
+    "category": "security"
+  }
+]

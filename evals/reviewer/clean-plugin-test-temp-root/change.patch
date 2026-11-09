@@ -1,0 +1,22 @@
+diff --git a/test/plugin.test.ts b/test/plugin.test.ts
+index 9e7909a..a7abe66 100644
+--- a/test/plugin.test.ts
++++ b/test/plugin.test.ts
+@@ -5,6 +5,7 @@ import {
+   mkdirSync,
+   mkdtempSync,
+   readFileSync,
++  realpathSync,
+   rmSync,
+   statSync,
+   symlinkSync,
+@@ -25,7 +26,8 @@ import {
+ 
+ let root = "";
+ beforeEach(() => {
+-  root = mkdtempSync(join(tmpdir(), "factory-plugin-"));
++  // the real path: on macOS tmpdir() is behind a symlink (/var -> /private/var), and a plugin is named by its real file
++  root = realpathSync(mkdtempSync(join(tmpdir(), "factory-plugin-")));
+ });
+ afterEach(() => rmSync(root, { recursive: true, force: true }));
+ 

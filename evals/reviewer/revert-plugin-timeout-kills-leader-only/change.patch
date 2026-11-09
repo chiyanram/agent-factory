@@ -1,0 +1,21 @@
+diff --git a/src/core/plugin/exec.ts b/src/core/plugin/exec.ts
+index 8f00be9..95f42ee 100644
+--- a/src/core/plugin/exec.ts
++++ b/src/core/plugin/exec.ts
+@@ -29,7 +29,7 @@ function killGroup(pid: number | undefined): void {
+     return;
+   }
+   try {
+-    process.kill(-pid, "SIGKILL");
++    process.kill(pid, "SIGKILL");
+   } catch {
+     // the group is gone already
+   }
+@@ -52,7 +52,6 @@ export const runPlugin: Exec = (input) =>
+     let stop: Ran | "none" = "none";
+     const child = spawn(input.path, [...input.args], {
+       env: input.env,
+-      detached: true,
+       stdio: ["pipe", "pipe", "pipe"],
+       windowsHide: true,
+     });

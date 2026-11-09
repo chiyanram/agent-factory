@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/plugin/exec.ts",
+    "line": 32,
+    "issue": "The timeout and the output cap now kill only the plugin's own process, not its process group (and spawn no longer makes one): a child the plugin started, such as curl, keeps running and can still write after the call has ended. killGroup's and runPlugin's comments still promise the whole group.",
+    "severity": "warning",
+    "category": "concurrency"
+  }
+]

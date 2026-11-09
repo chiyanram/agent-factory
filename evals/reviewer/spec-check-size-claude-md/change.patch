@@ -1,0 +1,26 @@
+diff --git a/scripts/check-size.ts b/scripts/check-size.ts
+index 4636135..97b7696 100644
+--- a/scripts/check-size.ts
++++ b/scripts/check-size.ts
+@@ -1,4 +1,4 @@
+-// check-size — fails when ROOT/AGENTS.md has 200 lines or more (ported from check-size.sh, #138). The limit is
++// check-size — fails when ROOT/AGENTS.md or ROOT/CLAUDE.md has 200 lines or more (ported from check-size.sh, #138). The limit is
+ // ADR-0003's: "AGENTS.md (root, <200 lines" (docs/adr/0003-rulebook-layout-across-tools.md:14).
+ //
+ //   node scripts/check-size.ts [ROOT]      (make lint)
+@@ -18,11 +18,12 @@ export function lineCount(text: string): number {
+   return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+ }
+ 
+-// tooLong : why ROOT/AGENTS.md is too long, or "" when it is not (or is not there)
++// tooLong : why ROOT's instructions file is too long, or "" when it is not (or is not there)
+ export function tooLong(root: string): string {
+-  const file = join(root, "AGENTS.md");
++  const name = existsSync(join(root, "AGENTS.md")) ? "AGENTS.md" : "CLAUDE.md";
++  const file = join(root, name);
+   const lines = existsSync(file) ? lineCount(readFileSync(file, "utf8")) : 0;
+-  return lines >= LIMIT ? `too long: AGENTS.md: ${lines} lines; ADR-0003 allows fewer than ${LIMIT}` : "";
++  return lines >= LIMIT ? `too long: ${name}: ${lines} lines; ADR-0003 allows fewer than ${LIMIT}` : "";
+ }
+ 
+ if (process.argv[1] === import.meta.filename) {

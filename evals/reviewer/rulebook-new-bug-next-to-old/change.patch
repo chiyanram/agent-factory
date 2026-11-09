@@ -1,0 +1,15 @@
+diff --git a/src/core/plugin/exec.ts b/src/core/plugin/exec.ts
+index 8f00be9..653542d 100644
+--- a/src/core/plugin/exec.ts
++++ b/src/core/plugin/exec.ts
+@@ -62,8 +62,8 @@ export const runPlugin: Exec = (input) =>
+     };
+     const timer = setTimeout(() => halt({ kind: "timedOut", ms: input.limits.timeoutMs }), input.limits.timeoutMs);
+     const take = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
+-      size += chunk.length;
+-      if (size > input.limits.maxBytes) {
++      size += chunk.byteLength;
++      if (size >= input.limits.maxBytes) {
+         halt({ kind: "overCap", bytes: input.limits.maxBytes });
+         return;
+       }

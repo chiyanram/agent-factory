@@ -1,0 +1,13 @@
+diff --git a/src/core/loop.ts b/src/core/loop.ts
+index 724cfdb..f22284f 100644
+--- a/src/core/loop.ts
++++ b/src/core/loop.ts
+@@ -311,7 +311,7 @@ async function fetched(input: Reconcile, path: string): Promise<Done> {
+   if (input.dryRun) {
+     return { kind: "ok" };
+   }
+-  const done = await inWorktree(input, path, ["fetch", "--quiet", "origin"]);
++  const done = await inWorktree(input, path, ["fetch", "--quiet", "--prune", "origin"]);
+   return done.kind === "ok"
+     ? { kind: "ok" }
+     : failed(`cannot fetch (${gitWhy(done)}), so cannot tell whether it holds unlanded work`);

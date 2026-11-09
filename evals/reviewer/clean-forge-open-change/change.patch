@@ -1,0 +1,413 @@
+diff --git a/GUIDE.md b/GUIDE.md
+index 9c31798..5057c9c 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -85,6 +85,10 @@ stays out of reach either way.
+ ### Both forges
+ 
+ - Every agent post starts with its seat: `[coordinator]`, `[writer]` or `[reviewer]`.
++- A ticket's first writer run opens its change: after the first push of `factory/<ticket>`, the host opens a draft
++  change onto the default branch, as the project's identity. Its title is the spec's title and its body names the
++  ticket; the spec's text stays local. A change already open from that branch is reused, never doubled; two are left
++  to you ([#164](https://github.com/chiyanram/agent-factory/issues/164)). **Today:** the writer step (#113) does not call it yet.
+ - On agent branches, CI runs test jobs only, with no secrets. An agent never changes CI: the host push refuses
+   commits that touch `.gitlab-ci.yml` (and the files it includes), `.github/workflows/**` or `.github/actions/**`, and
+   you make such a change in your own commit ([review 8](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682922264)). Backstop: GitLab, protect every secret variable;
+diff --git a/src/core/forge/github.ts b/src/core/forge/github.ts
+index 3e72f80..d882614 100644
+--- a/src/core/forge/github.ts
++++ b/src/core/forge/github.ts
+@@ -11,6 +11,7 @@ import {
+   done,
+   nextCursor,
+   nextPage,
++  openOnce,
+   pages,
+   rendered,
+   text,
+@@ -20,6 +21,7 @@ import {
+ } from "./shared.js";
+ import type {
+   Change,
++  ChangeRequest,
+   Changes,
+   CommitStatus,
+   Forge,
+@@ -241,9 +243,42 @@ export function github(client: Client, project: GithubProject): Forge {
+     );
+   }
+ 
++  // the open pull requests from this branch of the repository itself: head=owner:branch leaves forks out
++  async function openFrom(branch: string): Promise<Result<readonly number[]>> {
++    const head = encodeURIComponent(`${project.owner}:${branch}`);
++    const answer = await rest(client, {
++      path: `${repo}/pulls?state=open&head=${head}&per_page=100`,
++      method: "GET",
++      body: { kind: "none" },
++    });
++    if (answer.kind === "failed") {
++      return answer;
++    }
++    const r = reader("github pull requests");
++    return r.done(r.list(answer.value, "").map((p) => r.int(p, "number")));
++  }
++
++  async function openChange(request: ChangeRequest): Promise<Result<number>> {
++    return openOnce({
++      mark: "#",
++      request,
++      find: () => openFrom(request.branch),
++      create: async (words) => {
++        const value = { title: words.title, body: words.body, head: request.branch, base: request.base, draft: true };
++        const answer = await rest(client, { path: `${repo}/pulls`, method: "POST", body: { kind: "json", value } });
++        if (answer.kind === "failed") {
++          return answer;
++        }
++        const r = reader("github pull request");
++        return r.done(r.int(answer.value, "number"));
++      },
++    });
++  }
++
+   return {
+     name: "github",
+     mark: "#",
++    openChange,
+     async me() {
+       const answer = await rest(client, { path: "user", method: "GET", body: { kind: "none" } });
+       if (answer.kind === "failed") {
+diff --git a/src/core/forge/gitlab.ts b/src/core/forge/gitlab.ts
+index 47a3784..59701c1 100644
+--- a/src/core/forge/gitlab.ts
++++ b/src/core/forge/gitlab.ts
+@@ -15,6 +15,7 @@ import {
+   done,
+   nextCursor,
+   nextPage,
++  openOnce,
+   pages,
+   rendered,
+   text,
+@@ -25,6 +26,7 @@ import {
+ import type {
+   CommitStatus,
+   Change,
++  ChangeRequest,
+   ChangeState,
+   Changes,
+   Forge,
+@@ -306,9 +308,49 @@ export function gitlab(client: Client, project: string): Forge {
+     });
+   }
+ 
++  // the open merge requests from this branch of the project itself: one from a fork has another source project
++  async function openFrom(branch: string): Promise<Result<readonly number[]>> {
++    const path = `${base}/merge_requests?state=opened&source_branch=${encodeURIComponent(branch)}&per_page=100`;
++    const answer = await rest(client, { path, method: "GET", body: none });
++    if (answer.kind === "failed") {
++      return answer;
++    }
++    const r = reader("gitlab merge requests");
++    const ours = r.list(answer.value, "").filter((m) => r.at(m, "source_project_id") === r.at(m, "target_project_id"));
++    return r.done(ours.map((m) => r.int(m, "iid")));
++  }
++
++  // GitLab marks a draft by the title's "Draft: " prefix
++  async function openChange(request: ChangeRequest): Promise<Result<number>> {
++    return openOnce({
++      mark: "!",
++      request,
++      find: () => openFrom(request.branch),
++      create: async (words) => {
++        const value = {
++          source_branch: request.branch,
++          target_branch: request.base,
++          title: `Draft: ${words.title}`,
++          description: words.body,
++        };
++        const answer = await rest(client, {
++          path: `${base}/merge_requests`,
++          method: "POST",
++          body: { kind: "json", value },
++        });
++        if (answer.kind === "failed") {
++          return answer;
++        }
++        const r = reader("gitlab merge request");
++        return r.done(r.int(answer.value, "iid"));
++      },
++    });
++  }
++
+   return {
+     name: "gitlab",
+     mark: "!",
++    openChange,
+     async me() {
+       const login = await get("user", "gitlab user", (v, r) => r.text(v, "username"));
+       return login.kind === "ok" ? { kind: "ok", value: String(login.value) } : login;
+diff --git a/src/core/forge/shared.ts b/src/core/forge/shared.ts
+index 197b083..d004bf2 100644
+--- a/src/core/forge/shared.ts
++++ b/src/core/forge/shared.ts
+@@ -1,10 +1,11 @@
+ // shared — what both adapters do the same way: paging, posting through the template, and the line-finding fallback.
+ 
+ import type { Note } from "../notes.js";
+-import { renderPost, type Post } from "../post.js";
+-import type { Done, Result, Variable } from "./api.js";
++import { cleanField, renderPost, type Post } from "../post.js";
++import { plainBranch } from "../push.js";
++import type { Done, Failed, Result, Variable } from "./api.js";
+ import type { Reader } from "./read.js";
+-import type { OpenChange } from "./types.js";
++import type { ChangeRequest, OpenChange } from "./types.js";
+ 
+ // A page of a list, and where the next one starts.
+ export type Cursor = { readonly kind: "start" } | { readonly kind: "after"; readonly cursor: string };
+@@ -128,3 +129,72 @@ export async function completeAll(
+   }
+   return { kind: "ok", value: changes };
+ }
++
++// GitHub caps a pull request title at 256 characters; GitLab's merge request title is longer. Both stay under this.
++const TITLE_LIMIT = 200;
++
++export type ChangeWords = { readonly title: string; readonly body: string };
++
++// reuse : what the open changes from the branch decide. None: open one. One: it is the ticket's change (a retry after a
++// crash between the push and the open). More: no one of them can be trusted, so a person decides, as poll does.
++export function reuse(
++  numbers: readonly number[],
++  where: { readonly mark: string; readonly branch: string },
++): { readonly kind: "open" } | { readonly kind: "reuse"; readonly number: number } | Failed {
++  const [only, second] = numbers;
++  if (only === undefined) {
++    return { kind: "open" };
++  }
++  return second === undefined
++    ? { kind: "reuse", number: only }
++    : {
++        kind: "failed",
++        reason: `${numbers.length} changes are open from ${where.branch}: ${numbers.map((n) => `${where.mark}${n}`).join(", ")}; a person decides`,
++      };
++}
++
++// changeWords : the title, cleaned like a posted field, and the body through the template; refused for a branch that is
++// not plain, so no branch name can change the request
++export function changeWords(request: ChangeRequest): Result<ChangeWords> {
++  if (!plainBranch(request.branch) || !plainBranch(request.base)) {
++    return {
++      kind: "failed",
++      reason: `branch ${JSON.stringify(request.branch)} onto ${JSON.stringify(request.base)} is not a plain branch`,
++    };
++  }
++  const body = rendered(request.body);
++  return body.kind === "ok"
++    ? { kind: "ok", value: { title: cleanField(request.title, TITLE_LIMIT), body: body.value } }
++    : body;
++}
++
++// openOnce : the change open from the branch, or a new draft one. Both adapters keep this order: words, find, open.
++export async function openOnce(input: {
++  readonly mark: string;
++  readonly request: ChangeRequest;
++  readonly find: () => Promise<Result<readonly number[]>>;
++  readonly create: (words: ChangeWords) => Promise<Result<number>>;
++}): Promise<Result<number>> {
++  const words = changeWords(input.request);
++  if (words.kind === "failed") {
++    return words;
++  }
++  const found = await input.find();
++  return found.kind === "ok"
++    ? act(reuse(found.value, { mark: input.mark, branch: input.request.branch }), () => input.create(words.value))
++    : found;
++}
++
++function act(
++  decided: ReturnType<typeof reuse>,
++  create: () => Promise<Result<number>>,
++): Promise<Result<number>> | Result<number> {
++  switch (decided.kind) {
++    case "open":
++      return create();
++    case "reuse":
++      return { kind: "ok", value: decided.number };
++    case "failed":
++      return decided;
++  }
++}
+diff --git a/src/core/forge/types.ts b/src/core/forge/types.ts
+index 6c33adf..59c0bac 100644
+--- a/src/core/forge/types.ts
++++ b/src/core/forge/types.ts
+@@ -74,6 +74,16 @@ export type CommitStatus = {
+   readonly description: string;
+ };
+ 
++// A draft change the host opens after a ticket's first push (#164). Its title and body are the factory's own words: the
++// title is cleaned like any posted field, and the body goes through the posting template. The spec's text never goes
++// in, because at work the spec stays local (#127).
++export type ChangeRequest = {
++  readonly branch: string;
++  readonly base: string;
++  readonly title: string;
++  readonly body: Post;
++};
++
+ export type Forge = {
+   readonly name: ForgeName;
+   // the change's prefix in every line the factory prints: ! on GitLab, # on GitHub
+@@ -96,6 +106,8 @@ export type Forge = {
+   status(input: CommitStatus): Promise<Done>;
+   // the numbers of the changes in that state that carry the label
+   claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>>;
++  // the change open from this branch of the repository itself, or a new draft one; two or more fail, so a person decides
++  openChange(input: ChangeRequest): Promise<Result<number>>;
+   // everything poll decides on, in as few calls as paging allows
+   changes(input: { readonly label: string }): Promise<Result<Changes>>;
+ };
+diff --git a/test/dispatch-tick.test.ts b/test/dispatch-tick.test.ts
+index 4f1bd00..6496784 100644
+--- a/test/dispatch-tick.test.ts
++++ b/test/dispatch-tick.test.ts
+@@ -72,6 +72,7 @@ function forge(changes: Changes, log: string[]): Forge {
+     me: async () => ({ kind: "ok", value: "ram" }),
+     change: notUsed,
+     defaultBranch: notUsed,
++    openChange: notUsed,
+     notes: notUsed,
+     lineFinding: notUsed,
+     status: notUsed,
+diff --git a/test/forge-github.test.ts b/test/forge-github.test.ts
+index 1e71ded..a056447 100644
+--- a/test/forge-github.test.ts
++++ b/test/forge-github.test.ts
+@@ -374,3 +374,54 @@ describe("single calls", () => {
+     });
+   });
+ });
++
++describe("openChange (#164)", () => {
++  const request = {
++    branch: "factory/T-7",
++    base: "main",
++    title: "Add the ledger row @all closes #1",
++    body: { seat: "coordinator", title: "T-7", fields: [{ label: "ticket", value: "T-7" }], items: [] },
++  } as const;
++
++  it("opens a draft pull request from the branch when none is open, with cleaned words", async () => {
++    const f = fake("github", [ok([]), { status: 201, body: { number: 42 } }]);
++    expect(await github(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 42 });
++    expect(f.calls[0]?.args[2]).toBe(
++      "repos/chiyanram/ledger/pulls?state=open&head=chiyanram%3Afactory%2FT-7&per_page=100",
++    );
++    const sent = JSON.parse(f.calls[1]?.stdin ?? "");
++    expect(sent).toEqual({
++      title: "Add the ledger row @⁠all closes #⁠1",
++      body: "[coordinator] T-7\n\n- ticket: T-7",
++      head: "factory/T-7",
++      base: "main",
++      draft: true,
++    });
++  });
++
++  it("reuses the one pull request already open from the branch, and opens no second", async () => {
++    const f = fake("github", [ok([{ number: 9 }])]);
++    expect(await github(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 9 });
++    expect(f.calls).toHaveLength(1);
++  });
++
++  it("leaves two open pull requests to a person", async () => {
++    const f = fake("github", [ok([{ number: 9 }, { number: 11 }])]);
++    expect(await github(f.client, project).openChange(request)).toEqual({
++      kind: "failed",
++      reason: "2 changes are open from factory/T-7: #9, #11; a person decides",
++    });
++  });
++
++  it("refuses a branch that is not plain before any call", async () => {
++    const f = fake("github", []);
++    expect((await github(f.client, project).openChange({ ...request, branch: "x&head=y:z" })).kind).toBe("failed");
++    expect(f.calls).toEqual([]);
++  });
++
++  it("fails with GitHub's reason when it refuses the pull request", async () => {
++    const f = fake("github", [ok([]), { status: 422, body: { message: "No commits between main and factory/T-7" } }]);
++    const opened = await github(f.client, project).openChange(request);
++    expect(opened).toEqual({ kind: "failed", reason: expect.stringContaining("No commits between") });
++  });
++});
+diff --git a/test/forge-gitlab.test.ts b/test/forge-gitlab.test.ts
+index bde40aa..fb675ed 100644
+--- a/test/forge-gitlab.test.ts
++++ b/test/forge-gitlab.test.ts
+@@ -311,3 +311,43 @@ describe("single calls", () => {
+     });
+   });
+ });
++
++describe("openChange (#164)", () => {
++  const request = {
++    branch: "factory/T-7",
++    base: "main",
++    title: "/merge the ledger row",
++    body: { seat: "coordinator", title: "T-7", fields: [], items: [] },
++  } as const;
++  const listed = (iid: number, source = 5, target = 5) => ({
++    iid,
++    source_project_id: source,
++    target_project_id: target,
++  });
++
++  it("opens a draft merge request when none is open from the branch", async () => {
++    const f = fake("gitlab", [ok([]), { status: 201, body: { iid: 81 } }]);
++    expect(await gitlab(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 81 });
++    expect(f.calls[0]?.args[2]).toBe(`${base}/merge_requests?state=opened&source_branch=factory%2FT-7&per_page=100`);
++    expect(JSON.parse(f.calls[1]?.stdin ?? "")).toEqual({
++      source_branch: "factory/T-7",
++      target_branch: "main",
++      title: "Draft: \\/merge the ledger row",
++      description: "[coordinator] T-7",
++    });
++  });
++
++  it("reuses the merge request already open from the branch, and leaves a fork's out", async () => {
++    const f = fake("gitlab", [ok([listed(12), listed(13, 99, 5)])]);
++    expect(await gitlab(f.client, project).openChange(request)).toEqual({ kind: "ok", value: 12 });
++    expect(f.calls).toHaveLength(1);
++  });
++
++  it("leaves two open merge requests to a person", async () => {
++    const f = fake("gitlab", [ok([listed(12), listed(14)])]);
++    expect(await gitlab(f.client, project).openChange(request)).toEqual({
++      kind: "failed",
++      reason: "2 changes are open from factory/T-7: !12, !14; a person decides",
++    });
++  });
++});
+diff --git a/test/ready.test.ts b/test/ready.test.ts
+index fbf18af..5f5f3b1 100644
+--- a/test/ready.test.ts
++++ b/test/ready.test.ts
+@@ -185,6 +185,7 @@ function statusForge(posted: CommitStatus[]): Forge {
+     me: notUsed,
+     change: notUsed,
+     defaultBranch: notUsed,
++    openChange: notUsed,
+     addLabel: notUsed,
+     removeLabel: notUsed,
+     note: notUsed,
+diff --git a/test/review-round.test.ts b/test/review-round.test.ts
+index 5e8c30b..139f139 100644
+--- a/test/review-round.test.ts
++++ b/test/review-round.test.ts
+@@ -91,6 +91,7 @@ function forge(
+       return { kind: "ok", value: calls > 1 && over.moveTo !== undefined ? { ...base, sha: over.moveTo } : base };
+     },
+     defaultBranch: async () => ({ kind: "ok", value: "main" }),
++    openChange: failed,
+     notes: async () => ({ kind: "ok", value: [...notes] }),
+     note: async ({ post }): Promise<Done> => {
+       const body = text(post);

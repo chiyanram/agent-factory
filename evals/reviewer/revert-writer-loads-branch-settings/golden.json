@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/writer/run.ts",
+    "line": 73,
+    "issue": "claudeArgv no longer passes --setting-sources user, so the writer's claude -p loads the branch's own .claude/settings.json, hooks, env and .mcp.json: a branch can plant a hook or env that runs in the writer's run (#110). The file's own header still says the branch's settings are dropped.",
+    "severity": "blocker",
+    "category": "security"
+  }
+]

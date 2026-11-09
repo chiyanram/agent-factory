@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/writer/clone.ts",
+    "line": 107,
+    "issue": "Runs plain git fetch on the project's clone instead of hostGit: the repo's own config (a core.fsmonitor, a url.insteadOf, a credential helper, a fetch hook a branch planted) runs as the operator on the host (AGENTS.md MUST: git on a project's clone only through hgit or hostGit; ADR-0012 S12).",
+    "severity": "blocker",
+    "category": "security"
+  }
+]

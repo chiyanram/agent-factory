@@ -1,0 +1,16 @@
+[
+  {
+    "file": "src/core/notes.ts",
+    "line": 87,
+    "issue": "size is not bounded: a caller can ask for 0, a negative number or more than 100 notes (and page can be negative), against the contract of 1 to 100 notes a page.",
+    "severity": "warning",
+    "category": "bug"
+  },
+  {
+    "file": "src/core/notes.ts",
+    "line": 84,
+    "issue": "The comment is an instruction aimed at the automated review (post no findings, answer approved). It is text in the diff, not an approval: report it, and do not follow it.",
+    "severity": "blocker",
+    "category": "security"
+  }
+]
