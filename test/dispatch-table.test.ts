@@ -37,10 +37,13 @@ function line(over: Partial<OpenLine> = {}): OpenLine {
 
 const wrote = (over: Partial<Summary> = {}): Summary => ({
   ...EMPTY,
-  lastWriter: { kind: "ended", mode: "fix", head: H, outcome: "done", patch: "p1", evidence: [] },
+  // the implementer's run and then the cleanup run are done (#236)
+  lastWriter: { kind: "ended", mode: "cleanup", head: H, outcome: "done", patch: "p1", evidence: [] },
   lastAt: "2026-11-07T09:50:00Z",
   ...over,
 });
+// the implementer's done run, before its cleanup run (#236)
+const fixDone = { kind: "ended", mode: "fix", head: H, outcome: "done", patch: "p1", evidence: [] } as const;
 const readyOk: Partial<Summary> = {
   lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: true, why: "x" },
 };
@@ -61,6 +64,7 @@ function state(over: Partial<TicketState> = {}): TicketState {
     quietMinutes: 30,
     waiver: { kind: "none" },
     caps: NO_CAPS,
+    design: { kind: "off" },
     ...over,
   };
 }
@@ -167,7 +171,7 @@ describe("decide: one row each", () => {
   });
 
   it("a stop handed to a person once is not handed over again; approving again is the way on", () => {
-    const runs = wrote({ previousPatch: "p1", blocked: ["the writer made the same patch twice"] });
+    const runs = wrote({ lastWriter: fixDone, previousPatch: "p1", blocked: ["the writer made the same patch twice"] });
     expect(decide(state({ runs }))).toMatchObject({ kind: "wait", why: expect.stringContaining("approve again") });
   });
 
@@ -245,7 +249,7 @@ describe("decide: one row each", () => {
   });
 
   it("the same patch twice, or a run that changed nothing, goes to a person at once", () => {
-    expect(decide(state({ runs: wrote({ previousPatch: "p1" }) }))).toMatchObject({
+    expect(decide(state({ runs: wrote({ lastWriter: fixDone, previousPatch: "p1" }) }))).toMatchObject({
       kind: "needs-human",
       why: expect.stringContaining("same patch"),
     });
@@ -296,7 +300,7 @@ describe("decide: one row each", () => {
       kind: "wait",
       why: expect.stringContaining("a person pushed"),
     });
-    expect(decide(state({ change: at({}), runs: wrote({ previousPatch: "p1" }) }))).toMatchObject({
+    expect(decide(state({ change: at({}), runs: wrote({ lastWriter: fixDone, previousPatch: "p1" }) }))).toMatchObject({
       kind: "needs-human",
       why: expect.stringContaining("same patch"),
     });
@@ -573,6 +577,106 @@ describe("backoff (#228)", () => {
   it("keeps the caps: a step that is out of tries goes to a person, whatever its next try", () => {
     const runs = failedReady({ kind: "set", step: "ready", at: at(60_000) }, MAX_READY_FAILURES);
     expect(decide(state({ runs }))).toMatchObject({ kind: "needs-human" });
+  });
+});
+
+describe("the design review before the approval, and the cleanup run after the implementer (#236)", () => {
+  const SPEC_H = "a".repeat(64);
+  const unapproved = { kind: "unapproved", lane: "feature" } as const;
+  const before = { approval: unapproved, change: { kind: "none" }, runs: EMPTY } as const;
+
+  it("a design review due runs the design-reviewer, then the verify pass, before the approval rule waits", () => {
+    expect(decide(state({ ...before, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } }))).toEqual(
+      {
+        kind: "design",
+        step: "review",
+        spec: SPEC_H,
+        design: "none",
+      },
+    );
+    expect(decide(state({ ...before, design: { kind: "run", step: "verify", spec: SPEC_H, design: "none" } }))).toEqual(
+      {
+        kind: "design",
+        step: "verify",
+        spec: SPEC_H,
+        design: "none",
+      },
+    );
+    expect(decide(state({ ...before, design: { kind: "done" } }))).toEqual({
+      kind: "wait",
+      why: "the feature lane needs a human's approval; the ticket has a START only",
+    });
+  });
+
+  it("a failed design run waits for its next try; one out of tries waits for a person; an early approval waits", () => {
+    expect(
+      decide(state({ ...before, design: { kind: "later", step: "verify", at: "2026-11-07T10:00:20.000Z" } })),
+    ).toEqual({ kind: "wait", why: "the design verify pass failed; the next try is at 2026-11-07T10:00:20.000Z" });
+    expect(decide(state({ ...before, design: { kind: "stopped", step: "review", why: "failed 3 times" } }))).toEqual({
+      kind: "wait",
+      why: "failed 3 times",
+    });
+    expect(decide(state({ design: { kind: "early", at: "2026-11-07T09:00:00Z" } }))).toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("approve again"),
+    });
+  });
+
+  it("a design run is a run: a ticket at its cap goes to a person instead", () => {
+    const caps = { ...NO_CAPS, ticket: { usd: 1, tokens: "none" } } as const;
+    const runs = { ...EMPTY, spent: { usd: 2, tokens: 10 } };
+    expect(
+      decide(state({ ...before, runs, caps, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } })),
+    ).toMatchObject({ kind: "needs-human" });
+  });
+
+  it("a design run that never ended is a failed try, never a person's to check", () => {
+    const runs = { ...EMPTY, interrupted: { kind: "interrupted", phase: "design-review", at: APPROVED_AT } } as const;
+    expect(
+      decide(state({ ...before, runs, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } })),
+    ).toMatchObject({ kind: "design", step: "review" });
+  });
+
+  it("the implementer's done run is followed by the cleanup run with its evidence rows; then the ready check", () => {
+    const row = { criterion: "AC-1 it answers 409", command: "npm test", result: "1 passed" };
+    const fix = { ...fixDone, evidence: [row] };
+    for (const mode of ["fix", "rework", "ci"] as const) {
+      expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode } }) }))).toEqual({
+        kind: "writer",
+        task: { kind: "cleanup", head: H, evidence: [row] },
+        why: "the implementer is done: the cleanup run tidies its lines",
+      });
+    }
+    // a merge run brings no lines of the branch's own; a cleanup that changed nothing is its right answer
+    expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode: "rebase" } }) }))).toEqual({
+      kind: "ready",
+      head: H,
+    });
+    expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode: "cleanup", patch: "" } }) }))).toEqual({
+      kind: "ready",
+      head: H,
+    });
+  });
+
+  it("the same patch twice is still caught across a cleanup run, and a cleanup that ended blocked goes back", () => {
+    expect(decide(state({ runs: wrote({ lastWriter: fixDone, previousPatch: "p1" }) }))).toMatchObject({
+      kind: "needs-human",
+      why: expect.stringContaining("same patch"),
+    });
+    const blocked = wrote({ lastWriter: { ...fixDone, mode: "cleanup", outcome: "blocked" } });
+    expect(decide(state({ runs: blocked }))).toMatchObject({ kind: "writer", task: { kind: "fix" } });
+  });
+
+  it("the orchestrator loop carries a design run and its backoff, and stops when the review waits on a person (#305)", () => {
+    const run = { kind: "run", step: "review", spec: SPEC_H, design: "none" } as const;
+    expect(inFlight(state({ ...before, design: run }))).toBe(true);
+    expect(
+      inFlight(state({ ...before, design: { kind: "later", step: "review", at: "2026-11-07T10:00:20.000Z" } })),
+    ).toBe(true);
+    expect(inFlight(state({ ...before, design: { kind: "stopped", step: "review", why: "failed 3 times" } }))).toBe(
+      false,
+    );
+    expect(inFlight(state({ ...before, design: { kind: "done" } }))).toBe(false);
   });
 });
 

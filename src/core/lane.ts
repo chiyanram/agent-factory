@@ -12,7 +12,9 @@
 // makes any approval stale, and a human approves the raised spec.
 //
 // The engine acts on a lane's properties, never on its name (section 3). Today one property, approval, is read from
-// the project's process: its process plugin's lanes, or the default lanes below (process/read.ts, #232). The approval floor: every lane above the lowest needs a human's approval, and no settings
+// the project's process: its process plugin's lanes, or the default lanes below (process/read.ts, #232). Each lane also
+// says whether its spec and design get a design review before the human's approval (designReview, #236): a
+// design-reviewer run, then a verify pass. The approval floor: every lane above the lowest needs a human's approval, and no settings
 // layer or process plugin can turn that off. In the settings the floor is "approval.floor", a locked key fixed to tiny
 // (#229; settings/keys.ts). lanesOf is the one door a lanes value from a process plugin comes through; it refuses any
 // value that drops the floor.
@@ -27,15 +29,32 @@ import { readProjectRaw } from "./project.js";
 import { LANES, type Lane, type Spec } from "./spec.js";
 
 // one lane's properties, in the lanes' order from the lightest
-export type LaneProps = { readonly name: Lane; readonly approval: boolean };
+// designReview: whether the lane's spec and design get a design review (#236); a lane that does not say keeps the
+// default lane's
+export type LaneProps = { readonly name: Lane; readonly approval: boolean; readonly designReview?: boolean };
 
-// the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well
+// the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well, after a design
+// review (docs/DESIGN.md section 3)
 export const DEFAULT_LANES: readonly LaneProps[] = [
-  { name: "tiny", approval: false },
-  { name: "bug", approval: true },
-  { name: "feature", approval: true },
-  { name: "one-way door", approval: true },
+  { name: "tiny", approval: false, designReview: false },
+  { name: "bug", approval: true, designReview: true },
+  { name: "feature", approval: true, designReview: true },
+  { name: "one-way door", approval: true, designReview: true },
 ];
+
+// defaultDesignReview : the default lanes' designReview for a lane, for a lanes value that does not say. Pure.
+function defaultDesignReview(lane: Lane): boolean {
+  return DEFAULT_LANES.find((l) => l.name === lane)?.designReview ?? true;
+}
+
+// designReviewOf : the design review value, or "bad" when it is there but not true or false. Pure.
+function designReviewOf(value: unknown, lane: Lane): boolean | "bad" {
+  const given = prop(value, "designReview");
+  if (given === undefined) {
+    return defaultDesignReview(lane);
+  }
+  return typeof given === "boolean" ? given : "bad";
+}
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -45,7 +64,11 @@ function propsOf(value: unknown): LaneProps | "bad" {
   const name = prop(value, "name");
   const approval = prop(value, "approval");
   const lane = LANES.find((l) => l === name);
-  return lane !== undefined && typeof approval === "boolean" ? { name: lane, approval } : "bad";
+  if (lane === undefined || typeof approval !== "boolean") {
+    return "bad";
+  }
+  const designReview = designReviewOf(value, lane);
+  return designReview === "bad" ? "bad" : { name: lane, approval, designReview };
 }
 
 // namedLanes : every lane's properties, or "bad" when the value is not a list of them. Pure.
@@ -66,7 +89,9 @@ function floorBreaks(lanes: readonly LaneProps[]): readonly string[] {
 export function lanesOf(value: unknown, from: string): Result<readonly LaneProps[]> {
   const named = namedLanes(value);
   if (named === "bad") {
-    return failed(`${from}: the lanes must be a list of {"name", "approval"}, with a name one of ${LANES.join(", ")}`);
+    return failed(
+      `${from}: the lanes must be a list of {"name", "approval"} (and an optional "designReview"), with a name one of ${LANES.join(", ")}`,
+    );
   }
   const breaks = floorBreaks(named);
   return breaks.length === 0
@@ -80,6 +105,11 @@ export function lanesOf(value: unknown, from: string): Result<readonly LaneProps
 // lane they leave out needs one. The lanes came through lanesOf, so the approval floor holds. Pure.
 export function needsApproval(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
   return lanes.find((l) => l.name === lane)?.approval ?? true;
+}
+
+// needsDesignReview : whether a lane's spec and design get a design review before the human's approval (#236). Pure.
+export function needsDesignReview(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
+  return lanes.find((l) => l.name === lane)?.designReview ?? defaultDesignReview(lane);
 }
 
 function rank(lane: Lane): number {

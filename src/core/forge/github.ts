@@ -237,6 +237,23 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
+  async function setBody(input: {
+    readonly number: number;
+    readonly post: Parameters<Forge["setBody"]>[0]["post"];
+  }): Promise<Done> {
+    const body = rendered(input.post);
+    if (body.kind === "failed") {
+      return body;
+    }
+    return done(
+      await rest(client, {
+        path: `${repo}/pulls/${input.number}`,
+        method: "PATCH",
+        body: { kind: "json", value: { body: body.value } },
+      }),
+    );
+  }
+
   async function team(): Promise<Result<readonly Person[]>> {
     return pages((cursor) =>
       query(
@@ -434,6 +451,7 @@ export function github(client: Client, project: GithubProject): Forge {
         : { kind: "ok" };
     },
     note,
+    setBody,
     async notes(input) {
       return pages(async (cursor): Promise<Result<Page<Note>>> => {
         const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;

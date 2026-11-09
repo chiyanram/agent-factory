@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
+import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
 import { headed } from "../src/core/dispatch/last-poll.js";
 import { record } from "../src/core/dispatch/records.js";
@@ -87,6 +88,7 @@ function forge(now: () => Changes | "down"): Forge {
     branchExists: async () => ({ kind: "ok", value: false }),
     openChange: notUsed,
     notes: notUsed,
+    setBody: notUsed,
     lineFinding: notUsed,
     status: notUsed,
     ciConfig: notUsed,
@@ -139,6 +141,8 @@ function loopWith(
     notify: NO_NOTIFY,
     dryRun: false,
     log: (l) => lines.push(l),
+    // these tests carry the build: a lanes file may leave the design review out (#236), which has its own tests
+    lanes: DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.approval, designReview: false })),
   };
   const run = () =>
     orchestratorLoop({

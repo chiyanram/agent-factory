@@ -67,11 +67,16 @@ async function jsonAt(path: string): Promise<Result<unknown> | { readonly kind: 
   }
 }
 
-// the plugin's lane shape, {"lane", "approval", …}, as lanesOf reads it, {"name", "approval"}
+// the plugin's lane shape, {"lane", "approval", "design_review", …}, as lanesOf reads it, {"name", "approval",
+// "designReview"}; a lane with no "design_review" keeps the default lane's (#236)
 function engineLanes(raw: unknown): unknown {
   const lanes = prop(raw, "lanes");
   return Array.isArray(lanes)
-    ? lanes.map((l: unknown) => ({ name: prop(l, "lane"), approval: prop(l, "approval") }))
+    ? lanes.map((l: unknown) => ({
+        name: prop(l, "lane"),
+        approval: prop(l, "approval"),
+        designReview: prop(l, "design_review"),
+      }))
     : undefined;
 }
 

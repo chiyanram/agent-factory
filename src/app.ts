@@ -45,6 +45,8 @@ import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
 import { readProcess, type PluginDir } from "./core/process/read.js";
 import type { LaneProps } from "./core/lane.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
+import { designSteps } from "./core/design/step.js";
+import { designSetup } from "./core/design/settings.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
@@ -649,7 +651,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     identity,
     store: tokenStore(io, home),
     pusher: hostPush,
-    plugins: used.value.plugins.map((p) => p.dir),
+    plugins: used.value.plugins,
     lanes: own.value.lanes,
   });
   const steps: Steps = {
@@ -664,6 +666,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     }),
     review: await reviewStepFor(io.env, forge, project, used.value.plugins),
     verify: verifyStep(plan, forge),
+    ...designSteps(designSetup({ env: io.env, forge, home, project, plugins: used.value.plugins })),
   };
   return {
     kind: "ok",
