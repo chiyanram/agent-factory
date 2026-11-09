@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
 import { pluginConfigOf, readPluginConfig } from "../src/core/plugin/config.js";
+import { pluginListOf } from "../src/core/process/plugins.js";
 import { MODES } from "../src/core/plugin/policy.js";
 import { projectPath, readProjectFile, readProjectRaw, readyFieldsOf } from "../src/core/project.js";
 import { fileKeys, machineKeys, type FileKey } from "../src/core/settings/keys.js";
@@ -181,7 +182,8 @@ const POOLS: Readonly<Record<string, readonly unknown[]>> = {
   "ready.timeoutMinutes": [5, 30, 60, 240],
   "ready.testFiles": [["test/**"], ["spec/**"], ["test/**", "it/**"]],
   "egress.allow": [["a.example.com"], ["a.example.com", "b.example.com"], ["c.example.com"]],
-  plugins: [{}, { notify: "discord" }],
+  connectors: [{}, { notify: "discord" }],
+  plugins: [[], ["rulebook@chiyanram"], ["rulebook@chiyanram", "team@acme"]],
   "lanes.oneWayDoor": [["db/migrations/**"], ["infra/**"]],
   "approval.floor": ["tiny"],
 };
@@ -399,12 +401,15 @@ describe("resolve: each class (#229)", () => {
       layer("project", { ready: { timeoutMinutes: 5 } }),
     ]);
     expect(errors(lockedUnset)[0]).toContain("sets a key the team locked");
-    const plugins = resolved([
-      layer("team", { plugins: { notify: "discord" } }),
-      layer("user", { plugins: { notify: "other" } }),
+    const connectors = resolved([
+      layer("team", { connectors: { notify: "discord" } }),
+      layer("user", { connectors: { notify: "other" } }),
     ]);
-    expect(valueOf(plugins, "plugins")?.value).toEqual({ notify: "discord" });
-    expect(errors(plugins)).toHaveLength(1);
+    expect(valueOf(connectors, "connectors")?.value).toEqual({ notify: "discord" });
+    expect(errors(connectors)).toHaveLength(1);
+    const plugins = resolved([layer("team", { plugins: ["rulebook@chiyanram"] }), layer("user", { plugins: [] })]);
+    expect(valueOf(plugins, "plugins")?.value).toEqual(["rulebook@chiyanram"]);
+    expect(errors(plugins)[0]).toContain('plugins: the user layer (/user.json:2) is locked at ["rulebook@chiyanram"]');
   });
 
   it("the approval floor cannot be turned off by any layer", () => {
@@ -519,10 +524,10 @@ describe("agent-factory config and team (#229)", () => {
   it("team update shows the change, checks it, then moves the pin; a failed check keeps the pin", async () => {
     const first = commitTeam({ ready: { timeoutMinutes: 60 } });
     const path = writeProject({ ...BASE, team: `acme@${first}` });
-    const second = commitTeam({ ready: { timeoutMinutes: 45 }, plugins: { notify: "discord" } });
+    const second = commitTeam({ ready: { timeoutMinutes: 45 }, connectors: { notify: "discord" } });
     const r = await cli(["team", "update", "ledger"]);
     expect(r).toMatchObject({ code: 0, err: "" });
-    expect(r.out).toContain('plugins: {} -> {"notify":"discord"}');
+    expect(r.out).toContain('connectors: {} -> {"notify":"discord"}');
     expect(r.out).toContain(`pinned acme@${second}`);
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ...BASE, team: `acme@${second}` });
     expect((await cli(["team", "update", "ledger"])).out).toContain("already pinned");
@@ -543,5 +548,68 @@ describe("agent-factory config and team (#229)", () => {
     writeProject({ ...BASE, team: `acme@${"b".repeat(40)}` });
     expect((await cli(["team", "update", "ledger", "HEAD"])).err).toContain("is not a full commit id");
     expect((await cli(["team", "nope"])).code).toBe(64);
+  });
+});
+
+describe("connectors and the plugin list (#232)", () => {
+  it("reads the connectors, and the old plugins map for one release with a warning", async () => {
+    writeProject({ ...BASE, connectors: { notify: "discord" } });
+    const now = await readPluginConfig({ home, project: "ledger" });
+    expect(now).toMatchObject({ kind: "ok" });
+    expect(now.kind === "ok" ? [...now.value.plugins] : []).toEqual([["notify", "discord"]]);
+    expect((await cli(["config", "check", "ledger"])).err).not.toContain("warning");
+
+    const path = writeProject({ ...BASE, plugins: { notify: "discord" } });
+    const old = await readPluginConfig({ home, project: "ledger" });
+    expect(old.kind === "ok" ? [...old.value.plugins] : []).toEqual([["notify", "discord"]]);
+    expect(pluginListOf(path, { plugins: { notify: "discord" } })).toEqual({ kind: "ok", value: [] });
+    const checked = await cli(["config", "check", "ledger"]);
+    expect(checked.code).toBe(0);
+    expect(checked.err).toContain(`warning: ${path}:10: "plugins" holds a map of connectors`);
+  });
+
+  it("refuses the old plugins map beside connectors, and a bad connector map", () => {
+    expect(pluginConfigOf("/p.json", { connectors: {}, plugins: { notify: "discord" } })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('keep only "connectors"'),
+    });
+    expect(pluginConfigOf("/p.json", { connectors: ["discord"] })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"connectors" must map extension points to connector names'),
+    });
+    const both = pluginConfigOf("/p.json", { connectors: { notify: "discord" }, plugins: ["rulebook@chiyanram"] });
+    expect(both.kind === "ok" ? [...both.value.plugins] : []).toEqual([["notify", "discord"]]);
+  });
+
+  it("reads the plugin list in order: name@marketplace, each name once; none is the built-in process", () => {
+    expect(pluginListOf("/p.json", {})).toEqual({ kind: "ok", value: [] });
+    expect(pluginListOf("/p.json", { plugins: ["rulebook@chiyanram", "team-rules@acme"] })).toEqual({
+      kind: "ok",
+      value: [
+        { name: "rulebook", marketplace: "chiyanram" },
+        { name: "team-rules", marketplace: "acme" },
+      ],
+    });
+    const bad = ["rulebook", "Rulebook@chiyanram", "a@b@c", "../x@y", "a..b@c", "", 7];
+    for (const entry of bad) {
+      expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining('"plugins" must be a list of plugins'),
+      });
+    }
+    expect(pluginListOf("/p.json", { plugins: ["a@x", "a@y"] })).toMatchObject({ kind: "failed" });
+    expect(pluginListOf("/p.json", { plugins: "rulebook@chiyanram" })).toMatchObject({ kind: "failed" });
+  });
+
+  it("config check refuses a bad plugin list in the project file, and in a user file", async () => {
+    writeProject({ ...BASE, plugins: ["rulebook"] });
+    const r = await cli(["config", "check", "ledger"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('"plugins" must be a list of plugins');
+    writeProject({ ...BASE, plugins: ["rulebook@chiyanram"] });
+    writeUser({ plugins: [] });
+    const user = await cli(["config", "check", "ledger"]);
+    expect(user.code).toBe(1);
+    expect(user.err).toContain("plugins: the user layer");
   });
 });

@@ -238,7 +238,7 @@ The package bundles two plugins, `github` and `gitlab`: the factory's own forge 
 each request, so it needs no setting and no token. A project opts in with its project file:
 
 ```json
-{ "plugins": { "forge.read": "github", "forge.write": "github" } }
+{ "connectors": { "forge.read": "github", "forge.write": "github" } }
 ```
 
 Run `agent-factory plugin add github` once. The bundled plugins start with `#!/usr/bin/env node`, so `node` must be in
@@ -274,7 +274,7 @@ Each goes once per event and head, as its forge note does. To set it up:
 2. `agent-factory setup discord` and paste it at the hidden prompt. It is kept like the claude token: the login
    Keychain on macOS, `~/.factory/secrets/discord-token` (mode 600) on Linux, never printed. On the VM run it as the
    user that runs the dispatcher.
-3. `agent-factory plugin add discord`, and map `"notify": "discord"` in the project file's `plugins`.
+3. `agent-factory plugin add discord`, and map `"notify": "discord"` in the project file's `connectors`.
 
 The core hands the webhook to the plugin inside the request on stdin, never in env or argv; the plugin's `curl` reads
 it from a 0600 config file it removes after, and the message from stdin. The text is a posting template, and every
@@ -378,13 +378,14 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30, "testFiles": ["src/test/**", "**/*Spec.groovy"] },
   "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] },
   "lanes": { "oneWayDoor": ["db/migrations/**", "api/openapi.yaml"] },
-  "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
+  "connectors": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
+  "plugins": ["rulebook@chiyanram"],
   "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
 }
 ```
 
 `agent-factory project init <project> [--template <file>]` writes it: from a template, copied once and never
-read again and only when its fields read, or with no plugin and the default policy. A team that keeps its settings
+read again and only when its fields read, or with no connector, no plugin and the default policy. A team that keeps its settings
 live uses a team layer instead ([Settings layers](#settings-layers)). It never replaces a file that is
 there.
 
@@ -411,7 +412,14 @@ there.
   files` names one, and in the ready check when the diff touches one. It is a deny-list key ([Settings](#settings)):
   every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
   drops it.
-- `plugins`: which registered plugin serves each extension point ([Plugins](#plugins)).
+- `connectors`: which registered connector serves each extension point ([Plugins](#plugins); the engine's swappable
+  parts are connectors, `GLOSSARY.md`). Before #232 this map was called `plugins`; a `plugins` that holds a map is
+  still read as the connectors for one release, and `config show` and `config check` warn about it. Both at once is
+  refused.
+- `plugins`: the Claude Code plugins the project installs, each `name@marketplace`, in order, each name once
+  ([docs/DESIGN.md](docs/DESIGN.md) section 5 "Plugins"). It is a locked key, so a user layer cannot drop or swap the
+  process plugin. None listed means the engine runs alone, on its built-in process. **Today:** the list is checked and
+  locked only; no plugin is fetched, pinned by hash or handed to a run yet (#232).
 - `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
   (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
   `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3. A `forge.write` policy is refused.
@@ -443,7 +451,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
 | deny-list | all layers add | `ready.testFiles`, `lanes.oneWayDoor` |
-| locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor` |
 | preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the

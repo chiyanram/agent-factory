@@ -106,7 +106,7 @@ async function approved(at = "2026-11-08T09:00:00Z"): Promise<void> {
 async function ready(policy: unknown = {}, described: unknown = TRACKER): Promise<void> {
   const added = await addPlugin(setup(), plugin("tracker", described));
   expect(added.kind).toBe("ok");
-  project({ plugins: { "tracker.comment": "tracker", "tracker.create": "tracker", notify: "tracker" }, policy });
+  project({ connectors: { "tracker.comment": "tracker", "tracker.create": "tracker", notify: "tracker" }, policy });
   await approved();
 }
 
@@ -137,8 +137,8 @@ describe("the project file's plugin fields (#134; ADR-0014 P3, P5)", () => {
       [{ policy: { notify: { mode: "allow", cap: 21 } } }, "policy.notify"],
       [{ policy: { notify: { mode: "allow", cap: 1, extra: 1 } } }, "policy.notify"],
       [{ policy: [] }, "must be an object"],
-      [{ plugins: { notify: "Discord!" } }, '"plugins"'],
-      [{ plugins: { shell: "x" } }, '"plugins"'],
+      [{ connectors: { notify: "Discord!" } }, '"connectors"'],
+      [{ connectors: { shell: "x" } }, '"connectors"'],
     ];
     for (const [raw, reason] of bad) {
       expect(pluginConfigOf("/p.json", raw)).toMatchObject({
@@ -200,7 +200,7 @@ describe("request: an allow write goes out at once, cleaned, within the cap (#13
 
   it("refuses a ticket with no approval, or one whose spec changed since", async () => {
     await addPlugin(setup(), plugin("tracker"));
-    project({ plugins: { notify: "tracker" } });
+    project({ connectors: { notify: "tracker" } });
     expect(await request(setup(), "notify", draft({ text: "x" }))).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("not approved"),
@@ -228,10 +228,10 @@ describe("request: an allow write goes out at once, cleaned, within the cap (#13
         reason: expect.stringContaining(reason),
       });
     }
-    project({ plugins: {} });
+    project({ connectors: {} });
     expect(await request(setup(), "notify", draft({ text: "x" }))).toMatchObject({
       kind: "failed",
-      reason: expect.stringContaining("no plugin for notify"),
+      reason: expect.stringContaining("no connector for notify"),
     });
     expect(sentRequests()).toHaveLength(0);
   });
@@ -239,7 +239,7 @@ describe("request: an allow write goes out at once, cleaned, within the cap (#13
   it("refuses a write the plugin did not declare, at request and at call", async () => {
     const quiet = { ...TRACKER, name: "quiet", writes: [] };
     expect((await addPlugin(setup(), plugin("quiet", quiet))).kind).toBe("ok");
-    project({ plugins: { notify: "quiet" } });
+    project({ connectors: { notify: "quiet" } });
     await approved();
     expect(await request(setup(), "notify", draft({ text: "x" }))).toMatchObject({
       kind: "failed",
@@ -424,17 +424,17 @@ describe("the request, confirm and project commands (#134)", () => {
     const o = io();
     expect(await run("project", ["init", "ledger"], o)).toBe(0);
     const file = join(home, "projects", "ledger.json");
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ plugins: {}, policy: DEFAULT_POLICY });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ connectors: {}, plugins: [], policy: DEFAULT_POLICY });
     expect(await run("project", ["init", "ledger"], o)).toBe(1);
     expect(o.err.join("")).toContain("there already");
     const template = join(root, "team.json");
     expect(await readProjectFile({ home, project: "ledger" })).toMatchObject({ kind: "missing" });
-    writeFileSync(template, JSON.stringify({ gate: "forge-ci", plugins: { notify: "discord" } }));
+    writeFileSync(template, JSON.stringify({ gate: "forge-ci", connectors: { notify: "discord" } }));
     expect(await run("project", ["init", "web", "--template", template], o)).toBe(1);
     expect(o.err.join("")).toContain("ready.programs");
     writeFileSync(
       template,
-      JSON.stringify({ gate: "forge-ci", ready: { programs: ["make"] }, plugins: { notify: "discord" } }),
+      JSON.stringify({ gate: "forge-ci", ready: { programs: ["make"] }, connectors: { notify: "discord" } }),
     );
     expect(await run("project", ["init", "web", "--template", template], o)).toBe(0);
     expect(readFileSync(join(home, "projects", "web.json"), "utf8")).toBe(readFileSync(template, "utf8"));

@@ -187,7 +187,7 @@ function oneForgePlugin(path: string, plugins: ReadonlyMap<string, string>): Res
   const [read, write] = ["forge.read", "forge.write"].map((p) => plugins.get(p) ?? "");
   return read === write
     ? { kind: "ok", value: read ?? "" }
-    : { kind: "failed", reason: `${path}: "plugins" must map forge.read and forge.write to the same plugin` };
+    : { kind: "failed", reason: `${path}: "connectors" must map forge.read and forge.write to the same connector` };
 }
 
 // pluginTarget : the forge plugin's target, under the own identity only: the App's token never reaches a plugin

@@ -295,14 +295,14 @@ describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)",
 
   it("uses the built-in adapter when the project maps no forge plugin, or has no file", async () => {
     expect(await open({})).toMatchObject({ kind: "ok", value: { identity: { kind: "own" } } });
-    projectFile({ plugins: { notify: "discord" } });
+    projectFile({ connectors: { notify: "discord" } });
     expect(await open({})).toMatchObject({ kind: "ok" });
   });
 
   it("refuses forge.read and forge.write mapped apart, and a forge plugin with the App identity", async () => {
-    projectFile({ plugins: { "forge.read": "github" } });
-    expect(await open({})).toMatchObject({ kind: "failed", reason: expect.stringContaining("the same plugin") });
-    projectFile({ plugins: { "forge.read": "github", "forge.write": "github" } });
+    projectFile({ connectors: { "forge.read": "github" } });
+    expect(await open({})).toMatchObject({ kind: "failed", reason: expect.stringContaining("the same connector") });
+    projectFile({ connectors: { "forge.read": "github", "forge.write": "github" } });
     expect(await open({ FACTORY_IDENTITY: "app" })).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("no plugin may hold"),
@@ -330,7 +330,7 @@ describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)",
   });
 
   it("serves the project through its plugin, with FACTORY_DRY_RUN still holding every write back", async () => {
-    projectFile({ plugins: { "forge.read": "github", "forge.write": "github" } });
+    projectFile({ connectors: { "forge.read": "github", "forge.write": "github" } });
     const logged: string[] = [];
     const opened = await open({ FACTORY_DRY_RUN: "1" }, (l) => logged.push(l));
     if (opened.kind === "failed") {

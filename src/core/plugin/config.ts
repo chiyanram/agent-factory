@@ -1,9 +1,13 @@
-// config — the plugin fields of the project file on this machine (#134; ADR-0014 P3, P5): which plugin serves each
-// capability, and the write policy. Read from <home>/projects/<project>.json, never a repo file, so a branch cannot
-// loosen its own policy (ADR-0012 S12). Fields this reader does not know are left alone (project.ts reads the rest).
+// config — the connector fields of the project file on this machine (#134; ADR-0014 P3, P5): which connector serves
+// each capability, and the write policy. Read from <home>/projects/<project>.json, never a repo file, so a branch
+// cannot loosen its own policy (ADR-0012 S12). Fields this reader does not know are left alone (project.ts reads the
+// rest; process/plugins.ts reads the "plugins" list).
 //
-//   "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" }
-//   "policy":  { "tracker.comment": { "mode": "allow" | "confirm" | "deny", "cap": 5 }, … }
+//   "connectors": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" }
+//   "policy":     { "tracker.comment": { "mode": "allow" | "confirm" | "deny", "cap": 5 }, … }
+//
+// "plugins" was the old name of "connectors" (#232). A "plugins" that holds a map is still read as the connectors for
+// one release, and the settings layers warn about it; a "plugins" list is the plugins a project installs.
 //
 // A policy names only the writes the coordinator may request: tracker.comment, tracker.create and notify. forge.write
 // is the dispatcher's and has no policy here. A cap counts the writes since the ticket's latest approval (writes.ts).
@@ -11,6 +15,7 @@
 
 import type { Result } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
+import { isOldConnectors } from "../process/plugins.js";
 import { readProjectRaw } from "../project.js";
 import { isPoint, PLUGIN_NAME, type ExtensionPoint } from "./contract.js";
 import {
@@ -26,6 +31,7 @@ import {
 export { DEFAULT_POLICY, MAX_CAP, POLICY_POINTS, type Mode, type Policy, type PolicyPoint, type Rule };
 
 export type PluginConfig = {
+  // the connector that serves each extension point, from "connectors" (or the old "plugins" map)
   readonly plugins: ReadonlyMap<ExtensionPoint, string>;
   readonly policy: Policy;
 };
@@ -50,13 +56,32 @@ function pairOf([point, name]: readonly [string, unknown]): readonly [ExtensionP
   return isPoint(point) && typeof name === "string" && PLUGIN_NAME.test(name) ? [point, name] : BAD;
 }
 
-function pluginsOf(path: string, raw: unknown): Result<PluginConfig["plugins"]> {
-  if (raw === undefined) {
+// the connector map's field: "connectors", or the old "plugins" map when there is no "connectors"
+function connectorField(path: string, raw: object): Result<{ readonly name: string; readonly value: unknown }> {
+  const [connectors, plugins] = [prop(raw, "connectors"), prop(raw, "plugins")];
+  if (connectors !== undefined && isOldConnectors(plugins)) {
+    return failed(`${path}: "plugins" is the old name of "connectors"; keep only "connectors"`);
+  }
+  return isOldConnectors(plugins) && connectors === undefined
+    ? { kind: "ok", value: { name: "plugins", value: plugins } }
+    : { kind: "ok", value: { name: "connectors", value: connectors } };
+}
+
+function connectorsOf(path: string, raw: object): Result<PluginConfig["plugins"]> {
+  const field = connectorField(path, raw);
+  return field.kind === "failed" ? field : connectorMap(path, field.value);
+}
+
+function connectorMap(
+  path: string,
+  { name, value }: { readonly name: string; readonly value: unknown },
+): Result<PluginConfig["plugins"]> {
+  if (value === undefined) {
     return { kind: "ok", value: new Map() };
   }
-  const pairs = isMap(raw) ? Object.entries(raw).map(pairOf) : [BAD];
+  const pairs = isMap(value) ? Object.entries(value).map(pairOf) : [BAD];
   return pairs.includes(BAD)
-    ? failed(`${path}: "plugins" must map extension points to plugin names, such as {"notify": "discord"}`)
+    ? failed(`${path}: "${name}" must map extension points to connector names, such as {"notify": "discord"}`)
     : { kind: "ok", value: new Map(pairs.filter((p): p is readonly [ExtensionPoint, string] => p !== BAD)) };
 }
 
@@ -100,9 +125,9 @@ function policyOf(path: string, raw: unknown): Result<Policy> {
   return { kind: "ok", value: { ...DEFAULT_POLICY, ...Object.fromEntries(rules) } };
 }
 
-// pluginConfigOf : the plugin fields of one project file's JSON
+// pluginConfigOf : the connector fields of one project file's JSON
 export function pluginConfigOf(path: string, raw: object): Result<PluginConfig> {
-  const plugins = pluginsOf(path, prop(raw, "plugins"));
+  const plugins = connectorsOf(path, raw);
   if (plugins.kind === "failed") {
     return plugins;
   }
@@ -110,7 +135,7 @@ export function pluginConfigOf(path: string, raw: object): Result<PluginConfig> 
   return policy.kind === "ok" ? { kind: "ok", value: { plugins: plugins.value, policy: policy.value } } : policy;
 }
 
-// readPluginConfig : the project's plugin fields; no project file is refused, since no write may go out without one
+// readPluginConfig : the project's connector fields; no project file is refused, since no write may go out without one
 export async function readPluginConfig(input: {
   readonly home: string;
   readonly project: string;
@@ -119,7 +144,7 @@ export async function readPluginConfig(input: {
   return raw.kind === "ok" ? pluginConfigOf(raw.path, raw.value) : failed(raw.reason);
 }
 
-// the file `project init` writes when no template is given: no plugin yet, and the default policy written out
+// the file `project init` writes when no template is given: no connector and no plugin yet, and the default policy
 export function initialProject(): string {
-  return `${JSON.stringify({ plugins: {}, policy: DEFAULT_POLICY }, null, 2)}\n`;
+  return `${JSON.stringify({ connectors: {}, plugins: [], policy: DEFAULT_POLICY }, null, 2)}\n`;
 }
