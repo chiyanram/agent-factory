@@ -12,7 +12,7 @@
   "src/core/forge/gitlab.ts eslint(no-shadow)": 2,
   "src/core/forge/index.ts eslint(complexity)": 2,
   "src/core/forge/read.ts typescript(no-unsafe-type-assertion)": 2,
-  "src/core/git.ts eslint(complexity)": 3,
+  "src/core/git.ts eslint(complexity)": 2,
   "src/core/git.ts typescript(no-non-null-assertion)": 1,
   "src/core/git.ts unicorn(no-array-sort)": 1,
   "src/core/identity.ts eslint(complexity)": 2,

@@ -53,7 +53,6 @@ function git(env: NodeJS.ProcessEnv, repo: string, args: readonly string[]): Ret
     args,
     repo: { kind: "repo", path: repo },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }

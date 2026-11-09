@@ -1,5 +1,5 @@
 // cards — one role card per role, read from the project's process plugin, or the engine's built-in card when no
-// plugin holds one (#236; docs/DESIGN.md section 5 "The process plugin"):
+// plugin holds one (#236, #235; docs/DESIGN.md section 5 "The process plugin"):
 //
 //   <plugin>/skills/<skill>/process/roles/<role>.md     the process plugin's card (read.ts finds the process folder)
 //   prompts/roles/<role>.md                             the engine's built-in card
@@ -22,6 +22,9 @@ export const ROLE_TOOLS = {
   "design-reviewer": ["Read", "Grep", "Glob"],
   "verify-pass": ["Read", "Grep", "Glob"],
   cleanup: ["Read", "Grep", "Glob", "Edit", "Bash"],
+  // its Bash is the build tool's help and task list only: the engine lists the commands itself and hands the run the
+  // list, so the run gets the read-only tools alone (#235; onboard/run.ts)
+  onboarder: ["Read", "Grep", "Glob", "Bash"],
 } as const;
 
 export type Role = keyof typeof ROLE_TOOLS;

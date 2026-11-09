@@ -49,6 +49,8 @@ type Held = Common & {
   readonly fixed?: unknown;
   // true when no project file reader checks it, so the layers check the project's value too
   readonly checkProject?: true;
+  // a cap whose value is not a number: true when `lower` is no more than `upper` (the run hours: its hours are within)
+  readonly within?: (lower: unknown, upper: unknown) => boolean;
 };
 
 // a key the files hold, at its path of the JSON object

@@ -82,6 +82,7 @@ describe("buildPack", () => {
       patchId: id,
       base,
       reused: false,
+      criteria: ["SPEC-AC1: total() returns the sum.", "SPEC-AC2: an empty order totals 0."],
     });
     const text = readFileSync(built.value.path, "utf8");
     expect(section(text, 1)).toContain(p.head2);
@@ -207,6 +208,20 @@ describe("buildPack: the approved spec (#224)", () => {
     expect(five).toContain("1. SPEC-AC1: total() returns the sum.");
     expect(five).toContain("2. SPEC-AC2: an empty order totals 0.");
     expect(five).toContain("approved by ram at 2026-11-09T09:00:00Z");
+  });
+
+  it("hands the round the approved criteria to quote, and asks a Spec finding to name its criterion as its rule (#219)", async () => {
+    const built = await buildPack(input());
+    expect(built.kind === "ok" && built.value.criteria).toEqual([
+      "SPEC-AC1: total() returns the sum.",
+      "SPEC-AC2: an empty order totals 0.",
+    ]);
+    expect(section(await pack(), 5)).toContain("gives `AC<n>` as its rule");
+  });
+
+  it("hands the round no criteria when the spec is not the approved one (#219)", async () => {
+    const built = await buildPack(input({ spec: { ...spec(), approval: { kind: "none" } } }));
+    expect(built.kind === "ok" && built.value.criteria).toEqual([]);
   });
 
   it("puts the spec's intent in a fence it cannot close, so it cannot forge a section", async () => {
