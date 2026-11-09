@@ -66,7 +66,6 @@ async function git(setup: OnboardSetup, args: readonly string[]): Promise<Result
     args,
     repo: { kind: "repo", path: setup.repo },
     env: setup.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return ran.kind === "ok" ? { kind: "ok", value: ran.stdout } : failed(`git ${args[0] ?? ""} failed in ${setup.repo}`);

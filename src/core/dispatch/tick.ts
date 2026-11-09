@@ -874,7 +874,12 @@ function closed(setup: TickSetup, runs: readonly Later[], ran: Ran[]): boolean {
   const why = `the run hours ${hours.text} (UTC, ${settingName("runHours")})`;
   setup.log(`no new runs: outside ${why}`);
   for (const { state, action } of runs) {
-    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `${OUTSIDE_HOURS} ${why}` } });
+    ran.push({
+      ticket: state.ticket,
+      action,
+      result: { kind: "unavailable", reason: `${OUTSIDE_HOURS} ${why}` },
+      held: true,
+    });
   }
   return true;
 }

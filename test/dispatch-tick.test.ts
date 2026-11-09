@@ -1242,6 +1242,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
         {
           ticket: "PROJ-1",
           result: { kind: "unavailable", reason: expect.stringContaining("held: outside the run hours 22-06") },
+          held: true,
         },
       ],
     });
