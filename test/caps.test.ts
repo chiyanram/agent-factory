@@ -94,6 +94,7 @@ describe("the project's stop: the day cap, then the window share, then the machi
     project,
     ticket: "PROJ-1",
     at,
+    kind: "implementer",
     spend: { usd, tokens },
   });
 
@@ -138,7 +139,13 @@ describe("the project's stop: the day cap, then the window share, then the machi
 
   it("a run with no spend recorded adds nothing", () => {
     const caps = { ...NO_CAPS, day: { usd: "none" as const, tokens: 1 } };
-    const unmeasured: Spent = { project: "ledger", ticket: "PROJ-1", at: "2026-11-09T11:00:00Z", spend: "unmeasured" };
+    const unmeasured: Spent = {
+      project: "ledger",
+      ticket: "PROJ-1",
+      at: "2026-11-09T11:00:00Z",
+      kind: "implementer",
+      spend: "unmeasured",
+    };
     expect(projectStop({ project: [unmeasured], machine: [], now: NOW, caps })).toEqual({ kind: "go" });
   });
 

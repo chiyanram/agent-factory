@@ -20,6 +20,7 @@ import {
   openOnce,
   pages,
   rendered,
+  renderedBody,
   text,
   unanchored,
   withLogs,
@@ -314,7 +315,7 @@ export function gitlab(client: Client, project: string): Forge {
     readonly number: number;
     readonly post: Parameters<Forge["setBody"]>[0]["post"];
   }): Promise<Done> {
-    const body = rendered(input.post);
+    const body = renderedBody(input.post);
     if (body.kind === "failed") {
       return body;
     }

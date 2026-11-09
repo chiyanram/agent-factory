@@ -46,7 +46,7 @@ describe("a run's spend, from the agent CLI's output", () => {
 const NOW = Date.parse("2026-11-09T12:00:00Z");
 
 function spent(at: string, usd: number, over: Partial<Spent> = {}): Spent {
-  return { project: "ledger", ticket: "PROJ-1", at, spend: { usd, tokens: usd * 1000 }, ...over };
+  return { project: "ledger", ticket: "PROJ-1", at, kind: "implementer", spend: { usd, tokens: usd * 1000 }, ...over };
 }
 
 describe("usage sums", () => {
@@ -73,21 +73,64 @@ describe("usage sums", () => {
     ];
     const lines = usageLines({ runs, now: NOW, windowHours: 5 });
     expect(lines[0]).toBe("usage at 2026-11-09T12:00:00.000Z: days and months in UTC, the window is the last 5 h");
-    expect(lines.slice(1, -1)).toEqual([
-      "          today               window              month",
-      "all       $3.00 3000 tok +1?  $1.00 1000 tok +1?  $7.00 7000 tok +1?",
-      "atlas     $0.00 0 tok +1?     $0.00 0 tok +1?     $0.00 0 tok +1?",
-      "  PROJ-1  $0.00 0 tok +1?     $0.00 0 tok +1?     $0.00 0 tok +1?",
-      "ledger    $3.00 3000 tok      $1.00 1000 tok      $7.00 7000 tok",
-      "  PROJ-1  $2.00 2000 tok      $0.00 0 tok         $6.00 6000 tok",
-      "  PROJ-2  $1.00 1000 tok      $1.00 1000 tok      $1.00 1000 tok",
+    expect(lines.slice(1, -2)).toEqual([
+      "          kind         today               window              month",
+      "all       implementer  $3.00 3000 tok +1?  $1.00 1000 tok +1?  $7.00 7000 tok +1?",
+      "atlas     implementer  $0.00 0 tok +1?     $0.00 0 tok +1?     $0.00 0 tok +1?",
+      "  PROJ-1  implementer  $0.00 0 tok +1?     $0.00 0 tok +1?     $0.00 0 tok +1?",
+      "ledger    implementer  $3.00 3000 tok      $1.00 1000 tok      $7.00 7000 tok",
+      "  PROJ-1  implementer  $2.00 2000 tok      $0.00 0 tok         $6.00 6000 tok",
+      "  PROJ-2  implementer  $1.00 1000 tok      $1.00 1000 tok      $1.00 1000 tok",
     ]);
   });
 
   it("a window that reaches back into last month still counts its runs", () => {
     const runs = [spent("2026-10-31T23:00:00Z", 8)];
     const lines = usageLines({ runs, now: Date.parse("2026-11-01T01:00:00Z"), windowHours: 5 });
-    expect(lines[2]?.split(/\s{2,}/)).toEqual(["all", "$0.00 0 tok", "$8.00 8000 tok", "$0.00 0 tok"]);
+    expect(lines[2]?.split(/\s{2,}/)).toEqual(["all", "implementer", "$0.00 0 tok", "$8.00 8000 tok", "$0.00 0 tok"]);
+  });
+
+  it("splits each period, per project and per ticket, by run kind (#337)", () => {
+    const runs = [
+      spent("2026-11-02T10:00:00Z", 4, { kind: "design-reviewer" }),
+      spent("2026-11-02T10:05:00Z", 1, { kind: "verify pass" }),
+      spent("2026-11-09T01:00:00Z", 2, { kind: "test-first" }),
+      spent("2026-11-09T08:00:00Z", 3),
+      spent("2026-11-09T09:00:00Z", 0, { spend: "unmeasured" }),
+      spent("2026-11-09T10:00:00Z", 1, { kind: "cleanup" }),
+      spent("2026-11-09T11:00:00Z", 2, { kind: "automated review" }),
+      spent("2026-11-09T11:30:00Z", 5, { ticket: "PROJ-2" }),
+      spent("2026-11-03T09:00:00Z", 6, { project: "atlas", ticket: "onboarder", kind: "onboarder" }),
+    ];
+    const lines = usageLines({ runs, now: NOW, windowHours: 5 });
+    expect(lines.slice(1, -2)).toEqual([
+      "             kind              today                 window                month",
+      "all          all               $13.00 13000 tok +1?  $11.00 11000 tok +1?  $24.00 24000 tok +1?",
+      "             design-reviewer   $0.00 0 tok           $0.00 0 tok           $4.00 4000 tok",
+      "             verify pass       $0.00 0 tok           $0.00 0 tok           $1.00 1000 tok",
+      "             test-first        $2.00 2000 tok        $0.00 0 tok           $2.00 2000 tok",
+      "             implementer       $8.00 8000 tok +1?    $8.00 8000 tok +1?    $8.00 8000 tok +1?",
+      "             cleanup           $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
+      "             automated review  $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
+      "             onboarder         $0.00 0 tok           $0.00 0 tok           $6.00 6000 tok",
+      "atlas        onboarder         $0.00 0 tok           $0.00 0 tok           $6.00 6000 tok",
+      "  onboarder  onboarder         $0.00 0 tok           $0.00 0 tok           $6.00 6000 tok",
+      "ledger       all               $13.00 13000 tok +1?  $11.00 11000 tok +1?  $18.00 18000 tok +1?",
+      "             design-reviewer   $0.00 0 tok           $0.00 0 tok           $4.00 4000 tok",
+      "             verify pass       $0.00 0 tok           $0.00 0 tok           $1.00 1000 tok",
+      "             test-first        $2.00 2000 tok        $0.00 0 tok           $2.00 2000 tok",
+      "             implementer       $8.00 8000 tok +1?    $8.00 8000 tok +1?    $8.00 8000 tok +1?",
+      "             cleanup           $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
+      "             automated review  $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
+      "  PROJ-1     all               $8.00 8000 tok +1?    $6.00 6000 tok +1?    $13.00 13000 tok +1?",
+      "             design-reviewer   $0.00 0 tok           $0.00 0 tok           $4.00 4000 tok",
+      "             verify pass       $0.00 0 tok           $0.00 0 tok           $1.00 1000 tok",
+      "             test-first        $2.00 2000 tok        $0.00 0 tok           $2.00 2000 tok",
+      "             implementer       $3.00 3000 tok +1?    $3.00 3000 tok +1?    $3.00 3000 tok +1?",
+      "             cleanup           $1.00 1000 tok        $1.00 1000 tok        $1.00 1000 tok",
+      "             automated review  $2.00 2000 tok        $2.00 2000 tok        $2.00 2000 tok",
+      "  PROJ-2     implementer       $5.00 5000 tok        $5.00 5000 tok        $5.00 5000 tok",
+    ]);
   });
 });
 
@@ -103,16 +146,59 @@ describe("agent-factory usage", () => {
     writeFileSync(join(home, "runs", project, `${ticket}.jsonl`), lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
   }
 
-  const writerEnded = (at: string, spend?: unknown) => ({
+  const writerEnded = (at: string, spend?: unknown, mode = "fix") => ({
     at,
     kind: "writer-ended",
-    mode: "fix",
+    mode,
     head: "1".repeat(40),
     outcome: "done",
     patch: "p",
     evidence: [],
     hung: false,
     ...(spend === undefined ? {} : { spend }),
+  });
+
+  it("names each record's run kind: the writer's mode, the review round, each design review run, the onboarder", async () => {
+    const head = "1".repeat(40);
+    const designEnded = (step: string, spend: unknown) => ({
+      at: "2026-11-09T08:00:00Z",
+      kind: "design-ended",
+      step,
+      spec: "s",
+      design: "d",
+      outcome: "done",
+      why: "",
+      findings: [],
+      kept: [],
+      spend,
+    });
+    write("ledger", "PROJ-1", [
+      designEnded("review", { usd: 1, tokens: 1 }),
+      designEnded("verify", { usd: 2, tokens: 2 }),
+      writerEnded("2026-11-09T09:00:00Z", { usd: 3, tokens: 3 }, "test-first"),
+      ...["fix", "rework", "ci", "rebase"].map((mode) => writerEnded("2026-11-09T09:10:00Z", undefined, mode)),
+      writerEnded("2026-11-09T09:30:00Z", { usd: 4, tokens: 4 }, "cleanup"),
+      { at: "2026-11-09T10:00:00Z", kind: "review-ended", head, actOn: 0, spend: { usd: 5, tokens: 5 } },
+      { at: "2026-11-09T10:30:00Z", kind: "spent", phase: "review", head, spend: { usd: 6, tokens: 6 } },
+    ]);
+    write("ledger", "onboarder", [
+      { at: "2026-11-09T07:00:00Z", kind: "spent", phase: "onboard", head, spend: { usd: 7, tokens: 7 } },
+    ]);
+    const read = await readSpends({ home });
+    expect(read.problems).toEqual([]);
+    expect(read.runs.map((r) => [r.ticket, r.kind])).toEqual([
+      ["PROJ-1", "design-reviewer"],
+      ["PROJ-1", "verify pass"],
+      ["PROJ-1", "test-first"],
+      ["PROJ-1", "implementer"],
+      ["PROJ-1", "implementer"],
+      ["PROJ-1", "implementer"],
+      ["PROJ-1", "implementer"],
+      ["PROJ-1", "cleanup"],
+      ["PROJ-1", "automated review"],
+      ["PROJ-1", "automated review"],
+      ["onboarder", "onboarder"],
+    ]);
   });
 
   it("reads the writer's and the reviewer's ends from every project's run records", async () => {
@@ -146,7 +232,7 @@ describe("agent-factory usage", () => {
     const err: string[] = [];
     const io = { env: {}, home, now: () => NOW, out: (t: string) => out.push(t), err: (t: string) => err.push(t) };
     expect(await usageCommand(["ledger"], io)).toBe(1);
-    expect(out.join("")).toContain("  PROJ-1  $2.00 10 tok  $2.00 10 tok  $2.00 10 tok");
+    expect(out.join("")).toContain("  PROJ-1  implementer  $2.00 10 tok  $2.00 10 tok  $2.00 10 tok");
     expect(err.join("")).toContain("PROJ-2.jsonl line 1 is not a record");
   });
 

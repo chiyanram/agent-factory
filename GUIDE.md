@@ -677,8 +677,10 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    enough.
 5. **Run the queue.** Follow the triggers below. Done when the MR is merged or carries `needs-human`.
 6. **Retro.** After about one merge in ten, turn each lesson into a rule change, strongest fix first: architecture →
-   types → lint → test → docs. Read `agent-factory usage <project>` for what each ticket cost. In the pilot, compare it with one
-   `/crq` session on a like change at the same budget; a phase that does not change outcomes is retired.
+   types → lint → test → docs. Read `agent-factory usage <project>` for what each ticket cost, and its `kind` column
+   for what each run kind cost (design-reviewer, verify pass, test-first, implementer, cleanup, automated review,
+   onboarder) today, in the window and this month (#337). In the pilot, compare it with one `/crq` session on a like
+   change at the same budget; a phase that does not change outcomes is retired.
 
 ### Triggers
 
@@ -716,7 +718,9 @@ START waits, since nothing runs without one. In a lane with a design review, the
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
 fails is tried again after the same backoff, three times, then waits for a person (#236). After the implementer's
 done run (not a merge run), a cleanup run on the same branch tidies the branch's own lines from the cleanup role card,
-runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body;
+runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body,
+above the implementer's own PR body, `.factory/pr.md`, which the host posts cleaned after each implementer run that
+ended done (#335);
 the ready check then runs the cleanup's evidence rows. Each approval also gets one shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
@@ -838,7 +842,7 @@ and `#12` for `!12`.
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory dispatch <project> [--once] [--dry-run]` | the orchestrator loop over the project: a pass of the dispatcher's table, then the next after `FACTORY_POLL_MINUTES` while a ticket is in flight, ending by itself when none is, or after a pass whose runs a cap or a step not set up held back (see Triggers); `--once` is one pass, and `--dry-run` one pass that acts on nothing; exit 0, 1 when it cannot run (another loop runs, or 3 passes in a row failed), 2 when an action failed |
-| `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131). Then the automated review's acted-on rate this month, all and per project, per lens (the rule or logic finder), per category and per bucket: each full round keeps its Act on and Consider findings at `.claude/runs/<change>/<head>/findings.json`, and the next full round counts one acted on when `git diff -U0` from that head changed a line of its file within 5 lines of it; no model decides it. A merge of the default branch into the branch can count too, so the rate is an upper bound (#220, ADR-0015 R4) |
+| `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket, each split by run kind in its `kind` column (design-reviewer, verify pass, test-first, implementer, cleanup, automated review, onboarder; an automated review's round records its finder runs and its verify pass as one spend) (#337). Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131). Then the automated review's acted-on rate this month, all and per project, per lens (the rule or logic finder), per category and per bucket: each full round keeps its Act on and Consider findings at `.claude/runs/<change>/<head>/findings.json`, and the next full round counts one acted on when `git diff -U0` from that head changed a line of its file within 5 lines of it; no model decides it. A merge of the default branch into the branch can count too, so the rate is an upper bound (#220, ADR-0015 R4) |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |
 | `agent-factory reconcile` | removes each claim and run worktree with no live run, and each claim left on a merged MR; a live-run list it cannot read releases nothing. It never removes a writer's worktree that holds unlanded work (#189): commits no remote branch holds, after a fetch, or uncommitted files. For an open MR it labels `needs-human` before any claim is released, pushes the commits on top of the MR's branch through the host push, with a blocked run's guards (fast-forward only, no `.factory`, no CI file), and posts one note naming the commits, the push and every uncommitted file, which it never commits. It tells you once for what the worktree holds, until that changes. A merged or closed MR gets no label and no push. A folder that is not one of the clone's worktrees, or a worktree it cannot fetch for, is kept and labels nothing. A reviewer's worktree is removed as before. `FACTORY_DRY_RUN=1` fetches nothing and says which it would keep |
@@ -925,6 +929,10 @@ it is a prompt instruction at most.
   `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
   and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126), and
   the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
+  One exception, the PR body (#335): below its own templated lines, the host posts the implementer's
+  `.factory/pr.md` as Markdown, only through the cleaner (`src/core/pr-body.ts`). It drops raw HTML, breaks every `@`,
+  puts `\` before a line that starts with `/`, breaks each reference after a closing keyword (`Fixes #12`), turns links to any host but the project's git host into plain text,
+  and caps the length; tables, headings and lists stay. Notes and comments stay fixed templates.
 - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106). **Today:** an edit elsewhere asks you rather than being refused.
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,

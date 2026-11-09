@@ -15,7 +15,7 @@ import type { Started as EgressStarted } from "../src/core/egress/start.js";
 import type { Pusher } from "../src/core/finish.js";
 import type { Result } from "../src/core/forge/api.js";
 import type { ChangeRequest, FailedJob, Forge, OpenChange } from "../src/core/forge/types.js";
-import { renderPost, type Post } from "../src/core/post.js";
+import { renderBody, renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
@@ -110,6 +110,8 @@ type Act = {
   readonly exit: number;
   readonly skipHook?: boolean;
   readonly plant?: string;
+  // the PR body the writer writes in .factory/pr.md (#335)
+  readonly pr?: string;
 };
 
 // git as the writer runs it in the box: no author in the environment, so the clone's own author name applies
@@ -142,6 +144,9 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
         commitWork(dir, act);
       }
       writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(act.report));
+      if (act.pr !== undefined) {
+        writeFileSync(join(dir, ".factory", "pr.md"), act.pr);
+      }
       await fake.box.run(call);
       const ran: Ran = { kind: "exited", code: act.exit, stdout: "{}", stderr: "" };
       return ran;
@@ -203,7 +208,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
       return { kind: "ok" };
     },
     setBody: async ({ number, post }) => {
-      const r = renderPost(post);
+      const r = renderBody(post);
       log.push(`body ${number} ${r.kind === "ok" ? r.text.replaceAll("\n", " | ") : `refused: ${r.reason}`}`);
       return { kind: "ok" };
     },
@@ -1076,6 +1081,76 @@ describe("the writer's words and settings", () => {
 
   it("is unavailable with the reason when its setup is not there", () => {
     expect(writerStep({ kind: "failed", reason: "no box" })).toEqual({ kind: "unavailable", reason: "no box" });
+  });
+});
+
+describe("the writer step: the implementer's PR body (#335)", () => {
+  const PLANTED = '## Why\nRefuse a reserved loan. cc @alice\n/approve\n<img src="https://evil.example/x.png">\n';
+  const ROW = { criterion: "AC1", command: "make test", result: "1 passed" };
+  const JOBS: readonly FailedJob[] = [{ name: "test", log: { kind: "tail", text: "1 failed" } }];
+
+  it("opens the first change with the engine's lines, then the implementer's PR body, cleaned, and keeps it for the cleanup run", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge();
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0, pr: PLANTED }, []), told, []), FIX);
+    const value = valueOf(out);
+    const body = told.opened[0]?.body;
+    expect(body?.prBody).toEqual({ markdown: PLANTED, host: "github.com" });
+    if (body === undefined) throw new Error("no change was opened");
+    const text = renderBody(body);
+    expect(text).toMatchObject({ kind: "ok" });
+    const posted = text.kind === "ok" ? text.text : "";
+    expect(posted.split("\n")[0]).toBe("[coordinator] PROJ-1: renewals refuse a reserved loan");
+    expect(posted).toContain(`- spec: ${specHash(SPEC)}`);
+    expect(posted.indexOf("- spec:")).toBeLessThan(posted.indexOf("## Why"));
+    expect(posted).toContain("cc @\u2060alice\n\\/approve");
+    expect(posted).not.toContain("<img");
+    const kept = join(recordsDirOf(p.clone), "41", value.head, "pr.md");
+    expect(readFileSync(kept, "utf8")).toBe(PLANTED);
+  });
+
+  it("an implementer run on an open change sets the PR body; the cleanup run after it keeps that body under its deferred list", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge(JOBS);
+    const out = await run(
+      setup(writer(fake, { commit: true, report: DONE, exit: 0, pr: PLANTED }, []), told, []),
+      { kind: "ci-red", head: p.head2 },
+      openLine(),
+    );
+    const head = valueOf(out).head;
+    const first = told.log.find((l) => l.startsWith("body 12")) ?? "";
+    expect(first).toContain("--- |  | ## Why | Refuse a reserved loan. cc @\u2060alice | \\/approve");
+    expect(first).not.toContain("evil.example");
+
+    const cleanFake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const later = forge();
+    const report = { ...DONE, deferred: ["drop the unused import"] };
+    await run(
+      setup(writer(cleanFake, { commit: false, report, exit: 0 }, []), later, []),
+      { kind: "cleanup", head, evidence: [ROW] },
+      openLine({ head }),
+    );
+    const cleaned = later.log.find((l) => l.startsWith("body 12")) ?? "";
+    expect(cleaned).toContain("- deferred by the cleanup run: drop the unused import |  | --- |  | ## Why");
+  });
+
+  it("posts no PR body from a test-first run, or from a run that did not end done", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge();
+    await run(setup(writer(fake, { commit: true, report: DONE, exit: 0, pr: PLANTED }, []), told, []), {
+      kind: "test-first",
+    });
+    expect(told.opened[0]?.body.prBody).toBeUndefined();
+
+    const asked = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const ask = forge(JOBS);
+    const report = { status: "asked", questions: ["which loan?"] };
+    await run(
+      setup(writer(asked, { commit: true, report, exit: 0, pr: PLANTED }, []), ask, []),
+      { kind: "ci-red", head: p.head2 },
+      openLine(),
+    );
+    expect(ask.log.filter((l) => l.startsWith("body"))).toEqual([]);
   });
 });
 

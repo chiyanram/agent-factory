@@ -3,7 +3,7 @@
 
 import { tailOf } from "../kept.js";
 import type { Note } from "../notes.js";
-import { cleanField, renderPost, type Post } from "../post.js";
+import { cleanField, renderBody, renderPost, type BodyPost, type Post } from "../post.js";
 import { plainBranch } from "../branch.js";
 import type { Done, Failed, Result, Variable } from "./api.js";
 import type { Reader } from "./read.js";
@@ -60,6 +60,12 @@ export function text(variable: string): Variable {
 // rendered : the post's text, or the template's refusal as a failure.
 export function rendered(post: Post): Result<string> {
   const result = renderPost(post);
+  return result.kind === "ok" ? { kind: "ok", value: result.text } : { kind: "failed", reason: result.reason };
+}
+
+// renderedBody : a PR body's text (renderBody), or the template's refusal as a failure.
+export function renderedBody(post: BodyPost): Result<string> {
+  const result = renderBody(post);
   return result.kind === "ok" ? { kind: "ok", value: result.text } : { kind: "failed", reason: result.reason };
 }
 
@@ -155,7 +161,8 @@ export function reuse(
       };
 }
 
-// changeWords : the title, cleaned like a posted field, and the body through the template; refused for a branch that is
+// changeWords : the title, cleaned like a posted field, and the body through the template (and the implementer's
+// Markdown through cleanBody, #335); refused for a branch that is
 // not plain, so no branch name can change the request
 export function changeWords(request: ChangeRequest): Result<ChangeWords> {
   if (!plainBranch(request.branch) || !plainBranch(request.base)) {
@@ -164,7 +171,7 @@ export function changeWords(request: ChangeRequest): Result<ChangeWords> {
       reason: `branch ${JSON.stringify(request.branch)} onto ${JSON.stringify(request.base)} is not a plain branch`,
     };
   }
-  const body = rendered(request.body);
+  const body = renderedBody(request.body);
   return body.kind === "ok"
     ? { kind: "ok", value: { title: cleanField(request.title, TITLE_LIMIT), body: body.value } }
     : body;
