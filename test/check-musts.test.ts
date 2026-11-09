@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ALLOW, baseRef, counts, raised, scan, untested, type Allow } from "../scripts/check-musts.js";
+import { ALLOW, bashFiles, baseRef, counts, raised, scan, type Allow } from "../scripts/check-musts.js";
 import { claudeEnv } from "../src/core/review/settings.js";
 import { tempDir } from "./temp.js";
 
@@ -17,31 +17,18 @@ const findings = (file: string, text: string, allow: readonly Allow[] = []) =>
   scan([{ file, text }], allow).findings.map((f) => f.split(": ").slice(0, 2).join(": "));
 
 describe("scan", () => {
-  it("finds gh or glab named in src/ outside the forge seam, and a gh or glab command in any bash script", () => {
+  it("finds gh or glab named in src/ outside the forge seam", () => {
     expect(findings("src/core/x.ts", 'run({ bin: "gh" });\nconst b = `glab`;\n')).toEqual([
       "src/core/x.ts:1: forge-seam",
       "src/core/x.ts:2: forge-seam",
     ]);
     expect(findings("src/core/forge/x.ts", 'run({ bin: "gh" });\n')).toEqual([]);
-    expect(findings("scripts/a.sh", "gh pr list\nx=$(glab mr view 1)\nif ok; then gh api user; fi\n")).toEqual([
-      "scripts/a.sh:1: forge-seam",
-      "scripts/a.sh:2: forge-seam",
-      "scripts/a.sh:3: forge-seam",
-    ]);
-    expect(findings("scripts/lib/forge.sh", "gh pr list\n")).toEqual(["scripts/lib/forge.sh:1: forge-seam"]);
-    expect(findings("scripts/a.sh", "# gh pr list\nforge_pr 1\necho high\n")).toEqual([]);
   });
 
-  it("finds git named in src/ outside hostGit, and a git command in a bash script but hgit's own; a message is not a call", () => {
+  it("finds git named in src/ outside hostGit; a message is not a call", () => {
     expect(findings("src/core/x.ts", 'execFile("git", ["status"]);\n')).toEqual(["src/core/x.ts:1: host-git"]);
     expect(findings("src/core/git.ts", 'execFile("git", ["status"]);\n')).toEqual([]);
-    expect(findings("scripts/lib/git.sh", 'git -C "$d" status\n')).toEqual([]);
-    expect(findings("scripts/lib/runs.sh", 'git -C "$d" status\n')).toEqual(["scripts/lib/runs.sh:1: host-git"]);
     expect(findings("src/core/x.ts", 'failed("git push failed");\n')).toEqual([]);
-    expect(findings("scripts/a.sh", 'tip=$(git rev-parse HEAD)\ngit -C "$d" fetch\nhgit -C "$d" fetch\n')).toEqual([
-      "scripts/a.sh:1: host-git",
-      "scripts/a.sh:2: host-git",
-    ]);
   });
 
   it("finds node:child_process outside the reviewed runners", () => {
@@ -50,9 +37,8 @@ describe("scan", () => {
     ]);
   });
 
-  it("finds a forge token outside the forge seam, in src/ and in a top-level script", () => {
+  it("finds a forge token in src/ outside the forge seam", () => {
     expect(findings("src/core/x.ts", "const env = { ...e, GH_TOKEN: t };\n")).toEqual(["src/core/x.ts:1: forge-token"]);
-    expect(findings("scripts/a.sh", 'GITLAB_TOKEN=$t claude -p "$p"\n')).toEqual(["scripts/a.sh:1: forge-token"]);
     expect(findings("src/core/forge/x.ts", "const env = { GH_TOKEN: t };\n")).toEqual([]);
   });
 
@@ -60,9 +46,6 @@ describe("scan", () => {
     const text =
       'a("--dangerously-skip-permissions");\nb("bypassPermissions");\nc("--yolo");\nd("--allow-all-tools");\n';
     expect(findings("src/core/x.ts", text)).toHaveLength(4);
-    expect(findings("scripts/lib/a.sh", "claude --dangerously-skip-permissions\n")).toEqual([
-      "scripts/lib/a.sh:1: skip-permissions",
-    ]);
   });
 
   it("finds a disable comment in any code file, test files included, but not in the planted fixtures", () => {
@@ -85,10 +68,24 @@ describe("scan", () => {
   });
 });
 
-describe("untested", () => {
-  it("names a top-level script with no tests/<script>.test.sh", () => {
-    expect(untested(["scripts/a.sh", "tests/a.test.sh", "scripts/b.sh", "scripts/lib/c.sh"])).toEqual([
-      "scripts/b.sh: script-test: write each script with its tests/<script>.test.sh",
+describe("bashFiles", () => {
+  it("names each .sh file and each file that starts with a shell's #! line, but not a planted fixture", () => {
+    const file = (name: string, text = "") => ({ file: name, text });
+    expect(
+      bashFiles([
+        file("scripts/a.sh"),
+        file("scripts/lib/b.sh", "x=1\n"),
+        file("bin/gh", "#!/usr/bin/env bash\nexec gh\n"),
+        file("bin/run", "#!/bin/sh\n"),
+        file("bin/node", "#!/usr/bin/env node\n"),
+        file("src/a.ts", 'const s = "#!/bin/sh";\n'),
+        file("tests/fixtures/x/run.sh", "#!/bin/sh\n"),
+      ]),
+    ).toEqual([
+      "scripts/a.sh: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)",
+      "scripts/lib/b.sh: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)",
+      "bin/gh: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)",
+      "bin/run: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)",
     ]);
   });
 });
@@ -156,12 +153,13 @@ describe("check-musts, the script", () => {
     put("scripts/lint-baseline.json", '{"src/a.ts eslint(complexity)": 2}\n');
     put("src/a.ts", 'run({ bin: "glab" });\n');
     put("scripts/b.sh", "git status\n");
+    put("src/b.ts", 'run("git", ["status"]);\n');
     expect(run(dir, { ...process.env, FACTORY_BASE_REF: "main" })).toEqual({
       code: 1,
       out:
-        "scripts/b.sh:1: host-git: call git on a project's clone only through hostGit (src/core/git.ts) or hgit (scripts/lib/git.sh)\n" +
-        "src/a.ts:1: forge-seam: call the forge only through the Forge seam in src/core/forge/ (bash: a forge_* call)\n" +
-        "scripts/b.sh: script-test: write each script with its tests/<script>.test.sh\n" +
+        "src/a.ts:1: forge-seam: call the forge only through the Forge seam in src/core/forge/\n" +
+        "src/b.ts:1: host-git: call git on a project's clone only through hostGit (src/core/git.ts)\n" +
+        "scripts/b.sh: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)\n" +
         "scripts/lint-baseline.json: lint-baseline: src/a.ts eslint(complexity) is 2, above 1; it only shrinks\n" +
         "check-musts: 4 way(s) the code breaks an AGENTS.md MUST\n",
     });
