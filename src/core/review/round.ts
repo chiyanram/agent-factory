@@ -30,6 +30,7 @@ import { prop } from "../dispatch/records.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
+import { readProcess } from "../process/read.js";
 import { attempt } from "./safe.js";
 import { plainName } from "../spec.js";
 import { statusBox, type Box } from "./status.js";
@@ -176,14 +177,20 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
   if (spec.kind === "failed") {
     return spec;
   }
-  const last = ctx.past.last;
   const s = ctx.setup;
+  // the rulebook folder stands in for the project's plugin list until plugins are fetched and pinned (#232)
+  const own = await readProcess([{ label: "FACTORY_RULEBOOK", dir: s.rulebook }]);
+  if (own.kind === "failed") {
+    return own;
+  }
+  const last = ctx.past.last;
   return buildPack({
     repo: s.repo,
     env: s.env,
     change: ctx.change,
     defaultBranch: branch.value,
     rulebook: s.rulebook,
+    baseline: own.value.baseline,
     previous: last.kind === "round" ? { kind: "head", sha: last.head } : { kind: "none" },
     spec: spec.value,
     dir: s.packDir,

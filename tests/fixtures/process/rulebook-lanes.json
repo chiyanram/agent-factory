@@ -1,0 +1,45 @@
+{
+  "rules": [
+    "An engine may make a lane stricter, never looser.",
+    "No lanes file can drop approval for a lane above tiny: the engine enforces the approval floor.",
+    "The engine writes the timeline record with no model. A full retro run is an extra task that runs only when a human starts it."
+  ],
+  "lanes": [
+    {
+      "lane": "tiny",
+      "approval": false,
+      "starts_on": "START only",
+      "design_review": false,
+      "test_first": false,
+      "lenses": "1",
+      "retro": "timeline record"
+    },
+    {
+      "lane": "bug",
+      "approval": true,
+      "starts_on": "approval, which releases the build",
+      "design_review": true,
+      "test_first": true,
+      "lenses": "~3",
+      "retro": "timeline record; a full retro run if a human starts one"
+    },
+    {
+      "lane": "feature",
+      "approval": true,
+      "starts_on": "approval, which releases the build",
+      "design_review": true,
+      "test_first": false,
+      "lenses": "~3",
+      "retro": "timeline record; a full retro run if a human starts one"
+    },
+    {
+      "lane": "one-way door",
+      "approval": true,
+      "starts_on": "approval, which releases the build and covers each irreversible step",
+      "design_review": true,
+      "test_first": false,
+      "lenses": "all, on the strongest model",
+      "retro": "timeline record; a full retro run if a human starts one"
+    }
+  ]
+}

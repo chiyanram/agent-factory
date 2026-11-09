@@ -49,6 +49,8 @@ export type PackInput = {
   readonly defaultBranch: string;
   // the rulebook plugin folder, the one that holds skills/<domain>/references/
   readonly rulebook: string;
+  // the baseline review checks of the project's process (process/read.ts); none given is the built-in BASELINE
+  readonly baseline?: readonly Pointer[];
   readonly previous: Previous;
   readonly spec: SpecSource;
   // where packs are kept
@@ -122,8 +124,8 @@ function shapeProblem(input: PackInput): string {
 }
 
 // missingBaseline : the first baseline review check the rulebook lacks, as the reason, or ""
-async function missingBaseline(rulebook: string): Promise<string> {
-  for (const p of BASELINE) {
+async function missingBaseline(rulebook: string, baseline: readonly Pointer[]): Promise<string> {
+  for (const p of baseline) {
     const path = referencePath(rulebook, p);
     if (!(await exists(path))) {
       return `the rulebook ${JSON.stringify(rulebook)} has no baseline review check ${p.domain}/${p.reference} (${path}); it must be the plugin folder`;
@@ -132,10 +134,14 @@ async function missingBaseline(rulebook: string): Promise<string> {
   return "";
 }
 
+function baselineOf(input: PackInput): readonly Pointer[] {
+  return input.baseline ?? BASELINE;
+}
+
 // checks that need no git: the rulebook and its baseline review checks, the previous head, the target branch, the
 // branch names
 async function precheck(input: PackInput): Promise<string> {
-  const missing = await missingBaseline(input.rulebook);
+  const missing = await missingBaseline(input.rulebook, baselineOf(input));
   return missing === "" ? shapeProblem(input) : missing;
 }
 
@@ -383,7 +389,7 @@ async function rulesSection(p: Parts): Promise<Result<string>> {
     blocks.push(fence({ title: file, text: text.kind === "ok" ? text.value : "", info: "markdown" }));
   }
   // a baseline review check is in section 4 already
-  const seen = new Set<string>(BASELINE.map((b) => `${b.domain}/${b.reference}`));
+  const seen = new Set<string>(baselineOf(p.input).map((b) => `${b.domain}/${b.reference}`));
   for (const ptr of p.rules.pointers) {
     const key = `${ptr.domain}/${ptr.reference}`;
     if (!seen.has(key)) {
@@ -487,9 +493,9 @@ async function editsSection(p: Parts): Promise<Result<string>> {
 type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly baseline: string };
 
 // baselineSection : each baseline review check, fenced as data
-async function baselineSection(rulebook: string): Promise<Result<string>> {
+async function baselineSection(rulebook: string, baseline: readonly Pointer[]): Promise<Result<string>> {
   const blocks: string[] = [];
-  for (const b of BASELINE) {
+  for (const b of baseline) {
     const path = referencePath(rulebook, b);
     const text = await readFile(path, "utf8").then(
       (value): Result<string> => ({ kind: "ok", value }),
@@ -512,7 +518,7 @@ async function sections(p: Parts): Promise<Result<Sections>> {
   if (rules.kind === "failed") {
     return rules;
   }
-  const baseline = await baselineSection(p.input.rulebook);
+  const baseline = await baselineSection(p.input.rulebook, baselineOf(p.input));
   if (baseline.kind === "failed") {
     return baseline;
   }

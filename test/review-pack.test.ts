@@ -365,4 +365,14 @@ describe("buildPack: the baseline review checks (#226)", () => {
     });
     expect(existsSync(join(p.root, "packs")) ? readdirSync(join(p.root, "packs")) : []).toEqual([]);
   });
+
+  it("holds the process's baseline in place of the built-in one when one is given (#232)", async () => {
+    const four = section(await pack({ baseline: [{ domain: "code", reference: "errors" }] }), 4);
+    expect(four).toContain("### rulebook code/errors\n");
+    expect(four).not.toContain("crq/review-process");
+    expect(await buildPack(input({ baseline: [{ domain: "code", reference: "nothere" }] }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("baseline review check code/nothere"),
+    });
+  });
 });

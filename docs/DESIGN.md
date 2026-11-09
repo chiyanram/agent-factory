@@ -153,7 +153,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 | PR body | `.factory/pr.md`, written by the implementer and posted by the host (who owns it is open, see section 9) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
-| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), evidence (`cited`, `walked` or `ran`), fix |
+| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), evidence and grade (each `cited`, `walked` or `ran`; the role cards name it grade), fix |
 | verdict | id, bucket (`act_on`, `consider`, `noted`, `dismissed`), why |
 
 **Tests are judged twice:**
