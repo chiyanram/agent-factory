@@ -73,7 +73,8 @@ repository's checkout (default `.`): its golden set, and the history every `base
   partial result is never proof.
 - **Settings.** `FACTORY_CLAUDE` (the agent CLI), `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL`,
   `FACTORY_REVIEW_FIND` and `FACTORY_REVIEW_VERIFY` as for `agent-factory review`; `FACTORY_JUDGE_MODEL` (default
-  `sonnet`) and `FACTORY_EVAL_JUDGE` (the judge's instructions).
+  `claude-sonnet-5-5`) and `FACTORY_EVAL_JUDGE` (the judge's instructions). Every model is a full id: a pass refuses
+  an alias such as `sonnet`, since its results file could not say which model ran (ADR-0015 E9).
 
 Exit 0 when the results file is written, 3 when it is written but partial, 1 when the pass is refused.
 
@@ -103,13 +104,16 @@ needs no model and no token.
 `results/<date>-<sha>.json` that proves it:
 
 - `"partial": false` and `"proof": true` (no draft case);
-- `inputs.prompts` holds the git blob SHA of each prompt as the change leaves it, and `head` is a commit on the
+- `inputs.prompts` holds the git blob SHA of each prompt as the change leaves it, `inputs.models` holds the full
+  model ids `src/core/review/pinned.ts` pins (a pass run with another id is no proof), and `head` is a commit on the
   branch: run the pass at the change, then commit its results file;
 - `recall_at_act_on.overall.recall` is not below `baseline.json`'s;
 - `clean_floor.hits` is 0.
 
 Until there is a `baseline.json` (#216), a reviewer-input change is refused: there is nothing to prove it against.
-The model and rulebook pins become reviewer inputs when they land (#213, and the plugin pins with #232).
+`src/core/review/pinned.ts` becomes a reviewer input itself with the first baseline (#216): it landed before one
+existed (#213). The rulebook's pin is the project's plugin pin, kept in the factory home, not here (#232), so
+`inputs.rulebook` is not checked yet.
 
 **A change to `baseline.json`** needs the operator's approval: the pull request label `eval-baseline-approved`, which
 CI reads from the pull request event. Only the operator adds it; an agent never does. A local run has no event, so it

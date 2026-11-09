@@ -19,6 +19,7 @@ import { ACT_ON_FILE, isActOn, type ActOn } from "../review/act-on.js";
 import { readKept } from "../kept.js";
 import type { Model } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
+import { JUDGE_MODEL } from "../review/pinned.js";
 import { reviewSetup } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
@@ -82,7 +83,7 @@ export function evalSettings(
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
     judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
-    judgeModel: settingOf(env, "eval.judgeModel") || "sonnet",
+    judgeModel: settingOf(env, "eval.judgeModel") || JUDGE_MODEL,
     judgePrompt: env.FACTORY_EVAL_JUDGE || join(PROMPTS, "eval-judge.md"),
     ...flags,
   };

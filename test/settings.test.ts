@@ -12,7 +12,8 @@ import { layered, modesOf, pinOf } from "../src/core/settings/layers.js";
 import { keyLines } from "../src/core/settings/lines.js";
 import { canonical, didYouMean, resolve, type FileLayer, type Resolved } from "../src/core/settings/resolve.js";
 import { runEnv, settingOf } from "../src/core/settings/machine.js";
-import { maxUsd } from "../src/core/review/settings.js";
+import { maxUsd, paths, REVIEW_MODELS } from "../src/core/review/settings.js";
+import { pinnedModel } from "../src/core/settings/variables.js";
 import { evalSettings } from "../src/core/eval/harness.js";
 import { capsOf } from "../src/core/dispatch/caps.js";
 import { tempDir } from "./temp.js";
@@ -681,19 +682,51 @@ describe("every module reads the resolved settings (#254)", () => {
   });
 
   it("the eval judge's spend cap and model are settings keys: a cap, and a preference", () => {
-    const team = layer("team", { eval: { judgeUsdPerRun: 0.2, judgeModel: "opus" } });
+    const team = layer("team", { eval: { judgeUsdPerRun: 0.2, judgeModel: "claude-opus-5-5" } });
     const flags = { drafts: false, allowPartial: false };
     expect(evalSettings(runEnv({}, withEnv([team], {})), flags)).toMatchObject({
       judgeUsd: "0.2",
-      judgeModel: "opus",
+      judgeModel: "claude-opus-5-5",
     });
     expect(errors(withEnv([team], { FACTORY_JUDGE_MAX_USD: "1" }))[0]).toContain(
       "eval.judgeUsdPerRun: the machine layer (env FACTORY_JUDGE_MAX_USD) 1 is higher than 0.2",
     );
-    expect(valueOf(withEnv([team], { FACTORY_JUDGE_MODEL: "sonnet" }), "eval.judgeModel")?.value).toBe("sonnet");
+    expect(valueOf(withEnv([team], { FACTORY_JUDGE_MODEL: "claude-sonnet-5-5" }), "eval.judgeModel")?.value).toBe(
+      "claude-sonnet-5-5",
+    );
     const poll = layer("user", { poll: { minutes: 10 } });
     expect(settingOf(runEnv({}, withEnv([poll], {})), "poll.minutes")).toBe("10");
     expect(errors(withEnv([layer("user", { poll: { minutes: 90 } })], {}))[0]).toContain("from 1 to 60");
+  });
+});
+
+describe("the reviewer's models, pinned to full ids (ADR-0015 E9, #213)", () => {
+  it("tells a full model id from an alias", () => {
+    const ids = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-5@20251101", "anthropic.claude-opus-5-5"];
+    expect(ids.filter((id) => !pinnedModel(id))).toEqual([]);
+    const aliases = ["sonnet", "opus", "haiku", "sonnet[1m]", "opusplan", "claude-sonnet-latest", "", 5, undefined];
+    expect(aliases.filter((alias) => pinnedModel(alias))).toEqual([]);
+  });
+
+  it("defaults to full ids, which the eval's results file records", () => {
+    expect(Object.values(REVIEW_MODELS).filter((id) => !pinnedModel(id))).toEqual([]);
+    expect(paths({ FACTORY_REPO: "/r", FACTORY_RULEBOOK: "/b", FACTORY_HOME: "/h" }).kind).toBe("ok");
+  });
+
+  it("refuses an alias in a file layer and in the machine layer", () => {
+    const team = layer("team", { review: { findModel: "sonnet" } });
+    expect(errors(resolved([team]))).toEqual([
+      'review.findModel in /team.json:3 must be a full model id, such as "claude-sonnet-5-5", never an alias such as "sonnet"',
+    ]);
+    expect(errors(resolved([layer("user", { eval: { judgeModel: "opus" } })]))[0]).toContain("eval.judgeModel");
+    expect(errors(resolved([layer("user", { review: { logicModel: "claude-opus-5-5" } })]))).toEqual([]);
+    const env = { FACTORY_REPO: "/r", FACTORY_RULEBOOK: "/b", FACTORY_HOME: "/h", FACTORY_RULE_MODEL: "sonnet" };
+    expect(paths(env)).toEqual({
+      kind: "failed",
+      reason:
+        'FACTORY_RULE_MODEL must be a full model id, such as "claude-sonnet-5-5", never an alias such as "sonnet", got "sonnet"',
+    });
+    expect(paths({ ...env, FACTORY_RULE_MODEL: "claude-sonnet-5-5" }).kind).toBe("ok");
   });
 });
 

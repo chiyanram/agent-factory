@@ -355,7 +355,7 @@ The scripts read their settings from the environment.
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
-| `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models | `sonnet`, `sonnet`, `opus` |
+| `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the reviewer's models: full model ids, never an alias such as `sonnet`, which is refused (ADR-0015 E9) | `claude-sonnet-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` |
 | `FACTORY_RULEBOOK` | **Deprecated** (#232; read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the writer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |

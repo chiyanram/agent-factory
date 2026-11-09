@@ -29,6 +29,18 @@ export const list: Check = (value) => (words(value) ? "" : 'a list of words, suc
 
 const text: Check = (value) => (word(value) ? "" : "a word");
 
+// pinnedModel : true for a model's full id, one that names its version, such as "claude-sonnet-5-5"; false for an
+// alias ("sonnet", "opus", "sonnet[1m]", "...-latest"), which the agent CLI moves to a new model with no PR here
+// (ADR-0015 E9, #213). Pure.
+export function pinnedModel(value: unknown): boolean {
+  return typeof value === "string" && /^[A-Za-z][\w.:@/-]*\d[\w.:@/-]*(\[1m\])?$/.test(value) && !/latest/i.test(value);
+}
+
+// what a pinned model key must hold, for its refusal
+export const PINNED_HINT = 'a full model id, such as "claude-sonnet-5-5", never an alias such as "sonnet"';
+
+const pinned: Check = (value) => (pinnedModel(value) ? "" : PINNED_HINT);
+
 const dollars: Check = (value) =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? "" : "a dollar amount above 0, such as 2 or 0.5";
 
@@ -136,7 +148,13 @@ export const MACHINE_KEYS = [
     "the most one judge run of the eval may spend, in US dollars",
     dollars,
   ),
-  machine("eval.judgeModel", "FACTORY_JUDGE_MODEL", "preference", "the eval judge's model"),
+  machine(
+    "eval.judgeModel",
+    "FACTORY_JUDGE_MODEL",
+    "preference",
+    "the eval judge's model: a full model id, never an alias",
+    pinned,
+  ),
   machine(
     "window.hours",
     "FACTORY_WINDOW_HOURS",
@@ -154,9 +172,27 @@ export const MACHINE_KEYS = [
     wholeNumber(5),
   ),
   machine("implementer.model", "FACTORY_WRITER_MODEL", "preference", "the implementer's model"),
-  machine("review.findModel", "FACTORY_FIND_MODEL", "preference", "the finder's model"),
-  machine("review.ruleModel", "FACTORY_RULE_MODEL", "preference", "the rule finder's model"),
-  machine("review.logicModel", "FACTORY_LOGIC_MODEL", "preference", "the logic finder's model"),
+  machine(
+    "review.findModel",
+    "FACTORY_FIND_MODEL",
+    "preference",
+    "the finder's model: a full model id, never an alias",
+    pinned,
+  ),
+  machine(
+    "review.ruleModel",
+    "FACTORY_RULE_MODEL",
+    "preference",
+    "the rule finder's model: a full model id, never an alias",
+    pinned,
+  ),
+  machine(
+    "review.logicModel",
+    "FACTORY_LOGIC_MODEL",
+    "preference",
+    "the logic finder's model: a full model id, never an alias",
+    pinned,
+  ),
   machine("claimLabel", "FACTORY_CLAIM_LABEL", "preference", "the label a claimed PR carries"),
   machine(
     "poll.minutes",

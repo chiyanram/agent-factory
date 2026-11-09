@@ -22,6 +22,12 @@ const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "scripts", "check-eval-proof.ts");
 const HEAD = "a".repeat(40);
 const SHAS = { find: "1".repeat(40), verify: "2".repeat(40), judge: "3".repeat(40) };
+const MODELS = {
+  find: "claude-sonnet-5-5",
+  rule: "claude-sonnet-5-5",
+  logic: "claude-opus-5-5",
+  judge: "claude-sonnet-5-5",
+};
 
 // a results document as agent-factory eval reviewer writes it (src/core/eval/results.ts), cut to what the check reads
 function pass(over: Record<string, unknown> = {}, recall = 0.8, hits = 0): Record<string, unknown> {
@@ -30,7 +36,7 @@ function pass(over: Record<string, unknown> = {}, recall = 0.8, hits = 0): Recor
     head: HEAD,
     partial: false,
     proof: true,
-    inputs: { head: HEAD, models: {}, prompts: SHAS, rulebook: "unknown" },
+    inputs: { head: HEAD, models: MODELS, prompts: SHAS, rulebook: "unknown" },
     recall_at_act_on: { overall: { found: 8, of: 10, recall } },
     clean_floor: { hits, findings: [] },
     ...over,
@@ -46,6 +52,7 @@ function facts(over: Partial<Facts> = {}): Facts {
     results: new Map([[RESULT, JSON.stringify(pass())]]),
     baseline: JSON.stringify(pass({}, 0.75)),
     prompts: SHAS,
+    models: MODELS,
     onBranch: (sha) => sha === HEAD,
     labels: undefined,
     ...over,
@@ -83,9 +90,14 @@ describe("proofProblems", () => {
     ]);
   });
 
-  it("names each way a results file fails: partial, drafts, clean floor, recall, prompt SHAs, head", () => {
+  it("names each way a results file fails: partial, drafts, clean floor, recall, prompt SHAs, models, head", () => {
     const bad = pass(
-      { partial: true, proof: false, head: "b".repeat(40), inputs: { prompts: { ...SHAS, judge: "9".repeat(40) } } },
+      {
+        partial: true,
+        proof: false,
+        head: "b".repeat(40),
+        inputs: { prompts: { ...SHAS, judge: "9".repeat(40) }, models: { ...MODELS, logic: "opus" } },
+      },
       0.5,
       2,
     );
@@ -97,6 +109,7 @@ describe("proofProblems", () => {
       'it is not proof ("proof": true needs no draft case and not partial)',
       "it has 2 clean-floor hit(s); the floor is 0",
       `inputs.prompts.judge is ${"9".repeat(40)}, not prompts/eval-judge.md as changed (${"3".repeat(40)})`,
+      "inputs.models.logic is opus, not the pin in src/core/review/pinned.ts (claude-opus-5-5)",
       `head ${"b".repeat(40)} is not a commit on this branch`,
       "recall@act_on 0.5 is below the baseline's 0.75",
     ]);
@@ -193,6 +206,11 @@ describe("check-eval-proof, the script", () => {
     for (const p of ["prompts/review-find.md", "prompts/review-verify.md", "prompts/eval-judge.md"]) {
       put(p, `${p}\n`);
     }
+    const { judge, ...review } = MODELS;
+    put(
+      "src/core/review/pinned.ts",
+      `export const REVIEW_MODELS = ${JSON.stringify(review)};\nexport const JUDGE_MODEL = ${JSON.stringify(judge)};\n`,
+    );
     git("add", "-A");
     commit("base");
     git("checkout", "-qb", "change");
@@ -213,14 +231,23 @@ describe("check-eval-proof, the script", () => {
       judge: blob("prompts/eval-judge.md"),
     };
     const head = git("rev-parse", "HEAD");
-    put(RESULT, `${JSON.stringify(pass({ head, inputs: { head, prompts } }, 0.7))}\n`);
+    put(
+      RESULT,
+      `${JSON.stringify(pass({ head, inputs: { head, prompts, models: { ...MODELS, find: "sonnet" } } }, 0.7))}\n`,
+    );
     git("add", "-A");
-    commit("the eval pass, and a baseline");
-    expect(run(dir, env)).toMatchObject({ code: 1, out: expect.stringContaining(`${BASELINE} changed`) });
-
+    commit("an eval pass run with an alias");
     const event = join(dir, "..", `${dir.split("/").pop()}-event.json`);
     made.push(event);
     writeFileSync(event, JSON.stringify({ pull_request: { labels: [{ name: LABEL }] } }));
+    expect(run(dir, { ...env, GITHUB_EVENT_PATH: event })).toMatchObject({
+      code: 1,
+      out: expect.stringContaining("inputs.models.find is sonnet, not the pin in src/core/review/pinned.ts"),
+    });
+    put(RESULT, `${JSON.stringify(pass({ head, inputs: { head, prompts, models: MODELS } }, 0.7))}\n`);
+    git("add", "-A");
+    commit("the eval pass, and a baseline");
+    expect(run(dir, env)).toMatchObject({ code: 1, out: expect.stringContaining(`${BASELINE} changed`) });
     expect(run(dir, { ...env, GITHUB_EVENT_PATH: event })).toEqual({ code: 0, out: "" });
   });
 });
