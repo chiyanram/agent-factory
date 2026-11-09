@@ -19,6 +19,7 @@ import { ACT_ON_FILE, isActOn, type ActOn } from "../review/act-on.js";
 import { readKept } from "../kept.js";
 import type { Model } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
+import { JUDGE_MODEL } from "../review/pinned.js";
 import { reviewSetup } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
@@ -45,8 +46,6 @@ export const RUNS = 3;
 export const PROJECT = "eval";
 export const LOGIN = "agent-factory-eval";
 const LABEL = "agent::claimed";
-// the judge's model when no layer sets it: a full id, as the reviewer's are (ADR-0015 E9, #213)
-export const JUDGE_MODEL = "claude-sonnet-5-5";
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
 export type EvalSettings = {

@@ -5,7 +5,7 @@
 //   FACTORY_RULEBOOK              the rulebook plugin folder, the one that holds skills/<domain>/references/
 //   FACTORY_REVIEW_FIND / _VERIFY the instructions (default: the package's prompts/review-*.md)
 //   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   full model ids, never an alias (ADR-0015 E9, #213);
-//                                 default REVIEW_MODELS: Sonnet, Sonnet, Opus (#22 Q4)
+//                                 default REVIEW_MODELS (pinned.ts)
 //   FACTORY_MAX_USD               the most one model run may spend, in US dollars (ADR-0011 D14)
 //   FACTORY_CLAUDE                the claude CLI (default: claude)
 //   FACTORY_MAX_RUNS              live runs allowed on this machine at once (default 2)
@@ -25,6 +25,9 @@ import { claudeModel, runInFolder, type Model } from "./model.js";
 import type { ReviewSetup } from "./round.js";
 import { settingName, settingOf } from "../settings/machine.js";
 import { PINNED_HINT, pinnedModel, type MachineId } from "../settings/variables.js";
+import { REVIEW_MODELS } from "./pinned.js";
+
+export { REVIEW_MODELS } from "./pinned.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
@@ -44,14 +47,6 @@ export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
         reason: `${settingName("caps.usdPerRun")} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(value)}`,
       };
 }
-
-// the reviewer's models when no layer sets them: full ids, so a new model reaches the reviewer only through a PR that
-// changes these lines, and that PR carries an eval pass (ADR-0015 E8, E9; #213)
-export const REVIEW_MODELS = {
-  find: "claude-sonnet-5-5",
-  rule: "claude-sonnet-5-5",
-  logic: "claude-opus-5-5",
-} as const;
 
 const MODEL_KEYS = { find: "review.findModel", rule: "review.ruleModel", logic: "review.logicModel" } as const;
 
