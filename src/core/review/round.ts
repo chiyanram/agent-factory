@@ -110,10 +110,10 @@ export type Outcome =
       readonly costUsd: number;
       // every token the round's passes spent (#131)
       readonly tokens: number;
-      // per lens that ran, its verified findings no other lens reported (#237)
-      readonly lenses: Readonly<Record<string, number>>;
       // the last full round's Act on and Consider findings, each acted on or not since its head (#220)
       readonly acted: Acted | "none";
+      // per lens that ran, its verified findings no other lens reported (#237)
+      readonly lenses: Readonly<Record<string, number>>;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -771,13 +771,6 @@ async function threadsAndLabel(
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
-// lensesLine : each lens that ran and its verified findings no other lens reported. Pure.
-function lensesLine(lenses: Readonly<Record<string, number>>): string {
-  return Object.entries(lenses)
-    .map(([lens, n]) => `${lens} ${n}`)
-    .join(" · ");
-}
-
 // actedOf : keeps this round's findings for the next round's rate, and rates the last full round's against this head;
 // neither can fail the round (#220)
 async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promise<Acted | "none"> {
@@ -787,6 +780,13 @@ async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promi
   return last.kind === "round"
     ? actedSince({ ...at, repo: ctx.setup.repo, env: ctx.setup.env, since: last.head })
     : "none";
+}
+
+// lensesLine : each lens that ran and its verified findings no other lens reported. Pure.
+function lensesLine(lenses: Readonly<Record<string, number>>): string {
+  return Object.entries(lenses)
+    .map(([lens, n]) => `${lens} ${n}`)
+    .join(" · ");
 }
 
 async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outcome>> {
@@ -831,8 +831,8 @@ async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outc
           counts: c,
           costUsd: result.spent.costUsd,
           tokens: result.spent.find + result.spent.verify,
-          lenses: result.lenses,
           acted,
+          lenses: result.lenses,
         },
       }
     : summary;

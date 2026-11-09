@@ -28,7 +28,6 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const sorted = (over: Partial<Sorted>): Sorted => ({
   id: "F1",
-  lens: "baseline",
   axis: "standards",
   kind: "rule",
   file: "a.ts",
@@ -36,6 +35,7 @@ const sorted = (over: Partial<Sorted>): Sorted => ({
   rule: "R1",
   category: "bug",
   severity: "warning",
+  lens: "correctness",
   grade: "cited",
   evidence: "a.ts:10",
   finding: "x",
