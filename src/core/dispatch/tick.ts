@@ -28,7 +28,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { needsApproval, oneWayDoorPathsOf, plannedCheck } from "../lane.js";
+import { needsApproval, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
@@ -95,7 +95,7 @@ export type Steps = {
 export const STEPS_TODAY: Steps = {
   writer: { kind: "unavailable", reason: "the writer's box is not built yet (#113)" },
   ready: { kind: "unavailable", reason: "the ready check needs a box (#113) and the project file" },
-  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and FACTORY_RULEBOOK" },
+  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and a plugin that holds its references" },
   verify: { kind: "unavailable", reason: "the local verifier needs a box (#113) and the project file" },
 };
 
@@ -120,6 +120,8 @@ export type TickSetup = {
   readonly notify: Notify;
   // the plugins this pass's runs use, each with its hash, for the run records (#232); none when it lists none
   readonly plugins?: readonly PluginHash[];
+  // the project's lanes, from its process plugin or the built-in process (#232); the default lanes when absent
+  readonly lanes?: readonly LaneProps[];
 };
 
 export type Decision = { readonly ticket: string; readonly action: Action };
@@ -166,7 +168,7 @@ async function startedView(
     return { kind: "unwritten" };
   }
   const { lane } = spec.spec;
-  if (!needsApproval(lane)) {
+  if (!needsApproval(lane, setup.lanes)) {
     return { kind: "started", at: started.at, lane };
   }
   return stale ? { kind: "stale" } : { kind: "unapproved", lane };

@@ -4,6 +4,7 @@
 //   no-progress               needs-human is on the change, which the table reads first next pass
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 
+import type { PluginDir } from "../process/read.js";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import type { RunInput, Step } from "../dispatch/tick.js";
@@ -41,6 +42,7 @@ export function reviewStep(input: {
   readonly forge: Forge;
   readonly factory: string;
   readonly project: string;
+  readonly plugins: readonly PluginDir[];
   readonly model?: Model;
   readonly sessions?: Sessions;
 }): Step<RunInput, { readonly actOn: number }> {

@@ -10,6 +10,7 @@ import type { Pusher } from "../finish.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import type { BoxPlan } from "../ready/steps.js";
 import { writerSettings } from "./settings.js";
+import type { LaneProps } from "../lane.js";
 import { readPrompts, type PushTarget, type WriterSetup } from "./step.js";
 
 export type WriterInput = {
@@ -24,6 +25,8 @@ export type WriterInput = {
   readonly pusher: Pusher;
   // the plugins' folders, in order (process/use.ts)
   readonly plugins: readonly string[];
+  // the project's lanes, from its process (#232)
+  readonly lanes: readonly LaneProps[];
 };
 
 function pushTarget(input: WriterInput): Result<PushTarget> {
@@ -81,6 +84,7 @@ export async function writerSetup(input: WriterInput): Promise<Result<WriterSetu
           label: input.label,
           login: () => boxTokenFrom({ store, now: new Date() }),
           pusher: input.pusher,
+          lanes: input.lanes,
         },
       }
     : prompts;

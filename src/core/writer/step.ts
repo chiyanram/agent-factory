@@ -14,6 +14,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { goAhead, type GoAhead } from "../start.js";
+import type { LaneProps } from "../lane.js";
 import type { BoxToken } from "../token/rules.js";
 import type { Task } from "../dispatch/records.js";
 import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/tick.js";
@@ -78,6 +79,8 @@ export type WriterSetup = {
   readonly login: () => Promise<BoxToken>;
   // the host push: hostPush; a test passes its own
   readonly pusher: Pusher;
+  // the project's lanes (#232); the default lanes when absent
+  readonly lanes?: readonly LaneProps[];
 };
 
 type Input = RunInput & { readonly task: Task };
@@ -192,7 +195,7 @@ async function loginOf(setup: WriterSetup): Promise<Result<Readonly<Record<strin
 
 // goFor : what lets the build begin: an approval, or a START in the tiny lane (#227)
 async function goFor(setup: WriterSetup, ticket: string): Promise<Result<Extract<GoAhead, { kind: "go" }>>> {
-  const go = await goAhead({ home: setup.home, project: setup.project, ticket });
+  const go = await goAhead({ home: setup.home, project: setup.project, ticket, lanes: setup.lanes });
   if (go.kind === "go") {
     return { kind: "ok", value: go };
   }
