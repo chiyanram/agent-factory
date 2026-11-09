@@ -111,9 +111,15 @@ export type Steps = {
         // the most a round can spend, in dollars: every finder it can pick and its verify passes at the per-run cap;
         // "unbounded" with no per-run cap. A round whose worst case could pass a dollar cap is held (#237)
         readonly worstUsd?: () => Promise<Result<number | "unbounded">>;
-        readonly run: (
-          input: RunInput,
-        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend; readonly acted?: Acted }> | FailedSpent>;
+        readonly run: (input: RunInput) => Promise<
+          | Result<{
+              readonly actOn: number;
+              readonly spend: Spend;
+              readonly acted?: Acted;
+              readonly lenses?: Readonly<Record<string, number>>;
+            }>
+          | FailedSpent
+        >;
       };
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
@@ -736,7 +742,12 @@ function reviewEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly actOn: number; readonly spend: Spend; readonly acted?: Acted },
+  value: {
+    readonly actOn: number;
+    readonly spend: Spend;
+    readonly acted?: Acted;
+    readonly lenses?: Readonly<Record<string, number>>;
+  },
 ): Promise<Done> {
   return record({
     where: where(setup, state),
@@ -747,6 +758,7 @@ function reviewEnded(
       actOn: value.actOn,
       spend: value.spend,
       ...(value.acted === undefined ? {} : { acted: value.acted }),
+      ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });
