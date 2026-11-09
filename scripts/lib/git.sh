@@ -38,7 +38,9 @@ hgit() {
     '' | *[!0-9]*) echo "hgit: refused: GIT_CONFIG_COUNT is not a whole number ('$hg_n'); nothing run" >&2; return 1 ;;
   esac
   hg_path=$(hg_trusted_path) || return 1
-  hg_git=$(PATH=$hg_path command -v git) || { echo "hgit: no git on a trusted PATH entry" >&2; return 1; }
+  # a plain assignment, not a PATH=… prefix: bash 3.2 answers a prefixed `command -v` from its cache of where git was
+  # last found, which may be a PATH entry hgit does not trust; assigning PATH empties that cache
+  hg_git=$(PATH=$hg_path && command -v git) || { echo "hgit: no git on a trusted PATH entry" >&2; return 1; }
   hg_file=$(mktemp "${TMPDIR:-/tmp}/hgit.XXXXXX") || return 1
   hg_overrides "$hg_dir" > "$hg_file" || { rm -f "$hg_file"; return 1; }
   set -- "$hg_git" -C "$hg_dir" "$@"
