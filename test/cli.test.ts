@@ -297,9 +297,19 @@ describe("agent-factory setup", () => {
 describe("agent-factory review", () => {
   const set = () => ({ FACTORY_REPO: home, FACTORY_RULEBOOK: home, FACTORY_HOME: home, PATH: process.env.PATH });
 
-  it("prints its usage without exactly one change number (64)", async () => {
-    for (const argv of [["review"], ["review", "abc"], ["review", "1", "2"], ["review", "0"]]) {
-      expect(await cli(argv, set())).toMatchObject({ code: 64, err: "usage: agent-factory review <number>\n" });
+  it("prints its usage without exactly a project and one change number (64)", async () => {
+    for (const argv of [
+      ["review"],
+      ["review", "12"],
+      ["review", "ledger", "abc"],
+      ["review", "ledger", "1", "2"],
+      ["review", "ledger", "0"],
+      ["review", "../x", "12"],
+    ]) {
+      expect(await cli(argv, set())).toMatchObject({
+        code: 64,
+        err: "usage: agent-factory review <project> <number>\n",
+      });
     }
   });
 
@@ -312,7 +322,7 @@ describe("agent-factory review", () => {
       [{ ...set(), FACTORY_HOME: "" }, "FACTORY_HOME must be an absolute path"],
     ];
     for (const [env, reason] of cases) {
-      const run = await cli(["review", "12"], env);
+      const run = await cli(["review", "ledger", "12"], env);
       expect(run).toMatchObject({ code: 1, out: "" });
       expect(run.err).toContain(reason);
     }
@@ -321,7 +331,7 @@ describe("agent-factory review", () => {
   it("refuses the round when it cannot tell which login the factory posts as (1)", async () => {
     const glab = join(home, "glab");
     writeFileSync(glab, "#!/bin/sh\necho down >&2\nexit 3\n", { mode: 0o755 });
-    const run = await cli(["review", "12"], { ...set(), FACTORY_PROJECT: "a/b", FACTORY_GLAB: glab });
+    const run = await cli(["review", "ledger", "12"], { ...set(), FACTORY_PROJECT: "a/b", FACTORY_GLAB: glab });
     expect(run).toMatchObject({ code: 1, out: "" });
     expect(run.err).toContain("cannot tell which login the factory posts as");
   });

@@ -154,7 +154,10 @@ function isRecord(value: unknown, where: Where): value is ApprovalRecord {
   );
 }
 
-type Stored = { readonly kind: "record"; readonly record: ApprovalRecord } | { readonly kind: "missing" } | Refused;
+export type Stored =
+  | { readonly kind: "record"; readonly record: ApprovalRecord }
+  | { readonly kind: "missing" }
+  | Refused;
 
 function parseRecord(text: string, path: string, where: Where): Stored {
   try {
@@ -187,9 +190,15 @@ function compare(record: ApprovalRecord, current: Current, where: Where): Approv
     : { kind: "stale", approvedHash: record.spec_hash, currentHash: current.spec.hash };
 }
 
+// readApproval : the ticket's approval record as it is on disk, without a look at the spec; the reviewer's pack (#224)
+// compares its hash with the spec it reads from the project's spec store
+export async function readApproval(where: Where): Promise<Stored> {
+  const path = approvalPath(where);
+  return path.kind === "path" ? readRecord(path.path, where) : path;
+}
+
 // approvalState : what the dispatcher decides on. Approved only while the spec still has the approved hash.
 export async function approvalState(where: Where): Promise<ApprovalState> {
-  const path = approvalPath(where);
-  const stored = path.kind === "path" ? await readRecord(path.path, where) : path;
+  const stored = await readApproval(where);
   return stored.kind === "record" ? compare(stored.record, await currentSpec(where), where) : stored;
 }

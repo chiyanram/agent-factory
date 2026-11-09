@@ -17,7 +17,7 @@ import { project, type Project } from "./review-repo.js";
 let p: Project;
 let head = "";
 beforeEach(() => {
-  p = project();
+  p = project("feat/x");
   // a branch whose own Makefile would write outside the folder if anything ran it on the host
   p.git("checkout", "-q", "feat/x");
   p.write("Makefile", `test:\n\ttouch ${join(p.root, "planted")}\n`);

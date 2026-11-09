@@ -157,7 +157,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory release 12",
       "agent-factory block 12 why",
       "agent-factory reconcile",
-      "agent-factory review 12",
+      "agent-factory review ledger 12",
       "agent-factory dispatch ledger --once",
       "agent-factory setup claude",
       "/opt/agent-factory/scripts/start-writer.sh 12",

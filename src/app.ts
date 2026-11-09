@@ -9,7 +9,7 @@ import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
 import { openProject, openProjectForge } from "./core/forge/index.js";
 import type { Forge } from "./core/forge/types.js";
-import { checkSpec, readSpec, template } from "./core/spec.js";
+import { checkSpec, plainName, readSpec, template } from "./core/spec.js";
 import { approvalState, approve } from "./core/approval.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
@@ -56,7 +56,8 @@ commands:
                                record the human's approval of the spec with exactly that hash (all 64 characters,
                                as spec printed it); run it only behind the harness ask prompt, never from an allow list
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
-  review <number>              one review round on a claimed change: pack, find, verify, threads, status box, summary;
+  review <project> <number>    one review round on a claimed change: pack, find, verify, threads, status box, summary;
+                               the contract is the approved spec of the ticket its factory/<ticket> branch names;
                                exit 0 posted or reused, 3 when the head moved, 1 otherwise
   dispatch <project> --once    one pass of the dispatcher over the project's approved tickets and their changes:
                                decides each with the table and acts (--dry-run: decides and acts on none)
@@ -349,7 +350,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     ...STEPS_TODAY,
     writer: writerStep(writer),
     ready: readyStep(plan, forge),
-    review: await reviewStepFor(io.env, forge),
+    review: await reviewStepFor(io.env, forge, project),
     verify: verifyStep(plan, forge),
   };
   return { kind: "ok", value: { gate, steps } };
@@ -441,10 +442,14 @@ async function factoryLogin(forge: Forge): Promise<Result<string>> {
     : { kind: "failed", reason: `cannot tell which login the factory posts as: ${me.reason}` };
 }
 
-async function reviewStepFor(env: NodeJS.ProcessEnv, forge: Forge): Promise<ReturnType<typeof reviewStep>> {
+async function reviewStepFor(
+  env: NodeJS.ProcessEnv,
+  forge: Forge,
+  project: string,
+): Promise<ReturnType<typeof reviewStep>> {
   const factory = await factoryLogin(forge);
   return factory.kind === "ok"
-    ? reviewStep({ env, forge, factory: factory.value })
+    ? reviewStep({ env, forge, factory: factory.value, project })
     : { kind: "unavailable", reason: factory.reason };
 }
 
@@ -469,9 +474,16 @@ function outcomeLine(mark: string, n: number, o: Outcome): string {
   return lineAs(o.kind, `${mark}${n}`, o);
 }
 
-function reviewNumber(positionals: readonly string[]): number | "bad" {
-  const [n] = positionals;
-  return positionals.length === 1 && n !== undefined && /^[1-9]\d{0,9}$/.test(n) ? Number(n) : "bad";
+type Target = { readonly project: string; readonly number: number };
+
+function changeNumber(n: string | undefined): number | "bad" {
+  return n !== undefined && /^[1-9]\d{0,9}$/.test(n) ? Number(n) : "bad";
+}
+
+function reviewTarget(positionals: readonly string[]): Target | "bad" {
+  const [project = "", n] = positionals;
+  const number = changeNumber(n);
+  return positionals.length === 2 && plainName(project) && number !== "bad" ? { project, number } : "bad";
 }
 
 function reviewPaths(env: NodeJS.ProcessEnv): ReturnType<typeof paths> {
@@ -483,7 +495,8 @@ function reviewPaths(env: NodeJS.ProcessEnv): ReturnType<typeof paths> {
     : paths(env);
 }
 
-async function runReview(n: number, io: Io, p: Paths): Promise<number> {
+async function runReview(target: Target, io: Io, p: Paths): Promise<number> {
+  const { project, number: n } = target;
   const opened = await openProject({ env: io.env, log: (line) => io.err(`${line}\n`) });
   if (opened.kind === "failed") {
     io.err(`agent-factory review: ${opened.reason}\n`);
@@ -493,7 +506,7 @@ async function runReview(n: number, io: Io, p: Paths): Promise<number> {
   const factory = await factoryLogin(forge);
   const round =
     factory.kind === "ok"
-      ? await reviewRound(reviewSetup({ env: io.env, forge, factory: factory.value, number: n, paths: p }))
+      ? await reviewRound(reviewSetup({ env: io.env, forge, factory: factory.value, project, number: n, paths: p }))
       : factory;
   if (round.kind === "failed") {
     io.err(`agent-factory review: ${round.reason}\n`);
@@ -505,9 +518,9 @@ async function runReview(n: number, io: Io, p: Paths): Promise<number> {
 
 // review : one round (#138). A reviewer spends on model runs, so a dry run refuses it.
 async function reviewCommand({ positionals, io }: Args): Promise<number> {
-  const n = reviewNumber(positionals);
-  if (n === "bad") {
-    io.err("usage: agent-factory review <number>\n");
+  const target = reviewTarget(positionals);
+  if (target === "bad") {
+    io.err("usage: agent-factory review <project> <number>\n");
     return 64;
   }
   const p = reviewPaths(io.env);
@@ -515,7 +528,7 @@ async function reviewCommand({ positionals, io }: Args): Promise<number> {
     io.err(`agent-factory review: ${p.reason}\n`);
     return 1;
   }
-  return runReview(n, io, p.value);
+  return runReview(target, io, p.value);
 }
 
 // app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the

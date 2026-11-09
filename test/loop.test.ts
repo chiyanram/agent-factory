@@ -208,7 +208,7 @@ describe("block (#138; ADR-0011 D14)", () => {
 describe("reconcile (#138; #39)", () => {
   let p: Project;
   beforeEach(() => {
-    p = project();
+    p = project("feat/x");
   });
   afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
@@ -312,7 +312,7 @@ describe("reconcile keeps a writer's unlanded work (#189)", () => {
   let p: Project;
   const pushes: PushRequest[] = [];
   beforeEach(() => {
-    p = project();
+    p = project("feat/x");
     pushes.length = 0;
   });
   afterEach(() => rmSync(p.root, { recursive: true, force: true }));
@@ -470,7 +470,7 @@ describe("reconcile tells a person once, and never mistakes what it cannot check
   let p: Project;
   const pushes: PushRequest[] = [];
   beforeEach(() => {
-    p = project();
+    p = project("feat/x");
     pushes.length = 0;
   });
   afterEach(() => rmSync(p.root, { recursive: true, force: true }));
@@ -571,7 +571,7 @@ describe("reconcile tells a person once, and never mistakes what it cannot check
 describe("lint-edit, the writer's hook (#138; ADR-0011 D17)", () => {
   let p: Project;
   beforeEach(() => {
-    p = project();
+    p = project("feat/x");
     p.write("ok.txt", "good\n");
     p.write("bad.txt", "BAD\n");
     p.write("a b.txt", "BAD\n");

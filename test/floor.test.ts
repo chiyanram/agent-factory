@@ -5,7 +5,7 @@ import { project, type Project } from "./review-repo.js";
 
 let p: Project;
 beforeEach(() => {
-  p = project();
+  p = project("feat/x");
   // main holds a test with assertions, a Spock spec and a test the change may move
   p.write(
     "src/test/java/OrderTest.java",

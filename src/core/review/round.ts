@@ -1,7 +1,9 @@
 // round — one review round on a claimed change: pack → find → verify → post (#22; ported from start-reviewer.sh, #138).
 //
 //   1 The rounds so far come from the factory's own summary notes (history.ts). A head already reviewed is left alone.
-//   2 The context pack for the head; from round 2, the interdiff since the last reviewed head (pack.ts). The same
+//   2 The context pack for the head; from round 2, the interdiff since the last reviewed head (pack.ts). Its contract
+//     is the approved spec of the ticket the change's factory/<ticket> branch names, read from the local spec store
+//     with the ticket's approval record (#224); a change on another branch names no spec and is refused. The same
 //     patch-id as the last round reuses its verdict, with no model run; when that verdict still has Act on findings the
 //     writer made no progress, and the change goes to the human (ADR-0011 D14). An empty change goes there too.
 //   3 After 3 rounds the change goes to the human (#22 Q5).
@@ -14,6 +16,8 @@
 
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { readApproval } from "../approval.js";
+import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
@@ -24,8 +28,9 @@ import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
-import { buildPack, type Pack } from "./pack.js";
+import { buildPack, type Pack, type SpecSource } from "./pack.js";
 import { attempt } from "./safe.js";
+import { plainName } from "../spec.js";
 import { statusBox, type Box } from "./status.js";
 import {
   BUCKET_NAMES,
@@ -53,6 +58,9 @@ export type ReviewSetup = {
   readonly label: string;
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
+  // where specs and approvals live (<home>/specs, <home>/approvals), and the project they are kept under
+  readonly home: string;
+  readonly project: string;
   readonly rulebook: string;
   readonly packDir: string;
   // where each pass's answer is kept, per change and head (ADR-0011 D16)
@@ -111,10 +119,43 @@ async function defaultBranch(ctx: Ctx): Promise<Result<string>> {
   return ctx.setup.forge.defaultBranch();
 }
 
+// specFor : the change's contract: the spec of the ticket its factory/<ticket> branch names, and that ticket's approval.
+// An approval record that cannot be read is refused, never read as no approval.
+async function specFor(ctx: Ctx): Promise<Result<SpecSource>> {
+  const s = ctx.setup;
+  const branch = ctx.change.sourceBranch;
+  const ticket = branch.startsWith(BRANCH_PREFIX) ? branch.slice(BRANCH_PREFIX.length) : "";
+  if (!plainName(ticket)) {
+    return failed(
+      `${s.forge.mark}${s.number} is on ${branch}, not ${BRANCH_PREFIX}<ticket>, so it names no spec to review against; a person reviews it`,
+    );
+  }
+  const stored = await readApproval({ home: s.home, project: s.project, ticket });
+  if (stored.kind === "refused") {
+    return failed(stored.reason);
+  }
+  return {
+    kind: "ok",
+    value: {
+      store: { kind: "local", root: join(s.home, "specs") },
+      project: s.project,
+      ticket,
+      approval:
+        stored.kind === "record"
+          ? { kind: "approved", hash: stored.record.spec_hash, by: stored.record.by, at: stored.record.at }
+          : { kind: "none" },
+    },
+  };
+}
+
 async function packFor(ctx: Ctx): Promise<Result<Pack>> {
   const branch = await defaultBranch(ctx);
   if (branch.kind === "failed") {
     return branch;
+  }
+  const spec = await specFor(ctx);
+  if (spec.kind === "failed") {
+    return spec;
   }
   const last = ctx.past.last;
   const s = ctx.setup;
@@ -125,6 +166,7 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
     defaultBranch: branch.value,
     rulebook: s.rulebook,
     previous: last.kind === "round" ? { kind: "head", sha: last.head } : { kind: "none" },
+    spec: spec.value,
     dir: s.packDir,
     mark: s.forge.mark,
   });
