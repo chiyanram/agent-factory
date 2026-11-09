@@ -49,6 +49,7 @@ src/core/ready/       the ready check and the local verifier: branch code run in
 src/core/plugin/      the plugin contract: describe and call, the pinned registry, and the contract test kit (#134)
 plugins/              the bundled plugins: github and gitlab serve the forge seam (lib/ built from dist/); discord pings
 prompts/              the reviewer's default find and verify instructions
+evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)
 tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
 docs/adr/             decision records
 docs/agents/          issue tracker, triage labels, domain-doc conventions

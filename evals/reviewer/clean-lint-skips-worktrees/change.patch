@@ -1,0 +1,21 @@
+diff --git a/.gitignore b/.gitignore
+index b947077..b5ed56d 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,2 +1,4 @@
+ node_modules/
+ dist/
++# git worktrees of this repo (Claude Code puts them here); every repo-wide tool must skip them (#148)
++.claude/worktrees/
+diff --git a/vitest.config.ts b/vitest.config.ts
+new file mode 100644
+index 0000000..b991d09
+--- /dev/null
++++ b/vitest.config.ts
+@@ -0,0 +1,6 @@
++// Only this checkout's tests: a git worktree under .claude/worktrees/ holds a second copy of every test (#148).
++import { defineConfig } from "vitest/config";
++
++export default defineConfig({
++  test: { include: ["test/**/*.test.ts"] },
++});

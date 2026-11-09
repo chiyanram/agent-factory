@@ -1,0 +1,13 @@
+diff --git a/src/core/writer/step.ts b/src/core/writer/step.ts
+index 42ac391..1820590 100644
+--- a/src/core/writer/step.ts
++++ b/src/core/writer/step.ts
+@@ -140,7 +140,7 @@ export function promptFor(input: {
+     .replaceAll("{{branch}}", input.branch)
+     .replaceAll("{{head}}", input.head);
+   const tools = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
+-  return `${filled.trimEnd()}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
++  return `${filled.trimEnd()}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
+ }
+ 
+ // outOf : what the dispatcher records, from what the host did with the run. Pure.

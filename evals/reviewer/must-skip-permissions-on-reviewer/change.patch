@@ -1,0 +1,13 @@
+diff --git a/src/core/review/model.ts b/src/core/review/model.ts
+index cd894dd..c2bd5d8 100644
+--- a/src/core/review/model.ts
++++ b/src/core/review/model.ts
+@@ -47,6 +47,8 @@ export function claudeArgs(run: ModelRun): readonly string[] {
+     "--model",
+     run.model,
+     "--restricted",
++    // a finder that stops on a permission prompt waits forever in -p mode
++    "--dangerously-skip-permissions",
+     "--strict-mcp-config",
+     "--tools",
+     "Read,Grep,Glob",

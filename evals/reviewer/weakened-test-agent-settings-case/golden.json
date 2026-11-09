@@ -1,0 +1,16 @@
+[
+  {
+    "file": "src/core/agent-settings.ts",
+    "line": 16,
+    "issue": "isAgentSetting is now case-sensitive: a writer commit that adds .CLAUDE/settings.json or claude.md passes the push guard, and on a case-insensitive file system (macOS, Windows) it is the same file claude loads (#110; ADR-0012 S12).",
+    "severity": "blocker",
+    "category": "security"
+  },
+  {
+    "file": "test/agent-settings.test.ts",
+    "line": 12,
+    "issue": "The test drops the other-letter-case paths (alsoYes) that would have caught the case-sensitive match, so the regression stays green.",
+    "severity": "warning",
+    "category": "test_gap"
+  }
+]

@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/git.ts",
+    "line": 179,
+    "issue": "hostGit reads the system config with an explicit --system even when GIT_CONFIG_NOSYSTEM is set, which git honours only for the implicit read: it adds back a value the operator turned off (#167), and hgit (scripts/lib/git.sh hg_nosystem) still skips it, so the two are out of step.",
+    "severity": "warning",
+    "category": "security"
+  }
+]

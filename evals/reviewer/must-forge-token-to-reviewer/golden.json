@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/core/review/settings.ts",
+    "line": 119,
+    "issue": "claudeEnv now passes GH_TOKEN and GITLAB_TOKEN to the reviewer's claude: an LLM seat holds a forge token, so a prompt injection in the diff can post, approve or push as the factory (AGENTS.md MUST; ADR-0012 S2, S6). The finder also has no tool that could run gh (--tools Read,Grep,Glob).",
+    "severity": "blocker",
+    "category": "security"
+  }
+]

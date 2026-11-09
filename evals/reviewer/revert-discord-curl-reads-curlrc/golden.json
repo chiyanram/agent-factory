@@ -1,0 +1,9 @@
+[
+  {
+    "file": "plugins/discord/plugin",
+    "line": 54,
+    "issue": "curl no longer starts with --disable, so it reads the user's ~/.curlrc: a --trace, --proxy or --output there writes or sends the Discord webhook, which is a secret, somewhere else (#119 review).",
+    "severity": "warning",
+    "category": "security"
+  }
+]

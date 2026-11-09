@@ -1,0 +1,9 @@
+[
+  {
+    "file": "scripts/check-size.ts",
+    "line": 23,
+    "issue": "AC-1 says make lint fails when AGENTS.md or CLAUDE.md has 200 lines or more, but CLAUDE.md is read only when there is no AGENTS.md: a repo with both (this one) never checks CLAUDE.md. AC-3's test is also missing.",
+    "severity": "warning",
+    "category": "bug"
+  }
+]

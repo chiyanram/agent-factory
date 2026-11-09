@@ -1,0 +1,267 @@
+diff --git a/GUIDE.md b/GUIDE.md
+index b89c477..2f8b8cc 100644
+--- a/GUIDE.md
++++ b/GUIDE.md
+@@ -243,8 +243,11 @@ it is a prompt instruction at most.
+   and `core.fsmonitor` off (#87, [review 5](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682642355)).
+ - **Decided: the writer reads only what it is given.** A private home per run; the coordinator gets a deny list on
+   secret paths ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
+-- **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`, and
+-  mentions and closing keywords are put in backticks ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
++- **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
++  `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
++  and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126); the
++  dispatcher (#103) and the writer's exit (#109) will post through it. **Today:** the bash scripts flatten model text
++  but do not span mentions or keywords ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
+ - **Decided: the coordinator cannot widen its own wall.** It edits only spec drafts, never its settings or the
+   factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)).
+ - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,
+diff --git a/src/core/post.ts b/src/core/post.ts
+new file mode 100644
+index 0000000..eded118
+--- /dev/null
++++ b/src/core/post.ts
+@@ -0,0 +1,87 @@
++// post — the one place that builds text the factory posts to a forge, Jira or an issue (#126; ADR-0012 S13).
++//
++// The words in a post come from a writer, a reviewer or a ticket, and any of them may carry an injected line. Posted
++// with a person's or a bot's login, such a line acts: on GitLab a line that starts with "/" is a quick action run as
++// the poster (/approve, /merge, /label); on GitHub and GitLab "@name" pings people and "closes #12" closes an issue on
++// merge; a link or an image can carry data out. So no free text is posted. A post is a fixed template, and outside
++// words only fill its fields, each made inert by cleanField. It breaks the characters that start each of these, rather
++// than matching every form a forge accepts, because a pattern always misses one (a review of the first version found
++// "closing #1", "Closes issue #1" and a mention right after a code span):
++//   - one line: line breaks and runs of white space become one space; control and invisible format characters go
++//   - "\" is escaped first, so no later escape can be undone
++//   - "@" (mentions, e-mail links), "#" and "!" (issue and merge-request references, and so closing keywords; Jira
++//     images) get an invisible word joiner (U+2060) after them, and "://" and "www." (links) one inside, so no forge sees a
++//     mention, a reference or a link
++//   - HTML is escaped; "[", "]", "{", "}", "|" and "`" get a backslash, so no Markdown or Jira link, image, macro or
++//     code span forms
++//   - a field never starts with "/", and it is capped in length after all of this, with "…" when cut
++// The template writes the seat prefix ("[writer] " and so on) and the labels, so a field never starts a line. A label
++// must be the factory's own plain words: renderPost refuses any other, as a result, never by throwing, so a caller
++// such as the dispatcher handles the refusal instead of stopping mid-run.
++
++export type Seat = "writer" | "reviewer" | "coordinator";
++
++export type PostField = { readonly label: string; readonly value: string };
++
++export type Post = {
++  readonly seat: Seat;
++  readonly title: string;
++  readonly fields: readonly PostField[];
++  readonly items: readonly string[];
++};
++
++export type RenderResult =
++  | { readonly kind: "ok"; readonly text: string }
++  | { readonly kind: "refused"; readonly reason: string };
++
++export const DEFAULT_FIELD_LIMIT = 500;
++
++const JOIN = "\u2060";
++// Every C0 and C1 control character, the invisible format characters a field could use to undo a break (zero-width
++// spaces and joiners, bidi controls, the word joiner itself, the BOM), and the line and paragraph separators.
++const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\ufeff]/g;
++const LABEL = /^[A-Za-z0-9 ()_.,'-]+$/;
++
++function cut(text: string, limit: number): string {
++  const chars = Array.from(text);
++  if (chars.length <= limit) {
++    return text;
++  }
++  let kept = chars.slice(0, Math.max(0, limit - 1));
++  // never end on an escaping "\" or on a character whose word joiner was cut off
++  while (kept.length > 0 && /[\\@#!:.]/.test(kept[kept.length - 1]!)) {
++    kept = kept.slice(0, -1);
++  }
++  return `${kept.join("").trimEnd()}…`;
++}
++
++// cleanField : one field's words, made inert inside a template line. See the header for the rules.
++export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): string {
++  const flat = value.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
++  const inert = flat
++    .replace(/\\/g, "\\\\")
++    .replace(/&/g, "&amp;")
++    .replace(/</g, "&lt;")
++    .replace(/>/g, "&gt;")
++    .replace(/[[\]{}|`]/g, "\\$&")
++    .replace(/[@#!]/g, `$&${JOIN}`)
++    .replace(/:\/\//g, `:${JOIN}//`)
++    .replace(/\b(www)\./gi, `$1${JOIN}.`);
++  const capped = cut(inert, limit);
++  return capped.startsWith("/") ? `\\${capped}` : capped;
++}
++
++// renderPost : the full text of one post. The first line is "[seat] title"; each field is "- label: value"; each item
++// is "- value". A label outside the factory's own plain words is refused, so no caller can pass outside text as one.
++export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): RenderResult {
++  const bad = post.fields.find((f) => !LABEL.test(f.label));
++  if (bad !== undefined) {
++    return { kind: "refused", reason: `post label must be the factory's own plain words, got ${JSON.stringify(bad.label)}` };
++  }
++  const head = [`[${post.seat}] ${cleanField(post.title, limit)}`];
++  const body = [
++    ...post.fields.map((f) => `- ${f.label}: ${cleanField(f.value, limit)}`),
++    ...post.items.map((item) => `- ${cleanField(item, limit)}`),
++  ];
++  return { kind: "ok", text: [...head, ...(body.length > 0 ? ["", ...body] : [])].join("\n") };
++}
+diff --git a/test/post.test.ts b/test/post.test.ts
+new file mode 100644
+index 0000000..40cfe6e
+--- /dev/null
++++ b/test/post.test.ts
+@@ -0,0 +1,150 @@
++import { describe, expect, it } from "vitest";
++import { cleanField, renderPost, type Post } from "../src/core/post.js";
++
++// The text of an accepted post; a refusal fails the test with its reason.
++function text(post: Post): string {
++  const result = renderPost(post);
++  switch (result.kind) {
++    case "ok":
++      return result.text;
++    case "refused":
++      throw new Error(`unexpected refusal: ${result.reason}`);
++    default: {
++      const unreachable: never = result;
++      return unreachable;
++    }
++  }
++}
++
++const J = "\u2060"; // the word joiner cleanField puts after a trigger character
++
++// What a forge would act on in posted text. Each check is a pattern of the plain characters the forge needs; a word
++// joiner or a backslash in between breaks it.
++const MENTION = /(^|[^\w])@[A-Za-z0-9_]/; // GitHub, GitLab
++const REFERENCE = /(#|!)\d/; // #12, !12, owner/repo#12: what a closing keyword and a link both need
++const LINK = /(:\/\/|\bwww\.)/; // any scheme, and GitHub's www. autolink
++const SPAN_OR_LINK = /(^|[^\\])[`[\]{}|]/; // an unescaped Markdown or Jira link, image, macro or code-span character
++const HTML = /[<>]/;
++
++function inert(text: string): void {
++  expect(text).not.toMatch(MENTION);
++  expect(text).not.toMatch(REFERENCE);
++  expect(text).not.toMatch(LINK);
++  expect(text).not.toMatch(SPAN_OR_LINK);
++  expect(text).not.toMatch(HTML);
++  for (const line of text.split("\n")) {
++    expect(line.startsWith("/")).toBe(false);
++  }
++}
++
++describe("cleanField", () => {
++  it("puts a multi-line field on one line", () => {
++    expect(cleanField("first\nsecond\r\n\tthird")).toBe("first second third");
++  });
++
++  it("never lets a field start with / (a GitLab quick action)", () => {
++    expect(cleanField("/merge")).toBe("\\/merge");
++    expect(cleanField("  /approve")).toBe("\\/approve");
++    expect(cleanField("done\n/merge\n/label ~shipped").split("\n")).toHaveLength(1);
++  });
++
++  it("breaks every mention, wherever it stands", () => {
++    for (const text of ["@alice", "ask @alice", "@group/team", "@all", "fixes #1@octocat", "@a.@octocat", "x(@bob)", "\\@octocat"]) {
++      inert(cleanField(text));
++    }
++    expect(cleanField("ask @alice")).toBe(`ask @${J}alice`);
++  });
++
++  it("breaks every issue and merge-request reference, so no closing keyword closes anything", () => {
++    for (const text of [
++      "fixes #12", "Fix: #1", "closing #1", "fixing #1", "resolving #1", "implementing #1", "Closes issue #1",
++      "Closes otherproject#1", "closes #1, #2", "Closes #1 and #2", "Closes owner/repo#1", "see !42",
++      "resolves https://github.com/o/r/issues/1", "\\fixes #1",
++    ]) {
++      inert(cleanField(text));
++    }
++  });
++
++  it("breaks every link: any scheme, www., and an e-mail address", () => {
++    for (const text of ["see https://evil.example/x?a=1", "ftp://evil.example/x", "www.evil.example/p", "a@b.example", "\\https://evil.example/x"]) {
++      inert(cleanField(text));
++    }
++  });
++
++  it("escapes HTML and every Markdown and Jira link, image, macro and code-span character", () => {
++    const out = cleanField('<img src=x> ![a](//evil) [b](x) [link|http://x] !image.png! {html} `@x`');
++    inert(out);
++    expect(out).toContain("&lt;img src=x&gt;");
++  });
++
++  it("escapes a backslash first, so no later escape is undone", () => {
++    expect(cleanField("\\[x]")).toBe("\\\\\\[x\\]");
++    inert(cleanField("\\\\@octocat \\`code\\` \\[l](u)"));
++  });
++
++  it("drops control and invisible format characters, so none can undo a break", () => {
++    expect(cleanField("a\u0000b\u001bc\u2028d")).toBe("a b c d");
++    expect(cleanField(`@${J}x`)).toBe(`@${J} x`);
++    inert(cleanField("@\u200bx #\u200d1 /\u202emerge"));
++  });
++
++  it("caps the output, not only the input, and marks the cut", () => {
++    const limit = 20;
++    for (const text of ["x".repeat(100), "<".repeat(500), "@a ".repeat(200), "\\".repeat(100), "#".repeat(100)]) {
++      const out = cleanField(text, limit);
++      expect(Array.from(out).length).toBeLessThanOrEqual(limit);
++      expect(out.endsWith("…")).toBe(true);
++      inert(out.replace("…", ""));
++    }
++  });
++
++  it("never ends a cut on an escaping backslash or a broken trigger", () => {
++    for (let limit = 2; limit < 12; limit++) {
++      inert(cleanField("@a#1\\[x]www.y://z", limit).replace("…", ""));
++    }
++  });
++
++  it("is fast on long hostile input", () => {
++    const started = Date.now();
++    cleanField("@a#1[x]`y`\\".repeat(100_000));
++    expect(Date.now() - started).toBeLessThan(2000);
++  });
++});
++
++describe("renderPost", () => {
++  it("writes the seat prefix and the title on the first line", () => {
++    expect(text({ seat: "writer", title: "OPEN: which currency?", fields: [], items: [] })).toBe("[writer] OPEN: which currency?");
++  });
++
++  it("writes each field and item as a list line, cleaned", () => {
++    const out = text({
++      seat: "reviewer",
++      title: "round 1",
++      fields: [{ label: "Act on", value: "F1 fixes #2\n/merge" }],
++      items: ["see @bob"],
++    });
++    expect(out).toBe(`[reviewer] round 1\n\n- Act on: F1 fixes #${J}2 /merge\n- see @${J}bob`);
++  });
++
++  it("never lets an injected line start a line, or forge a second seat line", () => {
++    const out = text({
++      seat: "coordinator",
++      title: "/approve\n/merge",
++      fields: [{ label: "reason", value: "x\n/label ~ok\n[coordinator] approved" }],
++      items: ["\n/close", "@all fixes #1 https://evil.example"],
++    });
++    inert(out.replace(/^\[coordinator\] /, ""));
++    expect(out.split("\n").filter((l) => l.startsWith("[coordinator]"))).toHaveLength(1);
++  });
++
++  it("refuses a label that is not the factory's own plain words, as a result, never by throwing", () => {
++    for (const label of ["@all", "a\nb", "[x](y)", "fixes #1", "/merge"]) {
++      const result = renderPost({ seat: "writer", title: "t", fields: [{ label, value: "v" }], items: [] });
++      expect(result).toMatchObject({ kind: "refused" });
++      expect(result.kind === "refused" ? result.reason : "").toMatch(/label/);
++    }
++    expect(text({ seat: "writer", title: "t", fields: [{ label: "Act on (F1)", value: "v" }], items: [] })).toBe(
++      "[writer] t\n\n- Act on (F1): v",
++    );
++  });
++});
