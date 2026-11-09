@@ -551,8 +551,13 @@ describe("the box run's egress", () => {
 describe("boxPlan", () => {
   const ID = `sha256:${"1".repeat(64)}`;
   const opens: string[] = [];
-  const openEgress = async (o: { readonly project: string }): Promise<EgressStarted> => {
+  const gitHosts: (readonly string[])[] = [];
+  const openEgress = async (o: {
+    readonly project: string;
+    readonly gitHosts: readonly string[];
+  }): Promise<EgressStarted> => {
     opens.push(o.project);
+    gitHosts.push(o.gitHosts);
     return EGRESS;
   };
   let home = "";
@@ -582,6 +587,7 @@ describe("boxPlan", () => {
     home = join(p.root, "home-f");
     images = [];
     opens.length = 0;
+    gitHosts.length = 0;
   });
 
   it("reads the gate from the project file, and is unavailable with no file", async () => {
@@ -622,6 +628,17 @@ describe("boxPlan", () => {
     if (ok.kind !== "ok" || ok.value.plan.kind !== "ready") throw new Error("no plan");
     await ok.value.plan.setup.egress();
     expect(opens).toEqual(["ledger"]);
+  });
+
+  it("hands the proxy the project's own git host, so the allowlist refuses it too", async () => {
+    write("ledger.json", { ...LOCAL, egress: { allow: ["repo.maven.apache.org"] } });
+    write("ledger/box.json", { image: ID });
+    for (const more of [{}, { FACTORY_FORGE_HOST: "gitlab.corp.example" }]) {
+      const ok = await planFor([fakeBox({}).box], more);
+      if (ok.kind !== "ok" || ok.value.plan.kind !== "ready") throw new Error("no plan");
+      await ok.value.plan.setup.egress();
+    }
+    expect(gitHosts).toEqual([[], ["gitlab.corp.example"]]);
   });
 
   it("stops the pass on a project file that is there but refused, so a local project never reads as forge CI", async () => {
