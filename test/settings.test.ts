@@ -656,5 +656,8 @@ describe("every module reads the resolved settings (#254)", () => {
       "eval.judgeUsdPerRun: the machine layer (env FACTORY_JUDGE_MAX_USD) 1 is higher than 0.2",
     );
     expect(valueOf(withEnv([team], { FACTORY_JUDGE_MODEL: "sonnet" }), "eval.judgeModel")?.value).toBe("sonnet");
+    const poll = layer("user", { poll: { minutes: 10 } });
+    expect(settingOf(runEnv({}, withEnv([poll], {})), "poll.minutes")).toBe("10");
+    expect(errors(withEnv([layer("user", { poll: { minutes: 90 } })], {}))[0]).toContain("from 1 to 60");
   });
 });

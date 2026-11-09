@@ -447,7 +447,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
 | locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
-| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `poll.minutes` |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
   layer, its `file:line` and the team value. A team `locked` mode holds on any class.

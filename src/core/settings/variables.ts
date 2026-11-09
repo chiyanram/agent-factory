@@ -89,6 +89,13 @@ export const MACHINE_KEYS = [
   machine("review.logicModel", "FACTORY_LOGIC_MODEL", "preference", "the logic finder's model"),
   machine("claimLabel", "FACTORY_CLAIM_LABEL", "preference", "the label a claimed PR carries"),
   machine(
+    "poll.minutes",
+    "FACTORY_POLL_MINUTES",
+    "preference",
+    "how often the git host is polled (default 5)",
+    wholeNumber(60),
+  ),
+  machine(
     "quietMinutes",
     "FACTORY_QUIET_MINUTES",
     "preference",
