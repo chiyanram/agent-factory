@@ -180,7 +180,7 @@ rots, such as counts, goes in, and every `file:line` is checked again on each ru
 **Spec home** is a setting:
 - a local folder, which is the default and what work uses;
 - a shared place, later;
-- the issue or Jira;
+- the ticket on the git host, or Jira;
 - a repo commit, for personal projects that opt in.
 
 **Runners.**
@@ -251,7 +251,7 @@ so work and personal logins never mix.
 | `claude` only | an agent CLI connector: claude and copilot |
 | caps per run only | caps per run, ticket and project-day, plus usage records |
 | no project knowledge | the onboarder's brief and glossary in the project home |
-| old words in code and docs (forge, box, dispatcher, writer, plugin for a connector) | the glossary's words (#144) |
+| old words in code and docs (`forge`, `box`, `dispatcher`, `writer`, `plugin` for a connector) | the glossary's words (#144: docs in phase 3, code names in phase 4) |
 
 **ADRs to update** as the work lands:
 - 0004: a finder per lens (amended 2026-11-09);
