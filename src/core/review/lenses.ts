@@ -27,10 +27,12 @@ export const BASELINE_LENS = "baseline";
 // the lens that reviews every edit to an existing test (DESIGN.md section 5; its rubric: chiyanram/skills#235)
 export const TEST_INTEGRITY = "test-integrity";
 
-// where a lens's rubric comes from: a skill in an enabled plugin, or a file in the repo on the default branch
+// where a lens's rubric comes from: a skill in an enabled plugin (its SKILL.md, or one of its references), a file in
+// the repo on the default branch, or the baseline review checks alone, which every finder sees already
 export type Rubric =
-  | { readonly kind: "skill"; readonly plugin: string; readonly skill: string }
-  | { readonly kind: "file"; readonly path: string };
+  | { readonly kind: "skill"; readonly plugin: string; readonly skill: string; readonly reference?: string }
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "baseline" };
 
 export type Lens = {
   readonly name: string;

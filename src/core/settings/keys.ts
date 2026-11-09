@@ -16,6 +16,7 @@
 import { DEFAULT_POLICY, MAX_CAP, MODES, POLICY_POINTS } from "../plugin/policy.js";
 import { checkPluginList } from "../process/plugins.js";
 import { TEST_FILES } from "../ready/floor.js";
+import { checkLenses } from "../review/lens-list.js";
 import { list, MACHINE_KEYS, oneOf, type MachineId, wholeNumber, word } from "./variables.js";
 
 export type { MachineId } from "./variables.js";
@@ -183,6 +184,16 @@ const FILE_KEYS: readonly FileKey[] = [
     check: list,
     fallback: [],
     about: "the paths whose change is a one-way door (read by the lane check, #230)",
+  },
+  {
+    id: "review.lenses",
+    where: "file",
+    path: ["review", "lenses"],
+    class: "locked",
+    check: checkLenses,
+    fallback: [],
+    about:
+      "the automated review's lenses, each a rubric and optional paths and lanes; none runs one finder on the baseline review checks (#237)",
   },
   {
     id: "approval.floor",
