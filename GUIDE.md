@@ -4,8 +4,8 @@ How to set up the factory's identity, configure the scripts and run the loop. Th
 [Run the loop](#run-the-loop) as its instructions. Words in **bold** are in [Terms](#terms).
 
 > **Target and today.** [ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) (map #30, 2026-11-06) is the
-> decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The bash scripts do not follow it
-> yet. Each place where they still differ is marked **Today:**.
+> decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The code does not follow it
+> everywhere yet. Each place where it still differs is marked **Today:**.
 
 ## Install a pinned version
 
@@ -899,9 +899,7 @@ it is a prompt instruction at most.
 - **Decided: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
   `!`, `://` and `www.` are broken with an invisible joiner, so nothing pings, links, references or closes; Markdown
   and Jira markup characters are escaped. The template is built (`src/core/post.ts`, #126), and
-  the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)). **Today:** the bash
-  writer still holds a forge login, writes its evidence into the MR description itself and marks the MR ready; none of
-  that goes through the template until the writer runs in the box (#109, #113).
+  the commands, the dispatcher, the reviewer and the writer's exit post through it ([review 4](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682589125)).
 - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106). **Today:** an edit elsewhere asks you rather than being refused.
 - **State goes to the forge**, never to a file only one session can read. The one exception is the local approval,

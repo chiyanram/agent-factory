@@ -1,19 +1,17 @@
 // check-musts — each AGENTS.md MUST that code can check, as a check (#221; ADR-0015 R5): a rule that code can check
 // should not depend on the LLM reviewer. A finding names file:line, the rule and the MUST it breaks.
 //
-//   forge-seam        no "gh" or "glab" in src/ outside src/core/forge/, and no gh or glab command in a bash script
-//                     under scripts/: bash has no forge seam any more (#285)
-//   host-git          no "git" in src/ outside src/core/git.ts (hostGit), and no git command in a bash script under
-//                     scripts/
+//   forge-seam        no "gh" or "glab" in src/ outside src/core/forge/
+//   host-git          no "git" in src/ outside src/core/git.ts (hostGit)
 //   spawn-seam        node:child_process only in the files below that run a program, so a forge or git call cannot
 //                     hide behind a variable: a new one needs a reviewed entry here
-//   forge-token       no forge token variable (GH_TOKEN, GITLAB_TOKEN, ...) in src/ outside src/core/forge/, nor in a
-//                     bash script under scripts/, so no LLM seat is handed one (ADR-0012 S2, S6)
-//   skip-permissions  no skip-permissions flag or bypass mode for an agent CLI (claude, copilot) in src/ or a bash
-//                     script (ADR-0012 S11)
+//   forge-token       no forge token variable (GH_TOKEN, GITLAB_TOKEN, ...) in src/ outside src/core/forge/, so no
+//                     LLM seat is handed one (ADR-0012 S2, S6)
+//   skip-permissions  no skip-permissions flag or bypass mode for an agent CLI (claude, copilot) in src/ (ADR-0012 S11)
 //   disable-comment   no lint or type-check disable comment in any tracked code file: fix the code (#148)
 //   lint-baseline     scripts/lint-baseline.json raises no count above the default branch's, at the merge base (#148)
-//   script-test       each scripts/<name>.sh has its tests/<name>.test.sh
+//   no-bash           no tracked .sh file and no file that starts with a shell's #! line, but the planted input in
+//                     tests/fixtures/: no bash ships (ADR-0013, #138)
 // Comment lines are skipped, except by disable-comment. ALLOW below lists each real exception, matched by file, rule
 // and a piece of the line, with the reason; an entry that matches nothing on a file that is there fails, so the list
 // only shrinks.
@@ -36,7 +34,7 @@ export type Rule =
   | "skip-permissions"
   | "disable-comment"
   | "lint-baseline"
-  | "script-test";
+  | "no-bash";
 
 type LineRule = {
   readonly rule: Rule;
@@ -50,19 +48,13 @@ export type Allow = { readonly file: string; readonly rule: Rule; readonly has: 
 export type Source = { readonly file: string; readonly text: string };
 export type Scan = { readonly findings: readonly string[]; readonly unused: readonly Allow[] };
 
-const FORGE_WHY = "call the forge only through the Forge seam in src/core/forge/ (bash: a forge_* call)";
+const FORGE_WHY = "call the forge only through the Forge seam in src/core/forge/";
 const GIT_WHY = "call git on a project's clone only through hostGit (src/core/git.ts)";
 const TOKEN_WHY = "give no LLM seat a forge token; only the forge seam sets one (ADR-0012 S2, S6)";
 const SKIP_WHY = "give no LLM seat a skip-permissions flag (ADR-0012 S11)";
 
 const inSrc = (f: string): boolean => f.startsWith("src/") && f.endsWith(".ts");
-const topScript = (f: string): boolean => /^scripts\/[^/]+\.sh$/.test(f);
-const anySh = (f: string): boolean => f.startsWith("scripts/") && f.endsWith(".sh");
 const code = (f: string): boolean => /\.(?:ts|mts|cts|js|mjs|cjs)$/.test(f) && !f.startsWith("tests/fixtures/");
-
-// a bash command word: at the start of a line or after a separator, $( or a keyword
-const command = (names: string): RegExp =>
-  new RegExp(`(?:^|[;&|({]|\\$\\(|\\b(?:then|do|else|exec|time)\\s)\\s*(?:${names})(?=\\s|$|\\))`);
 
 export const RULES: readonly LineRule[] = [
   {
@@ -72,7 +64,6 @@ export const RULES: readonly LineRule[] = [
     comments: false,
     why: FORGE_WHY,
   },
-  { rule: "forge-seam", applies: anySh, bad: command("gh|glab"), comments: false, why: FORGE_WHY },
   {
     rule: "host-git",
     applies: (f) => inSrc(f) && f !== "src/core/git.ts",
@@ -80,7 +71,6 @@ export const RULES: readonly LineRule[] = [
     comments: false,
     why: GIT_WHY,
   },
-  { rule: "host-git", applies: anySh, bad: command("git"), comments: false, why: GIT_WHY },
   {
     rule: "spawn-seam",
     applies: inSrc,
@@ -90,14 +80,14 @@ export const RULES: readonly LineRule[] = [
   },
   {
     rule: "forge-token",
-    applies: (f) => (inSrc(f) && !f.startsWith("src/core/forge/")) || anySh(f),
+    applies: (f) => inSrc(f) && !f.startsWith("src/core/forge/"),
     bad: /\b(?:GH|GITHUB|GH_ENTERPRISE|GITHUB_ENTERPRISE|GLAB|GITLAB|CI_JOB)_TOKEN\b/,
     comments: false,
     why: TOKEN_WHY,
   },
   {
     rule: "skip-permissions",
-    applies: (f) => inSrc(f) || anySh(f),
+    applies: inSrc,
     bad: /--(?:allow-)?dangerously-skip-permissions|\bbypassPermissions\b|--allow-all(?:-tools)?\b|--yolo\b/,
     comments: false,
     why: SKIP_WHY,
@@ -185,13 +175,24 @@ export function scan(sources: readonly Source[], allow: readonly Allow[] = ALLOW
   return { findings, unused: allow.filter((a) => scanned.has(a.file) && !used.has(a)) };
 }
 
-// untested : each top-level bash script with no tests/<name>.test.sh. Pure.
-export function untested(listed: readonly string[]): readonly string[] {
-  const have = new Set(listed);
-  return listed
-    .filter(topScript)
-    .filter((f) => !have.has(`tests/${f.slice("scripts/".length, -".sh".length)}.test.sh`))
-    .map((f) => `${f}: script-test: write each script with its tests/<script>.test.sh`);
+const SHELL = /^#!\S*\/(?:env\s+)?(?:ba|da|k|z)?sh(?:\s|$)/;
+
+// bashFiles : each file that is a shell script: named .sh, or starting with a shell's #! line. A planted fixture is
+// skipped. Each source's text needs only its first line. Pure.
+export function bashFiles(sources: readonly Source[]): readonly string[] {
+  return sources
+    .filter((s) => !s.file.startsWith("tests/fixtures/"))
+    .filter((s) => s.file.endsWith(".sh") || SHELL.test(s.text))
+    .map((s) => `${s.file}: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)`);
+}
+
+// firstLine : a file's first line, or nothing when it cannot be read
+function firstLine(file: string): string {
+  try {
+    return readFileSync(file, "utf8").split("\n", 1)[0] ?? "";
+  } catch {
+    return "";
+  }
 }
 
 export type Counts = Readonly<Record<string, number>>;
@@ -255,7 +256,7 @@ if (process.argv[1] === import.meta.filename) {
   const problems = [
     ...result.findings,
     ...result.unused.map((a) => `${a.file}: ${a.rule}: the ALLOW entry "${a.has}" matches no line; remove it`),
-    ...untested(listed),
+    ...bashFiles(listed.map((file) => ({ file, text: firstLine(join(root, file)) }))),
     ...baselineProblems(root, baseRef(process.env)),
   ];
   for (const problem of problems) {
