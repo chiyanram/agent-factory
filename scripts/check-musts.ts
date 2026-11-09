@@ -4,7 +4,7 @@
 //   forge-seam        no "gh" or "glab" in src/ outside src/core/forge/, and no gh or glab command in a bash script
 //                     under scripts/: bash has no forge seam any more (#285)
 //   host-git          no "git" in src/ outside src/core/git.ts (hostGit), and no git command in a bash script under
-//                     scripts/ but scripts/lib/git.sh, which holds hgit
+//                     scripts/
 //   spawn-seam        node:child_process only in the files below that run a program, so a forge or git call cannot
 //                     hide behind a variable: a new one needs a reviewed entry here
 //   forge-token       no forge token variable (GH_TOKEN, GITLAB_TOKEN, ...) in src/ outside src/core/forge/, nor in a
@@ -51,14 +51,13 @@ export type Source = { readonly file: string; readonly text: string };
 export type Scan = { readonly findings: readonly string[]; readonly unused: readonly Allow[] };
 
 const FORGE_WHY = "call the forge only through the Forge seam in src/core/forge/ (bash: a forge_* call)";
-const GIT_WHY = "call git on a project's clone only through hostGit (src/core/git.ts) or hgit (scripts/lib/git.sh)";
+const GIT_WHY = "call git on a project's clone only through hostGit (src/core/git.ts)";
 const TOKEN_WHY = "give no LLM seat a forge token; only the forge seam sets one (ADR-0012 S2, S6)";
 const SKIP_WHY = "give no LLM seat a skip-permissions flag (ADR-0012 S11)";
 
 const inSrc = (f: string): boolean => f.startsWith("src/") && f.endsWith(".ts");
 const topScript = (f: string): boolean => /^scripts\/[^/]+\.sh$/.test(f);
 const anySh = (f: string): boolean => f.startsWith("scripts/") && f.endsWith(".sh");
-const gitSh = (f: string): boolean => anySh(f) && f !== "scripts/lib/git.sh";
 const code = (f: string): boolean => /\.(?:ts|mts|cts|js|mjs|cjs)$/.test(f) && !f.startsWith("tests/fixtures/");
 
 // a bash command word: at the start of a line or after a separator, $( or a keyword
@@ -81,7 +80,7 @@ export const RULES: readonly LineRule[] = [
     comments: false,
     why: GIT_WHY,
   },
-  { rule: "host-git", applies: gitSh, bad: command("git"), comments: false, why: GIT_WHY },
+  { rule: "host-git", applies: anySh, bad: command("git"), comments: false, why: GIT_WHY },
   {
     rule: "spawn-seam",
     applies: inSrc,

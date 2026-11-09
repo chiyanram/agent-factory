@@ -32,11 +32,10 @@ describe("scan", () => {
     expect(findings("scripts/a.sh", "# gh pr list\nforge_pr 1\necho high\n")).toEqual([]);
   });
 
-  it("finds git named in src/ outside hostGit, and a git command in a bash script but hgit's own; a message is not a call", () => {
+  it("finds git named in src/ outside hostGit, and a git command in any bash script; a message is not a call", () => {
     expect(findings("src/core/x.ts", 'execFile("git", ["status"]);\n')).toEqual(["src/core/x.ts:1: host-git"]);
     expect(findings("src/core/git.ts", 'execFile("git", ["status"]);\n')).toEqual([]);
-    expect(findings("scripts/lib/git.sh", 'git -C "$d" status\n')).toEqual([]);
-    expect(findings("scripts/lib/runs.sh", 'git -C "$d" status\n')).toEqual(["scripts/lib/runs.sh:1: host-git"]);
+    expect(findings("scripts/lib/a.sh", 'git -C "$d" status\n')).toEqual(["scripts/lib/a.sh:1: host-git"]);
     expect(findings("src/core/x.ts", 'failed("git push failed");\n')).toEqual([]);
     expect(findings("scripts/a.sh", 'tip=$(git rev-parse HEAD)\ngit -C "$d" fetch\nhgit -C "$d" fetch\n')).toEqual([
       "scripts/a.sh:1: host-git",
@@ -159,7 +158,7 @@ describe("check-musts, the script", () => {
     expect(run(dir, { ...process.env, FACTORY_BASE_REF: "main" })).toEqual({
       code: 1,
       out:
-        "scripts/b.sh:1: host-git: call git on a project's clone only through hostGit (src/core/git.ts) or hgit (scripts/lib/git.sh)\n" +
+        "scripts/b.sh:1: host-git: call git on a project's clone only through hostGit (src/core/git.ts)\n" +
         "src/a.ts:1: forge-seam: call the forge only through the Forge seam in src/core/forge/ (bash: a forge_* call)\n" +
         "scripts/b.sh: script-test: write each script with its tests/<script>.test.sh\n" +
         "scripts/lint-baseline.json: lint-baseline: src/a.ts eslint(complexity) is 2, above 1; it only shrinks\n" +
