@@ -35,9 +35,11 @@ export type Command = {
   readonly argv: readonly [string, ...string[]];
   readonly stdin: Input;
   readonly timeoutSeconds: number;
-  // each piece of the command's stdout as it comes, while it runs (#228: the writer's stall stop); Ran still holds all
-  // of it at the end
+  // each piece of the command's stdout as it comes, while it runs (#228: the writer's stall stop)
   readonly watch?: (chunk: string) => void;
+  // "all" (the default): Ran holds all of stdout, up to the runtime's cap. "tail": Ran holds only the end of it and no
+  // cap applies, for a long run whose output only its watcher reads (#228)
+  readonly keep?: "all" | "tail";
 };
 
 export type Failed = { readonly kind: "failed"; readonly reason: string };

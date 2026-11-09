@@ -559,6 +559,8 @@ describe("the stall stop (#228)", () => {
         await base.run(call);
         const start = fake.calls.findLast((c) => c.op === "start");
         const dir = start?.op === "start" ? start.spec.worktree : "";
+        // nothing reads the writer's output after the run: it keeps only the tail, so no cap stops a long run
+        expect(call.command.keep).toBe("tail");
         for (let i = 0; i < 12; i += 1) {
           await pause(STALL / 4);
           call.command.watch?.(`{"type":"assistant","n":${i}}\n`);

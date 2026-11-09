@@ -69,14 +69,14 @@ export function boxContract(name: string, make: (host: NodeJS.ProcessEnv) => Mad
       await box.stop(started.session);
     });
 
-    it("hands a command's watcher its output as it comes: by the end, all of it (#228)", async () => {
+    it("hands a command's watcher its output as it comes, all of it, and keeps the tail it asked for (#228)", async () => {
       const { box } = make(HOST);
       const started = await box.start(full);
       if (started.kind !== "started") throw new Error("start failed");
       const heard: string[] = [];
       const ran = await box.run({
         session: started.session,
-        command: { ...STREAMED, watch: (chunk) => heard.push(chunk) },
+        command: { ...STREAMED, keep: "tail", watch: (chunk) => heard.push(chunk) },
       });
       expect(ran).toMatchObject({ kind: "exited", code: 0, stdout: "streamed\n" });
       expect(heard.join("")).toBe("streamed\n");

@@ -170,6 +170,8 @@ async function inBox(run: WriterRun): Promise<RunEnd> {
       argv: claudeArgv(run.claude, run.settings),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
+      // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it
+      keep: "tail",
       watch: (chunk) => {
         heard.at = Date.now();
         heard.tail = tailOf(heard.tail, chunk);

@@ -218,6 +218,11 @@ export function parseReport(text: string): Outcome {
     : READ[status]!(body);
 }
 
+// spoken : a stall time in minutes when it is whole minutes, else in seconds. Pure.
+function spoken(seconds: number): string {
+  return seconds > 0 && seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`;
+}
+
 function ended(end: RunEnd): string {
   switch (end.kind) {
     case "exited":
@@ -227,7 +232,7 @@ function ended(end: RunEnd): string {
     case "timedOut":
       return `the run was stopped after ${end.seconds}s`;
     case "stalled":
-      return `the run printed nothing for ${end.seconds} s; the host stopped it`;
+      return `the run printed nothing for ${spoken(end.seconds)}; the host stopped it`;
     case "cap":
       return `the run hit a cap: ${end.what}`;
     case "failed":

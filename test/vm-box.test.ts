@@ -182,6 +182,18 @@ describe("vm box: start", () => {
 });
 
 describe("vm box: run", () => {
+  it("hands docker the command's watcher and its keep, and sets neither when the command does not (#228)", async () => {
+    const fake = fakeDocker();
+    const vm = box(fake);
+    const started = await vm.start(SPEC);
+    if (started.kind !== "started") throw new Error("start failed");
+    const watch = (): void => undefined;
+    await vm.run({ session: started.session, command: { ...TRUE, keep: "tail", watch } });
+    expect(fake.calls.at(-1)).toMatchObject({ keep: "tail", watch });
+    await vm.run({ session: started.session, command: TRUE });
+    expect(Object.keys(fake.calls.at(-1) ?? {})).not.toContain("keep");
+  });
+
   it("runs as the box user in /work under timeout, the value in docker's environment only", async () => {
     const fake = fakeDocker();
     const vm = box(fake);
