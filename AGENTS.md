@@ -9,7 +9,7 @@ People start at `README.md`; `docs/DESIGN.md` is the design on one page; `GUIDE.
 ## Check
 
 ```bash
-make lint   # links resolve; AGENTS.md under 200 lines; tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
+make lint   # links resolve; AGENTS.md under 200 lines; the MUSTs below (check-musts); tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
 make test   # every tests/*.test.sh; no network, glab, gh or claude needed
 ```
 
