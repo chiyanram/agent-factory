@@ -2,7 +2,7 @@
 // that holds only the pack and the code copy:
 //   --restricted            no command or web tools, no settings files, file tools held to this folder
 //   --strict-mcp-config     no MCP servers
-//   --tools Read,Grep,Glob  and nothing else
+//   --tools Read,Grep,Glob  and nothing else; a role card may narrow them (process/cards.ts), never widen them
 //   --max-budget-usd        FACTORY_MAX_USD, when set (ADR-0011 D14)
 //   --json-schema           the answer is structured output, checked by the CLI
 // Never resumed, never continued: every pass is a new session. A test passes its own Model.
@@ -22,7 +22,11 @@ export type ModelRun = {
   readonly name: string;
   // "" for no cap
   readonly maxUsd: string;
+  // a role card's tools, each one of READ_ONLY; none given is all of READ_ONLY
+  readonly tools?: readonly string[];
 };
+
+const READ_ONLY = ["Read", "Grep", "Glob"];
 
 export type ModelAnswer = {
   readonly output: unknown;
@@ -50,7 +54,7 @@ export function claudeArgs(run: ModelRun): readonly string[] {
     "--restricted",
     "--strict-mcp-config",
     "--tools",
-    "Read,Grep,Glob",
+    READ_ONLY.filter((t) => run.tools === undefined || run.tools.includes(t)).join(","),
     ...cap,
     "--output-format",
     "json",

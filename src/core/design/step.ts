@@ -8,6 +8,9 @@
 //   verify pass     the same folder with findings.json, the design-reviewer's conflicts and opens; the prompt is the
 //                   verify-pass role card; the answer is one bucket per finding (review/verdicts.ts VERIFY_SCHEMA)
 //
+// Each run gets only its card's tools, and its folder leaves out what the card's must_not_see names (#232; process/cards.ts):
+// a card that leaves out the spec, or the verify pass's findings, fails the run.
+//
 // Before either run the spec and the design are read again and must still have the hashes the table decided on: an
 // edit in between is a failed run, and the next pass decides on the new hashes. A run with no conflict or open to
 // verify runs no model. What a run spent is given back whether it finished or failed, so the caps count it. The
@@ -22,7 +25,7 @@ import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import { spendOf, type Spend } from "../dispatch/spend.js";
-import { readCard, type Card, type Role } from "../process/cards.js";
+import { inputsOf, readCard, type Card, type Part, type Role } from "../process/cards.js";
 import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
 import type { Model, ModelResult } from "../review/model.js";
@@ -101,22 +104,51 @@ async function baseSha(setup: DesignSetup): Promise<Result<string>> {
   return fetched.kind === "ok" ? git(setup, ["rev-parse", "refs/factory/design-base"]) : fetched;
 }
 
-// filled : the run folder with the spec, the design and the code at the default branch
-async function filled(setup: DesignSetup, input: DesignInput, run: string): Promise<Result<void>> {
-  const read = await texts(setup, input);
-  if (read.kind === "failed") {
-    return read;
-  }
-  await writeFile(join(run, "spec.md"), read.value.spec, { mode: 0o600 });
-  if (read.value.design !== "") {
-    await writeFile(join(run, "design.md"), read.value.design, { mode: 0o600 });
-  }
+// the run folder's parts, by the words a card's must_not_see may call them (process/cards.ts)
+type Input = Part & { readonly file: "spec.md" | "design.md" | "code" | "findings.json" };
+const SPEC: Input = { file: "spec.md", names: ["the spec", "the approved spec"], needed: true };
+const DESIGN: Input = { file: "design.md", names: ["the design", "the design it links"], needed: false };
+const CODE: Input = { file: "code", names: ["the code", "the code at the default branch"], needed: false };
+const FINDINGS: Input = {
+  file: "findings.json",
+  names: ["the design-reviewer's findings", "the findings"],
+  needed: true,
+};
+
+// partsFor : what the card's run gets of its folder's parts; a card that leaves out a part the run needs is refused
+function partsFor(card: Card, parts: readonly Input[]): Result<ReadonlySet<Input["file"]>> {
+  const kept = inputsOf(card, parts);
+  return kept.kind === "ok" ? { kind: "ok", value: new Set(kept.value.map((p) => p.file)) } : kept;
+}
+
+// codeIn : the code at the default branch, in the run folder's code/
+async function codeIn(setup: DesignSetup, run: string): Promise<Result<void>> {
   const sha = await baseSha(setup);
   const copied =
     sha.kind === "ok"
       ? await copyCode({ repo: setup.repo, sha: sha.value, into: join(run, "code"), env: setup.env, prune: "rules" })
       : sha;
   return copied.kind === "ok" ? { kind: "ok", value: undefined } : copied;
+}
+
+// filled : the run folder with the spec, the design and the code at the default branch, less what the card's
+// must_not_see leaves out
+async function filled(
+  setup: DesignSetup,
+  input: DesignInput,
+  run: string,
+  gets: ReadonlySet<Input["file"]>,
+): Promise<Result<void>> {
+  const read = await texts(setup, input);
+  if (read.kind === "failed") {
+    return read;
+  }
+  await writeFile(join(run, "spec.md"), read.value.spec, { mode: 0o600 });
+  const design = gets.has("design.md") ? read.value.design : "";
+  if (design !== "") {
+    await writeFile(join(run, "design.md"), design, { mode: 0o600 });
+  }
+  return gets.has("code") ? codeIn(setup, run) : { kind: "ok", value: undefined };
 }
 
 // inFolder : a fresh run folder for `work`, gone afterwards
@@ -149,6 +181,7 @@ async function modelRun(
     prompt: `${card.body}\n\n${FLOOR}\n`,
     name,
     maxUsd: setup.maxUsd,
+    tools: card.tools,
   });
 }
 
@@ -186,8 +219,12 @@ async function review(
   if (card.kind === "failed") {
     return card;
   }
+  const gets = partsFor(card.value, [SPEC, DESIGN, CODE]);
+  if (gets.kind === "failed") {
+    return gets;
+  }
   return inFolder(setup, async (run) => {
-    const ready = await filled(setup, input, run);
+    const ready = await filled(setup, input, run, gets.value);
     if (ready.kind === "failed") {
       return ready;
     }
@@ -211,8 +248,12 @@ async function verify(
   if (card.kind === "failed" || input.findings.length === 0) {
     return card.kind === "failed" ? card : { kind: "ok", value: { kind: "done", kept: [], card: card.value.sha256 } };
   }
+  const gets = partsFor(card.value, [SPEC, DESIGN, CODE, FINDINGS]);
+  if (gets.kind === "failed") {
+    return gets;
+  }
   return inFolder(setup, async (run) => {
-    const ready = await filled(setup, input, run);
+    const ready = await filled(setup, input, run, gets.value);
     if (ready.kind === "failed") {
       return ready;
     }

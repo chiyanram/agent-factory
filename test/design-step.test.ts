@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { designSteps, FLOOR, type DesignSetup } from "../src/core/design/step.js";
 import type { DesignFinding } from "../src/core/design/findings.js";
@@ -139,6 +139,27 @@ describe("the design review's runs (#236)", () => {
       kind: "ok",
       value: { kind: "failed", spend: { usd: 0.25 }, why: expect.stringContaining("findings") },
     });
+  });
+
+  it("a team card's tools are the run's only tools, and its must_not_see leaves the design and code out (#232)", async () => {
+    const roles = join(p.root, "team", "skills", "process", "process", "roles");
+    mkdirSync(roles, { recursive: true });
+    writeFileSync(join(roles, "..", "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+    writeFileSync(
+      join(roles, "design-reviewer.md"),
+      "---\nrole: design-reviewer\ntools: [Read]\nmust_not_see: the design; the code\n---\n\nRead the spec only.\n",
+    );
+    const seen: Seen[] = [];
+    const s = {
+      ...setup(model(seen, [{ findings: [] }])),
+      plugins: [{ label: "team@acme", dir: join(p.root, "team") }],
+    };
+    const step = designSteps({ kind: "ok", value: s }).designReview;
+    if (step.kind !== "available") throw new Error("unavailable");
+    done(await step.run(input()));
+    expect(seen[0]?.run.tools).toEqual(["Read"]);
+    expect(seen[0]?.files).toEqual(["spec.md"]);
+    expect(seen[0]?.run.prompt).toBe(`Read the spec only.\n\n${FLOOR}\n`);
   });
 
   it("is unavailable, with the reason, when the review is not set up", () => {

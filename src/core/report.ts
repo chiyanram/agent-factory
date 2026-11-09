@@ -186,6 +186,9 @@ function deferredOf(value: unknown): Check<{ readonly deferred?: readonly string
   return list.kind === "ok" ? ok({ deferred: list.value }) : list;
 }
 
+// REPORT_FIELDS : every field the report's schema names, at any depth: what a role card's hand-off may name (#232)
+export const REPORT_FIELDS: readonly string[] = ["status", ...[...FIELDS.values()].flat(), ...CELLS];
+
 const READ: Readonly<Record<string, (body: Field) => Outcome>> = {
   done: (body) => {
     const evidence = listOf(body.evidence, "evidence", MAX_EVIDENCE, evidenceRow);
