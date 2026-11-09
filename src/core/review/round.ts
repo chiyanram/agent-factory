@@ -14,6 +14,7 @@
 //     a protected file not listed before; then one summary note, last, since it marks the round done: a round that
 //     failed halfway runs again. No verdict ever approves or undrafts, and zero findings is not a pass (#118).
 
+import { withFloor } from "./never.js";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
@@ -292,7 +293,7 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
     folder,
     model: pass.model,
     schema: pass.schema,
-    prompt,
+    prompt: withFloor(prompt),
     name: `reviewer-${ctx.setup.number}`,
     maxUsd: ctx.setup.maxUsd,
   });
