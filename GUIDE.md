@@ -376,6 +376,7 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   "verify": ["make", "verify"],
   "ready": { "programs": ["make", "./gradlew"], "timeoutMinutes": 30, "testFiles": ["src/test/**", "**/*Spec.groovy"] },
   "egress": { "allow": ["repo.maven.apache.org", "services.gradle.org", ".gradle.org"] },
+  "lanes": { "oneWayDoor": ["db/migrations/**", "api/openapi.yaml"] },
   "plugins": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
   "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
 }
@@ -404,6 +405,11 @@ there.
   `factory-egress-<project>`, on its own network, `factory-int-<project>`, so one project's box never sees another's
   list (decision on [#30](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6707179439)). With none,
   no box runs for the project.
+- `lanes.oneWayDoor`: globs for the paths whose change cannot be undone (stored data, a schema, a public contract, a
+  deploy). A change that touches one needs the one-way-door lane (#230): before the build when the spec's `## Planned
+  files` names one, and in the ready check when the diff touches one. It is a deny-list key ([Settings](#settings)):
+  every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
+  drops it.
 - `plugins`: which registered plugin serves each extension point ([Plugins](#plugins)).
 - `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
   (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
@@ -449,7 +455,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
   Fetch the team's clone yourself first; nothing here uses the network.
 - **Today:** the machine-layer keys are still read by each module from its own variable, so a file value for one is
-  reported by `config check` and not used, and `lanes.oneWayDoor` waits for the lane check (#230).
+  reported by `config check` and not used.
 
 ### The box image
 
@@ -598,7 +604,20 @@ hit sends the writer back like any failed ready check. A person who agrees with 
 clears it. On a later head the test checks look again only at the files changed since the waiver's head, so a cleared
 file is flagged again only if it changes again. A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
 or the waiver fails the step, so the check is never passed and a person looks. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
-fools it or fails it; and Spock `where:` rows are not counted. Then it runs each evidence row of the writer's report again at the head,
+fools it or fails it; and Spock `where:` rows are not counted.
+
+The ready check then reads the lane the real diff needs, the same way (#230; `src/core/ready/lane.ts`): only docs,
+comments or the values of config keys that stay may be tiny; any other change, a moved file among them, needs at least
+bug; a path under the project's `lanes.oneWayDoor` needs the one-way door. The lane is only ever raised: a diff that
+needs a heavier lane than the one a human approved, or STARTed in the tiny lane, goes to `needs-human`, and the way on
+is a raised `## Lane` in the spec and a human's approval of it. The same check runs before the build, on the spec's
+`## Planned files`: a planned file under a one-way-door path holds the ticket until the spec is raised and approved.
+Every lane above tiny needs an approval (the approval floor); a lanes value from a plugin or a settings layer that
+drops it is refused (`lanesOf`). **Today:** a config file's change counts as values when its changed lines keep the
+same keys, so a dependency's major bump in `package.json` still reads as tiny; the automated review's LN2 check is
+what catches it. Each acceptance criterion must also have an evidence row: the n-th criterion is `AC-n`, and a row
+names it when its `criterion` starts with that id; a criterion with no row fails the check and counts towards its 3
+tries. Then it runs each evidence row of the writer's report again at the head,
 and the local verifier the project file's `verify`, each in a fresh box with no forge token and its egress through the
 project's own proxy; nothing of the branch runs on the host. Each box run starts that proxy afresh, inside the
 project's lock. The dispatcher opens the vm box when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set; otherwise
@@ -609,7 +628,7 @@ and posts what it committed. A `rework` or `ci` run (#171) works the same way, w
 
 | the run is for | `.factory/task.md` holds |
 |---|---|
-| a failed ready check | why it failed at the head (the evidence row that failed, with the last 200 lines of its stdout and stderr, or the floor guard's `file:line` hits), kept at `.claude/runs/<change>/<head>/ready.txt` before the result is recorded |
+| a failed ready check | why it failed at the head (the evidence row that failed, with the last 200 lines of its stdout and stderr, the acceptance criteria with no row, or the floor guard's `file:line` hits), kept at `.claude/runs/<change>/<head>/ready.txt` before the result is recorded |
 | an open Act on | the review's own Act on findings, kept at `.claude/runs/<change>/<head>/act-on.json` before it posts them; never a forge thread |
 | red forge CI | each failed job's name and the last 200 lines of its log, for the first 3 jobs (GitHub check runs and statuses, GitLab pipeline jobs) |
 | a failed local verifier | the verifier's own output, kept at `.claude/runs/<change>/<head>/verify.txt` before it posts the status |
@@ -657,7 +676,7 @@ and `#12` for `!12`.
 | (context pack) | built by `review`, one per head, under `$FACTORY_REPO/.claude/packs/`: rules from the default branch only; an unresolved rule pointer or link stops it. The intent and acceptance criteria come from the approved spec of the ticket the MR's `factory/<ticket>` branch names, read from `<home>/specs/<project>/` and checked against `<home>/approvals/<project>/`; the design from that spec's `## Design` link, as the default branch holds it. A spec edited after approval, or never approved, is named in the pack for the reviewer to report; no spec in the store stops it. The MR description is data in the pack, never the contract |
 | `agent-factory status <mr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text |
 | `agent-factory ask -- <mr> <sha> "<question>"` | **today** the writer's one way to reach the human: posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The target: the writer writes the question to `report.json` and the host posts it |
-| `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash and the design's (`design none` with no `design.md` beside it), or every missing part (intent, numbered acceptance criteria, design, lane); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
+| `agent-factory spec <project> <ticket>` | checks a ticket's local spec (`$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, default `~/.factory`) against the template: prints its hash and the design's (`design none` with no `design.md` beside it), or every missing part (intent, numbered acceptance criteria, design, lane); an optional `## Planned files` lists the paths the change will touch, one per line, for the lane check before the build (#230); `--template <ticket>` prints an empty one. The hash ignores line endings and trailing spaces, and changes on any real edit ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #127) |
 | `agent-factory start <project> <ticket> [--yes]` | records a human's START in `$FACTORY_HOME/starts/<project>/<ticket>.json`: who, the front door (`via`) and when. It opens the ticket; in the tiny lane it also lets the build begin. When `factory/<ticket>` is already on the git host it asks first (exit 3), and `--yes` starts anyway. A human runs it; the coordinator's settings deny it (#227) |
 | `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` | records the human's approval in `$FACTORY_HOME/approvals/<project>/<ticket>.json`: the spec's full hash, the design's (`none` when there is no `design.md` beside the spec), who, the front door and when. The hashes on the command line are the ones the human saw, as `agent-factory spec` printed them; a spec or design that no longer has exactly that hash is refused. A human runs it; the coordinator's settings deny it ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), #104, #227) |
 | `agent-factory waive <project> <ticket> <head>` | records the human's waiver of the test checks in `$FACTORY_HOME/waivers/<project>/<ticket>.json`: `kind: "test-change"`, the full commit id of the head the hits were listed at, who, the front door and when. The ready check clears the test check hits at that head; on a later head it looks again only at the files changed since, so a cleared file is flagged again only if it changes again. A waiver given again replaces it. A human runs it; the coordinator's settings deny it (#231) |

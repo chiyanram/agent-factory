@@ -13,7 +13,7 @@
 
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { plainName } from "../spec.js";
+import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
 
@@ -96,6 +96,8 @@ export type Event =
       readonly human?: boolean;
       // only when it failed (#228)
       readonly nextTry?: NextTry;
+      // the lane the diff needs (#230); none on a line older than the lane check
+      readonly lane?: Lane;
     }
   // the local verifier's run (#91); its result is the commit status it posted
   | {
@@ -256,6 +258,17 @@ function whyOf(raw: unknown): string | Bad {
   return prop(raw, "why") === undefined ? "" : str(raw, "why");
 }
 
+// laneField : a ready line's lane, as a field to spread: none on a line older than the lane check (#230), BAD when it
+// is there but not a lane
+function laneField(raw: unknown): { readonly lane?: Lane } | Bad {
+  const lane = prop(raw, "lane");
+  if (lane === undefined) {
+    return {};
+  }
+  const known = LANES.find((l) => l === lane);
+  return known === undefined ? BAD : { lane: known };
+}
+
 // humanField : a ready line's human flag, as a field to spread: none on a line that has none (#231)
 function humanField(raw: unknown): { readonly human?: boolean } | Bad {
   const human = prop(raw, "human");
@@ -265,20 +278,25 @@ function humanField(raw: unknown): { readonly human?: boolean } | Bad {
   return typeof human === "boolean" ? { human } : BAD;
 }
 
+// readyExtras : a ready line's optional fields, its nextTry, its lane and its human flag, as fields to spread, or BAD
+function readyExtras(
+  raw: unknown,
+): { readonly nextTry?: NextTry; readonly lane?: Lane; readonly human?: boolean } | Bad {
+  const next = nextTryField(raw);
+  const lane = laneField(raw);
+  const human = humanField(raw);
+  return next === BAD || lane === BAD || human === BAD ? BAD : { ...next, ...lane, ...human };
+}
+
 function readyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
   const why = whyOf(raw);
-  const next = nextTryField(raw);
-  if (head === BAD || why === BAD || next === BAD) {
+  const extras = readyExtras(raw);
+  if (head === BAD || why === BAD || extras === BAD) {
     return BAD;
   }
-  return typeof passed === "boolean" ? withHuman(raw, { at, kind: "ready-ended", head, passed, why, ...next }) : BAD;
-}
-
-function withHuman(raw: unknown, event: Extract<Event, { kind: "ready-ended" }>): Event | Bad {
-  const human = humanField(raw);
-  return human === BAD ? BAD : { ...event, ...human };
+  return typeof passed === "boolean" ? { at, kind: "ready-ended", head, passed, why, ...extras } : BAD;
 }
 
 function verifyEndedOf(raw: unknown, at: string): Event | Bad {
@@ -395,6 +413,8 @@ export type Summary = {
         readonly why: string;
         // a test check stopped it for a person (#231)
         readonly human: boolean;
+        // the lane the diff needs (#230); none on a line older than the lane check
+        readonly lane?: Lane;
       };
   readonly lastVerify:
     | { readonly kind: "none" }
@@ -470,7 +490,15 @@ const STEPS: Steps = {
   "ready-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
-    lastReady: { kind: "ended", at: e.at, head: e.head, passed: e.passed, why: e.why, human: e.human === true },
+    lastReady: {
+      kind: "ended",
+      at: e.at,
+      head: e.head,
+      passed: e.passed,
+      why: e.why,
+      human: e.human === true,
+      ...(e.lane === undefined ? {} : { lane: e.lane }),
+    },
     readyFailures: s.readyFailures + Number(!e.passed),
     nextTry: nextTryView(e.nextTry),
   }),

@@ -148,7 +148,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 
 | item | what it holds |
 |---|---|
-| spec | intent · lane · acceptance criteria (the form is open, see section 9) · design link · out of scope |
+| spec | intent · lane · acceptance criteria (the form is open, see section 9) · design link · out of scope · planned files (optional) |
 | report | `.factory/report.json`: `done` with evidence per AC (and an optional `deferred` list), `asked` with questions, or `blocked` |
 | PR body | `.factory/pr.md`, written by the implementer and posted by the host (who owns it is open, see section 9) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |

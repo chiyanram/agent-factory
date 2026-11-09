@@ -26,7 +26,8 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { plainName, type Lane } from "../spec.js";
+import { needsApproval, oneWayDoorPathsOf, plannedCheck } from "../lane.js";
+import { plainName, type Lane, type Spec } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
 import type { Evidence } from "../report.js";
@@ -59,6 +60,9 @@ export type Unavailable = { readonly kind: "unavailable"; readonly reason: strin
 export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O>> };
 
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
+// what the ready check holds the change to, read on the host (#230): the spec's acceptance criteria, in order (AC-1
+// first), and the project's one-way-door paths
+export type ReadyFacts = { readonly criteria: readonly string[]; readonly oneWayDoor: readonly string[] };
 export type Steps = {
   readonly writer: Step<
     RunInput & { readonly task: Task },
@@ -72,10 +76,11 @@ export type Steps = {
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
-  // says a test check stopped it for a person (#231)
+  // says a test check stopped it for a person (#231). It reads the lane the real diff needs (#230), and holds each
+  // acceptance criterion of the spec to an evidence row.
   readonly ready: Step<
-    RunInput & { readonly evidence: readonly Evidence[] },
-    { readonly passed: boolean; readonly why: string; readonly human: boolean }
+    RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts,
+    { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane }
   >;
   readonly review: Step<RunInput, { readonly actOn: number }>;
   // the local verifier (#91): it posts its result as a commit status at the head
@@ -152,7 +157,7 @@ async function startedView(
     return { kind: "unwritten" };
   }
   const { lane } = spec.spec;
-  if (lane === "tiny") {
+  if (!needsApproval(lane)) {
     return { kind: "started", at: started.at, lane };
   }
   return stale ? { kind: "stale" } : { kind: "unapproved", lane };
@@ -178,7 +183,29 @@ async function unapprovedSaid(
   return { kind: "ok", value: { view, record: "none" } };
 }
 
+// plannedView : a view that lets the build begin is held when the spec's planned files need a heavier lane (#230)
+async function plannedView(setup: TickSetup, ticket: string, said: Said, spec: Spec): Promise<Result<Said>> {
+  const raise = await plannedCheck({ home: setup.home, project: setup.project, spec });
+  if (raise.kind === "failed") {
+    return { kind: "failed", reason: `${ticket}: ${raise.reason}` };
+  }
+  return raise.value.kind === "raised"
+    ? { kind: "ok", value: { ...said, view: raise.value } }
+    : { kind: "ok", value: said };
+}
+
+// saidOf : what a human said for the ticket, with the lane checked against the planned files before the build
 async function saidOf(setup: TickSetup, ticket: string): Promise<Result<Said>> {
+  const said = await humanSaid(setup, ticket);
+  const go = said.kind === "ok" && goAt(said.value.view) !== "";
+  if (!go) {
+    return said;
+  }
+  const spec = await currentSpec({ home: setup.home, project: setup.project, ticket });
+  return spec.kind === "spec" ? plannedView(setup, ticket, said.value, spec.spec) : said;
+}
+
+async function humanSaid(setup: TickSetup, ticket: string): Promise<Result<Said>> {
   const started = await startOf(setup, ticket);
   if (started.kind === "failed") {
     return started;
@@ -504,24 +531,54 @@ function evidenceOf(state: TicketState): readonly Evidence[] {
   return w.kind === "ended" ? w.evidence : [];
 }
 
+// readyFacts : the spec's acceptance criteria and the project's one-way-door paths, read on the host before the check
+async function readyFacts(setup: TickSetup, state: TicketState): Promise<Result<ReadyFacts>> {
+  const spec = await currentSpec(where(setup, state));
+  if (spec.kind !== "spec") {
+    return { kind: "failed", reason: spec.kind === "missing" ? "the ticket's spec is gone" : spec.reason };
+  }
+  const oneWayDoor = await oneWayDoorPathsOf(setup);
+  return oneWayDoor.kind === "ok"
+    ? { kind: "ok", value: { criteria: spec.spec.criteria, oneWayDoor: oneWayDoor.value } }
+    : oneWayDoor;
+}
+
+// readyStarted : the facts the ready check needs, then its "started" line; neither is written when the facts cannot
+// be read
+async function readyStarted(setup: TickSetup, state: TicketState, head: string): Promise<Result<ReadyFacts>> {
+  const facts = await readyFacts(setup, state);
+  const started = facts.kind === "ok" ? await startCheck(setup, state, "ready", head) : facts;
+  return started.kind === "ok" ? facts : started;
+}
+
 async function runReady(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
   const step = setup.steps.ready;
-  const started = step.kind === "available" ? await startCheck(setup, state, "ready", head) : step;
-  if (started.kind !== "ok" || step.kind === "unavailable") {
-    return started;
+  if (step.kind === "unavailable") {
+    return step;
   }
-  const ran = await step.run({ ticket: state.ticket, change: state.change, head, evidence: evidenceOf(state) });
+  const facts = await readyStarted(setup, state, head);
+  if (facts.kind === "failed") {
+    return facts;
+  }
+  const ran = await step.run({
+    ticket: state.ticket,
+    change: state.change,
+    head,
+    evidence: evidenceOf(state),
+    ...facts.value,
+  });
   return ran.kind === "ok"
     ? record({ where: where(setup, state), event: readyEnded(setup, state, head, ran.value) })
     : ran;
 }
 
-// readyEnded : the ready check's end; a stop for a person (#231) is marked so and sets no next try for the writer
+// readyEnded : the ready check's end, with the lane the diff needs (#230); a stop for a person (#231) is marked so and
+// sets no next try for the writer
 function readyEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly passed: boolean; readonly why: string; readonly human: boolean },
+  value: { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane },
 ): Event {
   const forWriter = !value.passed && !value.human;
   return {
@@ -531,6 +588,7 @@ function readyEnded(
     passed: value.passed,
     why: value.why,
     ...(value.human ? { human: true } : {}),
+    ...(value.lane === undefined ? {} : { lane: value.lane }),
     ...failedAt(setup, "ready", forWriter, state.runs.readyFailures),
   };
 }

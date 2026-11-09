@@ -6,7 +6,8 @@
 //   tiny                          its START
 //   bug, feature, one-way door    its START and its approval, bound to the spec's and the design's hashes (the
 //                                 approval floor); an approval with no START waits, since nothing runs without one
-// A START in a lane that needs an approval, or a START whose spec the coordinator has not written yet, waits.
+// A START in a lane that needs an approval, or a START whose spec the coordinator has not written yet, waits. So does a
+// spec whose planned files need a heavier lane than its own (#230; lane.ts): the engine only ever raises a lane.
 //
 //   the change is merged and still claimed                     reconcile (remove the claim)
 //   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
@@ -26,6 +27,8 @@
 //   the head is not the writer's (a person pushed)             wait: stand off
 //   the same patch twice, or a run that changed nothing        needs-human
 //   writer done, no ready check at this head                   ready check
+//   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230);
+//   than the one a human approved or STARTed                   a test check's stop at the same check is named too
 //   ready check stopped by a test check (#231)                 needs-human, the hits listed; a human's waiver at
 //                                                              this head, newer than that check, runs it again
 //   ready check failed                                         writer again        3 failures → needs-human
@@ -50,6 +53,7 @@
 //
 // Today: a merge conflict has no row, since poll does not report mergeability yet; the writer is not sent to rebase.
 
+import { above, raisedWhy } from "../lane.js";
 import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
 import type { Retried, Summary, Task } from "./records.js";
@@ -58,7 +62,8 @@ import type { Retried, Summary, Task } from "./records.js";
 // is the newer of the two records, and the run records count from then
 export type ApprovalView =
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
-  | { readonly kind: "started"; readonly at: string; readonly lane: "tiny" }
+  // a START alone, in a lane that needs no approval
+  | { readonly kind: "started"; readonly at: string; readonly lane: Lane }
   | { readonly kind: "stale" }
   | { readonly kind: "missing" }
   // a START, and a spec whose lane needs an approval the ticket does not have
@@ -66,7 +71,9 @@ export type ApprovalView =
   // a START, and no spec ready yet: the coordinator writes it
   | { readonly kind: "unwritten" }
   // an approval, and no START: nothing runs without one
-  | { readonly kind: "unstarted" };
+  | { readonly kind: "unstarted" }
+  // a START (and an approval), and the spec's planned files need a heavier lane than the spec's (#230)
+  | { readonly kind: "raised"; readonly from: Lane; readonly to: Lane; readonly why: string };
 
 // a human's waiver of the test checks (#231; waiver.ts): the head it was given at, and when
 export type WaiverView =
@@ -149,6 +156,7 @@ const HELD: { readonly [K in keyof HeldMap]: (view: HeldMap[K]) => string } = {
   unapproved: (v) => `the ${v.lane} lane needs a human's approval; the ticket has a START only`,
   unwritten: () => "the ticket has a START; its spec is not written yet",
   unstarted: () => "approved, no START: a human STARTs the ticket first",
+  raised: (v) => raisedWhy(v),
 };
 
 function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): string {
@@ -266,6 +274,37 @@ const samePatch: Rule = (s) => {
   return w.patch === s.runs.previousPatch
     ? { kind: "needs-human", why: "the writer made the same patch twice" }
     : "next";
+};
+
+// saidLane : the lane a human said yes to: approved, or STARTed in a lane that needs no approval
+function saidLane(view: ApprovalView): Lane | "none" {
+  return view.kind === "approved" || view.kind === "started" ? view.lane : "none";
+}
+
+// raisedLaneWhy : why the ready check's diff stops the change, when it needs a heavier lane than the one a human said
+// yes to (#230); "" when it does not. A raise stops for a person, never for the writer: only a raised spec and a new
+// approval let it go on, and a waiver does not.
+function raisedLaneWhy(s: TicketState, lane: Lane | undefined): string {
+  const said = saidLane(s.approval);
+  return lane !== undefined && said !== "none" && above(lane, said)
+    ? raisedWhy({ from: said, to: lane, why: "the ready check read the real diff" })
+    : "";
+}
+
+type LastReady = Extract<Summary["lastReady"], { kind: "ended" }>;
+
+// alsoStopped : the test checks' own stop at the same check, when they stopped it too and no waiver lifted it (#231)
+function alsoStopped(s: TicketState, head: string, r: LastReady): string {
+  const tests = r.human && !r.passed ? testChecksStopped(s, head, r) : { kind: "ready" as const, head };
+  return tests.kind === "needs-human" ? `; and ${tests.why}` : "";
+}
+
+// laneRaised : a lane raise goes to a person, naming the test checks' stop as well when both hit
+const laneRaised: Rule = (s) => {
+  const r = s.runs.lastReady;
+  const head = writerHead(s);
+  const why = r.kind === "ended" && r.head === head ? raisedLaneWhy(s, r.lane) : "";
+  return why === "" || r.kind !== "ended" ? "next" : { kind: "needs-human", why: `${why}${alsoStopped(s, head, r)}` };
 };
 
 // waivedSince : a waiver given at this head after the ready check that stopped it
@@ -406,6 +445,7 @@ const RULES: readonly Rule[] = [
   writerAgain,
   headMoved,
   samePatch,
+  laneRaised,
   ready,
   review,
   localGate,

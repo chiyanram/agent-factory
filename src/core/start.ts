@@ -16,6 +16,7 @@
 import { join } from "node:path";
 import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import { approvalState, currentSpec } from "./approval.js";
+import { needsApproval, plannedCheck, raisedWhy } from "./lane.js";
 import { plainName, type Refused, type Spec, type Ticket } from "./spec.js";
 
 export type StartRecord = {
@@ -136,7 +137,7 @@ async function tinyStart(where: Where, held: string): Promise<GoAhead> {
     return stored.kind === "missing" ? { kind: "held", why: held } : stored;
   }
   const current = await currentSpec(where);
-  const tiny = current.kind === "spec" && current.spec.lane === "tiny";
+  const tiny = current.kind === "spec" && !needsApproval(current.spec.lane);
   return tiny
     ? { kind: "go", said: "started", spec: current.spec, by: stored.record.by, at: stored.record.at }
     : { kind: "held", why: `${held}, and a START alone builds only the tiny lane` };
@@ -156,8 +157,24 @@ async function approvedStart(
     : { kind: "held", why: "approved, no START: a human STARTs the ticket first" };
 }
 
-// goAhead : whether the ticket's build may begin, and on whose word
+// planned : a go-ahead whose spec's planned files need a heavier lane than the one a human said yes to is held (#230)
+async function planned(where: Where, go: GoAhead): Promise<GoAhead> {
+  if (go.kind !== "go") {
+    return go;
+  }
+  const raise = await plannedCheck({ home: where.home, project: where.project, spec: go.spec });
+  if (raise.kind === "failed") {
+    return { kind: "refused", reason: raise.reason };
+  }
+  return raise.value.kind === "raised" ? { kind: "held", why: raisedWhy(raise.value) } : go;
+}
+
+// goAhead : whether the ticket's build may begin, and on whose word; the lane is checked against the planned files
 export async function goAhead(where: Where): Promise<GoAhead> {
+  return planned(where, await saidGo(where));
+}
+
+async function saidGo(where: Where): Promise<GoAhead> {
   const approval = await approvalState(where);
   switch (approval.kind) {
     case "approved":

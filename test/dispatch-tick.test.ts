@@ -8,7 +8,7 @@ import { waive } from "../src/core/waiver.js";
 import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
-import { start } from "../src/core/start.js";
+import { goAhead, start } from "../src/core/start.js";
 import { specHash } from "../src/core/spec.js";
 import { tempDir } from "./temp.js";
 
@@ -844,5 +844,108 @@ describe("START and approval (#227)", () => {
     expect(log).toContain("log PROJ-1: the shared copy of the approval did not go out: HTTP 502");
     const read = await readRecords(where());
     expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).not.toContain("shared");
+  });
+});
+
+describe("the lane set by code, raise only (#230)", () => {
+  const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
+  const LONG = "the coordinator raises the spec's lane, and a human approves it";
+
+  function specWith(lane: string, planned: readonly string[] = []): string {
+    const text = `${SPEC(lane)}\n## Planned files\n\n${planned.map((p) => `- ${p}`).join("\n")}\n`;
+    mkdirSync(join(home, "specs", "ledger", "PROJ-1"), { recursive: true });
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text);
+    return text;
+  }
+
+  function oneWayDoor(globs: readonly string[]): void {
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify({ lanes: { oneWayDoor: globs } }));
+  }
+
+  async function startedTiny(): Promise<void> {
+    const done = await start({
+      where: where(),
+      by: "ram",
+      via: "terminal",
+      at: "2026-11-07T08:00:00Z",
+      branch: "absent",
+      confirmed: false,
+    });
+    expect(done.kind).toBe("started");
+  }
+
+  const dry = async (changes: Changes = { team, open: [], merged: [] }): Promise<readonly string[]> => {
+    const log: string[] = [];
+    await tick(setup(changes, log, { dryRun: true }));
+    return log;
+  };
+
+  it("before the build: a planned file under a one-way-door path raises the lane, and the ticket waits for approval", async () => {
+    oneWayDoor(["db/migrations/**"]);
+    specWith("tiny", ["db/migrations/V7__loans.sql"]);
+    await startedTiny();
+    expect(await dry()).toEqual([
+      `log PROJ-1: wait: the lane is raised from tiny to one-way door (db/migrations/V7__loans.sql is under a one-way-door path): ${LONG} (dry run)`,
+    ]);
+    // the writer's own check holds it too
+    expect(await goAhead(where())).toMatchObject({
+      kind: "held",
+      why: expect.stringContaining("raised from tiny to one-way door"),
+    });
+    // raised in the spec and approved, the build begins
+    const text = specWith("one-way door", ["db/migrations/V7__loans.sql"]);
+    const done = await approve({ where: where(), seenHash: specHash(text), by: "ram", at: "2026-11-07T09:00:00Z" });
+    expect(done.kind).toBe("approved");
+    expect(await dry()).toEqual(["log PROJ-1: writer (fix): approved; no run yet (dry run)"]);
+  });
+
+  it("a lanes.oneWayDoor key that is not a list breaks the ticket rather than drop the check", async () => {
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify({ lanes: { oneWayDoor: "db/**" } }));
+    specWith("tiny", ["db/x.sql"]);
+    await startedTiny();
+    expect((await dry()).join(" ")).toContain("broken");
+  });
+
+  it("the ready check: a tiny spec whose diff changes code is raised to bug, and stops for approval", async () => {
+    oneWayDoor(["db/migrations/**"]);
+    specWith("tiny");
+    await startedTiny();
+    await record({
+      where: where(),
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p1",
+        evidence: [{ criterion: "AC-1", command: "make test", result: "ok" }],
+        hung: false,
+      },
+    });
+    const seen: unknown[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      ready: {
+        kind: "available",
+        run: async (input) => (
+          seen.push({ criteria: input.criteria, oneWayDoor: input.oneWayDoor }),
+          { kind: "ok", value: { passed: true, why: "", human: false, lane: "bug" } }
+        ),
+      },
+    };
+    const changes = { team, open: [open()], merged: [] };
+    await tick(setup(changes, [], { steps }));
+    expect(seen).toEqual([{ criteria: ["It answers 409."], oneWayDoor: ["db/migrations/**"] }]);
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ kind: "ready-ended", lane: "bug" });
+    const log: string[] = [];
+    await tick(setup(changes, log, { steps }));
+    expect(log).toContain("label +needs-human #12");
+    expect(log.find((l) => l.startsWith("note #12"))).toBe(
+      `note #12 [coordinator] blocked: the lane is raised from tiny to bug (the ready check read the real diff): ${LONG}`,
+    );
   });
 });

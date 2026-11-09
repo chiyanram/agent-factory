@@ -89,7 +89,7 @@ engine checks it from the planned files and the real diff, and can only raise it
 _Avoid_: size, type, category
 
 **Spec**: the approved contract, one file with `## Intent`, `## Lane`, `## Acceptance criteria` (numbered), `## Design`
-(a link or `none`) and what is out of scope.
+(a link or `none`), what is out of scope, and optionally `## Planned files`, which the lane is checked against.
 _Avoid_: requirements, story (for this file)
 
 **AC**: one acceptance criterion: a numbered line in the spec, referred to as AC-n, decidable by a test.
