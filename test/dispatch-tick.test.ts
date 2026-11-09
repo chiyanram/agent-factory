@@ -1165,6 +1165,76 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     expect(runs).toEqual(["PROJ-1"]);
   });
 
+  const two = () => ({
+    team,
+    open: [open({ labels: [] }), open({ number: 13, branch: "factory/PROJ-2", labels: [] })],
+    merged: [],
+  });
+
+  it("runs at once: a pass starts up to that many runs, one after another (#299)", async () => {
+    await approved("PROJ-1");
+    await approved("PROJ-2");
+    const runs: string[] = [];
+    await tick(setup(two(), [], { steps: writer(runs), caps: caps({ runsAtOnce: 2 }) }));
+    expect(runs.toSorted()).toEqual(["PROJ-1", "PROJ-2"]);
+  });
+
+  it("runs at once: the day cap is checked again before each run after the first (#299)", async () => {
+    await approved("PROJ-1");
+    await approved("PROJ-2");
+    const runs: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => (
+          runs.push(input.ticket),
+          {
+            kind: "ok",
+            value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false, spend: { usd: 2, tokens: 5 } },
+          }
+        ),
+      },
+    };
+    const log: string[] = [];
+    const day = { usd: 1, tokens: "none" } as const;
+    const ran = await tick(setup(two(), log, { steps, caps: caps({ runsAtOnce: 2, day }) }));
+    expect(runs).toHaveLength(1);
+    expect(log.some((l) => l.startsWith("log no new runs: today (2026-11-07, UTC) the project spent $2.00"))).toBe(
+      true,
+    );
+    expect(ran).toMatchObject({ kind: "ok" });
+  });
+
+  it("run hours: a pass outside them starts no run and holds it; inside them, it runs (#299)", async () => {
+    await approved();
+    const runs: string[] = [];
+    const runHours = { from: 22, to: 6, text: "22-06" };
+    const at = (now: string) => {
+      const log: string[] = [];
+      return {
+        log,
+        pass: tick(
+          setup(changes(), log, { steps: writer(runs), caps: caps({ runHours }), now: () => Date.parse(now) }),
+        ),
+      };
+    };
+    const day = at("2026-11-07T10:00:00Z");
+    expect(await day.pass).toMatchObject({
+      kind: "ok",
+      value: [
+        {
+          ticket: "PROJ-1",
+          result: { kind: "unavailable", reason: expect.stringContaining("held: outside the run hours 22-06") },
+        },
+      ],
+    });
+    expect(day.log).toContain("log no new runs: outside the run hours 22-06 (UTC, FACTORY_RUN_HOURS)");
+    expect(runs).toEqual([]);
+    await at("2026-11-07T23:30:00Z").pass;
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
   it("the token caps count tokens, as on a subscription, and the window share pauses until the window has room", async () => {
     await approved();
     await spent("2026-11-07T06:00:00Z", 0, 700);
