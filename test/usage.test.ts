@@ -181,6 +181,7 @@ describe("agent-factory usage", () => {
         gid: 20,
         run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
         interactive: async () => 1,
+        background: async () => ({ kind: "failed", reason: "no background in this test" }),
       },
     };
     expect(await runCli(["usage"], io)).toBe(0);

@@ -1174,7 +1174,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     const first = await pass("2026-11-07T10:00:00Z");
     expect(runs).toEqual([]);
     expect(first.log).toContain(
-      "log no new runs: today (2026-11-07, UTC) the project spent $1.00 and 10 tokens, at the cap of $1 (FACTORY_MAX_USD_DAY)",
+      "log no new runs: the project-day cap is reached: today (2026-11-07, UTC) the project spent $1.00 and 10 tokens, at the cap of $1 (FACTORY_MAX_USD_DAY); run `agent-factory dispatch ledger` again tomorrow",
     );
     // held, not failed: the pass exits 0
     expect(first.ran).toMatchObject({ kind: "ok", value: [{ ticket: "PROJ-1", result: { kind: "unavailable" } }] });
@@ -1221,9 +1221,13 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     const day = { usd: 1, tokens: "none" } as const;
     const ran = await tick(setup(two(), log, { steps, caps: caps({ runsAtOnce: 2, day }) }));
     expect(runs).toHaveLength(1);
-    expect(log.some((l) => l.startsWith("log no new runs: today (2026-11-07, UTC) the project spent $2.00"))).toBe(
-      true,
-    );
+    expect(
+      log.some((l) =>
+        l.startsWith(
+          "log no new runs: the project-day cap is reached: today (2026-11-07, UTC) the project spent $2.00",
+        ),
+      ),
+    ).toBe(true);
     expect(ran).toMatchObject({ kind: "ok" });
   });
 
@@ -1247,6 +1251,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
         {
           ticket: "PROJ-1",
           result: { kind: "unavailable", reason: expect.stringContaining("held: outside the run hours 22-06") },
+          held: true,
         },
       ],
     });
@@ -1276,7 +1281,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     await tick(setup(changes(), log, { steps: writer(runs), caps: caps({ window }) }));
     expect(runs).toEqual([]);
     expect(log).toContain(
-      "log no new runs: in the last 5 h the project spent $0.00 and 700 tokens, at the cap of 500 tokens (FACTORY_WINDOW_TOKENS)",
+      "log no new runs: the window is full until 11:00 UTC: in the last 5 h the project spent $0.00 and 700 tokens, at the cap of 500 tokens (FACTORY_WINDOW_TOKENS); run `agent-factory dispatch ledger` again then",
     );
     // 5 h after that round the window has room again
     await tick(

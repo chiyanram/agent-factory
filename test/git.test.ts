@@ -93,6 +93,18 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     );
   });
 
+  it("a planted core.hooksPath is ignored", async () => {
+    mkdirSync(join(base, "hooks"));
+    writeFileSync(join(base, "hooks/post-checkout"), readFileSync(plant("hooks-dir")));
+    chmodSync(join(base, "hooks/post-checkout"), 0o755);
+    git(["config", "core.hooksPath", join(base, "hooks")]);
+    gitTry(["checkout", "-q", "-b", "a"]);
+    expect(ranBy("hooks-dir")).toBe(true);
+    rmSync(ran);
+    ok(await hostGit(request(["checkout", "-q", "-b", "c"])));
+    expect(ranBy("hooks-dir")).toBe(false);
+  });
+
   it("a planted filter driver, also one whose name holds =", async () => {
     writeFileSync(join(repo, ".gitattributes"), "*.txt filter=x\n*.md filter=a=b\n");
     writeFileSync(join(repo, "a.txt"), "hi\n");
@@ -122,6 +134,20 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     expect(ranBy("textconv")).toBe(false);
   });
 
+  it("a planted textconv whose driver name holds = is not run", async () => {
+    writeFileSync(join(repo, ".gitattributes"), "*.txt diff=c=d\n");
+    writeFileSync(join(repo, "a.txt"), "one\n");
+    git(["add", "-A"]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one"]);
+    writeFileSync(join(repo, "a.txt"), "two\n");
+    git(["config", "diff.c=d.textconv", plant("eq-textconv")]);
+    gitTry(["diff"]);
+    expect(ranBy("eq-textconv")).toBe(true);
+    rmSync(ran);
+    ok(await hostGit(request(["diff"])));
+    expect(ranBy("eq-textconv")).toBe(false);
+  });
+
   it("a planted credential helper: plain git runs it, hostGit does not", async () => {
     git(["config", "credential.helper", `!${plant("helper")}`]);
     gitTry(["credential", "fill"], "protocol=https\nhost=example.invalid\n\n");
@@ -131,6 +157,21 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
       request(["credential", "fill"], { stdin: { kind: "text", text: "protocol=https\nhost=example.invalid\n\n" } }),
     );
     expect(ranBy("helper")).toBe(false);
+  });
+
+  it("a git planted in a relative or in-repo PATH entry is never run", async () => {
+    mkdirSync(join(repo, "bin"));
+    writeFileSync(join(repo, "bin/git"), readFileSync(plant("git")));
+    chmodSync(join(repo, "bin/git"), 0o755);
+    ok(await hostGit(request(["status"], { env: { ...env, PATH: `bin:${join(repo, "bin")}:${env.PATH ?? ""}` } })));
+    expect(ranBy("git")).toBe(false);
+  });
+
+  it("a planted core.sshCommand reads as plain ssh, a planted uploadpack as git-upload-pack", async () => {
+    git(["config", "core.sshCommand", join(base, "evil-ssh")]);
+    git(["config", "remote.origin.uploadpack", join(base, "evil-upload")]);
+    expect(ok(await hostGit(request(["config", "--get", "core.sshcommand"]))).trim()).toBe("ssh");
+    expect(ok(await hostGit(request(["config", "--get", "remote.origin.uploadpack"]))).trim()).toBe("git-upload-pack");
   });
 
   it("an ssh planted in a relative or in-repo PATH entry is never run", async () => {
@@ -209,10 +250,22 @@ describe("hostGit keeps what the operator chose", () => {
     expect(effective(ok(await hostGit(request(["config", "--get-all", key]))))).toEqual([]);
   });
 
+  it("still runs when a repo-set helper key holds =, or the repo's last key is a helper for another host", async () => {
+    git(["config", "credential.https://u=v@host.example.helper", "!/evil"]);
+    expect(await hostGit(request(["status"]))).toMatchObject({ kind: "ok" });
+    git(["config", "credential.zzz.helper", "!/evil"]);
+    expect(await hostGit(request(["status"]))).toMatchObject({ kind: "ok" });
+  });
+
   it("an always-set key takes the operator's own value when there is one", async () => {
     git(["config", "--global", "core.pager", "trusted-pager"]);
     git(["config", "core.pager", "/evil-pager"]);
     expect(ok(await hostGit(request(["config", "--get", "core.pager"]))).trim()).toBe("trusted-pager");
+  });
+
+  it("passes an operator's value with spaces and quotes to git as one value", async () => {
+    git(["config", "--global", "core.editor", "vi -c 'set x'"]);
+    expect(ok(await hostGit(request(["config", "--get", "core.editor"]))).trim()).toBe("vi -c 'set x'");
   });
 
   it("keeps a caller's own GIT_CONFIG_COUNT entries", async () => {

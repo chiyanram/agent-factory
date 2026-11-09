@@ -42,14 +42,15 @@ src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab
 src/core/egress/      the egress proxy: the allowlist, the Squid config, and the --internal network the box joins (#130)
 src/core/box/         the box seam: one Box interface; FACTORY_BOX picks the place, openBox refuses a box that does not work
 images/factory-box/   the base image of every vm box: git, Docker (run under Sysbox), Node and the pinned runner CLIs (#113)
-src/core/dispatch/    the dispatcher: the decision table, the per-ticket run records, and one locked pass (dispatch --once)
+src/core/dispatch/    the dispatcher: the decision table, the per-ticket run records, one locked pass, and the loop (#305)
 src/core/review/      the reviewer: the context pack, one review round (find, verify, post), and the status box
+src/core/onboard/     the onboarder: a project's brief and glossary, staged in the project home for a human, read by every run (#235)
 src/core/ready/       the ready check and the local verifier: branch code run in a fresh box, never on the host (#91)
 src/core/settings/    the settings layers: team, project, user and machine; each key's class; config show/check (#229)
 src/core/plugin/      the plugin contract: describe and call, the pinned registry, and the contract test kit (#134)
 src/core/process/     the project's plugin list and its pins (hash-checked each run), and its process: lanes and baseline (#232)
 plugins/              the bundled plugins: github and gitlab serve the forge seam (lib/ built from dist/); discord pings
-prompts/              the reviewer's default find and verify instructions, and the eval's judge
+prompts/              the reviewer's default find and verify instructions, the eval's judge, and the built-in role cards (roles/)
 evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)
 src/core/eval/        agent-factory eval reviewer: the harness, the judge, the $100 cap and the results file (#215)
 tests/                one plain-bash test per script; tests/lib.sh helpers; tests/fixtures/
