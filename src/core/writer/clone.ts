@@ -33,6 +33,9 @@ export function pluginPaths(count: number): readonly string[] {
   return Array.from({ length: count }, (_p, i) => `${PLUGINS_DIR}/${i + 1}`);
 }
 export const TASK_FILE = ".factory/task.md";
+// the project's accepted brief and glossary (#235; onboard/known.ts)
+export const BRIEF_FILE = ".factory/brief.md";
+export const GLOSSARY_FILE = ".factory/glossary.md";
 
 // a file the host may write into .factory: the task of a rework or CI run (task.ts), the writer's settings (tools.ts)
 export type FileText = { readonly kind: "none" } | { readonly kind: "text"; readonly text: string };
@@ -179,6 +182,8 @@ type Files = {
   readonly settings: FileText;
   // a merge run's default branch, fetched in as origin/<it>
   readonly merge?: string;
+  // the project's accepted brief and glossary, which every run reads (#235)
+  readonly knowledge?: { readonly brief: string; readonly glossary: string };
 };
 
 // the optional files the host writes, each by its path
@@ -186,6 +191,12 @@ function optional(files: Files): readonly { readonly path: string; readonly text
   return [
     ...(files.task.kind === "text" ? [{ path: TASK_FILE, text: files.task.text }] : []),
     ...(files.settings.kind === "text" ? [{ path: SETTINGS_FILE, text: files.settings.text }] : []),
+    ...(files.knowledge === undefined
+      ? []
+      : [
+          { path: BRIEF_FILE, text: files.knowledge.brief },
+          { path: GLOSSARY_FILE, text: files.knowledge.glossary },
+        ]),
   ];
 }
 

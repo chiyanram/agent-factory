@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prop } from "../src/core/dispatch/records.js";
 
@@ -18,7 +18,11 @@ function shipped(): readonly string[] {
 describe("the published package (#171)", () => {
   it("ships every prompt and the box image the code reads at run time", () => {
     const files = shipped();
-    const prompts = readdirSync(join(ROOT, "prompts")).map((f) => `prompts/${f}`);
+    // the built-in role cards are in prompts/roles (#235)
+    const prompts = readdirSync(join(ROOT, "prompts"), { recursive: true, withFileTypes: true })
+      .filter((f) => f.isFile())
+      .map((f) => relative(ROOT, join(f.parentPath, f.name)));
+    expect(prompts).toContain("prompts/roles/onboarder.md");
     expect(prompts).toContain("prompts/writer-ci.md");
     expect(files).toEqual(expect.arrayContaining([...prompts, "images/factory-box/Dockerfile"]));
   });
