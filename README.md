@@ -19,10 +19,10 @@ every piece of state, so a restart loses nothing.
   never approve.
 - **Rules from the default branch.** A merge request cannot change the rules it is judged by.
 
-> **Status (2026-11-06).** The design above is decided ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md),
-> [ADR-0013](docs/adr/0013-typescript-package-cli-first.md), map #30). The bash scripts still run the old way: the
-> writer runs unsandboxed with the bot's login and pushes itself, and the coordinator starts runs. The next step is
-> a TypeScript package that builds the new design in; the laptop pilot runs on it.
+> **Status (2026-11-09).** The TypeScript package runs the orchestrator, the implementer in a runner, the host push,
+> the ready check, the automated review and the local gate. The design on one page, with what is still to build and the
+> order, is [docs/DESIGN.md](docs/DESIGN.md); its words are in [GLOSSARY.md](GLOSSARY.md). Map #30 tracks the work.
+> The first pilot is a small personal project on the VM (#62).
 
 The rules the workers follow live in the `rulebook` plugin in [chiyanram/skills](https://github.com/chiyanram/skills)
 and in each project's own `AGENTS.md` files, not here.
