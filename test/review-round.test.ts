@@ -1,3 +1,4 @@
+import { FLOOR } from "../src/core/review/never.js";
 import { readActOn } from "../src/core/review/act-on.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -28,6 +29,7 @@ const FINDING = {
   file: "code/svc/Main.java",
   line: 1,
   rule: "ERR1",
+  category: "bug",
   severity: "blocker",
   finding: "returns 2",
   fix: "return the sum",
@@ -160,7 +162,14 @@ describe("reviewRound", () => {
   it("runs find once and verify once per kind, each fresh and read-only, then posts threads and one summary", async () => {
     const log = fresh();
     const seen: Seen[] = [];
-    const logic = { ...FINDING, kind: "logic", axis: "spec", rule: "correctness", finding: "AC1 not met" };
+    const logic = {
+      ...FINDING,
+      kind: "logic",
+      axis: "spec",
+      rule: "correctness",
+      category: "speculative",
+      finding: "AC1 not met",
+    };
     const m = model(
       [
         findAnswer([FINDING, logic]),
@@ -178,7 +187,7 @@ describe("reviewRound", () => {
     expect(seen.every((s) => s.run.maxUsd === "2" && s.run.name === "reviewer-12")).toBe(true);
     expect(log.threads).toHaveLength(2);
     expect(log.threads[0]).toMatch(
-      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, ERR1\): returns 2\n\n- Fix: return the sum$/,
+      /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum$/,
     );
     const summary = log.posts.at(-1) ?? "";
     expect(summary.split("\n")[0]).toMatch(
@@ -186,8 +195,8 @@ describe("reviewRound", () => {
         `^\\[reviewer\\] round 1 · head ${p.head2} · patch-id [0-9a-f]+ · Act on 1 · Consider 1 · Noted 0 · Dismissed 0$`,
       ),
     );
-    expect(summary).toContain("- Standards · Act on F1 svc/Main.java:1 ERR1: returns 2 (real)");
-    expect(summary).toContain("- Spec · Consider F2 svc/Main.java:1 correctness: AC1 not met (judgment)");
+    expect(summary).toContain("- Standards · Act on F1 svc/Main.java:1 ERR1 (bug): returns 2 (real)");
+    expect(summary).toContain("- Spec · Consider F2 svc/Main.java:1 correctness (speculative): AC1 not met (judgment)");
     expect(readdirSync(join(p.root, "runs"))).toEqual([]);
   });
 
@@ -236,7 +245,9 @@ describe("reviewRound", () => {
     expect(JSON.parse(seen[1]?.findings ?? "[]").map((f: { id: string; file: string }) => `${f.id} ${f.file}`)).toEqual(
       ["F1 svc/Main.java", "F2 svc/Main.java"],
     );
-    expect(log.posts.at(-1)).toContain("Consider F2 svc/Main.java:1 ERR1: second (the verify pass gave no verdict)");
+    expect(log.posts.at(-1)).toContain(
+      "Consider F2 svc/Main.java:1 ERR1 (bug): second (the verify pass gave no verdict)",
+    );
   });
 
   it("zero findings still posts the summary and says it is not a pass (#118)", async () => {
@@ -244,6 +255,20 @@ describe("reviewRound", () => {
     await reviewRound(setup(forge(log), model([findAnswer([])], [])));
     expect(log.posts.at(-1)).toContain("No findings. That is not a pass: the human still reviews before merge");
     expect(log.threads).toEqual([]);
+  });
+
+  it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {
+    const bare = join(p.root, "bare-find.md");
+    writeFileSync(bare, "Find what breaks. Report each finding.\n");
+    const seen: Seen[] = [];
+    await reviewRound(
+      setup(forge(fresh()), model([findAnswer([FINDING]), verdicts([])], seen), {
+        prompts: { find: bare, verify: PROMPTS.verify },
+      }),
+    );
+    expect(seen.map((s) => s.run.prompt.startsWith(FLOOR))).toEqual([true, true]);
+    expect(seen[0]?.run.prompt).toContain("approve or merge");
+    expect(seen[0]?.run.prompt.endsWith("Find what breaks. Report each finding.\n")).toBe(true);
   });
 
   it("a head that moved during the review posts nothing: MOVED", async () => {

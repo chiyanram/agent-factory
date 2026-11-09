@@ -807,6 +807,7 @@ const FINDING: Sorted = {
   file: "src/Renewal.java",
   line: 7,
   rule: "R-3",
+  category: "bug",
   severity: "blocker",
   finding: "a reserved loan still renews",
   fix: "refuse it with 409",
