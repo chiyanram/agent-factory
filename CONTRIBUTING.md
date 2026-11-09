@@ -104,7 +104,7 @@ Every push to `main` runs semantic-release (`release.config.mjs`, #153), the sam
 - The release notes come from the PR titles on `main` (`scripts/release_notes.mjs`, #157). The sections are
   `⚠️ Breaking changes`, `✨ Features`, `🐛 Fixes`, `⚡ Performance` and `⏪ Reverts`, and each change is one bullet
   `**scope** — subject · #ticket (PR #pr)`. Put the ticket as `(#N)` at the end of the PR title; GitHub adds the PR
-  number after it. `tests/release_notes.test.sh` compares the notes for fixed commits to
+  number after it. `test/release-notes.test.ts` compares the notes for fixed commits to
   `tests/fixtures/release-notes/expected.md`; change both together.
 - The versions are `0.x` until the pilot (#62) has run; `1.0.0` means the CLI is meant to stay stable.
 - `npm run release:preview` shows the next version without releasing (it needs a GitHub login).
