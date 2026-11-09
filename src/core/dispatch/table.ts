@@ -53,11 +53,15 @@
 // handed to a person is not handed over again: removing needs-human does not lift it. The way back from needs-human
 // (#227, #151 gap 1): a person removes the label and STARTs again (tiny) or approves the spec again (the other lanes);
 // the newer record starts every count afresh, and the next pass picks the ticket up.
+//
+// The ticket's cap (#131; caps.ts) holds over every run: a ticket whose runs since the approval spent its cap goes to
+// needs-human, with the spend shown, instead of starting another.
 
 import { above, raisedWhy } from "../lane.js";
 import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
 import type { Retried, Summary, Task } from "./records.js";
+import { ticketCapped, type Caps } from "./caps.js";
 
 // what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
 // is the newer of the two records, and the run records count from then
@@ -101,6 +105,8 @@ export type TicketState = {
   // milliseconds since the epoch
   readonly now: number;
   readonly quietMinutes: number;
+  // the ticket's cap (#131)
+  readonly caps: Caps;
 };
 
 export type Action =
@@ -526,7 +532,15 @@ function released(state: TicketState, action: Action): Action {
     : action;
 }
 
-// decide : the one action for this ticket now, with the two rules that hold over every row.
+const RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify"]);
+
+// capped : a run of a ticket at its cap goes to a person instead, with what the ticket spent (#131)
+function capped(state: TicketState, action: Action): Action {
+  const why = RUNS.has(action.kind) ? ticketCapped(state.runs.spent, state.caps) : "";
+  return why === "" ? action : { kind: "needs-human", why };
+}
+
+// decide : the one action for this ticket now, with the rules that hold over every row.
 export function decide(state: TicketState): Action {
-  return released(state, once(state, backedOff(state, first(state))));
+  return released(state, once(state, capped(state, backedOff(state, first(state)))));
 }

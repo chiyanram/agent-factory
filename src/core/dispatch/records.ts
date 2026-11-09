@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
-import type { Spend } from "./spend.js";
+import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
@@ -467,6 +467,8 @@ export type Summary = {
   readonly blocked: readonly string[];
   // the time of the newest line, or "" for none
   readonly lastAt: string;
+  // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
+  readonly spent: Spend;
 };
 
 export const EMPTY: Summary = {
@@ -487,6 +489,7 @@ export const EMPTY: Summary = {
   pingedAt: "",
   blocked: [],
   lastAt: "",
+  spent: NO_SPEND,
 };
 
 function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): Summary {
@@ -506,6 +509,7 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
     testFirstDone: s.testFirstDone || testFirst,
     rebaseRuns: s.rebaseRuns + Number(e.mode === "rebase"),
     ciRounds: s.ciRounds + Number(e.mode === "ci"),
+    spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   };
 }
 
@@ -541,6 +545,7 @@ const STEPS: Steps = {
     reviewRounds: s.reviewRounds + 1,
     reviewFailures: s.reviewFailures + Number(e.actOn > 0),
     nextTry: nextTryView(e.nextTry),
+    spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   }),
   "verify-ended": (s, e) => ({
     ...s,

@@ -33,6 +33,9 @@ const dollars: Check = (value) =>
 
 const DRY: readonly string[] = ["0", "1"];
 
+// the most tokens a token cap may hold
+const MOST_TOKENS = 1_000_000_000_000;
+
 const MACHINE_CHECK: Readonly<Record<KeyClass, Check>> = {
   ladder: oneOf(DRY),
   cap: wholeNumber(999),
@@ -66,6 +69,48 @@ export const MACHINE_KEYS = [
   machine("review.verifyPrompt", "FACTORY_REVIEW_VERIFY", "locked", "the automated review's verify instructions"),
   machine("caps.usdPerRun", "FACTORY_MAX_USD", "cap", "the most one model run may spend, in US dollars", dollars),
   machine("caps.liveRuns", "FACTORY_MAX_RUNS", "cap", "the most live runs on this machine"),
+  machine(
+    "caps.usdPerTicket",
+    "FACTORY_MAX_USD_TICKET",
+    "cap",
+    "the most a ticket's runs may spend since its approval, in US dollars; then needs-human",
+    dollars,
+  ),
+  machine(
+    "caps.tokensPerTicket",
+    "FACTORY_MAX_TOKENS_TICKET",
+    "cap",
+    "the most tokens a ticket's runs may spend since its approval; then needs-human",
+    wholeNumber(MOST_TOKENS),
+  ),
+  machine(
+    "caps.usdPerProjectDay",
+    "FACTORY_MAX_USD_DAY",
+    "cap",
+    "the most a project's runs may spend in a UTC day, in US dollars; then no new run that day",
+    dollars,
+  ),
+  machine(
+    "caps.tokensPerProjectDay",
+    "FACTORY_MAX_TOKENS_DAY",
+    "cap",
+    "the most tokens a project's runs may spend in a UTC day; then no new run that day",
+    wholeNumber(MOST_TOKENS),
+  ),
+  machine(
+    "caps.windowTokens",
+    "FACTORY_WINDOW_TOKENS",
+    "cap",
+    "the project's share of a subscription window, in tokens: the stop line; then no new run until the window has room",
+    wholeNumber(MOST_TOKENS),
+  ),
+  machine(
+    "caps.machineWindowTokens",
+    "FACTORY_MACHINE_WINDOW_TOKENS",
+    "cap",
+    "every project's share of a subscription window on this machine, in tokens: the machine's stop line",
+    wholeNumber(MOST_TOKENS),
+  ),
   machine(
     "eval.judgeUsdPerRun",
     "FACTORY_JUDGE_MAX_USD",

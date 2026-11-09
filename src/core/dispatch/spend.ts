@@ -6,7 +6,10 @@
 // A run that ends with no result event (a stall, a timeout, a box that failed) reports nothing: its record carries no
 // spend, and `usage` counts it as unmeasured, never as free.
 
-import { prop } from "./records.js";
+// prop : one property of a parsed JSON value, or undefined (records.ts has the same; it imports this file)
+function prop(value: unknown, name: string): unknown {
+  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
+}
 
 export type Spend = { readonly usd: number; readonly tokens: number };
 

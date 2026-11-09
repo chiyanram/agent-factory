@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { backoffMs, EMPTY, type Summary } from "../src/core/dispatch/records.js";
+import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import {
   decide,
   MAX_CI_ROUNDS,
@@ -58,6 +59,7 @@ function state(over: Partial<TicketState> = {}): TicketState {
     now: NOW,
     quietMinutes: 30,
     waiver: { kind: "none" },
+    caps: NO_CAPS,
     ...over,
   };
 }
