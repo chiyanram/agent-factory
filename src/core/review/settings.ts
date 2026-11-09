@@ -4,7 +4,8 @@
 //   FACTORY_REPO                  the project's clone; packs go to <repo>/.claude/packs, pass answers to <repo>/.claude/runs
 //   FACTORY_RULEBOOK              the rulebook plugin folder, the one that holds skills/<domain>/references/
 //   FACTORY_REVIEW_FIND / _VERIFY the instructions (default: the package's prompts/review-*.md)
-//   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   default sonnet, sonnet, opus (#22 Q4)
+//   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   full model ids, never an alias (ADR-0015 E9, #213);
+//                                 default REVIEW_MODELS: Sonnet, Sonnet, Opus (#22 Q4)
 //   FACTORY_MAX_USD               the most one model run may spend, in US dollars (ADR-0011 D14)
 //   FACTORY_CLAUDE                the claude CLI (default: claude)
 //   FACTORY_MAX_RUNS              live runs allowed on this machine at once (default 2)
@@ -23,6 +24,7 @@ import { claudeSessions, type Sessions } from "./live.js";
 import { claudeModel, runInFolder, type Model } from "./model.js";
 import type { ReviewSetup } from "./round.js";
 import { settingName, settingOf } from "../settings/machine.js";
+import { PINNED_HINT, pinnedModel, type MachineId } from "../settings/variables.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
@@ -41,6 +43,27 @@ export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
         kind: "failed",
         reason: `${settingName("caps.usdPerRun")} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(value)}`,
       };
+}
+
+// the reviewer's models when no layer sets them: full ids, so a new model reaches the reviewer only through a PR that
+// changes these lines, and that PR carries an eval pass (ADR-0015 E8, E9; #213)
+export const REVIEW_MODELS = {
+  find: "claude-sonnet-5-5",
+  rule: "claude-sonnet-5-5",
+  logic: "claude-opus-5-5",
+} as const;
+
+const MODEL_KEYS = { find: "review.findModel", rule: "review.ruleModel", logic: "review.logicModel" } as const;
+
+// unpinnedModel : the refusal of the first of these model keys that is set to an alias, or ""
+export function unpinnedModel(env: NodeJS.ProcessEnv, ids: readonly MachineId[]): string {
+  const bad = ids.find((id) => {
+    const value = settingOf(env, id);
+    return value !== undefined && !pinnedModel(value);
+  });
+  return bad === undefined
+    ? ""
+    : `${settingName(bad)} must be ${PINNED_HINT}, got ${JSON.stringify(settingOf(env, bad))}`;
 }
 
 function maxRuns(env: NodeJS.ProcessEnv): Result<number> {
@@ -93,8 +116,12 @@ function places(env: NodeJS.ProcessEnv): Result<Places> {
   return h.kind === "ok" ? { kind: "ok", value: { repo: repo.value, rulebook: rulebook.value, home: h.value } } : h;
 }
 
-// paths : the settings, each checked; a value that is set but not valid is refused
+// paths : the settings, each checked; a value that is set but not valid is refused, and so is a model alias
 export function paths(env: NodeJS.ProcessEnv): Result<Paths> {
+  const alias = unpinnedModel(env, Object.values(MODEL_KEYS));
+  if (alias !== "") {
+    return { kind: "failed", reason: alias };
+  }
   const where = places(env);
   if (where.kind === "failed") {
     return where;
@@ -141,9 +168,9 @@ function prompts(env: NodeJS.ProcessEnv): ReviewSetup["prompts"] {
 
 function models(env: NodeJS.ProcessEnv): ReviewSetup["models"] {
   return {
-    find: settingOf(env, "review.findModel") ?? "sonnet",
-    rule: settingOf(env, "review.ruleModel") ?? "sonnet",
-    logic: settingOf(env, "review.logicModel") ?? "opus",
+    find: settingOf(env, MODEL_KEYS.find) ?? REVIEW_MODELS.find,
+    rule: settingOf(env, MODEL_KEYS.rule) ?? REVIEW_MODELS.rule,
+    logic: settingOf(env, MODEL_KEYS.logic) ?? REVIEW_MODELS.logic,
   };
 }
 

@@ -9,7 +9,7 @@ import { parseArgs } from "node:util";
 import type { Result } from "./core/forge/api.js";
 import { evalReviewer, evalSettings, type EvalInput, type EvalSettings, type Written } from "./core/eval/harness.js";
 import { claudeModel, runInFolder } from "./core/review/model.js";
-import { claudeEnv } from "./core/review/settings.js";
+import { claudeEnv, unpinnedModel } from "./core/review/settings.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
 export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--allow-partial]
@@ -68,6 +68,7 @@ function badDollars(env: NodeJS.ProcessEnv): string {
 // refusal : why this pass may not run here, or ""
 export function refusal(env: NodeJS.ProcessEnv): string {
   const bad = badDollars(env);
+  const alias = unpinnedModel(env, ["review.findModel", "review.ruleModel", "review.logicModel", "eval.judgeModel"]);
   const checks: readonly (readonly [boolean, string])[] = [
     [inCi(env), "it runs on the host, never in CI: CI holds no model token (ADR-0015 E10)"],
     [
@@ -75,6 +76,7 @@ export function refusal(env: NodeJS.ProcessEnv): string {
       "FACTORY_DRY_RUN is set, and an eval spends on model runs; run it without the dry run",
     ],
     [bad !== "", bad],
+    [alias !== "", `${alias}: a pass with an alias proves nothing about the model it ran (ADR-0015 E9)`],
     [
       !isAbsolute(settingOf(env, "rulebook") ?? ""),
       "FACTORY_RULEBOOK must be the rulebook plugin folder, an absolute path",

@@ -215,7 +215,12 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     );
     expect(r.inputs.prompts.judge).toMatch(/^[0-9a-f]{40}$/);
     expect(r.inputs.rulebook).toMatch(/^[0-9a-f]{40}$/);
-    expect(r.inputs.models).toEqual({ find: "sonnet", rule: "sonnet", logic: "opus", judge: "sonnet" });
+    expect(r.inputs.models).toEqual({
+      find: "claude-sonnet-5-5",
+      rule: "claude-sonnet-5-5",
+      logic: "claude-opus-5-5",
+      judge: "claude-sonnet-5-5",
+    });
     // per run: find, verify (rule); the seeded case's run also judges once
     expect(seen.filter((s) => s.schema.includes("confidence"))).toHaveLength(RUNS);
     expect(seen).toHaveLength(RUNS * 2 * 2 + RUNS);
@@ -271,7 +276,7 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     expect(r.cases.skipped).toContainEqual({ case: "clean-one", status: "not run: the cap" });
   });
 
-  it("refuses in CI, in a dry run, and without a rulebook, and never starts the agent CLI", async () => {
+  it("refuses in CI, in a dry run, without a rulebook and with a model alias, and never starts the agent CLI", async () => {
     const io = (e: NodeJS.ProcessEnv, argv: readonly string[] = ["eval", "reviewer", root]) => {
       let err = "";
       return {
@@ -299,6 +304,11 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
       [{ ...full, FACTORY_DRY_RUN: "1" }, "dry run"],
       [{ ...env }, "FACTORY_RULEBOOK"],
       [{ ...full, FACTORY_MAX_USD: "lots" }, "FACTORY_MAX_USD"],
+      [
+        { ...full, FACTORY_LOGIC_MODEL: "opus" },
+        'FACTORY_LOGIC_MODEL must be a full model id, such as "claude-sonnet-5-5"',
+      ],
+      [{ ...full, FACTORY_JUDGE_MODEL: "sonnet" }, "FACTORY_JUDGE_MODEL must be a full model id"],
     ] as const) {
       const c = io(e);
       expect(await c.run()).toBe(1);

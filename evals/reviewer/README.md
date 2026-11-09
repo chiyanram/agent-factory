@@ -73,7 +73,8 @@ repository's checkout (default `.`): its golden set, and the history every `base
   partial result is never proof.
 - **Settings.** `FACTORY_CLAUDE` (the agent CLI), `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL`,
   `FACTORY_REVIEW_FIND` and `FACTORY_REVIEW_VERIFY` as for `agent-factory review`; `FACTORY_JUDGE_MODEL` (default
-  `sonnet`) and `FACTORY_EVAL_JUDGE` (the judge's instructions).
+  `claude-sonnet-5-5`) and `FACTORY_EVAL_JUDGE` (the judge's instructions). Every model is a full id: a pass refuses
+  an alias such as `sonnet`, since its results file could not say which model ran (ADR-0015 E9).
 
 Exit 0 when the results file is written, 3 when it is written but partial, 1 when the pass is refused.
 
