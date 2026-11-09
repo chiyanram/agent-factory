@@ -24,6 +24,7 @@ import type { Change, Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
+import { actedSince, keepTracked, type Acted } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
@@ -88,6 +89,8 @@ export type Outcome =
       readonly costUsd: number;
       // every token the round's passes spent (#131)
       readonly tokens: number;
+      // the last full round's Act on and Consider findings, each acted on or not since its head (#220)
+      readonly acted: Acted | "none";
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -528,6 +531,17 @@ async function threadsAndLabel(ctx: Ctx, box: Box, sorted: readonly Sorted[]): P
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
+// actedOf : keeps this round's findings for the next round's rate, and rates the last full round's against this head;
+// neither can fail the round (#220)
+async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promise<Acted | "none"> {
+  const at = { recordsDir: ctx.setup.recordsDir, change: ctx.setup.number, head };
+  await keepTracked(at, sorted);
+  const last = ctx.past.last;
+  return last.kind === "round"
+    ? actedSince({ ...at, repo: ctx.setup.repo, env: ctx.setup.env, since: last.head })
+    : "none";
+}
+
 async function post(
   ctx: Ctx,
   pack: Pack,
@@ -547,6 +561,7 @@ async function post(
   if (kept.kind === "failed") {
     return kept;
   }
+  const acted = await actedOf(ctx, pack.head, result.sorted);
   const labelled = await threadsAndLabel(ctx, box.value, result.sorted);
   if (labelled.kind === "failed") {
     return labelled;
@@ -570,6 +585,7 @@ async function post(
           counts: c,
           costUsd: result.spent.costUsd,
           tokens: result.spent.find + result.spent.verify,
+          acted,
         },
       }
     : summary;

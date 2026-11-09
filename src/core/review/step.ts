@@ -1,7 +1,7 @@
 // step — the reviewer as the dispatcher's review step (#103, #138). The table needs only the Act on count; every other
 // outcome maps onto it, with what the round spent (#131): every model answer of the round, a failed pass's too, is
 // metered, so a round that fails still hands the orchestrator its spend. The outcomes:
-//   posted, reused, already   their Act on count
+//   posted, reused, already   their Act on count; a posted round also rates the last full round's findings (#220)
 //   no-progress               needs-human is on the change, which the table reads first next pass
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 
@@ -10,16 +10,20 @@ import type { Forge } from "../forge/types.js";
 import type { Steps } from "../dispatch/tick.js";
 import type { Sessions } from "./live.js";
 import type { Model, ModelResult } from "./model.js";
+import type { Acted } from "./acted-on.js";
 import { reviewRound, type Outcome } from "./round.js";
 import { paths, reviewSetup } from "./settings.js";
 import { addSpend, NO_SPEND, spendOf, type Spend } from "../dispatch/spend.js";
 
 type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
-type ActOn = Result<{ readonly actOn: number }>;
+type ActOn = Result<{ readonly actOn: number; readonly acted?: Acted }>;
 type Mappers = { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => ActOn };
 
 const MAP: Mappers = {
-  posted: (o) => ({ kind: "ok", value: { actOn: o.counts.act_on } }),
+  posted: (o) => ({
+    kind: "ok",
+    value: o.acted === "none" ? { actOn: o.counts.act_on } : { actOn: o.counts.act_on, acted: o.acted },
+  }),
   reused: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   already: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   "no-progress": () => ({ kind: "ok", value: { actOn: 1 } }),

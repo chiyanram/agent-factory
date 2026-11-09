@@ -46,6 +46,7 @@ import {
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
 import type { Spend } from "./spend.js";
+import type { Acted } from "../review/acted-on.js";
 import { projectStop, type Caps, type Stop } from "./caps.js";
 import { readSpends } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
@@ -101,7 +102,7 @@ export type Steps = {
         readonly kind: "available";
         readonly run: (
           input: RunInput,
-        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend }> | FailedSpent>;
+        ) => Promise<Result<{ readonly actOn: number; readonly spend: Spend; readonly acted?: Acted }> | FailedSpent>;
       };
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
@@ -655,7 +656,7 @@ function reviewEnded(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  value: { readonly actOn: number; readonly spend: Spend },
+  value: { readonly actOn: number; readonly spend: Spend; readonly acted?: Acted },
 ): Promise<Done> {
   return record({
     where: where(setup, state),
@@ -665,6 +666,7 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
+      ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });

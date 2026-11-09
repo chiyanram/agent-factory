@@ -22,6 +22,7 @@ import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
+import { isActedRow, type Acted } from "../review/acted-on.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
@@ -127,6 +128,9 @@ export type Event =
       readonly nextTry?: NextTry;
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // the last full round's Act on and Consider findings at its head, each acted on or not by this head (#220);
+      // none on a first round, a reused one, or an older line
+      readonly acted?: Acted;
     }
   // what a run that failed spent (#131): a review round whose pass failed
   | {
@@ -349,14 +353,25 @@ function verifyEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "verify-ended", head, passed, ...next };
 }
 
+// actedField : a review line's acted-on rows, as a field to spread: none on a line that has none (#220)
+function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
+  const acted = prop(raw, "acted");
+  if (acted === undefined) {
+    return {};
+  }
+  const since = str(acted, "since");
+  const rows = prop(acted, "rows");
+  return since !== BAD && Array.isArray(rows) && rows.every(isActedRow) ? { acted: { since, rows } } : BAD;
+}
+
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
-  const next = nextTryField(raw);
-  const spend = spendField(raw);
-  return head === BAD || next === BAD || spend === BAD || !Number.isSafeInteger(actOn)
+  const extras = [nextTryField(raw), spendField(raw), actedField(raw)];
+  const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
+  return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
     ? BAD
-    : { at, kind: "review-ended", head, actOn: Number(actOn), ...next, ...spend };
+    : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good) };
 }
 
 const PARSE: Readonly<Record<Kind, Parse>> = {

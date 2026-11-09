@@ -9,6 +9,7 @@ import { plainName } from "../spec.js";
 import type { Result } from "../forge/api.js";
 import { readRecords } from "./records.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
+import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 
 // one model run's record: the writer's or a review round's end, or what a failed run spent
 export type Spent = {
@@ -18,7 +19,14 @@ export type Spent = {
   readonly spend: Spend | "unmeasured";
 };
 
-export type Spends = { readonly runs: readonly Spent[]; readonly problems: readonly string[] };
+// one review round's acted-on rows (#220): the last full round's findings, each acted on or not since
+export type ActedSeen = { readonly project: string; readonly at: string; readonly rows: readonly ActedRow[] };
+
+export type Spends = {
+  readonly runs: readonly Spent[];
+  readonly acted: readonly ActedSeen[];
+  readonly problems: readonly string[];
+};
 
 export const WINDOW_HOURS = 5;
 
@@ -36,19 +44,27 @@ async function projectsOf(home: string, project: string | undefined): Promise<re
   return project === undefined ? names(join(home, "runs"), "") : [project];
 }
 
-// ticketSpends : every measured or unmeasured run of one ticket, or why its records cannot be read
-async function ticketSpends(home: string, project: string, ticket: string): Promise<Result<readonly Spent[]>> {
+type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[] };
+
+// ticketSpends : every measured or unmeasured run of one ticket, and its acted-on rows, or why its records cannot be
+// read
+async function ticketSpends(home: string, project: string, ticket: string): Promise<Result<Read>> {
   const events = await readRecords({ home, project, ticket });
   if (events.kind === "failed") {
     return events;
   }
   return {
     kind: "ok",
-    value: events.value.flatMap((e) =>
-      e.kind === "writer-ended" || e.kind === "review-ended" || e.kind === "spent"
-        ? [{ project, ticket, at: e.at, spend: e.spend ?? "unmeasured" }]
-        : [],
-    ),
+    value: {
+      runs: events.value.flatMap((e) =>
+        e.kind === "writer-ended" || e.kind === "review-ended" || e.kind === "spent"
+          ? [{ project, ticket, at: e.at, spend: e.spend ?? "unmeasured" }]
+          : [],
+      ),
+      acted: events.value.flatMap((e) =>
+        e.kind === "review-ended" && e.acted !== undefined ? [{ project, at: e.at, rows: e.acted.rows }] : [],
+      ),
+    },
   };
 }
 
@@ -56,18 +72,20 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
 // the rest are still read
 export async function readSpends(input: { readonly home: string; readonly project?: string }): Promise<Spends> {
   const runs: Spent[] = [];
+  const acted: ActedSeen[] = [];
   const problems: string[] = [];
   for (const project of await projectsOf(input.home, input.project)) {
     for (const ticket of await names(join(input.home, "runs", project), ".jsonl")) {
       const read = await ticketSpends(input.home, project, ticket);
       if (read.kind === "ok") {
-        runs.push(...read.value);
+        runs.push(...read.value.runs);
+        acted.push(...read.value.acted);
       } else {
         problems.push(read.reason);
       }
     }
   }
-  return { runs, problems };
+  return { runs, acted, problems };
 }
 
 // Periods : the start of today, of the current window and of the month, in ms since the epoch
@@ -140,5 +158,38 @@ export function usageLines(input: {
     `usage at ${new Date(input.now).toISOString()}: days and months in UTC, the window is the last ${input.windowHours} h`,
     ...aligned(rows),
     "+N? is N runs with no spend reported (stopped before their result): not in the sums",
+  ];
+}
+
+function rateText(name: string, r: Rate): string {
+  return `${name} ${r.acted}/${r.of}`;
+}
+
+// actedLines : the automated review's acted-on rate this month, all and per project, per lens and per bucket (#220).
+// Pure.
+export function actedLines(input: { readonly acted: readonly ActedSeen[]; readonly now: number }): readonly string[] {
+  const month = periodsAt(input.now, 1).month;
+  const seen = input.acted.filter((a) => Date.parse(a.at) >= month);
+  if (seen.length === 0) {
+    return [];
+  }
+  const line = (name: string, rows: readonly ActedRow[]): string => {
+    const r = actedRates(rows);
+    const parts = [...Object.entries(r.lens), ...Object.entries(r.bucket)].map(([k, v]) => rateText(k, v));
+    return [rateText(name, r.all), ...parts].join(" · ");
+  };
+  const projects = [...new Set(seen.map((a) => a.project))].toSorted();
+  return [
+    "acted on this month: findings in Act on or Consider whose region a later commit changed, per lens and bucket",
+    line(
+      "all",
+      seen.flatMap((a) => a.rows),
+    ),
+    ...projects.map((p) =>
+      line(
+        `  ${p}`,
+        seen.filter((a) => a.project === p).flatMap((a) => a.rows),
+      ),
+    ),
   ];
 }
