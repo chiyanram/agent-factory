@@ -5,7 +5,7 @@ import { openProjectForge } from "../src/core/forge/index.js";
 import { pluginForge } from "../src/core/forge/plugin.js";
 import { reader } from "../src/core/forge/read.js";
 import { answer, described } from "../src/core/forge/serve.js";
-import { changeOf } from "../src/core/forge/shapes.js";
+import { changeOf, changesOf } from "../src/core/forge/shapes.js";
 import type { Change } from "../src/core/forge/types.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { makeFakes, type FakeAnswer } from "../src/core/plugin/fakes.js";
@@ -241,6 +241,36 @@ describe("serve: the plugin side (#134 PR C)", () => {
     };
     const r = reader("test");
     expect(r.done(changeOf(r, JSON.parse(JSON.stringify(change))))).toEqual({ kind: "ok", value: change });
+  });
+});
+
+describe("changesOf: an open change's mergeability over the plugin protocol (#103)", () => {
+  const open = (extra: Record<string, unknown>) => ({
+    team: [],
+    merged: [],
+    open: [
+      {
+        number: 4,
+        branch: "factory/T-4",
+        fork: false,
+        head: "h",
+        draft: true,
+        labels: [],
+        pipeline: { kind: "none" },
+        comments: [],
+        ...extra,
+      },
+    ],
+  });
+
+  it("keeps what the plugin says, reads a plugin built before it as unknown, and refuses another word", () => {
+    const read = (extra: Record<string, unknown>) => {
+      const r = reader("test");
+      return r.done(changesOf(r, open(extra)));
+    };
+    expect(read({ mergeable: "conflict" })).toMatchObject({ kind: "ok", value: { open: [{ mergeable: "conflict" }] } });
+    expect(read({})).toMatchObject({ kind: "ok", value: { open: [{ mergeable: "unknown" }] } });
+    expect(read({ mergeable: "maybe" })).toMatchObject({ kind: "failed" });
   });
 });
 

@@ -15,6 +15,7 @@ import type {
   CommitStatus,
   FailedJob,
   LineFinding,
+  Mergeable,
   MergedChange,
   OpenChange,
   Person,
@@ -92,6 +93,13 @@ function personOf(r: Reader, value: unknown): Person {
   };
 }
 
+const MERGEABLE: readonly [Mergeable, ...Mergeable[]] = ["unknown", "clean", "conflict"];
+
+// mergeableOf : a plugin built before mergeability was on the seam (#103) sends none, which is unknown
+function mergeableOf(r: Reader, value: unknown): Mergeable {
+  return r.absent(value, "mergeable") ? "unknown" : r.word(value, "mergeable", MERGEABLE);
+}
+
 function openOf(r: Reader, value: unknown): OpenChange {
   return {
     number: r.int(value, "number"),
@@ -101,6 +109,7 @@ function openOf(r: Reader, value: unknown): OpenChange {
     draft: r.bool(value, "draft"),
     labels: texts(r, value, "labels"),
     pipeline: pipelineOf(r, r.at(value, "pipeline")),
+    mergeable: mergeableOf(r, value),
     comments: notesOf(r, r.at(value, "comments")),
   };
 }

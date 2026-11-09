@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gitlab, pipeline } from "../src/core/forge/gitlab.js";
+import { gitlab, mergeableOf, pipeline } from "../src/core/forge/gitlab.js";
 import type { Change } from "../src/core/forge/types.js";
 import type { Post } from "../src/core/post.js";
 import { fake, field, ok } from "./fake-forge.js";
@@ -29,6 +29,8 @@ type MrOptions = {
   readonly labels?: readonly string[];
   readonly notes?: readonly unknown[];
   readonly older?: string;
+  readonly conflicts?: boolean;
+  readonly mergeStatus?: string;
 };
 const mr = (iid: number, o: MrOptions = {}) => ({
   iid: String(iid),
@@ -37,12 +39,36 @@ const mr = (iid: number, o: MrOptions = {}) => ({
   sourceBranch: `factory/T-${iid}`,
   sourceProjectId: 1,
   targetProjectId: 1,
+  conflicts: o.conflicts ?? false,
+  mergeStatusEnum: o.mergeStatus ?? "CAN_BE_MERGED",
   labels: { pageInfo: { hasNextPage: false }, nodes: (o.labels ?? []).map((title) => ({ title })) },
   headPipeline: o.pipeline === undefined ? null : o.pipeline,
   notes: { pageInfo: { hasPreviousPage: o.older !== undefined, startCursor: o.older ?? null }, nodes: o.notes ?? [] },
 });
 const open = (nodes: readonly unknown[], more = false) =>
   ok({ data: { project: { mergeRequests: { pageInfo: page(more, "m1"), nodes } } } });
+
+describe("mergeable (#103)", () => {
+  it("reads conflicts first; CAN_BE_MERGED is clean; a status GitLab has not checked yet is unknown", () => {
+    expect(mergeableOf(true, "CAN_BE_MERGED")).toBe("conflict");
+    expect(mergeableOf(true, "UNCHECKED")).toBe("conflict");
+    expect(mergeableOf(false, "CAN_BE_MERGED")).toBe("clean");
+    for (const status of ["UNCHECKED", "CHECKING", "CANNOT_BE_MERGED_RECHECK", null, undefined]) {
+      expect(mergeableOf(false, status)).toBe("unknown");
+    }
+  });
+
+  it("asks for it with the open merge requests", async () => {
+    const f = fake("gitlab", [
+      members([]),
+      open([mr(4, { conflicts: true, mergeStatus: "CANNOT_BE_MERGED" })]),
+      ok([]),
+    ]);
+    const result = await gitlab(f.client, project).changes({ label: "agent::claimed" });
+    expect(result).toMatchObject({ kind: "ok", value: { open: [{ number: 4, mergeable: "conflict" }] } });
+    expect(f.calls[1]?.args.join(" ")).toContain("conflicts mergeStatusEnum");
+  });
+});
 
 describe("pipeline (#124)", () => {
   it("maps every GitLab status, in any case", () => {
@@ -110,6 +136,7 @@ describe("changes", () => {
             draft: true,
             labels: ["agent::claimed"],
             pipeline: { kind: "running" },
+            mergeable: "clean",
             comments: [{ body: "[writer] OPEN: which port?", author: { name: "ram" }, at: "2026-11-02T12:00:00Z" }],
           },
         ],

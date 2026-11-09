@@ -118,6 +118,7 @@ function input(
         needsHuman: false,
         stop: { kind: "none" },
         asks: 0,
+        mergeable: "clean",
       },
     },
   };

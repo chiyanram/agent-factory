@@ -2,7 +2,9 @@
 // status, ask, block, reconcile (core/loop.ts) and lint-edit (core/lint-edit.ts). Each prints one line per action;
 // with FACTORY_DRY_RUN=1 the seam prints each write on stderr instead, and the line ends in "(dry run)".
 
-import { isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
+import { headed } from "./core/dispatch/last-poll.js";
 import type { Result } from "./core/forge/api.js";
 import { forgeHost, openProject } from "./core/forge/index.js";
 import type { Identity } from "./core/identity.js";
@@ -90,9 +92,41 @@ function atHead(name: "status" | "ask", positionals: readonly string[], io: Loop
   if (number === "bad" || positionals.length !== 3) {
     return usage(name, io);
   }
-  const act = name === "status" ? status : ask;
   const [sha, text] = [word(positionals, 1), word(positionals, 2)];
-  return onForge(name, io, (forge) => act({ forge, number, sha, text } satisfies AtHead));
+  return name === "status"
+    ? onForge(name, io, (forge, label) => withLiveness(io, forge, label, status({ forge, number, sha, text })))
+    : onForge(name, io, (forge) => ask({ forge, number, sha, text } satisfies AtHead));
+}
+
+// homeOf : the factory's home, as dispatch reads it; a relative FACTORY_HOME is refused
+function homeOf(env: NodeJS.ProcessEnv): Result<string> {
+  const home = env.FACTORY_HOME ?? join(homedir(), ".factory");
+  return isAbsolute(home)
+    ? { kind: "ok", value: home }
+    : { kind: "failed", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(home)}` };
+}
+
+// withLiveness : status's line, headed by when the orchestrator last ran (#103; last-poll.ts)
+async function withLiveness(
+  io: LoopIo,
+  forge: Forge,
+  label: string,
+  posted: Promise<Result<string>>,
+): Promise<Result<string>> {
+  const done = await posted;
+  return done.kind === "ok"
+    ? {
+        kind: "ok",
+        value: await headed({
+          home: homeOf(io.env),
+          forge,
+          label,
+          repo: io.env.FACTORY_PROJECT ?? "",
+          now: Date.now(),
+          line: done.value,
+        }),
+      }
+    : done;
 }
 
 function blocked(positionals: readonly string[], io: LoopIo): Promise<number> | number {
@@ -165,7 +199,8 @@ export const LOOP_COMMANDS: Readonly<Record<string, LoopCommand>> = {
 export const LOOP_HELP = `  claim <number>               add the claim label to an open change that has none: one run at a time
   release <number>             remove the claim label; a change with no claim is not an error
   status <number> <sha> "<line>"
-                               post one [coordinator] note; refused when the head is no longer <sha>
+                               post one [coordinator] note; refused when the head is no longer <sha>; its line starts
+                               with when the orchestrator last ran, LATE after 3 poll intervals while a change is claimed
   ask <number> <sha> "<question>"
                                post one [writer] OPEN: note, an open ask until a person answers; the same head rule
   block <number> "<reason>" [<log>]

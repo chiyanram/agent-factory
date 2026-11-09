@@ -71,6 +71,7 @@ const open = (over: Partial<OpenChange> = {}): OpenChange => ({
   draft: true,
   labels: ["agent::claimed"],
   pipeline: { kind: "success" },
+  mergeable: "clean",
   comments: [],
   ...over,
 });
@@ -133,6 +134,8 @@ function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): 
     steps: STEPS_TODAY,
     now: () => Date.parse("2026-11-07T10:00:00Z"),
     quietMinutes: 30,
+    pollMinutes: 5,
+    repo: "chiyanram/ledger",
     notify: NO_NOTIFY,
     dryRun: false,
     log: (l) => log.push(`log ${l}`),
