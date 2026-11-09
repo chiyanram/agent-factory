@@ -12,7 +12,9 @@
 // step's n-th failure since the approval. The newest check line's nextTry is the one that holds.
 //
 // A writer or review "ended" line carries the run's spend{usd, tokens} (#131), as the agent CLI reported it; a line
-// with none was not measured (an older line, or a run stopped before its result). `usage` and the caps sum them.
+// with none was not measured (an older line, or a run stopped before its result). A run that failed after it spent
+// writes a "spent" line instead: it ends nothing, so the start still reads as a run that never ended and goes to a
+// person, but its spend counts. `usage` and the caps sum them all.
 
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -128,6 +130,14 @@ export type Event =
       readonly nextTry?: NextTry;
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
+    }
+  // what a run that failed spent (#131): a review round whose pass failed
+  | {
+      readonly at: string;
+      readonly kind: "spent";
+      readonly phase: Phase;
+      readonly head: string;
+      readonly spend: Spend;
     }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
@@ -374,6 +384,14 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
   "ready-ended": readyEndedOf,
   "review-ended": reviewEndedOf,
   "verify-ended": verifyEndedOf,
+  spent: (raw, at) => {
+    const phase = oneOf(raw, "phase", PHASES);
+    const head = str(raw, "head");
+    const spend = spendField(raw);
+    return phase === BAD || head === BAD || spend === BAD || spend.spend === undefined
+      ? BAD
+      : { at, kind: "spent", phase, head, spend: spend.spend };
+  },
   pinged: (raw, at) => {
     const head = str(raw, "head");
     return head === BAD ? BAD : { at, kind: "pinged", head };
@@ -573,6 +591,8 @@ const STEPS: Steps = {
     verifyFailures: s.verifyFailures + Number(!e.passed),
     nextTry: nextTryView(e.nextTry),
   }),
+  // a failed run's spend counts toward the ticket's cap; it ends nothing
+  spent: (s, e) => ({ ...s, spent: addSpend(s.spent, e.spend) }),
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice

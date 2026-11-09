@@ -6,7 +6,9 @@ import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
 import { waive } from "../src/core/waiver.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
-import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
+import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
+import { NO_SPEND } from "../src/core/dispatch/spend.js";
+import { readSpends } from "../src/core/dispatch/usage.js";
 import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
@@ -1069,6 +1071,76 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     rmSync(join(home, "runs"), { recursive: true, force: true });
     await tick(setup(changes(), [], { steps: writer(runs), caps: caps({ ticket: { usd: 3, tokens: "none" } }) }));
     expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("a review round that fails records what it spent, and that spend counts toward the ticket's cap", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({
+      where,
+      event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
+    });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: {
+        kind: "available",
+        run: async () => ({
+          kind: "failed",
+          reason: "the verify pass failed: budget",
+          spend: { usd: 1.5, tokens: 200 },
+        }),
+      },
+    };
+    const ran = await tick(setup({ team, open: [open()], merged: [] }, [], { steps }));
+    expect(ran).toMatchObject({
+      kind: "ok",
+      value: [{ result: { kind: "failed", reason: "the verify pass failed: budget" } }],
+    });
+    const read = await readRecords(where);
+    const events = read.kind === "ok" ? read.value : [];
+    // the start stays without an end, so a person looks; the spend is kept beside it
+    expect(events.slice(-2)).toMatchObject([
+      { kind: "started", phase: "review" },
+      { kind: "spent", phase: "review", head: H, spend: { usd: 1.5, tokens: 200 } },
+    ]);
+    const summary = summarize({ events, since: "2026-11-07T08:00:00Z" });
+    expect(summary.spent).toEqual({ usd: 2.5, tokens: 300 });
+    expect(summary.interrupted).toMatchObject({ kind: "interrupted", phase: "review" });
+    expect(ticketCapped(summary.spent, caps({ ticket: { usd: 2, tokens: "none" } }))).toContain(
+      "spent $2.50 and 300 tokens",
+    );
+    expect(ticketCapped({ usd: 1, tokens: 100 }, caps({ ticket: { usd: 2, tokens: "none" } }))).toBe("");
+    // usage counts it too
+    const spends = await readSpends({ home, project: "ledger" });
+    expect(spends.runs.map((r) => r.spend)).toEqual([
+      { usd: 1, tokens: 100 },
+      { usd: 1.5, tokens: 200 },
+    ]);
+  });
+
+  it("once a person takes the failed round back, the ticket at its cap goes to needs-human, not to another run", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:10:00Z", kind: "spent", phase: "review", head: H, spend: { usd: 3, tokens: 9 } },
+    });
+    const log: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: { kind: "available", run: async () => ({ kind: "ok", value: { actOn: 0, spend: NO_SPEND } }) },
+    };
+    await tick(
+      setup({ team, open: [open()], merged: [] }, log, { steps, caps: caps({ ticket: { usd: 2, tokens: "none" } }) }),
+    );
+    expect(log.find((l) => l.startsWith("note #12 [coordinator] blocked"))).toBe(
+      "note #12 [coordinator] blocked: the ticket spent $3.00 and 9 tokens since its approval, at its cap of $2 (FACTORY_MAX_USD_TICKET)",
+    );
   });
 
   it("a project at its day cap starts no run that day and sends one notice; the next day it runs again", async () => {
