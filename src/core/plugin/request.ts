@@ -221,7 +221,7 @@ async function ruleOf(where: Where, capability: PolicyPoint): Promise<Result<Pic
     return failed(`${where.project}: the policy denies ${capability}`);
   }
   return plugin === undefined
-    ? failed(`${where.project}: no plugin for ${capability} in the project file's "plugins"`)
+    ? failed(`${where.project}: no connector for ${capability} in the project file's "connectors"`)
     : { kind: "ok", value: { plugin, rule } };
 }
 

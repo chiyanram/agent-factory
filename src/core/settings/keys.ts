@@ -13,6 +13,7 @@
 // still read their variable themselves, so a file value for one is not used yet and is reported, never applied.
 
 import { DEFAULT_POLICY, MAX_CAP, MODES, POLICY_POINTS } from "../plugin/policy.js";
+import { checkPluginList } from "../process/plugins.js";
 import { TEST_FILES } from "../ready/floor.js";
 
 export const CLASSES = ["ladder", "cap", "allow-list", "deny-list", "locked", "preference"] as const;
@@ -161,13 +162,22 @@ const FILE_KEYS: readonly FileKey[] = [
     about: "the hosts the project's runners may reach",
   },
   {
-    id: "plugins",
+    id: "connectors",
     where: "file",
-    path: ["plugins"],
+    path: ["connectors"],
     class: "locked",
     check: map,
     fallback: {},
     about: "the connector that serves each extension point (ADR-0014 P3)",
+  },
+  {
+    id: "plugins",
+    where: "file",
+    path: ["plugins"],
+    class: "locked",
+    check: checkPluginList,
+    fallback: [],
+    about: "the plugins the project installs, each name@marketplace, in order; none runs the built-in process",
   },
   ...POLICY_POINTS.flatMap(policyKeys),
   {
