@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.21.0](https://github.com/chiyanram/agent-factory/compare/v0.20.1...v0.21.0) (2026-11-09)
+
+### ✨ Features
+
+* **dispatch** — START and approval records; nothing starts without a human, and the AI can never approve · [#227](https://github.com/chiyanram/agent-factory/issues/227) (PR [#248](https://github.com/chiyanram/agent-factory/pull/248))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.21.0`
+
 ## [0.20.1](https://github.com/chiyanram/agent-factory/compare/v0.20.0...v0.20.1) (2026-11-09)
 
 ### 🐛 Fixes
