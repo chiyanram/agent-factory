@@ -37,7 +37,6 @@ CI runs both on every pull request and on push to `main`.
 
 ```text
 scripts/              the loop scripts and the lint checks
-scripts/lib/          tokens.sh's helpers until #131 replaces it: run tracking (runs.sh), the change prefix (forge.sh)
 src/core/forge/       the forge seam: one Forge interface, a GitHub and a GitLab adapter over gh api and glab api
 src/core/egress/      the egress proxy: the allowlist, the Squid config, and the --internal network the box joins (#130)
 src/core/box/         the box seam: one Box interface; FACTORY_BOX picks the place, openBox refuses a box that does not work
