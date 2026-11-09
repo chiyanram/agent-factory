@@ -48,7 +48,7 @@ import {
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
 import type { Spend } from "./spend.js";
-import { projectStop, type Caps, type Stop } from "./caps.js";
+import { heldWords, projectStop, type Caps, type Stop } from "./caps.js";
 import { readSpends } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
@@ -479,7 +479,13 @@ async function forgeAction(setup: TickSetup, state: TicketState, action: Action)
   return dispatchOn(FORGE, action.kind, setup, state, action);
 }
 
-export type Ran = { readonly ticket: string; readonly action: Action; readonly result: Done | Unavailable };
+// a run a cap held back is marked held (#131, #305), so the orchestrator loop tells it from a step not set up
+export type Ran = {
+  readonly ticket: string;
+  readonly action: Action;
+  readonly result: Done | Unavailable;
+  readonly held?: boolean;
+};
 
 // claim : the change carries the claim label before a writer runs on it
 async function claim(setup: TickSetup, state: TicketState): Promise<Done> {
@@ -785,7 +791,7 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
   return later;
 }
 
-const RUN_KINDS: ReadonlySet<ActionKind> = new Set(["writer", "ready", "review", "verify"]);
+export const RUN_KINDS: ReadonlySet<ActionKind> = new Set(["writer", "ready", "review", "verify"]);
 
 // stopNow : whether a new run may start in the project; the runs are read only when a cap is set (#131)
 async function stopNow(setup: TickSetup): Promise<Stop> {
@@ -818,10 +824,11 @@ async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Pro
   if (stop.kind === "go" || first === undefined) {
     return false;
   }
-  setup.log(`no new runs: ${stop.why}`);
+  const why = heldWords(stop, setup.project);
+  setup.log(`no new runs: ${why}`);
   await noticed(setup, stop, first);
   for (const { state, action } of runs) {
-    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `held: ${stop.why}` } });
+    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: why }, held: true });
   }
   return true;
 }

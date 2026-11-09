@@ -2,8 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
-import { NO_CAPS } from "../src/core/dispatch/caps.js";
-import { LOOP_GUARD, loopFile, MAX_FAILED_PASSES, orchestratorLoop } from "../src/core/dispatch/orchestrator-loop.js";
+import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
+import { headed } from "../src/core/dispatch/last-poll.js";
+import { record } from "../src/core/dispatch/records.js";
+import {
+  heldBack,
+  LOOP_GUARD,
+  loopFile,
+  MAX_FAILED_PASSES,
+  orchestratorLoop,
+} from "../src/core/dispatch/orchestrator-loop.js";
 import { lock, STEPS_TODAY, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { NO_NOTIFY } from "../src/core/notify.js";
@@ -112,6 +120,7 @@ type Loop = { readonly slept: number[]; readonly lines: string[] };
 function loopWith(
   changes: () => Changes | "down",
   steps: Steps = STEPS_TODAY,
+  caps: Caps = NO_CAPS,
 ): Loop & { readonly run: () => ReturnType<typeof orchestratorLoop> } {
   const slept: number[] = [];
   const lines: string[] = [];
@@ -124,7 +133,7 @@ function loopWith(
     steps,
     now: () => Date.parse("2026-11-07T10:00:00Z"),
     quietMinutes: 30,
-    caps: NO_CAPS,
+    caps,
     pollMinutes: 7,
     repo: "chiyanram/ledger",
     notify: NO_NOTIFY,
@@ -142,6 +151,7 @@ function loopWith(
         slept.push(ms);
       },
       log: (l) => lines.push(l),
+      now: () => Date.parse("2026-11-07T10:00:00Z"),
     });
   return { slept, lines, run };
 }
@@ -149,7 +159,7 @@ function loopWith(
 describe("the orchestrator loop (#305)", () => {
   it("with no ticket in flight, ends after its first pass, with no wait, and leaves no loop file", async () => {
     const loop = loopWith(() => ({ team, open: [], merged: [] }));
-    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false } });
+    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false, held: [] } });
     expect(loop.slept).toEqual([]);
     expect(loop.lines).toContain("no ticket is in flight; the orchestrator loop ends");
     expect(existsSync(loopFile(home, "ledger"))).toBe(false);
@@ -168,8 +178,8 @@ describe("the orchestrator loop (#305)", () => {
     const loop = loopWith(
       () => {
         pass += 1;
-        // each pass polls twice: once to act, once to look
-        return pass <= 4
+        // each pass polls twice: once to act, once to look; the change is merged from the second pass on
+        return pass <= 2
           ? { team, open: [open({ labels: ["agent::claimed"] })], merged: [] }
           : {
               team,
@@ -179,7 +189,7 @@ describe("the orchestrator loop (#305)", () => {
       },
       writer("done", runs),
     );
-    // the writer ends done, so the ready check is due: its step is not set up here, so it stays due until the merge
+    // the writer ends done, so the ready check is due after the first pass
     const ended = await loop.run();
     expect(ended).toMatchObject({ kind: "ok" });
     expect(loop.slept.every((ms) => ms === 7 * 60_000)).toBe(true);
@@ -195,7 +205,7 @@ describe("the orchestrator loop (#305)", () => {
       () => ({ team, open: [open({ comments: runs.length > 0 ? [asked] : [] })], merged: [] }),
       writer("asked", runs),
     );
-    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false } });
+    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false, held: [] } });
     expect(runs).toEqual(["PROJ-1"]);
     expect(loop.slept).toEqual([]);
   });
@@ -237,4 +247,101 @@ describe("the orchestrator loop (#305)", () => {
     expect(loop.slept.length).toBe(MAX_FAILED_PASSES - 1);
     expect(existsSync(loopFile(home, "ledger"))).toBe(false);
   });
+
+  it("ends after a pass whose run's step is not set up, saying which and what to do, in its log and in status", async () => {
+    await approved();
+    const loop = loopWith(() => ({ team, open: [open()], merged: [] }));
+    const why =
+      "the writer is not set up: the writer's box is not built yet (#113); set it up, then run `agent-factory dispatch ledger` again";
+    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false, held: [why] } });
+    expect(loop.slept).toEqual([]);
+    expect(loop.lines).toContain(`no run could start; the orchestrator loop ends: ${why}`);
+    expect(await statusLine()).toBe(
+      `no orchestrator loop running; the last loop ended at 2026-11-07T10:00:00.000Z: ${why}; posted #12`,
+    );
+  });
+
+  it("ends after a pass the project-day cap holds, to run again tomorrow", async () => {
+    await approved();
+    await spent("2026-11-07T09:00:00Z", 2, 10);
+    const runs: string[] = [];
+    const caps = { ...NO_CAPS, day: { usd: 1, tokens: "none" as const } };
+    const loop = loopWith(() => ({ team, open: [open()], merged: [] }), writer("done", runs), caps);
+    const ended = await loop.run();
+    expect(runs).toEqual([]);
+    expect(loop.slept).toEqual([]);
+    expect(ended).toMatchObject({
+      kind: "ok",
+      value: {
+        passes: 1,
+        held: [expect.stringMatching(/^the project-day cap is reached: today \(2026-11-07, UTC\) /)],
+      },
+    });
+    expect(ended.kind === "ok" ? ended.value.held[0] : "").toMatch(
+      /; run `agent-factory dispatch ledger` again tomorrow$/,
+    );
+    expect(await statusLine()).toMatch(
+      /^no orchestrator loop running; the last loop ended at .*: the project-day cap /,
+    );
+  });
+
+  it("ends after a pass the window's share holds, naming when the window has room", async () => {
+    await approved();
+    await spent("2026-11-07T06:30:00Z", 0, 700);
+    const caps = { ...NO_CAPS, window: { tokens: 500, machineTokens: "none" as const } };
+    const loop = loopWith(() => ({ team, open: [open()], merged: [] }), writer("done", []), caps);
+    const ended = await loop.run();
+    expect(ended).toMatchObject({
+      kind: "ok",
+      value: { passes: 1, held: [expect.stringMatching(/^the window is full until 11:30 UTC: in the last 5 h /)] },
+    });
+    expect(loop.lines.some((l) => l.includes("run `agent-factory dispatch ledger` again then"))).toBe(true);
+  });
+
+  it("goes on when one run is held and another starts; a later clean end clears status's stopped line", async () => {
+    const writerRun = { kind: "writer", task: { kind: "fix" }, why: "x" } as const;
+    const unset = { kind: "unavailable", reason: "no runner" } as const;
+    expect(
+      heldBack(
+        [
+          { ticket: "PROJ-1", action: { kind: "ready", head: H }, result: unset },
+          { ticket: "PROJ-2", action: writerRun, result: { kind: "ok" } },
+        ],
+        "ledger",
+      ),
+    ).toEqual([]);
+    expect(heldBack([{ ticket: "PROJ-1", action: { kind: "wait", why: "CI" }, result: unset }], "ledger")).toEqual([]);
+    await approved();
+    expect(await loopWith(() => ({ team, open: [open()], merged: [] })).run()).toMatchObject({
+      value: { held: [expect.any(String)] },
+    });
+    expect(await statusLine()).toMatch(/^no orchestrator loop running; the last loop ended at /);
+    const merged = loopWith(() => ({
+      team,
+      open: [],
+      merged: [{ number: 12, branch: "factory/PROJ-1", fork: false }],
+    }));
+    expect(await merged.run()).toMatchObject({ kind: "ok", value: { held: [] } });
+    expect(await statusLine()).toBe("no orchestrator loop running; run `agent-factory dispatch ledger`; posted #12");
+  });
 });
+
+// a ticket's earlier runs spent this much, in the project's run records (#131)
+function spent(at: string, usd: number, tokens: number): ReturnType<typeof record> {
+  return record({
+    where: { home, project: "ledger", ticket: "PROJ-9" },
+    event: { at, kind: "review-ended", head: H, actOn: 0, spend: { usd, tokens } },
+  });
+}
+
+// status's line for change 12, claimed, after the loop
+function statusLine(): Promise<string> {
+  return headed({
+    home: { kind: "ok", value: home },
+    forge: { ...forge(() => ({ team, open: [], merged: [] })), claimed: async () => ({ kind: "ok", value: [12] }) },
+    label: "agent::claimed",
+    repo: "chiyanram/ledger",
+    now: Date.parse("2026-11-07T10:05:00Z"),
+    line: "posted #12",
+  });
+}

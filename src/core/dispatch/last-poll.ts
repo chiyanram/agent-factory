@@ -26,6 +26,16 @@ export const LATE_INTERVALS = 3;
 export const DEFAULT_POLL_MINUTES = 5;
 // the file an orchestrator loop holds while it runs (orchestrator-loop.ts, LOOP_GUARD)
 export const LOOP_PID_FILE = "loop.pid";
+// how the project's last orchestrator loop ended (orchestrator-loop.ts)
+export const LOOP_END_FILE = "loop-end.json";
+
+// LoopEnded : how a loop ended: nothing in flight (done), a run held back by a step not set up or a cap (held), or
+// passes that failed (failed); why says what, and what to do
+export type LoopEnded = {
+  readonly at: string;
+  readonly kind: "done" | "held" | "failed";
+  readonly why: string;
+};
 
 export type LastPoll = {
   // ISO 8601
@@ -134,9 +144,18 @@ function newestOf(polls: readonly Polled[]): Polled | "none" {
   );
 }
 
-// the orchestrator loop as status sees it: whether one is meant to be running for the repository, and the project it
-// runs for ("<project>" when no pass names one)
-export type LoopView = { readonly meant: boolean; readonly project: string };
+// the orchestrator loop as status sees it: whether one is meant to be running for the repository, the project it runs
+// for ("<project>" when no pass names one), and, with none running, why the last one stopped while a ticket was still
+// in flight (absent when it ended with nothing in flight, or none ran)
+export type LoopView = { readonly meant: boolean; readonly project: string; readonly ended?: string };
+
+// stoppedWhy : why the project's last loop stopped while a ticket was in flight, or "" (#305)
+async function stoppedWhy(dir: string): Promise<string> {
+  const raw = parsed(await readFile(join(dir, LOOP_END_FILE), "utf8").catch(() => ""));
+  const [at, kind, why] = ["at", "kind", "why"].map((name) => prop(raw, name));
+  const stopped = (kind === "held" || kind === "failed") && typeof why === "string" && isTime(at);
+  return stopped ? `the last loop ended at ${at}: ${why}` : "";
+}
 
 // readLoop : whether a loop is meant to be running for this git host and repository: a project that polled it holds
 // its loop file
@@ -148,16 +167,25 @@ export async function readLoop(input: {
   const polled = await polledHere(input);
   const projects = polled.kind === "ok" ? polled.value : [];
   for (const { project } of projects) {
-    const there = await access(join(runsDir(input.home), project, LOOP_PID_FILE)).then(
-      () => true,
-      () => false,
-    );
-    if (there) {
+    if (await holdsLoop(join(runsDir(input.home), project))) {
       return { meant: true, project };
     }
   }
   const newest = newestOf(projects);
-  return { meant: false, project: newest === "none" ? "<project>" : newest.project };
+  return newest === "none" ? { meant: false, project: "<project>" } : notMeant(input.home, newest.project);
+}
+
+function holdsLoop(dir: string): Promise<boolean> {
+  return access(join(dir, LOOP_PID_FILE)).then(
+    () => true,
+    () => false,
+  );
+}
+
+// notMeant : no loop for the project, with why its last one stopped while a ticket was in flight
+async function notMeant(home: string, project: string): Promise<LoopView> {
+  const ended = await stoppedWhy(join(runsDir(home), project));
+  return ended === "" ? { meant: false, project } : { meant: false, project, ended };
 }
 
 // claimed changes: how many, or why the git host could not say
@@ -199,9 +227,18 @@ export function livenessLine(input: {
     return `orchestrator last ran: cannot tell: ${last.reason}`;
   }
   if (!loop.meant) {
-    return anyClaimed(claimed) ? `no orchestrator loop running; ${startWords(loop)}` : "no orchestrator loop running";
+    return notRunning(claimed, loop);
   }
   return last.value === "none" ? neverRan(claimed, loop) : ranLine(last.value, input.now, claimed, loop);
+}
+
+// notRunning : no loop runs: why the last one stopped while a ticket was in flight, else the command that starts one
+// while a change is claimed
+function notRunning(claimed: Claimed, loop: LoopView): string {
+  if (loop.ended !== undefined && loop.ended !== "") {
+    return `no orchestrator loop running; ${loop.ended}`;
+  }
+  return anyClaimed(claimed) ? `no orchestrator loop running; ${startWords(loop)}` : "no orchestrator loop running";
 }
 
 function neverRan(claimed: Claimed, loop: LoopView): string {

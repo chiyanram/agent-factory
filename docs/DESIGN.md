@@ -71,7 +71,8 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
     approval is the record (`via: "pr"`).
 - **The orchestrator** carries the ticket from approval to the PR. The human's command starts a loop that carries
   their tickets and exits when none is in flight (`dispatch`, or `start` and `approve` in the background). No cron
-  and no launchd job: nothing runs when nothing is in flight. A sleeping laptop stops the loop; `dispatch` again
+  and no launchd job: nothing runs when nothing is in flight, and a loop never waits on a cap or a step that is not
+  set up: it exits and says when to run it again. A sleeping laptop stops the loop; `dispatch` again
   carries on from the records. `dispatch --once` is one pass by hand.
 - **Extra tasks** (full retro, weekly clean-up, triage) are off until a human starts one. A schedule can be switched on
   per task later.

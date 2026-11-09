@@ -638,7 +638,11 @@ No cron or launchd job runs the orchestrator: a human's command starts the **orc
 itself (#305). `agent-factory dispatch <project>` without `--once` runs one pass, then waits `FACTORY_POLL_MINUTES`
 and runs the next, while any ticket with a START or an approval is in flight. It ends when each such ticket is
 finished (merged or closed), has asked a person, stopped at `needs-human`, or waits on a human (an approval, a merge,
-a `/stop`); a loop with nothing in flight ends after its first pass. `agent-factory start` and `approve` start it in
+a `/stop`); a loop with nothing in flight ends after its first pass. It never waits on what only a person can change:
+a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
+what to do. A step that is not set up says so ("the writer is not set up: …; set it up, then run `agent-factory
+dispatch <project>` again"); the project-day cap says to run it again tomorrow; the window's share says when the
+window has room ("the window is full until HH:MM UTC"). Three failed passes in a row end it too. `agent-factory start` and `approve` start it in
 the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
 While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
 the runs a pass may start, hold in each pass. A laptop that sleeps stops the loop; run `dispatch` again and it carries
@@ -723,8 +727,9 @@ no row. Each pass that polled writes its last-poll time to `$FACTORY_HOME/runs/<
 does not), and `agent-factory status` puts "orchestrator last ran N min ago" at the head of its line. While a loop is
 meant to be running (its `loop.pid` is there), it is flagged `LATE` when that is more than 3 poll intervals
 (`FACTORY_POLL_MINUTES`) ago while any change is claimed: a loop that stopped shows up there, instead of claimed changes
-that just sit. With no loop it says "no orchestrator loop running", and names `agent-factory dispatch <project>` while
-a change is claimed. Flaky jobs are not yet rerun with failure
+that just sit. With no loop it says "no orchestrator loop running". When the last loop stopped while a ticket was still
+in flight (a step not set up, a cap, failed passes) it adds when and why, from `$FACTORY_HOME/runs/<project>/loop-end.json`;
+otherwise it names `agent-factory dispatch <project>` while a change is claimed. Flaky jobs are not yet rerun with failure
 signatures (#132): red CI sends the writer back.
 The order is fixed: writer done → ready check → reviewer → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
 The orchestrator loop polls the forge every `FACTORY_POLL_MINUTES` (5) while a ticket is in flight. Limits: one run per MR, at most `FACTORY_MAX_RUNS` at once, and at most one
@@ -770,7 +775,7 @@ and `#12` for `!12`.
 | `agent-factory request <capability> --file <draft.json>` | asks for a `tracker.comment`, `tracker.create` or `notify` write on an approved ticket; the project's policy performs it at once (0), keeps it for `confirm` and prints that command (3), or refuses it (1) ([Writes](#writes)) |
 | `agent-factory confirm <id> '<text>'` | performs a kept write when the text is the one `request` printed; run it only through the harness `ask` prompt |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
-| `agent-factory dispatch <project> [--once] [--dry-run]` | the orchestrator loop over the project: a pass of the dispatcher's table, then the next after `FACTORY_POLL_MINUTES` while a ticket is in flight, ending by itself when none is (see Triggers); `--once` is one pass, and `--dry-run` one pass that acts on nothing; exit 0, 1 when it cannot run (another loop runs, or 3 passes in a row failed), 2 when an action failed |
+| `agent-factory dispatch <project> [--once] [--dry-run]` | the orchestrator loop over the project: a pass of the dispatcher's table, then the next after `FACTORY_POLL_MINUTES` while a ticket is in flight, ending by itself when none is, or after a pass whose runs a cap or a step not set up held back (see Triggers); `--once` is one pass, and `--dry-run` one pass that acts on nothing; exit 0, 1 when it cannot run (another loop runs, or 3 passes in a row failed), 2 when an action failed |
 | `agent-factory usage [<project>]` | what the dispatcher's runs spent, from the run records: today, the current window (the last `FACTORY_WINDOW_HOURS`) and this month, in dollars and tokens, for all, each project and each ticket. Days and months are UTC. `+N?` is N runs with no spend reported, not in the sums. A review or eval run by hand writes no run record, so it is not in it (#131) |
 | `agent-factory block <mr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
 | `agent-factory lint-edit '<command>'` | the writer's hook, not yours: lints each file an Edit or Write changed and shows the writer what failed. The command runs with no shell; one that needs a shell is reported to you and holds no writer |

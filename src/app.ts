@@ -84,9 +84,11 @@ commands:
                                exit 0 posted or reused, 3 when the head moved, 1 otherwise
   dispatch <project> [--once]  the orchestrator loop over the project's started and approved tickets and their PRs:
                                a pass decides each with the table and acts, then waits FACTORY_POLL_MINUTES while a
-                               ticket is in flight, and ends by itself when none is; --once: one pass (--dry-run: one
-                               pass that decides and acts on none). It refuses to start while the coordinator's
-                               settings are looser than its wall, and while another loop runs for the project
+                               ticket is in flight, and ends by itself when none is, or when a cap or a step not set
+                               up holds every run back (it says why and when to run it again); --once: one pass
+                               (--dry-run: one pass that decides and acts on none). It refuses to start while the
+                               coordinator's settings are looser than its wall, and while another loop runs for the
+                               project
   app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
                                repository, as JSON {token, login, expiresAt}
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
@@ -745,6 +747,7 @@ async function loopPasses(project: string, io: Io, settings: PassSettings): Prom
     setup: () => setupNow(project, false, io, settings),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     log: (line) => io.out(`${line}\n`),
+    now: Date.now,
   });
   if (ended.kind === "failed") {
     io.err(`agent-factory dispatch: ${ended.reason}\n`);
