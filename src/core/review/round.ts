@@ -464,7 +464,6 @@ async function show(ctx: Ctx, rev: string, path: string): Promise<string> {
     args: ["show", `${rev}:${path}`],
     repo: { kind: "repo", path: ctx.setup.repo },
     env: ctx.setup.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return shown.kind === "ok" ? shown.stdout : "";
@@ -475,7 +474,6 @@ async function boxFor(ctx: Ctx, pack: Pack): Promise<Result<Box>> {
     args: ["diff", "--name-only", "--no-renames", "-z", pack.base, pack.head],
     repo: { kind: "repo", path: ctx.setup.repo },
     env: ctx.setup.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   if (names.kind !== "ok") {

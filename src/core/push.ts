@@ -116,7 +116,6 @@ function git(request: PushRequest, args: readonly string[], env: NodeJS.ProcessE
     args,
     repo: { kind: "repo", path: request.repo },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }

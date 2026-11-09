@@ -132,7 +132,6 @@ async function git(repo: string, env: NodeJS.ProcessEnv, args: readonly string[]
     args,
     repo: { kind: "repo", path: repo },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return r.kind === "ok" ? r.stdout.trim() : "";

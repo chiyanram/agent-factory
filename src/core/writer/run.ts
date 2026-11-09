@@ -301,7 +301,6 @@ async function git(run: WriterRun, args: readonly string[], stdin = ""): Promise
     args,
     repo: { kind: "repo", path: run.clone.repo },
     env: run.setup.env,
-    ownHelper: { kind: "none" },
     stdin: stdin === "" ? { kind: "none" } : { kind: "text", text: stdin },
   });
   return ran.kind === "ok"

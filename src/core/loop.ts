@@ -234,7 +234,6 @@ async function removeWorktree(input: Reconcile, path: string): Promise<Done> {
       args,
       repo: { kind: "repo", path: input.repo },
       env: input.env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "none" },
     });
   await git(["worktree", "remove", "--force", path]);
@@ -257,7 +256,6 @@ function inWorktree(input: Reconcile, path: string, args: readonly string[]): Re
     args,
     repo: { kind: "repo", path },
     env: { ...input.env, GIT_CEILING_DIRECTORIES: worktreesDir(input) },
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }
@@ -282,7 +280,6 @@ async function isWorktree(input: Reconcile, path: string): Promise<Done> {
       args: ["worktree", "list", "--porcelain"],
       repo: { kind: "repo", path: input.repo },
       env: input.env,
-      ownHelper: { kind: "none" },
       stdin: { kind: "none" },
     }),
     "list the clone's worktrees",
@@ -531,7 +528,6 @@ async function isClone(input: Reconcile): Promise<Done> {
     args: ["rev-parse", "--git-dir"],
     repo: { kind: "repo", path: input.repo },
     env: input.env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   return ran.kind === "ok"
