@@ -7,7 +7,7 @@
 //
 // The hash covers each file's path, mode and bytes, so a file changed, added or removed in the store is caught on the
 // next run, and the run refuses it. A plugin the list names but no pin holds is refused too: only `agent-factory plugin
-// update` fetches a version and moves a pin. **Today:** that command and the fetch come in the next part of #232.
+// update` moves a pin, with a version fetch.ts fetched. **Today:** that command comes in the next part of #232.
 
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, rename, writeFile } from "node:fs/promises";
