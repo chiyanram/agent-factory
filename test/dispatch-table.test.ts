@@ -3,6 +3,7 @@ import { backoffMs, EMPTY, type Summary } from "../src/core/dispatch/records.js"
 import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import {
   decide,
+  inFlight,
   MAX_CI_ROUNDS,
   MAX_CONFLICT_RUNS,
   MAX_READY_FAILURES,
@@ -572,5 +573,56 @@ describe("backoff (#228)", () => {
   it("keeps the caps: a step that is out of tries goes to a person, whatever its next try", () => {
     const runs = failedReady({ kind: "set", step: "ready", at: at(60_000) }, MAX_READY_FAILURES);
     expect(decide(state({ runs }))).toMatchObject({ kind: "needs-human" });
+  });
+});
+
+describe("inFlight: whether the orchestrator loop carries the ticket on (#305)", () => {
+  const merged = {
+    kind: "merged",
+    line: { kind: "merged", number: 12, branch: "factory/PROJ-1", fork: false },
+  } as const;
+
+  it("is in flight with a run due, a ping to send, CI running, or a run backing off", () => {
+    expect(inFlight(state({ runs: EMPTY, change: { kind: "none" } }))).toBe(true);
+    // claimed by another orchestrator: not this loop's to carry
+    expect(inFlight(state({ runs: EMPTY }))).toBe(false);
+    expect(inFlight(state())).toBe(true);
+    const pinged = wrote({ ...reviewed(0), pingedAt: H });
+    expect(
+      inFlight(state({ runs: pinged, change: { kind: "open", line: line({ pipeline: { kind: "running" } }) } })),
+    ).toBe(true);
+    expect(
+      inFlight(state({ runs: pinged, change: { kind: "open", line: line({ pipeline: { kind: "none" } }) } })),
+    ).toBe(true);
+    const failedReady = wrote({
+      lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: false, why: "red" },
+      readyFailures: 1,
+      nextTry: { kind: "set", step: "ready", at: "2026-11-07T10:05:00Z" },
+    });
+    expect(decide(state({ runs: failedReady }))).toMatchObject({ kind: "wait" });
+    expect(inFlight(state({ runs: failedReady }))).toBe(true);
+  });
+
+  it("is not in flight once finished, asked, at needs-human, or waiting on a person", () => {
+    const pinged = wrote({ ...reviewed(0), pingedAt: H });
+    expect(inFlight(state({ change: merged }))).toBe(false);
+    expect(inFlight(state({ change: { kind: "open", line: line({ asks: 1 }) } }))).toBe(false);
+    expect(inFlight(state({ change: { kind: "open", line: line({ needsHuman: true }) } }))).toBe(false);
+    expect(inFlight(state({ change: { kind: "none" } }))).toBe(false);
+    expect(inFlight(state({ approval: { kind: "stale" } }))).toBe(false);
+    expect(inFlight(state({ approval: { kind: "unapproved", lane: "feature" } }))).toBe(false);
+    expect(inFlight(state({ approval: { kind: "unstarted" } }))).toBe(false);
+    expect(inFlight(state({ approval: { kind: "missing" } }))).toBe(false);
+    // the gate is green and the human was pinged: the merge is theirs
+    expect(inFlight(state({ runs: pinged }))).toBe(false);
+    expect(
+      inFlight(state({ runs: pinged, change: { kind: "open", line: line({ pipeline: { kind: "manual" } }) } })),
+    ).toBe(false);
+    // a stop already handed to a person, and a ticket at its cap
+    const blocked = wrote({
+      ...reviewed(1, MAX_REVIEW_ROUNDS),
+      blocked: [`Act on findings after ${MAX_REVIEW_ROUNDS} review rounds`],
+    });
+    expect(inFlight(state({ runs: blocked }))).toBe(false);
   });
 });

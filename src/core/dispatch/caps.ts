@@ -172,14 +172,25 @@ export function ticketCapped(spent: Spend, caps: Caps): string {
   return over === "" ? "" : `the ticket spent ${spentLine(spent)} since its approval, at its cap of ${over}`;
 }
 
-// Stop : whether a new run may start in this project now; a stop names why, and the period its one notice is for
-export type Stop = { readonly kind: "go" } | { readonly kind: "stop"; readonly why: string; readonly notice: string };
+// Stop : whether a new run may start in this project now; a stop names why, the period its one notice is for, which
+// cap it is (the day's or the window's), and the first time (ms) a run may start again
+export type Stop =
+  | { readonly kind: "go" }
+  | {
+      readonly kind: "stop";
+      readonly why: string;
+      readonly notice: string;
+      readonly period: "day" | "window";
+      readonly until: number;
+    };
 
 function stopFor(input: {
   readonly what: string;
   readonly spend: Spend;
   readonly limits: readonly (readonly [Limit, "usd" | "tokens", MachineId])[];
   readonly notice: string;
+  readonly period: "day" | "window";
+  readonly until: (limit: number, unit: "usd" | "tokens") => number;
 }): Stop {
   const hit = input.limits.find(([limit, unit]) => reached(input.spend[unit], limit));
   if (hit === undefined) {
@@ -191,7 +202,31 @@ function stopFor(input: {
     kind: "stop",
     why: `${input.what} spent ${spentLine(input.spend)}, at the cap of ${cap} (${settingName(id)})`,
     notice: input.notice,
+    period: input.period,
+    until: input.until(limit === "none" ? 0 : limit, unit),
   };
+}
+
+// roomAt : when a window of these hours, over these runs, next holds less than the limit: the oldest runs leave it one
+// by one, and the window has room once the one that brings it under the limit has left. Pure.
+export function roomAt(input: {
+  readonly runs: readonly Spent[];
+  readonly from: number;
+  readonly hours: number;
+  readonly limit: number;
+  readonly unit: "usd" | "tokens";
+}): number {
+  const inside = input.runs
+    .filter((r) => Date.parse(r.at) >= input.from && r.spend !== "unmeasured")
+    .toSorted((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  let left = inside.reduce((sum, r) => sum + (r.spend === "unmeasured" ? 0 : r.spend[input.unit]), 0);
+  for (const r of inside) {
+    left -= r.spend === "unmeasured" ? 0 : r.spend[input.unit];
+    if (left < input.limit) {
+      return Date.parse(r.at) + input.hours * 3_600_000;
+    }
+  }
+  return input.from + input.hours * 3_600_000;
 }
 
 // projectStop : the first cap the project's runs, or every project's runs on this machine, have reached now (ms):
@@ -216,19 +251,38 @@ export function projectStop(input: {
         [caps.day.tokens, "tokens", "caps.tokensPerProjectDay"],
       ],
       notice: `day ${today}`,
+      period: "day",
+      until: () => p.day + 86_400_000,
     }),
     stopFor({
       what: `in the last ${caps.windowHours} h the project`,
       spend: totalOf(input.project, p.window).spend,
       limits: [[caps.window.tokens, "tokens", "caps.windowTokens"]],
       notice: slot,
+      period: "window",
+      until: (limit, unit) => roomAt({ runs: input.project, from: p.window, hours: caps.windowHours, limit, unit }),
     }),
     stopFor({
       what: `in the last ${caps.windowHours} h every project on this machine`,
       spend: totalOf(input.machine, p.window).spend,
       limits: [[caps.window.machineTokens, "tokens", "caps.machineWindowTokens"]],
       notice: slot,
+      period: "window",
+      until: (limit, unit) => roomAt({ runs: input.machine, from: p.window, hours: caps.windowHours, limit, unit }),
     }),
   ];
   return stops.find((s) => s.kind === "stop") ?? { kind: "go" };
+}
+
+// hhmm : a time as HH:MM UTC. Pure.
+function hhmm(at: number): string {
+  return `${new Date(at).toISOString().slice(11, 16)} UTC`;
+}
+
+// heldWords : why a cap holds the project's runs, and when to start the orchestrator loop again (#305). Pure.
+export function heldWords(stop: Extract<Stop, { kind: "stop" }>, project: string): string {
+  const again = `run \`agent-factory dispatch ${project}\` again`;
+  return stop.period === "day"
+    ? `the project-day cap is reached: ${stop.why}; ${again} tomorrow`
+    : `the window is full until ${hhmm(stop.until)}: ${stop.why}; ${again} then`;
 }

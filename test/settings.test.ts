@@ -76,6 +76,7 @@ async function cli(argv: readonly string[], env?: NodeJS.ProcessEnv): Promise<Ru
       gid: process.getgid?.() ?? -1,
       run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
       interactive: async () => 0,
+      background: async () => ({ kind: "failed", reason: "no background in this test" }),
     },
   });
   return { code, out, err };
