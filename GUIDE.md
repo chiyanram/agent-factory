@@ -524,9 +524,9 @@ ended goes to a person. A ticket's change is the one on `factory/<ticket>` in th
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: to go on, the human
-STARTs again (tiny) or approves the spec again (the other lanes), which also starts every count afresh (#227). The
-build begins only on a human's word: a START in the tiny lane, an approval in the others. Each approval also gets one
-shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
+STARTs again or approves the spec again; the newer of the two records starts every count afresh (#227). The build
+begins only on a human's word: a START in the tiny lane, a START and an approval in the others. An approval with no
+START waits, since nothing runs without one. Each approval also gets one shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
 each record when the writer may try again (`nextTry`, #228): 10 s after the step's first failure, doubling each time,

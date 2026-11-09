@@ -39,7 +39,17 @@ const COPY = (ticket: string, lane = "feature") =>
   `[coordinator] approved by ram via terminal, spec ${specHash(SPEC(lane).replace("PROJ-1", ticket))}, design none`;
 let home = "";
 
+// a ticket a human STARTed and then approved: both records, since nothing runs without a START (#227)
 async function approved(ticket = "PROJ-1", lane = "feature"): Promise<void> {
+  const started = await start({
+    where: { home, project: "ledger", ticket },
+    by: "ram",
+    via: "terminal",
+    at: "2026-11-07T07:00:00Z",
+    branch: "absent",
+    confirmed: false,
+  });
+  expect(started.kind).toBe("started");
   mkdirSync(join(home, "specs", "ledger", ticket), { recursive: true });
   const text = SPEC(lane).replace("PROJ-1", ticket);
   writeFileSync(join(home, "specs", "ledger", ticket, "spec.md"), text);
@@ -702,15 +712,48 @@ describe("START and approval (#227)", () => {
     expect(await decisions(cleared)).toEqual(["log PROJ-1: writer (fix): started; no run yet (dry run)"]);
   });
 
-  it("the way back from needs-human, an approval lane: a new START is not enough; approving again picks it up", async () => {
+  it("the way back from needs-human, an approval lane: approving again picks it up, with the START it has", async () => {
+    const text = spec("feature");
+    await started("2026-11-07T08:00:00Z");
+    await approvedAt(text, "2026-11-07T09:00:00Z");
+    await handedOver();
+    expect((await decisions(cleared)).join(" ")).toContain("handed to a person earlier");
+    await approvedAt(text, "2026-11-07T09:50:00Z");
+    expect(await decisions(cleared)).toEqual(["log PROJ-1: writer (fix): approved; no run yet (dry run)"]);
+  });
+
+  it("the way back from needs-human, an approval lane: a new START also restarts the counts, the approval still current", async () => {
     const text = spec("feature");
     await started("2026-11-07T08:00:00Z");
     await approvedAt(text, "2026-11-07T09:00:00Z");
     await handedOver();
     await started("2026-11-07T09:45:00Z");
-    expect((await decisions(cleared)).join(" ")).toContain("handed to a person earlier");
-    await approvedAt(text, "2026-11-07T09:50:00Z");
     expect(await decisions(cleared)).toEqual(["log PROJ-1: writer (fix): approved; no run yet (dry run)"]);
+  });
+
+  it("an approval with no START waits: nothing runs without one; the START then lets the build begin", async () => {
+    const text = spec("bug");
+    await approvedAt(text, "2026-11-07T08:00:00Z");
+    expect(await decisions()).toEqual([
+      "log PROJ-1: wait: approved, no START: a human STARTs the ticket first (dry run)",
+    ]);
+    const log: string[] = [];
+    const runs: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => (
+          runs.push(input.task.kind),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+        ),
+      },
+    };
+    await tick(setup({ team, open: [open({ labels: [] })], merged: [] }, log, { steps }));
+    expect(runs).toEqual([]);
+    await started("2026-11-07T09:00:00Z");
+    await tick(setup({ team, open: [open({ labels: [] })], merged: [] }, log, { steps }));
+    expect(runs).toEqual(["test-first"]);
   });
 
   it("posts the shared copy of each approval once, through the posting template; a new approval posts again", async () => {

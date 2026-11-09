@@ -11,7 +11,8 @@
 // A lock file keeps two passes from running at once (cron every few minutes, a run of an hour).
 //
 // The ticket list (#227) is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
-// the build begin is a human's word: an approval, or in the tiny lane a START (table.ts). The shared copy is a note the
+// the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
+// approval with no START waits. The newer of the two records is when the counts start afresh. The shared copy is a note the
 // project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or none>", for
 // people to see. It never starts anything: the orchestrator decides only from the local records.
 
@@ -121,10 +122,10 @@ function newest(a: string, b: string): string {
   return Date.parse(b) > Date.parse(a) ? b : a;
 }
 
-// approvedView : an approval lets the build begin in any lane; in the tiny lane a newer START counts from its own time
+// approvedView : an approval lets the build begin only with a START; the newer of the two is when the counts start,
+// so a person who takes the ticket back from needs-human may START or approve again
 function approvedView(approval: ApprovalRecord, lane: Lane, started: StartRecord | "none"): ApprovalView {
-  const since = lane === "tiny" && started !== "none" ? newest(approval.at, started.at) : approval.at;
-  return { kind: "approved", at: since, lane };
+  return started === "none" ? { kind: "unstarted" } : { kind: "approved", at: newest(approval.at, started.at), lane };
 }
 
 // startedView : a START with no current approval: the build may begin in the tiny lane only. A spec the coordinator

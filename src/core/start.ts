@@ -116,9 +116,9 @@ export async function readStart(where: Where): Promise<StoredStart> {
     : { kind: "refused", reason: `${path.path} is not a START record for ${where.project}/${where.ticket}` };
 }
 
-// What lets a ticket's build begin, for the steps that run it (the implementer's run, the automated review): its
-// current approval in any lane, or its START in the tiny lane, with the spec as it is now. A START binds no hash: the
-// tiny lane builds the spec as the coordinator left it.
+// What lets a ticket's build begin, for the steps that run it (the implementer's run): always a START (nothing runs
+// without one), plus its current approval in every lane above tiny. The spec is the approved one, or in the tiny lane
+// the spec as it is now: a START binds no hash, so the tiny lane builds the spec as the coordinator left it.
 export type GoAhead =
   | {
       readonly kind: "go";
@@ -142,12 +142,26 @@ async function tinyStart(where: Where, held: string): Promise<GoAhead> {
     : { kind: "held", why: `${held}, and a START alone builds only the tiny lane` };
 }
 
+// approvedStart : an approval releases the build only where a human also said START
+async function approvedStart(
+  where: Where,
+  approved: { readonly spec: Spec; readonly by: string; readonly at: string },
+): Promise<GoAhead> {
+  const stored = await readStart(where);
+  if (stored.kind === "refused") {
+    return stored;
+  }
+  return stored.kind === "record"
+    ? { kind: "go", said: "approved", ...approved }
+    : { kind: "held", why: "approved, no START: a human STARTs the ticket first" };
+}
+
 // goAhead : whether the ticket's build may begin, and on whose word
 export async function goAhead(where: Where): Promise<GoAhead> {
   const approval = await approvalState(where);
   switch (approval.kind) {
     case "approved":
-      return { kind: "go", said: "approved", spec: approval.spec, by: approval.record.by, at: approval.record.at };
+      return approvedStart(where, { spec: approval.spec, by: approval.record.by, at: approval.record.at });
     case "refused":
       return approval;
     case "stale":

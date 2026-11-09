@@ -149,6 +149,17 @@ describe("goAhead: what lets the build begin (#227)", () => {
   };
   const where = () => request().where;
 
+  it("an approval with no START holds: nothing runs without one", async () => {
+    const feature = spec("feature");
+    await approve({ where: where(), seenHash: specHash(feature), by: "ana", at: "2026-11-09T09:00:00Z" });
+    expect(await goAhead(where())).toEqual({
+      kind: "held",
+      why: "approved, no START: a human STARTs the ticket first",
+    });
+    await start(request());
+    expect(await goAhead(where())).toMatchObject({ kind: "go", said: "approved", by: "ana" });
+  });
+
   it("a tiny ticket goes on its START alone; a feature ticket holds until it is approved", async () => {
     spec("tiny");
     expect(await goAhead(where())).toMatchObject({ kind: "held", why: "the approval is missing" });

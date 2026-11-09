@@ -4,15 +4,16 @@
 //
 // Nothing starts unless a human starts it (P8, #227). A ticket's build may begin only after a human's word:
 //   tiny                          its START
-//   bug, feature, one-way door    its approval, bound to the spec's and the design's hashes (the approval floor)
+//   bug, feature, one-way door    its START and its approval, bound to the spec's and the design's hashes (the
+//                                 approval floor); an approval with no START waits, since nothing runs without one
 // A START in a lane that needs an approval, or a START whose spec the coordinator has not written yet, waits.
 //
 //   the change is merged and still claimed                     reconcile (remove the claim)
 //   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
 //   needs-human on the change                                  wait: a person decides
 //   a run started and never ended (the dispatcher died)        needs-human: check what that run pushed
-//   no START or approval that lets the build begin, or a stale  release a claim, else wait
-//   approval
+//   no START, no approval above tiny, an approval with no       release a claim, else wait
+//   START, or a stale approval
 //   a maintainer's /stop newer than that START or approval     wait; a new START (tiny) or approval lifts it
 //   an open question                                           wait
 //   a pipeline state the factory does not know                 needs-human
@@ -51,8 +52,8 @@ import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
 import type { Retried, Summary, Task } from "./records.js";
 
-// what a human said that lets the build begin (#227): an approval (any lane), or a START (the tiny lane only); at is
-// when they said it, and the run records count from then
+// what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
+// is the newer of the two records, and the run records count from then
 export type ApprovalView =
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
   | { readonly kind: "started"; readonly at: string; readonly lane: "tiny" }
@@ -61,7 +62,9 @@ export type ApprovalView =
   // a START, and a spec whose lane needs an approval the ticket does not have
   | { readonly kind: "unapproved"; readonly lane: Lane }
   // a START, and no spec ready yet: the coordinator writes it
-  | { readonly kind: "unwritten" };
+  | { readonly kind: "unwritten" }
+  // an approval, and no START: nothing runs without one
+  | { readonly kind: "unstarted" };
 
 export type ChangeView =
   | { readonly kind: "none" }
@@ -137,6 +140,7 @@ const HELD: { readonly [K in keyof HeldMap]: (view: HeldMap[K]) => string } = {
   missing: () => "the ticket has no START and no approval",
   unapproved: (v) => `the ${v.lane} lane needs a human's approval; the ticket has a START only`,
   unwritten: () => "the ticket has a START; its spec is not written yet",
+  unstarted: () => "approved, no START: a human STARTs the ticket first",
 };
 
 function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): string {
