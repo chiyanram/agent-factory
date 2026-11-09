@@ -58,5 +58,6 @@ docs/agents/          issue tracker, triage labels, domain-doc conventions
 
 - Issues, the wayfinder map and its tickets: GitHub issues on chiyanram/agent-factory. See
   `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`.
-- Terms: `GUIDE.md#terms`. Decisions: `docs/adr/`. See `docs/agents/domain.md`.
+- Terms: `GLOSSARY.md` (the software-factory words, #144). `GUIDE.md#terms` still uses the old words until #144 phase 3.
+  Decisions: `docs/adr/`. See `docs/agents/domain.md`.
 - A cite `docs/archive/…` or `research/NN` means that file at git tag `docs-archive-2026-11`.
