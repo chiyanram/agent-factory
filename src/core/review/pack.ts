@@ -94,7 +94,6 @@ function gitFor(input: PackInput): Git {
       await hostGit({
         args: ["-c", "core.quotePath=false", ...args],
         env: input.env,
-        ownHelper: { kind: "none" },
         ...whereFor(input.repo, stdin),
       }),
       args,

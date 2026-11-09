@@ -94,7 +94,6 @@ export async function readTeamAt(home: string, pin: Pin, env: NodeJS.ProcessEnv)
     args: ["cat-file", "blob", `${pin.commit}:team.json`],
     repo: { kind: "repo", path: dir },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   const file = `${join(dir, "team.json")}@${pin.commit.slice(0, 12)}`;

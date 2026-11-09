@@ -44,7 +44,6 @@ export function git(env: NodeJS.ProcessEnv, repo: string, args: readonly string[
     args,
     repo: { kind: "repo", path: repo },
     env: { ...env, GIT_NO_REPLACE_OBJECTS: "1" },
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
 }

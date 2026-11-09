@@ -24,7 +24,6 @@ async function git(repo: RepoTarget, env: NodeJS.ProcessEnv, args: readonly stri
     args,
     repo,
     env: { ...env, ...AUTHOR },
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   if (ran.kind === "ok") {

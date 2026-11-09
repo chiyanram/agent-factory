@@ -276,7 +276,6 @@ async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
     args: ["config", "--get", "user.name"],
     repo: { kind: "none" },
     env,
-    ownHelper: { kind: "none" },
     stdin: { kind: "none" },
   });
   const gitName = name.kind === "ok" ? name.stdout.trim() : "";
