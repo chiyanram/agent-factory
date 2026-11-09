@@ -81,12 +81,8 @@ flowchart LR
 flowchart LR
     P["agent-factory<br/>poll · dispatch · review · approve · spec<br/>claim · release · status · ask · block · reconcile"]
     P --> SEAM["forge seam<br/>src/core/forge"]
-    S["bash scripts, until ported (#138)<br/>start-writer · tokens · github-app"]
-    S --> BSEAM["scripts/lib/forge.sh"]
     SEAM --> GL["glab api"]
     SEAM --> GH["gh api"]
-    BSEAM --> GL
-    BSEAM --> GH
 ```
 
 Today the coordinator decides and the scripts act. In the target design the dispatcher decides from `poll` and the

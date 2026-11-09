@@ -188,11 +188,7 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
       disableAutoMode: "disable",
       additionalDirectories: [`${p.factoryHome}/specs`],
       allow: [...READS.flatMap((c) => exact(`agent-factory ${c}`)), `Edit(${specs}/**)`, `Read(${specs}/**)`],
-      ask: [
-        ...exact("agent-factory confirm"),
-        ...STARTS.flatMap((c) => exact(`agent-factory ${c}`)),
-        bash(`${p.pkg}/scripts/start-writer.sh`),
-      ],
+      ask: [...exact("agent-factory confirm"), ...STARTS.flatMap((c) => exact(`agent-factory ${c}`))],
       deny: [...DENY_BASH.flatMap(exact), ...editDenies(p), ...readDenies(p)],
     },
   };
