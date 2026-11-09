@@ -55,6 +55,8 @@ import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
+import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
+import { onboardSetup } from "./core/onboard/settings.js";
 import { capsOf, type Caps } from "./core/dispatch/caps.js";
 
 const HELP = `usage: agent-factory <command>
@@ -101,7 +103,7 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${USAGE_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
@@ -184,6 +186,40 @@ function usage({ positionals, io }: Args): Promise<number> {
       return Promise.resolve(1);
     }
     return usageCommand(positionals, { ...resolved, home: home.path, now: Date.now });
+  });
+}
+
+// onboard : the onboarder's run, or a human's acceptance of what it staged (#235), with the project's settings resolved
+function onboardCli({ positionals, io }: Args): Promise<number> {
+  const project = positionals[0] === "accept" ? positionals[1] : positionals[0];
+  return resolvedRun("onboard", project, io, (resolved) => {
+    const home = factoryHome(resolved.env);
+    if (home.kind === "refused") {
+      io.err(`agent-factory onboard: ${home.reason}\n`);
+      return Promise.resolve(1);
+    }
+    return onboardCommand(positionals, {
+      home: home.path,
+      out: io.out,
+      err: io.err,
+      now: Date.now,
+      by: () => whoApproves(resolved.env),
+      setup: async (name) => {
+        const opened = await openProjectForge(
+          { env: resolved.env, log: (line) => io.err(`${line}\n`) },
+          { home: home.path, project: name, plugins: await pluginSetup(home.path, resolved.env) },
+        );
+        return opened.kind === "ok"
+          ? onboardSetup({
+              env: resolved.env,
+              forge: opened.value.forge,
+              home: home.path,
+              project: name,
+              now: Date.now,
+            })
+          : opened;
+      },
+    });
   });
 }
 
@@ -1066,6 +1102,7 @@ const COMMANDS: readonly Command[] = [
   { name: "dispatch", run: dispatchCommand },
   { name: "review", run: reviewCommand },
   { name: "usage", run: usage },
+  { name: "onboard", run: onboardCli },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
   { name: "plugin", run: pluginCli },

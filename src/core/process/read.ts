@@ -36,7 +36,7 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
 const NAME = /^[A-Za-z0-9_-]+$/;
 
 // processDir : the plugin's first skills/<skill>/process folder with a lanes file, by skill name; "" when none
-async function processDir(dir: string): Promise<string> {
+export async function processDir(dir: string): Promise<string> {
   const skills = await readdir(join(dir, "skills")).catch((): string[] => []);
   for (const skill of skills.toSorted()) {
     const lanes = join(dir, "skills", skill, "process", "lanes.json");
