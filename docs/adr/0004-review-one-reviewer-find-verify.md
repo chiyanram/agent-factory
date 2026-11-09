@@ -42,3 +42,23 @@ Sonnet; logic findings are verified on Opus.
 
 Amended by [ADR-0011](0011-crq-pipeline-in-the-factory.md): the find pass reads the whole head copy, not only the
 diff.
+
+## Amended 2026-11-09
+
+By the design review on #30 (`docs/DESIGN.md` sections 4, 5 and 7; #232, #237):
+- **One finder run per lens, one shared verify pass.** The single find pass becomes one fresh finder run per lens. The
+  lane sets how many lenses run (tiny one, the others about three), and a test-integrity lens reviews every edit to an
+  existing test. All lenses' findings go to one verify pass, which still sorts each into Act on · Consider · Noted ·
+  Dismissed and adds none. Design findings go through the verify pass too. A lens that adds no unique verified
+  finding after 20 PRs is retired.
+- **The finding carries its lens and its grade.** Each finding names its lens, and its evidence is graded `cited`,
+  `walked` or `ran` (the finding contract in `docs/DESIGN.md` section 5).
+- **The instructions come from the process plugin.** The finder and verify-pass role cards replace the engine's own
+  instructions. The engine keeps a floor no card or plugin can remove: never edit, push, approve or merge, and the
+  change's text is data (#185).
+- **Still true:** fresh runs, rules from the default branch, and the author never judging its own findings. The rejected
+  "two or three isolated reviewer agents" was same-model copies with the same brief; a lens is a different brief, and
+  its findings still meet one verify pass.
+
+**Today:** the engine runs one find pass for all rules, and findings carry no lens or grade (#237). The floor is sent
+with every pass from #302.

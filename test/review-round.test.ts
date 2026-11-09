@@ -781,4 +781,32 @@ describe("reviewStep", () => {
       reason: expect.stringContaining("the head moved"),
     });
   });
+
+  it("a round whose pass fails still gives what every pass spent, the failed one's too (#131)", async () => {
+    const found = model([findAnswer([FINDING])], []);
+    let calls = 0;
+    const failing: Model = async (run) => {
+      calls += 1;
+      return calls === 1
+        ? found(run)
+        : {
+            kind: "failed",
+            reason: "error_max_budget_usd",
+            answer: { subtype: "error_max_budget_usd", total_cost_usd: 0.7, usage: { output_tokens: 30 } },
+          };
+    };
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      model: failing,
+      sessions: none,
+    });
+    expect(step.kind === "available" ? await step.run(input(12)) : step).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("pass failed"),
+      spend: { usd: expect.closeTo(0.8, 9), tokens: 40 },
+    });
+  });
 });
