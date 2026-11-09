@@ -65,7 +65,7 @@ describe("the caps are cap-class settings keys", () => {
   });
 
   it("per run: the writer's run carries the run cap as --max-budget-usd", () => {
-    const argv = claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1);
+    const argv = claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1, ["Read"]);
     expect(argv.slice(argv.indexOf("--max-budget-usd"), argv.indexOf("--max-budget-usd") + 2)).toEqual([
       "--max-budget-usd",
       "2",

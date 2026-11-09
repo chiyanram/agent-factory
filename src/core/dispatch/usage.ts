@@ -7,11 +7,11 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { plainName } from "../spec.js";
 import type { Result } from "../forge/api.js";
-import { readRecords } from "./records.js";
+import { readRecords, type Event } from "./records.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 
-// one model run's record: the writer's or a review round's end, or what a failed run spent
+// one model run's record: the writer's, a review round's or a design review run's end, or what a failed run spent
 export type Spent = {
   readonly project: string;
   readonly ticket: string;
@@ -44,6 +44,16 @@ async function projectsOf(home: string, project: string | undefined): Promise<re
   return project === undefined ? names(join(home, "runs"), "") : [project];
 }
 
+// the lines that end or follow a model run: the writer's, a review round's, a design review run's (#236), and what a
+// failed run spent; a line of these kinds with no spend was not measured
+const SPENDING: ReadonlySet<string> = new Set(["writer-ended", "review-ended", "spent", "design-ended"]);
+
+type Spending = Extract<Event, { kind: "writer-ended" | "review-ended" | "spent" | "design-ended" }>;
+
+function spending(e: Event): e is Spending {
+  return SPENDING.has(e.kind);
+}
+
 type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[] };
 
 // ticketSpends : every measured or unmeasured run of one ticket, and its acted-on rows, or why its records cannot be
@@ -56,11 +66,7 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
   return {
     kind: "ok",
     value: {
-      runs: events.value.flatMap((e) =>
-        e.kind === "writer-ended" || e.kind === "review-ended" || e.kind === "spent"
-          ? [{ project, ticket, at: e.at, spend: e.spend ?? "unmeasured" }]
-          : [],
-      ),
+      runs: events.value.filter(spending).map((e) => ({ project, ticket, at: e.at, spend: e.spend ?? "unmeasured" })),
       acted: events.value.flatMap((e) =>
         e.kind === "review-ended" && e.acted !== undefined ? [{ project, at: e.at, rows: e.acted.rows }] : [],
       ),

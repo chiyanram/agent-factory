@@ -47,7 +47,7 @@ export type Client = {
   readonly now: () => number;
 };
 
-export type Method = "GET" | "POST" | "PUT" | "DELETE";
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type Body = { readonly kind: "json"; readonly value: unknown } | { readonly kind: "none" };
 export type RestRequest = { readonly path: string; readonly method: Method; readonly body: Body };
 // GraphQL variables go in as -f (text) or -F (whole numbers) fields, never into the query text.

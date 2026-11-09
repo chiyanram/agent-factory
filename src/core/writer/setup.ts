@@ -11,7 +11,8 @@ import type { BoxSetup } from "../ready/boxrun.js";
 import type { BoxPlan } from "../ready/steps.js";
 import { writerSettings } from "./settings.js";
 import type { LaneProps } from "../lane.js";
-import { readPrompts, type PushTarget, type WriterSetup } from "./step.js";
+import type { PushTarget, WriterSetup } from "./step.js";
+import type { PluginDir } from "../process/read.js";
 
 export type WriterInput = {
   readonly env: NodeJS.ProcessEnv;
@@ -23,8 +24,8 @@ export type WriterInput = {
   readonly identity: Identity;
   readonly store: Result<TokenStore>;
   readonly pusher: Pusher;
-  // the plugins' folders, in order (process/use.ts)
-  readonly plugins: readonly string[];
+  // the plugins, in order (process/use.ts)
+  readonly plugins: readonly PluginDir[];
   // the project's lanes, from its process (#232)
   readonly lanes: readonly LaneProps[];
 };
@@ -59,33 +60,30 @@ function placed(input: WriterInput): Result<Placed> {
     : push;
 }
 
-export async function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
+// writerSetup : the writer step's setup; each run reads its role card when it starts (step.ts)
+export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
   const where = placed(input);
   if (where.kind === "failed") {
-    return where;
+    return Promise.resolve(where);
   }
   const settings = writerSettings(input.env, input.plugins);
   if (settings.kind === "failed") {
-    return settings;
+    return Promise.resolve(settings);
   }
-  const prompts = await readPrompts();
   const { box, store, push } = where.value;
-  return prompts.kind === "ok"
-    ? {
-        kind: "ok",
-        value: {
-          box,
-          settings: settings.value,
-          prompts: prompts.value,
-          forge: input.forge,
-          push,
-          home: input.home,
-          project: input.project,
-          label: input.label,
-          login: () => boxTokenFrom({ store, now: new Date() }),
-          pusher: input.pusher,
-          lanes: input.lanes,
-        },
-      }
-    : prompts;
+  return Promise.resolve({
+    kind: "ok",
+    value: {
+      box,
+      settings: settings.value,
+      forge: input.forge,
+      push,
+      home: input.home,
+      project: input.project,
+      label: input.label,
+      login: () => boxTokenFrom({ store, now: new Date() }),
+      pusher: input.pusher,
+      lanes: input.lanes,
+    },
+  });
 }

@@ -51,6 +51,7 @@ function forge(claimed: readonly number[] | "down"): Forge {
     addLabel: notUsed,
     removeLabel: notUsed,
     note: notUsed,
+    setBody: notUsed,
   };
 }
 

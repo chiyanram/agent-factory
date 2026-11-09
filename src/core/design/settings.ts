@@ -1,0 +1,47 @@
+// settings — the design review's setup, from the settings the automated review already reads (#236): the project's
+// clone (FACTORY_REPO), the project's plugins whose process may hold the role cards (process/use.ts, #232), the per-run
+// cap, and the logic model the review's verify pass uses, a full id (review/pinned.ts, #213). The claude CLI gets only the environment it needs: no forge token, no FACTORY_*
+// (review/settings.ts claudeEnv; ADR-0012 S2).
+
+import { join } from "node:path";
+import type { Result } from "../forge/api.js";
+import type { Forge } from "../forge/types.js";
+import { claudeModel, runInFolder, type Model } from "../review/model.js";
+import { claudeEnv, paths } from "../review/settings.js";
+import { settingOf } from "../settings/machine.js";
+import type { PluginDir } from "../process/read.js";
+import { REVIEW_MODELS } from "../review/pinned.js";
+import type { DesignSetup } from "./step.js";
+
+export function designSetup(input: {
+  readonly env: NodeJS.ProcessEnv;
+  readonly forge: Forge;
+  readonly home: string;
+  readonly project: string;
+  // the project's plugins, in order (process/use.ts, #232): the process plugin among them holds the role cards
+  readonly plugins: readonly PluginDir[];
+  readonly model?: Model;
+}): Result<DesignSetup> {
+  const p = paths(input.env);
+  if (p.kind === "failed") {
+    return { kind: "failed", reason: `the design review is not set up: ${p.reason}` };
+  }
+  const model =
+    input.model ??
+    claudeModel({ bin: input.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(input.env), run: runInFolder });
+  return {
+    kind: "ok",
+    value: {
+      home: input.home,
+      project: input.project,
+      repo: p.value.repo,
+      env: input.env,
+      forge: input.forge,
+      model,
+      modelName: settingOf(input.env, "review.logicModel") ?? REVIEW_MODELS.logic,
+      maxUsd: p.value.maxUsd,
+      plugins: input.plugins,
+      runsDir: join(input.home, "design-runs"),
+    },
+  };
+}

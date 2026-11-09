@@ -270,3 +270,31 @@ describe("a stalled run (#228)", () => {
     });
   });
 });
+
+describe("parseReport: a cleanup run's deferred list (#236)", () => {
+  const row = { criterion: "AC-1 x", command: "make test", result: "1 passed" };
+
+  it("keeps the deferred list of a done report; an empty one is none; a bad one is malformed", () => {
+    expect(
+      parseReport(
+        JSON.stringify({ status: "done", evidence: [row], deferred: ["drop the guard: it hides a failure"] }),
+      ),
+    ).toEqual({
+      kind: "done",
+      evidence: [row],
+      deferred: ["drop the guard: it hides a failure"],
+    });
+    expect(parseReport(JSON.stringify({ status: "done", evidence: [row], deferred: [] }))).toEqual({
+      kind: "done",
+      evidence: [row],
+    });
+    expect(parseReport(JSON.stringify({ status: "done", evidence: [row], deferred: [3] }))).toMatchObject({
+      kind: "blocked",
+      reason: expect.stringContaining("deferred 1"),
+    });
+    // only done may carry it
+    expect(parseReport(JSON.stringify({ status: "asked", questions: ["q?"], deferred: ["x"] }))).toMatchObject({
+      kind: "blocked",
+    });
+  });
+});

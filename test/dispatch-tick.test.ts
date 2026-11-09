@@ -39,6 +39,12 @@ const SPEC = (lane: string) =>
   ].join("\n");
 
 const H = "1".repeat(40);
+const NO_DESIGN_REVIEW = DEFAULT_LANES.map((l) => ({
+  name: l.name,
+  approval: l.approval,
+  lenses: l.lenses,
+  designReview: false,
+}));
 // the shared copy of the approval approved() gives (#227)
 const COPY = (ticket: string, lane = "feature") =>
   `[coordinator] approved by ram via terminal, spec ${specHash(SPEC(lane).replace("PROJ-1", ticket))}, design none`;
@@ -96,6 +102,7 @@ function forge(changes: Changes, log: string[]): Forge {
     branchExists: async () => ({ kind: "ok", value: false }),
     openChange: notUsed,
     notes: notUsed,
+    setBody: notUsed,
     lineFinding: notUsed,
     status: notUsed,
     ciConfig: notUsed,
@@ -144,6 +151,8 @@ function setup(changes: Changes, log: string[], over: Partial<TickSetup> = {}): 
     notify: NO_NOTIFY,
     dryRun: false,
     log: (l) => log.push(`log ${l}`),
+    // the tests of the build leave the design review out (a lanes file may): its own tests below use the default lanes
+    lanes: NO_DESIGN_REVIEW,
     ...over,
   };
 }
@@ -301,7 +310,7 @@ describe("tick", () => {
       event: {
         at: "2026-11-07T09:00:00Z",
         kind: "writer-ended",
-        mode: "fix",
+        mode: "cleanup",
         head: H,
         outcome: "done",
         patch: "p1",
@@ -342,13 +351,16 @@ describe("tick", () => {
     expect(wrote).toEqual([]);
     await pass("2026-11-07T10:00:10Z");
     expect(wrote).toEqual(["ready-failed"]);
+    // the cleanup run follows the implementer's done run, with no backoff of its own (#236)
+    await pass("2026-11-07T10:00:30Z");
+    expect(wrote).toEqual(["ready-failed", "cleanup"]);
     // the second failure: 20 s
     await pass("2026-11-07T10:01:00Z");
     expect(await nextTry()).toEqual({ step: "ready", at: "2026-11-07T10:01:20.000Z" });
     await pass("2026-11-07T10:01:19Z");
-    expect(wrote).toEqual(["ready-failed"]);
+    expect(wrote).toEqual(["ready-failed", "cleanup"]);
     await pass("2026-11-07T10:01:20Z");
-    expect(wrote).toEqual(["ready-failed", "ready-failed"]);
+    expect(wrote).toEqual(["ready-failed", "cleanup", "ready-failed"]);
   });
 
   it("a test check hit goes to a person, never back to the writer; a human's waiver at the head runs it again (#231)", async () => {
@@ -359,7 +371,7 @@ describe("tick", () => {
       event: {
         at: "2026-11-07T09:00:00Z",
         kind: "writer-ended",
-        mode: "fix",
+        mode: "cleanup",
         head: H,
         outcome: "done",
         patch: "p1",
@@ -419,7 +431,7 @@ describe("tick", () => {
       event: {
         at: "2026-11-07T09:00:00Z",
         kind: "writer-ended",
-        mode: "fix",
+        mode: "cleanup",
         head: H,
         outcome: "done",
         patch: "p",
@@ -460,7 +472,7 @@ describe("tick", () => {
   it("a review round records its Act on count, what it spent (#131) and each lens's unique findings (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
     await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
     await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
     const steps: Steps = {
@@ -510,7 +522,7 @@ describe("tick", () => {
       event: {
         at: "2026-11-07T09:00:00Z",
         kind: "writer-ended",
-        mode: "fix",
+        mode: "cleanup",
         head: H,
         outcome: "done",
         patch: "p",
@@ -993,7 +1005,7 @@ describe("the lane set by code, raise only (#230)", () => {
       event: {
         at: "2026-11-07T09:00:00Z",
         kind: "writer-ended",
-        mode: "fix",
+        mode: "cleanup",
         head: H,
         outcome: "done",
         patch: "p1",
@@ -1085,7 +1097,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
   it("a review round that fails records what it spent, and that spend counts toward the ticket's cap", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
     await record({
       where,
       event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
@@ -1132,7 +1144,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
   it("holds a review round whose worst case could pass the ticket's dollar cap, with no start line (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
     await record({
       where,
       event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
@@ -1349,5 +1361,266 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     expect(log.join("\n")).toContain("every project on this machine spent $0.00 and 600 tokens");
     await tick(setup(changes(), [], { steps: writer(runs), caps: share(601) }));
     expect(runs).toEqual(["PROJ-1"]);
+  });
+});
+
+describe("the design review and the cleanup run (#236)", () => {
+  const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
+  const CARD = "c".repeat(64);
+  const finding = {
+    id: "D1",
+    decision: "renewals keep their own table",
+    verdict: "conflict",
+    file: "src/loans.ts",
+    line: 12,
+    rule: "SR9",
+    severity: "warning",
+    grade: "walked",
+    finding: "the loans table already holds renewals",
+    fix: "reuse the loans table",
+  } as const;
+
+  function spec(lane: string): string {
+    const text = SPEC(lane);
+    mkdirSync(join(home, "specs", "ledger", "PROJ-1"), { recursive: true });
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text);
+    return text;
+  }
+
+  async function started(): Promise<void> {
+    const done = await start({
+      where: where(),
+      by: "ram",
+      via: "terminal",
+      at: "2026-11-07T08:00:00Z",
+      branch: "absent",
+      confirmed: false,
+    });
+    expect(done.kind).toBe("started");
+  }
+
+  // fake design runs that keep what they were given
+  function designSteps(seen: string[]): Steps {
+    return {
+      ...STEPS_TODAY,
+      designReview: {
+        kind: "available",
+        run: async (input) => {
+          seen.push(`review ${input.spec.slice(0, 8)} ${input.design}`);
+          return {
+            kind: "ok",
+            value: {
+              kind: "done",
+              findings: [finding, { ...finding, id: "D2", verdict: "aligned" }],
+              card: CARD,
+              spend: { usd: 0.4, tokens: 500 },
+            },
+          };
+        },
+      },
+      designVerify: {
+        kind: "available",
+        run: async (input) => {
+          seen.push(`verify ${input.findings.map((f) => f.id).join(",")}`);
+          return {
+            kind: "ok",
+            value: {
+              kind: "done",
+              kept: input.findings
+                .slice(0, 1)
+                .map((f) => Object.assign({}, f, { bucket: "act_on" as const, why: "it holds" })),
+              card: CARD,
+              spend: { usd: 0.2, tokens: 300 },
+            },
+          };
+        },
+      },
+    };
+  }
+
+  const pass = async (steps: Steps, at: string, pings: Ping[] = []) => {
+    const log: string[] = [];
+    await tick(
+      setup({ team, open: [], merged: [] }, log, {
+        steps,
+        lanes: DEFAULT_LANES,
+        now: () => Date.parse(at),
+        notify: pinger(pings),
+      }),
+    );
+    return log;
+  };
+
+  it("a feature-lane ticket: coordinator's spec → design review → verify pass → posted → waits for the approval → build", async () => {
+    const text = spec("feature");
+    await started();
+    const seen: string[] = [];
+    const pings: Ping[] = [];
+    const steps = designSteps(seen);
+    const first = await pass(steps, "2026-11-07T09:00:00Z");
+    expect(first).toContain(`log PROJ-1: design review at spec ${specHash(text).slice(0, 8)}`);
+    expect(seen).toEqual([`review ${specHash(text).slice(0, 8)} none`]);
+    // the verify pass checks the conflict and the open, never an aligned decision
+    const second = await pass(steps, "2026-11-07T09:01:00Z", pings);
+    expect(seen.at(-1)).toBe("verify D1");
+    expect(second).toContain(
+      "log PROJ-1: design review: D1 conflict (act on, walked) src/loans.ts:12: the loans table already holds renewals",
+    );
+    expect(pings).toEqual([
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: "none",
+        why: `the design review is in, 1 finding(s) kept at spec ${specHash(text).slice(0, 8)}: read them, then approve`,
+      },
+    ]);
+    // each run record carries the card's hash and what it spent
+    const read = await readRecords(where());
+    const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
+    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd])).toEqual([
+      ["review", "done", CARD, 0.4],
+      ["verify", "done", CARD, 0.2],
+    ]);
+    // the build waits for the human's approval, and runs nothing more
+    const third = await pass(steps, "2026-11-07T09:02:00Z");
+    expect(third).toEqual(["log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only"]);
+    expect(seen).toHaveLength(2);
+    expect(
+      (await approve({ where: where(), seenHash: specHash(text), by: "ram", at: "2026-11-07T09:30:00Z" })).kind,
+    ).toBe("approved");
+    expect(await pass(steps, "2026-11-07T09:31:00Z")).toContain("log PROJ-1: writer (fix): approved; no run yet");
+  });
+
+  it("an approval given before the findings waits for an approval after them; an edit to the spec reviews again", async () => {
+    const text = spec("bug");
+    await started();
+    expect(
+      (await approve({ where: where(), seenHash: specHash(text), by: "ram", at: "2026-11-07T08:30:00Z" })).kind,
+    ).toBe("approved");
+    const seen: string[] = [];
+    const steps = designSteps(seen);
+    await pass(steps, "2026-11-07T09:00:00Z");
+    await pass(steps, "2026-11-07T09:01:00Z");
+    expect(await pass(steps, "2026-11-07T09:02:00Z")).toEqual([
+      expect.stringContaining("wait: approved before the design review's findings"),
+    ]);
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", "423"));
+    expect(await pass(steps, "2026-11-07T09:03:00Z")).toContain(
+      `log PROJ-1: design review at spec ${specHash(text.replace("409", "423")).slice(0, 8)}`,
+    );
+  });
+
+  it("a tiny-lane ticket skips the design review: its START builds at once", async () => {
+    spec("tiny");
+    await started();
+    const seen: string[] = [];
+    expect(await pass(designSteps(seen), "2026-11-07T09:00:00Z")).toContain(
+      "log PROJ-1: unavailable: the writer's box is not built yet (#113)",
+    );
+    expect(seen).toEqual([]);
+  });
+
+  it("a failed design run records its spend, backs off, and is tried again; a lanes file may switch it off", async () => {
+    spec("feature");
+    await started();
+    let calls = 0;
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      designReview: {
+        kind: "available",
+        run: async () => {
+          calls += 1;
+          return {
+            kind: "ok",
+            value: { kind: "failed", why: "the model ran out of budget", card: CARD, spend: { usd: 1, tokens: 9 } },
+          };
+        },
+      },
+    };
+    expect(await pass(steps, "2026-11-07T09:00:00Z")).toContain(
+      "log PROJ-1: failed: the design-review run failed: the model ran out of budget",
+    );
+    expect(await pass(steps, "2026-11-07T09:00:05Z")).toEqual([
+      "log PROJ-1: wait: the design review failed; the next try is at 2026-11-07T09:00:10.000Z",
+    ]);
+    await pass(steps, "2026-11-07T09:00:10Z");
+    expect(calls).toBe(2);
+    const read = await readRecords(where());
+    const spent =
+      read.kind === "ok" ? summarize({ events: read.value, since: "1970-01-01T00:00:00Z" }).spent : undefined;
+    expect(spent).toEqual({ usd: 2, tokens: 18 });
+    const off = DEFAULT_LANES.map((l) => ({
+      name: l.name,
+      approval: l.approval,
+      lenses: l.lenses,
+      designReview: false,
+    }));
+    const log: string[] = [];
+    await tick(setup({ team, open: [], merged: [] }, log, { lanes: off, dryRun: true }));
+    expect(log).toEqual([
+      "log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only (dry run)",
+    ]);
+  });
+
+  it("the cleanup run follows the implementer's done run; the ready check then runs the cleanup's evidence rows", async () => {
+    await approved();
+    const row = { criterion: "AC-1 it answers 409", command: "npm test", result: "1 passed" };
+    await record({
+      where: where(),
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p1",
+        evidence: [row],
+        hung: false,
+      },
+    });
+    const H2 = "2".repeat(40);
+    const tasks: unknown[] = [];
+    const checked: unknown[] = [];
+    let head = H;
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => {
+          tasks.push(input.task);
+          head = H2;
+          return {
+            kind: "ok",
+            value: {
+              head: H2,
+              outcome: "done",
+              patch: "c1",
+              evidence: [row],
+              hung: false,
+              card: CARD,
+              deferred: ["drop the guard in loans.ts:40"],
+            },
+          };
+        },
+      },
+      ready: {
+        kind: "available",
+        run: async (input) => (
+          checked.push(input.evidence), { kind: "ok", value: { passed: true, why: "", human: false } }
+        ),
+      },
+    };
+    const run = async () => tick(setup({ team, open: [open({ head })], merged: [] }, [], { steps }));
+    await run();
+    expect(tasks).toEqual([{ kind: "cleanup", head: H, evidence: [row] }]);
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({
+      kind: "writer-ended",
+      mode: "cleanup",
+      card: CARD,
+      deferred: ["drop the guard in loans.ts:40"],
+    });
+    await run();
+    expect(checked).toEqual([[row]]);
   });
 });

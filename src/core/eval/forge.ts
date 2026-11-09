@@ -55,6 +55,7 @@ export function evalForge(change: Change, login: string): Forge {
     ciConfig: async () => unused("ciConfig"),
     claimed: async () => unused("claimed"),
     openChange: async () => unused("openChange"),
+    setBody: async () => unused("setBody"),
     changes: async () => unused("changes"),
     failedJobs: async () => unused("failedJobs"),
   };

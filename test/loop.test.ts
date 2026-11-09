@@ -65,6 +65,7 @@ function forge(
       return write(`note !${number} ${r.kind === "ok" ? r.text : r.reason}`);
     },
     notes: notUsed,
+    setBody: notUsed,
     lineFinding: notUsed,
     status: notUsed,
     ciConfig: async () => ({ kind: "ok", value: { kind: "none", why: "test" } }),

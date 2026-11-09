@@ -148,6 +148,8 @@ async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<R
     prompt: `${card.body}\n\n${FLOOR}\n`,
     name: `onboarder-${setup.project}`,
     maxUsd: setup.maxUsd,
+    // the card's tools, narrowed to the read-only ones the model seam gives (#232)
+    tools: card.tools,
   });
   if (ran.kind === "failed") {
     return { answer: failed(`the onboarder's run failed: ${ran.reason}`), spend: spendOf(ran.answer) };

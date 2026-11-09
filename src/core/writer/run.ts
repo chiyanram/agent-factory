@@ -60,6 +60,8 @@ export type WriterRun = {
   readonly settings: SettingsArg;
   // how many plugins the clone holds (clone.ts pluginPaths)
   readonly plugins: number;
+  // the role card's tools (process/cards.ts): the run gets these and no others (#232)
+  readonly tools: readonly string[];
   readonly completion: Completion;
   readonly stallMs: number;
 };
@@ -79,9 +81,27 @@ const QUIET: Readonly<Record<string, string>> = {
   DISABLE_AUTOUPDATER: "1",
 };
 
+// the claude tools each role card tool stands for: a card's Edit also writes a new file. With any tools, a run also
+// gets claude's helpers that add no reach of their own: its task list, its skills (read like any file), and subagents,
+// which get the same tools.
+const CLAUDE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  Read: ["Read"],
+  Grep: ["Grep"],
+  Glob: ["Glob"],
+  Edit: ["Edit", "Write"],
+  Bash: ["Bash"],
+};
+const HELPERS = ["TodoWrite", "Skill", "Task"];
+
+// claudeTools : the --tools value for a card's tools, in claude's names. Pure.
+export function claudeTools(tools: readonly string[]): string {
+  const named = tools.flatMap((t) => CLAUDE_TOOLS[t] ?? []);
+  return [...new Set([...named, ...(named.length === 0 ? [] : HELPERS)])].join(",");
+}
+
 // claudeArgv : the writer's command. Pure. The prompt goes on stdin; the plugin and settings paths are relative to the
-// clone.
-export function claudeArgv(claude: Claude, settings: SettingsArg, plugins: number): Argv {
+// clone. The run gets only the role card's tools (#232).
+export function claudeArgv(claude: Claude, settings: SettingsArg, plugins: number, tools: readonly string[]): Argv {
   return [
     "claude",
     "-p",
@@ -89,6 +109,8 @@ export function claudeArgv(claude: Claude, settings: SettingsArg, plugins: numbe
     "user",
     "--dangerously-skip-permissions",
     ...pluginArgs(plugins),
+    "--tools",
+    claudeTools(tools),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -182,7 +204,7 @@ async function inBox(run: WriterRun): Promise<InBox> {
   const running = run.setup.box.run({
     session: session.value,
     command: {
-      argv: claudeArgv(run.claude, run.settings, run.plugins),
+      argv: claudeArgv(run.claude, run.settings, run.plugins, run.tools),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
       // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it

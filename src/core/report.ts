@@ -28,6 +28,7 @@ export const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_TEXT = 2000;
 const MAX_EVIDENCE = 50;
 const MAX_QUESTIONS = 5;
+const MAX_DEFERRED = 20;
 // a question's choices: 2 to 4 short ones, so a person answers with a letter (#320)
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 4;
@@ -47,7 +48,8 @@ export type Question =
   | { readonly kind: "plain"; readonly question: string };
 
 export type Outcome =
-  | { readonly kind: "done"; readonly evidence: readonly Evidence[] }
+  // deferred: what a cleanup run left for a person, as each would change behaviour (#236); none when the report has none
+  | { readonly kind: "done"; readonly evidence: readonly Evidence[]; readonly deferred?: readonly string[] }
   | { readonly kind: "asked"; readonly questions: readonly Question[] }
   // by: the writer said so, or the host decided it from how the run ended
   | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" };
@@ -239,17 +241,36 @@ function malformed(problem: string): Outcome {
   return hostBlocked(`the report is malformed: ${problem}`);
 }
 
-// the one field each status requires; a Map, so "constructor" or "__proto__" is never a status
-const FIELDS: ReadonlyMap<string, string> = new Map([
-  ["done", "evidence"],
-  ["asked", "questions"],
-  ["blocked", "blocker"],
+// the fields each status may hold, the one it requires first; a Map, so "constructor" or "__proto__" is never a status.
+// done may add "deferred", the cleanup run's list (#236).
+const FIELDS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["done", ["evidence", "deferred"]],
+  ["asked", ["questions"]],
+  ["blocked", ["blocker"]],
 ]);
+
+// deferredOf : a done report's deferred list, as a field to spread: none when it has none, and an empty list is none
+function deferredOf(value: unknown): Check<{ readonly deferred?: readonly string[] }> {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+    return ok({});
+  }
+  const list = listOf(value, "deferred", MAX_DEFERRED, (d, i) => text(d, `deferred ${i + 1}`));
+  return list.kind === "ok" ? ok({ deferred: list.value }) : list;
+}
+
+// REPORT_FIELDS : every field the report's schema names, at any depth: what a role card's hand-off may name (#232)
+export const REPORT_FIELDS: readonly string[] = ["status", ...[...FIELDS.values()].flat(), ...CELLS];
 
 const READ: Readonly<Record<string, (body: Field) => Outcome>> = {
   done: (body) => {
     const evidence = listOf(body.evidence, "evidence", MAX_EVIDENCE, evidenceRow);
-    return evidence.kind === "ok" ? { kind: "done", evidence: evidence.value } : malformed(evidence.problem);
+    const deferred = deferredOf(body.deferred);
+    if (deferred.kind === "bad") {
+      return malformed(deferred.problem);
+    }
+    return evidence.kind === "ok"
+      ? { kind: "done", evidence: evidence.value, ...deferred.value }
+      : malformed(evidence.problem);
   },
   asked: (body) => {
     const questions = listOf(body.questions, "questions", MAX_QUESTIONS, questionOf);
@@ -284,7 +305,7 @@ export function parseReport(text: string): Outcome {
   if (field === undefined) {
     return hostBlocked("the report's status must be done, asked or blocked");
   }
-  const extra = extras(body, ["status", field]);
+  const extra = extras(body, ["status", ...field]);
   return extra > 0
     ? hostBlocked(`the report has ${extra} field(s) the schema does not name for ${status}`)
     : READ[status]!(body);
