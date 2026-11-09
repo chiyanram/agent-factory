@@ -14,6 +14,7 @@
 //     a protected file not listed before; then one summary note, last, since it marks the round done: a round that
 //     failed halfway runs again. No verdict ever approves or undrafts, and zero findings is not a pass (#118).
 
+import { withFloor } from "./never.js";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
@@ -292,7 +293,7 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
     folder,
     model: pass.model,
     schema: pass.schema,
-    prompt,
+    prompt: withFloor(prompt),
     name: `reviewer-${ctx.setup.number}`,
     maxUsd: ctx.setup.maxUsd,
   });
@@ -439,7 +440,7 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
 function threadPost(f: Sorted): Post {
   return {
     seat: "reviewer",
-    title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.rule}): ${f.finding}`,
+    title: `${BUCKET_NAMES[f.bucket]} ${f.id} (${f.severity}, ${f.category}, ${f.rule}): ${f.finding}`,
     fields: [{ label: "Fix", value: f.fix }],
     items: [],
   };
@@ -490,7 +491,8 @@ function findingLines(sorted: readonly Sorted[], axis: "standards" | "spec", nam
   return mine.length === 0
     ? [`${name} · none`]
     : mine.map(
-        (f) => `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule}: ${f.finding} (${f.why})`,
+        (f) =>
+          `${name} · ${BUCKET_NAMES[f.bucket]} ${f.id} ${f.file}:${f.line} ${f.rule} (${f.category}): ${f.finding} (${f.why})`,
       );
 }
 
