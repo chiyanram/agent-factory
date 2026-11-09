@@ -9,8 +9,10 @@
 // decided the same way next time. A "started" record is written before a run and an "ended" one after it; a pass that
 // dies in between leaves the first alone, and the next pass hands that ticket to a person.
 //
-// A lock file keeps two passes from running at once (cron every few minutes, a run of an hour). Each pass that polled
-// writes its last-poll time (last-poll.ts), so `status` shows a stopped orchestrator.
+// A lock file keeps two passes from running at once (a pass by hand while the orchestrator loop runs, a run of an
+// hour). No cron or launchd job runs a pass: a human's command starts the orchestrator loop (orchestrator-loop.ts), and
+// it ends by itself when no ticket is in flight (#305). Each pass that polled writes its last-poll time (last-poll.ts),
+// so `status` shows a loop that stopped.
 //
 // The ticket list (#227) is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
 // the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
@@ -126,7 +128,7 @@ export type TickSetup = {
   readonly gate: Gate;
   readonly now: () => number;
   readonly quietMinutes: number;
-  // how often cron or launchd runs the pass (FACTORY_POLL_MINUTES), kept with the last-poll time for status
+  // how long the orchestrator loop waits between passes (poll.minutes), kept with the last-poll time for status
   readonly pollMinutes: number;
   // the repository on the git host (FACTORY_PROJECT): status finds the last-poll time by it
   readonly repo: string;
@@ -870,12 +872,13 @@ function alive(pid: number): boolean {
   }
 }
 
-type Holder =
+export type Holder =
   | { readonly kind: "alive"; readonly pid: number }
   | { readonly kind: "dead" }
   | { readonly kind: "unknown" };
 
-async function holder(path: string, now: number): Promise<Holder> {
+// holder : who holds a lock file: a live pid, a dead one (a crash left it), or unknown while it is being written
+export async function holder(path: string, now: number): Promise<Holder> {
   const text = await readFile(path, "utf8").catch(() => "");
   const pid = Number(text.split(":")[0]);
   if (Number.isSafeInteger(pid) && pid > 0) {
@@ -904,10 +907,20 @@ async function take(lockPath: string, mine: string, token: string): Promise<bool
   }
 }
 
-// lock : one pass at a time per project. It never throws: a lock it cannot take is "busy", with the reason.
-export async function lock(input: { readonly home: string; readonly project: string }): Promise<Lock> {
+// what a lock file guards: one pass, or one orchestrator loop (#305), at a time per project
+export type Guard = { readonly file: string; readonly what: string };
+export const PASS_GUARD: Guard = { file: ".lock", what: "pass" };
+
+// lock : one pass at a time per project, or with a guard one of what it guards. It never throws: a lock it cannot take
+// is "busy", with the reason.
+export async function lock(input: {
+  readonly home: string;
+  readonly project: string;
+  readonly guard?: Guard;
+}): Promise<Lock> {
+  const guard = input.guard ?? PASS_GUARD;
   const dir = join(input.home, "runs", input.project);
-  const lockPath = join(dir, ".lock");
+  const lockPath = join(dir, guard.file);
   const token = `${process.pid}:${randomUUID()}`;
   const mine = join(dir, `.lock.${randomUUID()}`);
   try {
@@ -921,8 +934,8 @@ export async function lock(input: { readonly home: string; readonly project: str
         kind: "busy",
         reason:
           found.kind === "alive"
-            ? `another pass (pid ${found.pid}) is running for ${input.project}`
-            : `another pass holds ${lockPath}`,
+            ? `another ${guard.what} (pid ${found.pid}) is running for ${input.project}`
+            : `another ${guard.what} holds ${lockPath}`,
       };
     }
     // release only a lock that is still ours
