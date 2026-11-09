@@ -52,10 +52,10 @@ describe("the approval floor (#230)", () => {
   });
 
   it("reads a lane's approval from the project's lanes: a process may make tiny need one; a lane left out needs one", () => {
-    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true }));
+    const strict = DEFAULT_LANES.map((l) => ({ ...l, approval: true }));
     expect(needsApproval("tiny", strict)).toBe(true);
     expect(needsApproval("tiny", DEFAULT_LANES)).toBe(false);
-    expect(needsApproval("bug", [{ name: "tiny", approval: false }])).toBe(true);
+    expect(needsApproval("bug", [{ name: "tiny", approval: false, designReview: false }])).toBe(true);
   });
 
   it("refuses a plugin or settings value that drops the approval above the lightest lane", () => {

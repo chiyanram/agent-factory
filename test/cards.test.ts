@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cardOf, readCard, type Role } from "../src/core/process/cards.js";
+import { cardOf, handOffFields, inputsOf, readCard, withheld, type Role } from "../src/core/process/cards.js";
 import { tempDir } from "./temp.js";
 
 // the rulebook's own role cards, as chiyanram/skills ships them (crq/process/roles/)
 const RULEBOOK_ROLES = join(import.meta.dirname, "..", "tests", "fixtures", "process", "rulebook-roles");
-const ROLES: readonly Role[] = ["design-reviewer", "verify-pass", "cleanup"];
+const ROLES: readonly Role[] = ["implementer", "test-first", "cleanup", "design-reviewer", "verify-pass"];
 
 let root = "";
 beforeEach(() => {
@@ -81,5 +81,75 @@ describe("role cards (#236)", () => {
     });
     const dir = plugin({ "verify-pass": "---\nrole: verify-pass\ntools: [Read, Write]\n---\nx" });
     expect(await readCard([{ label: "p", dir }], "verify-pass")).toMatchObject({ kind: "failed" });
+  });
+});
+
+describe("role card frontmatter, enforced (#232)", () => {
+  const card = (front: string) => cardOf("implementer", `---\nrole: implementer\n${front}\n---\n\nBuild it.\n`, "team");
+
+  it("a card must name its tools; the run gets the card's tools, by name alone", () => {
+    expect(card("steps: [build]")).toMatchObject({ kind: "failed", reason: expect.stringContaining("names no tools") });
+    expect(card("tools: [Read, Edit (src only), Read]")).toMatchObject({
+      kind: "ok",
+      value: { tools: ["Read", "Edit"] },
+    });
+  });
+
+  it("reads each field a hand-off names in braces, at the brace's own level", () => {
+    expect(
+      handOffFields(
+        "commits, and .factory/report.json {status: done, evidence: [rows, run again]} or {status: asked, questions}",
+      ),
+    ).toEqual(["status", "evidence", "status", "questions"]);
+    expect(handOffFields("the spec, in the spec home")).toEqual([]);
+  });
+
+  it("refuses a hand-off that names a field the engine's schema for the role does not have", () => {
+    expect(card("tools: [Read]\nhand_off: .factory/report.json {status: done, evidence, pr_title}")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('names "pr_title", which the engine\'s implementer schema does not have'),
+    });
+    expect(
+      cardOf(
+        "verify-pass",
+        "---\nrole: verify-pass\ntools: [Read]\nhand_off: {id, bucket, why, severity}\n---\nx",
+        "t",
+      ),
+    ).toMatchObject({ kind: "failed", reason: expect.stringContaining('"severity"') });
+  });
+
+  it("keeps the role's must_not_see floor, whatever the card says, and adds the card's own entries", () => {
+    const none = card("tools: [Read]\nmust_not_see: none");
+    const own = card("tools: [Read]\nmust_not_see: the failed CI jobs; the design");
+    expect(none).toMatchObject({
+      kind: "ok",
+      value: { mustNotSee: ["review findings other than the act_on list", "earlier verdicts"] },
+    });
+    expect(own).toMatchObject({ kind: "ok", value: { mustNotSee: expect.arrayContaining(["the design"]) } });
+  });
+
+  it("leaves out what an entry names, unless its 'other than' names it too", () => {
+    const actOn = { names: ["the act_on list", "review findings"], needed: true } as const;
+    const report = { names: ["the implementer's report"], needed: false } as const;
+    expect(withheld({ mustNotSee: ["review findings other than the act_on list"] }, actOn)).toBe(false);
+    expect(withheld({ mustNotSee: ["review findings"] }, actOn)).toBe(true);
+    expect(withheld({ mustNotSee: ["The implementer's report or account"] }, report)).toBe(true);
+    expect(withheld({ mustNotSee: ["the implementer's work"] }, report)).toBe(false);
+  });
+
+  it("refuses a card that leaves out an input the run needs, and drops one it can do without", () => {
+    const read = cardOf(
+      "verify-pass",
+      "---\nrole: verify-pass\ntools: [Read]\nmust_not_see: the code; the findings\n---\nx",
+      "team",
+    );
+    if (read.kind !== "ok") throw new Error(read.reason);
+    const code = { names: ["the code"], needed: false } as const;
+    const findings = { names: ["the design-reviewer's findings", "the findings"], needed: true } as const;
+    expect(inputsOf(read.value, [code])).toEqual({ kind: "ok", value: [] });
+    expect(inputsOf(read.value, [code, findings])).toMatchObject({
+      kind: "failed",
+      reason: "team: its must_not_see leaves out the design-reviewer's findings, which the verify-pass run needs",
+    });
   });
 });
