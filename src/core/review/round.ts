@@ -31,8 +31,8 @@ import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { readProcess } from "../process/read.js";
-import { attempt } from "./safe.js";
 import { settingName } from "../settings/machine.js";
+import { attempt } from "./safe.js";
 import { plainName } from "../spec.js";
 import { statusBox, type Box } from "./status.js";
 import {
