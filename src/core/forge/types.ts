@@ -117,6 +117,9 @@ export type Forge = {
   removeLabel(input: { readonly number: number; readonly label: string }): Promise<Done>;
   // one comment, rendered from the posting template (#126), so no free text is ever posted
   note(input: { readonly number: number; readonly post: Post }): Promise<Done>;
+  // the change's description replaced, rendered from the posting template like a note (#236: the cleanup run's
+  // deferred list goes in the PR body)
+  setBody(input: { readonly number: number; readonly post: Post }): Promise<Done>;
   // every comment, oldest first
   notes(input: { readonly number: number }): Promise<Result<readonly Note[]>>;
   // one comment at file:line on the change's head; when the forge refuses that line, an unanchored one that names it

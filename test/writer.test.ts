@@ -187,6 +187,11 @@ function forge(jobs: readonly FailedJob[] = []): Told {
       log.push(`note ${number} ${text(post)}`);
       return { kind: "ok" };
     },
+    setBody: async ({ number, post }) => {
+      const r = renderPost(post);
+      log.push(`body ${number} ${r.kind === "ok" ? r.text.replaceAll("\n", " | ") : `refused: ${r.reason}`}`);
+      return { kind: "ok" };
+    },
     notes: async () => unused("notes"),
     lineFinding: async () => unused("lineFinding"),
     status: async () => unused("status"),
@@ -1021,5 +1026,61 @@ describe("the writer's words and settings", () => {
 
   it("is unavailable with the reason when its setup is not there", () => {
     expect(writerStep({ kind: "failed", reason: "no box" })).toEqual({ kind: "unavailable", reason: "no box" });
+  });
+});
+
+describe("the writer step: the cleanup run (#236)", () => {
+  const ROW = { criterion: "AC1", command: "make test", result: "1 passed" };
+  const CLEANUP: Task = { kind: "cleanup", head: "", evidence: [ROW] };
+
+  it("runs from the cleanup role card, with the evidence rows and origin/main to diff against, and puts what it deferred in the PR body", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const report = { ...DONE, deferred: ["remove the empty catch in Renewal.java:3: it hides a failure"] };
+    const told = forge();
+    const out = await run(
+      setup(writer(fake, { commit: true, report, exit: 0 }, seen), told, []),
+      { ...CLEANUP, head: p.head2 },
+      openLine(),
+    );
+    const value = valueOf(out);
+    expect(value).toMatchObject({ outcome: "done", deferred: report.deferred, evidence: [ROW] });
+    // the card's hash goes into the run record
+    expect(value.card).toMatch(/^[0-9a-f]{64}$/);
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^# Cleanup\n/) });
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringContaining('"deferred"') });
+    expect(seen[0]?.task).toContain("git diff origin/main...HEAD");
+    expect(seen[0]?.task).toContain("- AC1: `make test` gave: 1 passed");
+    expect(told.log.find((l) => l.startsWith("body 12"))).toContain(
+      "deferred by the cleanup run: remove the empty catch in Renewal.java:3: it hides a failure",
+    );
+  });
+
+  it("a cleanup with nothing to tidy commits nothing, and the PR body says nothing was deferred", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge();
+    const out = await run(
+      setup(writer(fake, { commit: false, report: DONE, exit: 0 }, []), told, []),
+      { ...CLEANUP, head: p.head2 },
+      openLine(),
+    );
+    expect(valueOf(out)).toMatchObject({ outcome: "done", patch: "" });
+    expect(valueOf(out).deferred).toBeUndefined();
+    expect(told.log.find((l) => l.startsWith("body 12"))).not.toContain("deferred");
+  });
+
+  it("a process plugin's cleanup card that asks for a tool the role does not get stops the run for a person", async () => {
+    const process = join(rulebook, "skills", "crq", "process");
+    mkdirSync(join(process, "roles"), { recursive: true });
+    writeFileSync(join(process, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+    writeFileSync(
+      join(process, "roles", "cleanup.md"),
+      "---\nrole: cleanup\ntools: [Read, Write, WebFetch]\n---\n\nTidy.\n",
+    );
+    const fake = fakeBox({});
+    const told = forge();
+    const out = await run(setup(fake.box, told, []), { ...CLEANUP, head: p.head2 }, openLine());
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(told.log.find((l) => l.startsWith("note 12"))).toContain("the cleanup run has no role card");
   });
 });

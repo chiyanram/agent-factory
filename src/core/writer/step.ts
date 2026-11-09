@@ -8,7 +8,10 @@
 // (task.ts): the failed evidence row, the factory's own Act on findings, or the failed CI jobs and their logs' ends. A
 // task the host cannot read goes to a person: the host says why on the change, labelled needs-human. A merge run, for a
 // change that conflicts with its target, gets the default branch fetched into its clone as origin/<default>, merges it
-// in and resolves the conflicts; the push stays a fast-forward, so nothing rebases or force-pushes.
+// in and resolves the conflicts; the push stays a fast-forward, so nothing rebases or force-pushes. A cleanup run (#236)
+// takes its instructions from the cleanup role card (process/cards.ts) and the implementer's evidence rows as its task,
+// with the default branch fetched in to diff against; what it defers goes in the PR body, and its card's hash in the
+// run record.
 
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -18,12 +21,13 @@ import type { BoxToken } from "../token/rules.js";
 import type { Task } from "../dispatch/records.js";
 import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/tick.js";
 import { fastForwardOnly, finishFirst, finishRun, seatOnEvery, type Next, type Pusher } from "../finish.js";
-import type { Result } from "../forge/api.js";
+import type { Done, Result } from "../forge/api.js";
 import type { Forge, ForgeName } from "../forge/types.js";
 import type { Identity } from "../identity.js";
 import type { PushRequest } from "../push.js";
 import { CLEAN, REPORT_INSTRUCTIONS, type Evidence, type Outcome } from "../report.js";
 import type { Approver, Spec } from "../spec.js";
+import type { Post } from "../post.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start, type FileText } from "./clone.js";
@@ -33,6 +37,8 @@ import { writerRun, type Ended } from "./run.js";
 import { ciText, taskText, verifyText } from "./task.js";
 import { VERIFY_FILE } from "../ready/steps.js";
 import type { WriterSettings } from "./settings.js";
+import { readCard, type Card } from "../process/cards.js";
+import { settingName } from "../settings/machine.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 // named in words: a "#171" on the project's forge would be read as the project's own issue
@@ -45,7 +51,7 @@ export type Prompts = {
   readonly merge: string;
 };
 
-// the modes this step runs, each with its prompt
+// the modes this step runs, each with its prompt; cleanup's comes from its role card (#236)
 export type RunMode = "test-first" | "fix" | "rework" | "ci" | "merge";
 const PROMPT_FILES = {
   fix: "writer.md",
@@ -91,6 +97,10 @@ export type WriterOut = {
   readonly hung: boolean;
   // what the run spent (#131); none when the host started no run, or the run printed no result event
   readonly spend?: Spend;
+  // the role card's hash, for a run started from one (#236)
+  readonly card?: string;
+  // what a cleanup run left for a person, as each would change behaviour (#236)
+  readonly deferred?: readonly string[];
 };
 
 // readPrompts : the package's writer prompts
@@ -155,6 +165,22 @@ export function promptFor(input: {
   return `${filled.trimEnd()}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${tools}\n\n${REPORT_INSTRUCTIONS}\n`;
 }
 
+// CLEANUP_REPORT : the words a cleanup run's prompt adds to the report's schema (#236)
+export const CLEANUP_REPORT =
+  'A cleanup run\'s "done" report may add "deferred": a list of each cleanup you did not make because it would change behaviour, each with why. It goes in the PR body for a person.';
+
+// cardPrompt : a run's prompt from its role card: the card's body, the foreground rule, the project's instructions and
+// tools, then the report's schema. Pure.
+export function cardPrompt(card: Card, tools: readonly string[]): string {
+  const listed = tools.length === 0 ? "" : `\n\n${tools.join("\n")}`;
+  return `${card.body}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${listed}\n\n${REPORT_INSTRUCTIONS}\n${CLEANUP_REPORT}\n`;
+}
+
+// deferredOf : a done report's deferred list, as a field to spread
+function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
+  return outcome.kind === "done" && outcome.deferred !== undefined ? { deferred: outcome.deferred } : {};
+}
+
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
   const base = {
@@ -162,6 +188,7 @@ export function outOf(ended: Ended, next: Next): WriterOut {
     patch: ended.patch,
     hung: ended.ending.kind === "hung",
     ...(ended.spend === "unmeasured" ? {} : { spend: ended.spend }),
+    ...deferredOf(ended.outcome),
   };
   switch (next.kind) {
     case "ready-check":
@@ -254,31 +281,55 @@ function pushOf(setup: WriterSetup, p: Prepared, clone: Clone, tip: string): Pus
   };
 }
 
-// openFor : the first run's draft change, claimed; its body names the approved spec, never its text (#164)
+// bodyOf : the change's body: it names the approved spec, never its text (#164), and lists what a cleanup run deferred
+// (#236). Pure.
+export function bodyOf(p: Pick<Prepared, "spec" | "approver">, deferred: readonly string[] = []): Post {
+  return {
+    seat: "coordinator",
+    // the spec's first line is "# <ticket>: <title>", so its title already names the ticket
+    title: p.spec.title,
+    fields: [
+      { label: "spec", value: p.spec.hash },
+      { label: p.approver.said ?? "approved", value: `locally by ${p.approver.by} at ${p.approver.at}` },
+    ],
+    items: deferred.map((d) => `deferred by the cleanup run: ${d}`),
+  };
+}
+
+// openFor : the first run's draft change, claimed
 function openFor(setup: WriterSetup, p: Prepared, branch: string): () => Promise<Result<number>> {
   return async () => {
-    // the spec's first line is "# <ticket>: <title>", so its title already names the ticket
     const { title } = p.spec;
-    const opened = await setup.forge.openChange({
-      branch,
-      base: p.base,
-      title,
-      body: {
-        seat: "coordinator",
-        title,
-        fields: [
-          { label: "spec", value: p.spec.hash },
-          { label: p.approver.said ?? "approved", value: `locally by ${p.approver.by} at ${p.approver.at}` },
-        ],
-        items: [],
-      },
-    });
+    const opened = await setup.forge.openChange({ branch, base: p.base, title, body: bodyOf(p) });
     if (opened.kind === "failed") {
       return opened;
     }
     const claimed = await setup.forge.addLabel({ number: opened.value, label: setup.label });
     return claimed.kind === "ok" ? opened : claimed;
   };
+}
+
+// onChange : a later run's push and post on its open change; a cleanup run's deferred list then goes in the PR body
+async function onChange(
+  setup: WriterSetup,
+  input: Input,
+  p: Prepared,
+  run: { readonly push: PushRequest; readonly ended: Ended; readonly number: number },
+): Promise<Result<WriterOut>> {
+  const { ended, number } = run;
+  const next = await finishRun({
+    outcome: ended.outcome,
+    ending: ended.ending,
+    change: number,
+    forge: setup.forge,
+    push: run.push,
+    pusher: setup.pusher,
+  });
+  if (next.kind === "failed") {
+    return next;
+  }
+  const shown = await deferredShown(setup, input, p, number, ended.outcome);
+  return shown.kind === "ok" ? { kind: "ok", value: outOf(ended, next.value) } : shown;
 }
 
 // finished : the host's push and post for the run, and what the dispatcher records
@@ -292,15 +343,7 @@ async function finished(
   const push = pushOf(setup, p, clone, ended.tip);
   const { outcome } = ended;
   if (input.change.kind === "open") {
-    const next = await finishRun({
-      outcome,
-      ending: ended.ending,
-      change: input.change.line.number,
-      forge: setup.forge,
-      push,
-      pusher: setup.pusher,
-    });
-    return next.kind === "ok" ? { kind: "ok", value: outOf(ended, next.value) } : next;
+    return onChange(setup, input, p, { push, ended, number: input.change.line.number });
   }
   if (ended.tip === clone.start) {
     // nothing to push and no change to post on: the record says the run changed nothing, and a person looks
@@ -320,12 +363,60 @@ async function finished(
   return first.kind === "ok" ? { kind: "ok", value: outOf(ended, first.value.next) } : first;
 }
 
-// what one run does: its prompt's mode, and the task the host hands it
-type Work = { readonly mode: RunMode; readonly task: FileText };
+// deferredShown : a cleanup run that ended done puts what it deferred, or nothing, in the PR body (#236)
+async function deferredShown(
+  setup: WriterSetup,
+  input: Input,
+  p: Prepared,
+  number: number,
+  outcome: Outcome,
+): Promise<Done> {
+  if (input.task.kind !== "cleanup" || outcome.kind !== "done") {
+    return { kind: "ok" };
+  }
+  const set = await setup.forge.setBody({ number, post: bodyOf(p, outcome.deferred) });
+  return set.kind === "ok" ? set : { kind: "failed", reason: `the PR body was not set: ${set.reason}` };
+}
 
-// mergeOf : a merge run's default branch, which the clone fetches in, as a field to spread
+// what one run does: its prompt's mode, and the task the host hands it; a cleanup run's prompt is its role card
+type Work = { readonly mode: RunMode; readonly task: FileText; readonly card?: Card };
+
+// mergeOf : the default branch a merge run merges in, or a cleanup run diffs against, which the clone fetches in, as a
+// field to spread
 function mergeOf(work: Work, base: string): { readonly merge?: string } {
-  return work.mode === "merge" ? { merge: base } : {};
+  return work.mode === "merge" || work.card !== undefined ? { merge: base } : {};
+}
+
+// promptOf : the mode's prompt, or the role card's for a run started from one
+function promptOf(
+  setup: WriterSetup,
+  run: {
+    readonly input: Input;
+    readonly p: Prepared;
+    readonly work: Work;
+    readonly clone: Clone;
+    readonly tools: readonly string[];
+  },
+): string {
+  const { work } = run;
+  return work.card === undefined
+    ? promptFor({
+        prompts: setup.prompts,
+        mode: work.mode,
+        ticket: run.input.ticket,
+        branch: run.clone.branch,
+        head: run.clone.start,
+        tools: run.tools,
+        base: run.p.base,
+      })
+    : cardPrompt(work.card, run.tools);
+}
+
+// withCard : a run from a role card records the card's hash (#236)
+function withCard(result: Result<WriterOut>, work: Work): Result<WriterOut> {
+  return result.kind === "ok" && work.card !== undefined
+    ? { kind: "ok", value: { ...result.value, card: work.card.sha256 } }
+    : result;
 }
 
 async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
@@ -342,15 +433,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
   if (clone.kind === "failed") {
     return clone;
   }
-  const prompt = promptFor({
-    prompts: setup.prompts,
-    mode: work.mode,
-    ticket: input.ticket,
-    branch: clone.value.branch,
-    head: clone.value.start,
-    tools: toolLines(tools),
-    base: p.base,
-  });
+  const prompt = promptOf(setup, { input, p, work, clone: clone.value, tools: toolLines(tools) });
   const ended = await writerRun({
     setup: setup.box,
     clone: clone.value,
@@ -362,7 +445,8 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     completion: setup.settings.completion,
     stallMs: setup.settings.stallMs,
   });
-  const out = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
+  const result = ended.kind === "ok" ? await finished(setup, input, p, clone.value, ended.value) : ended;
+  const out = withCard(result, work);
   const removed = await removeClone(clone.value.dir);
   return removed.kind === "ok" ? out : removed;
 }
@@ -455,6 +539,46 @@ function mergePlan(_setup: WriterSetup, input: Input): Promise<Planned> {
   );
 }
 
+// cleanupText : the implementer's evidence rows, which the cleanup run runs again, and the branch it diffs against
+export function cleanupText(evidence: readonly Evidence[], base: string): string {
+  const rows = evidence.map((e) => `- ${e.criterion}: \`${e.command}\` gave: ${e.result}`);
+  return [
+    "# Cleanup",
+    "",
+    `The branch's own lines are its diff against origin/${base}: \`git diff origin/${base}...HEAD\`.`,
+    "",
+    "The implementer's evidence rows. Run each again after your cleanup; each must give the same result, and your report's evidence is these rows, run again:",
+    "",
+    ...rows,
+    "",
+  ].join("\n");
+}
+
+// cleanupPlan : the cleanup role card and the evidence rows a cleanup run gets, or why a person takes it (#236)
+async function cleanupPlan(
+  setup: WriterSetup,
+  input: Input,
+  task: Extract<Task, { readonly kind: "cleanup" }>,
+): Promise<Planned> {
+  if (input.change.kind !== "open") {
+    return { kind: "hand-over", reason: "a cleanup run needs an open change" };
+  }
+  const plugins =
+    setup.settings.rulebook === "" ? [] : [{ label: settingName("rulebook"), dir: setup.settings.rulebook }];
+  const card = await readCard(plugins, "cleanup");
+  if (card.kind === "failed") {
+    return { kind: "hand-over", reason: `the cleanup run has no role card: ${card.reason}` };
+  }
+  const base = await setup.forge.defaultBranch();
+  return base.kind === "ok"
+    ? {
+        kind: "run",
+        // the card replaces the mode's prompt (inClone); the mode only names the run's shape: a plain run on the branch
+        work: { mode: "fix", task: { kind: "text", text: cleanupText(task.evidence, base.value) }, card: card.value },
+      }
+    : { kind: "hand-over", reason: `the cleanup run has no default branch to diff against: ${base.reason}` };
+}
+
 const plain = (mode: "test-first" | "fix"): Promise<Planned> =>
   Promise.resolve({ kind: "run", work: { mode, task: { kind: "none" } } });
 
@@ -472,6 +596,7 @@ const PLANNERS: Planners = {
   "ci-red": ciPlan,
   "verify-failed": verifyPlan,
   conflict: mergePlan,
+  cleanup: cleanupPlan,
 };
 
 function planOn<K extends keyof TaskMap>(

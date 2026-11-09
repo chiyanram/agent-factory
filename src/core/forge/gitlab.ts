@@ -310,6 +310,23 @@ export function gitlab(client: Client, project: string): Forge {
     );
   }
 
+  async function setBody(input: {
+    readonly number: number;
+    readonly post: Parameters<Forge["setBody"]>[0]["post"];
+  }): Promise<Done> {
+    const body = rendered(input.post);
+    if (body.kind === "failed") {
+      return body;
+    }
+    return done(
+      await rest(client, {
+        path: `${base}/merge_requests/${input.number}`,
+        method: "PUT",
+        body: { kind: "json", value: { description: body.value } },
+      }),
+    );
+  }
+
   async function labelled(input: {
     readonly state: "opened" | "merged";
     readonly label: string;
@@ -471,6 +488,7 @@ export function gitlab(client: Client, project: string): Forge {
         : { kind: "ok" };
     },
     note,
+    setBody,
     // every comment, oldest first, every page: an MR with many notes must not push the reviewer's rounds out of view
     async notes(input) {
       return pages(async (cursor): Promise<Result<Page<Note>>> => {

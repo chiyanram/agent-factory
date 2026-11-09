@@ -261,6 +261,7 @@ function statusForge(posted: CommitStatus[]): Forge {
     addLabel: notUsed,
     removeLabel: notUsed,
     note: notUsed,
+    setBody: notUsed,
     notes: notUsed,
     lineFinding: notUsed,
     ciConfig: notUsed,

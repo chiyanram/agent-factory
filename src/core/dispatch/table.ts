@@ -6,13 +6,20 @@
 //   tiny                          its START
 //   bug, feature, one-way door    its START and its approval, bound to the spec's and the design's hashes (the
 //                                 approval floor); an approval with no START waits, since nothing runs without one
+// In a lane with a design review (#236; design.ts), the spec and its design get one before the human's approval: a
+// design-reviewer run, then a verify pass, both read-only. What the verify pass kept goes to the front doors, and the
+// build waits for an approval given after it.
 // A START in a lane that needs an approval, or a START whose spec the coordinator has not written yet, waits. So does a
 // spec whose planned files need a heavier lane than its own (#230; lane.ts): the engine only ever raises a lane.
 //
 //   the change is merged and still claimed                     reconcile (remove the claim)
 //   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
 //   needs-human on the change                                  wait: a person decides
-//   a run started and never ended (the dispatcher died)        needs-human: check what that run pushed
+//   a run started and never ended (the dispatcher died)        needs-human: check what that run pushed (a design run
+//                                                              pushed nothing: it is tried again, below)
+//   a design review due at the spec's and design's hashes      design-reviewer, then verify pass; a failed run is tried
+//                                                              again after its backoff, 3 failures → wait for a person
+//   approved before the design review's verify pass ended      wait: the human approves again, after the findings
 //   no START, no approval above tiny, an approval with no       release a claim, else wait
 //   START, or a stale approval
 //   a maintainer's /stop newer than that START or approval     wait; a new START (tiny) or approval lifts it
@@ -29,6 +36,7 @@
 //   the change conflicts with its target (poll's conflict)     implementer merges the default branch in
 //                                                              1 failure → needs-human (still conflicting after the
 //                                                              merge run); nothing rebases or force-pushes
+//   implementer done (fix, rework, CI), no cleanup since       cleanup run on the same branch (#236)
 //   writer done, no ready check at this head                   ready check
 //   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230);
 //   than the one a human approved or STARTed                   a test check's stop at the same check is named too
@@ -60,8 +68,10 @@
 import { above, raisedWhy } from "../lane.js";
 import type { Lane } from "../spec.js";
 import type { OpenLine, MergedLine } from "../poll.js";
-import type { Retried, Summary, Task } from "./records.js";
+import type { Retried, Summary, Task, WriterMode } from "./records.js";
 import { ticketCapped, type Caps } from "./caps.js";
+import type { DesignView } from "./design.js";
+import type { DesignStep } from "./records.js";
 
 // what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
 // is the newer of the two records, and the run records count from then
@@ -107,6 +117,8 @@ export type TicketState = {
   readonly quietMinutes: number;
   // the ticket's cap (#131)
   readonly caps: Caps;
+  // where the design review of the current spec and design stands (#236)
+  readonly design: DesignView;
 };
 
 export type Action =
@@ -115,6 +127,8 @@ export type Action =
   | { readonly kind: "ready"; readonly head: string }
   | { readonly kind: "review"; readonly head: string }
   | { readonly kind: "verify"; readonly head: string }
+  // a design review run at the spec's and design's hashes (#236)
+  | { readonly kind: "design"; readonly step: DesignStep; readonly spec: string; readonly design: string }
   | { readonly kind: "needs-human"; readonly why: string }
   | { readonly kind: "release"; readonly why: string }
   | { readonly kind: "ping"; readonly head: string }
@@ -144,9 +158,12 @@ const needsHuman: Rule = (s) => {
   return line !== "none" && line.needsHuman ? { kind: "wait", why: "needs-human: a person decides" } : "next";
 };
 
+// a design run pushes nothing, so its lost start is a failed try (design.ts), never a person's to check
+const DESIGN_PHASES: ReadonlySet<string> = new Set(["design-review", "design-verify"]);
+
 const interrupted: Rule = (s) => {
   const i = s.runs.interrupted;
-  return i.kind === "interrupted"
+  return i.kind === "interrupted" && !DESIGN_PHASES.has(i.phase)
     ? { kind: "needs-human", why: `the ${i.phase} run started at ${i.at} never ended; check what it pushed` }
     : "next";
 };
@@ -176,6 +193,29 @@ function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): string {
 function heldWhy(view: ApprovalView): string {
   return view.kind === "approved" || view.kind === "started" ? "" : heldAs(view.kind, view);
 }
+
+const DESIGN_STEP: Readonly<Record<DesignStep, string>> = { review: "design review", verify: "design verify pass" };
+
+type DesignMap = { readonly [V in DesignView as V["kind"]]: V };
+
+const DESIGN: { readonly [K in keyof DesignMap]: (d: DesignMap[K]) => Action | "next" } = {
+  off: () => "next",
+  done: () => "next",
+  run: (d) => ({ kind: "design", step: d.step, spec: d.spec, design: d.design }),
+  later: (d) => ({ kind: "wait", why: `the ${DESIGN_STEP[d.step]} failed; the next try is at ${d.at}` }),
+  stopped: (d) => ({ kind: "wait", why: d.why }),
+  early: (d) => ({
+    kind: "wait",
+    why: `approved before the design review's findings (posted at ${d.at}): read them, then approve again`,
+  }),
+};
+
+function designAs<K extends keyof DesignMap>(kind: K, d: DesignMap[K]): Action | "next" {
+  return DESIGN[kind](d);
+}
+
+// designReview : the design review before the approval (#236); "next" when none is due or it is done
+const designReview: Rule = (s) => designAs(s.design.kind, s.design);
 
 const approval: Rule = (s) => {
   const why = heldWhy(s.approval);
@@ -274,7 +314,8 @@ const headMoved: Rule = (s) => {
 
 const samePatch: Rule = (s) => {
   const w = s.runs.lastWriter;
-  if (w.kind !== "ended") {
+  // a cleanup that left nothing to tidy commits nothing, and that is its right answer (#236)
+  if (w.kind !== "ended" || w.mode === "cleanup") {
     return "next";
   }
   if (w.patch === "") {
@@ -287,6 +328,22 @@ const samePatch: Rule = (s) => {
 
 // conflict : a change that does not merge into its target sends the implementer to merge the default branch in. The
 // head is the writer's (headMoved stands off otherwise), so a conflict right after a merge run is that run's failure.
+// the implementer's runs a cleanup run follows (#236): not a merge run, whose lines are the default branch's, and not
+// the cleanup's own
+const CLEANED: ReadonlySet<WriterMode> = new Set(["fix", "rework", "ci"]);
+
+// cleanup : after the implementer's done run, and its checks for the same patch and a conflict, the cleanup run
+const cleanup: Rule = (s) => {
+  const w = s.runs.lastWriter;
+  return w.kind === "ended" && w.outcome === "done" && CLEANED.has(w.mode)
+    ? {
+        kind: "writer",
+        task: { kind: "cleanup", head: w.head, evidence: w.evidence },
+        why: "the implementer is done: the cleanup run tidies its lines",
+      }
+    : "next";
+};
+
 const conflict: Rule = (s) => {
   const line = open(s);
   if (line === "none" || line.mergeable !== "conflict") {
@@ -465,6 +522,7 @@ const RULES: readonly Rule[] = [
   many,
   needsHuman,
   interrupted,
+  designReview,
   approval,
   stopped,
   asks,
@@ -475,6 +533,7 @@ const RULES: readonly Rule[] = [
   headMoved,
   samePatch,
   conflict,
+  cleanup,
   laneRaised,
   ready,
   review,
@@ -532,7 +591,7 @@ function released(state: TicketState, action: Action): Action {
     : action;
 }
 
-const RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify"]);
+const RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify", "design"]);
 
 // capped : a run of a ticket at its cap goes to a person instead, with what the ticket spent (#131)
 function capped(state: TicketState, action: Action): Action {

@@ -106,6 +106,7 @@ export function pluginForge(target: PluginTarget): Forge {
     addLabel: (i) => written(target, "addLabel", i),
     removeLabel: (i) => written(target, "removeLabel", i),
     note: (i) => written(target, "note", i),
+    setBody: (i) => written(target, "setBody", i),
     notes: (i): Promise<Result<readonly Note[]>> => read(target, "notes", i, notesOf),
     lineFinding: (i) => written(target, "lineFinding", i),
     status: (i) => written(target, "status", i),

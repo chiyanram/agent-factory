@@ -41,6 +41,8 @@ import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
 import { writerStep } from "./core/writer/step.js";
 import { readyStep, verifyStep } from "./core/ready/steps.js";
+import { designSteps } from "./core/design/step.js";
+import { designSetup } from "./core/design/settings.js";
 import { countsLine } from "./core/review/verdicts.js";
 import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
@@ -563,6 +565,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     }),
     review: await reviewStepFor(io.env, forge, project),
     verify: verifyStep(plan, forge),
+    ...designSteps(designSetup({ env: io.env, forge, home, project })),
   };
   return { kind: "ok", value: { gate, steps } };
 }

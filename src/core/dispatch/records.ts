@@ -15,6 +15,10 @@
 // with none was not measured (an older line, or a run stopped before its result). A run that failed after it spent
 // writes a "spent" line instead: it ends nothing, so the start still reads as a run that never ended and goes to a
 // person, but its spend counts. `usage` and the caps sum them all.
+//
+// A design review (#236) runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
+// a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
+// findings or what the verify pass kept, and its spend, whether it finished or failed. design.ts reads them per hashes.
 
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -22,11 +26,15 @@ import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
+import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 
-export type Phase = "writer" | "ready" | "review" | "verify";
+export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify";
+// the two runs of a design review (#236)
+export type DesignStep = "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
 // never rebases (#103: nothing force-pushes; the name predates that decision and stays, so older lines still read)
-export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase";
+// "cleanup" is the cleanup run after the implementer's done run (#236): the same branch, its own role card
+export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase" | "cleanup";
 
 // what one writer run is for, and so what the host hands the writer (#171). The record keeps only its mode.
 export type Task =
@@ -41,7 +49,10 @@ export type Task =
   // the local verifier failed at this head (a local gate, #91); its output is kept with the head (kept.ts)
   | { readonly kind: "verify-failed"; readonly head: string }
   // the change does not merge into the default branch at this head: merge the default branch in (#103)
-  | { readonly kind: "conflict"; readonly head: string };
+  | { readonly kind: "conflict"; readonly head: string }
+  // the implementer's run ended done at this head: the cleanup run tidies the branch's own lines, and runs its evidence
+  // rows again (#236)
+  | { readonly kind: "cleanup"; readonly head: string; readonly evidence: readonly Evidence[] };
 
 const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
   "test-first": "test-first",
@@ -51,6 +62,7 @@ const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
   "ci-red": "ci",
   "verify-failed": "ci",
   conflict: "rebase",
+  cleanup: "cleanup",
 };
 
 // modeOf : the mode a task is recorded as. Pure.
@@ -96,6 +108,10 @@ export type Event =
       readonly hung: boolean;
       // what the run spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // the role card's hash, for a run started from a card (#236: cleanup)
+      readonly card?: string;
+      // what a cleanup run left for a person, as each would change behaviour (#236)
+      readonly deferred?: readonly string[];
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -135,6 +151,24 @@ export type Event =
       readonly phase: Phase;
       readonly head: string;
       readonly spend: Spend;
+    }
+  // one run of a design review (#236), at the spec and design hashes it read
+  | {
+      readonly at: string;
+      readonly kind: "design-ended";
+      readonly step: DesignStep;
+      readonly spec: string;
+      readonly design: string;
+      readonly outcome: "done" | "failed";
+      // why it failed, "" when it finished
+      readonly why: string;
+      // the design-reviewer's findings, one per decision
+      readonly findings: readonly DesignFinding[];
+      // what the verify pass kept
+      readonly kept: readonly Kept[];
+      // the role card's hash; none when the run failed before it read one
+      readonly card?: string;
+      readonly spend?: Spend;
     }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
@@ -193,8 +227,8 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
   return allowed.find((a) => a === v) ?? BAD;
 }
 
-const PHASES = ["writer", "ready", "review", "verify"] as const;
-const MODES = ["test-first", "fix", "rework", "ci", "rebase"] as const;
+const PHASES = ["writer", "ready", "review", "verify", "design-review", "design-verify"] as const;
+const MODES = ["test-first", "fix", "rework", "ci", "rebase", "cleanup"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
 const RETRIED = ["ready", "review", "verify"] as const;
 
@@ -272,14 +306,71 @@ function spendField(raw: unknown): { readonly spend?: Spend } | Bad {
   return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens } };
 }
 
+// cardField : a line's role card hash, as a field to spread: none on a line that has none (#236)
+function cardField(raw: unknown): { readonly card?: string } | Bad {
+  const card = prop(raw, "card");
+  if (card === undefined) {
+    return {};
+  }
+  return typeof card === "string" && /^[0-9a-f]{64}$/.test(card) ? { card } : BAD;
+}
+
+// deferredField : a cleanup run's deferred list, as a field to spread: none on a line that has none (#236)
+function deferredField(raw: unknown): { readonly deferred?: readonly string[] } | Bad {
+  const deferred = prop(raw, "deferred");
+  if (deferred === undefined) {
+    return {};
+  }
+  return Array.isArray(deferred) && deferred.every((d) => typeof d === "string") ? { deferred } : BAD;
+}
+
+// writerExtras : a writer line's optional fields, its spend, card and deferred list, as fields to spread, or BAD
+function writerExtras(
+  raw: unknown,
+): Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred"> | Bad {
+  const spend = spendField(raw);
+  const card = cardField(raw);
+  const deferred = deferredField(raw);
+  return spend === BAD || card === BAD || deferred === BAD ? BAD : { ...spend, ...card, ...deferred };
+}
+
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const mode = oneOf(raw, "mode", MODES);
   const outcome = oneOf(raw, "outcome", OUTCOMES);
   const parts = writerParts(raw);
-  const spend = spendField(raw);
-  return mode === BAD || outcome === BAD || parts === BAD || spend === BAD
+  const extras = writerExtras(raw);
+  return mode === BAD || outcome === BAD || parts === BAD || extras === BAD
     ? BAD
-    : { at, kind: "writer-ended", mode, outcome, ...parts, ...spend };
+    : { at, kind: "writer-ended", mode, outcome, ...parts, ...extras };
+}
+
+type DesignParts = Pick<Extract<Event, { kind: "design-ended" }>, "step" | "spec" | "design" | "outcome" | "why">;
+
+function designTexts(raw: unknown): Pick<DesignParts, "spec" | "design" | "why"> | Bad {
+  const spec = str(raw, "spec");
+  const design = str(raw, "design");
+  const why = str(raw, "why");
+  return spec === BAD || design === BAD || why === BAD ? BAD : { spec, design, why };
+}
+
+function designParts(raw: unknown): DesignParts | Bad {
+  const which = oneOf(raw, "step", ["review", "verify"] as const);
+  const outcome = oneOf(raw, "outcome", ["done", "failed"] as const);
+  const texts = designTexts(raw);
+  return which === BAD || outcome === BAD || texts === BAD ? BAD : { step: which, outcome, ...texts };
+}
+
+function designEndedOf(raw: unknown, at: string): Event | Bad {
+  const parts = designParts(raw);
+  const findings = recordedFindings(prop(raw, "findings"));
+  const kept = recordedKept(prop(raw, "kept"));
+  const extras = writerExtras(raw);
+  if (parts === BAD || extras === BAD) {
+    return BAD;
+  }
+  return findings === undefined || kept === undefined
+    ? BAD
+    : { at, kind: "design-ended", ...parts, findings, kept, ...extras };
 }
 
 // nextTryField : a check line's nextTry, as a field to spread: none on a line that has none (a pass, or older than
@@ -373,6 +464,7 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
       ? BAD
       : { at, kind: "spent", phase, head, spend: spend.spend };
   },
+  "design-ended": designEndedOf,
   pinged: (raw, at) => {
     const head = str(raw, "head");
     return head === BAD ? BAD : { at, kind: "pinged", head };
@@ -449,8 +541,10 @@ export type Summary = {
     | { readonly kind: "none" }
     | { readonly kind: "interrupted"; readonly phase: Phase; readonly at: string };
   readonly lastWriter: LastWriter;
-  // the writer's patch before the last one, to catch the same patch twice
+  // the implementer's patch before its last one, to catch the same patch twice; a cleanup run's is never one (#236)
   readonly previousPatch: string;
+  // the implementer's last patch
+  readonly implementerPatch: string;
   readonly testFirstDone: boolean;
   readonly readyFailures: number;
   readonly lastReady:
@@ -493,6 +587,7 @@ export const EMPTY: Summary = {
   interrupted: { kind: "none" },
   lastWriter: { kind: "none" },
   previousPatch: "",
+  implementerPatch: "",
   testFirstDone: false,
   readyFailures: 0,
   lastReady: { kind: "none" },
@@ -510,12 +605,22 @@ export const EMPTY: Summary = {
   spent: NO_SPEND,
 };
 
+// patches : the same-patch check's two patches after a writer run: a cleanup run leaves them as they were (#236)
+function patches(
+  s: Summary,
+  e: Extract<Event, { kind: "writer-ended" }>,
+): Pick<Summary, "previousPatch" | "implementerPatch"> {
+  return e.mode === "cleanup"
+    ? { previousPatch: s.previousPatch, implementerPatch: s.implementerPatch }
+    : { previousPatch: s.implementerPatch, implementerPatch: e.patch };
+}
+
 function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): Summary {
   const testFirst = e.mode === "test-first" && e.outcome === "done";
   return {
     ...s,
     interrupted: { kind: "none" },
-    previousPatch: s.lastWriter.kind === "ended" ? s.lastWriter.patch : "",
+    ...patches(s, e),
     lastWriter: {
       kind: "ended",
       mode: e.mode,
@@ -574,6 +679,8 @@ const STEPS: Steps = {
   }),
   // a failed run's spend counts toward the ticket's cap; it ends nothing
   spent: (s, e) => ({ ...s, spent: addSpend(s.spent, e.spend) }),
+  // a design review's run ends its start; what it spent counts toward the ticket's cap (#236)
+  "design-ended": (s, e) => ({ ...s, interrupted: { kind: "none" }, spent: addSpend(s.spent, e.spend ?? NO_SPEND) }),
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice

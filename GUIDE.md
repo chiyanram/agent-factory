@@ -612,8 +612,15 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
 3. **Write the contract.** Write the spec where the project keeps it: the local spec file at work, the issue on a
    personal project. **Today:** open the draft MR with it. Done when a stranger with no chat access could build the
    change from the spec alone.
-4. **Design review.** Start a reviewer on the design. It returns ALIGNED, CONFLICT or OPEN per decision. Bring every
-   OPEN to the human. Done when nothing is OPEN and the human approves: run `agent-factory spec <project> <ticket>`,
+4. **Design review.** Do not start one yourself: in a lane whose lanes entry says `design_review` (bug, feature and
+   one-way door by default), the dispatcher's next pass runs it once the spec is ready (#236): a design-reviewer run,
+   then a verify pass over its conflicts and opens, both read-only, from their role cards (the process plugin's
+   `process/roles/`, else the engine's `prompts/roles/`). Each decision gets ALIGNED, CONFLICT or OPEN. What the
+   verify pass keeps goes to the pass's log, a note on the ticket's PR when one is open, and a ping; the record keeps
+   it in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl` (`design-ended`). Fix the spec or design for each CONFLICT and
+   bring every OPEN to the human; an edit runs the review again on the next pass. An approval given before the
+   review's findings does not let the build begin: the human approves again after them. Done when nothing is OPEN
+   and the human approves: run `agent-factory spec <project> <ticket>`,
    show them the spec hash and the design hash (`none` with no `design.md` beside the spec), and ask them to run
    `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` in their own terminal. You cannot run it: it
    is on your deny list (#227). It records a local approval bound to both hashes; an edit of the spec or the design
@@ -640,7 +647,12 @@ has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the 
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: to go on, the human
 STARTs again or approves the spec again; the newer of the two records starts every count afresh (#227). The build
 begins only on a human's word: a START in the tiny lane, a START and an approval in the others. An approval with no
-START waits, since nothing runs without one. Each approval also gets one shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
+START waits, since nothing runs without one. In a lane with a design review, the design-reviewer and its verify pass
+run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
+fails is tried again after the same backoff, three times, then waits for a person (#236). After the implementer's
+done run (not a merge run), a cleanup run on the same branch tidies the branch's own lines from the cleanup role card,
+runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body;
+the ready check then runs the cleanup's evidence rows. Each approval also gets one shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
 each record when the writer may try again (`nextTry`, #228): 10 s after the step's first failure, doubling each time,
