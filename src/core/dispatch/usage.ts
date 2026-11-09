@@ -10,7 +10,7 @@ import type { Result } from "../forge/api.js";
 import { readRecords } from "./records.js";
 import { addSpend, NO_SPEND, type Spend } from "./spend.js";
 
-// one model run's record: the writer's or a review round's end
+// one model run's record: the writer's or a review round's end, or what a failed run spent
 export type Spent = {
   readonly project: string;
   readonly ticket: string;
@@ -45,7 +45,7 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
   return {
     kind: "ok",
     value: events.value.flatMap((e) =>
-      e.kind === "writer-ended" || e.kind === "review-ended"
+      e.kind === "writer-ended" || e.kind === "review-ended" || e.kind === "spent"
         ? [{ project, ticket, at: e.at, spend: e.spend ?? "unmeasured" }]
         : [],
     ),
