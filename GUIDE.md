@@ -411,6 +411,10 @@ there.
   every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
   drops it.
 - `plugins`: which registered plugin serves each extension point ([Plugins](#plugins)).
+- `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it.
+- `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
+  [docs/DESIGN.md](docs/DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing
+  commits them yet; the setting is only checked.
 - `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
   (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](#writes)). What it leaves out keeps the default:
   `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3. A `forge.write` policy is refused.
@@ -432,16 +436,16 @@ start while one is missing (`wallProblems`).
 | team | `$FACTORY_HOME/teams/<team>/team.json`, a git clone, read at the commit the project pins | the project file's keys, plus `"modes": {"<key>": "locked" \| "default" \| "open"}` |
 | project | `$FACTORY_HOME/projects/<project>.json`; `"team": "<team>@<full commit>"` pins the team | the keys above |
 | user | `$FACTORY_HOME/user.json` | the same keys |
-| machine | the `FACTORY_*` variables | the keys that `config show` lists with an `env` source |
+| machine | the `FACTORY_*` variables | the keys `config show` lists with an `env` source; the files may set them too, at the dotted name, such as `"caps": {"usdPerRun": 2}` |
 
 Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 
 | class | rule | keys |
 |---|---|---|
-| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun` |
-| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap` |
+| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits` |
+| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `implementer.minutes`, `implementer.stallMinutes` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
-| deny-list | all layers add | `ready.testFiles`, `lanes.oneWayDoor` |
+| deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
 | locked | the highest layer that sets it wins | `gate`, `verify`, `plugins`, `approval.floor` |
 | preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes` |
 
@@ -454,8 +458,10 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   resolves the layers, runs the project file's checks on the result, and exits 0 or 1; `team update <project>
   [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
   Fetch the team's clone yourself first; nothing here uses the network.
-- **Today:** the machine-layer keys are still read by each module from its own variable, so a file value for one is
-  reported by `config check` and not used.
+- The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch` and `review`
+  resolve the layers once before the run, print each warning, and refuse to start on an error, so a team's
+  `caps.usdPerRun` is the most each model run of the project may spend (#254).
+- **Today:** `dispatch` and `review` read the resolved values; the other commands still read the variables alone.
 
 ### The box image
 

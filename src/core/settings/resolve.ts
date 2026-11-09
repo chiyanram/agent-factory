@@ -1,23 +1,14 @@
 // resolve — the settings layers combined into one value per key, by each key's class (keys.ts), with where each value
 // came from (#229). Pure: the files are read by layers.ts.
 //
-// Layers from the highest: the engine's fixed values, team, project, user, and the machine (env vars). A lower layer
+// Layers from the highest: the engine's fixed values, team, project, user, and the machine (env vars; a machine key's
+// FACTORY_* variable is its lowest layer, #254). A lower layer
 // may only make a safety key stricter. An attempt to loosen one is an error that names the key, the layer, the file
 // and the team value, and the run does not start. A key no class knows is a warning with "did you mean", for one
 // release, before it becomes an error (#229).
 
 import { pathKey } from "./lines.js";
-import {
-  fileKeys,
-  KEYS,
-  machineKeys,
-  PROJECT_META,
-  TEAM_META,
-  type FileKey,
-  type Key,
-  type KeyClass,
-  type MachineKey,
-} from "./keys.js";
+import { KEYS, PROJECT_META, TEAM_META, type Key, type KeyClass } from "./keys.js";
 
 export type LayerName = "engine" | "team" | "project" | "user" | "machine" | "default";
 export const TEAM_MODES = ["locked", "default", "open"] as const;
@@ -103,7 +94,7 @@ function rankStep(state: State, entry: Entry, was: number, now: number): Step {
 }
 
 // ladderStep : the strictest wins; a looser value is refused
-function ladderStep(key: FileKey, state: State, entry: Entry): Step {
+function ladderStep(key: Key, state: State, entry: Entry): Step {
   const ladder = key.ladder ?? [];
   const [was, now] = [ladder.indexOf(String(state.value)), ladder.indexOf(String(entry.value))];
   return was < 0 || now < 0
@@ -115,7 +106,7 @@ function ladderStep(key: FileKey, state: State, entry: Entry): Step {
 function capStep(state: State, entry: Entry): Step {
   const [was, now] = [state.value, entry.value];
   if (typeof was !== "number" || typeof now !== "number") {
-    return { state, problem: "cannot be compared: a whole number" };
+    return { state, problem: "cannot be compared: a number" };
   }
   if (now > was) {
     return { state, problem: `${now} is higher than ${was}` };
@@ -161,7 +152,7 @@ function lockedStep(state: State, entry: Entry): Step {
     : { state, problem: `is locked at ${show(state.value)}` };
 }
 
-type ClassStep = (key: FileKey, state: State, entry: Entry, mode: TeamMode) => Step;
+type ClassStep = (key: Key, state: State, entry: Entry, mode: TeamMode) => Step;
 
 const STEPS: Readonly<Record<KeyClass, ClassStep>> = {
   ladder: (key, state, entry) => ladderStep(key, state, entry),
@@ -173,7 +164,7 @@ const STEPS: Readonly<Record<KeyClass, ClassStep>> = {
 };
 
 // step : one lower layer's value against what the layers above resolved to
-function step(key: FileKey, state: State, entry: Entry, mode: TeamMode): Step {
+function step(key: Key, state: State, entry: Entry, mode: TeamMode): Step {
   const team = state.sources.find((s) => s.layer === "team");
   return mode === "locked" && team !== undefined ? lockedStep(state, entry) : STEPS[key.class](key, state, entry, mode);
 }
@@ -181,21 +172,44 @@ function step(key: FileKey, state: State, entry: Entry, mode: TeamMode): Step {
 type Context = {
   readonly layers: readonly FileLayer[];
   readonly modes: ReadonlyMap<string, TeamMode>;
+  readonly env: NodeJS.ProcessEnv;
 };
 
-function entriesOf(key: FileKey, layers: readonly FileLayer[]): readonly Entry[] {
-  return layers.flatMap((layer) => {
+const NUMBER = /^\d+(\.\d+)?$/;
+
+// machineEntry : a machine key's variable, the lowest layer; a cap's number is compared as a number, any other text
+// is left as it is, for the module's own check
+function machineEntry(key: Key, env: NodeJS.ProcessEnv): readonly Entry[] {
+  const text = key.where === "machine" ? env[key.env] : undefined;
+  return key.where === "machine" && text !== undefined
+    ? [{ value: machineValue(key, text), source: { layer: "machine", file: `env ${key.env}`, line: 0 } }]
+    : [];
+}
+
+function machineValue(key: Key, text: string): unknown {
+  return key.class === "cap" && NUMBER.test(text) ? Number(text) : text;
+}
+
+function entriesOf(key: Key, context: Context): readonly Entry[] {
+  const files = context.layers.flatMap((layer) => {
     const found = at(layer.value, key.path);
     const line = layer.lines.get(pathKey(key.path)) ?? 0;
     return found.found ? [{ value: found.value, source: { layer: layer.name, file: layer.file, line } }] : [];
   });
+  return [...files, ...machineEntry(key, context.env)];
 }
 
-// checked : a team or user value that is not what the key holds is an error; a project value is left to the project
-// file's readers, so their refusals read as they do today
-function checked(key: FileKey, entry: Entry): string {
-  const why = entry.source.layer === "project" ? "" : key.check(entry.value);
+// checked : a team or user value that is not what the key holds is an error; a project value of a file key is left to
+// the project file's readers, so their refusals read as they do today, unless the key has no reader there; a machine
+// variable is left to its module's own check
+function checked(key: Key, entry: Entry): string {
+  const why = checkedHere(key, entry.source.layer) ? key.check(entry.value) : "";
   return why === "" ? "" : `${key.id} in ${where(entry.source)} must be ${why}`;
+}
+
+function checkedHere(key: Key, layer: LayerName): boolean {
+  const readerChecks = key.where === "file" && key.checkProject !== true;
+  return layer === "machine" ? false : layer !== "project" || !readerChecks;
 }
 
 function teamValueOf(entries: readonly Entry[]): string {
@@ -203,7 +217,7 @@ function teamValueOf(entries: readonly Entry[]): string {
   return team === undefined ? "the team sets none" : `the team value is ${show(team.value)}`;
 }
 
-function refusal(key: FileKey, entry: Entry, why: string, entries: readonly Entry[]): string {
+function refusal(key: Key, entry: Entry, why: string, entries: readonly Entry[]): string {
   return `${key.id}: the ${entry.source.layer} layer (${where(entry.source)}) ${why}; a ${key.class} key only gets stricter in a lower layer, and ${teamValueOf(entries)}`;
 }
 
@@ -211,7 +225,7 @@ function lockedByTeam(entry: Entry, mode: TeamMode, state: State | undefined): b
   return mode === "locked" && entry.source.layer !== "team" && state === undefined;
 }
 
-function initial(key: FileKey): State | undefined {
+function initial(key: Key): State | undefined {
   return key.fixed === undefined
     ? undefined
     : { value: key.fixed, sources: [{ layer: "engine", file: "the engine", line: 0 }] };
@@ -219,7 +233,7 @@ function initial(key: FileKey): State | undefined {
 
 type Fold = { readonly state: State | undefined; readonly problems: readonly string[] };
 
-function refusedEntry(key: FileKey, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): string {
+function refusedEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): string {
   const bad = checked(key, entry);
   if (bad !== "") {
     return bad;
@@ -227,7 +241,7 @@ function refusedEntry(key: FileKey, mode: TeamMode, entries: readonly Entry[], f
   return lockedByTeam(entry, mode, fold.state) ? refusal(key, entry, "sets a key the team locked", entries) : "";
 }
 
-function foldEntry(key: FileKey, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): Fold {
+function foldEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): Fold {
   const refused = refusedEntry(key, mode, entries, fold, entry);
   if (refused !== "") {
     return { state: fold.state, problems: [...fold.problems, refused] };
@@ -240,27 +254,14 @@ function foldEntry(key: FileKey, mode: TeamMode, entries: readonly Entry[], fold
   return { state: next.state, problems };
 }
 
-function resolveFileKey(key: FileKey, context: Context): { readonly resolved: Resolved; readonly problems: string[] } {
+function resolveKey(key: Key, context: Context): { readonly resolved: Resolved; readonly problems: string[] } {
   const mode = context.modes.get(key.id) ?? "default";
-  const entries = entriesOf(key, context.layers);
+  const entries = entriesOf(key, context);
   const start: Fold = { state: initial(key), problems: [] };
   const fold = entries.reduce((f, e) => foldEntry(key, mode, entries, f, e), start);
   const state = fold.state ?? { value: key.fallback, sources: [{ layer: "default", file: "the default", line: 0 }] };
   const set = fold.state !== undefined;
   return { resolved: { key, value: state.value, set, sources: state.sources, mode }, problems: [...fold.problems] };
-}
-
-function resolveMachineKey(key: MachineKey, env: NodeJS.ProcessEnv): Resolved {
-  const value = env[key.env];
-  return value === undefined
-    ? {
-        key,
-        value: undefined,
-        set: false,
-        sources: [{ layer: "default", file: "the default", line: 0 }],
-        mode: "default",
-      }
-    : { key, value, set: true, sources: [{ layer: "machine", file: `env ${key.env}`, line: 0 }], mode: "default" };
 }
 
 // setAt : puts a value at a path, making the objects on the way; a part that is there but not an object is left, so
@@ -306,28 +307,38 @@ export type Input = {
 
 // resolve : every key's value, the problems, and the project file's object with the layers in place
 export function resolve(input: Input): Resolution {
-  const context: Context = { layers: input.layers, modes: input.modes };
-  const files = fileKeys().map((k) => resolveFileKey(k, context));
-  const machine = machineKeys().map((k) => resolveMachineKey(k, input.env));
-  const values = [...files.map((f) => f.resolved), ...machine];
-  const errors = files.flatMap((f) => f.problems.map((text): Problem => ({ level: "error", text })));
+  const context: Context = { layers: input.layers, modes: input.modes, env: input.env };
+  const each = KEYS.map((k) => resolveKey(k, context));
+  const values = each.map((f) => f.resolved);
+  const errors = [...each.flatMap((f) => f.problems), ...atWork(values)].map(
+    (text): Problem => ({ level: "error", text }),
+  );
   const unknown = input.layers.flatMap(unknownKeys);
   const project = input.layers.find((l) => l.name === "project");
   return { values, problems: [...input.problems, ...errors, ...unknown], effective: effectiveOf(project, values) };
 }
 
+// atWork : P9, nothing is committed to a work project's product repo, so its opt-in is refused
+function atWork(values: readonly Resolved[]): readonly string[] {
+  const on = (id: string): Resolved | undefined => values.find((r) => r.key.id === id && r.value === true);
+  const [work, commits] = [on("work"), on("repoCommits")];
+  return work !== undefined && commits !== undefined
+    ? [
+        `repoCommits: ${commits.sources.map(where).join(", ")} opts in to commits to the product repo, and ${work.sources.map(where).join(", ")} marks the project as work, where nothing is ever committed (P9)`,
+      ]
+    : [];
+}
+
 // ---- unknown keys
 
-const FILE_PATHS = fileKeys().map((k) => k.path);
-const MACHINE_BY_PATH = new Map(machineKeys().map((k) => [pathKey(k.id.split(".")), k]));
-const ALL_PATHS = [...FILE_PATHS, ...machineKeys().map((k) => k.id.split("."))];
+const ALL_PATHS = KEYS.map((k) => k.path);
 
 function isPrefix(path: readonly string[]): boolean {
   return ALL_PATHS.some((p) => p.length > path.length && path.every((part, i) => p[i] === part));
 }
 
 function isKey(path: readonly string[]): boolean {
-  return FILE_PATHS.some((p) => pathKey(p) === pathKey(path));
+  return ALL_PATHS.some((p) => pathKey(p) === pathKey(path));
 }
 
 function isMeta(layer: FileLayer, path: readonly string[]): boolean {
@@ -370,13 +381,10 @@ export function didYouMean(name: string): string {
 function unknownAt(layer: FileLayer, path: readonly string[]): Problem {
   const name = path.join(".");
   const place = where({ layer: layer.name, file: layer.file, line: layer.lines.get(pathKey(path)) ?? 0 });
-  const machine = MACHINE_BY_PATH.get(pathKey(path));
-  return machine === undefined
-    ? {
-        level: "warning",
-        text: `${place}: unknown key ${name}${didYouMean(name)} (a warning for one release, then an error)`,
-      }
-    : { level: "warning", text: `${place}: ${name} is read from ${machine.env} only, for now; this value is not used` };
+  return {
+    level: "warning",
+    text: `${place}: unknown key ${name}${didYouMean(name)} (a warning for one release, then an error)`,
+  };
 }
 
 function walk(layer: FileLayer, value: unknown, path: readonly string[]): readonly Problem[] {
