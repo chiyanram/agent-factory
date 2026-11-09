@@ -214,7 +214,8 @@ describe("check-evals on a repository", () => {
     expect(r.out).toContain("evals/reviewer/empty: a seeded case's golden.json must name its seed");
   });
 
-  it("passes this repository's own golden set", () => {
+  // it applies every case's patch to its base commit, so it grows with the golden set: a cold macOS runner took 6 s
+  it("passes this repository's own golden set", { timeout: 60_000 }, () => {
     expect(run(ROOT)).toEqual({ code: 0, out: "" });
   });
 });

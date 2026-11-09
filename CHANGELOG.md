@@ -3,6 +3,15 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.23.0](https://github.com/chiyanram/agent-factory/compare/v0.22.0...v0.23.0) (2026-11-09)
+
+### ✨ Features
+
+* **eval** — agent-factory eval reviewer with the judge, the results file and the $100 cap · [#215](https://github.com/chiyanram/agent-factory/issues/215) (PR [#251](https://github.com/chiyanram/agent-factory/pull/251))
+* **settings** — resolve team, project and user layers where safety keys only get stricter · [#229](https://github.com/chiyanram/agent-factory/issues/229) (PR [#250](https://github.com/chiyanram/agent-factory/pull/250))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.23.0`
+
 ## [0.22.0](https://github.com/chiyanram/agent-factory/compare/v0.21.0...v0.22.0) (2026-11-09)
 
 ### ✨ Features
