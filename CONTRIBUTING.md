@@ -46,7 +46,9 @@ issue ──▶ branch ──▶ make lint + make test ──▶ pull request �
 3. Change the code and its test together. Run `make lint` and `make test`.
 4. Open one pull request per issue, and link the issue (`Closes #56`).
 5. A maintainer reviews it. Answer each comment with a change or a reason.
-6. A maintainer merges once CI is green and the review is resolved.
+6. A maintainer adds it to the merge queue once CI is green and the review is resolved. The queue builds it on top
+   of the pull requests ahead of it, runs `lint-and-test` and `test-macos` there, and squash-merges it only when
+   both pass (#323). Do not merge `main` into a branch only to bring it up to date: the queue does that.
 
 A good pull request has one concern, a test that fails without the change, and no secrets, tokens or real project
 data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md](GUIDE.md) or an ADR too.
@@ -93,7 +95,9 @@ Pin every GitHub Actions step to a full commit SHA, with the version in a commen
 
 ## Releases
 
-Every push to `main` runs semantic-release (`release.config.mjs`, #153), the same way as chiyanram/skills.
+Releases are manual during the dev phase (#327). A merge to `main` runs the checks only. To release, open
+**Actions → ci → Run workflow** on `main`, or run `gh workflow run ci.yml --ref main`; semantic-release
+(`release.config.mjs`, #153) then runs after the checks pass, the same way as chiyanram/skills.
 
 - Pull requests are squash-merged with the PR title as the commit subject, so **the PR title decides the release**.
   CI fails a title that is not a Conventional Commit, and a title, description or commit that holds a skip-ci marker.
