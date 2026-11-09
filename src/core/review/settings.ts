@@ -2,7 +2,6 @@
 // review step (#138). A value that is set but not valid is refused, never replaced by the default.
 //
 //   FACTORY_REPO                  the project's clone; packs go to <repo>/.claude/packs, pass answers to <repo>/.claude/runs
-//   FACTORY_RULEBOOK              the rulebook plugin folder, the one that holds skills/<domain>/references/
 //   FACTORY_REVIEW_FIND / _VERIFY the instructions (default: the package's prompts/review-*.md)
 //   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   default sonnet, sonnet, opus (#22 Q4)
 //   FACTORY_MAX_USD               the most one model run may spend, in US dollars (ADR-0011 D14)
@@ -11,7 +10,8 @@
 //   FACTORY_HOME                  the run folders go in <home>/review-runs; the spec and its approval are read from
 //                                 <home>/specs and <home>/approvals (default ~/.factory)
 //
-// The claude CLI gets only the environment it needs (CLAUDE_ENV): no forge token, no FACTORY_* (ADR-0012 S2).
+// The plugins come from the project's pinned list (process/use.ts, #232): the process plugin's folder holds the review
+// references (skills/<domain>/references/). The claude CLI gets only the environment it needs (CLAUDE_ENV): no forge token, no FACTORY_* (ADR-0012 S2).
 
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -24,6 +24,7 @@ import { claudeSessions, type Sessions } from "./live.js";
 import { claudeModel, runInFolder, type Model } from "./model.js";
 import type { ReviewSetup } from "./round.js";
 import { settingName, settingOf } from "../settings/machine.js";
+import type { PluginDir } from "../process/read.js";
 
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
@@ -52,7 +53,6 @@ function home(env: NodeJS.ProcessEnv): Result<string> {
 
 export type Paths = {
   readonly repo: string;
-  readonly rulebook: string;
   readonly home: string;
   readonly maxUsd: string;
   readonly maxRuns: number;
@@ -69,19 +69,15 @@ function limits(env: NodeJS.ProcessEnv): Result<Limits> {
   return runs.kind === "ok" ? { kind: "ok", value: { maxUsd: usd.value, maxRuns: runs.value } } : runs;
 }
 
-type Places = { readonly repo: string; readonly rulebook: string; readonly home: string };
+type Places = { readonly repo: string; readonly home: string };
 
 function places(env: NodeJS.ProcessEnv): Result<Places> {
   const repo = absolute("FACTORY_REPO", env.FACTORY_REPO);
   if (repo.kind === "failed") {
     return repo;
   }
-  const rulebook = absolute(settingName("rulebook"), settingOf(env, "rulebook"));
-  if (rulebook.kind === "failed") {
-    return rulebook;
-  }
   const h = home(env);
-  return h.kind === "ok" ? { kind: "ok", value: { repo: repo.value, rulebook: rulebook.value, home: h.value } } : h;
+  return h.kind === "ok" ? { kind: "ok", value: { repo: repo.value, home: h.value } } : h;
 }
 
 // paths : the settings, each checked; a value that is set but not valid is refused
@@ -155,6 +151,8 @@ export function reviewSetup(input: {
   readonly project: string;
   readonly number: number;
   readonly paths: Paths;
+  // the project's plugins, in order (process/use.ts)
+  readonly plugins: readonly PluginDir[];
   readonly model?: Model;
   readonly sessions?: Sessions;
 }): ReviewSetup {
@@ -168,7 +166,7 @@ export function reviewSetup(input: {
     env,
     home: p.home,
     project: input.project,
-    rulebook: p.rulebook,
+    plugins: input.plugins,
     packDir: join(p.repo, ".claude", "packs"),
     recordsDir: recordsDirOf(p.repo),
     runsDir: join(p.home, "review-runs"),

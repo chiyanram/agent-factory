@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
 import { waive } from "../src/core/waiver.js";
+import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
@@ -764,6 +765,17 @@ describe("START and approval (#227)", () => {
     expect(await decisions()).toEqual([]);
     await started("2026-11-07T08:00:00Z");
     expect(await decisions()).toEqual(["log PROJ-1: writer (fix): started; no run yet (dry run)"]);
+  });
+
+  it("the project's process lanes decide: a process that makes tiny need an approval holds a START (#232)", async () => {
+    spec("tiny");
+    await started("2026-11-07T08:00:00Z");
+    const strict = DEFAULT_LANES.map((l) => ({ name: l.name, approval: true }));
+    const log: string[] = [];
+    await tick(setup({ team, open: [], merged: [] }, log, { dryRun: true, lanes: strict }));
+    expect(log).toEqual([
+      "log PROJ-1: wait: the tiny lane needs a human's approval; the ticket has a START only (dry run)",
+    ]);
   });
 
   it("a START in a lane that needs an approval waits for one; the approval lets the build begin", async () => {

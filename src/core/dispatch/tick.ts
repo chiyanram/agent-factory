@@ -18,6 +18,7 @@
 // project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or none>", for
 // people to see. It never starts anything: the orchestrator decides only from the local records.
 
+import type { PluginHash } from "../process/use.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { needsApproval, oneWayDoorPathsOf, plannedCheck } from "../lane.js";
+import { needsApproval, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
@@ -114,7 +115,7 @@ export type Steps = {
 export const STEPS_TODAY: Steps = {
   writer: { kind: "unavailable", reason: "the writer's box is not built yet (#113)" },
   ready: { kind: "unavailable", reason: "the ready check needs a box (#113) and the project file" },
-  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and FACTORY_RULEBOOK" },
+  review: { kind: "unavailable", reason: "the reviewer needs FACTORY_REPO and a plugin that holds its references" },
   verify: { kind: "unavailable", reason: "the local verifier needs a box (#113) and the project file" },
 };
 
@@ -137,6 +138,10 @@ export type TickSetup = {
   readonly log: (line: string) => void;
   // a person's ping when a ticket needs them (#119); NO_NOTIFY when the project maps no notify plugin
   readonly notify: Notify;
+  // the plugins this pass's runs use, each with its hash, for the run records (#232); none when it lists none
+  readonly plugins?: readonly PluginHash[];
+  // the project's lanes, from its process plugin or the built-in process (#232); the default lanes when absent
+  readonly lanes?: readonly LaneProps[];
   // the ticket, day and window caps (#131)
   readonly caps: Caps;
 };
@@ -185,7 +190,7 @@ async function startedView(
     return { kind: "unwritten" };
   }
   const { lane } = spec.spec;
-  if (!needsApproval(lane)) {
+  if (!needsApproval(lane, setup.lanes)) {
     return { kind: "started", at: started.at, lane };
   }
   return stale ? { kind: "stale" } : { kind: "unapproved", lane };
@@ -508,7 +513,7 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
   // a person, never a claim with no record, which would look like someone else's
   const started = await record({
     where: place,
-    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state) },
+    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state), plugins: usedBy(setup) },
   });
   const claimed = started.kind === "ok" ? await claim(setup, state) : started;
   if (claimed.kind === "failed") {
@@ -539,6 +544,11 @@ async function writerEnded(
   return ended.kind === "ok" && message !== "none" ? informed(setup, message) : ended;
 }
 
+// usedBy : the plugins and hashes a run of this pass records
+function usedBy(setup: TickSetup): readonly PluginHash[] {
+  return setup.plugins ?? [];
+}
+
 // startCheck : the "started" line of a ready check or a review, or why it cannot start
 async function startCheck(
   setup: TickSetup,
@@ -546,7 +556,10 @@ async function startCheck(
   phase: "ready" | "review" | "verify",
   head: string,
 ): Promise<Done> {
-  return record({ where: where(setup, state), event: { at: at(setup), kind: "started", phase, mode: "none", head } });
+  return record({
+    where: where(setup, state),
+    event: { at: at(setup), kind: "started", phase, mode: "none", head, plugins: usedBy(setup) },
+  });
 }
 
 // failedAt : a failed check's nextTry, as a field to spread; n counts this failure (#228)

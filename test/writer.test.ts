@@ -232,7 +232,7 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       runsDir: join(p.root, "box-runs"),
     },
     settings: {
-      rulebook,
+      plugins: [rulebook],
       timeoutSeconds: 3600,
       claude: { maxUsd: "2", model: "" },
       completion: FAST,
@@ -355,7 +355,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
     const spec = started(fake);
-    expect(spec.readOnly).toEqual(["AGENTS.md", ".git/config", ".git/hooks", ".factory/spec.md", ".factory/rulebook"]);
+    expect(spec.readOnly).toEqual(["AGENTS.md", ".git/config", ".git/hooks", ".factory/spec.md", ".factory/plugins/1"]);
     expect(spec.network).toBe("factory-int-ledger");
     expect(spec.env).toMatchObject({
       CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test",
@@ -366,7 +366,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(Object.keys(spec.env)).not.toContain("GITHUB_TOKEN");
     expect(Object.keys(spec.env)).not.toContain("PATH");
     const ran = command(fake);
-    expect(ran.argv).toEqual(claudeArgv({ maxUsd: "2", model: "" }));
+    expect(ran.argv).toEqual(claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1));
     expect(ran.stdin).toMatchObject({
       kind: "text",
       text: expect.stringContaining("fix PROJ-1 on factory/PROJ-1 at"),
@@ -994,22 +994,35 @@ describe("the writer's words and settings", () => {
     expect(texts.filter((t) => !t.includes(FOREGROUND))).toEqual([]);
   });
 
-  it("runs claude with no settings of the branch, skip-all, the rulebook as a plugin, streamed output, the cap and model only when set", () => {
+  it("runs claude with no settings of the branch, skip-all, each plugin with --plugin-dir, streamed output, the cap and model only when set", () => {
     // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
     // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
-    expect(claudeArgv({ maxUsd: "", model: "" })).toEqual([
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1)).toEqual([
       "claude",
       "-p",
       "--setting-sources",
       "user",
       "--dangerously-skip-permissions",
       "--plugin-dir",
-      ".factory/rulebook",
+      ".factory/plugins/1",
       "--output-format",
       "stream-json",
       "--verbose",
     ]);
-    expect(claudeArgv({ maxUsd: "2", model: "opus" }).slice(-4)).toEqual(["--max-budget-usd", "2", "--model", "opus"]);
+    // the engine runs alone with no plugin, and hands two plugins in the project's order (#232)
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0)).not.toContain("--plugin-dir");
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2).slice(5, 9)).toEqual([
+      "--plugin-dir",
+      ".factory/plugins/1",
+      "--plugin-dir",
+      ".factory/plugins/2",
+    ]);
+    expect(claudeArgv({ maxUsd: "2", model: "opus" }, { kind: "none" }, 1).slice(-4)).toEqual([
+      "--max-budget-usd",
+      "2",
+      "--model",
+      "opus",
+    ]);
   });
 
   it("gives a run 60 minutes unless FACTORY_WRITER_MINUTES says otherwise, from 1 to 240", () => {
