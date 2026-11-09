@@ -44,6 +44,7 @@ import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
+import { EVAL_HELP, evalCommand } from "./eval-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
 import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
@@ -89,7 +90,7 @@ commands:
 ${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${LOOP_HELP}
+${LOOP_HELP}${EVAL_HELP}
 options:
   --help      show this help
   --version   show the package version
@@ -962,6 +963,10 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
 }
 
 export function runCli(argv: readonly string[], io: Io): Promise<number> {
+  // eval reads its own options (--drafts, --allow-partial)
+  if (argv[0] === "eval") {
+    return evalCommand(argv.slice(1), io);
+  }
   return ownOptions(argv, io) ?? mainCli(argv, io);
 }
 
