@@ -20,7 +20,14 @@ import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, stallOf } from "../src/core/writer/settings.js";
-import { FOREGROUND, PROJECT_INSTRUCTIONS, promptFor, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import {
+  FOREGROUND,
+  KNOWLEDGE,
+  PROJECT_INSTRUCTIONS,
+  promptFor,
+  writerStep,
+  type WriterSetup,
+} from "../src/core/writer/step.js";
 import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
 import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
@@ -1035,5 +1042,52 @@ describe("the writer's words and settings", () => {
 
   it("is unavailable with the reason when its setup is not there", () => {
     expect(writerStep({ kind: "failed", reason: "no box" })).toEqual({ kind: "unavailable", reason: "no box" });
+  });
+});
+
+describe("the writer step: the project's brief and glossary (#235)", () => {
+  // an accepted brief, as agent-factory onboard accept leaves it: its cites keep each line's text
+  function accepted(cites: readonly { readonly file: string; readonly line: number; readonly text: string }[]): void {
+    const dir = join(home, "projects", "ledger");
+    mkdirSync(dir, { recursive: true });
+    const brief = "# ledger: brief\n\n- `make test` (`Makefile:1`, verified)\n";
+    const glossary = "# ledger: glossary\n\n- **Renewal**: a loan extended. _Avoid_: extension.\n";
+    writeFileSync(join(dir, "brief.md"), brief);
+    writeFileSync(join(dir, "glossary.md"), glossary);
+    writeFileSync(join(dir, "cites.json"), JSON.stringify(cites));
+    const record = { version: 1, kind: "knowledge", brief_hash: specHash(brief), glossary_hash: specHash(glossary) };
+    writeFileSync(join(dir, "knowledge.json"), JSON.stringify(record));
+  }
+
+  it("hands the run the accepted brief and glossary, and puts each stale cite in its record", async () => {
+    accepted([
+      { file: "svc/Main.java", line: 1, text: "class Main {}" },
+      { file: "svc/Main.java", line: 1, text: "class Gone {}" },
+    ]);
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    let brief = "";
+    const reading: Box = {
+      ...fake.box,
+      run: async (call) => {
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const dir = start?.op === "start" ? start.spec.worktree : "";
+        brief = readFileSync(join(dir, ".factory", "brief.md"), "utf8");
+        commitWork(dir, { commit: true, report: DONE, exit: 0 });
+        writeFileSync(join(dir, ".factory", "report.json"), JSON.stringify(DONE));
+        await fake.box.run(call);
+        return { kind: "exited", code: 0, stdout: "{}", stderr: "" };
+      },
+    };
+    const out = await run(setup(reading, forge(), []), FIX);
+    expect(brief).toContain("`make test`");
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringContaining(KNOWLEDGE) });
+    expect(valueOf(out).stale).toEqual(["svc/Main.java:1 is stale: its line changed"]);
+  });
+
+  it("a run with no accepted brief goes without one and reports nothing", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out).stale).toBeUndefined();
+    expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.not.stringContaining(KNOWLEDGE) });
   });
 });
