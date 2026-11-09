@@ -19,7 +19,7 @@ import { renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
 import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
-import { minutesOf, stallOf } from "../src/core/writer/settings.js";
+import { minutesOf, questionsOf, stallOf } from "../src/core/writer/settings.js";
 import {
   FOREGROUND,
   KNOWLEDGE,
@@ -244,6 +244,7 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       claude: { maxUsd: "2", model: "" },
       completion: FAST,
       stallMs: STALL_MS,
+      questions: "round",
     },
     prompts: {
       fix: "fix {{ticket}} on {{branch}} at {{head}}",
@@ -1040,6 +1041,17 @@ describe("the writer's words and settings", () => {
     expect(minutesOf({ FACTORY_WRITER_MINUTES: "90" })).toEqual({ kind: "ok", value: 5400 });
     for (const bad of ["0", "241", "1.5", "x"]) {
       expect(minutesOf({ FACTORY_WRITER_MINUTES: bad }).kind).toBe("failed");
+    }
+  });
+
+  it("asks every question at once unless FACTORY_QUESTIONS says one-at-a-time, and refuses any other value (#320)", () => {
+    expect(questionsOf({})).toEqual({ kind: "ok", value: "round" });
+    expect(questionsOf({ FACTORY_QUESTIONS: "one-at-a-time" })).toEqual({ kind: "ok", value: "one-at-a-time" });
+    for (const bad of ["", "all", "Round"]) {
+      expect(questionsOf({ FACTORY_QUESTIONS: bad })).toEqual({
+        kind: "failed",
+        reason: "FACTORY_QUESTIONS must be round or one-at-a-time",
+      });
     }
   });
 

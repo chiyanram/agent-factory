@@ -4,7 +4,10 @@
 //
 //   done     push the writer's commits; post the evidence; next: the ready check re-runs the evidence rows
 //   asked    push; post the questions in one "[writer] OPEN: …" note, which poll counts as one open ask (one note, so a
-//            retry after a failure never posts a question twice); next: wait for a person
+//            retry after a failure never posts a question twice); next: wait for a person. By default the note is one
+//            numbered round: every question, its lettered choices with the recommended one marked, and how to answer
+//            ("1A 2B", or "accept all"). With the project's questions setting at one-at-a-time it holds only the first;
+//            the next run, after the answer, asks again whatever is still open (#320).
 //   blocked  label needs-human first, so nothing hands the change out again; push the work in progress, but only on top
 //            of the branch (a run stopped in a rebase never rewrites it); post the reason, in the writer's seat when
 //            the writer said it; next: a person
@@ -24,8 +27,9 @@ import { agentTrailer, commitKind } from "./notes.js";
 import type { Post, PostField, Seat } from "./post.js";
 import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
+import type { Questions } from "./settings/variables.js";
 import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
-import { hungLine, type Ending, type Evidence, type Outcome } from "./report.js";
+import { hungLine, type Ending, type Evidence, type Outcome, type Question } from "./report.js";
 
 export const NEEDS_HUMAN = "needs-human";
 
@@ -46,6 +50,8 @@ export type FinishInput = {
   // how the run ended: on its own, or stopped after its completion window (#182); a hung run's post says so
   readonly ending: Ending;
   readonly pusher?: Pusher;
+  // the project's questions setting; unset: round
+  readonly questions?: Questions;
 };
 
 function git(env: NodeJS.ProcessEnv, repo: string, args: readonly string[]): ReturnType<typeof hostGit> {
@@ -251,18 +257,62 @@ async function done(input: FinishInput, evidence: readonly Evidence[]): Promise<
   return said.kind === "ok" ? { kind: "ok", value: { kind: "ready-check", head, evidence } } : said;
 }
 
-async function asked(input: FinishInput, questions: readonly string[]): Promise<Result<Next>> {
-  const [only] = questions;
-  const ask: Post =
-    questions.length === 1 && only !== undefined
-      ? { seat: "writer", title: `OPEN: ${only}`, fields: runFields(input.ending), items: [] }
-      : {
-          seat: "writer",
-          title: `OPEN: ${questions.length} questions`,
-          fields: runFields(input.ending),
-          items: questions,
-        };
-  const said = await post(input, ask);
+const LETTERS = "ABCD";
+
+// asking : one question, numbered, with its lettered choices and the recommended one marked. Pure.
+function asking(q: Question, i: number): string {
+  if (q.kind === "plain") {
+    return `${i + 1}. ${q.question} (no choices: answer in words)`;
+  }
+  const choices = q.choices.map((c, j) => `${LETTERS[j]}) ${c}${j === q.recommended ? " (recommended)" : ""}`);
+  return `${i + 1}. ${q.question} ${choices.join(" · ")}`;
+}
+
+// howToAnswer : what a person replies, for the questions posted. Pure.
+function howToAnswer(questions: readonly Question[]): string {
+  const lettered = questions.some((q) => q.kind === "choices");
+  return lettered
+    ? 'reply with a letter per question, such as "1A 2B", or "accept all" to take every recommended choice; a question with no choices takes words'
+    : 'reply in words, each answer after its number, such as "1: EUR"';
+}
+
+// waitingFields : with one-at-a-time, how many questions wait for a later run. Pure.
+function waitingFields(waiting: number): readonly PostField[] {
+  return waiting > 0
+    ? [
+        {
+          label: "next",
+          value: `${waiting} more question(s) wait: once this one is answered, the next run asks again what is still open`,
+        },
+      ]
+    : [];
+}
+
+function counted(n: number): string {
+  return n === 1 ? "1 question" : `${n} questions`;
+}
+
+// askPost : the one OPEN note: every question as a numbered round, or with one-at-a-time only the first, saying how
+// many wait. One plain question keeps its old form, the question as the title. Pure.
+function askPost(input: FinishInput, questions: readonly Question[]): Post {
+  const posted = input.questions === "one-at-a-time" ? questions.slice(0, 1) : questions;
+  const run = runFields(input.ending);
+  const waiting = waitingFields(questions.length - posted.length);
+  const [only] = posted;
+  if (posted.length === 1 && only?.kind === "plain") {
+    return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...waiting], items: [] };
+  }
+  const answer: PostField = { label: "answer", value: howToAnswer(posted) };
+  return {
+    seat: "writer",
+    title: `OPEN: ${counted(posted.length)}`,
+    fields: [...run, answer, ...waiting],
+    items: posted.map(asking),
+  };
+}
+
+async function asked(input: FinishInput, questions: readonly Question[]): Promise<Result<Next>> {
+  const said = await post(input, askPost(input, questions));
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }
 

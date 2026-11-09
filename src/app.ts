@@ -124,6 +124,7 @@ options:
 
 settings:
   FACTORY_QUIET_MINUTES  dispatch: how long an open question may sit before the claim is released (default 30)
+  FACTORY_QUESTIONS    dispatch: round asks every open question at once, with choices (default); or one-at-a-time
   FACTORY_POLL_MINUTES   dispatch: the wait between the loop's passes; status flags a loop late after 3 (default 5)
   FACTORY_HOME         where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
   FACTORY_FORGE        gitlab (default) or github
