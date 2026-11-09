@@ -10,6 +10,7 @@
 import { execFile } from "node:child_process";
 import type { Exit } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
+import { spendOf } from "../dispatch/spend.js";
 
 export type ModelRun = {
   // the folder the run reads: ./pack.md, ./code/, and for verify ./findings.json
@@ -67,13 +68,6 @@ function parse(text: string): unknown {
   }
 }
 
-function tokensOf(answer: unknown): number {
-  const usage = prop(answer, "usage");
-  return ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
-    .map((k) => prop(usage, k))
-    .reduce<number>((sum, n) => sum + (typeof n === "number" ? n : 0), 0);
-}
-
 function failure(answer: unknown, stderr: string): string {
   const said = [prop(answer, "subtype"), prop(answer, "result")].filter((s) => typeof s === "string").join(": ");
   return (said || stderr.trim().split("\n")[0] || "no answer").slice(0, 200);
@@ -91,11 +85,8 @@ export function readAnswer(input: {
   if (!ok) {
     return { kind: "failed", reason: failure(answer, input.stderr), answer };
   }
-  const cost = prop(answer, "total_cost_usd");
-  return {
-    kind: "ok",
-    value: { output, answer, costUsd: typeof cost === "number" ? cost : 0, tokens: tokensOf(answer) },
-  };
+  const spent = spendOf(answer);
+  return { kind: "ok", value: { output, answer, costUsd: spent.usd, tokens: spent.tokens } };
 }
 
 // One CLI call in a folder: claude's file tools are held to the folder it starts in.

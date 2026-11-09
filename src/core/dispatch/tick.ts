@@ -44,6 +44,7 @@ import {
   type Task,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
+import type { Spend } from "./spend.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
   decide,
@@ -75,6 +76,8 @@ export type Steps = {
       readonly evidence: readonly Evidence[];
       // the writer hung after its report, and the host stopped it after the completion window (#182)
       readonly hung: boolean;
+      // what the run spent (#131); none when it was not measured
+      readonly spend?: Spend;
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
@@ -84,7 +87,8 @@ export type Steps = {
     RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts,
     { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane }
   >;
-  readonly review: Step<RunInput, { readonly actOn: number }>;
+  // what the round spent: zero when it ran no model, as when it reused a verdict (#131)
+  readonly review: Step<RunInput, { readonly actOn: number; readonly spend: Spend }>;
   // the local verifier (#91): it posts its result as a commit status at the head
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
 };
@@ -635,6 +639,7 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
           kind: "review-ended",
           head,
           actOn: ran.value.actOn,
+          spend: ran.value.spend,
           ...failedAt(setup, "review", ran.value.actOn > 0, state.runs.reviewFailures),
         },
       })

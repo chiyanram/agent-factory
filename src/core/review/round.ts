@@ -86,6 +86,8 @@ export type Outcome =
       readonly head: string;
       readonly counts: Counts;
       readonly costUsd: number;
+      // every token the round's passes spent (#131)
+      readonly tokens: number;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -559,7 +561,17 @@ async function post(
     [{ label: "Spent at this head", value: spent }],
   );
   return summary.kind === "ok"
-    ? { kind: "ok", value: { kind: "posted", round, head: pack.head, counts: c, costUsd: result.spent.costUsd } }
+    ? {
+        kind: "ok",
+        value: {
+          kind: "posted",
+          round,
+          head: pack.head,
+          counts: c,
+          costUsd: result.spent.costUsd,
+          tokens: result.spent.find + result.spent.verify,
+        },
+      }
     : summary;
 }
 

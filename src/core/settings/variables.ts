@@ -74,6 +74,13 @@ export const MACHINE_KEYS = [
     dollars,
   ),
   machine("eval.judgeModel", "FACTORY_JUDGE_MODEL", "preference", "the eval judge's model"),
+  machine(
+    "window.hours",
+    "FACTORY_WINDOW_HOURS",
+    "preference",
+    "the length of the subscription's usage window, in hours, for usage (default 5)",
+    wholeNumber(24),
+  ),
   machine("caps.gitHostTries", "FACTORY_MAX_TRIES", "cap", "the most tries of one git host call"),
   machine("implementer.minutes", "FACTORY_WRITER_MINUTES", "cap", "the implementer's time per run", wholeNumber(240)),
   machine(
