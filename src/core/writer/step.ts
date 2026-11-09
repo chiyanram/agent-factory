@@ -315,6 +315,7 @@ async function onChange(
     forge: setup.forge,
     push: run.push,
     pusher: setup.pusher,
+    questions: setup.settings.questions,
   });
   if (next.kind === "failed") {
     return next;
@@ -352,6 +353,7 @@ async function finished(
     forge: setup.forge,
     push,
     pusher: setup.pusher,
+    questions: setup.settings.questions,
     open: openFor(setup, p, clone.branch, prBodyOf(setup, mode, ended)),
   });
   if (first.kind === "failed") {

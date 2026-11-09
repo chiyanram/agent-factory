@@ -82,8 +82,11 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   - One-way-door paths are a project setting.
   - A raise that needs an approval the ticket lacks stops and asks.
   - The engine acts on a lane's properties, never on its name.
-- **Questions.** A run that needs a decision ends with an ask. The question goes to the front doors (terminal, Discord
-  thread, spec PR). The answer goes **into the spec**, so an approval lane approves again.
+- **Questions.** A run that needs a decision ends with an ask. By default it asks **every open question at once, in one
+  numbered round**; each question carries 2 to 4 short choices and one recommended choice, so a person answers with
+  taps, "1A 2B", or "accept all". The project setting `questions` can be `one-at-a-time` instead. Never a guess. The
+  round goes to the front doors (terminal, Discord thread, spec PR). The answer goes **into the spec**, so an approval
+  lane approves again (the operator, [2026-11-09](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6744864148); #320).
 - **Limits:**
   - **caps** per run, per ticket and per project per day. A ticket at its cap goes to needs-human with the spend shown.
     A day at its cap starts no new runs and sends one notice; nothing is killed mid-run.
@@ -156,7 +159,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 | PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner (#335; ADR-0012 S13) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
-| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), evidence and grade (each `cited`, `walked` or `ran`; the role cards name it grade), fix |
+| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), grade (how strong the proof is: `cited`, `walked` or `ran`), evidence (the proof itself), finding (the plain description), fix; the finder gives all but the lens, which the engine adds (decided on #30, 2026-11-09) |
 | verdict | id, bucket (`act_on`, `consider`, `noted`, `dismissed`), why |
 
 **Tests are judged twice:**
@@ -238,7 +241,7 @@ so work and personal logins never mix.
 | a ticket starts from an approval file, and the lane comes from the approval (`dispatch/table.ts:44`) | START opens it, approval releases the build, and the lane is checked from the diff |
 | one approval kind, local, nothing on the git host (ADR-0012 S1) | approval by lane, many front doors, a bot-written copy on the git host |
 | the floor guard (`ready/floor.ts`) checks skips, deleted test files, fewer asserts, bare suppressions and empty catches, with no waiver | plus judge files (S4), test-case removal within a file, and a waiver scoped to the head (#231) |
-| findings have no lens or evidence grade (`review/verdicts.ts`) | `lens` and `evidence: cited / walked / ran` |
+| findings have no lens or evidence grade (`review/verdicts.ts`) | `lens`, `grade` (`cited` / `walked` / `ran`) and `evidence` |
 | design findings skip the verify pass | they go through the verify pass |
 | one find pass for all rules (ADR-0004) | one finder run per lens, one shared verify pass |
 | `report.json` has no `deferred` list | an optional `deferred` list (cleanup) |
@@ -286,6 +289,5 @@ Each step widens only after its exit check passes. Map #30 keeps the current lis
 
 - **Acceptance criteria form:** Gherkin (the rulebook's GA1–GA6) or numbered lines (the spec template here). Decided in
   chiyanram/skills#237.
-- **Questions:** asked one at a time, or as one numbered round. Proposed: a project setting.
 - **Copilot CLI and Claude plugins:** whether Copilot CLI loads them. If not, the engine passes it the plugin's skills
   folder (the #162 spike).

@@ -469,7 +469,7 @@ describe("tick", () => {
     expect(pings).toHaveLength(1);
   });
 
-  it("a review round records its Act on count and what it spent (#131)", async () => {
+  it("a review round records its Act on count, what it spent (#131) and each lens's unique findings (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
     const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
@@ -479,7 +479,10 @@ describe("tick", () => {
       ...STEPS_TODAY,
       review: {
         kind: "available",
-        run: async () => ({ kind: "ok", value: { actOn: 0, spend: { usd: 0.3, tokens: 40 } } }),
+        run: async () => ({
+          kind: "ok",
+          value: { actOn: 0, spend: { usd: 0.3, tokens: 40 }, lenses: { errors: 1, api: 0 } },
+        }),
       },
     };
     expect(await tick(setup({ team, open: [open()], merged: [] }, [], { steps }))).toMatchObject({ kind: "ok" });
@@ -488,6 +491,7 @@ describe("tick", () => {
       kind: "review-ended",
       actOn: 0,
       spend: { usd: 0.3, tokens: 40 },
+      lenses: { errors: 1, api: 0 },
     });
   });
 
@@ -502,6 +506,11 @@ describe("tick", () => {
     writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: -1, tokens: 7 } })}\n`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
     writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: 1 } })}\n`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    // each lens's unique findings (#237): kept, and a count that is not one fails the read
+    writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: 2 } })}\n`);
+    expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, lenses: { errors: 2 } }] });
+    writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: "two" } })}\n`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
   });
 

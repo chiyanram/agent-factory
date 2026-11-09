@@ -1,7 +1,8 @@
 // step — the reviewer as the dispatcher's review step (#103, #138). The table needs only the Act on count; every other
 // outcome maps onto it, with what the round spent (#131): every model answer of the round, a failed pass's too, is
 // metered, so a round that fails still hands the orchestrator its spend. The outcomes:
-//   posted, reused, already   their Act on count; a posted round also rates the last full round's findings (#220)
+//   posted, reused, already   their Act on count; a posted round also rates the last full round's findings (#220),
+//                             and names each lens's unique verified findings (#237)
 //   no-progress               needs-human is on the change, which the table reads first next pass
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 
@@ -18,13 +19,21 @@ import { paths, reviewSetup } from "./settings.js";
 import { addSpend, NO_SPEND, spendOf, type Spend } from "../dispatch/spend.js";
 
 type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
-type ActOn = Result<{ readonly actOn: number; readonly acted?: Acted }>;
+// a posted round also rates the last full round's findings (#220), and names each lens's unique verified findings (#237)
+type ActOn = Result<{
+  readonly actOn: number;
+  readonly acted?: Acted;
+  readonly lenses?: Readonly<Record<string, number>>;
+}>;
 type Mappers = { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => ActOn };
 
 const MAP: Mappers = {
   posted: (o) => ({
     kind: "ok",
-    value: o.acted === "none" ? { actOn: o.counts.act_on } : { actOn: o.counts.act_on, acted: o.acted },
+    value:
+      o.acted === "none"
+        ? { actOn: o.counts.act_on, lenses: o.lenses }
+        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses },
   }),
   reused: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   already: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),

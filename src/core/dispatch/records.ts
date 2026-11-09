@@ -153,6 +153,8 @@ export type Event =
       // the last full round's Act on and Consider findings at its head, each acted on or not by this head (#220);
       // none on a first round, a reused one, or an older line
       readonly acted?: Acted;
+      // per lens that ran, its verified findings no other lens reported (#237); none when the round ran no lens
+      readonly lenses?: Readonly<Record<string, number>>;
     }
   // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
   // or failed (#235)
@@ -492,10 +494,27 @@ function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
   return since !== BAD && Array.isArray(rows) && rows.every(isActedRow) ? { acted: { since, rows } } : BAD;
 }
 
+// entriesOf : an object's own entries; none for anything else. Pure.
+function entriesOf(value: unknown): readonly [string, unknown][] {
+  return typeof value === "object" && value !== null ? Object.entries(value) : [];
+}
+
+// lensesField : a review line's per-lens unique findings (#237), as a field to spread; none on an older line
+function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, number>> } | Bad {
+  const lenses = prop(raw, "lenses");
+  if (lenses === undefined) {
+    return {};
+  }
+  const entries = entriesOf(lenses);
+  return entries.length > 0 && entries.every(([, n]) => Number.isSafeInteger(n))
+    ? { lenses: Object.fromEntries(entries.map(([lens, n]) => [lens, Number(n)])) }
+    : BAD;
+}
+
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
-  const extras = [nextTryField(raw), spendField(raw), actedField(raw)];
+  const extras = [nextTryField(raw), spendField(raw), actedField(raw), lensesField(raw)];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
   return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
     ? BAD

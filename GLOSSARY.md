@@ -120,8 +120,10 @@ commit (personal projects that opt in).
 
 **Needs-human**: the label that stops a ticket for a person. The person removes it and STARTs or approves again.
 
-**Ask**: a run that needs a decision ends with status `asked` and its questions (one at a time or a numbered round is
-open; see `docs/DESIGN.md`). The answer goes into the spec.
+**Ask**: a run that needs a decision ends with status `asked` and every open question at once, as one numbered round.
+Each question carries 2 to 4 short choices and one recommended choice, so a person answers with taps, "1A 2B", or
+"accept all". The project setting `questions` can be `one-at-a-time` instead. Never a guess. The answer goes into the
+spec.
 _Avoid_: clarify inline, assume
 
 **Evidence row**: `{criterion, command, result}`: one AC and the plain command that proves it.
