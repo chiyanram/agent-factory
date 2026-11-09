@@ -87,6 +87,8 @@ export type Steps = {
       readonly hung: boolean;
       // what the run spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // each cite of the project's brief that went stale (#235)
+      readonly stale?: readonly string[];
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human

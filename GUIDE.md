@@ -167,7 +167,8 @@ The wall (`src/core/coordinator.ts`):
   still run by hand; they become denied once the dispatcher runs the writer in the box (#113).
 - **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
   STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
-  `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+  `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215).
+  `agent-factory onboard`: the onboarder's run and the acceptance of its brief are a human's (#235). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
   `starts`, `waivers`,
@@ -450,6 +451,30 @@ there.
   for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never
   turns a local gate into forge CI.
 
+### Project knowledge
+
+A project's brief and glossary live in its project home, `$FACTORY_HOME/projects/<project>/`, never in the product
+repo (#235; [docs/DESIGN.md](docs/DESIGN.md) section 5 "Project knowledge"). A human writes them once with the
+onboarder:
+
+1. `agent-factory onboard <project>` reads the product repo at its default branch through `FACTORY_REPO`, read-only.
+   The engine lists the build, test and run commands from the repo's own files, with no program run: the Makefile's
+   targets first (the front door), else `package.json`'s scripts; a Gradle or Maven wrapper alone is named as
+   inferred. A fresh model run, from the onboarder role card (the process plugin's `process/roles/onboarder.md`, else
+   `prompts/roles/onboarder.md`), with Read, Grep and Glob only, gives the stack, the modules, the gotchas at
+   `file:line` and the domain terms. The engine writes `brief.md` and `glossary.md` in `<project>/staged/`: every
+   line marked verified or inferred, a cite the default branch does not hold marked inferred, the project's
+   `AGENTS.md`, `CONTEXT.md` and ADRs linked and never copied, and a term `CONTEXT.md` defines linked there. It prints
+   both hashes. What it spent goes in `runs/<project>/onboarder.jsonl`.
+2. Read both files, then `agent-factory onboard accept <project> <brief hash> <glossary hash>`: they move into the
+   project home, with `knowledge.json` recording the hashes, who and when. Hashes that no longer match are refused.
+3. Every implementer run then gets them as `.factory/brief.md` and `.factory/glossary.md`. Each `file:line` they cite
+   is checked against the default branch first; a stale one (its file gone, or its line changed or moved) is listed
+   in the run's `writer-ended` record as `stale`, for the retro. A brief edited after its acceptance is not handed to
+   runs, and the record says so. **Today:** the reviewer's pack does not read them yet.
+
+Both commands are denied to the coordinator, and so is any edit of the project home.
+
 ### Settings layers
 
 The project file is one of three settings layers, all in the factory home and never in the repo (#229;
@@ -562,7 +587,8 @@ to. Writers and reviewers are fresh **workers** that the **dispatcher** (code, n
 story and goes away. The forge is your only memory. In the target you run only the read commands, `agent-factory status`,
 questions and status to Jira or the issue through `agent-factory request` ([Writes](#writes)), and
 `agent-factory confirm` behind the person's yes; you never run `agent-factory approve`, `agent-factory start` or
-`agent-factory waive` or `agent-factory eval`, which are denied to you: the human runs them (#227, #231, #215). You edit and write only spec drafts in
+`agent-factory waive`, `agent-factory eval` or `agent-factory onboard`, which are denied to you: the human runs them
+(#227, #231, #215, #235). You edit and write only spec drafts in
 `~/.factory/specs/`, and never your own settings ([review 3](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682553870), [review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888)). The start commands and raw
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** no dispatcher
 exists yet, so you run the triggers below by hand.
