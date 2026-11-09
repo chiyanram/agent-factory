@@ -9,7 +9,7 @@ import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
-import { lock, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
+import { lock, runHoursEnd, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
 import { goAhead, start } from "../src/core/start.js";
@@ -1175,6 +1175,87 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     ]);
     await pass("2026-11-08T00:30:00Z");
     expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  const two = () => ({
+    team,
+    open: [open({ labels: [] }), open({ number: 13, branch: "factory/PROJ-2", labels: [] })],
+    merged: [],
+  });
+
+  it("runs at once: a pass starts up to that many runs, one after another (#299)", async () => {
+    await approved("PROJ-1");
+    await approved("PROJ-2");
+    const runs: string[] = [];
+    await tick(setup(two(), [], { steps: writer(runs), caps: caps({ runsAtOnce: 2 }) }));
+    expect(runs.toSorted()).toEqual(["PROJ-1", "PROJ-2"]);
+  });
+
+  it("runs at once: the day cap is checked again before each run after the first (#299)", async () => {
+    await approved("PROJ-1");
+    await approved("PROJ-2");
+    const runs: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => (
+          runs.push(input.ticket),
+          {
+            kind: "ok",
+            value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false, spend: { usd: 2, tokens: 5 } },
+          }
+        ),
+      },
+    };
+    const log: string[] = [];
+    const day = { usd: 1, tokens: "none" } as const;
+    const ran = await tick(setup(two(), log, { steps, caps: caps({ runsAtOnce: 2, day }) }));
+    expect(runs).toHaveLength(1);
+    expect(log.some((l) => l.startsWith("log no new runs: today (2026-11-07, UTC) the project spent $2.00"))).toBe(
+      true,
+    );
+    expect(ran).toMatchObject({ kind: "ok" });
+  });
+
+  it("run hours: a pass outside them starts no run, records it held and says when to run dispatch again; inside them, it runs (#299)", async () => {
+    await approved();
+    const runs: string[] = [];
+    const runHours = { from: 22, to: 6, text: "22-06" };
+    const at = (now: string) => {
+      const log: string[] = [];
+      return {
+        log,
+        pass: tick(
+          setup(changes(), log, { steps: writer(runs), caps: caps({ runHours }), now: () => Date.parse(now) }),
+        ),
+      };
+    };
+    const day = at("2026-11-07T10:00:00Z");
+    expect(await day.pass).toMatchObject({
+      kind: "ok",
+      value: [
+        {
+          ticket: "PROJ-1",
+          result: { kind: "unavailable", reason: expect.stringContaining("held: outside the run hours 22-06") },
+        },
+      ],
+    });
+    expect(day.log).toContain("log no new runs: outside the run hours 22-06 (UTC, FACTORY_RUN_HOURS)");
+    expect(runs).toEqual([]);
+    const held = await at("2026-11-07T10:00:00Z").pass;
+    const ran = held.kind === "ok" ? held.value : [];
+    // the loop ends on this line rather than wait for the hours: no job runs in the background
+    expect(runHoursEnd({ project: "ledger", caps: caps({ runHours }) }, ran)).toBe(
+      "run hours are 22-06 UTC; run `agent-factory dispatch ledger` again then",
+    );
+    // nothing is lost: the pass lists the held run, the ticket's records are untouched, and a dispatch inside the hours
+    // starts it
+    const night = await at("2026-11-07T23:30:00Z").pass;
+    expect(runs).toEqual(["PROJ-1"]);
+    const nightRan = night.kind === "ok" ? night.value : [];
+    expect(runHoursEnd({ project: "ledger", caps: caps({ runHours }) }, nightRan)).toBe("none");
+    expect(runHoursEnd({ project: "ledger", caps: NO_CAPS }, ran)).toBe("none");
   });
 
   it("the token caps count tokens, as on a subscription, and the window share pauses until the window has room", async () => {

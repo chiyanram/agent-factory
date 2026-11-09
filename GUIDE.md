@@ -342,7 +342,8 @@ The scripts read their settings from the environment.
 | `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
 | `FACTORY_FORGE_HOST` | the forge's host; the host push sends a branch only to a URL on it | `github.com` or `gitlab.com` |
 | `FACTORY_CLAIM_LABEL` | the claim label | `agent::claimed` |
-| `FACTORY_MAX_RUNS` | live runs at once on this machine | `2` |
+| `FACTORY_MAX_RUNS` | runs at once (`caps.liveRuns`): the most runs one `dispatch` pass starts, one after another, each only while the caps still allow it; `review` also refuses a machine at this many live runs | `1` |
+| `FACTORY_RUN_HOURS` | run hours (`runHours`): the hours in UTC, `HH-HH`, in which a `dispatch` pass may start a run, such as `22-06` across midnight or `00-24` for the whole day. Outside them a pass starts no run and lists each one as held; nothing is stopped mid-run, and nothing waits in the background: `dispatch` prints "run hours are 22-06 UTC; run `agent-factory dispatch <project>` again then", and the orchestrator loop ends after that pass. The tickets keep their records, so the next `dispatch` inside the hours starts their runs. A cap: a lower layer may only narrow the hours (#299) | any hour |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every reviewer run, and every run of the dispatcher's writer | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each forge write instead of making it, and end their line in "(dry run)"; reads still go to the forge; `agent-factory review` refuses it | off |
 | `FACTORY_BOX` | where a box runs ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each box as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No box starts without it | — (refused) |
@@ -350,7 +351,7 @@ The scripts read their settings from the environment.
 | `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
 | `FACTORY_MAX_USD_DAY`, `FACTORY_MAX_TOKENS_DAY` | `dispatch`: the most a project's runs may spend in a UTC day (`caps.usdPerProjectDay`, `caps.tokensPerProjectDay`); at either, no new run starts that day and one notice goes out (#131) | no cap |
 | `FACTORY_WINDOW_TOKENS`, `FACTORY_MACHINE_WINDOW_TOKENS` | `dispatch`: the factory's share of a subscription window, in tokens, for the project and for every project on this machine (`caps.windowTokens`, `caps.machineWindowTokens`). The share is the stop line: at it, no new run starts until the last `FACTORY_WINDOW_HOURS` hold less, and one notice goes out (#131) | no cap |
-| budget settings | the rest of ADR-0012 S16: runs at once and the model per phase are the keys above (`FACTORY_MAX_RUNS`, the `*_MODEL` keys). **Today:** `dispatch` starts one run per pass whatever `FACTORY_MAX_RUNS` says, and there is no run-hours setting yet (#131) | — |
+| budget settings | the rest of ADR-0012 S16: runs at once, run hours and the model per phase are the keys above (`FACTORY_MAX_RUNS`, `FACTORY_RUN_HOURS`, the `*_MODEL` keys) | — |
 | `FACTORY_WRITER_MODEL` | the writer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one run of the dispatcher's writer may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_WRITER_STALL_MINUTES` | the longest a writer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
@@ -359,7 +360,7 @@ The scripts read their settings from the environment.
 | `FACTORY_CLAUDE` | the `claude` CLI the reviewer runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
-| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
+| `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the reviewer's instructions. They replace the instructions only: the engine sends its floor ahead of them on every pass (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_MAX_TRIES` | tries per request on a rate limit | `4` |
 
 ### The project file
@@ -639,7 +640,7 @@ The dispatcher's decision table is code: [`src/core/dispatch/table.ts`](src/core
 [review 9](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682943767)). Its header lists every row and every stop; the code is the source of truth. `agent-factory dispatch
 <project> --once` runs one pass: it decides each ticket with a START or an approval record (and each change on a
 `factory/<ticket>` branch),
-posts and labels as the project's identity, and starts at most one run. Run it from launchd or cron every few
+posts and labels as the project's identity, and starts at most `FACTORY_MAX_RUNS` runs (default 1), one after another, and none outside `FACTORY_RUN_HOURS`. Run it from launchd or cron every few
 minutes; a lock keeps two passes apart, and `--dry-run` prints the decisions and acts on none. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
 ended goes to a person. A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that

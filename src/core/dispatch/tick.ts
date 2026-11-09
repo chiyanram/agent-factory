@@ -48,6 +48,8 @@ import {
 import { writeLastPoll } from "./last-poll.js";
 import type { Spend } from "./spend.js";
 import { projectStop, type Caps, type Stop } from "./caps.js";
+import { openAt } from "./hours.js";
+import { settingName } from "../settings/machine.js";
 import { readSpends } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
 import {
@@ -837,17 +839,61 @@ async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Pro
   return true;
 }
 
-// runPass : the first run that can start, and no other: runs at once is 1; none while the project is at a cap
+// what a run held outside the run hours is recorded with; the orchestrator loop ends on it (runHoursEnd)
+const OUTSIDE_HOURS = "held: outside";
+
+// runHoursEnd : after a pass that held a run outside the run hours, what to tell the human; "none" otherwise. The
+// orchestrator loop ends then, with this line, and never waits for the hours (#299; no job runs in the background):
+// the held runs stay in the records, so the next dispatch picks them up. Pure.
+export function runHoursEnd(setup: Pick<TickSetup, "project" | "caps">, ran: readonly Ran[]): string {
+  const hours = setup.caps.runHours;
+  const held = ran.some((r) => r.result.kind === "unavailable" && r.result.reason.startsWith(OUTSIDE_HOURS));
+  return held && hours !== "any"
+    ? `run hours are ${hours.text} UTC; run \`agent-factory dispatch ${setup.project}\` again then`
+    : "none";
+}
+
+// closed : every run held while the hour is outside the run hours (hours.ts); nothing is stopped, and the tickets stay
+// in flight, so a dispatch started inside the hours runs them (runHoursEnd)
+function closed(setup: TickSetup, runs: readonly Later[], ran: Ran[]): boolean {
+  const hours = setup.caps.runHours;
+  if (runs.length === 0 || hours === "any" || openAt(hours, setup.now())) {
+    return false;
+  }
+  const why = `the run hours ${hours.text} (UTC, ${settingName("runHours")})`;
+  setup.log(`no new runs: outside ${why}`);
+  for (const { state, action } of runs) {
+    ran.push({ ticket: state.ticket, action, result: { kind: "unavailable", reason: `${OUTSIDE_HOURS} ${why}` } });
+  }
+  return true;
+}
+
+// runPass : up to runs at once of the runs that can start, one after another; none outside the run hours, and none
+// while the project is at a cap, checked again before each run after the first
 async function runPass(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
   const runs = later.filter((l) => RUN_KINDS.has(l.action.kind));
-  if (!(await paused(setup, runs, ran))) {
-    await firstRun(setup, later, ran);
+  if (closed(setup, runs, ran)) {
+    return;
+  }
+  await someRuns(setup, later, ran, setup.caps.runsAtOnce);
+}
+
+// someRuns : up to `most` runs from `later`, the caps checked before each
+async function someRuns(setup: TickSetup, later: readonly Later[], ran: Ran[], most: number): Promise<void> {
+  const pending = later.filter((l) => RUN_KINDS.has(l.action.kind));
+  if (most < 1 || pending.length === 0 || (await paused(setup, pending, ran))) {
+    return;
+  }
+  const next = await firstRun(setup, later, ran);
+  if (next !== "none") {
+    await someRuns(setup, later.slice(next + 1), ran, most - 1);
   }
 }
 
-// firstRun : the first run that can start; an unavailable step lets the next one try
-async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
-  for (const { state, action } of later) {
+// firstRun : the first run that can start, and the index of its entry in `later`, or "none"; an unavailable step
+// lets the next one try
+async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<number | "none"> {
+  for (const [i, { state, action }] of later.entries()) {
     const pending = runAction(setup, state, action);
     const result = pending === "none" ? "none" : await pending;
     if (result === "none") {
@@ -856,9 +902,10 @@ async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): 
     ran.push({ ticket: state.ticket, action, result });
     logResult(setup, state.ticket, result);
     if (result.kind !== "unavailable") {
-      return;
+      return i;
     }
   }
+  return "none";
 }
 
 async function actAll(setup: TickSetup, decided: readonly Decided[]): Promise<readonly Ran[]> {

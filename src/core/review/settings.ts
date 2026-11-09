@@ -6,7 +6,7 @@
 //   FACTORY_FIND_MODEL, FACTORY_RULE_MODEL, FACTORY_LOGIC_MODEL   default sonnet, sonnet, opus (#22 Q4)
 //   FACTORY_MAX_USD               the most one model run may spend, in US dollars (ADR-0011 D14)
 //   FACTORY_CLAUDE                the claude CLI (default: claude)
-//   FACTORY_MAX_RUNS              live runs allowed on this machine at once (default 2)
+//   FACTORY_MAX_RUNS              runs at once: live runs allowed on this machine (default 1, ADR-0012 S16)
 //   FACTORY_HOME                  the run folders go in <home>/review-runs; the spec and its approval are read from
 //                                 <home>/specs and <home>/approvals (default ~/.factory)
 //
@@ -18,6 +18,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
+import { runsAtOnceOf } from "../dispatch/caps.js";
 import { recordsDirOf } from "../kept.js";
 import { claudeSessions, type Sessions } from "./live.js";
 import { claudeModel, runInFolder, type Model } from "./model.js";
@@ -44,16 +45,6 @@ export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
       };
 }
 
-function maxRuns(env: NodeJS.ProcessEnv): Result<number> {
-  const value = settingOf(env, "caps.liveRuns") ?? "2";
-  return /^[1-9]\d{0,2}$/.test(value)
-    ? { kind: "ok", value: Number(value) }
-    : {
-        kind: "failed",
-        reason: `${settingName("caps.liveRuns")} must be a whole number from 1, got ${JSON.stringify(value)}`,
-      };
-}
-
 function home(env: NodeJS.ProcessEnv): Result<string> {
   return env.FACTORY_HOME === undefined
     ? { kind: "ok", value: join(homedir(), ".factory") }
@@ -74,7 +65,7 @@ function limits(env: NodeJS.ProcessEnv): Result<Limits> {
   if (usd.kind === "failed") {
     return usd;
   }
-  const runs = maxRuns(env);
+  const runs = runsAtOnceOf(env);
   return runs.kind === "ok" ? { kind: "ok", value: { maxUsd: usd.value, maxRuns: runs.value } } : runs;
 }
 
