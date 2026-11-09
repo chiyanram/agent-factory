@@ -154,11 +154,12 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${absolute(p.pkg)}/**)`,
     `Edit(${home}/approvals/**)`,
     `Edit(${home}/starts/**)`,
-    // the settings layers and rubric folders the plugin work adds (#229, #232): denied before they exist
-    `Edit(${home}/settings.json)`,
-    `Edit(${home}/team/**)`,
-    `Edit(${home}/rubrics/**)`,
+    // the settings layers (#229; settings/layers.ts): the user file, every team's clone and its team.json, and the
+    // project home (each <project>.json and its <project>/ folder); and the rubric folders (#232)
+    `Edit(${home}/user.json)`,
+    `Edit(${home}/teams/**)`,
     `Edit(${home}/projects/**)`,
+    `Edit(${home}/rubrics/**)`,
     `Edit(${home}/runs/**)`,
     `Edit(${home}/secrets/**)`,
     `Edit(${home}/coordinator/**)`,

@@ -413,7 +413,9 @@ there.
 
 The project file is one of three settings layers, all in the factory home and never in the repo (#229;
 [docs/DESIGN.md](docs/DESIGN.md) section 5 "Settings"). They are resolved on this host each time a project file is read,
-so before every run, and no run's agent is handed them.
+so before every run, and no run's agent is handed them. The coordinator's deny list covers each of them:
+`$FACTORY_HOME/user.json`, `$FACTORY_HOME/teams/**` and `$FACTORY_HOME/projects/**`, and the orchestrator refuses to
+start while one is missing (`wallProblems`).
 
 | layer | file | holds |
 |---|---|---|

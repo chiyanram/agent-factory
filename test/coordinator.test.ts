@@ -128,8 +128,9 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "/work/project/.claude/settings.local.json",
       "/home/ram/.factory/approvals/ledger/PROJ-1.json",
       "/home/ram/.factory/starts/ledger/PROJ-1.json",
-      "/home/ram/.factory/settings.json",
-      "/home/ram/.factory/team/settings.json",
+      "/home/ram/.factory/user.json",
+      "/home/ram/.factory/teams/acme/team.json",
+      "/home/ram/.factory/teams/acme/.git/config",
       "/home/ram/.factory/rubrics/security.md",
       "/home/ram/.factory/projects/ledger.json",
       "/home/ram/.factory/projects/ledger/brief.md",
@@ -291,6 +292,13 @@ describe("the wall's check (#105, #227)", () => {
         "Edit(//home/ram/.factory/starts/**) is missing",
       ],
       [(p) => (p.deny = p.deny.filter((r) => r !== "Edit(~/.claude/**)")), "Edit(~/.claude/**) is missing"],
+      // the settings layers (#229): the user file, the teams' clones, and the project home
+      ...["user.json", "teams/**", "projects/**"].map(
+        (tail): [(p: Rules & Record<string, unknown>) => void, string] => [
+          (p) => (p.deny = p.deny.filter((r) => r !== `Edit(//home/ram/.factory/${tail})`)),
+          `Edit(//home/ram/.factory/${tail}) is missing`,
+        ],
+      ),
       [(p) => (p.disableBypassPermissionsMode = "allow"), "bypass-permissions mode is not disabled"],
       [(p) => (p.defaultMode = "bypassPermissions"), "the default mode is bypassPermissions"],
     ];
