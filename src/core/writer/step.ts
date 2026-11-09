@@ -305,6 +305,7 @@ async function finished(
       forge: setup.forge,
       push,
       pusher: setup.pusher,
+      questions: setup.settings.questions,
     });
     return next.kind === "ok" ? { kind: "ok", value: outOf(ended, next.value) } : next;
   }
@@ -321,6 +322,7 @@ async function finished(
     forge: setup.forge,
     push,
     pusher: setup.pusher,
+    questions: setup.settings.questions,
     open: openFor(setup, p, clone.branch),
   });
   return first.kind === "ok" ? { kind: "ok", value: outOf(ended, first.value.next) } : first;

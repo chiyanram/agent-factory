@@ -79,8 +79,11 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   - One-way-door paths are a project setting.
   - A raise that needs an approval the ticket lacks stops and asks.
   - The engine acts on a lane's properties, never on its name.
-- **Questions.** A run that needs a decision ends with an ask. The question goes to the front doors (terminal, Discord
-  thread, spec PR). The answer goes **into the spec**, so an approval lane approves again.
+- **Questions.** A run that needs a decision ends with an ask. By default it asks **every open question at once, in one
+  numbered round**; each question carries 2 to 4 short choices and one recommended choice, so a person answers with
+  taps, "1A 2B", or "accept all". The project setting `questions` can be `one-at-a-time` instead. Never a guess. The
+  round goes to the front doors (terminal, Discord thread, spec PR). The answer goes **into the spec**, so an approval
+  lane approves again (the operator, [2026-11-09](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6744864148); #320).
 - **Limits:**
   - **caps** per run, per ticket and per project per day. A ticket at its cap goes to needs-human with the spend shown.
     A day at its cap starts no new runs and sends one notice; nothing is killed mid-run.
@@ -282,7 +285,6 @@ Each step widens only after its exit check passes. Map #30 keeps the current lis
 
 - **Acceptance criteria form:** Gherkin (the rulebook's GA1–GA6) or numbered lines (the spec template here). Decided in
   chiyanram/skills#237.
-- **Questions:** asked one at a time, or as one numbered round. Proposed: a project setting.
 - **The PR body:** the implementer writes it, as crq gives the PR phase to the build. To be confirmed.
 - **Copilot CLI and Claude plugins:** whether Copilot CLI loads them. If not, the engine passes it the plugin's skills
   folder (the #162 spike).

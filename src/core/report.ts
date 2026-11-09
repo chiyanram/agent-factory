@@ -4,7 +4,9 @@
 //
 //   status     done | asked | blocked                      required
 //   evidence   [{criterion, command, result}], at least one  required when done
-//   questions  ["…"], one to five                           required when asked
+//   questions  [{question, choices, recommended}], one to five, required when asked: every open question at once, each
+//              with 2 to 4 short choices and the index of the recommended one (#320). A plain "…" is still read, for one
+//              release, as a question with no choices; then it is refused.
 //   blocker    "…"                                          required when blocked
 //
 // Anything else is blocked, with the reason: a missing, unreadable or malformed report, an unknown status, a field the
@@ -26,12 +28,27 @@ export const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_TEXT = 2000;
 const MAX_EVIDENCE = 50;
 const MAX_QUESTIONS = 5;
+// a question's choices: 2 to 4 short ones, so a person answers with a letter (#320)
+const MIN_CHOICES = 2;
+const MAX_CHOICES = 4;
+const MAX_CHOICE = 200;
 
 export type Evidence = { readonly criterion: string; readonly command: string; readonly result: string };
 
+// One open question (#320). With choices, a person answers with a letter, and recommended is the index of the one the
+// writer recommends. A plain question is the old report's string: read for one release, with no choices, then refused.
+export type Question =
+  | {
+      readonly kind: "choices";
+      readonly question: string;
+      readonly choices: readonly string[];
+      readonly recommended: number;
+    }
+  | { readonly kind: "plain"; readonly question: string };
+
 export type Outcome =
   | { readonly kind: "done"; readonly evidence: readonly Evidence[] }
-  | { readonly kind: "asked"; readonly questions: readonly string[] }
+  | { readonly kind: "asked"; readonly questions: readonly Question[] }
   // by: the writer said so, or the host decided it from how the run ended
   | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" };
 
@@ -88,7 +105,7 @@ export type ReportFile =
 // The words the writer's prompt carries, so the writer knows the schema it is held to.
 export const REPORT_INSTRUCTIONS = `When you stop, write ${REPORT_PATH} in the worktree and exit. Never commit it. It is JSON with one "status":
 - "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed. Start each "criterion" with the criterion's id, AC-1 for the first, AC-2 for the second, and so on: a criterion with no row fails the ready check.
-- "asked": add "questions", one to five questions the spec does not answer. Never guess an answer.
+- "asked": add "questions": every question the spec does not answer, all at once in one list, one to five. Each is {"question", "choices", "recommended"}: "choices" is a list of 2 to 4 short answers, and "recommended" is the index of the one you recommend, 0 for the first. Never guess an answer.
 - "blocked": add "blocker", what stops you. Commit the work you have first.
 No other field. A missing or malformed report counts as blocked.`;
 
@@ -151,6 +168,61 @@ function evidenceRow(row: unknown, i: number): Check<Evidence> {
   return ok({ criterion, command, result });
 }
 
+// choiceText : one choice, short enough to read as a tap or a letter
+function choiceText(value: unknown, what: string): Check<string> {
+  const read = text(value, what);
+  return read.kind === "ok" && read.value.length > MAX_CHOICE
+    ? bad(`${what} is longer than ${MAX_CHOICE} characters`)
+    : read;
+}
+
+const QUESTION_CELLS = ["question", "choices", "recommended"] as const;
+
+function choicesOf(value: unknown, what: string): Check<readonly string[]> {
+  if (!Array.isArray(value) || value.length < MIN_CHOICES || value.length > MAX_CHOICES) {
+    return bad(`${what} choices must be a list of ${MIN_CHOICES} to ${MAX_CHOICES}`);
+  }
+  return all(value.map((c, i) => choiceText(c, `${what} choice ${i + 1}`)));
+}
+
+// recommendedOf : the question when its recommended is the index of one of its choices
+function recommendedOf(pick: unknown, question: string, choices: readonly string[], what: string): Check<Question> {
+  const index = Number(pick);
+  return Number.isSafeInteger(pick) && index >= 0 && index < choices.length
+    ? ok({ kind: "choices", question, choices, recommended: index })
+    : bad(`${what} recommended must be the index of one of its choices, 0 for the first`);
+}
+
+function choiceQuestion(item: Field, what: string): Check<Question> {
+  const question = text(item.question, `${what} question`);
+  if (question.kind === "bad") {
+    return bad(question.problem);
+  }
+  const choices = choicesOf(item.choices, what);
+  return choices.kind === "bad"
+    ? bad(choices.problem)
+    : recommendedOf(item.recommended, question.value, choices.value, what);
+}
+
+// plainQuestion : the old report's string, read for one release as a question with no choices (#320)
+function plainQuestion(item: string, what: string): Check<Question> {
+  const plain = text(item, what);
+  return plain.kind === "ok" ? ok({ kind: "plain", question: plain.value }) : bad(plain.problem);
+}
+
+// questionOf : one question with its choices and the recommended one, or a plain string, read for one release (#320)
+function questionOf(item: unknown, i: number): Check<Question> {
+  const what = `question ${i + 1}`;
+  if (typeof item === "string") {
+    return plainQuestion(item, what);
+  }
+  if (!isRecord(item)) {
+    return bad(`${what} must be {question, choices, recommended}`);
+  }
+  const extra = extras(item, QUESTION_CELLS);
+  return extra > 0 ? bad(`${what} has ${extra} field(s) the schema does not name`) : choiceQuestion(item, what);
+}
+
 function listOf<T>(
   value: unknown,
   what: string,
@@ -180,7 +252,7 @@ const READ: Readonly<Record<string, (body: Field) => Outcome>> = {
     return evidence.kind === "ok" ? { kind: "done", evidence: evidence.value } : malformed(evidence.problem);
   },
   asked: (body) => {
-    const questions = listOf(body.questions, "questions", MAX_QUESTIONS, (q, i) => text(q, `question ${i + 1}`));
+    const questions = listOf(body.questions, "questions", MAX_QUESTIONS, questionOf);
     return questions.kind === "ok" ? { kind: "asked", questions: questions.value } : malformed(questions.problem);
   },
   blocked: (body) => {

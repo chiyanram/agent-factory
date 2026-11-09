@@ -338,6 +338,7 @@ The scripts read their settings from the environment.
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
+| `FACTORY_QUESTIONS` | `dispatch`: how a writer run's questions are posted (`questions`, a preference). `round` posts every open question at once, in one numbered `[writer] OPEN:` note: each question with 2 to 4 lettered choices and the recommended one marked, so you reply with a letter per question (`1A 2B`) or `accept all`. `one-at-a-time` posts only the first and says how many wait; once it is answered, the next run asks again what is still open. Either way the writer never guesses (#320). **Today:** a report's plain-text question is still read, for one release, as one with no choices, which you answer in words | `round` |
 | `FACTORY_POLL_MINUTES` | `dispatch`: how often launchd or cron runs it; each pass keeps it with its last-poll time, and `status` flags the orchestrator `LATE` after 3 of these while a change is claimed | `5` |
 | `FACTORY_IDENTITY` | who `agent-factory` acts as on the forge: `own`, your `gh` or `glab` login, or `app`, a GitHub App whose key the `factory` user holds ([Set up identity](#github)) | `own` |
 | `FACTORY_APP_USER`, `FACTORY_APP_COMMAND` | with `app`: the OS user that holds the key, and the root-owned wrapper its sudo rule names | `factory`, `/usr/local/bin/agent-factory-app-token` |
@@ -499,7 +500,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
 | locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor` |
-| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `poll.minutes` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes` |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
   layer, its `file:line` and the team value. A team `locked` mode holds on any class.
