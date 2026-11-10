@@ -218,12 +218,12 @@ export function copilotArgs(p: CoordinatorPlaces): readonly string[] {
   ];
 }
 
-// the session's instructions: GUIDE.md is the coordinator's, from the installed package
+// the session's instructions: prompts/coordinator.md, from the installed package (#378: GUIDE.md was not packed)
 // (an @import cannot hold a space, so a package path with one gets the sentence only)
 export function claudeMd(p: CoordinatorPlaces): string {
-  const guide = `${p.pkg}/GUIDE.md`;
+  const guide = `${p.pkg}/prompts/coordinator.md`;
   const importLine = /\s/.test(guide) ? "" : `\n@${guide}\n`;
-  return `# Coordinator\n\nYou are the factory's coordinator. Follow ${guide}, "Run the loop", as your instructions.\n${importLine}`;
+  return `# Coordinator\n\nYou are the factory's coordinator. Follow ${guide} as your instructions.\n${importLine}`;
 }
 
 export function claudeArgv(): Argv {

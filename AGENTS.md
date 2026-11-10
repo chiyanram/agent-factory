@@ -4,7 +4,8 @@ A coordinator AI that talks with the human, and an orchestrator (code) that star
 review runs on a runner for a project's pull requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the code
 does not follow it everywhere yet). The rules those
 runs follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
-People start at `README.md`; `docs/DESIGN.md` is the design on one page; `GUIDE.md` and `CONTRIBUTING.md` hold the rest.
+People start at `README.md`; `docs/explanation/architecture.md` is the design; `docs/` holds the how-to, reference and
+explanation pages, and `CONTRIBUTING.md` the rest.
 
 ## Check
 
@@ -23,8 +24,8 @@ CI runs both on every pull request and on push to `main`.
   programs that a branch or an implementer can plant in the repo's own config.
 - Ship no bash script: write each new component in the TypeScript package, with its vitest test, and call CLIs
   from it ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)), because one language is built and checked once.
-- Keep `GUIDE.md` in step with the code, because the coordinator follows it as its instructions. Mark
-  each place where the code still differs from ADR-0012 with **Today:**, because a reader must not take a decided
+- Keep `prompts/coordinator.md` and `docs/` in step with the code, because the coordinator follows them as its
+  instructions. Mark each place where the code still differs from ADR-0012 with **Today:**, because a reader must not take a decided
   guardrail for an enforced one.
 - Give no model run a git host token or a skip-permissions flag in new code, because ADR-0012 S2, S6 and S11 forbid it.
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable

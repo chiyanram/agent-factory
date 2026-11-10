@@ -47,6 +47,14 @@ describe("check-words", () => {
     expect(docs(root)).toContain("docs/DESIGN.md");
   });
 
+  it("checks every how-to, reference and explanation page, and the coordinator's instructions (#378)", () => {
+    const root = tempDir("check-words-");
+    mkdirSync(join(root, "docs", "how-to"), { recursive: true });
+    writeFileSync(join(root, "docs", "how-to", "install.md"), "x\n");
+    expect(docs(root)).toContain("docs/how-to/install.md");
+    expect(docs(root)).toContain("prompts/coordinator.md");
+  });
+
   it("exits 1 with each finding, and 0 on clean docs", () => {
     const root = tempDir("check-words-");
     writeFileSync(join(root, "README.md"), "The orchestrator starts a run.\n");

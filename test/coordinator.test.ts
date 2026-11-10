@@ -121,7 +121,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
   it("refuses editing a factory file, its own settings, any .claude/, the approvals and the project files", () => {
     for (const path of [
       "/opt/agent-factory/src/app.ts",
-      "/opt/agent-factory/GUIDE.md",
+      "/opt/agent-factory/prompts/coordinator.md",
       "/home/ram/.factory/coordinator/.claude/settings.json",
       "/home/ram/.factory/coordinator/CLAUDE.md",
       `${HOME}/.claude/settings.json`,
@@ -382,7 +382,9 @@ describe("setup coordinator and the launcher (#106)", () => {
     const file = join(home, "coordinator", ".claude", "settings.json");
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(claudeSettings(places()));
     expect(statSync(file).mode & 0o777).toBe(0o444);
-    expect(readFileSync(join(home, "coordinator", "CLAUDE.md"), "utf8")).toContain("@/opt/agent-factory/GUIDE.md");
+    expect(readFileSync(join(home, "coordinator", "CLAUDE.md"), "utf8")).toContain(
+      "@/opt/agent-factory/prompts/coordinator.md",
+    );
     expect(await installCoordinator(places())).toMatchObject({ kind: "ok" });
   });
 
@@ -420,7 +422,7 @@ describe("setup coordinator and the launcher (#106)", () => {
 
   it("leaves the import out when the package path has a space, which an @import cannot hold", () => {
     expect(claudeMd({ ...PLACES, pkg: "/opt/agent factory" })).not.toContain("@/opt");
-    expect(claudeMd(PLACES)).toContain("@/opt/agent-factory/GUIDE.md");
+    expect(claudeMd(PLACES)).toContain("@/opt/agent-factory/prompts/coordinator.md");
   });
 
   it("refuses to start before setup; after it, starts Claude in its folder with only its own settings", async () => {
