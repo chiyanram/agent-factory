@@ -40,7 +40,7 @@ variable needs exporting.
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through, the vm runner's Squid and the srt runner's own (`parentProxy` in its policy); a setting of the machine, not of a project | none: direct |
 | `NODE_EXTRA_CA_CERTS` | at work: the company CA's PEM file, an absolute path (`egress.caCerts`, a preference). The srt runner hands it to `srt` and the run, and reads it even inside the factory home. Add the CA to the OS trust store as well, for programs that are not Node. **Today:** the vm runner does not pass it on (#114) | none |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the finder's and the verify pass's instructions. They replace the instructions only: the engine sends its floor ahead of them on every run (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
-| `FACTORY_MAX_TRIES` | tries per request on a rate limit | `4` |
+| `FACTORY_MAX_TRIES` | tries per request on a short rate limit, the wait doubling from a minute; a limit that lasts past 5 minutes ends the request at once with "rate limited until <time>" (#62) | `4` |
 
 ## The project file
 

@@ -2,15 +2,19 @@
 // login, so the package never reads a token. Every request runs with --include, so the status and the headers are read
 // from the answer itself, never guessed from the exit code.
 //
-// A rate limit is waited out and tried again, up to FACTORY_MAX_TRIES calls (default 4), because single calls ran into
-// 429 (docs/archive/research/46 G8). A rate limit is:
+// A short rate limit is waited out and tried again, up to FACTORY_MAX_TRIES calls (default 4), because single calls ran
+// into 429 (docs/archive/research/46 G8). A rate limit is, whatever the status (#71, #62):
 //   - a 429, on either forge
-//   - a GitHub 403 with Retry-After, with x-ratelimit-remaining: 0, or whose message names a rate limit (a secondary
-//     limit can come with no header at all, #71)
-//   - a GraphQL answer of 200 with an error of type RATE_LIMITED (#71)
-// The wait is Retry-After, else the time until x-ratelimit-reset when no requests are left, else 60 seconds, and never
-// more than 5 minutes. Any other status fails at once and
-// names it. Nothing here throws: every outcome is a sealed result.
+//   - a GitHub 403 with Retry-After or with x-ratelimit-remaining: 0
+//   - an answer whose message names a rate limit or GitHub's abuse detection: a secondary limit, the per-minute GraphQL
+//     points among them, can come with no header at all
+//   - a GraphQL answer with an error of type RATE_LIMITED or code graphql_rate_limit, or whose message names a rate
+//     limit ("API rate limit already exceeded for user ID …" came as a 200 with neither, #62)
+// The wait is Retry-After, else the time until x-ratelimit-reset when no requests are left, else a minute, doubled on
+// each limit in a row. A wait past MAX_WAIT is not waited: the call ends at once, and so does the last try. Either way
+// the reason says "rate limited until <time>" (rateLimitedUntil), so the orchestrator loop waits for that time instead
+// of asking again (#62). Any other status fails at once and names it. Nothing here throws: every outcome is a sealed
+// result.
 
 import { execFile, spawn } from "node:child_process";
 
@@ -217,46 +221,101 @@ export function parseJson(body: string): Result<unknown> {
   }
 }
 
+// a rate limit's words: GitHub's primary and secondary limits, the per-minute GraphQL points, and its older abuse
+// detection; GitLab's "Retry later" comes as a 429
+const LIMIT_WORDS = /rate limit|abuse detection/i;
+
 function limitedBody(body: string): boolean {
-  return /rate limit/i.test(body);
+  return LIMIT_WORDS.test(body);
 }
 
-// limited : whether this answer is a rate limit (see the header).
+// limited : whether this REST or GraphQL answer is a rate limit (see the header).
 export function limited(answer: Answer): boolean {
-  if (answer.status === 429) {
-    return true;
-  }
-  const h = answer.headers;
-  return (
-    answer.status === 403 &&
-    (h.has("retry-after") || h.get("x-ratelimit-remaining") === "0" || limitedBody(answer.body))
-  );
+  return answer.status === 429 || graphqlLimited(answer) || (answer.status === 403 && limited403(answer));
 }
 
-// The longest one wait may be: a poll that waits longer is better failing loudly after its tries.
+// limited403 : a GitHub 403 that is a rate limit: one that asks for a wait, has no requests left, or names a limit
+function limited403(answer: Answer): boolean {
+  const h = answer.headers;
+  return h.has("retry-after") || h.get("x-ratelimit-remaining") === "0" || limitedBody(answer.body);
+}
+
+// The longest one wait may be: a call that would wait longer ends at once and names the reset time.
 export const MAX_WAIT = 300;
 
-// waitSeconds : Retry-After wins; else, when no requests are left, the time until x-ratelimit-reset; else 60 (GitHub
-// sends x-ratelimit-reset on every answer, and a secondary limit asks for at least a minute). Never above MAX_WAIT.
-export function waitSeconds(headers: ReadonlyMap<string, string>, now: number): number {
-  const after = Number.parseInt(headers.get("retry-after") ?? "", 10);
-  const reset = Number.parseInt(headers.get("x-ratelimit-reset") ?? "", 10);
-  const empty = headers.get("x-ratelimit-remaining") === "0" && Number.isFinite(reset);
-  const wait = Number.isFinite(after) && after >= 0 ? after : empty ? Math.max(reset - now, 1) : 60;
-  return Math.min(wait, MAX_WAIT);
+// the first wait of a limit that names no time; doubled on each limit in a row, as GitHub asks for a secondary limit
+const FIRST_WAIT = 60;
+
+// waitSeconds : Retry-After wins; else, when no requests are left, the time until x-ratelimit-reset; else a minute for
+// the first limit in a row, doubled for each after it (GitHub sends x-ratelimit-reset on every answer, and a secondary
+// limit asks for at least a minute). Not capped: send ends the call when this is past MAX_WAIT. Pure.
+export function waitSeconds(headers: ReadonlyMap<string, string>, now: number, tries = 1): number {
+  const asked = askedWait(headers, now);
+  return asked === "none" ? FIRST_WAIT * 2 ** (Math.max(tries, 1) - 1) : asked;
 }
 
-// graphqlLimited : a 200 whose errors say RATE_LIMITED.
-function graphqlLimited(answer: Answer): boolean {
-  const parsed = parseJson(answer.body);
-  if (parsed.kind !== "ok" || typeof parsed.value !== "object" || parsed.value === null) {
-    return false;
+// askedWait : the wait the answer's headers ask for: its Retry-After, else the time to the reset when no requests are
+// left; "none" when they ask for none. Pure.
+function askedWait(headers: ReadonlyMap<string, string>, now: number): number | "none" {
+  const after = Number.parseInt(headers.get("retry-after") ?? "", 10);
+  if (after >= 0) {
+    return after;
   }
-  const errors = (parsed.value as { errors?: unknown }).errors;
-  return (
-    Array.isArray(errors) &&
-    errors.some((e) => typeof e === "object" && e !== null && (e as { type?: unknown }).type === "RATE_LIMITED")
+  const reset = Number.parseInt(headers.get("x-ratelimit-reset") ?? "", 10);
+  return headers.get("x-ratelimit-remaining") === "0" && Number.isFinite(reset) ? Math.max(reset - now, 1) : "none";
+}
+
+type GraphqlError = { readonly type?: unknown; readonly code?: unknown; readonly message?: unknown };
+
+// objectOf : the answer's body as a JSON object; {} for any other body. Pure.
+function objectOf(body: string): Readonly<Record<string, unknown>> {
+  const parsed = parseJson(body);
+  return parsed.kind === "ok" && typeof parsed.value === "object" && parsed.value !== null
+    ? (parsed.value as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function errorsOf(body: string): readonly GraphqlError[] {
+  const { errors } = objectOf(body);
+  return Array.isArray(errors) ? errors.filter((e): e is GraphqlError => typeof e === "object" && e !== null) : [];
+}
+
+// graphqlLimited : an answer whose GraphQL errors say a rate limit: by type, by code, or in their message.
+function graphqlLimited(answer: Answer): boolean {
+  return errorsOf(answer.body).some(
+    (e) =>
+      e.type === "RATE_LIMITED" ||
+      (typeof e.code === "string" && /rate_limit/i.test(e.code)) ||
+      (typeof e.message === "string" && LIMIT_WORDS.test(e.message)),
   );
+}
+
+// what a rate limit said, for its reason: the GraphQL error's message, else the REST message, else the body's start
+function saidOf(answer: Answer): string {
+  const message = errorsOf(answer.body)[0]?.message ?? objectOf(answer.body).message;
+  return (typeof message === "string" ? message : answer.body).slice(0, 200);
+}
+
+// the words a rate-limited reason carries before its time, which rateLimitedUntil reads back
+const UNTIL = "rate limited until";
+
+// isoSeconds : a time in seconds since the epoch, in ISO 8601 UTC to the second. Pure.
+function isoSeconds(seconds: number): string {
+  return new Date(seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+// rateLimitedUntil : the time, in milliseconds since the epoch, that a failure's reason says a rate limit lasts until;
+// "none" for any other failure. The reason may come back through a forge plugin, so it is read from the words. Pure.
+export function rateLimitedUntil(reason: string): number | "none" {
+  const found = /rate limited until (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)/.exec(reason);
+  const at = found === null ? Number.NaN : Date.parse(found[1] ?? "");
+  return Number.isFinite(at) ? at : "none";
+}
+
+function limitReason(client: Client, args: readonly string[], answer: Answer, tries: number, until: number): string {
+  const said = saidOf(answer);
+  const times = tries === 1 ? "1 try" : `${tries} tries`;
+  return `${client.name}: ${UNTIL} ${isoSeconds(until)}: HTTP ${answer.status} after ${times} on ${args[0] ?? ""}${said === "" ? "" : `: ${said}`}`;
 }
 
 type Attempt =
@@ -265,7 +324,7 @@ type Attempt =
   | Failed;
 
 function outcome(client: Client, args: readonly string[], answer: Answer): Attempt {
-  if (limited(answer) || (answer.status === 200 && graphqlLimited(answer))) {
+  if (limited(answer)) {
     return { kind: "retry", answer };
   }
   if (answer.status < 200 || answer.status > 299) {
@@ -287,21 +346,25 @@ async function attempt(client: Client, args: readonly string[], stdin: string): 
   return outcome(client, args, read.value);
 }
 
-// send : one request, retried while the forge answers with a rate limit.
+// send : one request, tried again while the forge answers with a rate limit whose wait is short; a long wait, or the
+// last try, ends it with the time the limit lasts until, so nothing asks again before then (#62).
 async function send(client: Client, args: readonly string[], stdin: string): Promise<Result<Answer>> {
   for (let tries = 1; ; tries++) {
     const result = await attempt(client, args, stdin);
     if (result.kind !== "retry") {
       return result.kind === "answer" ? { kind: "ok", value: result.answer } : result;
     }
-    if (tries >= client.maxTries) {
-      return {
-        kind: "failed",
-        reason: `${client.name}: HTTP ${result.answer.status} after ${client.maxTries} tries, rate limited: ${args[0] ?? ""}`,
-      };
+    const wait = waitSeconds(result.answer.headers, client.now(), tries);
+    if (lastTry(client, tries, wait)) {
+      return { kind: "failed", reason: limitReason(client, args, result.answer, tries, client.now() + wait) };
     }
-    await client.sleep(waitSeconds(result.answer.headers, client.now()));
+    await client.sleep(wait);
   }
+}
+
+// lastTry : whether a rate-limited call ends here: its tries are used up, or its wait is too long to wait. Pure.
+function lastTry(client: Client, tries: number, wait: number): boolean {
+  return tries >= client.maxTries || wait > MAX_WAIT;
 }
 
 // restText : one GET whose answer is plain text, such as a CI job's log; a redirect is followed by the CLI.

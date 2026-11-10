@@ -118,7 +118,9 @@ a `/stop`); a loop with nothing in flight ends after its first pass. It never wa
 a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
 what to do. A step that is not set up says so, and says to run `agent-factory dispatch <project>` again once it is; the project-day cap says to run it again tomorrow; the window's share says when the
 window has room ("the window is full until HH:MM UTC"); outside the run hours it says when they are. Three
-failed passes in a row end it too. `agent-factory start` and `approve` start it in
+failed passes in a row end it too. A pass that fails on the git host's rate limit says until when ("rate limited until
+<time>"), and the next pass waits for that time, never asking the git host again before it (#62). A pass in which
+nothing happened reads the git host's changes once, not twice. `agent-factory start` and `approve` start it in
 the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
 While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
 the runs a pass may start, hold in each pass. A laptop that sleeps stops the loop; run `dispatch` again and it carries
