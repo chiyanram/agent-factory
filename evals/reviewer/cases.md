@@ -33,7 +33,7 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `must-oxlint-disable-comment` | seeded | MUST: no disable comment. A complexity disable added to grow `failure()` with more branches. | AGENTS.md MUST | approved |
 | `weakened-test-agent-settings-case` | seeded | A weakened test: the settings match turns case-sensitive and the test drops the mixed-case paths that would catch it. Two findings: the code and the test. | the floor guard's S3 shape (#190) | approved |
 | `slip-reconcile-nothing-left-or` | seeded | A correctness slip: `&&` becomes a logical or in `nothingLeft`, so a worktree with only commits or only files is removed. Framed as a readability refactor. | written for the set | approved |
-| `spec-check-size-claude-md` | seeded | A spec mismatch: AC-1 in `pr.md` says CLAUDE.md is checked too, and the code checks it only when there is no AGENTS.md; AC-3's test is missing. | written for the set | draft |
+| `spec-check-size-claude-md` | seeded | A spec mismatch: AC-1 in `pr.md` says CLAUDE.md is checked too, and the code checks it only when there is no AGENTS.md; AC-3's test is missing. | written for the set | approved |
 | `clean-hgit-hostgit-nosystem` | clean | The #167 fix in both git wrappers, with tests on each side. | 7cd3d24 (#168) | draft |
 | `clean-writer-prompt-foreground` | clean | The foreground rule added to every writer prompt, with a test per mode. | bd4225c (#210) | draft |
 | `clean-plugin-test-temp-root` | clean | A three-line test fix: resolve the temp root for macOS. | f2b6305 (#196) | draft |
