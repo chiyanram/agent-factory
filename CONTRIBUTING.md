@@ -22,7 +22,7 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to an automated review input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed modules that start programs, no git host token or skip-permissions flag outside the git host seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
+| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to an automated review input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed modules that start programs, no git host token or skip-permissions flag outside the git host seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `node scripts/check-words.ts .` (no old word from `GLOSSARY.md` in the prose of `README.md`, `GUIDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/DESIGN.md` or a role card; an identifier goes in backticks), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
 | `make test` | builds, then runs the vitest suite. CI runs it on Linux and on macOS. One file: `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
@@ -128,10 +128,6 @@ way as chiyanram/skills.
   `tests/fixtures/release-notes/expected.md`; change both together.
 - The versions are `0.x` until the pilot (#62) has run; `1.0.0` means the CLI is meant to stay stable.
 - `npm run release:preview` shows the next version without releasing (it needs a GitHub login).
-- The release job pushes its `chore(release)` commit with the owner's token, repo secret `RELEASE_TOKEN`: a
-  fine-grained token for this repo only, with contents, issues and pull requests write. Ruleset `main` lets only the
-  admin role bypass its pull-request rule, and a user-owned repo cannot give that bypass to the GitHub Actions app
-  (#350). When the token expires, the release job fails at its first step; make a new one and set the secret again.
 
 ## Troubleshooting
 
