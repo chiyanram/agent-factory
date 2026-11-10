@@ -42,7 +42,7 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `clean-writer-agent-trailer` | clean | The `Agent: writer` trailer hook and the push guard that refuses a commit without it. | 5191d08 (#191) | draft |
 | `clean-forge-open-change` | clean | `openChange` on both forge adapters, with tests. | 4b19e4a (#165) | approved |
 | `clean-box-canary-test` | clean | Tests only: a host canary and a forge token never reach the writer's box. | 4b0a52c (#202) | approved |
-| `clean-posting-template` | clean | The posting template that makes every posted field inert. | f0c6d10 (#133) | draft |
+| `clean-posting-template` | clean | The posting template that makes every posted field inert. | f0c6d10 (#133) | approved |
 | `clean-notes-login-and-seat` | clean | Notes told apart by login and seat prefix. | 5e78272 (#141) | draft |
 | `rulebook-clean-change` | rulebook-copy | `clean-change`: a value trimmed and then checked for empty, with its test. Here `FACTORY_CLAIM_LABEL`, through one `claimLabel` used at all four call sites. Expects no finding. | skills `plugins/rulebook/evals/review/clean-change` | approved |
 | `rulebook-new-bug-next-to-old` | rulebook-copy | `new-bug-next-to-old`: a `>` flipped to `>=` on the plugin's output cap, next to an older defect it does not touch (`chunk.toString` per chunk can split a UTF-8 character). The golden names only the new bug; it cannot say "do not flag the old one" (see README). | skills `plugins/rulebook/evals/review/new-bug-next-to-old` | approved |
