@@ -417,7 +417,20 @@ function exportLines(io: InitIo, file: object, user: object): string {
     : `\nThe files now hold ${same.join(", ")}: you can remove their exports from your shell profile.\n`;
 }
 
-async function nextLines(io: InitIo, name: string, checks: readonly Check[], clone: string): Promise<string> {
+// specLine : how the person writes a ticket's spec, in the store the project file names (#381)
+function specLine(io: InitIo, name: string, projectFile: object): string {
+  return at(projectFile, ["specStore"]) === "issue"
+    ? "write the ticket's spec in its git host issue's body (agent-factory spec --template <issue number> prints the template); the ticket is the issue number"
+    : `agent-factory spec --template <ticket>   (write the ticket's spec into ${join(io.home, "specs", name, "<ticket>", "spec.md")})`;
+}
+
+async function nextLines(
+  io: InitIo,
+  name: string,
+  checks: readonly Check[],
+  places: { readonly clone: string; readonly projectFile: object },
+): Promise<string> {
+  const clone = places.clone;
   const fixes = [...new Set(checks.filter((c) => !c.ok).map((c) => c.fix))];
   const known = await readKnowledge(io.home, name);
   const steps = [
@@ -429,7 +442,7 @@ async function nextLines(io: InitIo, name: string, checks: readonly Check[], clo
           `agent-factory onboard ${name}`,
           `agent-factory onboard accept ${name} <brief hash> <glossary hash>   (the hashes onboard printed, after you read both files)`,
         ]),
-    `agent-factory spec --template <ticket>   (write the ticket's spec into ${join(io.home, "specs", name, "<ticket>", "spec.md")})`,
+    specLine(io, name, places.projectFile),
     `agent-factory start ${name} <ticket>`,
     `agent-factory coordinator ${name}   (talk with the coordinator; it reads this project file, so it needs no exports)`,
   ];
@@ -515,7 +528,7 @@ async function finish(io: InitIo, plan: Plan, written: Written, yes: boolean): P
   const checks = [...pins, ...(await checksOf(io, plan, at(user, ["runner"])))];
   io.out(`\nChecks:\n${checkLines(checks)}`);
   io.out(exportLines(io, written.projectFile, user));
-  io.out(await nextLines(io, plan.name, checks, plan.detected.clone));
+  io.out(await nextLines(io, plan.name, checks, { clone: plan.detected.clone, projectFile: written.projectFile }));
   if (written.kept) {
     return 3;
   }

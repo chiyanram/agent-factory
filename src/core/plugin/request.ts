@@ -22,7 +22,7 @@ import { approvalState } from "../approval.js";
 import { prop } from "../dispatch/records.js";
 import { cleanField, renderPost, type Post } from "../post.js";
 import { attempt } from "../review/safe.js";
-import { plainName } from "../spec.js";
+import { plainName, type SpecStore } from "../spec.js";
 import { isPolicyPoint, readPluginConfig, type PolicyPoint, type Rule } from "./config.js";
 import { isPoint } from "./contract.js";
 import { callPlugin, registered, type Setup } from "./registry.js";
@@ -196,7 +196,9 @@ type Plan = {
   readonly rule: Rule;
 };
 
-async function approvalOf(where: Where): Promise<Result<{ readonly key: string; readonly at: string }>> {
+async function approvalOf(
+  where: Where & { readonly store?: SpecStore },
+): Promise<Result<{ readonly key: string; readonly at: string }>> {
   const state = await approvalState(where);
   switch (state.kind) {
     case "approved":
@@ -235,10 +237,30 @@ async function declared(home: string, plugin: string, capability: PolicyPoint): 
     : failed(`the plugin ${plugin} did not declare the write ${capability}; it may not perform it`);
 }
 
+// the project's spec store, which the approval is checked against (spec-store.ts, #381)
+export type SpecsFor = (project: string) => Promise<Result<SpecStore>>;
+
+// what request and confirm run with: the plugin setup, and the spec store of the draft's project; the local one under
+// <home>/specs when none is given
+export type RequestSetup = Setup & { readonly specs?: SpecsFor };
+
+// approvalAt : the draft's ticket's approval, checked against its project's spec store
+async function approvalAt(
+  setup: RequestSetup,
+  where: Where,
+): Promise<Result<{ readonly key: string; readonly at: string }>> {
+  if (setup.specs === undefined) {
+    return approvalOf(where);
+  }
+  const store = await setup.specs(where.project);
+  return store.kind === "ok" ? approvalOf({ ...where, store: store.value }) : store;
+}
+
 // planOf : the write's plan, after the approval, the policy and the plugin's declared writes are each checked
-async function planOf(home: string, capability: PolicyPoint, draft: Draft): Promise<Result<Plan>> {
+async function planOf(setup: RequestSetup, capability: PolicyPoint, draft: Draft): Promise<Result<Plan>> {
+  const home = setup.home;
   const where = { home, project: draft.project, ticket: draft.ticket };
-  const approval = await approvalOf(where);
+  const approval = await approvalAt(setup, where);
   if (approval.kind === "failed") {
     return approval;
   }
@@ -388,8 +410,12 @@ function nothing(): Promise<Done> {
 }
 
 // planned : the plan, and the write built from the draft
-async function planned(setup: Setup, capability: PolicyPoint, draft: Draft): Promise<Result<readonly [Plan, Built]>> {
-  const plan = await planOf(setup.home, capability, draft);
+async function planned(
+  setup: RequestSetup,
+  capability: PolicyPoint,
+  draft: Draft,
+): Promise<Result<readonly [Plan, Built]>> {
+  const plan = await planOf(setup, capability, draft);
   if (plan.kind === "failed") {
     return plan;
   }
@@ -397,7 +423,7 @@ async function planned(setup: Setup, capability: PolicyPoint, draft: Draft): Pro
   return write.kind === "ok" ? { kind: "ok", value: [plan.value, write.value] } : write;
 }
 
-async function requested(setup: Setup, capability: PolicyPoint, draft: Draft): Promise<Requested> {
+async function requested(setup: RequestSetup, capability: PolicyPoint, draft: Draft): Promise<Requested> {
   const both = await planned(setup, capability, draft);
   if (both.kind === "failed") {
     return both;
@@ -417,7 +443,7 @@ function unwrapped<T extends Requested>(r: Result<T>): T | { readonly kind: "fai
 }
 
 // request : one write the coordinator asks for: refused, done (allow) or pending (confirm)
-export async function request(setup: Setup, capability: string, draftText: string): Promise<Requested> {
+export async function request(setup: RequestSetup, capability: string, draftText: string): Promise<Requested> {
   const point = pointOf(capability);
   if (point.kind === "failed") {
     return point;
@@ -491,7 +517,7 @@ function sameAsPending(id: Id, [plan, write]: readonly [Plan, Built], pending: P
 }
 
 async function confirmedLocked(
-  setup: Setup,
+  setup: RequestSetup,
   id: Id,
   given: { readonly id: string; readonly text: string },
 ): Promise<Confirmed> {
@@ -510,7 +536,7 @@ async function confirmedLocked(
 }
 
 // confirm : the pending request with that id, performed, when the text given is its text
-export async function confirm(setup: Setup, id: string, text: string): Promise<Confirmed> {
+export async function confirm(setup: RequestSetup, id: string, text: string): Promise<Confirmed> {
   const parsedId = parseId(setup.home, id);
   if (parsedId.kind === "failed") {
     return parsedId;

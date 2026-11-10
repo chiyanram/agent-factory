@@ -81,9 +81,16 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    Restate what is decided, the live state of each option, and one concrete example. Once the draft PR exists, post
    each ask as a `[coordinator] OPEN: …` note, so `poll` lists it until a human answers. A two-option ask accepts
    only "A" or "B"; any other reply gets one re-ask. Done when the human has answered every open question.
-3. **Write the contract.** Write the spec where the project keeps it: the local spec file at work, the ticket on a
-   personal project. The host opens the draft PR on the implementer's first push (#164). Done when a stranger with no chat access could build the
-   change from the spec alone.
+3. **Write the contract.** Write the spec where the project file's `specStore` keeps it (`agent-factory config show
+   <project>` prints it). `local`, the default and the rule at work: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`.
+   `issue`, on a personal project: the body of the git host issue whose number is the ticket; `agent-factory spec`,
+   `approve`, `approval` and `dispatch` read and hash that body, so an edit to the issue makes its approval stale
+   (#381). Never write an issue with `gh` or `glab`: a write to the issue goes only through `agent-factory request`
+   under the tracker write policy. **Today:** no connector writes an issue's body, so draft the spec in
+   `$FACTORY_HOME/specs/<project>/<ticket>/spec.md` (`agent-factory spec --template <issue number>` prints the
+   template) and ask the human to paste it into the issue; then run `agent-factory spec <project> <issue number>`. The
+   host opens the draft PR on the implementer's first push (#164). Done when a stranger with no chat access could build
+   the change from the spec alone.
 4. **Design review.** Do not start one yourself: in a lane whose lanes entry says `design_review` (bug, feature and
    one-way door by default), the orchestrator's next pass runs it once the spec is ready (#236): a design-reviewer run,
    then a verify pass over its conflicts and opens, both read-only, from their role cards (the process plugin's

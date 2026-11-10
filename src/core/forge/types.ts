@@ -111,6 +111,9 @@ export type Forge = {
   defaultBranch(): Promise<Result<string>>;
   // whether this branch is on the git host, in the repository itself (#227: a START asks first when factory/<ticket> is)
   branchExists(input: { readonly branch: string }): Promise<Result<boolean>>;
+  // an issue's body, "" when it has none (#381: on a personal project the issue is the spec); a pull or merge request
+  // is not an issue, so its number fails
+  issueBody(input: { readonly number: number }): Promise<Result<string>>;
   // fails unless the forge kept the label
   addLabel(input: { readonly number: number; readonly label: string }): Promise<Done>;
   // succeeds when the label is gone afterwards, even if someone removed it first

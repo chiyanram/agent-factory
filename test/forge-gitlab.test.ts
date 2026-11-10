@@ -462,3 +462,13 @@ describe("branchExists (#227)", () => {
     expect(await forge.branchExists({ branch: "a b" })).toMatchObject({ kind: "failed" });
   });
 });
+
+describe("issueBody (#381)", () => {
+  it("reads an issue's description, none as empty", async () => {
+    const f = fake("gitlab", [ok({ iid: 2, description: "# 2: a title\n" }), ok({ iid: 3, description: null })]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.issueBody({ number: 2 })).toEqual({ kind: "ok", value: "# 2: a title\n" });
+    expect(f.calls[0]?.args.join(" ")).toContain(`${base}/issues/2`);
+    expect(await forge.issueBody({ number: 3 })).toEqual({ kind: "ok", value: "" });
+  });
+});

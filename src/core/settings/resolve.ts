@@ -380,15 +380,28 @@ function oldNames(layer: FileLayer): readonly Problem[] {
   return isOldConnectors(plugins) ? [{ level: "warning", text: `${place}: ${OLD_CONNECTORS}` }] : [];
 }
 
-// atWork : P9, nothing is committed to a work project's product repo, so its opt-in is refused
+// atWork : P9, nothing is committed to a work project's product repo, so its opt-in is refused; and a work project's
+// spec stays on this machine, so the issue spec store is refused too (#381)
 function atWork(values: readonly Resolved[]): readonly string[] {
-  const on = (id: string): Resolved | undefined => values.find((r) => r.key.id === id && r.value === true);
-  const [work, commits] = [on("work"), on("repoCommits")];
-  return work !== undefined && commits !== undefined
-    ? [
-        `repoCommits: ${commits.sources.map(where).join(", ")} opts in to commits to the product repo, and ${work.sources.map(where).join(", ")} marks the project as work, where nothing is ever committed (P9)`,
-      ]
-    : [];
+  const on = (id: string, value: unknown): Resolved | undefined =>
+    values.find((r) => r.key.id === id && r.value === value);
+  const [work, commits, issue] = [on("work", true), on("repoCommits", true), on("specStore", "issue")];
+  if (work === undefined) {
+    return [];
+  }
+  const marked = `${work.sources.map(where).join(", ")} marks the project as work`;
+  return [
+    ...(commits === undefined
+      ? []
+      : [
+          `repoCommits: ${commits.sources.map(where).join(", ")} opts in to commits to the product repo, and ${marked}, where nothing is ever committed (P9)`,
+        ]),
+    ...(issue === undefined
+      ? []
+      : [
+          `specStore: ${issue.sources.map(where).join(", ")} keeps the specs in the git host issues, and ${marked}, where the spec stays local; set "specStore": "local"`,
+        ]),
+  ];
 }
 
 // ---- unknown keys

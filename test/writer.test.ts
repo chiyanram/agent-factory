@@ -208,6 +208,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     change: async () => unused("change"),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
+    issueBody: async () => unused("issueBody"),
     addLabel: async ({ number, label }) => {
       log.push(`label ${number} ${label}`);
       return { kind: "ok" };
@@ -1383,7 +1384,10 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
         project: "ledger",
         repo: p.clone,
         env: p.env,
-        forge: { defaultBranch: async () => ({ kind: "ok", value: "main" }) },
+        forge: {
+          defaultBranch: async () => ({ kind: "ok", value: "main" }),
+          issueBody: async () => ({ kind: "failed", reason: "a local-store project reads no issue" }),
+        },
         model: async (r) => {
           seen.push(r);
           return { kind: "ok", value: { output: outputs[seen.length - 1], answer: {}, costUsd: 0.1, tokens: 10 } };

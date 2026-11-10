@@ -28,7 +28,7 @@ import type { Forge, ForgeName } from "../forge/types.js";
 import type { Identity } from "../identity.js";
 import type { PushRequest } from "../push.js";
 import { CLEAN, REPORT_INSTRUCTIONS, type Evidence, type Outcome } from "../report.js";
-import type { Approver, Spec } from "../spec.js";
+import type { Approver, Spec, SpecStore } from "../spec.js";
 import type { BodyPost, PrBody } from "../post.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { keepText, readKept, recordsDirOf } from "../kept.js";
@@ -79,6 +79,8 @@ export type WriterSetup = {
   readonly pusher: Pusher;
   // the project's lanes (#232); the default lanes when absent
   readonly lanes?: readonly LaneProps[];
+  // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
+  readonly specs?: SpecStore;
 };
 
 type Input = RunInput & { readonly task: Task };
@@ -207,7 +209,13 @@ async function loginOf(setup: WriterSetup): Promise<Result<Readonly<Record<strin
 
 // goFor : what lets the build begin: an approval, or a START in the tiny lane (#227)
 async function goFor(setup: WriterSetup, ticket: string): Promise<Result<Extract<GoAhead, { kind: "go" }>>> {
-  const go = await goAhead({ home: setup.home, project: setup.project, ticket, lanes: setup.lanes });
+  const go = await goAhead({
+    home: setup.home,
+    project: setup.project,
+    ticket,
+    lanes: setup.lanes,
+    ...(setup.specs === undefined ? {} : { store: setup.specs }),
+  });
   if (go.kind === "go") {
     return { kind: "ok", value: go };
   }

@@ -16,7 +16,10 @@ agent-factory init            # the project's name defaults to the clone folder'
    `.tool-versions`, `.sdkmanrc`). It runs none of the clone's programs.
 2. **Asks one round**, in the style of `questions: round`: the project on the git host, the runner (`srt` or `vm`),
    the gate (`forge-ci` when the clone has CI files, else `local` with the verify command), the plugins
-   (`rulebook@chiyanram` or none) and, when it found migrations, whether they are one-way doors. Each question has
+   (`rulebook@chiyanram` or none), when it found migrations, whether they are one-way doors, and where the ticket
+   specs live (`specStore`): `issue`, the git host issue's body, recommended for a personal project on github.com or
+   gitlab.com, or `local`, recommended on a company's own git host; a project marked `work` is not asked and stays
+   `local` (#381). Each question has
    lettered choices with the recommended one marked; answer `1A 2B`, or press Enter to take every recommendation.
    `--yes` takes them all, for a repeat setup. A question whose key the files already hold is not asked.
 3. **Writes the answers** to the settings layers, never to the repo or a shell profile: `runner` to
@@ -36,7 +39,8 @@ agent-factory init            # the project's name defaults to the clone folder'
    settings, and `config check`.
 6. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
    claude` when the token is missing, opening `claude` once in the clone, `agent-factory onboard <project>`,
-   `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec, `agent-factory start` and
+   `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec (in the issue's body with the issue
+   store, else the local file), `agent-factory start` and
    `agent-factory coordinator <project>`.
 
 It never handles a secret and never runs a command only a human runs (`setup claude`, `onboard`, `onboard accept`,

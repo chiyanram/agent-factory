@@ -18,8 +18,9 @@
 // Approval is what lets the build begin in the bug, feature and one-way-door lanes; tiny needs a START only (start.ts).
 // The AI never approves: `agent-factory approve` is on the coordinator's deny list (coordinator.ts, #227), and the
 // coordinator's settings deny any edit of the approvals folder. On the VM the folder belongs to the separate `factory`
-// OS user, and `approve` writes it through a narrow sudo rule (GUIDE §Set up identity). The local store is the one this
-// reads today; an issue-backed spec joins when the forge seam (#102) is ported.
+// OS user, and `approve` writes it through a narrow sudo rule (GUIDE §Set up identity). The spec is read from the
+// project's spec store (spec-store.ts, #381): <home>/specs, or the git host issue's body; the approval record is always
+// local, so an edit to the issue makes the approval stale like an edit to a local spec.
 
 import { join } from "node:path";
 import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
@@ -48,7 +49,8 @@ export type ApprovalRecord = {
   readonly at: string;
 };
 
-export type Where = { readonly home: string } & Ticket;
+// store: the project's spec store (spec-store.ts specStoreOf); none given is the local one under <home>/specs
+export type Where = { readonly home: string; readonly store?: SpecStore } & Ticket;
 
 export type ApproveRequest = {
   readonly where: Where;
@@ -88,8 +90,8 @@ export function approvalPath(where: Where): PathResult {
       };
 }
 
-function localStore(where: Where): SpecStore {
-  return { kind: "local", root: join(where.home, "specs") };
+function storeOf(where: Where): SpecStore {
+  return where.store ?? { kind: "local", root: join(where.home, "specs") };
 }
 
 export type Current =
@@ -99,7 +101,7 @@ export type Current =
 
 // currentSpec : the ticket's spec as it is now, checked against the template, and its design's hash
 export async function currentSpec(where: Where): Promise<Current> {
-  const read = await readSpec({ store: localStore(where), project: where.project, ticket: where.ticket });
+  const read = await readSpec({ store: storeOf(where), project: where.project, ticket: where.ticket });
   if (read.kind !== "found") {
     return read.kind === "missing" ? { kind: "missing" } : read;
   }
@@ -107,7 +109,7 @@ export async function currentSpec(where: Where): Promise<Current> {
   if (checked.kind !== "ok") {
     return { kind: "refused", reason: `the spec is not ready: ${checked.problems.join("; ")}` };
   }
-  const design = await designHash({ store: localStore(where), project: where.project, ticket: where.ticket });
+  const design = await designHash({ store: storeOf(where), project: where.project, ticket: where.ticket });
   return design.kind === "design" ? { kind: "spec", spec: checked.spec, design: design.hash } : design;
 }
 

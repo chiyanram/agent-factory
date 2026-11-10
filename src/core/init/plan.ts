@@ -117,6 +117,33 @@ function doorsQuestion(d: Detected): Question {
   };
 }
 
+// atWork : the project or the user file marks it work (the work key, a ladder: true in either holds)
+function atWork(existing: Existing): boolean {
+  return at(existing.project, ["work"]) === true || at(existing.user, ["work"]) === true;
+}
+
+// specStoreQuestion : where the specs live (#381). A personal project on github.com or gitlab.com keeps its spec on the
+// issue; one on a company's own git host is likely work, so local is recommended there. A work project is not asked:
+// the spec stays local, and the settings refuse the issue store.
+function specStoreQuestion(d: Detected): Question {
+  const personal = d.hostName === "";
+  return {
+    id: "specStore",
+    text: "Where do the ticket specs live?",
+    choices: [
+      {
+        label: `issue: the ${d.host === "github" ? "GitHub" : "GitLab"} issue's body is the spec, and the ticket is the issue number; for a personal project`,
+        value: "issue",
+      },
+      {
+        label: "local: <factory home>/specs/<project>/<ticket>/spec.md, never on the git host; the rule at work",
+        value: "local",
+      },
+    ],
+    recommended: personal ? 0 : 1,
+  };
+}
+
 // questionsFor : the round, without the questions whose key the files already set
 export function questionsFor(d: Detected, existing: Existing): readonly Question[] {
   const all: readonly (readonly [Question, object, readonly string[]])[] = [
@@ -125,6 +152,7 @@ export function questionsFor(d: Detected, existing: Existing): readonly Question
     [gateQuestion(d), existing.project, ["gate"]],
     [pluginsQuestion(), existing.project, ["plugins"]],
     ...(d.oneWayDoor.length > 0 ? [[doorsQuestion(d), existing.project, ["lanes", "oneWayDoor"]] as const] : []),
+    ...(atWork(existing) ? [] : [[specStoreQuestion(d), existing.project, ["specStore"]] as const]),
   ];
   return all.filter(([, file, path]) => !isSet(file, path)).map(([q]) => q);
 }
@@ -161,6 +189,7 @@ export function projectEntries(
     asked(answered.questions, answered.picks, id, at(answered.project, path));
   const gate = pick("gate", ["gate"]);
   const doors = pick("lanes.oneWayDoor", ["lanes", "oneWayDoor"]);
+  const specs = pick("specStore", ["specStore"]);
   return [
     { path: ["gitHost"], value: d.host },
     ...only(d.hostName !== "", { path: ["gitHostName"], value: d.hostName }),
@@ -173,6 +202,7 @@ export function projectEntries(
     { path: ["egress", "allow"], value: union([[MODEL_HOST], ...d.builds.map((b) => b.egress)]) },
     ...only(nonEmpty(doors), { path: ["lanes", "oneWayDoor"], value: doors }),
     { path: ["plugins"], value: pick("plugins", ["plugins"]) },
+    ...only(specs !== undefined, { path: ["specStore"], value: specs }),
   ];
 }
 

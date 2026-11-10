@@ -58,6 +58,7 @@ function forge(
     change: async ({ number }) => ({ kind: "ok", value: { ...change, number } }),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
+    issueBody: notUsed,
     addLabel: ({ number, label }) => write(`+${label} !${number}`),
     removeLabel: ({ number, label }) => write(`-${label} !${number}`),
     note: ({ number, post }) => {

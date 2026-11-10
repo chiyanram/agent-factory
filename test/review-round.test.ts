@@ -102,6 +102,7 @@ function forge(
     },
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
+    issueBody: failed,
     openChange: failed,
     notes: async () => ({ kind: "ok", value: [...notes] }),
     setBody: async () => ({ kind: "failed", reason: "the review does not set a body" }),

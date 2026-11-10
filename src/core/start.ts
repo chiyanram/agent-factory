@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import { approvalState, currentSpec } from "./approval.js";
 import { needsApproval, plannedCheck, raisedWhy, type LaneProps } from "./lane.js";
-import { plainName, type Refused, type Spec, type Ticket } from "./spec.js";
+import { plainName, type Refused, type Spec, type SpecStore, type Ticket } from "./spec.js";
 
 export type StartRecord = {
   readonly version: 1;
@@ -29,7 +29,8 @@ export type StartRecord = {
   readonly at: string;
 };
 
-export type Where = { readonly home: string } & Ticket;
+// store: the project's spec store, which goAhead reads the spec from (approval.ts); none given is the local one
+export type Where = { readonly home: string; readonly store?: SpecStore } & Ticket;
 
 export type StartRequest = {
   readonly where: Where;

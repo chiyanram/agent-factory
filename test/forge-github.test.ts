@@ -509,3 +509,23 @@ describe("branchExists (#227)", () => {
     expect(f.calls).toHaveLength(2);
   });
 });
+
+describe("issueBody (#381)", () => {
+  it("reads an issue's body, none as empty, and refuses a pull request's number", async () => {
+    const f = fake("github", [
+      ok({ number: 4, body: "# 4: a title\r\n" }),
+      ok({ number: 5, body: null }),
+      ok({ number: 6, body: "x", pull_request: { url: "u" } }),
+      { status: 404, body: { message: "Not Found" } },
+    ]);
+    const forge = github(f.client, project);
+    expect(await forge.issueBody({ number: 4 })).toEqual({ kind: "ok", value: "# 4: a title\r\n" });
+    expect(f.calls[0]?.args.join(" ")).toContain("repos/chiyanram/ledger/issues/4");
+    expect(await forge.issueBody({ number: 5 })).toEqual({ kind: "ok", value: "" });
+    expect(await forge.issueBody({ number: 6 })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("pull request"),
+    });
+    expect(await forge.issueBody({ number: 7 })).toMatchObject({ kind: "failed" });
+  });
+});

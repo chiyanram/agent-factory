@@ -20,7 +20,10 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
-const forge: Pick<Forge, "defaultBranch"> = { defaultBranch: async () => ({ kind: "ok", value: "main" }) };
+const forge: Pick<Forge, "defaultBranch" | "issueBody"> = {
+  defaultBranch: async () => ({ kind: "ok", value: "main" }),
+  issueBody: async () => ({ kind: "failed", reason: "a local-store project reads no issue" }),
+};
 
 // done : a run's finished outcome, or a test failure
 function done<T>(out: Result<DesignRan<T>>): T {

@@ -41,6 +41,7 @@ export function evalForge(change: Change, login: string): Forge {
     change: async () => ({ kind: "ok", value: change }),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: true }),
+    issueBody: () => unused("issueBody"),
     addLabel: ok,
     removeLabel: ok,
     note: async ({ post }) => {

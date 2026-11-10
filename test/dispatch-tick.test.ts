@@ -14,6 +14,7 @@ import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
 import { goAhead, start } from "../src/core/start.js";
 import { specHash } from "../src/core/spec.js";
+import { issueStore } from "../src/core/spec-store.js";
 import { tempDir } from "./temp.js";
 
 const SPEC = (lane: string) =>
@@ -100,6 +101,7 @@ function forge(changes: Changes, log: string[]): Forge {
     change: notUsed,
     defaultBranch: notUsed,
     branchExists: async () => ({ kind: "ok", value: false }),
+    issueBody: notUsed,
     openChange: notUsed,
     notes: notUsed,
     setBody: notUsed,
@@ -809,6 +811,32 @@ describe("START and approval (#227)", () => {
     expect(await decisions()).toEqual([]);
     await started("2026-11-07T08:00:00Z");
     expect(await decisions()).toEqual(["log PROJ-1: writer (fix): started; no run yet (dry run)"]);
+  });
+
+  it("with the issue spec store, the issue's body is the spec: a tiny START builds it, an edit makes the approval stale (#381)", async () => {
+    let body = SPEC("tiny").replace("PROJ-1", "2");
+    const specs = issueStore({
+      open: async () => ({ kind: "ok", value: { issueBody: async () => ({ kind: "ok", value: body }) } }),
+      hostProject: "a/ledger",
+    });
+    const issueTick = async (): Promise<readonly string[]> => {
+      const log: string[] = [];
+      await tick(setup({ team, open: [], merged: [] }, log, { dryRun: true, specs }));
+      return log;
+    };
+    await started("2026-11-07T08:00:00Z", "2");
+    expect(await issueTick()).toEqual(["log 2: writer (fix): started; no run yet (dry run)"]);
+    body = SPEC("feature").replace("PROJ-1", "2");
+    const done = await approve({
+      where: { ...where("2"), store: specs },
+      seenHash: specHash(body),
+      by: "ram",
+      at: "2026-11-07T09:00:00Z",
+    });
+    expect(done.kind).toBe("approved");
+    expect(await goAhead({ ...where("2"), store: specs })).toMatchObject({ kind: "go", said: "approved" });
+    body = body.replace("## Intent\n\n", "## Intent\n\nAlso: ");
+    expect(await goAhead({ ...where("2"), store: specs })).toMatchObject({ kind: "held" });
   });
 
   it("the project's process lanes decide: a process that makes tiny need an approval holds a START (#232)", async () => {

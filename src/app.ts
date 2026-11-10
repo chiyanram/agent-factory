@@ -9,7 +9,8 @@ import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
 import { openProject, openProjectForge } from "./core/forge/index.js";
 import type { Forge } from "./core/forge/types.js";
-import { checkSpec, designHash, plainName, readSpec, template } from "./core/spec.js";
+import { checkSpec, designHash, plainName, readSpec, template, type Refused, type SpecStore } from "./core/spec.js";
+import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
 import { approvalState, approve } from "./core/approval.js";
 import { start } from "./core/start.js";
 import { readWaiver, waive } from "./core/waiver.js";
@@ -298,42 +299,96 @@ async function pollResolved({ json, io }: Args): Promise<number> {
 // spec : one line "spec <project>/<ticket> <hash> <path>" for a spec that follows the template (exit 0); its problems
 // (exit 2); or why it cannot be read (exit 1). The hash is what `approve` (#104) asks the human to confirm.
 async function spec({ template: wantTemplate, positionals, io }: Args): Promise<number> {
-  if (wantTemplate) {
-    const [ticket] = positionals;
-    if (ticket === undefined) {
-      io.err("usage: agent-factory spec --template <ticket>\n");
-      return 64;
-    }
-    io.out(template(ticket));
-    return 0;
+  return wantTemplate ? specTemplate(positionals, io) : specOf(positionals, io);
+}
+
+function specTemplate(positionals: readonly string[], io: Io): Promise<number> {
+  const [ticket] = positionals;
+  if (ticket === undefined) {
+    io.err("usage: agent-factory spec --template <ticket>\n");
+    return Promise.resolve(64);
   }
+  io.out(template(ticket));
+  return Promise.resolve(0);
+}
+
+async function specOf(positionals: readonly string[], io: Io): Promise<number> {
   const [project, ticket] = positionals;
   if (project === undefined || ticket === undefined) {
     io.err("usage: agent-factory spec <project> <ticket>\n");
     return 64;
   }
-  const home = factoryHome(io.env);
-  if (home.kind === "refused") {
-    io.err(`agent-factory spec: ${home.reason}\n`);
+  if (!plainName(project) || !plainName(ticket)) {
+    io.err(
+      `agent-factory spec: a project and a ticket must be plain names, got ${JSON.stringify(project)} ${JSON.stringify(ticket)}\n`,
+    );
     return 1;
   }
-  const read = await readSpec({ store: { kind: "local", root: join(home.path, "specs") }, project, ticket });
+  return resolvedRun("spec", project, io, (resolved) => specResolved(resolved, project, ticket));
+}
+
+async function specResolved(io: Io, project: string, ticket: string): Promise<number> {
+  const at = specsAt(io, project, ticket);
+  if (at.kind === "refused") {
+    io.err(`agent-factory spec: ${at.reason}\n`);
+    return 1;
+  }
+  const read = await readSpec(at.where);
   switch (read.kind) {
     case "refused":
       io.err(`agent-factory spec: ${read.reason}\n`);
       return 1;
     case "missing":
-      io.err(`agent-factory spec: no spec at ${read.where}; start one with: agent-factory spec --template ${ticket}\n`);
+      io.err(`agent-factory spec: no spec at ${read.where}; ${startOne(at.where.store, ticket)}\n`);
       return 1;
     case "found":
-      return specFound(io, { home: home.path, project, ticket }, read);
+      return specFound(io, at.where, read);
   }
+}
+
+function startOne(store: SpecStore, ticket: string): string {
+  return store.kind === "local"
+    ? `start one with: agent-factory spec --template ${ticket}`
+    : `write the spec in the issue's body; agent-factory spec --template ${ticket} prints the template`;
+}
+
+type SpecWhere = {
+  readonly home: string;
+  readonly store: SpecStore;
+  readonly project: string;
+  readonly ticket: string;
+};
+
+// specsAt : where the ticket's spec is read: the project's spec store from its resolved settings (#381); the git host
+// is opened only when the issue store reads an issue
+function specsAt(
+  io: Io,
+  project: string,
+  ticket: string,
+): { readonly kind: "at"; readonly where: SpecWhere } | Refused {
+  const home = factoryHome(io.env);
+  if (home.kind === "refused") {
+    return home;
+  }
+  const store = specStoreOf({ env: io.env, home: home.path, open: openOnce(() => issuesOf(io, home.path, project)) });
+  return store.kind === "ok"
+    ? { kind: "at", where: { home: home.path, store: store.value, project, ticket } }
+    : { kind: "refused", reason: store.reason };
+}
+
+// issuesOf : the project's forge, for the issue store
+async function issuesOf(io: Io, home: string, project: string): Promise<Result<Forge>> {
+  const opened = await openProjectForge(
+    { env: io.env, log: (line) => io.err(`${line}\n`) },
+    { home, project, plugins: await pluginSetup(home, io.env) },
+  );
+  return opened.kind === "ok" ? { kind: "ok", value: opened.value.forge } : opened;
 }
 
 // specFound : the spec's hash and its design's (#227), or what the spec is missing
 async function specFound(
   io: Io,
-  at: { readonly home: string; readonly project: string; readonly ticket: string },
+  at: SpecWhere,
   read: { readonly text: string; readonly where: string },
 ): Promise<number> {
   const checked = checkSpec(read.text);
@@ -341,7 +396,7 @@ async function specFound(
     io.err(`agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`);
     return 2;
   }
-  const design = await designHash({ store: { kind: "local", root: join(at.home, "specs") }, ...at });
+  const design = await designHash(at);
   if (design.kind === "refused") {
     io.err(`agent-factory spec: ${design.reason}\n`);
     return 1;
@@ -483,14 +538,22 @@ async function approveCommand({ positionals, noLoop, io }: Args): Promise<number
     );
     return 64;
   }
-  const home = factoryHome(io.env);
-  if (home.kind === "refused") {
-    io.err(`agent-factory approve: refused: ${home.reason}\n`);
+  if (!plainName(args.project)) {
+    io.err(`agent-factory approve: refused: ${JSON.stringify(args.project)} is not a plain project name\n`);
     return 1;
   }
+  return resolvedRun("approve", args.project, io, (resolved) => approveResolved(args, noLoop, resolved));
+}
+
+async function approveResolved(args: ApproveArgs, noLoop: boolean, io: Io): Promise<number> {
   const { project, ticket } = args;
+  const at = specsAt(io, project, ticket);
+  if (at.kind === "refused") {
+    io.err(`agent-factory approve: refused: ${at.reason}\n`);
+    return 1;
+  }
   const result = await approve({
-    where: { home: home.path, project, ticket },
+    where: at.where,
     seenHash: args.hash,
     seenDesign: args.design,
     by: await whoApproves(io.env),
@@ -543,8 +606,20 @@ async function approvalCommand({ positionals, io }: Args): Promise<number> {
     io.err("usage: agent-factory approval <project> <ticket>\n");
     return 64;
   }
-  const home = factoryHome(io.env);
-  const state = home.kind === "home" ? await approvalState({ home: home.path, project, ticket }) : home;
+  if (!plainName(project)) {
+    io.err(`agent-factory approval: refused: ${JSON.stringify(project)} is not a plain project name\n`);
+    return 1;
+  }
+  return resolvedRun("approval", project, io, (resolved) => approvalResolved(resolved, project, ticket));
+}
+
+async function approvalAt(io: Io, project: string, ticket: string): ReturnType<typeof approvalState> {
+  const at = specsAt(io, project, ticket);
+  return at.kind === "at" ? approvalState(at.where) : at;
+}
+
+async function approvalResolved(io: Io, project: string, ticket: string): Promise<number> {
+  const state = await approvalAt(io, project, ticket);
   switch (state.kind) {
     case "approved":
       io.out(
@@ -733,9 +808,9 @@ async function passSetup(
   if (planned.kind === "failed") {
     return planned;
   }
-  const notify = await notifierFor(io, settings.home, project, forge.mark);
-  if (notify.kind === "failed") {
-    return notify;
+  const around = await aroundPass(io, settings.home, project, forge);
+  if (around.kind === "failed") {
+    return around;
   }
   return {
     kind: "ok",
@@ -752,9 +827,24 @@ async function passSetup(
       repo: settingOf(io.env, "gitHostProject") ?? "",
       dryRun,
       log: (line) => io.out(`${line}\n`),
-      notify: notify.value,
+      ...around.value,
     },
   };
+}
+
+// aroundPass : the pass's pings (#119) and the project's spec store (#381)
+async function aroundPass(
+  io: Io,
+  home: string,
+  project: string,
+  forge: Forge,
+): Promise<Result<{ readonly notify: Notify; readonly specs: SpecStore }>> {
+  const notify = await notifierFor(io, home, project, forge.mark);
+  const specs = specStoreOf({ env: io.env, home, open: issuesFrom(forge) });
+  if (notify.kind === "failed") {
+    return notify;
+  }
+  return specs.kind === "ok" ? { kind: "ok", value: { notify: notify.value, specs: specs.value } } : specs;
 }
 
 // notifierFor : the pings of a pass (#119): through the notify plugin the project file maps, with the webhook from the

@@ -76,6 +76,12 @@ export const RUNNERS = ["none", "srt", "vm"] as const;
 const absolutePath: Check = (value) =>
   typeof value === "string" && value.startsWith("/") && !value.includes("\u0000") ? "" : "an absolute file path";
 
+// where a project's specs live (#381), from the loosest to the strictest: issue, the git host issue's body, for a
+// personal project; local, <home>/specs, the work rule and the default. A ladder: a team or user file that says local
+// holds every project to it, and no lower layer may move a spec onto the git host.
+export const SPEC_STORES = ["issue", "local"] as const;
+export type SpecStoreKind = (typeof SPEC_STORES)[number];
+
 // how a run's questions are asked: all at once, as one numbered round of choices (the default), or one at a time
 // (#320)
 export const QUESTIONS = ["round", "one-at-a-time"] as const;
@@ -135,6 +141,14 @@ export const MACHINE_KEYS = [
     ),
     projectOnly: true,
   },
+  machine(
+    "specStore",
+    "FACTORY_SPEC_STORE",
+    "ladder",
+    "where the specs live: local, <home>/specs (the default, the work rule), or issue, the git host issue's body, for a personal project; local wins (#381)",
+    oneOf(SPEC_STORES),
+    SPEC_STORES,
+  ),
   machine("identity", "FACTORY_IDENTITY", "locked", "own (your gh or glab login) or app (a GitHub App)"),
   machine(
     "runner",

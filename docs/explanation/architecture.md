@@ -179,10 +179,11 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 These live in the project home. Existing `AGENTS.md` and `CONTEXT.md` files are linked, never copied. Nothing that
 rots, such as counts, goes in, and every `file:line` is checked again on each run.
 
-**Spec home** is a setting:
-- a local folder, which is the default and what work uses;
-- a shared place, later;
-- the ticket on the git host, or Jira;
+**Spec home** is a setting (`specStore`, [Settings](../reference/settings.md#settings)):
+- a local folder, which is the default and what work uses (`local`);
+- the issue on the git host, for personal projects (`issue`, #381): its body is the spec, hashed the same way, so an
+  edit to the issue makes the approval stale; the approval itself stays local;
+- a shared place, or Jira, later;
 - a repo commit, for personal projects that opt in.
 
 **Runners.**
