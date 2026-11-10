@@ -3,6 +3,19 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.32.0](https://github.com/chiyanram/agent-factory/compare/v0.31.0...v0.32.0) (2026-11-10)
+
+### ✨ Features
+
+* **spec** — on a personal project the git host issue is the spec · [#381](https://github.com/chiyanram/agent-factory/issues/381) (PR [#399](https://github.com/chiyanram/agent-factory/pull/399))
+
+### 🐛 Fixes
+
+* **dispatch** — a writer run that stops records and logs why, even before a PR exists · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#408](https://github.com/chiyanram/agent-factory/pull/408))
+* **onboard** — the engine owns the project rules and drops a false absence claim instead of refusing the brief · [#383](https://github.com/chiyanram/agent-factory/issues/383) (PR [#403](https://github.com/chiyanram/agent-factory/pull/403))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.32.0/chiyanram-agent-factory-0.32.0.tgz`
+
 ## [0.31.0](https://github.com/chiyanram/agent-factory/compare/v0.30.2...v0.31.0) (2026-11-10)
 
 ### ✨ Features
