@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { readRecords } from "../src/core/dispatch/records.js";
 import { makeTargets, commandsOf } from "../src/core/onboard/listing.js";
-import { staleCites } from "../src/core/onboard/cites.js";
+import { absence, staleCites } from "../src/core/onboard/cites.js";
+import { mustsIn } from "../src/core/onboard/musts.js";
 import { accept, readKnowledge } from "../src/core/onboard/home.js";
 import { knownFor } from "../src/core/onboard/known.js";
 import { onboard, FLOOR, type OnboardSetup } from "../src/core/onboard/run.js";
@@ -207,7 +208,7 @@ describe("agent-factory onboard (#235)", () => {
       "library",
       "src",
     ]);
-    expect(seen[0]?.files).toEqual(["code", "commands.md"]);
+    expect(seen[0]?.files).toEqual(["code", "commands.md", "rules.md"]);
     expect(seen[0]?.commands).toContain("`make test`: unit and integration tests (Makefile:4)");
     expect(seen[0]?.run.prompt).toMatch(/^# Onboarder/);
     expect(seen[0]?.run.prompt).toContain(FLOOR);
@@ -304,5 +305,122 @@ describe("onboardSetup (#235, after #232 and #213)", () => {
     expect(set).toMatchObject({ kind: "ok", value: { plugins, modelName: REVIEW_MODELS.logic } });
     const other = onboardSetup({ ...input, env: { FACTORY_REPO: "/r", FACTORY_LOGIC_MODEL: "claude-opus-5-1" } });
     expect(other).toMatchObject({ kind: "ok", value: { modelName: "claude-opus-5-1" } });
+  });
+});
+
+// the ledger pilot's AGENTS.md (#62): three MUSTs, one wrapped over two lines
+const LEDGER_AGENTS = [
+  "# Agents",
+  "",
+  "Read the README first.",
+  "",
+  "## MUSTs",
+  "",
+  "- Write production code only after a human posts /approved on the draft PR.",
+  "- Keep ./gradlew check green.",
+  "- Put every integration test under src/integrationTest, never",
+  "  beside the unit tests.",
+  "",
+  "```bash",
+  "./gradlew check # MUST pass",
+  "```",
+  "",
+  "## Style",
+  "",
+  "- Prefer records.",
+  "",
+].join("\n");
+
+const LEDGER_MUSTS = [
+  "- Write production code only after a human posts /approved on the draft PR. (`AGENTS.md:7`, verified)",
+  "- Keep ./gradlew check green. (`AGENTS.md:8`, verified)",
+  "- Put every integration test under src/integrationTest, never beside the unit tests. (`AGENTS.md:9`, verified)",
+];
+
+// what the ledger brief said (#62), and the claim the engine must not take on a cite
+const ABSENCE_CLAIM = {
+  text: "Project rules: there is no CLAUDE.md, AGENTS.md, CONTRIBUTING, glossary or ADR directory in the repo",
+  file: "Makefile",
+  line: 1,
+  verified: true,
+};
+
+describe("the project's MUSTs and the cite check (#383)", () => {
+  beforeEach(() => {
+    write("AGENTS.md", LEDGER_AGENTS);
+    write("CLAUDE.md", "@AGENTS.md\n\nYou MUST NOT push to main.\n");
+    commitAndPush("rules");
+  });
+
+  it("finds each MUST, one line each, at its line: under a MUST heading, or by the word; never in a code fence", () => {
+    expect(mustsIn("AGENTS.md", LEDGER_AGENTS.split("\n"))).toEqual([
+      { file: "AGENTS.md", line: 7, text: "Write production code only after a human posts /approved on the draft PR." },
+      { file: "AGENTS.md", line: 8, text: "Keep ./gradlew check green." },
+      {
+        file: "AGENTS.md",
+        line: 9,
+        text: "Put every integration test under src/integrationTest, never beside the unit tests.",
+      },
+    ]);
+    expect(mustsIn("CLAUDE.md", ["intro", "line two says you MUST log in", "", "- plain item"])).toEqual([
+      { file: "CLAUDE.md", line: 2, text: "intro line two says you MUST log in" },
+    ]);
+  });
+
+  it("the brief carries every MUST of AGENTS.md and CLAUDE.md under Project rules, cited, and the model reads them", async () => {
+    const seen: Seen[] = [];
+    const out = await onboard(setup(model(seen)));
+    expect(out).toMatchObject({ kind: "ok" });
+    const brief = staged("brief.md");
+    const rules = brief.slice(brief.indexOf("## Project rules"), brief.indexOf("## Stack"));
+    for (const line of LEDGER_MUSTS) {
+      expect(rules).toContain(line);
+    }
+    expect(rules).toContain("- You MUST NOT push to main. (`CLAUDE.md:3`, verified)");
+    expect(rules).not.toContain("Prefer records");
+    expect(rules).not.toContain("# MUST pass");
+    // each MUST's cite is kept, so a run reports it stale when the line moves
+    const cites: unknown = JSON.parse(staged("cites.json"));
+    expect(cites).toContainEqual(expect.objectContaining({ file: "AGENTS.md", line: 8 }));
+    expect(seen).toHaveLength(1);
+  });
+
+  it("a brief that says AGENTS.md is absent, citing another file, is refused with the reason, and nothing is staged", async () => {
+    const answer = { ...ANSWER, stack: [ABSENCE_CLAIM] };
+    const out = await onboard(setup(model([], answer)));
+    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the brief is refused") });
+    expect(out.kind === "failed" ? out.reason : "").toContain("AGENTS.md");
+    expect(existsSync(join(r.home, "projects", "ledger", "staged"))).toBe(false);
+    // the spend is still in the run records
+    const read = await readRecords({ home: r.home, project: "ledger", ticket: "onboarder" });
+    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "spent" }] });
+  });
+
+  it("a true absence claim is verified against the file list, never by its cite; one naming no file is inferred", async () => {
+    const answer = {
+      ...ANSWER,
+      stack: [
+        { text: "There is no Dockerfile or docs/adr folder in the repo", file: "Makefile", line: 1, verified: true },
+        { text: "The file that sets the JDK is missing", file: "Makefile", line: 1, verified: true },
+        { text: "LoanRepository.java has no index on due_on", file: REPOSITORY, line: 31, verified: true },
+      ],
+    };
+    const out = await onboard(setup(model([], answer)));
+    expect(out).toMatchObject({ kind: "ok" });
+    const brief = staged("brief.md");
+    expect(brief).toContain("- There is no Dockerfile or docs/adr folder in the repo (verified against the file list)");
+    expect(brief).toContain("- The file that sets the JDK is missing (inferred: it says a file is absent");
+    expect(brief).not.toContain("(`Makefile:1`, verified)");
+    expect(brief).toContain(`- LoanRepository.java has no index on due_on (\`${REPOSITORY}:31\`, verified)`);
+  });
+
+  it("absence: the cited file itself is not an absence claim; a file the list holds makes the claim false", () => {
+    const files = ["AGENTS.md", "CONTRIBUTING.md", "docs/adr/0001-x.md", "CONTEXT.md", "src/A.java"];
+    expect(absence("A.java has no index", "src/A.java", files)).toEqual({ kind: "not-absence" });
+    expect(absence("there is no CONTRIBUTING guide", "", files)).toEqual({ kind: "false", held: ["CONTRIBUTING.md"] });
+    expect(absence("there is no glossary", "", files)).toEqual({ kind: "false", held: ["CONTEXT.md"] });
+    expect(absence("ADRs are absent", "", files)).toEqual({ kind: "false", held: ["docs/adr/0001-x.md"] });
+    expect(absence("there is no Dockerfile", "", files)).toEqual({ kind: "true", names: ["Dockerfile"] });
+    expect(absence("the build uses Gradle 8.10", "gradle/libs.versions.toml", files)).toEqual({ kind: "not-absence" });
   });
 });

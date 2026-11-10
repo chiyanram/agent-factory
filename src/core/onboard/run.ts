@@ -5,10 +5,12 @@
 //     the host (hostGit), and the commands they list (listing.ts), with no program from the repo run
 //   2 a fresh, read-only model run, the same model seam the automated review uses (review/model.ts: claude --restricted,
 //     Read, Grep and Glob only, no MCP server, no forge token), in a folder that holds code/, the code at the default
-//     branch with every rule file and symlink removed, and commands.md; its prompt is the onboarder role card
+//     branch with every rule file and symlink removed, commands.md, and rules.md, the MUSTs the engine read from the
+//     root AGENTS.md and CLAUDE.md (musts.ts); its prompt is the onboarder role card
 //     (process/cards.ts), its answer the stack, modules, gotchas and terms (answer.ts)
 //   3 brief.md and glossary.md written from the answer and the engine's own reading (brief.ts), every cite checked
-//     against the default branch, then staged in the project home for a human
+//     against the default branch and every absence claim against its file list, then staged in the project home for
+//     a human; a brief whose absence claim the file list contradicts is refused, and nothing is staged
 //
 // Nothing here writes to the product repo, pushes or posts. What the model run spent is recorded in the project's run
 // records (records.ts "spent", as onboarder), finished or failed, so usage and the day cap count it.
@@ -28,6 +30,7 @@ import { ANSWER_SCHEMA, readAnswer, type Answer } from "./answer.js";
 import { written, type Written } from "./brief.js";
 import { stage, type Hashes } from "./home.js";
 import { commandsOf, type Commands } from "./listing.js";
+import { projectMusts, RULE_FILES, type Must } from "./musts.js";
 
 export type OnboardSetup = {
   readonly home: string;
@@ -109,7 +112,7 @@ async function linesAt(
   return out;
 }
 
-const ROOT_FILES = ["Makefile", "package.json", "CONTEXT.md", "GLOSSARY.md"] as const;
+const ROOT_FILES = ["Makefile", "package.json", "CONTEXT.md", "GLOSSARY.md", ...RULE_FILES] as const;
 const WRAPPERS = ["gradlew", "mvnw"] as const;
 
 function textOf(lines: ReadonlyMap<string, readonly string[]>, path: string): string | undefined {
@@ -137,6 +140,21 @@ function commandsText(commands: Commands): string {
   return `# Commands\n\nListed by the engine from ${commands.from}:\n\n${rows.join("\n")}\n`;
 }
 
+// rulesText : the MUSTs the engine read from the root AGENTS.md and CLAUDE.md, for the model to read as data: code/
+// holds no rule file, so the model must not take their absence there for the repo's
+function rulesText(musts: readonly Must[]): string {
+  const rows = musts.map((m) => `- ${m.text} (${m.file}:${m.line})`);
+  return [
+    "# Project rules",
+    "",
+    "code/ has every AGENTS.md, CLAUDE.md, .claude/ and .agents/ removed; the repo's own copy still holds them.",
+    "The engine read the root ones itself and writes this section of the brief; say nothing of their absence.",
+    "",
+    ...(rows.length === 0 ? ["No MUST found in the root AGENTS.md or CLAUDE.md."] : rows),
+    "",
+  ].join("\n");
+}
+
 type Ran = { readonly answer: Result<Answer>; readonly spend: Spend };
 
 // asked : the model run in its folder, and what it spent, finished or failed
@@ -158,7 +176,12 @@ async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<R
 }
 
 // inFolder : a fresh run folder with the code and the commands, gone afterwards
-async function inFolder(setup: OnboardSetup, base: Base, commands: Commands, card: Card): Promise<Result<Ran>> {
+async function inFolder(
+  setup: OnboardSetup,
+  base: Base,
+  read: { readonly commands: Commands; readonly musts: readonly Must[] },
+  card: Card,
+): Promise<Result<Ran>> {
   let folder = "";
   try {
     await mkdir(setup.runsDir, { recursive: true, mode: 0o700 });
@@ -173,7 +196,8 @@ async function inFolder(setup: OnboardSetup, base: Base, commands: Commands, car
     if (copied.kind === "failed") {
       return copied;
     }
-    await writeFile(join(folder, "commands.md"), commandsText(commands), { mode: 0o600 });
+    await writeFile(join(folder, "commands.md"), commandsText(read.commands), { mode: 0o600 });
+    await writeFile(join(folder, "rules.md"), rulesText(read.musts), { mode: 0o600 });
     return { kind: "ok", value: await asked(setup, card, folder) };
   } catch {
     return failed(`cannot make a run folder in ${setup.runsDir}`);
@@ -200,7 +224,12 @@ function citedPaths(answer: Answer): readonly string[] {
 }
 
 // writtenFrom : brief.md and glossary.md from the answer, every cite read at the default branch
-async function writtenFrom(setup: OnboardSetup, base: Base, commands: Commands, answer: Answer): Promise<Written> {
+async function writtenFrom(
+  setup: OnboardSetup,
+  base: Base,
+  commands: Commands,
+  answer: Answer,
+): Promise<Result<Written>> {
   const lines = await linesAt(setup, base, [...ROOT_FILES, ...citedPaths(answer)]);
   return written({
     project: setup.project,
@@ -228,8 +257,9 @@ export async function onboard(setup: OnboardSetup): Promise<Result<Onboarded>> {
 
 // onBase : the commands listed at the default branch, the model run, its spend recorded, then the files staged
 async function onBase(setup: OnboardSetup, base: Base, card: Card): Promise<Result<Onboarded>> {
-  const commands = commandsAt(base, await linesAt(setup, base, ROOT_FILES));
-  const ran = await inFolder(setup, base, commands, card);
+  const root = await linesAt(setup, base, ROOT_FILES);
+  const commands = commandsAt(base, root);
+  const ran = await inFolder(setup, base, { commands, musts: projectMusts((p) => root.get(p)) }, card);
   if (ran.kind === "failed") {
     return ran;
   }
@@ -253,7 +283,10 @@ async function staged(
   },
 ): Promise<Result<Onboarded>> {
   const files = await writtenFrom(setup, run.base, run.commands, run.answer);
-  const done = await stage({ home: setup.home, project: setup.project, written: files });
+  if (files.kind === "failed") {
+    return files;
+  }
+  const done = await stage({ home: setup.home, project: setup.project, written: files.value });
   return done.kind === "ok"
     ? { kind: "ok", value: { hashes: done.value, spend: run.spend, card: run.card.sha256 } }
     : done;

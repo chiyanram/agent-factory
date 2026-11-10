@@ -141,9 +141,13 @@ onboarder:
    targets first (the front door), else `package.json`'s scripts; a Gradle or Maven wrapper alone is named as
    inferred. A fresh model run, from the onboarder role card (the process plugin's `process/roles/onboarder.md`, else
    `prompts/roles/onboarder.md`), with Read, Grep and Glob only, gives the stack, the modules, the gotchas at
-   `file:line` and the domain terms. The engine writes `brief.md` and `glossary.md` in `<project>/staged/`: every
-   line marked verified or inferred, a cite the default branch does not hold marked inferred, the project's
-   `AGENTS.md`, `CONTEXT.md` and ADRs linked and never copied, and a term `CONTEXT.md` defines linked there. It prints
+   `file:line` and the domain terms. The engine writes `brief.md` and `glossary.md` in `<project>/staged/`: first
+   "Project rules", each MUST of the root `AGENTS.md` and `CLAUDE.md`, which the engine reads itself (a list item
+   under a MUST heading, or a statement with MUST, MUST NOT, SHALL or NEVER in capitals), one line each, cited to its
+   line (#383); then every line marked verified or inferred, a cite the default branch does not hold marked inferred,
+   the project's `AGENTS.md`, `CONTEXT.md` and ADRs linked, and a term `CONTEXT.md` defines linked there. A line
+   that says a file is absent is never verified by its cite: it is checked against the default branch's file list,
+   and a brief that says a file the repo holds is absent is refused with the reason, and nothing is staged. It prints
    both hashes. What it spent goes in `runs/<project>/onboarder.jsonl`.
 2. Read both files, then `agent-factory onboard accept <project> <brief hash> <glossary hash>`: they move into the
    project home, with `knowledge.json` recording the hashes, who and when. Hashes that no longer match are refused.
