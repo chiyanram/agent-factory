@@ -143,7 +143,7 @@ way as chiyanram/skills.
 | `broken link: <file>:<line>: <target>` | a relative link points at a missing file; fix the path |
 | `too long: AGENTS.md` | the root `AGENTS.md` reached 200 lines; move detail into `GUIDE.md` and link it |
 | `refused: … a human account` | log the CLI in as the bot ([GUIDE.md](GUIDE.md#set-up-identity)) |
-| `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | export the setting ([GUIDE.md](GUIDE.md#settings)) |
+| `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | run `agent-factory init` in the clone, which writes them to the project file; or export the setting ([GUIDE.md](GUIDE.md#settings)) |
 | `cannot list live runs: claude agents --json failed` | the `claude` CLI is missing or too old |
 | `gitlab: HTTP 429 after 4 tries` | the git host is rate-limiting; wait, or raise `FACTORY_MAX_TRIES` |
 

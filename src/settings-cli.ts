@@ -162,6 +162,19 @@ export async function checkProblems(
   return { kind: "ok", value: allProblems(loaded.value.path, layers) };
 }
 
+// candidateProblems : what config check would find in a project file not yet written (init checks before it writes)
+export async function candidateProblems(
+  io: Pick<SettingsIo, "home" | "env">,
+  path: string,
+  text: string,
+): Promise<readonly Problem[]> {
+  const loaded = parsedProject(path, text);
+  if (loaded.kind === "failed") {
+    return [{ level: "error", text: loaded.reason }];
+  }
+  return allProblems(path, await layered({ home: io.home, env: io.env, project: loaded.value }));
+}
+
 async function check(io: SettingsIo, project: string): Promise<number> {
   const loaded = await loadProject(io.home, project);
   if (loaded.kind === "failed") {

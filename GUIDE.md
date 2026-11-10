@@ -32,6 +32,54 @@ cd af-$V && npm ci && npm pack && npm i -g ./chiyanram-agent-factory-$V.tgz && a
 We do not use `npm i -g github:chiyanram/agent-factory#v<version>`, because npm does not give that build its
 devDependencies, so the build fails.
 
+## Set up with agent-factory init
+
+`agent-factory init` sets up this laptop and one project in one guided run (#369). It is plain code, with no model run.
+Run it inside the product clone, or name the clone with `--repo <absolute path>`:
+
+```bash
+cd ~/workspace/ledger
+agent-factory init            # the project's name defaults to the clone folder's: ledger
+```
+
+1. **Reads the clone.** The git host and the project from `origin` (`github.com` is `github`; any other host is
+   `gitlab`, and its name becomes `gitHostName`), the clone's path, the build tool (`./gradlew`, `./mvnw` or `pom.xml`,
+   `package.json`, `Makefile`: `ready.programs`, the verify command and the egress hosts its dependencies need, plus
+   `api.anthropic.com`), the integration tests in `src/integrationTest` (the built-in test globs hold them), Flyway
+   (`db/migration`) and Liquibase (`db/changelog`) folders, the CI files and the toolchain file (`mise.toml`,
+   `.tool-versions`, `.sdkmanrc`). It runs none of the clone's programs.
+2. **Asks one round**, in the style of `questions: round`: the project on the git host, the runner (`srt` or `vm`),
+   the gate (`forge-ci` when the clone has CI files, else `local` with the verify command), the plugins
+   (`rulebook@chiyanram` or none) and, when it found migrations, whether they are one-way doors. Each question has
+   lettered choices with the recommended one marked; answer `1A 2B`, or press Enter to take every recommendation.
+   `--yes` takes them all, for a repeat setup. A question whose key the files already hold is not asked.
+3. **Writes the answers** to the settings layers, never to the repo or a shell profile: `runner` to
+   `$FACTORY_HOME/user.json`, and the rest to `$FACTORY_HOME/projects/<project>.json`, including the project's
+   identity: `gitHost`, `gitHostProject` and `clone` ([Settings](#settings)). It shows each key it adds (`+`) and each
+   value it would replace (`~`), and replaces one only after your yes; `--yes` keeps every value the files hold and
+   exits 3. A list key only grows. It runs `config check` on the result first, and writes nothing when that fails.
+4. **Pins each plugin** through `agent-factory plugin update` after it says what that does and you say yes: it clones
+   the marketplace to `$FACTORY_HOME/marketplaces/<marketplace>` through hostGit when it is not there
+   (`https://github.com/chiyanram/skills` for `chiyanram`).
+5. **Checks each piece** and prints ✓ or ✗ with the fix: `srt` at the pinned version (the exact install command, with
+   `--omit=optional`), the `claude` CLI, `agent-factory` and `srt` under the active Node (after a Node upgrade they
+   are gone; it prints the reinstall commands), the model token's days left (read from its expiry record in
+   `tokens.json`, never the token), the git host login for the project (the project's default branch, through the
+   `Forge` seam), each tool the toolchain file declares against the one `PATH` gives a run (for example SDKMAN!'s Java
+   25 first on `PATH` while `mise.toml` declares 27: it names the manager that wins and the fix), the coordinator's
+   settings, and `config check`.
+6. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
+   claude` when the token is missing, opening `claude` once in the clone, `agent-factory onboard <project>`,
+   `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec and `agent-factory start`.
+
+It never handles a secret and never runs a command only a human runs (`setup claude`, `onboard`, `onboard accept`,
+`start`, `approve`, `waive`). The coordinator's settings deny `agent-factory init`, since it writes the settings that
+hold the coordinator's wall. Exit 0 when every check passes, 1 when one fails or init refuses, 3 when `--yes` kept a
+value. Running it again is safe: it asks only what is missing and writes nothing when nothing changed. Once the files
+hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports.
+
+The sections below are the manual steps, kept as reference.
+
 ## Set up identity
 
 The factory pushes and posts with a git host login that **only code uses**: the orchestrator and the host push. No
@@ -203,7 +251,7 @@ The wall (`src/core/coordinator.ts`):
   `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215).
   `agent-factory onboard`: the onboarder's run and the acceptance of its brief are a human's (#235). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
-  `agent-factory plugin` and `agent-factory project`. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
+  `agent-factory plugin`, `agent-factory project` and `agent-factory init`, which write settings. Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
   `starts`, `waivers`,
   `projects`, `runs`, `secrets`, `coordinator`, `pending`, `writes`, `plugins.json` and `plugins`. Reading the
   secret paths: `~/.ssh`, `~/.gnupg`, the gh and glab logins, `~/.git-credentials`, `~/.netrc`, the cloud logins,
@@ -361,13 +409,15 @@ failure. `forge.write` is the orchestrator's alone, and no Jira status, assignee
 
 ## Settings
 
-The commands read their settings from the environment.
+The commands read their settings from the settings layers ([Settings layers](#settings-layers)): the files in the
+factory home, and the `FACTORY_*` variables below as the lowest layer. `agent-factory init` writes the files, so no
+variable needs exporting.
 
 | setting | meaning | default |
 |---|---|---|
-| `FACTORY_FORGE` | the git host adapter | `gitlab` (or `github`) |
-| `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` | — |
-| `FACTORY_REPO` | a local clone of that project; worktrees, context packs and run files go in its `.claude/` | — |
+| `FACTORY_FORGE` | the git host adapter (`gitHost`, locked; `agent-factory init` writes it to the project file) | `gitlab` (or `github`) |
+| `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` (`gitHostProject`, a preference; `init` writes it to the project file). The project file only: a team or user file that sets it is refused, since every project reads those. The variable still wins when set, with a warning when it differs from the project file (#369) | — |
+| `FACTORY_REPO` | a local clone of that project, an absolute path; worktrees, context packs and run files go in its `.claude/` (`clone`, a preference, the project file only, like `gitHostProject`) | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
@@ -536,8 +586,8 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow`, `srt.readOnly` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
-| locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor` |
-| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes` |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor`, `gitHost`, `gitHostName` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes`, `gitHostProject` and `clone` (the project file only) |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
   layer, its `file:line` and the team value. A team `locked` mode holds on any class.
@@ -552,6 +602,11 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   `start` resolve the project's layers once before the run, print each warning, and refuse to start on an error, so a
   team's `caps.usdPerRun` is the most each model run of the project may spend (#254). `poll` and the loop commands
   name no project, so they resolve the user and machine layers only; `lint-edit` reads no setting.
+- `gitHostProject` and `clone` name one project's own place, so only the project file (or the variable) sets them;
+  a preference, so an exported `FACTORY_PROJECT` or `FACTORY_REPO` still wins, and `config check` warns when it
+  differs from the project file. `gitHost` stays locked: a `FACTORY_FORGE` that differs from the project file is
+  refused, never a quiet switch to another git host (#369). `poll` and the loop commands (`claim`, `release`,
+  `status`, `ask`, `block`, `reconcile`) name no project, so they still read these from the variables.
 - Every module reads a machine key through `src/core/settings/machine.ts`, never its variable;
   `test/settings-read.test.ts` fails on a direct read.
 
@@ -904,6 +959,7 @@ request, and `!12` stands for `#12`.
 
 | script | does |
 |---|---|
+| `agent-factory init [<project>] [--repo <path>] [--yes]` | the guided setup of this laptop and one project ([Set up with agent-factory init](#set-up-with-agent-factory-init)): reads the clone, asks one round, writes `user.json` and the project file, pins the plugins, checks each piece and prints the next commands. A human runs it; the coordinator's settings deny it (#369) |
 | `agent-factory poll` | one line per open PR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks, `conflict` (`yes`, `no`, or `unknown` while the git host has not checked); plus each merged PR that still carries the claim; `--json` prints the records |
 | `agent-factory claim <pr>` / `agent-factory release <pr>` | adds or removes the claim label; `claim` refuses a PR already claimed or not open; `release` of a PR with no claim says so and is not an error |
 | `agent-factory review <project> <pr>` | one review round on a claimed PR: the context pack; the same patch-id as the last round reuses its verdict with no model run (with Act on still open, `needs-human`); after 3 rounds it refuses; then one finder run per lens the blast radius picks (`review.lenses`; the lane's lens count; every lens on the logic model for a one-way door; the test-integrity lens when an existing test changed), in parallel, their findings merged by `file:line` and rule, and one verify pass per kind, each a fresh read-only `claude -p` in a throwaway folder with the pack and the code at the head and no rule file; one thread per Act on and Consider; the status list; one summary note, last. It refuses a PR that already has a live implementer or review run, and a machine at `FACTORY_MAX_RUNS`, and holds `.claude/runs/reviewer-<pr>.pid` while it runs. A change that touches a file whose name holds a control character is refused, for a person to review. Exit 0 posted, reused or nothing to do, 3 when the head moved (nothing posted), 1 otherwise. Each pass's answer is kept under `.claude/runs/<pr>/<head>/`, with each lens's unique verified findings |

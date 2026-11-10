@@ -86,7 +86,7 @@ function egressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<Egress> 
 }
 
 function repoOf(env: NodeJS.ProcessEnv): Result<string> {
-  const repo = env.FACTORY_REPO ?? "";
+  const repo = settingOf(env, "clone") ?? "";
   return isAbsolute(repo)
     ? { kind: "ok", value: repo }
     : { kind: "failed", reason: `FACTORY_REPO must be an absolute path, got ${JSON.stringify(repo)}` };

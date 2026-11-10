@@ -93,6 +93,12 @@ const MACHINE_CHECK: Readonly<Record<KeyClass, Check>> = {
   preference: text,
 };
 
+// a project on the git host: owner/name on GitHub, the full path on GitLab; forge/target.ts checks it in full. Pure.
+const hostProject: Check = (value) =>
+  typeof value === "string" && /^[\w.-]+(\/[\w.-]+)+$/.test(value)
+    ? ""
+    : 'the project on the git host, such as "chiyanram/ledger"';
+
 function machine<const I extends string>(
   id: I,
   env: string,
@@ -109,6 +115,26 @@ export const MACHINE_KEYS = [
   machine("dryRun", "FACTORY_DRY_RUN", "ladder", "1 shows each write on the git host and makes none"),
   machine("gitHost", "FACTORY_FORGE", "locked", "the git host's kind: gitlab or github"),
   machine("gitHostName", "FACTORY_FORGE_HOST", "locked", "the git host's name, when it is not the public one"),
+  {
+    ...machine(
+      "gitHostProject",
+      "FACTORY_PROJECT",
+      "preference",
+      "the project on the git host: owner/name on GitHub, the full path on GitLab; the project file only (#369)",
+      hostProject,
+    ),
+    projectOnly: true,
+  },
+  {
+    ...machine(
+      "clone",
+      "FACTORY_REPO",
+      "preference",
+      "the project's clone on this machine, an absolute path; the project file only (#369)",
+      absolutePath,
+    ),
+    projectOnly: true,
+  },
   machine("identity", "FACTORY_IDENTITY", "locked", "own (your gh or glab login) or app (a GitHub App)"),
   machine(
     "runner",

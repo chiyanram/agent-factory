@@ -54,7 +54,10 @@ async function executable(path: string): Promise<boolean> {
 }
 
 // which : the first PATH entry that holds an executable `name`, as found and as its real file
-async function which(name: string, path: string): Promise<{ readonly found: string; readonly real: string } | "none"> {
+export async function which(
+  name: string,
+  path: string,
+): Promise<{ readonly found: string; readonly real: string } | "none"> {
   for (const dir of path.split(delimiter).filter((d) => d.startsWith("/"))) {
     const found = join(dir, name);
     if (await executable(found)) {

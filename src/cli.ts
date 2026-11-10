@@ -9,6 +9,14 @@ import { fileURLToPath } from "node:url";
 import { runCli } from "./app.js";
 import { runProcess } from "./core/forge/api.js";
 import { readHidden } from "./core/token/index.js";
+import { createInterface, type Interface } from "node:readline/promises";
+
+// readLine : one line typed at the terminal, for init's questions (#369); one reader for the whole command
+let lines: Interface | undefined;
+function readLine(prompt: string): Promise<string> {
+  lines ??= createInterface({ input: process.stdin, output: process.stderr, terminal: process.stdin.isTTY });
+  return lines.question(prompt).catch(() => "");
+}
 
 // background : this command line again, detached from this terminal, its output appended to the log, so it outlives
 // the command that started it (the orchestrator loop, #305). It gets this process's own environment, so it resolves
@@ -44,6 +52,7 @@ runCli(process.argv.slice(2), {
   out: (text) => process.stdout.write(text),
   err: (text) => process.stderr.write(text),
   readSecret: readHidden,
+  ...(process.stdin.isTTY ? { readLine } : {}),
   readStdin: async () => {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) {

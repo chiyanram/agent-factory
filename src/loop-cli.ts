@@ -122,7 +122,7 @@ async function withLiveness(
           home: homeOf(io.env),
           forge,
           label,
-          repo: io.env.FACTORY_PROJECT ?? "",
+          repo: settingOf(io.env, "gitHostProject") ?? "",
           now: Date.now(),
           line: done.value,
         }),
@@ -140,7 +140,7 @@ function blocked(positionals: readonly string[], io: LoopIo): Promise<number> | 
 }
 
 function reconciled(positionals: readonly string[], io: LoopIo): Promise<number> | number {
-  const repo = io.env.FACTORY_REPO ?? "";
+  const repo = settingOf(io.env, "clone") ?? "";
   if (positionals.length !== 0) {
     return usage("reconcile", io);
   }
@@ -165,7 +165,7 @@ function reconciled(positionals: readonly string[], io: LoopIo): Promise<number>
 // landingTarget : where a dead writer's unlanded commits go: the project on its forge's host, as its identity
 function landingTarget(env: NodeJS.ProcessEnv, forge: Forge, identity: Identity): Result<PushTarget> {
   const host = forgeHost(env, forge.name);
-  const project = env.FACTORY_PROJECT ?? "";
+  const project = settingOf(env, "gitHostProject") ?? "";
   if (host.kind === "failed") {
     return host;
   }

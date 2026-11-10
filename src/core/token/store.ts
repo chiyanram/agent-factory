@@ -70,6 +70,13 @@ function asMeta(value: unknown): MetaRead {
     : { kind: "bad" };
 }
 
+// tokenRecord : a token's expiry on record in <home>/tokens.json, read without the token itself (#369: init checks a
+// token's days left and never reads the secret); none when no expiry is on record
+export async function tokenRecord(home: string, runner: Runner): Promise<Meta | "none"> {
+  const meta = asMeta((await readMetas(home))[runner]);
+  return meta.kind === "meta" ? meta.meta : "none";
+}
+
 async function writeMeta(home: string, runner: Runner, meta: Meta): Promise<Done> {
   try {
     const all = { ...(await readMetas(home)), [runner]: meta };

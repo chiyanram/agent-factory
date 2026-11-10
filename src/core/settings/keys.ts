@@ -52,6 +52,9 @@ type Held = Common & {
   readonly checkProject?: true;
   // a cap whose value is not a number: true when `lower` is no more than `upper` (the run hours: its hours are within)
   readonly within?: (lower: unknown, upper: unknown) => boolean;
+  // true for a key that names one project's own place (its git host project, its clone): only the project file or its
+  // variable sets it, never a team or user file, which every project reads (#369)
+  readonly projectOnly?: true;
 };
 
 // a key the files hold, at its path of the JSON object

@@ -111,7 +111,7 @@ function limits(env: NodeJS.ProcessEnv): Result<Limits> {
 type Places = { readonly repo: string; readonly home: string };
 
 function places(env: NodeJS.ProcessEnv): Result<Places> {
-  const repo = absolute("FACTORY_REPO", env.FACTORY_REPO);
+  const repo = absolute(settingName("clone"), settingOf(env, "clone"));
   if (repo.kind === "failed") {
     return repo;
   }

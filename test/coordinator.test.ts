@@ -228,6 +228,17 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     }
   });
 
+  it("denies init: it writes the user layer and the project file, which hold the wall (#369)", () => {
+    for (const command of [
+      "agent-factory init",
+      "agent-factory init ledger --yes",
+      "agent-factory init --repo /work/ledger",
+    ]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    expect(copilotArgs(PLACES)).toContain("shell(agent-factory init)");
+  });
+
   it("builds its absolute rules from a factory home with a space in it", () => {
     const spaced = { ...PLACES, factoryHome: "/home/r m/.factory" };
     expect(verdict("Edit", "/home/r m/.factory/approvals/a.json", spaced)).toBe("deny");

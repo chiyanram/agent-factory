@@ -13,6 +13,7 @@ import { writerSettings } from "./settings.js";
 import type { LaneProps } from "../lane.js";
 import type { PushTarget, WriterSetup } from "./step.js";
 import type { PluginDir } from "../process/read.js";
+import { settingOf } from "../settings/machine.js";
 
 export type WriterInput = {
   readonly env: NodeJS.ProcessEnv;
@@ -32,7 +33,7 @@ export type WriterInput = {
 
 function pushTarget(input: WriterInput): Result<PushTarget> {
   const host = forgeHost(input.env, input.forge.name);
-  const project = input.env.FACTORY_PROJECT ?? "";
+  const project = settingOf(input.env, "gitHostProject") ?? "";
   if (project === "") {
     return { kind: "failed", reason: "FACTORY_PROJECT is not set" };
   }

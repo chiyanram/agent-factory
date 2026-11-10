@@ -219,6 +219,8 @@ so work and personal logins never mix.
 - Safety keys only get stricter in a lower layer.
 - An unknown key is an error.
 - The commands are `config show`, `config check` and `team update`.
+- `agent-factory init` writes the user layer and the project file from one guided round (#369). The project's
+  identity, its git host, its project there and its clone, lives in the project file; their variables still win.
 
 **Audit.** Every action in the run records names the agent's role, the human who started the ticket, and the run id.
 
