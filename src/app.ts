@@ -2,7 +2,7 @@
 // can run every command. src/cli.ts only binds it to the process (#101). A UI replaces only these two files.
 
 import { parseArgs } from "node:util";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
@@ -63,6 +63,9 @@ import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
+import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
+import type { Probes } from "./core/init/checks.js";
+import { which } from "./core/box/srt-programs.js";
 import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
 import { onboardSetup } from "./core/onboard/settings.js";
 import { capsOf, type Caps } from "./core/dispatch/caps.js";
@@ -120,7 +123,7 @@ commands:
 ${USAGE_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
+${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
 options:
   --help      show this help
   --version   show the package version
@@ -149,6 +152,8 @@ type Args = {
   readonly dryRun: boolean;
   readonly yes: boolean;
   readonly noLoop: boolean;
+  // init: the product clone to read (default: the current folder)
+  readonly repo: string | undefined;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -161,6 +166,8 @@ export type Io = {
   readonly readSecret: (prompt: string) => Promise<string>;
   // all of stdin, for the lint-edit hook
   readonly readStdin: () => Promise<string>;
+  // one line the person types at a terminal, for init's questions (#369); none off a terminal
+  readonly readLine?: (prompt: string) => Promise<string>;
   // the machine setup stores tokens on; a test passes linux and its own uid, so it never touches a Keychain
   readonly system: {
     readonly platform: NodeJS.Platform;
@@ -730,7 +737,7 @@ async function passSetup(
       quietMinutes: settings.quiet,
       pollMinutes: settings.poll,
       caps: settings.caps,
-      repo: io.env.FACTORY_PROJECT ?? "",
+      repo: settingOf(io.env, "gitHostProject") ?? "",
       dryRun,
       log: (line) => io.out(`${line}\n`),
       notify: notify.value,
@@ -1186,6 +1193,78 @@ async function teamCli({ positionals, json, io }: Args): Promise<number> {
   return sio === undefined ? 1 : teamCommand(positionals, sio);
 }
 
+// initProbes : what init's checks ask this machine: programs on PATH, srt's version, the git host login for the project
+// (through the Forge seam, with the project's settings resolved from the files init just wrote) and the coordinator's
+// settings
+function initProbes(io: Io, home: string): Probes {
+  return {
+    run: io.system.run,
+    env: io.env,
+    which: (name) => which(name, io.env.PATH ?? ""),
+    execPath: realExecPath(),
+    home: homedir(),
+    platform: io.system.platform,
+    now: new Date(),
+    version: version(),
+    gitHost: async (project) => {
+      const settings = await runSettings({ home, project, env: io.env });
+      const opened =
+        settings.kind === "ok"
+          ? await openProjectForge(
+              { env: settings.value.env, log: (line) => io.err(`${line}\n`), run: io.system.run },
+              { home, project, plugins: await pluginSetup(home, settings.value.env) },
+            )
+          : settings;
+      return opened.kind === "ok" ? opened.value.forge.defaultBranch() : opened;
+    },
+    wall: async () => {
+      const places = placesOf(io);
+      const wall = places.kind === "ok" ? await checkWall(places.value) : places;
+      return wall.kind === "ok" ? { kind: "ok", value: "" } : wall;
+    },
+  };
+}
+
+function realExecPath(): string {
+  try {
+    return realpathSync(process.execPath);
+  } catch {
+    return process.execPath;
+  }
+}
+
+// initDir : the clone init reads: --repo, an absolute path, else the current folder
+function initDir(repo: string | undefined): string | undefined {
+  const dir = repo ?? process.cwd();
+  return isAbsolute(dir) ? dir : undefined;
+}
+
+// init : the guided setup of this laptop and one project (#369); the coordinator's settings deny it
+async function initCli({ positionals, yes, repo, io }: Args): Promise<number> {
+  const home = factoryHome(io.env);
+  const dir = initDir(repo);
+  if (positionals.length > 1 || dir === undefined) {
+    io.err("usage: agent-factory init [<project>] [--repo <absolute path>] [--yes]\n");
+    return 64;
+  }
+  if (home.kind === "refused") {
+    io.err(`agent-factory init: ${home.reason}\n`);
+    return 1;
+  }
+  return initCommand(
+    { project: positionals[0], dir, yes },
+    {
+      env: io.env,
+      out: io.out,
+      err: io.err,
+      home: home.path,
+      ...(io.readLine === undefined ? {} : { readLine: io.readLine }),
+      probes: initProbes(io, home.path),
+      markets: KNOWN_MARKETS,
+    },
+  );
+}
+
 // coordinator : the coordinator's session, in its own folder with its own settings (#106)
 async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
   const runner = runnerOf(positionals);
@@ -1260,6 +1339,7 @@ const COMMANDS: readonly Command[] = [
   { name: "box", run: boxCommand },
   { name: "config", run: configCli },
   { name: "team", run: teamCli },
+  { name: "init", run: initCli },
   ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
     name,
     // the writer's lint hook reads no setting, and prints only the lint's own output
@@ -1317,6 +1397,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       template: { type: "boolean" },
       yes: { type: "boolean" },
       "no-loop": { type: "boolean" },
+      repo: { type: "string" },
     },
   });
   if (values.version === true) {
@@ -1335,6 +1416,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
     dryRun: values["dry-run"] === true,
     yes: values.yes === true,
     noLoop: values["no-loop"] === true,
+    repo: values.repo,
     positionals: positionals.slice(1),
     io,
   });

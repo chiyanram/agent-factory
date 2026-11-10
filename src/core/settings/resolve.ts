@@ -225,8 +225,16 @@ function entriesOf(key: Key, context: Context): readonly Entry[] {
 // the project file's readers, so their refusals read as they do today, unless the key has no reader there; a machine
 // variable is left to its module's own check
 function checked(key: Key, entry: Entry): string {
+  if (sharedLayer(key, entry.source.layer)) {
+    return `${key.id} in ${where(entry.source)} names one project's own place, which every project would read; set it in the project file (agent-factory init does)`;
+  }
   const why = checkedHere(key, entry.source.layer) ? key.check(entry.value) : "";
   return why === "" ? "" : `${key.id} in ${where(entry.source)} must be ${why}`;
+}
+
+// sharedLayer : a project-only key set in a layer every project reads (#369)
+function sharedLayer(key: Key, layer: LayerName): boolean {
+  return key.projectOnly === true && (layer === "team" || layer === "user");
 }
 
 function checkedHere(key: Key, layer: LayerName): boolean {
@@ -338,8 +346,31 @@ export function resolve(input: Input): Resolution {
   const unknown = input.layers.flatMap(unknownKeys);
   const old = input.layers.flatMap(oldNames);
   const project = input.layers.find((l) => l.name === "project");
-  const problems = [...input.problems, ...errors, ...unknown, ...old];
+  const shadows = KEYS.flatMap((k) => overridden(k, context));
+  const problems = [...input.problems, ...errors, ...unknown, ...old, ...shadows];
   return { values, problems, effective: effectiveOf(project, values) };
+}
+
+// overridden : a project-only key whose variable wins over a different project file value (#369), so a variable
+// exported in a shell profile for one project never quietly points another project at the wrong place
+function overridden(key: Key, context: Context): readonly Problem[] {
+  return key.projectOnly === true && key.where === "machine" ? shadowed(key.id, key.env, entriesOf(key, context)) : [];
+}
+
+function shadowed(id: string, env: string, entries: readonly Entry[]): readonly Problem[] {
+  const file = entries.find((e) => e.source.layer === "project");
+  const machine = entries.find((e) => e.source.layer === "machine");
+  if (file === undefined || machine === undefined) {
+    return [];
+  }
+  return canonical(file.value) === canonical(machine.value)
+    ? []
+    : [
+        {
+          level: "warning",
+          text: `${id}: the variable ${env} (${show(machine.value)}) wins over ${where(file.source)} (${show(file.value)}); unset it to use the project file`,
+        },
+      ];
 }
 
 // oldNames : a key still read under its old name, for one release, with a warning (#232)

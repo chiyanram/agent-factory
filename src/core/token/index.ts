@@ -33,6 +33,7 @@ export {
   fileVault,
   keychainVault,
   openStore,
+  tokenRecord,
   unsafeFile,
   type Owner,
   type StoreInput,

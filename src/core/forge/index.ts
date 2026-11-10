@@ -68,7 +68,7 @@ function client(setup: ForgeSetup, name: "github" | "gitlab", tries: number): Cl
 }
 
 function adapter(setup: ForgeSetup, tries: number): Result<Forge> {
-  const project = setup.env.FACTORY_PROJECT ?? "";
+  const project = settingOf(setup.env, "gitHostProject") ?? "";
   const kind = forgeName(setup.env);
   if (kind.kind === "failed") {
     return kind;
@@ -167,7 +167,7 @@ export async function openProject(
   const now = setup.now ?? (() => Math.floor(Date.now() / 1000));
   const identity = await resolveIdentity({
     setting: setting.value,
-    project: setup.env.FACTORY_PROJECT ?? "",
+    project: settingOf(setup.env, "gitHostProject") ?? "",
     run: setup.run ?? runProcess,
     env: setup.env,
     now: now(),
@@ -256,7 +256,7 @@ function plainSettings(env: NodeJS.ProcessEnv, forge: ForgeName, plugin: string)
 }
 
 function targetFor(forge: ForgeName, env: NodeJS.ProcessEnv, plugin: string, setup: Setup): Result<PluginTarget> {
-  const project = env.FACTORY_PROJECT ?? "";
+  const project = settingOf(env, "gitHostProject") ?? "";
   const where = forge === "github" ? githubProject(project) : gitlabProject(project);
   return where.kind === "ok" ? { kind: "ok", value: { setup, plugin, forge, project } } : where;
 }

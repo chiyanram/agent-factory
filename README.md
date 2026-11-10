@@ -38,15 +38,20 @@ cd agent-factory
 make lint && make test
 ```
 
-Point the coordinator at a project. First set up its identity ([GUIDE.md](GUIDE.md#set-up-identity)), then:
+Set up a laptop and a project in one guided run. Install a release ([GUIDE.md](GUIDE.md#install-a-pinned-version)),
+then, inside the product clone:
 
 ```bash
-export FACTORY_FORGE=gitlab              # the git host: gitlab or github
-export FACTORY_PROJECT=group/project     # the GitLab project path, or owner/repo on GitHub
-export FACTORY_REPO=~/src/project        # a local clone of it
-export FACTORY_RULEBOOK=<rulebook plugin folder>
-npx agent-factory poll                   # one line of facts per open PR
+cd ~/workspace/ledger                    # your clone of the project, such as chiyanram/ledger
+agent-factory init                       # asks one round of choices; Enter takes the recommended ones
 ```
+
+`init` reads the clone (git host and project from `origin`, build tool, tests, migrations, CI, toolchain), writes the
+runner to `~/.factory/user.json` and the project file to `~/.factory/projects/<project>.json` (no shell exports), pins
+the plugins, checks each piece with its fix, and prints the commands only you run next: `claude setup-token` and
+`agent-factory setup claude` when the model token is missing, then `agent-factory onboard <project>`, `onboard accept`
+and `start`. Run it again any time: it asks only what is missing and shows a diff before it replaces a value. The
+manual steps stay in [GUIDE.md](GUIDE.md#set-up-with-agent-factory-init).
 
 Then start the coordinator (`agent-factory coordinator`) and follow [GUIDE.md](GUIDE.md#run-the-loop). The orchestrator
 loop (`agent-factory dispatch <project>`) runs the trigger table; `agent-factory start` and `approve` start it.
