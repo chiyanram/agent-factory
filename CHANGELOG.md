@@ -3,6 +3,21 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.33.0](https://github.com/chiyanram/agent-factory/compare/v0.32.2...v0.33.0) (2026-11-10)
+
+### ✨ Features
+
+* **process** — one process plugin per project: a second one fails config check and the run · [#426](https://github.com/chiyanram/agent-factory/issues/426) (PR [#442](https://github.com/chiyanram/agent-factory/pull/442))
+* **process** — one shared finding record, the verify pass lowers grades only, retro actions as json · [#425](https://github.com/chiyanram/agent-factory/issues/425) (PR [#439](https://github.com/chiyanram/agent-factory/pull/439))
+* **process** — role cards: guardrail ids from a closed list, an edit path scope checked on the run's commits, next dropped · [#424](https://github.com/chiyanram/agent-factory/issues/424) (PR [#440](https://github.com/chiyanram/agent-factory/pull/440))
+
+### 🐛 Fixes
+
+* **dispatch** — the loop runs the next pass at once after a step it ran itself · [#445](https://github.com/chiyanram/agent-factory/issues/445) (PR [#446](https://github.com/chiyanram/agent-factory/pull/446))
+* **ready** — safe read-only evidence programs by default, refuse evidence that cannot prove its criterion, keep a reworked ticket moving · [#444](https://github.com/chiyanram/agent-factory/issues/444) (PR [#447](https://github.com/chiyanram/agent-factory/pull/447))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.33.0/chiyanram-agent-factory-0.33.0.tgz`
+
 ## [0.32.2](https://github.com/chiyanram/agent-factory/compare/v0.32.1...v0.32.2) (2026-11-10)
 
 ### 🐛 Fixes
