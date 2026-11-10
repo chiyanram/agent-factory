@@ -207,9 +207,9 @@ describe("srt runner: the probe refuses to start without the pinned srt (S7)", (
     const missing = await box(fakeSrt({ version: { code: 127, stdout: "", stderr: "spawn srt ENOENT" } })).probe();
     expect(missing).toEqual({
       kind: "missing",
-      reason: `srt does not answer (spawn srt ENOENT); install it: npm install --global @anthropic-ai/sandbox-runtime@${SRT_VERSION}`,
+      reason: `srt does not answer (spawn srt ENOENT); install it: npm install --global --omit=optional @anthropic-ai/sandbox-runtime@${SRT_VERSION}`,
     });
-    const other = await box(fakeSrt({ version: { code: 0, stdout: "0.0.82\n", stderr: "" } })).probe();
+    const other = await box(fakeSrt({ version: { code: 0, stdout: "0.0.81\n", stderr: "" } })).probe();
     expect(other).toMatchObject({ kind: "missing", reason: expect.stringContaining(`not the pinned ${SRT_VERSION}`) });
     expect(readSrtProbe({ platform: "win32", programs: HOST.programs, version: VERSION })).toMatchObject({
       kind: "missing",

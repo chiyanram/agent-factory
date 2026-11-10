@@ -27,11 +27,13 @@ import type { Exit, Result } from "../forge/api.js";
 import type { Upstream } from "../egress/squid.js";
 import type { Command, Probe } from "./types.js";
 
-// the pinned srt (S7): a release at least two weeks old when it was pinned (0.0.81, 2026-10-20). A new pin is a PR
-// that changes this line and passes the laptop check (GUIDE.md "Check the srt runner").
-export const SRT_VERSION = "0.0.81";
+// the pinned srt (S7): an exact version, pinned only after its changes were reviewed (0.0.82, 2026-11-10). A new pin is
+// a PR that reviews the release, changes this line and passes the laptop check (GUIDE.md "Check the srt runner").
+export const SRT_VERSION = "0.0.82";
 export const SRT_PACKAGE = "@anthropic-ai/sandbox-runtime";
-export const SRT_INSTALL = `npm install --global ${SRT_PACKAGE}@${SRT_VERSION}`;
+// --omit=optional: srt's only optional dependency is the Windows MXC SDK (0.0.82), whose native packages run install
+// scripts; Windows is refused here, so the laptop never needs it
+export const SRT_INSTALL = `npm install --global --omit=optional ${SRT_PACKAGE}@${SRT_VERSION}`;
 
 // the platforms srt sandboxes with a stable backend; Windows is alpha in srt and is refused
 const PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set(["darwin", "linux"]);
