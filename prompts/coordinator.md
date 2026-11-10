@@ -136,8 +136,12 @@ and none outside `FACTORY_RUN_HOURS`. A lock keeps two passes apart, and
 `--dry-run` prints the decisions and acts on none.
 
 No cron or launchd job runs the orchestrator: a human's command starts the **orchestrator loop**, and it ends by
-itself (#305). `agent-factory dispatch <project>` without `--once` runs one pass, then waits `FACTORY_POLL_MINUTES`
-and runs the next, while any ticket with a START or an approval is in flight. It ends when each such ticket is
+itself (#305). `agent-factory dispatch <project>` without `--once` runs one pass, then the next, while any ticket
+with a START or an approval is in flight. After a pass that ran a step itself (an implementer, ready check, review, local
+verifier or design run) or wrote to the git host, the next pass starts at once ("next pass now"); it waits
+`FACTORY_POLL_MINUTES` only when each ticket waits on something outside the factory (CI, a person, a hold), and names
+it ("in flight: 4 (waiting on CI); next pass in 5 min"). A step that fails the same way twice in a row falls back to
+that wait, so a broken step never spins (#445). It ends when each such ticket is
 finished (merged or closed), has asked a person, stopped at `needs-human`, or waits on a human (an approval, a merge,
 a `/stop`); a loop with nothing in flight ends after its first pass. It never waits on what only a person can change:
 a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
@@ -243,7 +247,7 @@ in flight (a step not set up, a cap, failed passes) it adds when and why, from `
 otherwise it names `agent-factory dispatch <project>` while a change is claimed. Flaky jobs are not yet rerun with failure
 signatures (#132): red CI sends the implementer back.
 The order is fixed: implementer done → ready check → automated review → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
-The orchestrator loop polls the git host every `FACTORY_POLL_MINUTES` (5) while a ticket is in flight. Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
+The orchestrator loop polls the git host every `FACTORY_POLL_MINUTES` (5) while each ticket in flight waits on CI or a person, and at once after a step it ran itself (#445). Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
 
 | when the git host shows | do |
