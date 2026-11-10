@@ -345,6 +345,14 @@ const ABSENCE_CLAIM = {
   verified: true,
 };
 
+// what the ledger run on the operator's Mac said (#383), which refused the whole brief over build.gradle.kts
+const LEDGER_CLAIM = {
+  text: "Project rules: the repo has no agent instruction file (CLAUDE.md/AGENTS.md), no glossary and no ADRs. The only written rules are comments in build.gradle.kts and gradle/libs.versions.toml",
+  file: "build.gradle.kts",
+  line: 1,
+  verified: true,
+};
+
 describe("the project's MUSTs and the cite check (#383)", () => {
   beforeEach(() => {
     write("AGENTS.md", LEDGER_AGENTS);
@@ -385,13 +393,74 @@ describe("the project's MUSTs and the cite check (#383)", () => {
     expect(seen).toHaveLength(1);
   });
 
-  it("a brief that says AGENTS.md is absent, citing another file, is refused with the reason, and nothing is staged", async () => {
-    const answer = { ...ANSWER, stack: [ABSENCE_CLAIM] };
+  it("the ledger run's own line: dropped with a note, the brief staged, and Project rules the engine's alone", async () => {
+    write("build.gradle.kts", "plugins { java }\n");
+    write("gradle/libs.versions.toml", '[versions]\njava = "21"\n');
+    commitAndPush("gradle");
+    const answer = { ...ANSWER, stack: [LEDGER_CLAIM, ...ANSWER.stack] };
+    const out = await onboard(setup(model([], answer)));
+    expect(out).toMatchObject({ kind: "ok", value: { dropped: [expect.stringContaining(LEDGER_CLAIM.text)] } });
+    const brief = staged("brief.md");
+    expect(brief).not.toContain("agent instruction file");
+    expect(brief).toContain("- Java with Gradle, wrapped by make");
+    const rules = brief.slice(brief.indexOf("## Project rules"), brief.indexOf("## Stack"));
+    for (const line of LEDGER_MUSTS) {
+      expect(rules).toContain(line);
+    }
+    expect(brief).toContain("- [AGENTS.md](AGENTS.md) (verified)");
+    expect(brief).toContain("- [CLAUDE.md](CLAUDE.md) (verified)");
+    // the note is staged for the human, never accepted, and the spend is in the run records
+    const note = staged("dropped.md");
+    expect(note).toContain(LEDGER_CLAIM.text);
+    expect(note).toContain("the engine writes Project rules itself");
+    const read = await readRecords({ home: r.home, project: "ledger", ticket: "onboarder" });
+    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "spent" }] });
+  });
+
+  it("a model Project rules item, or one naming an instruction file, is dropped; the engine's section stays", async () => {
+    const answer = {
+      ...ANSWER,
+      modules: [
+        { name: "Project rules", job: "keep the build green", file: "Makefile", line: 1, verified: true },
+        ...ANSWER.modules,
+      ],
+      gotchas: [
+        { text: "Agent instructions sit in .claude/rules", file: "Makefile", line: 1, verified: false },
+        ...ANSWER.gotchas,
+      ],
+    };
+    const out = await onboard(setup(model([], answer)));
+    expect(out.kind === "ok" ? out.value.dropped : []).toHaveLength(2);
+    const brief = staged("brief.md");
+    expect(brief.match(/## Project rules/g)).toHaveLength(1);
+    expect(brief).not.toContain("keep the build green");
+    expect(brief).not.toContain("Agent instructions sit");
+    expect(brief).toContain("- You MUST NOT push to main. (`CLAUDE.md:3`, verified)");
+  });
+
+  it("a false absence claim elsewhere is dropped, naming the file the repo holds; the rest is staged", async () => {
+    const answer = {
+      ...ANSWER,
+      gotchas: [
+        { text: "There is no CONTEXT.md, so terms drift", file: "Makefile", line: 1, verified: true },
+        ...ANSWER.gotchas,
+      ],
+    };
+    const out = await onboard(setup(model([], answer)));
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: { dropped: [expect.stringContaining("but the default branch holds CONTEXT.md")] },
+    });
+    expect(staged("brief.md")).not.toContain("terms drift");
+    expect(staged("brief.md")).toContain("The overdue query compares due_on");
+  });
+
+  it("refused only when the engine dropped every model line, and nothing is staged; the spend is still recorded", async () => {
+    const answer = { stack: [ABSENCE_CLAIM], modules: [], gotchas: [], terms: [] };
     const out = await onboard(setup(model([], answer)));
     expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the brief is refused") });
     expect(out.kind === "failed" ? out.reason : "").toContain("AGENTS.md");
     expect(existsSync(join(r.home, "projects", "ledger", "staged"))).toBe(false);
-    // the spend is still in the run records
     const read = await readRecords({ home: r.home, project: "ledger", ticket: "onboarder" });
     expect(read).toMatchObject({ kind: "ok", value: [{ kind: "spent" }] });
   });
@@ -417,10 +486,33 @@ describe("the project's MUSTs and the cite check (#383)", () => {
   it("absence: the cited file itself is not an absence claim; a file the list holds makes the claim false", () => {
     const files = ["AGENTS.md", "CONTRIBUTING.md", "docs/adr/0001-x.md", "CONTEXT.md", "src/A.java"];
     expect(absence("A.java has no index", "src/A.java", files)).toEqual({ kind: "not-absence" });
-    expect(absence("there is no CONTRIBUTING guide", "", files)).toEqual({ kind: "false", held: ["CONTRIBUTING.md"] });
-    expect(absence("there is no glossary", "", files)).toEqual({ kind: "false", held: ["CONTEXT.md"] });
-    expect(absence("ADRs are absent", "", files)).toEqual({ kind: "false", held: ["docs/adr/0001-x.md"] });
+    expect(absence("there is no CONTRIBUTING guide", "", files)).toMatchObject({
+      kind: "false",
+      held: ["CONTRIBUTING.md"],
+    });
+    expect(absence("there is no glossary", "", files)).toMatchObject({ kind: "false", held: ["CONTEXT.md"] });
+    expect(absence("ADRs are absent", "", files)).toMatchObject({ kind: "false", held: ["docs/adr/0001-x.md"] });
     expect(absence("there is no Dockerfile", "", files)).toEqual({ kind: "true", names: ["Dockerfile"] });
     expect(absence("the build uses Gradle 8.10", "gradle/libs.versions.toml", files)).toEqual({ kind: "not-absence" });
+  });
+
+  it("absence reads the names the line claims absent, never another file it names", () => {
+    const files = ["AGENTS.md", "build.gradle.kts", "gradle/libs.versions.toml", "src/A.java"];
+    expect(absence(LEDGER_CLAIM.text, LEDGER_CLAIM.file, files)).toEqual({
+      kind: "false",
+      names: ["CLAUDE.md", "AGENTS.md", "a glossary", "an ADR directory"],
+      held: ["AGENTS.md"],
+    });
+    const noRules = files.filter((f) => f !== "AGENTS.md");
+    expect(absence(LEDGER_CLAIM.text, LEDGER_CLAIM.file, noRules)).toMatchObject({ kind: "true" });
+    expect(absence("Without a Dockerfile, the app runs from build.gradle.kts", "", files)).toEqual({
+      kind: "true",
+      names: ["Dockerfile"],
+    });
+    expect(absence("build.gradle.kts sets Java 21, and the wrapper file is missing", "", files)).toEqual({
+      kind: "unsure",
+      held: ["build.gradle.kts"],
+    });
+    expect(absence("A.java has no retry, see build.gradle.kts", "src/A.java", files)).toEqual({ kind: "not-absence" });
   });
 });

@@ -33,8 +33,13 @@ async function run(project: string, io: OnboardIo): Promise<number> {
     io.err(`agent-factory onboard: ${done.reason}\n`);
     return 1;
   }
-  const { hashes, spend } = done.value;
+  const { hashes, spend, dropped } = done.value;
   io.out(`staged in ${io.home}/projects/${project}/staged ($${spend.usd.toFixed(2)}, ${spend.tokens} tokens)\n`);
+  if (dropped.length > 0) {
+    io.out(
+      `dropped by the engine (staged/dropped.md; never sent to a run):\n${dropped.map((d) => `  - ${d}\n`).join("")}`,
+    );
+  }
   io.out(`brief ${hashes.brief}\nglossary ${hashes.glossary}\n`);
   io.out(`read both, then accept them: agent-factory onboard accept ${project} ${hashes.brief} ${hashes.glossary}\n`);
   return 0;

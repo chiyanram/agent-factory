@@ -10,7 +10,9 @@
 //     (process/cards.ts), its answer the stack, modules, gotchas and terms (answer.ts)
 //   3 brief.md and glossary.md written from the answer and the engine's own reading (brief.ts), every cite checked
 //     against the default branch and every absence claim against its file list, then staged in the project home for
-//     a human; a brief whose absence claim the file list contradicts is refused, and nothing is staged
+//     a human; a model line about the project's rules, or one that says a file the repo holds is absent, is dropped
+//     with a note (staged as dropped.md, and returned for the command to print); only a brief with no model line left
+//     is refused, and nothing is staged
 //
 // Nothing here writes to the product repo, pushes or posts. What the model run spent is recorded in the project's run
 // records (records.ts "spent", as onboarder), finished or failed, so usage and the day cap count it.
@@ -48,7 +50,13 @@ export type OnboardSetup = {
   readonly now: () => number;
 };
 
-export type Onboarded = { readonly hashes: Hashes; readonly spend: Spend; readonly card: string };
+// dropped: one note per model line the engine left out of the brief (brief.ts)
+export type Onboarded = {
+  readonly hashes: Hashes;
+  readonly spend: Spend;
+  readonly card: string;
+  readonly dropped: readonly string[];
+};
 
 // the record file the onboarder's spend goes in, beside the tickets' records
 export const ONBOARDER_RECORD = "onboarder";
@@ -148,7 +156,8 @@ function rulesText(musts: readonly Must[]): string {
     "# Project rules",
     "",
     "code/ has every AGENTS.md, CLAUDE.md, .claude/ and .agents/ removed; the repo's own copy still holds them.",
-    "The engine read the root ones itself and writes this section of the brief; say nothing of their absence.",
+    "The engine read the root ones itself and writes this section of the brief alone. Write no line about the",
+    "project's rules or its instruction files: the engine drops any line that names them.",
     "",
     ...(rows.length === 0 ? ["No MUST found in the root AGENTS.md or CLAUDE.md."] : rows),
     "",
@@ -288,6 +297,9 @@ async function staged(
   }
   const done = await stage({ home: setup.home, project: setup.project, written: files.value });
   return done.kind === "ok"
-    ? { kind: "ok", value: { hashes: done.value, spend: run.spend, card: run.card.sha256 } }
+    ? {
+        kind: "ok",
+        value: { hashes: done.value, spend: run.spend, card: run.card.sha256, dropped: files.value.dropped },
+      }
     : done;
 }

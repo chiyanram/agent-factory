@@ -4,6 +4,8 @@
 // the files must still have exactly those hashes.
 //
 //   <home>/projects/<project>/staged/{brief.md,glossary.md,cites.json}   what the onboarder wrote, waiting for a human
+//   <home>/projects/<project>/staged/dropped.md                          each model line the engine dropped, and why;
+//                                                                        for the human only, never accepted or read
 //   <home>/projects/<project>/{brief.md,glossary.md,cites.json}          what a human accepted, which every run reads
 //   <home>/projects/<project>/knowledge.json                             the acceptance: both hashes, by, via, at
 //
@@ -21,6 +23,19 @@ import { prop } from "../dispatch/records.js";
 const FILES = ["brief.md", "glossary.md", "cites.json"] as const;
 
 export type Hashes = { readonly brief: string; readonly glossary: string };
+
+// the staged note of the model lines the engine dropped (brief.ts); never one of FILES, so never accepted
+export const DROPPED = "dropped.md";
+
+// droppedNote : the note, or none when nothing was dropped, so an earlier run's note does not stay
+async function droppedNote(path: string, dropped: readonly string[]): Promise<void> {
+  if (dropped.length === 0) {
+    await rm(path, { force: true });
+    return;
+  }
+  const lines = ["# Dropped by the engine", "", "Model lines left out of the brief, never sent to a run:", ""];
+  await writeFile(path, [...lines, ...dropped.map((d) => `- ${d}`), ""].join("\n"), { mode: 0o644 });
+}
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -48,6 +63,7 @@ export async function stage(input: {
     await writeFile(join(staged, "brief.md"), input.written.brief, { mode: 0o644 });
     await writeFile(join(staged, "glossary.md"), input.written.glossary, { mode: 0o644 });
     await writeFile(join(staged, "cites.json"), `${JSON.stringify(input.written.cites, null, 2)}\n`, { mode: 0o644 });
+    await droppedNote(join(staged, DROPPED), input.written.dropped);
   } catch {
     return failed(`cannot write the staged brief in ${staged}`);
   }
