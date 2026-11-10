@@ -431,6 +431,7 @@ async function nextLines(io: InitIo, name: string, checks: readonly Check[], clo
         ]),
     `agent-factory spec --template <ticket>   (write the ticket's spec into ${join(io.home, "specs", name, "<ticket>", "spec.md")})`,
     `agent-factory start ${name} <ticket>`,
+    `agent-factory coordinator ${name}   (talk with the coordinator; it reads this project file, so it needs no exports)`,
   ];
   return `\nNext, in this order (you run these; init runs none of them):\n${steps.map((s, i) => `  ${i + 1}. ${s}\n`).join("")}`;
 }

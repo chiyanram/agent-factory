@@ -9,6 +9,7 @@ variable needs exporting.
 | `FACTORY_FORGE` | the git host adapter (`gitHost`, locked; `agent-factory init` writes it to the project file) | `gitlab` (or `github`) |
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` (`gitHostProject`, a preference; `init` writes it to the project file). The project file only: a team or user file that sets it is refused, since every project reads those. The variable still wins when set, with a warning when it differs from the project file (#369) | — |
 | `FACTORY_REPO` | a local clone of that project, an absolute path; worktrees, context packs and run files go in its `.claude/` (`clone`, a preference, the project file only, like `gitHostProject`) | — |
+| `FACTORY_DEFAULT_PROJECT` | the project a command that names none acts on (`poll`, `claim`, `status` and the rest); `agent-factory coordinator <project>` sets it in its session, so you never export it (#382). Not a settings key | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
@@ -196,11 +197,14 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 - The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch`, `review` and
   `start` resolve the project's layers once before the run, print each warning, and refuse to start on an error, so a
   team's `caps.usdPerRun` is the most each model run of the project may spend (#254). `poll` and the loop commands
-  name no project, so they resolve the user and machine layers only; `lint-edit` reads no setting.
+  resolve the layers of the project they name, or of the only one in `$FACTORY_HOME/projects` (#382); with
+  `FACTORY_PROJECT` exported and no project named, the user and machine layers only, as before. `lint-edit` reads no
+  setting.
 - `gitHostProject` and `clone` name one project's own place, so only the project file (or the variable) sets them;
   a preference, so an exported `FACTORY_PROJECT` or `FACTORY_REPO` still wins, and `config check` warns when it
   differs from the project file. `gitHost` stays locked: a `FACTORY_FORGE` that differs from the project file is
   refused, never a quiet switch to another git host (#369). `poll` and the loop commands (`claim`, `release`,
-  `status`, `ask`, `block`, `reconcile`) name no project, so they still read these from the variables.
+  `status`, `ask`, `block`, `reconcile`) read them from the project file too, so the coordinator needs no export
+  (#382; [Scripts](cli.md)).
 - Every module reads a machine key through `src/core/settings/machine.ts`, never its variable;
   `test/settings-read.test.ts` fails on a direct read.

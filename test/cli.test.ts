@@ -9,7 +9,12 @@ const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
 
 let home = "";
-const started: { readonly bin: string; readonly args: readonly string[]; readonly cwd: string }[] = [];
+const started: {
+  readonly bin: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+}[] = [];
 // the background commands a test asked for: the fake starts none of them (#305)
 const backgrounded: { readonly args: readonly string[]; readonly log: string }[] = [];
 // this test's own ids: a test never runs as root, and the platform is linux so no Keychain is touched
@@ -226,6 +231,77 @@ describe("agent-factory poll", () => {
     const down = await cli(["poll"], { FACTORY_PROJECT: "a/b", FACTORY_GLAB: join(home, "missing-glab") });
     expect(down).toMatchObject({ code: 1, out: "" });
     expect(down.err).toContain("no HTTP status");
+  });
+});
+
+// writeProject : <home>/projects/<name>.json with the project's git host, its project there and its clone (#377)
+function writeProject(name: string, gitHostProject: string, clone = home): void {
+  mkdirSync(join(home, "projects"), { recursive: true });
+  writeFileSync(join(home, "projects", `${name}.json`), JSON.stringify({ gitHost: "gitlab", gitHostProject, clone }));
+}
+
+describe("commands read the project's git host and clone from the project file (#382)", () => {
+  const POLLED = "!9 merged claimed=yes\n";
+  // no FACTORY_PROJECT, FACTORY_FORGE or FACTORY_REPO: only the factory home and the fake glab
+  const bare = () => ({ FACTORY_HOME: home, FACTORY_GLAB: fakeGlab(), PATH: process.env.PATH });
+
+  it("poll with no export reads the one project in the factory home, or the project it names", async () => {
+    writeProject("ledger", "aruvii/agent-platform");
+    const sole = await cli(["poll"], bare());
+    expect(sole).toMatchObject({ code: 0, out: expect.stringContaining(POLLED) });
+    const named = await cli(["poll", "ledger"], bare());
+    expect(named).toMatchObject({ code: 0, out: expect.stringContaining(POLLED) });
+  });
+
+  it("refuses when the factory home holds no project or several and none is named, and names them", async () => {
+    expect(await cli(["poll"], bare())).toMatchObject({
+      code: 1,
+      out: "",
+      err: expect.stringContaining("no project in"),
+    });
+    writeProject("ledger", "aruvii/agent-platform");
+    writeProject("shop", "aruvii/shop");
+    const many = await cli(["claim", "12"], bare());
+    expect(many).toMatchObject({ code: 1, out: "" });
+    expect(many.err).toContain("holds 2 projects (ledger, shop); name one: agent-factory claim <project> <number>");
+    const unknown = await cli(["poll", "nope"], bare());
+    expect(unknown).toMatchObject({ code: 1 });
+    expect(unknown.err).toContain("or name one of ledger, shop");
+    expect((await cli(["poll", "shop"], bare())).code).toBe(0);
+  });
+
+  it("the coordinator's project is the default; an exported FACTORY_PROJECT keeps the old form", async () => {
+    writeProject("ledger", "aruvii/agent-platform");
+    writeProject("shop", "not a project");
+    const coordinated = await cli(["poll"], { ...bare(), FACTORY_DEFAULT_PROJECT: "ledger" });
+    expect(coordinated).toMatchObject({ code: 0, out: expect.stringContaining(POLLED) });
+    const old = await cli(["poll"], { ...bare(), FACTORY_PROJECT: "aruvii/agent-platform" });
+    expect(old).toMatchObject({ code: 0, out: expect.stringContaining(POLLED) });
+  });
+
+  it("reconcile reads the clone from the project file", async () => {
+    writeProject("ledger", "aruvii/agent-platform", "clone");
+    const run = await cli(["reconcile", "ledger"], bare());
+    expect(run).toMatchObject({
+      code: 1,
+      err: expect.stringContaining(`clone in ${join(home, "projects", "ledger.json")}:1 must be an absolute file path`),
+    });
+  });
+
+  it("coordinator <project> starts the session with that project as its default; the only one with none named", async () => {
+    expect((await cli(["setup", "coordinator"])).code).toBe(0);
+    writeProject("ledger", "aruvii/agent-platform");
+    started.length = 0;
+    expect(await cli(["coordinator"])).toMatchObject({ code: 0, err: expect.stringContaining("for ledger") });
+    expect(await cli(["coordinator", "ledger", "copilot"])).toMatchObject({ code: 0 });
+    expect(started.map((s) => [s.bin, s.env.FACTORY_DEFAULT_PROJECT])).toEqual([
+      ["claude", "ledger"],
+      ["copilot", "ledger"],
+    ]);
+    writeProject("shop", "aruvii/shop");
+    started.length = 0;
+    expect(await cli(["coordinator"])).toMatchObject({ code: 0 });
+    expect(started.map((s) => s.env.FACTORY_DEFAULT_PROJECT)).toEqual([undefined]);
   });
 });
 
@@ -485,7 +561,10 @@ describe("agent-factory loop commands (#138)", () => {
       ["status", "12", "aaaa1111"],
       ["ask", "x", "aaaa1111", "q"],
       ["block", "12"],
-      ["reconcile", "now"],
+      ["reconcile", "a", "b"],
+      ["claim", "ledger"],
+      ["status", "ledger", "12", "aaaa1111"],
+      ["block", "../x", "12", "why"],
       ["lint-edit"],
     ];
     for (const argv of cases) {
@@ -496,14 +575,20 @@ describe("agent-factory loop commands (#138)", () => {
   });
 
   it("text after -- that starts with - is text, not an option", async () => {
-    const run = await cli(["ask", "--", "12", "aaaa1111", "- is X ok?"], { FACTORY_FORGE: "github" });
+    const run = await cli(["ask", "--", "12", "aaaa1111", "- is X ok?"], {
+      FACTORY_FORGE: "github",
+      FACTORY_PROJECT: "ledger",
+    });
     expect(run.code).toBe(1);
     expect(run.err).toContain("FACTORY_PROJECT must be owner/name");
   });
 
   it("reconcile refuses a relative FACTORY_REPO before it reads the forge", async () => {
-    const run = await cli(["reconcile"], { FACTORY_REPO: "clone" });
-    expect(run).toMatchObject({ code: 1, err: expect.stringContaining("FACTORY_REPO must be an absolute path") });
+    const run = await cli(["reconcile"], { FACTORY_HOME: home, FACTORY_PROJECT: "a/b", FACTORY_REPO: "clone" });
+    expect(run).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("(clone in the project file, or FACTORY_REPO) must be an absolute path"),
+    });
   });
 
   it("lint-edit reads the tool call on stdin and skips a file outside the session's folder", async () => {
@@ -533,7 +618,11 @@ describe("agent-factory box (#113)", () => {
 
 describe("agent-factory setup coordinator and coordinator (#106)", () => {
   it("writes the wall into <home>/coordinator, then starts the session there with only its settings", async () => {
-    expect(await cli(["coordinator", "x"])).toMatchObject({ code: 64 });
+    expect(await cli(["coordinator", "a", "b"])).toMatchObject({ code: 64 });
+    expect(await cli(["coordinator", "x"])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining(`no project file ${join(home, "projects", "x.json")}`),
+    });
     expect(await cli(["coordinator"])).toMatchObject({
       code: 1,
       err: expect.stringContaining("setup coordinator first"),

@@ -36,12 +36,14 @@ agent-factory init            # the project's name defaults to the clone folder'
    settings, and `config check`.
 6. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
    claude` when the token is missing, opening `claude` once in the clone, `agent-factory onboard <project>`,
-   `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec and `agent-factory start`.
+   `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec, `agent-factory start` and
+   `agent-factory coordinator <project>`.
 
 It never handles a secret and never runs a command only a human runs (`setup claude`, `onboard`, `onboard accept`,
 `start`, `approve`, `waive`). The coordinator's settings deny `agent-factory init`, since it writes the settings that
 hold the coordinator's wall. Exit 0 when every check passes, 1 when one fails or init refuses, 3 when `--yes` kept a
 value. Running it again is safe: it asks only what is missing and writes nothing when nothing changed. Once the files
-hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports.
+hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports:
+every command, the coordinator's `poll`, `status` and the loop commands too, reads them from the files (#382).
 
 The sections below are the manual steps, kept as reference.

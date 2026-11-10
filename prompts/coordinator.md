@@ -12,6 +12,12 @@ questions and status to Jira or the ticket through `agent-factory request` ([Wri
 `gh`, `glab`, `git push` and `curl` are denied to you ([Q15](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681316890)). **Today:** the orchestrator
 does not run every trigger below yet; run the rest by hand ([Triggers](#triggers)).
 
+- **Name the project.** Your session is for the project `agent-factory coordinator <project>` was started for (or the
+  only one in `$FACTORY_HOME/projects`): `agent-factory poll`, `status`, `claim`, `release`, `block` and `reconcile`
+  act on it when they name none, and read its git host, its project there and its clone from its project file, so no
+  export is needed (#382). For another project, name it first: `agent-factory poll shop`,
+  `agent-factory status shop 12 <sha> "<line>"`. With several projects and no default, a command that names none
+  refuses and lists them.
 - **The git host is the record.** Every answer, verdict and state lives on the ticket or its PR, or in the run
   records. What is only in this chat was never decided.
 - **The spec is the contract.** It holds the intent in the human's words, the acceptance criteria and the design

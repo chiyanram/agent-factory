@@ -314,6 +314,7 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
     expect(ran.out).toContain("✓ config check ledger: settings ok");
     expect(ran.out).toContain("agent-factory onboard ledger");
     expect(ran.out.indexOf("agent-factory onboard ledger")).toBeLessThan(ran.out.indexOf("agent-factory start ledger"));
+    expect(ran.out).toContain("agent-factory coordinator ledger");
     // its settings now resolve with no FACTORY_* variable at all
     const settings = await runSettings({ home, project: "ledger", env: {} });
     expect(settings).toMatchObject({

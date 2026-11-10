@@ -1,5 +1,6 @@
 // coordinator-cli — `agent-factory setup coordinator` writes the coordinator's settings and instructions, and
-// `agent-factory coordinator [copilot]` starts its session there (#106). The settings come from src/core/coordinator.ts.
+// `agent-factory coordinator [<project>] [copilot]` starts its session there (#106, #382). The settings come from
+// src/core/coordinator.ts.
 //
 //   <FACTORY_HOME>/coordinator/.claude/settings.json   the wall, read-only (0444)
 //   <FACTORY_HOME>/coordinator/CLAUDE.md               "follow prompts/coordinator.md", read-only

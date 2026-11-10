@@ -50,7 +50,8 @@ import { readyStep, verifyStep } from "./core/ready/steps.js";
 import { designSteps } from "./core/design/step.js";
 import { designSetup } from "./core/design/settings.js";
 import { countsLine } from "./core/review/verdicts.js";
-import { LOOP_COMMANDS, LOOP_HELP } from "./loop-cli.js";
+import { LOOP_COMMANDS, LOOP_HELP, lintEditCommand, loopUsage, projectForm, projectWord } from "./loop-cli.js";
+import { chosenProject, DEFAULT_PROJECT, projectNames } from "./core/which-project.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
@@ -109,7 +110,10 @@ commands:
   setup status                 the box chosen, its risks, and whether the claude token is valid
   setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
                                <home>/coordinator
-  coordinator [copilot]        start the coordinator's session there, with only those settings (#106)
+  coordinator [<project>] [copilot]
+                               start the coordinator's session there, with only those settings (#106), for the
+                               project named, else the one in <home>/projects: its commands act on it when they name
+                               none, so it needs no FACTORY_* export (#382)
   plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
   plugin update <project> <name@marketplace> [<commit>]
@@ -134,13 +138,14 @@ settings:
   FACTORY_QUESTIONS    dispatch: round asks every open question at once, with choices (default); or one-at-a-time
   FACTORY_POLL_MINUTES   dispatch: the wait between the loop's passes; status flags a loop late after 3 (default 5)
   FACTORY_HOME         where specs and approvals live (default ~/.factory): <home>/specs/<project>/<ticket>/spec.md
-  FACTORY_FORGE        gitlab (default) or github
-  FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab
+  FACTORY_FORGE        gitlab (default) or github; the project file's gitHost
+  FACTORY_PROJECT      the project: owner/name on GitHub, the full path on GitLab; the project file's gitHostProject
   FACTORY_CLAIM_LABEL  the label a claimed change carries (default agent::claimed)
   FACTORY_GH           the gh to call (default gh); FACTORY_GLAB the glab to call (default glab)
   FACTORY_IDENTITY     own (default: your gh or glab login) or app (a GitHub App whose key the factory user holds)
   FACTORY_BOX          where a box runs: vm (Docker with Sysbox on this host)
-  FACTORY_REPO         dispatch: the project's clone on this host, an absolute path
+  FACTORY_REPO         the project's clone on this host, an absolute path; the project file's clone
+  FACTORY_DEFAULT_PROJECT  the project a command that names none acts on; agent-factory coordinator sets it (#382)
   FACTORY_EGRESS_IMAGE   the egress proxy's Squid image, name@sha256:<digest> (default: a pinned ubuntu/squid)
   FACTORY_UPSTREAM_PROXY at work: the corporate proxy, host:port, every box request leaves through
 `;
@@ -256,8 +261,15 @@ function onboardCli({ positionals, io }: Args): Promise<number> {
   });
 }
 
+// poll [<project>] : the project's changes; with no project named, the one in the factory home (#382)
 function poll(args: Args): Promise<number> {
-  return resolvedRun("poll", undefined, args.io, (io) => pollResolved({ ...args, io }));
+  if (args.positionals.length > 1) {
+    args.io.err("usage: agent-factory poll [<project>] [--json]\n");
+    return Promise.resolve(64);
+  }
+  return projectRun("poll", args.positionals[0], args.io, "agent-factory poll <project>", (io) =>
+    pollResolved({ ...args, io }),
+  );
 }
 
 async function pollResolved({ json, io }: Args): Promise<number> {
@@ -817,6 +829,44 @@ async function resolvedRun(
   return run({ ...io, env: settings.value.env });
 }
 
+// projectRun : resolvedRun for a command that may name no project (#382): the project it names, the coordinator's, the
+// variables alone when FACTORY_PROJECT is exported, or the one in the factory home (core/which-project.ts)
+async function projectRun(
+  name: string,
+  project: string | undefined,
+  io: Io,
+  form: string,
+  run: (resolved: Io) => Promise<number>,
+): Promise<number> {
+  const home = factoryHome(io.env);
+  const chosen =
+    home.kind === "home"
+      ? await chosenProject({ home: home.path, project, env: io.env, usage: form })
+      : { kind: "failed" as const, reason: home.reason };
+  if (chosen.kind === "failed") {
+    io.err(`agent-factory ${name}: ${chosen.reason}\n`);
+    return 1;
+  }
+  return resolvedRun(name, chosen.value, io, run);
+}
+
+// loopWords : a forge command's words checked, with its project word, if any, taken off first
+function loopWords(name: string, positionals: readonly string[]) {
+  const words = projectWord(name, positionals);
+  const command = LOOP_COMMANDS[name];
+  const plain = words.project === undefined || plainName(words.project);
+  return { project: words.project, parsed: plain && command !== undefined ? command(words.rest) : "usage" } as const;
+}
+
+// loopCommand : a forge command of loop-cli: its words checked first, then run on the chosen project's settings
+function loopCommand(name: string, { positionals, io }: Args): Promise<number> {
+  const words = loopWords(name, positionals);
+  const parsed = words.parsed;
+  return parsed === "usage"
+    ? Promise.resolve(loopUsage(name, io))
+    : projectRun(name, words.project, io, projectForm(name), (resolved) => Promise.resolve(parsed(resolved)));
+}
+
 // dispatch : the orchestrator loop (#305), or with --once one pass (#103). A human's command starts it; no cron or
 // launchd job does. A lock keeps passes apart, and another keeps a second loop out. A dry run is one pass: it acts on
 // nothing, so a loop of them would never end.
@@ -1153,10 +1203,16 @@ const SETUP: readonly SetupStep[] = [
   { name: "status", run: setupStatus },
 ];
 
-function runnerOf(positionals: readonly string[]): "claude" | "copilot" | "bad" {
-  const [runner = "claude"] = positionals;
-  const known = runner === "claude" || runner === "copilot" ? runner : "bad";
-  return positionals.length > 1 ? "bad" : known;
+type CoordinatorArgs = { readonly project: string | undefined; readonly runner: "claude" | "copilot" } | "bad";
+
+const RUNNERS: ReadonlySet<string> = new Set(["claude", "copilot"]);
+
+// coordinatorArgs : [<project>] [claude | copilot]
+function coordinatorArgs(positionals: readonly string[]): CoordinatorArgs {
+  const last = String(positionals.at(-1));
+  const rest = RUNNERS.has(last) ? positionals.slice(0, -1) : positionals;
+  const runner = last === "copilot" ? "copilot" : "claude";
+  return rest.length > 1 || !rest.every(plainName) ? "bad" : { project: rest[0], runner };
 }
 
 // the package's own folder, and its bundled discord plugin: the only plugin the Discord webhook is ever handed to (#119)
@@ -1265,19 +1321,58 @@ async function initCli({ positionals, yes, repo, io }: Args): Promise<number> {
   );
 }
 
-// coordinator : the coordinator's session, in its own folder with its own settings (#106)
+// coordinatorProject : the project the session's commands act on when they name none (#382): the one named, else the
+// one in the factory home; with none or several and none named, the session starts with no default and its commands
+// name their project
+async function coordinatorProject(home: string, project: string | undefined, io: Io): Promise<Result<string>> {
+  if (project === undefined) {
+    const known = await projectNames(home);
+    return { kind: "ok", value: known.length === 1 ? known.join("") : "" };
+  }
+  const chosen = await chosenProject({ home, project, env: io.env, usage: "" });
+  return chosen.kind === "ok" ? { kind: "ok", value: project } : chosen;
+}
+
+// coordinator : the coordinator's session, in its own folder with its own settings (#106), for one project (#382)
 async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
-  const runner = runnerOf(positionals);
-  if (runner === "bad") {
-    io.err("usage: agent-factory coordinator [copilot]\n");
+  const args = coordinatorArgs(positionals);
+  if (args === "bad") {
+    io.err("usage: agent-factory coordinator [<project>] [copilot]\n");
     return 64;
   }
-  const places = placesOf(io);
-  if (places.kind === "failed") {
-    io.err(`agent-factory coordinator: ${places.reason}\n`);
+  const session = await coordinatorSession(io, args.project);
+  if (session.kind === "failed") {
+    io.err(`agent-factory coordinator: ${session.reason}\n`);
     return 1;
   }
-  return startCoordinator(places.value, runner, { ...io, interactive: io.system.interactive });
+  const { places, project } = session.value;
+  return startCoordinator(places, args.runner, {
+    ...io,
+    env: sessionEnv(io, project),
+    interactive: io.system.interactive,
+  });
+}
+
+// coordinatorSession : where the session's rules point, and its project ("" for none)
+async function coordinatorSession(
+  io: Io,
+  named: string | undefined,
+): Promise<Result<{ readonly places: CoordinatorPlaces; readonly project: string }>> {
+  const places = placesOf(io);
+  if (places.kind === "failed") {
+    return places;
+  }
+  const project = await coordinatorProject(places.value.factoryHome, named, io);
+  return project.kind === "ok" ? { kind: "ok", value: { places: places.value, project: project.value } } : project;
+}
+
+// sessionEnv : the coordinator session's env, with its project as the default of the commands it runs (#382)
+function sessionEnv(io: Io, project: string): NodeJS.ProcessEnv {
+  if (project === "") {
+    return io.env;
+  }
+  io.err(`agent-factory coordinator: for ${project}; its commands act on it when they name no project\n`);
+  return { ...io.env, [DEFAULT_PROJECT]: project };
 }
 
 // setup : make and keep the box's model-only token (#136), and say whether a box may start
@@ -1340,14 +1435,9 @@ const COMMANDS: readonly Command[] = [
   { name: "config", run: configCli },
   { name: "team", run: teamCli },
   { name: "init", run: initCli },
-  ...Object.entries(LOOP_COMMANDS).map(([name, run]) => ({
-    name,
-    // the writer's lint hook reads no setting, and prints only the lint's own output
-    run: ({ positionals, io }: Args) =>
-      name === "lint-edit"
-        ? Promise.resolve(run(positionals, io))
-        : resolvedRun(name, undefined, io, (resolved) => Promise.resolve(run(positionals, resolved))),
-  })),
+  ...Object.keys(LOOP_COMMANDS).map((name) => ({ name, run: (args: Args) => loopCommand(name, args) })),
+  // the writer's lint hook reads no setting, and prints only the lint's own output
+  { name: "lint-edit", run: ({ positionals, io }: Args) => lintEditCommand(positionals, io) },
 ];
 
 // ownOptions : request, confirm and project read their own options (--file, --template <file>, a text that is one
