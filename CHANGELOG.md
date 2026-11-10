@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.32.1](https://github.com/chiyanram/agent-factory/compare/v0.32.0...v0.32.1) (2026-11-10)
+
+### 🐛 Fixes
+
+* **box** — every srt run gets its own writable TMPDIR inside its private home · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#415](https://github.com/chiyanram/agent-factory/pull/415))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.32.1/chiyanram-agent-factory-0.32.1.tgz`
+
 ## [0.32.0](https://github.com/chiyanram/agent-factory/compare/v0.31.0...v0.32.0) (2026-11-10)
 
 ### ✨ Features
