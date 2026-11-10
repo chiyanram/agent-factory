@@ -21,12 +21,20 @@
 // `status` shows a loop that ended that way.
 //
 // A pass that fails (the git host is down, a pass by hand holds the pass lock) is printed, and the loop tries again
-// after the poll interval; MAX_FAILED_PASSES failures in a row end it, so it never spins on a broken setup (P7).
+// after the poll interval; MAX_FAILED_PASSES failures in a row end it, so it never spins on a broken setup (P7). A pass
+// that failed on the git host's rate limit names the time the limit lasts until (api.ts), and the next pass waits for
+// that time when it is later than the poll interval, so the loop never asks a rate-limited git host again early (#62).
+//
+// A pass reads the git host's changes once to act and once more to look (decideAll after tick). When the pass did
+// nothing (no forge action and no run started: every ticket waits or is held), nothing it did can have moved a
+// ticket, so the look reuses the first read instead of asking the git host again; the factory's login is read once a
+// pass (readOnce, #62).
 
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Result } from "../forge/api.js";
+import { rateLimitedUntil, type Result } from "../forge/api.js";
+import type { Forge } from "../forge/types.js";
 import { plainName } from "../spec.js";
 import { LOOP_END_FILE, LOOP_PID_FILE, type LoopEnded } from "./last-poll.js";
 import { inFlight } from "./table.js";
@@ -123,17 +131,70 @@ type Step = {
   readonly setup: TickSetup;
 };
 
-// passAndLook : one locked pass, then the tickets still in flight
+// readOnce : the forge, with its login read once for the pass, and its changes at most once until forget() or a
+// write: what the look after an idle pass reuses (#62). A failed read is never kept.
+export function readOnce(forge: Forge): { readonly forge: Forge; readonly forget: () => void } {
+  let login: Awaited<ReturnType<Forge["me"]>> | "none" = "none";
+  const me: Forge["me"] = async () => {
+    if (login === "none") {
+      const read = await forge.me();
+      login = read.kind === "ok" ? read : "none";
+      return read;
+    }
+    return login;
+  };
+  let kept: Awaited<ReturnType<Forge["changes"]>> | "none" = "none";
+  const forget = (): void => {
+    kept = "none";
+  };
+  const changes: Forge["changes"] = async (input) => {
+    if (kept !== "none") {
+      return kept;
+    }
+    const read = await forge.changes(input);
+    kept = read.kind === "ok" ? read : "none";
+    return read;
+  };
+  // a write: what was read may be out of date after it
+  const wrote =
+    <I, O>(write: (input: I) => Promise<O>) =>
+    (input: I): Promise<O> => {
+      forget();
+      return write(input);
+    };
+  return {
+    forge: {
+      ...forge,
+      me,
+      changes,
+      addLabel: wrote((i) => forge.addLabel(i)),
+      removeLabel: wrote((i) => forge.removeLabel(i)),
+      note: wrote((i) => forge.note(i)),
+      setBody: wrote((i) => forge.setBody(i)),
+      lineFinding: wrote((i) => forge.lineFinding(i)),
+      status: wrote((i) => forge.status(i)),
+      openChange: wrote((i) => forge.openChange(i)),
+    },
+    forget,
+  };
+}
+
+// passAndLook : one locked pass, then the tickets still in flight; a pass that did nothing looks at what it read
 async function passAndLook(loop: LoopSetup): Promise<Result<Step>> {
   const setup = await loop.setup();
   if (setup.kind === "failed") {
     return setup;
   }
-  const ran = await tick(setup.value);
+  const once = readOnce(setup.value.forge);
+  const pass = { ...setup.value, forge: once.forge };
+  const ran = await tick(pass);
   if (ran.kind === "failed") {
     return ran;
   }
-  const decided = await decideAll(setup.value);
+  if (ran.value.some((r) => r.result.kind !== "unavailable")) {
+    once.forget();
+  }
+  const decided = await decideAll(pass);
   return decided.kind === "failed"
     ? decided
     : { kind: "ok", value: { kind: "pass", ran: ran.value, flying: flying(decided.value), setup: setup.value } };
@@ -141,18 +202,39 @@ async function passAndLook(loop: LoopSetup): Promise<Result<Step>> {
 
 type Count = { passes: number; failedInRow: number; failedActions: boolean; held: readonly string[] };
 
+type After = "end" | "failed" | { readonly wait: number };
+
 // next : after one pass, "end" when nothing is in flight, every run is held back, or too many passes failed in a row,
-// else "wait"
-function next(loop: LoopSetup, count: Count, step: Result<Step>): "end" | "wait" | "failed" {
+// else how long to wait: the poll interval, or until a rate limit the failed pass met is over
+function next(loop: LoopSetup, count: Count, step: Result<Step>): After {
   count.passes += 1;
   if (step.kind === "failed") {
-    count.failedInRow += 1;
-    loop.log(`pass ${count.passes} failed: ${step.reason}`);
-    return count.failedInRow >= MAX_FAILED_PASSES ? "failed" : "wait";
+    return failedPass(loop, count, step.reason);
   }
   count.failedInRow = 0;
   count.failedActions ||= step.value.ran.some((r) => r.result.kind === "failed");
-  return afterPass(loop, count, step.value);
+  return afterPass(loop, count, step.value) === "end" ? "end" : { wait: loop.pollMinutes * 60_000 };
+}
+
+// failedPass : a failed pass, printed; the loop ends after too many in a row, else waits the poll interval, or until
+// the git host's rate limit is over when the pass met one and it lasts longer (#62)
+function failedPass(loop: LoopSetup, count: Count, reason: string): After {
+  count.failedInRow += 1;
+  const until = rateLimitedUntil(reason);
+  const poll = loop.pollMinutes * 60_000;
+  if (until === "none") {
+    loop.log(`pass ${count.passes} failed: ${reason}`);
+    return count.failedInRow >= MAX_FAILED_PASSES ? "failed" : { wait: poll };
+  }
+  loop.log(
+    `pass ${count.passes} failed: ${reason}; the git host's rate limit lasts until ${new Date(until).toISOString()}`,
+  );
+  if (count.failedInRow >= MAX_FAILED_PASSES) {
+    return "failed";
+  }
+  const wait = Math.max(poll, until - loop.now());
+  loop.log(`next pass in ${Math.ceil(wait / 60_000)} min, when the rate limit is over`);
+  return { wait };
 }
 
 // afterPass : a pass that ran: it ends the loop with nothing in flight, or with every run held back
@@ -180,7 +262,7 @@ async function passes(loop: LoopSetup): Promise<Result<LoopEnd>> {
     if (after === "end") {
       return { kind: "ok", value: { passes: count.passes, failedActions: count.failedActions, held: count.held } };
     }
-    await loop.sleep(loop.pollMinutes * 60_000);
+    await loop.sleep(after.wait);
   }
 }
 
