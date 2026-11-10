@@ -37,6 +37,7 @@ import { NO_DESIGN } from "../src/core/spec.js";
 import { createHash } from "node:crypto";
 import { copyFileSync } from "node:fs";
 import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
+import { outputName, scrubSecrets, WHY_CHARS, whyOf, whyText } from "../src/core/writer/why.js";
 import { quoted, settingsOf, toolsOf, WRITER_ALLOW, writerDenies } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
@@ -689,6 +690,99 @@ describe("the stall stop (#228)", () => {
     for (const bad of ["0", "6", "1.5", "x", ""]) {
       expect(stallOf({ FACTORY_WRITER_STALL_MINUTES: bad }).kind).toBe("failed");
     }
+  });
+});
+
+// a token prefix, joined at run time, so no secret scanner reads this file as holding a token
+function fakeToken(prefix: string): string {
+  return [prefix].join("");
+}
+
+describe("a writer run that stops says why, even before a change exists (#62)", () => {
+  // fake tokens, built in pieces so no secret scanner reads this file as holding one
+  const TOKENS = `${fakeToken("sk-ant-")}oat01-AAAAbbbbCCCCdddd ${fakeToken("gho")}_ABCDEFGHIJKLMNOPQRSTUVWX Authorization: Bearer abc.def.ghi`;
+
+  // the agent CLI fails before it writes a report: no commit, a non-zero exit, its error on stderr
+  function failing(fake: FakeBox): Box {
+    return {
+      ...fake.box,
+      run: async (call) => {
+        await fake.box.run(call);
+        const stdout = '{"type":"system","subtype":"init"}\n';
+        call.command.watch?.(stdout);
+        const stderr = `starting\nwith ${TOKENS}\nError: Invalid API key · Please run /login\n`;
+        return { kind: "exited", code: 1, stdout, stderr };
+      },
+    };
+  }
+
+  it("a run that exits non-zero with no report: the record has why, and the end of its output is kept, scrubbed", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const told = forge();
+    const out = valueOf(await run(setup(failing(fake), told, []), FIX));
+    expect(out).toMatchObject({ outcome: "blocked", patch: "" });
+    expect(out.why).toBe("the run exited 1; the run said: Error: Invalid API key · Please run /login");
+    // no change to post on: nothing went to the forge
+    expect(told.log).toEqual([]);
+    const file = out.output ?? "";
+    expect(file.startsWith(join(home, "runs", "ledger", "PROJ-1", "writer-"))).toBe(true);
+    const kept = readFileSync(file, "utf8");
+    expect(kept).toContain("Error: Invalid API key");
+    expect(kept).toContain('{"type":"system","subtype":"init"}');
+    expect(kept).not.toMatch(/sk-ant-oat01|gho_ABC|abc\.def\.ghi/);
+    expect(kept).toContain("[scrubbed]");
+  });
+
+  it("a blocked report: why is the writer's blocker, and no output is kept", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const report = { status: "blocked", blocker: "the spec names no endpoint to change" };
+    const box = writer(fake, { commit: false, report, exit: 0 }, []);
+    const out = valueOf(await run(setup(box, forge(), []), FIX));
+    expect(out).toMatchObject({ outcome: "blocked", why: "the spec names no endpoint to change" });
+    expect(out.output).toBeUndefined();
+  });
+
+  it("a done run carries no why", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const box = writer(fake, { commit: true, report: DONE, exit: 0 }, []);
+    const out = valueOf(await run(setup(box, forge(), []), FIX));
+    expect(out.outcome).toBe("done");
+    expect(out.why).toBeUndefined();
+  });
+});
+
+describe("why.ts: the reason a person reads, made safe (#62)", () => {
+  it("scrubs what looks like a token or a key, and keeps the words around it", () => {
+    const text = [
+      `login ${fakeToken("sk-ant-")}oat01-abcDEF123_-xyz failed`,
+      `${fakeToken("gho")}_0123456789abcdefABCDEF ${fakeToken("ghp")}_0123456789abcdefABCDEF`,
+      `${fakeToken("github_pat")}_11ABCDEFG0123456789_abcdefghijklmnop`,
+      "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig'",
+      "CLAUDE_CODE_OAUTH_TOKEN=sk-xyz GH_TOKEN: plain-secret-value",
+    ].join("\n");
+    const out = scrubSecrets(text);
+    expect(out).not.toMatch(/abcDEF123|0123456789abcdef|11ABCDEFG|eyJhbGci|sk-xyz|plain-secret-value/);
+    expect(out).toContain("login [scrubbed] failed");
+    expect(out).toContain("Bearer [scrubbed]");
+    expect(out).toContain("CLAUDE_CODE_OAUTH_TOKEN=[scrubbed]");
+    expect(scrubSecrets("the run exited 1 at e9990c65605b")).toBe("the run exited 1 at e9990c65605b");
+  });
+
+  it("makes a reason one line, cut, and adds what the run said only to a reason the host decided", () => {
+    expect(whyText("a\nb\u0007 c")).toBe("a b c");
+    expect(Array.from(whyText("x".repeat(2000)))).toHaveLength(WHY_CHARS);
+    const host = { kind: "blocked", reason: "the run wrote no .factory/report.json", by: "host" } as const;
+    expect(whyOf(host, "Bearer abcdefgh")).toBe(
+      "the run wrote no .factory/report.json; the run said: Bearer [scrubbed]",
+    );
+    expect(whyOf({ ...host, reason: "stuck", by: "writer" }, "anything")).toBe("stuck");
+    expect(whyOf({ kind: "done", evidence: [] }, "x")).toBe("");
+    const asked = whyOf({ kind: "asked", questions: [{ kind: "plain", question: "which table?" }] }, "");
+    expect(asked).toBe("the writer asked: which table?");
+  });
+
+  it("names the kept output's file by the time, with no colon", () => {
+    expect(outputName(Date.parse("2026-11-10T08:12:03.764Z"))).toBe("writer-2026-11-10T08-12-03-764Z.log");
   });
 });
 

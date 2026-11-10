@@ -37,6 +37,7 @@ import { readTools, settingsOf, TARGET_REF, toolLines } from "./tools.js";
 import { knownFor, type Known } from "../onboard/known.js";
 import type { Spend } from "../dispatch/spend.js";
 import { writerRun, type Ended } from "./run.js";
+import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
 import { ciText, taskText, verifyText } from "./task.js";
 import { VERIFY_FILE } from "../ready/steps.js";
 import type { WriterSettings } from "./settings.js";
@@ -99,6 +100,10 @@ export type WriterOut = {
   readonly deferred?: readonly string[];
   // each cite of the project's brief that went stale, or why the run went without it (#235)
   readonly stale?: readonly string[];
+  // why a run that is not done stopped, scrubbed and cut (why.ts, #62); none for done
+  readonly why?: string;
+  // the file that keeps the end of a host-blocked run's output (why.ts keepOutput, #62)
+  readonly output?: string;
 };
 
 // the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
@@ -163,6 +168,17 @@ function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] }
   return outcome.kind === "done" && outcome.deferred !== undefined ? { deferred: outcome.deferred } : {};
 }
 
+// whyField : why the run stopped, as a field to spread: none when there is no reason. Pure.
+function whyField(why: string): { readonly why?: string } {
+  return why === "" ? {} : { why };
+}
+
+// nextWhy : why the host handed the run to a person, with what the run said last when the host decided it. Pure.
+function nextWhy(ended: Ended, next: Extract<Next, { kind: "needs-human" }>): string {
+  const host = ended.outcome.kind !== "blocked" || ended.outcome.by === "host";
+  return whyText(withSaid(next.reason, host && ended.outcome.kind !== "done" ? ended.said : ""));
+}
+
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
   const base = {
@@ -176,9 +192,9 @@ export function outOf(ended: Ended, next: Next): WriterOut {
     case "ready-check":
       return { ...base, outcome: "done", evidence: next.evidence };
     case "wait-for-answer":
-      return { ...base, outcome: "asked", evidence: [] };
+      return { ...base, outcome: "asked", evidence: [], ...whyField(whyOf(ended.outcome, ended.said)) };
     case "needs-human":
-      return { ...base, outcome: "blocked", evidence: [] };
+      return { ...base, outcome: "blocked", evidence: [], ...whyField(nextWhy(ended, next)) };
   }
 }
 
@@ -349,10 +365,18 @@ async function finished(
     return onChange(setup, input, p, { push, ended, number: input.change.line.number, mode });
   }
   if (ended.tip === clone.start) {
-    // nothing to push and no change to post on: the record says the run changed nothing, and a person looks
+    // nothing to push and no change to post on: the record says the run changed nothing and why it stopped, and a
+    // person looks (#62)
     return {
       kind: "ok",
-      value: { head: ended.tip, outcome: outcome.kind, patch: "", evidence: [], hung: ended.ending.kind === "hung" },
+      value: {
+        head: ended.tip,
+        outcome: outcome.kind,
+        patch: "",
+        evidence: [],
+        hung: ended.ending.kind === "hung",
+        ...whyField(whyOf(outcome, ended.said)),
+      },
     };
   }
   const first = await finishFirst({
@@ -525,9 +549,43 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     ended.kind === "ok"
       ? await finished(setup, input, p, { clone: clone.value, ended: ended.value, mode: work.mode })
       : ended;
-  const out = withStale(withCard(result, work), known);
+  const out = await withOutput(setup, input, ended, withStale(withCard(result, work), known));
   const removed = await removeClone(clone.value.dir);
   return removed.kind === "ok" ? out : removed;
+}
+
+// toKeep : the run's output to keep, for a run the host blocked (#62); none for any other. Pure.
+function toKeep(ended: Result<Ended>): readonly string[] {
+  if (ended.kind === "failed") {
+    return [];
+  }
+  const { outcome, output } = ended.value;
+  return outcome.kind === "blocked" && outcome.by === "host" ? output : [];
+}
+
+// withOutput : a run the host blocked keeps the end of what it printed in a file, named in the record (#62): the
+// clone, and the run's own folder, are gone after this step. A file that cannot be written is said in the reason.
+async function withOutput(
+  setup: WriterSetup,
+  input: Input,
+  ended: Result<Ended>,
+  result: Result<WriterOut>,
+): Promise<Result<WriterOut>> {
+  const lines = toKeep(ended);
+  if (result.kind === "failed" || lines.length === 0) {
+    return result;
+  }
+  const at = { home: setup.home, project: setup.project, ticket: input.ticket };
+  const kept = await keepOutput({ ...at, at: Date.now(), lines });
+  const value = result.value;
+  return kept.kind === "ok"
+    ? { kind: "ok", value: { ...value, output: kept.value } }
+    : { kind: "ok", value: { ...value, why: notKept(value.why, kept.reason) } };
+}
+
+// notKept : the reason, and why the run's output was not kept. Pure.
+function notKept(why: string | undefined, reason: string): string {
+  return whyText(`${why ?? "blocked"}; its output was not kept: ${reason}`);
 }
 
 // handOver : a run the host does not start; it says why on the change, labelled needs-human

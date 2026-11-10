@@ -121,6 +121,10 @@ export type Event =
       readonly deferred?: readonly string[];
       // each cite of the project's brief that went stale, for the retro (#235); none on a line that has none
       readonly stale?: readonly string[];
+      // why a run that is not done stopped, scrubbed and cut (writer/why.ts, #62); none on a done line or an older one
+      readonly why?: string;
+      // the file under <home>/runs/<project>/<ticket>/ that keeps the end of a host-blocked run's output (#62)
+      readonly output?: string;
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -409,19 +413,44 @@ function staleField(raw: unknown): { readonly stale?: readonly string[] } | Bad 
   return Array.isArray(stale) && stale.every((s) => typeof s === "string") ? { stale } : BAD;
 }
 
-// writerExtras : a writer line's optional fields, its spend, card, deferred list and stale cites, as fields to spread,
-// or BAD
+// textOf : a line's optional text field: undefined on a line that has none, or BAD
+function textOf(raw: unknown, name: string): string | undefined | Bad {
+  const value = prop(raw, name);
+  return value === undefined || typeof value === "string" ? value : BAD;
+}
+
+// whyFields : a writer line's why and output file, as fields to spread: none on a line that has none (#62)
+function whyFields(raw: unknown): { readonly why?: string; readonly output?: string } | Bad {
+  const why = textOf(raw, "why");
+  const output = textOf(raw, "output");
+  if (why === BAD || output === BAD) {
+    return BAD;
+  }
+  return { ...(why === undefined ? {} : { why }), ...(output === undefined ? {} : { output }) };
+}
+
+// notesFields : a writer line's stale cites, why and output file, as fields to spread, or BAD
+function notesFields(
+  raw: unknown,
+): { readonly stale?: readonly string[]; readonly why?: string; readonly output?: string } | Bad {
+  const stale = staleField(raw);
+  const why = whyFields(raw);
+  return stale === BAD || why === BAD ? BAD : { ...stale, ...why };
+}
+
+// writerExtras : a writer line's optional fields, its spend, card, deferred list, stale cites, why and output file, as
+// fields to spread, or BAD
 function writerExtras(
   raw: unknown,
-): Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred" | "stale"> | Bad {
+): Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred" | "stale" | "why" | "output"> | Bad {
   const spend = spendField(raw);
   const card = cardField(raw);
   const deferred = deferredField(raw);
-  const stale = staleField(raw);
+  const notes = notesFields(raw);
   if (spend === BAD || card === BAD) {
     return BAD;
   }
-  return deferred === BAD || stale === BAD ? BAD : { ...spend, ...card, ...deferred, ...stale };
+  return deferred === BAD || notes === BAD ? BAD : { ...spend, ...card, ...deferred, ...notes };
 }
 
 function writerEndedOf(raw: unknown, at: string): Event | Bad {

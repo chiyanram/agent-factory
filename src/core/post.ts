@@ -70,9 +70,14 @@ function cut(text: string, limit: number): string {
   return `${kept.join("").trimEnd()}…`;
 }
 
+// flatText : the words on one line: every control and invisible character gone, white space runs one space. Pure.
+export function flatText(value: string): string {
+  return value.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
+}
+
 // cleanField : one field's words, made inert inside a template line. See the header for the rules.
 export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): string {
-  const flat = value.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
+  const flat = flatText(value);
   const inert = flat
     .replace(/\\/g, "\\\\")
     .replace(/&/g, "&amp;")

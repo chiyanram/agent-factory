@@ -18,6 +18,8 @@
 //   4 the branch's tip, and the patch-id of everything since the start, which the dispatcher compares run to run
 //   5 the run's tokens and cost, from the result event of its stream-json output (#131); a run stopped before it
 //     printed one is unmeasured
+//   6 what the run said last and the end of its output (#62): the result event's text, or its stderr's last line, and
+//     up to OUTPUT_LINES lines of its stdout and stderr, so a run the host blocks can say why (step.ts keeps them)
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { Argv } from "../project.js";
@@ -87,6 +89,11 @@ export type Ended = {
   // the PR body the run wrote in .factory/pr.md, as it wrote it, when it ended done (#335); the host cleans it before
   // it posts it (renderBody)
   readonly pr?: string;
+  // what the run said last (#62): its result event's text, else its stderr's last line, else its last plain stdout
+  // line; "" when it said nothing. Raw: the host scrubs and cuts it before it records or shows it (why.ts)
+  readonly said: string;
+  // the end of what the run printed (#62): its stdout's last lines, then its stderr's; raw, as said
+  readonly output: readonly string[];
 };
 
 // only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
@@ -180,25 +187,60 @@ function cutLine(line: string): string {
   return line.length <= LINE_CHARS ? line : line.slice(0, LINE_CHARS).replace(/[\uD800-\uDBFF]$/, "");
 }
 
-// tailOf : the tail after one more piece of output. Pure.
+// the most lines of a run's output the host keeps for a person (#62)
+export const OUTPUT_LINES = 40;
+
+// tailOf : the tail after one more piece of output, the lines a stalled run shows. Pure.
 export function tailOf(tail: Tail, chunk: string): Tail {
+  return tailUpTo(tail, chunk, SHOWN_LINES);
+}
+
+// tailUpTo : the tail after one more piece of output, at most `most` lines. Pure.
+export function tailUpTo(tail: Tail, chunk: string, most: number): Tail {
   const [first = "", ...rest] = chunk.split("\n");
   const current = cutLine(tail.partial + cutLine(first));
   if (rest.length === 0) {
     return { lines: tail.lines, partial: current };
   }
   const ended = [current, ...rest.slice(0, -1)].filter((l) => l.trim() !== "").map(cutLine);
-  return { lines: [...tail.lines, ...ended].slice(-SHOWN_LINES), partial: cutLine(rest.at(-1) ?? "") };
+  return { lines: [...tail.lines, ...ended].slice(-most), partial: cutLine(rest.at(-1) ?? "") };
 }
 
 // lastLines : the lines a person sees of a stalled run, oldest first. Pure.
-export function lastLines(tail: Tail): readonly string[] {
-  return [...tail.lines, tail.partial].filter((l) => l.trim() !== "").slice(-SHOWN_LINES);
+export function lastLines(tail: Tail, most: number = SHOWN_LINES): readonly string[] {
+  return [...tail.lines, tail.partial].filter((l) => l.trim() !== "").slice(-most);
 }
 
-// Heard : what the host has heard of the run so far: when it last printed (ms; 0 for never), its tail, and its
-// stream-json output read for the result event (#131)
-type Heard = { at: number; tail: Tail; stream: Stream };
+// Heard : what the host has heard of the run so far: when it last printed (ms; 0 for never), its tail, the longer
+// tail kept for a person (#62), and its stream-json output read for the result event (#131)
+type Heard = { at: number; tail: Tail; kept: Tail; stream: Stream };
+
+// resultText : the text of the run's result event: its last message, or the CLI's error ("Invalid API key", a budget
+// hit); "" with none. Pure.
+function resultText(stream: Stream): string {
+  const result: unknown = stream.result;
+  const text = typeof result === "object" && result !== null ? (Reflect.get(result, "result") as unknown) : undefined;
+  return typeof text === "string" ? text.trim() : "";
+}
+
+// lastPlain : the last line that is not a stream-json event, "" for none. Pure.
+function lastPlain(lines: readonly string[]): string {
+  return lines.findLast((l) => l.trim() !== "" && !l.trimStart().startsWith("{"))?.trim() ?? "";
+}
+
+// heardOf : what the run said last, and the end of its output: stdout's lines, then stderr's. Pure.
+export function heardOf(input: {
+  readonly stdout: readonly string[];
+  readonly stderr: string;
+  readonly stream: Stream;
+}): {
+  readonly said: string;
+  readonly output: readonly string[];
+} {
+  const err = lastLines(tailUpTo(NO_TAIL, `${input.stderr}\n`, OUTPUT_LINES), OUTPUT_LINES);
+  const last = resultText(input.stream) || lastPlain(err) || lastPlain(input.stdout);
+  return { said: last, output: err.length === 0 ? input.stdout : [...input.stdout, "--- stderr ---", ...err] };
+}
 
 // quietAfter : how long the run has printed nothing, in awake time, after one more poll. Each poll adds the time since
 // the last poll, or since the last output if that came later, but never more than two polls: a poll that took longer
@@ -216,8 +258,13 @@ export function quietAfter(input: {
     : input.quiet + Math.min(input.now - input.last, most);
 }
 
-// InBox : how the run ended, and what it spent
-type InBox = { readonly end: RunEnd; readonly spend: Spend | "unmeasured" };
+// InBox : how the run ended, what it spent, what it said last and the end of its output
+type InBox = {
+  readonly end: RunEnd;
+  readonly spend: Spend | "unmeasured";
+  readonly said: string;
+  readonly output: readonly string[];
+};
 
 // inBox : the agent's run, start to stop; the run's end, or why the box itself failed
 async function inBox(run: WriterRun): Promise<InBox> {
@@ -227,9 +274,9 @@ async function inBox(run: WriterRun): Promise<InBox> {
     env: { ...run.login, ...QUIET },
   });
   if (session.kind === "failed") {
-    return { end: { kind: "failed", reason: session.reason }, spend: "unmeasured" };
+    return { end: { kind: "failed", reason: session.reason }, spend: "unmeasured", said: "", output: [] };
   }
-  const heard: Heard = { at: 0, tail: NO_TAIL, stream: NO_STREAM };
+  const heard: Heard = { at: 0, tail: NO_TAIL, kept: NO_TAIL, stream: NO_STREAM };
   const running = run.setup.box.run({
     session: session.value,
     command: {
@@ -241,13 +288,25 @@ async function inBox(run: WriterRun): Promise<InBox> {
       watch: (chunk) => {
         heard.at = Date.now();
         heard.tail = tailOf(heard.tail, chunk);
+        heard.kept = tailUpTo(heard.kept, chunk, OUTPUT_LINES);
         heard.stream = streamOf(heard.stream, chunk);
       },
     },
   });
   const end = await watched(run, running, heard);
   const stopped = await stoppedEnd(run, session.value, running, { end, heard });
-  return { end: stopped, spend: streamSpend(heard.stream) };
+  return { end: stopped, spend: streamSpend(heard.stream), ...lastWords(end, heard) };
+}
+
+// lastWords : what the run said last and the end of its output. An exit hands back its own output's end; a run the
+// host stopped has only what the watcher heard. Pure.
+function lastWords(end: Watched, heard: Heard): { readonly said: string; readonly output: readonly string[] } {
+  const exited = end.kind === "ran" && end.ran.kind === "exited" ? end.ran : undefined;
+  if (exited === undefined) {
+    return heardOf({ stdout: lastLines(heard.kept, OUTPUT_LINES), stderr: "", stream: heard.stream });
+  }
+  const stdout = lastLines(tailUpTo(NO_TAIL, `${exited.stdout}\n`, OUTPUT_LINES), OUTPUT_LINES);
+  return heardOf({ stdout, stderr: exited.stderr, stream: heard.stream });
 }
 
 // afterStop : the end of a run the host stopped. Pure.
@@ -399,7 +458,7 @@ async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: s
 // writerRun : the run, then its outcome, the branch's tip, the patch and the PR body it wrote. A failure here is the
 // host's, not the run's.
 export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
-  const { end, spend } = await inBox(run);
+  const { end, spend, said: words, output } = await inBox(run);
   const outcome = decide({
     end,
     file: end.kind === "failed" ? { kind: "missing" } : await loadReport({ worktree: run.clone.repo }),
@@ -407,6 +466,6 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
   const pr = await prOf(run, outcome);
   const tip = await committed(run);
   return tip.kind === "ok"
-    ? { kind: "ok", value: { outcome, ending: endingOf(end), spend, ...pr, ...tip.value } }
+    ? { kind: "ok", value: { outcome, ending: endingOf(end), spend, said: words, output, ...pr, ...tip.value } }
     : { kind: "failed", reason: `cannot read what the run committed: ${tip.reason}` };
 }

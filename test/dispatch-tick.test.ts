@@ -291,6 +291,53 @@ describe("tick", () => {
     expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ spend: { usd: 0.5, tokens: 900 } });
   });
 
+  it("a writer run that stops before a change exists: the record, the log and the ping all say why (#62)", async () => {
+    await approved();
+    const log: string[] = [];
+    const pings: Ping[] = [];
+    const why = "the run exited 1; the run said: Error: Invalid API key";
+    const output = join(home, "runs", "ledger", "PROJ-1", "writer-2026-11-10T08-12-03-764Z.log");
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async () => ({
+          kind: "ok",
+          value: { head: H, outcome: "blocked", patch: "", evidence: [], hung: false, why, output },
+        }),
+      },
+    };
+    await tick(setup({ team, open: [], merged: [] }, log, { steps, notify: pinger(pings) }));
+    expect(log).toContain(
+      `log PROJ-1: writer blocked: ${why}; output kept in ${output}; there is no open change to say so on`,
+    );
+    expect(log).not.toContain("log PROJ-1: done");
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ kind: "writer-ended", why, output });
+    expect(pings).toEqual([
+      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `the writer's run is blocked: ${why}` },
+    ]);
+  });
+
+  it("reads a writer-ended line written before #62, with no why, as before", async () => {
+    const line = {
+      at: "2026-11-10T08:12:03.764Z",
+      kind: "writer-ended",
+      mode: "fix",
+      head: H,
+      outcome: "blocked",
+      patch: "",
+      evidence: [],
+      hung: false,
+    };
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(join(home, "runs", "ledger", "OLD-1.jsonl"), `${JSON.stringify(line)}\n`);
+    const read = await readRecords({ home, project: "ledger", ticket: "OLD-1" });
+    expect(read).toEqual({ kind: "ok", value: [line] });
+    writeFileSync(join(home, "runs", "ledger", "OLD-2.jsonl"), `${JSON.stringify({ ...line, why: 7 })}\n`);
+    expect(await readRecords({ home, project: "ledger", ticket: "OLD-2" })).toMatchObject({ kind: "failed" });
+  });
+
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
     await approved();
     const steps: Steps = {
