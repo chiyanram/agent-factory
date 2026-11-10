@@ -10,6 +10,8 @@ on:
     branches: [main]
   # release.yml runs these checks first, then releases (#351).
   workflow_call:
+  # by hand, for a macOS run without a release: gh workflow run ci.yml --ref <branch> (#357)
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -38,8 +40,11 @@ jobs:
       - run: make build
 
   # The factory runs on stock macOS laptops, where tmpdir() sits behind a symlink; a test that passes on Linux can fail
-  # there (#196, #222). make test only: lint and build give the same answer on both.
+  # there (#196, #222). make test only: lint and build give the same answer on both. It takes about 5 minutes, so it
+  # runs only when a person starts the run: release.yml, which refuses to release on red, or Run workflow (#357). A
+  # called workflow sees its caller's event, so both are workflow_dispatch.
   test-macos:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
