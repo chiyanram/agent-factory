@@ -2,9 +2,10 @@
 // generated policy and one private HOME per started runner. srt-plan.ts decides the policy, the arguments and how each
 // answer reads; this file writes the policy, runs srt and keeps the runners it started. Nothing here throws.
 //
-// A started runner is a folder of its own, outside the clone: policy.json (0600, which the run cannot write) and home/
-// (0700, the run's HOME). stop removes it. A command that outlives its timeout, or a stop, gets SIGTERM and then
-// SIGKILL, sent to srt's whole process group, so the sandboxed agent and everything it started go with it.
+// A started runner is a folder of its own, outside the clone: policy.json (0600, which the run cannot write), home/
+// (0700, the run's HOME) and home/tmp/ (0700, the run's temp folder: srt-plan.ts tmpEnv, #62). stop removes it. A
+// command that outlives its timeout, or a stop, gets SIGTERM and then SIGKILL, sent to srt's whole process group, so
+// the sandboxed agent and everything it started go with it.
 
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -15,6 +16,7 @@ import {
   checkEnv,
   insideClone,
   readSrtProbe,
+  RUN_TMP,
   srtArgs,
   srtEnv,
   srtPolicy,
@@ -88,6 +90,7 @@ export function srtBox(setup: SrtBoxSetup): Box {
   const prepare = async (name: string, spec: BoxSpec): Promise<Live | Failed> => {
     const dir = join(setup.runsDir, name);
     const home = join(dir, "home");
+    const tmp = join(home, RUN_TMP);
     const policy = join(dir, "policy.json");
     const text = `${JSON.stringify(
       srtPolicy({
@@ -100,6 +103,7 @@ export function srtBox(setup: SrtBoxSetup): Box {
     )}\n`;
     const made = await attempt(async () => {
       await mkdir(home, { recursive: true, mode: 0o700 });
+      await mkdir(tmp, { mode: 0o700 });
       await writeFile(policy, text, { mode: 0o600 });
     }, `cannot prepare the srt runner in ${dir}`);
     if (made.kind === "failed") {
@@ -109,6 +113,7 @@ export function srtBox(setup: SrtBoxSetup): Box {
     const env = srtEnv({
       host: setup.env,
       home,
+      tmp,
       ca: { name: setup.caName, file: setup.egress.caCerts },
       spec: spec.env,
     });

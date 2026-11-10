@@ -90,6 +90,8 @@ Tick each one on #114 with the output:
 - [ ] a call to `https://api.anthropic.com` goes through (any HTTP answer); at work, through `FACTORY_UPSTREAM_PROXY`
   and the company CA;
 - [ ] a write in the clone works, and a write elsewhere in your home fails;
+- [ ] `node -e "require('fs').mkdtempSync(require('os').tmpdir()+'/x')"` works inside `srt` (the run's own temp
+  folder), and a write to `/tmp` directly fails;
 - [ ] the factory home's files and your `gh`, `glab`, `.netrc` and `.git-credentials` logins cannot be read;
 - [ ] no Docker socket answers (Docker Desktop, Rancher Desktop);
 - [ ] by hand: one implementer run with `claude` finishes inside `srt` (`FACTORY_BOX=srt agent-factory dispatch
@@ -98,5 +100,9 @@ Tick each one on #114 with the output:
 The policy hides your whole home ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531);
 the operator's choice A on #114). It allows back only the run's clone and private home, and, read-only, the install
 folders of `claude` and its Node, the detected toolchain managers' install folders, and the `srt.readOnly` folders.
+A run writes only in its clone and its private home. Its temp folder is `tmp/` in that private home, made before the
+run and removed with it: the runner sets `CLAUDE_CODE_TMPDIR`, `TMP` and `TEMP` to it, and srt sets the run's `TMPDIR`
+from `CLAUDE_CODE_TMPDIR`. The policy never allows `/tmp` (srt keeps only its own `/tmp/claude` writable), so a run
+with no temp folder of its own fails every Bash call with `EPERM` (#62).
 A program kept elsewhere under your home cannot be read inside `srt`: put its manager's real install folder on `PATH`,
 or add its folder to `srt.readOnly`.
