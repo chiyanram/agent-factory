@@ -133,19 +133,21 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
 **Plugins.** A project lists its plugins in its settings by `name@marketplace`.
 - **The list is pinned and locked.** Each plugin is pinned by version and hash. The list is a locked settings key, so
   a user layer cannot drop or swap the process plugin.
-- **Updating is deliberate.** An update shows the change, runs the eval set, and then moves the pin.
+- **Updating is deliberate.** An update shows the change, runs `config check`, and then moves the pin. **Today:** it
+  runs no eval set ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)).
 - **One ticket, one set of versions.** Run records carry the hash of the spec, the design, each plugin and each rubric
   used, so an update applies to the next ticket only.
-- **Order.** Proposed: when two plugins disagree, the project's list order wins, with its own repo files last, and the
-  automated review names each rule's source.
+- **Order.** Decided: one process plugin per project; other plugins add rules only, and their rule IDs carry the
+  plugin's name ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)). **Today:** the first plugin
+  with a process wins.
 
 **The process plugin** holds the lanes, as data, and one role card per role. The rulebook's crq is the first such plugin,
 and the engine ships a small default one.
 - **The approval floor:** a lanes file can make a lane stricter, never drop the approval for any lane above tiny.
 - **The roles:** coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro and
   onboarder.
-- **A role card's frontmatter** (role, steps, input, `must_not_see`, hand-off, tools, enforced guardrails, rules,
-  next) is enforced by the engine. Its body is what the model reads.
+- **A role card's frontmatter**: the engine enforces `role`, `tools`, `must_not_see` and `hand_off`; the other fields
+  are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
 
 **Connectors** are the engine's swappable parts (ADR-0014). Each has a dry mode that shows what it would write and writes
 nothing. Each passes the shared test kit: approve, stale after an edit, refuse a bot.
