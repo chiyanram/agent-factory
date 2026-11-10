@@ -104,6 +104,30 @@ describe("role card frontmatter, enforced (#232)", () => {
     expect(handOffFields("the spec, in the spec home")).toEqual([]);
   });
 
+  // The rulebook's cards (chiyanram/skills, rulebook 1.1.2) name a question's own fields since #320; the first ledger
+  // pilot run (#62) was refused on them.
+  it("takes the rulebook's hand-offs, a question's fields included", () => {
+    const hands: ReadonlyArray<readonly [Role, string]> = [
+      [
+        "implementer",
+        "commits, .factory/report.json {status: done, evidence: [evidence rows]} or {status: asked, questions: [{question, choices, recommended}]} or {status: blocked, blocker}, and .factory/pr.md",
+      ],
+      [
+        "test-first",
+        "one commit with the failing test, and .factory/report.json {status: done, evidence: [one evidence row]} or {status: asked, questions: [{question, choices, recommended}]}",
+      ],
+      [
+        "cleanup",
+        "commits, and .factory/report.json {status: done, evidence: [the evidence rows, run again], deferred: [each cleanup that would change behaviour]}",
+      ],
+    ];
+    for (const [role, hand] of hands) {
+      expect(cardOf(role, `---\nrole: ${role}\ntools: [Read]\nhand_off: ${hand}\n---\nx`, "rulebook")).toMatchObject({
+        kind: "ok",
+      });
+    }
+  });
+
   it("refuses a hand-off that names a field the engine's schema for the role does not have", () => {
     expect(card("tools: [Read]\nhand_off: .factory/report.json {status: done, evidence, pr_title}")).toMatchObject({
       kind: "failed",
