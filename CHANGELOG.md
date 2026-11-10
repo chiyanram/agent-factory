@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.29.0](https://github.com/chiyanram/agent-factory/compare/v0.28.0...v0.29.0) (2026-11-10)
+
+### ✨ Features
+
+* **box** — the srt runner allows back toolchain managers read-only · [#371](https://github.com/chiyanram/agent-factory/issues/371) (PR [#372](https://github.com/chiyanram/agent-factory/pull/372))
+
+Install: [build and install the packed tarball](https://github.com/chiyanram/agent-factory/blob/v0.29.0/GUIDE.md#install-a-pinned-version)
+
 ## [0.28.0](https://github.com/chiyanram/agent-factory/compare/v0.27.0...v0.28.0) (2026-11-10)
 
 ### ✨ Features
