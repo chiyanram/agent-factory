@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.30.1](https://github.com/chiyanram/agent-factory/compare/v0.30.0...v0.30.1) (2026-11-10)
+
+### 🐛 Fixes
+
+* **process** — a role card's hand-off may name a question's fields · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#379](https://github.com/chiyanram/agent-factory/pull/379))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.30.1/chiyanram-agent-factory-0.30.1.tgz`
+
 ## [0.30.0](https://github.com/chiyanram/agent-factory/compare/v0.29.0...v0.30.0) (2026-11-10)
 
 ### ✨ Features
