@@ -1052,10 +1052,24 @@ describe("one finder per lens (#237)", () => {
     let most = 0;
     const ran: Ran[] = [];
     const inner = byLens({}, ran);
+    // each finder's run waits until two are in flight, so the overlap does not hang on a runner's speed (#354); a
+    // round that allowed only one gives up after 2 s and fails on 1
+    const twoInFlight = async (): Promise<void> => {
+      const until = Date.now() + 2_000;
+      for (;;) {
+        if (now >= 2 || Date.now() >= until) {
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1));
+      }
+    };
     const counted: Model = async (run) => {
+      if (run.part?.kind !== "finder") {
+        return inner(run);
+      }
       now += 1;
       most = Math.max(most, now);
-      await new Promise((r) => setTimeout(r, 5));
+      await twoInFlight();
       const out = await inner(run);
       now -= 1;
       return out;
