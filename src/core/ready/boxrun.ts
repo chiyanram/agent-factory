@@ -10,7 +10,7 @@
 
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { Box, PinnedImage, Ran, Session } from "../box/index.js";
+import type { Box, NoImage, PinnedImage, Ran, Session } from "../box/index.js";
 import { proxyEnv } from "../egress/env.js";
 import type { Started as EgressStarted } from "../egress/start.js";
 import type { Result } from "../forge/api.js";
@@ -19,12 +19,17 @@ import type { Argv } from "../project.js";
 import { copyCode } from "../review/code.js";
 import { attempt } from "../review/safe.js";
 
+// the run's egress: the project's Squid proxy, started, on its internal network (vm), or the runner's own proxy, which
+// the srt runner was made with from the same checked allowlist (#114)
+export type Egress = EgressStarted | { readonly kind: "own" };
+
 export type BoxSetup = {
   readonly box: Box;
-  readonly image: PinnedImage;
+  // the vm runner's pinned image; NO_IMAGE for the srt runner, which runs this host's own programs
+  readonly image: PinnedImage | NoImage;
   // starts the project's egress proxy, recreated with the allowlist read this pass; a box run calls it inside the
   // project's dispatch lock, so it never recreates the proxy under a box that is running
-  readonly egress: () => Promise<EgressStarted>;
+  readonly egress: () => Promise<Egress>;
   // the project's clone (FACTORY_REPO): only git reads it, through hostGit
   readonly repo: string;
   // the host's environment, for hostGit only; the box never sees it
@@ -101,6 +106,19 @@ export type RunSpec = {
   readonly env: Readonly<Record<string, string>>;
 };
 
+// behindProxy : the proxy variables, the proxy and the network a box joins; none for a runner with its own proxy
+function behindProxy(egress: Exclude<Egress, { kind: "failed" }>): {
+  readonly env: Readonly<Record<string, string>>;
+  readonly proxy: string;
+  readonly network: string;
+} {
+  if (egress.kind === "own") {
+    return { env: {}, proxy: "", network: "" };
+  }
+  const { proxy, network } = egress;
+  return { env: proxyEnv(proxy), proxy: `http://${proxy.host}:${proxy.port}`, network };
+}
+
 // startBox : the project's egress proxy, then a fresh box on `spec.worktree`, behind it. The ready check and the
 // writer (#113) both start their boxes here.
 export async function startBox(setup: BoxSetup, spec: RunSpec): Promise<Result<Session>> {
@@ -108,14 +126,14 @@ export async function startBox(setup: BoxSetup, spec: RunSpec): Promise<Result<S
   if (egress.kind === "failed") {
     return { kind: "failed", reason: `the egress proxy did not start: ${egress.reason}` };
   }
-  const { proxy, network } = egress;
+  const net = behindProxy(egress);
   const box = await setup.box.start({
     image: setup.image,
     worktree: spec.worktree,
     readOnly: spec.readOnly,
-    env: { ...proxyEnv(proxy), ...spec.env },
-    proxy: `http://${proxy.host}:${proxy.port}`,
-    network,
+    env: { ...net.env, ...spec.env },
+    proxy: net.proxy,
+    network: net.network,
   });
   return box.kind === "started"
     ? { kind: "ok", value: box.session }

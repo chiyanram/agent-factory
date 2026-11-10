@@ -1,27 +1,34 @@
 // types — the box seam (#112; ADR-0012 S5, S7, S8): one interface for every run with no human watching (the writer,
-// the ready check, the reviewer). FACTORY_BOX picks only where the box runs (choose.ts); every place runs the same
-// container box image, so nothing that calls a Box may depend on the place (S17, review issue 10 on #30).
+// the ready check, the reviewer). FACTORY_BOX picks the runner kind (choose.ts): vm, a container with its own Docker,
+// or srt, Anthropic's sandbox runtime around the whole process on a work laptop (#114). Nothing that calls a Box may
+// depend on the kind (S17, review issue 10 on #30).
 //
-// A Box is an I/O seam: it decides nothing. It never inherits the host environment, it mounts only the worktree, and
-// every outcome is a sealed result. Nothing here throws.
+// A Box is an I/O seam: it decides nothing. It never inherits the host environment, it lets the run write only in the
+// worktree (and a private HOME), and every outcome is a sealed result. Nothing here throws.
 
-export type BoxPlace = "vm" | "laptop";
+export type BoxPlace = "vm" | "srt";
 
 // A container image pinned by digest (S7: "Pin the version"), made only by pinImage, so an unpinned tag cannot reach
 // start.
 export type PinnedImage = { readonly kind: "pinned"; readonly ref: string };
 
+// no image: the srt runner runs this host's own programs, inside the sandbox; its pin is srt's version (srt-plan.ts)
+export type NoImage = { readonly kind: "none" };
+export const NO_IMAGE: NoImage = { kind: "none" };
+
 export type BoxSpec = {
-  readonly image: PinnedImage;
+  // the vm runner refuses NO_IMAGE
+  readonly image: PinnedImage | NoImage;
   // the host path of the worktree: the only folder mounted into the box
   readonly worktree: string;
   // paths inside the worktree the run may read but not change: the agent's own settings and instructions (#113 Q1)
   readonly readOnly: readonly string[];
   // every variable the run sees, and nothing else: the host environment is never inherited (ADR-0014 P11)
   readonly env: Readonly<Record<string, string>>;
-  // the egress proxy every request leaves through (#130)
+  // the egress proxy every request leaves through (#130); "" for the srt runner, which keeps its own (srt-plan.ts)
   readonly proxy: string;
-  // the project's internal network: no route out but its proxy (one proxy per project, decision on #30, 2026-11-07)
+  // the project's internal network: no route out but its proxy (one proxy per project, decision on #30, 2026-11-07);
+  // "" for the srt runner, whose sandbox has no network but its own proxy
   readonly network: string;
 };
 

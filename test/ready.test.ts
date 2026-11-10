@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { join } from "node:path";
 import type { Box, PinnedImage, Ran } from "../src/core/box/types.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
+import type { SrtEgress } from "../src/core/box/srt-plan.js";
 import type { ReadyFacts, RunInput } from "../src/core/dispatch/tick.js";
 import type { CommitStatus, Forge } from "../src/core/forge/types.js";
 import type { ProjectFile } from "../src/core/project.js";
@@ -569,6 +570,8 @@ describe("boxPlan", () => {
   };
   const LOCAL = { gate: "local", verify: ["make", "verify"], ready: { programs: ["make"] } };
   const env = { FACTORY_BOX: "vm", FACTORY_REPO: "" };
+  const srtEgresses: SrtEgress[] = [];
+  let srtRunner: Box = fakeBox({ place: "srt" }).box;
   const planFor = (boxes: readonly Box[], more: NodeJS.ProcessEnv = {}) =>
     boxPlan({
       env: { ...env, FACTORY_REPO: p.clone, ...more },
@@ -579,6 +582,10 @@ describe("boxPlan", () => {
         return boxes;
       },
       openEgress,
+      srtFor: (egress) => {
+        srtEgresses.push(egress);
+        return srtRunner;
+      },
     });
   const reason = (text: string) => ({
     value: { plan: { kind: "unavailable", reason: expect.stringContaining(text) } },
@@ -589,6 +596,48 @@ describe("boxPlan", () => {
     images = [];
     opens.length = 0;
     gitHosts.length = 0;
+    srtEgresses.length = 0;
+    srtRunner = fakeBox({ place: "srt" }).box;
+  });
+
+  it("opens the srt runner with no image and no Squid: it keeps its own proxy, from the checked allowlist (#114)", async () => {
+    write("ledger.json", { ...LOCAL, egress: { allow: ["repo.maven.apache.org", ".npmjs.org"] } });
+    const ok = await planFor([], {
+      FACTORY_BOX: "srt",
+      FACTORY_UPSTREAM_PROXY: "proxy.corp.example:8080",
+      NODE_EXTRA_CA_CERTS: "/etc/corp/ca.pem",
+    });
+    expect(ok).toMatchObject({ value: { plan: { kind: "ready", setup: { image: { kind: "none" } } } } });
+    expect(srtEgresses).toEqual([
+      {
+        hosts: [".npmjs.org", "repo.maven.apache.org"],
+        upstream: { kind: "proxy", host: "proxy.corp.example", port: 8080 },
+        caCerts: "/etc/corp/ca.pem",
+      },
+    ]);
+    // no box.json is read, no vm box is asked for, and no egress container starts
+    expect(images).toEqual([]);
+    if (ok.kind !== "ok" || ok.value.plan.kind !== "ready") throw new Error("no plan");
+    expect(await ok.value.plan.setup.egress()).toEqual({ kind: "own" });
+    expect(opens).toEqual([]);
+  });
+
+  it("refuses the srt runner on an empty allowlist, the project's git host on it, a relative CA path, or a runner that does not answer", async () => {
+    // the project's own git host is refused on the list too, as the Squid proxy refuses it
+    write("ledger.json", { ...LOCAL, egress: { allow: ["gitlab.corp.example"] } });
+    expect(await planFor([], { FACTORY_BOX: "srt", FACTORY_FORGE_HOST: "gitlab.corp.example" })).toMatchObject(
+      reason("a git host"),
+    );
+    write("ledger.json", LOCAL);
+    expect(await planFor([], { FACTORY_BOX: "srt" })).toMatchObject(reason('no "egress.allow"'));
+    write("ledger.json", { ...LOCAL, egress: { allow: ["api.anthropic.com"] } });
+    expect(await planFor([], { FACTORY_BOX: "srt", NODE_EXTRA_CA_CERTS: "ca.pem" })).toMatchObject(
+      reason("NODE_EXTRA_CA_CERTS must be an absolute path"),
+    );
+    srtRunner = fakeBox({ place: "srt", probe: { kind: "missing", reason: "srt is not installed" } }).box;
+    expect(await planFor([], { FACTORY_BOX: "srt" })).toMatchObject(
+      reason("the srt box is not working: srt is not installed"),
+    );
   });
 
   it("reads the gate from the project file, and is unavailable with no file", async () => {

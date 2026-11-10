@@ -1,7 +1,8 @@
 // run — one writer run in a fresh box (#113; ADR-0012 S5, S11, S13). The host has made the clone (clone.ts); this
 // file runs the agent in it and reads how it ended:
 //   1 the project's egress proxy, then the box, with the clone mounted and only the model login and the proxy settings
-//   2 claude -p, the prompt on stdin, skip-all permissions (S11: allowed in the vm box), each plugin with --plugin-dir, and
+//   2 claude -p, the prompt on stdin, skip-all permissions (S11: only inside a runner, vm or srt, #114; never bare), the
+//     writer's deny list in .factory/settings.json (tools.ts), each plugin with --plugin-dir, and
 //     no settings from the branch: --setting-sources user drops its .claude/settings.json, hooks, env and .mcp.json,
 //     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08). Its output is
 //     streamed (stream-json, which -p takes only with --verbose): one JSON event a line, the last one the result with
@@ -33,7 +34,7 @@ import {
   type RunEnd,
 } from "../report.js";
 import { PR_BODY_PATH } from "../pr-body.js";
-import type { Ran, Session } from "../box/index.js";
+import type { BoxPlace, Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { pluginPaths, type Clone } from "./clone.js";
 import { NO_STREAM, streamOf, streamSpend, type Spend, type Stream } from "../dispatch/spend.js";
@@ -112,15 +113,30 @@ export function claudeTools(tools: readonly string[]): string {
   return [...new Set([...named, ...(named.length === 0 ? [] : HELPERS)])].join(",");
 }
 
-// claudeArgv : the writer's command. Pure. The prompt goes on stdin; the plugin and settings paths are relative to the
-// clone. The run gets only the role card's tools (#232).
-export function claudeArgv(claude: Claude, settings: SettingsArg, plugins: number, tools: readonly string[]): Argv {
+// the runners skip-all is allowed in (ADR-0012 S11; #114): a sandbox around the whole process. A run anywhere else, or
+// bare on the host, gets no skip flag, so with -p every tool call that would ask is denied.
+const SKIP_ALL_IN: ReadonlySet<BoxPlace> = new Set(["vm", "srt"]);
+
+// skipAll : the skip-all flag, inside a runner only. Pure.
+export function skipAll(place: BoxPlace): readonly string[] {
+  return SKIP_ALL_IN.has(place) ? ["--dangerously-skip-permissions"] : [];
+}
+
+// claudeArgv : the writer's command in the runner at `place`. Pure. The prompt goes on stdin; the plugin and settings
+// paths are relative to the clone. The run gets only the role card's tools (#232).
+export function claudeArgv(
+  claude: Claude,
+  settings: SettingsArg,
+  plugins: number,
+  tools: readonly string[],
+  place: BoxPlace,
+): Argv {
   return [
     "claude",
     "-p",
     "--setting-sources",
     "user",
-    "--dangerously-skip-permissions",
+    ...skipAll(place),
     ...pluginArgs(plugins),
     "--tools",
     claudeTools(tools),
@@ -217,7 +233,7 @@ async function inBox(run: WriterRun): Promise<InBox> {
   const running = run.setup.box.run({
     session: session.value,
     command: {
-      argv: claudeArgv(run.claude, run.settings, run.plugins, run.tools),
+      argv: claudeArgv(run.claude, run.settings, run.plugins, run.tools, session.value.place),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
       // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it

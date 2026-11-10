@@ -15,7 +15,7 @@ import { start } from "./core/start.js";
 import { readWaiver, waive } from "./core/waiver.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
-import { buildBox, chooseBox, hostDocker, vmBox, type Built } from "./core/box/index.js";
+import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
 import { openEgress } from "./core/egress/index.js";
 import {
@@ -593,16 +593,26 @@ function tokenStore(io: Io, home: string): Result<TokenStore> {
   return opened.kind === "store" ? { kind: "ok", value: opened.store } : { kind: "failed", reason: opened.reason };
 }
 
-// hostBoxPlan : the project's box plan on this host: the vm box and the project's egress proxy, through its docker
+// hostBoxPlan : the project's box plan on this host: the vm box and the project's egress proxy, through its docker, or
+// the srt runner with its own proxy (#114)
 function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
   const docker = hostDocker(io.env, io.system.run);
   return boxPlan({
     env: io.env,
     home,
     project,
-    // the laptop box comes with #129
     boxesFor: (image) => [vmBox({ docker, image: image.ref, owner: { uid: io.system.uid, gid: io.system.gid } })],
     openEgress: (o) => openEgress({ ...o, dir: join(home, "egress"), docker }),
+    srtFor: (egress) =>
+      srtBox({
+        run: io.system.run,
+        bin: "srt",
+        env: io.env,
+        host: { platform: io.system.platform, home: homedir(), factoryHome: home },
+        egress,
+        caName: settingName("egress.caCerts"),
+        runsDir: join(home, "srt-runs"),
+      }),
   });
 }
 

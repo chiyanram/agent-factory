@@ -18,7 +18,7 @@ import type { ChangeRequest, FailedJob, Forge, OpenChange } from "../src/core/fo
 import { renderBody, renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
-import { claudeArgv, lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
+import { claudeArgv, lastLines, NO_TAIL, quietAfter, skipAll, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, questionsOf, stallOf } from "../src/core/writer/settings.js";
 import {
   FLOOR,
@@ -37,7 +37,7 @@ import { NO_DESIGN } from "../src/core/spec.js";
 import { createHash } from "node:crypto";
 import { copyFileSync } from "node:fs";
 import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
-import { quoted, settingsOf, toolsOf } from "../src/core/writer/tools.js";
+import { quoted, settingsOf, toolsOf, WRITER_ALLOW, writerDenies } from "../src/core/writer/tools.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
 
@@ -101,7 +101,12 @@ beforeEach(async () => {
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
 // what a writer does in its box: what it saw, then a commit and a report
-type Seen = { readonly spec: string; readonly task: string; readonly files: readonly string[] };
+type Seen = {
+  readonly spec: string;
+  readonly task: string;
+  readonly files: readonly string[];
+  readonly settings: string;
+};
 // skipHook: the writer commits past the trailer hook, as `git -c core.hooksPath=/dev/null commit` would
 // plant: a file the writer also commits, as a run that writes the agent's settings would (#110)
 type Act = {
@@ -139,7 +144,12 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
       const start = fake.calls.findLast((c) => c.op === "start");
       const dir = start?.op === "start" ? start.spec.worktree : "";
       const read = (file: string) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file), "utf8") : "none");
-      seen.push({ spec: read(".factory/spec.md"), task: read(".factory/task.md"), files: readdirSync(dir).toSorted() });
+      seen.push({
+        spec: read(".factory/spec.md"),
+        task: read(".factory/task.md"),
+        files: readdirSync(dir).toSorted(),
+        settings: read(".factory/settings.json"),
+      });
       if (act.commit) {
         commitWork(dir, act);
       }
@@ -338,7 +348,14 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", evidence: DONE.evidence } });
     const { head, patch } = valueOf(out);
     // the writer saw the approved spec and the tree of main, and its commit is on the new branch on the forge
-    expect(seen).toEqual([{ spec: SPEC, task: "none", files: expect.arrayContaining(["AGENTS.md", ".factory"]) }]);
+    expect(seen).toEqual([
+      {
+        spec: SPEC,
+        task: "none",
+        files: expect.arrayContaining(["AGENTS.md", ".factory"]),
+        settings: expect.stringContaining('"deny"'),
+      },
+    ]);
     expect(origin("refs/heads/factory/PROJ-1")).toBe(head);
     expect(origin(`${head}^`)).toBe(origin("refs/heads/main"));
     expect(patch).toMatch(/^[0-9a-f]{40}$/);
@@ -374,7 +391,14 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
     const spec = started(fake);
-    expect(spec.readOnly).toEqual(["AGENTS.md", ".git/config", ".git/hooks", ".factory/spec.md", ".factory/plugins/1"]);
+    expect(spec.readOnly).toEqual([
+      "AGENTS.md",
+      ".git/config",
+      ".git/hooks",
+      ".factory/spec.md",
+      ".factory/plugins/1",
+      ".factory/settings.json",
+    ]);
     expect(spec.network).toBe("factory-int-ledger");
     expect(spec.env).toMatchObject({
       CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test",
@@ -387,7 +411,13 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const ran = command(fake);
     // the run gets the built-in implementer card's tools, and its prompt starts with the card's body
     expect(ran.argv).toEqual(
-      claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1, ["Read", "Grep", "Glob", "Edit", "Bash"]),
+      claudeArgv(
+        { maxUsd: "2", model: "" },
+        { kind: "file", path: ".factory/settings.json" },
+        1,
+        ["Read", "Grep", "Glob", "Edit", "Bash"],
+        "vm",
+      ),
     );
     expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^# Implementer\n/) });
     expect(ran.stdin).toMatchObject({
@@ -968,13 +998,17 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
   it("never takes the hook from the change's branch", async () => {
     commands("feat/x", "lint-file: touch /tmp/owned\n");
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
     await run(
-      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []),
+      setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []),
       FIX,
       openLine({ head: p.git("rev-parse", "origin/feat/x") }),
     );
-    expect(started(fake).readOnly).not.toContain(".factory/settings.json");
-    expect(command(fake).argv).not.toContain("--settings");
+    // the settings file holds only the host's allow and deny lists (#114): no hook from the branch
+    expect(started(fake).readOnly).toContain(".factory/settings.json");
+    expect(seen.map((s) => JSON.parse(s.settings) as unknown)).toEqual([
+      { permissions: { allow: WRITER_ALLOW, deny: expect.arrayContaining(["WebFetch", "Bash(git push *)"]) } },
+    ]);
   });
 
   it("reads each tool's first line, unwraps a code span, and quotes the lint for the hook's shell", () => {
@@ -984,9 +1018,13 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
     });
     expect(toolsOf("no tools here\n")).toEqual({ lint: "", quick: "" });
     expect(quoted("it's")).toBe("'it'\\''s'");
-    expect(settingsOf({ lint: "", quick: "npm test" })).toEqual({ kind: "none" });
-    const hook = settingsOf({ lint: "eslint --fix", quick: "" });
+    const plain = settingsOf({ lint: "", quick: "npm test" }, "/home/op");
+    expect(plain.kind === "text" ? JSON.parse(plain.text) : {}).toEqual({
+      permissions: { allow: WRITER_ALLOW, deny: writerDenies("/home/op") },
+    });
+    const hook = settingsOf({ lint: "eslint --fix", quick: "" }, "/home/op");
     expect(hook.kind === "text" ? JSON.parse(hook.text) : {}).toEqual({
+      permissions: { allow: WRITER_ALLOW, deny: writerDenies("/home/op") },
       hooks: {
         PostToolUse: [
           {
@@ -1030,7 +1068,7 @@ describe("the writer's words and settings", () => {
   it("runs claude with no settings of the branch, skip-all, each plugin with --plugin-dir, streamed output, the cap and model only when set", () => {
     // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
     // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
-    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1, ["Read", "Edit", "Bash"])).toEqual([
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1, ["Read", "Edit", "Bash"], "vm")).toEqual([
       "claude",
       "-p",
       "--setting-sources",
@@ -1045,19 +1083,47 @@ describe("the writer's words and settings", () => {
       "--verbose",
     ]);
     // the engine runs alone with no plugin, and hands two plugins in the project's order (#232)
-    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0, ["Read"])).not.toContain("--plugin-dir");
-    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2, ["Read"]).slice(5, 9)).toEqual([
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0, ["Read"], "vm")).not.toContain("--plugin-dir");
+    expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2, ["Read"], "vm").slice(5, 9)).toEqual([
       "--plugin-dir",
       ".factory/plugins/1",
       "--plugin-dir",
       ".factory/plugins/2",
     ]);
-    expect(claudeArgv({ maxUsd: "2", model: "opus" }, { kind: "none" }, 1, ["Read"]).slice(-4)).toEqual([
+    expect(claudeArgv({ maxUsd: "2", model: "opus" }, { kind: "none" }, 1, ["Read"], "vm").slice(-4)).toEqual([
       "--max-budget-usd",
       "2",
       "--model",
       "opus",
     ]);
+  });
+
+  it("gives skip-all only inside a runner, vm or srt, and hands the writer its allow and deny lists (#114, #111)", () => {
+    const argv = (place: "vm" | "srt") => claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0, ["Read"], place);
+    expect(argv("srt")).toContain("--dangerously-skip-permissions");
+    expect(argv("vm")).toContain("--dangerously-skip-permissions");
+    expect(skipAll("srt")).toEqual(["--dangerously-skip-permissions"]);
+    expect(WRITER_ALLOW).toEqual(["Bash", "Edit(./**)"]);
+    const deny = writerDenies("/Users/op/");
+    expect(deny).toEqual(
+      expect.arrayContaining([
+        "WebFetch",
+        "Bash(git push)",
+        "Bash(git push *)",
+        "Bash(curl)",
+        "Bash(curl *)",
+        "Read(//Users/op/.ssh/**)",
+        "Read(//Users/op/.config/gh/**)",
+        "Read(//Users/op/.config/glab-cli/**)",
+        "Read(//Users/op/.git-credentials)",
+        "Read(//Users/op/.netrc)",
+        "Read(//Users/op/.aws/**)",
+        "Read(//Users/op/.azure/**)",
+        "Read(//Users/op/.config/gcloud/**)",
+      ]),
+    );
+    // with no home known, the runner alone hides the credential paths
+    expect(writerDenies("").filter((d) => d.startsWith("Read("))).toEqual([]);
   });
 
   it("gives a run 60 minutes unless FACTORY_WRITER_MINUTES says otherwise, from 1 to 240", () => {

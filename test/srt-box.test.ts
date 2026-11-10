@@ -1,0 +1,266 @@
+// The srt runner (#114) on a fake srt: the policy it generates, the arguments and variables it hands srt, its refusals
+// (missing srt, the wrong version, a platform srt does not sandbox), its timeout and its stop. No srt is needed: the
+// real one is checked on the laptop by test/srt-box-real.test.ts (GUIDE.md "Check the srt runner").
+
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import type { Call, Exit, Runner } from "../src/core/forge/api.js";
+import { srtBox } from "../src/core/box/srt.js";
+import {
+  CREDENTIAL_PATHS,
+  readSrtProbe,
+  SRT_VERSION,
+  srtDomains,
+  srtEnv,
+  srtPolicy,
+  type SrtEgress,
+  type SrtHost,
+} from "../src/core/box/srt-plan.js";
+import { NO_IMAGE, type BoxSpec } from "../src/core/box/types.js";
+import { boxContract } from "./box-contract.js";
+import { tempDir } from "./temp.js";
+
+const RUNS = tempDir("srt-runs-");
+afterAll(() => rmSync(RUNS, { recursive: true, force: true }));
+
+const HOST: SrtHost = { platform: "darwin", home: "/Users/op", factoryHome: "/Users/op/.factory" };
+const EGRESS: SrtEgress = { hosts: [".npmjs.org", "api.anthropic.com"], upstream: { kind: "none" }, caCerts: "" };
+const WORKTREE = "/Users/op/.factory/box-runs/run-1/repo";
+const TOKEN = "sk-ant-oat01-not-a-real-token";
+const SPEC: BoxSpec = {
+  image: NO_IMAGE,
+  worktree: WORKTREE,
+  readOnly: [".git/config", ".factory/settings.json"],
+  env: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },
+  proxy: "",
+  network: "",
+};
+const VERSION: Exit = { code: 0, stdout: `${SRT_VERSION}\n`, stderr: "" };
+const OK: Exit = { code: 0, stdout: "", stderr: "" };
+
+// a fake srt: `--version` answers the version, every command answers `command`, or hangs until its stop when `hang`
+function fakeSrt(input: { readonly version?: Exit; readonly command?: Exit; readonly hang?: boolean } = {}): {
+  readonly calls: Call[];
+  readonly run: Runner;
+} {
+  const calls: Call[] = [];
+  const hung = (c: Call): Promise<Exit> =>
+    new Promise((resolve) => {
+      c.stop?.addEventListener("abort", () => resolve({ code: 143, stdout: "", stderr: "" }), { once: true });
+    });
+  const answered = (c: Call): Promise<Exit> => {
+    const exit = input.command ?? OK;
+    c.watch?.(exit.stdout);
+    return Promise.resolve(exit);
+  };
+  const run: Runner = (c) => {
+    calls.push(c);
+    if (c.args[0] === "--version") {
+      return Promise.resolve(input.version ?? VERSION);
+    }
+    return input.hang === true ? hung(c) : answered(c);
+  };
+  return { calls, run };
+}
+
+function box(fake: { readonly run: Runner }, host: SrtHost = HOST, egress: SrtEgress = EGRESS) {
+  let n = 0;
+  return srtBox({
+    run: fake.run,
+    bin: "srt",
+    env: { PATH: "/usr/bin:/bin", HOME: "/Users/op", GH_TOKEN: "ghp_x", HTTPS_PROXY: "http://corp:8080" },
+    host,
+    egress,
+    caName: "NODE_EXTRA_CA_CERTS",
+    runsDir: RUNS,
+    newName: () => `srt-test-${++n}-${Math.random().toString(36).slice(2, 8)}`,
+  });
+}
+
+const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
+
+// the runner as app.ts makes it, from the host's environment, on a fake srt that records each call
+boxContract(
+  "srt on a fake srt",
+  (host) => {
+    const fake = fakeSrt({ command: { code: 0, stdout: "streamed\n", stderr: "" } });
+    let n = 0;
+    const made = srtBox({
+      run: fake.run,
+      bin: "srt",
+      env: host,
+      host: HOST,
+      egress: EGRESS,
+      caName: "NODE_EXTRA_CA_CERTS",
+      runsDir: RUNS,
+      newName: () => `srt-contract-${++n}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+    return { box: made, handed: () => fake.calls.map((c) => ({ argv: c.args, env: c.env })) };
+  },
+  { image: NO_IMAGE, proxy: "", network: "" },
+);
+
+describe("srt runner: the policy (#114)", () => {
+  const policy = srtPolicy({
+    host: HOST,
+    egress: EGRESS,
+    run: { worktree: WORKTREE, readOnly: [".git/config"], home: "/Users/op/.factory/srt-runs/r/home" },
+  });
+
+  it("lets the run write only in its clone and its private HOME, and keeps the read-only paths read-only", () => {
+    expect(policy.filesystem.allowWrite).toEqual([WORKTREE, "/Users/op/.factory/srt-runs/r/home"]);
+    expect(policy.filesystem.denyWrite).toEqual([`${WORKTREE}/.git/config`]);
+  });
+
+  it("denies reads of the credential paths, the factory home and the Docker sockets, and allows the run's own back", () => {
+    const deny = policy.filesystem.denyRead;
+    for (const path of [
+      "/Users/op/.ssh",
+      "/Users/op/.config/gh",
+      "/Users/op/.config/glab-cli",
+      "/Users/op/.git-credentials",
+      "/Users/op/.netrc",
+      "/Users/op/.aws",
+      "/Users/op/.azure",
+      "/Users/op/.config/gcloud",
+      "/Users/op/.factory",
+      "/var/run/docker.sock",
+      "/Users/op/.rd/docker.sock",
+    ]) {
+      expect(deny).toContain(path);
+    }
+    expect(deny.length).toBeGreaterThanOrEqual(CREDENTIAL_PATHS.length);
+    expect(policy.filesystem.allowRead).toEqual([WORKTREE, "/Users/op/.factory/srt-runs/r/home"]);
+  });
+
+  it("allows only the checked allowlist, on port 443, no local binding and no Unix socket, and no weaker mode", () => {
+    expect(policy.network).toEqual({
+      allowedDomains: ["npmjs.org:443", "*.npmjs.org:443", "api.anthropic.com:443"],
+      deniedDomains: [],
+      allowLocalBinding: false,
+      allowAllUnixSockets: false,
+    });
+    expect(policy).toMatchObject({
+      enableWeakerNestedSandbox: false,
+      enableWeakerNetworkIsolation: false,
+      allowNestedUserNamespaces: false,
+      allowAppleEvents: false,
+    });
+    expect(srtDomains([])).toEqual([]);
+  });
+
+  it("chains to the company proxy at work, and reads the company CA inside the factory home", () => {
+    const work = srtPolicy({
+      host: HOST,
+      egress: {
+        ...EGRESS,
+        upstream: { kind: "proxy", host: "proxy.corp.example", port: 8080 },
+        caCerts: "/etc/ca.pem",
+      },
+      run: { worktree: WORKTREE, readOnly: [], home: "/h" },
+    });
+    expect(work.network.parentProxy).toEqual({
+      http: "http://proxy.corp.example:8080",
+      https: "http://proxy.corp.example:8080",
+    });
+    expect(work.filesystem.allowRead).toContain("/etc/ca.pem");
+  });
+
+  it("hands srt the host's PATH and locale, the private HOME and the CA, and no other host variable", () => {
+    const env = srtEnv({
+      host: { PATH: "/bin", LANG: "C", HOME: "/Users/op", GH_TOKEN: "x", HTTPS_PROXY: "http://corp:8080" },
+      home: "/h",
+      ca: { name: "NODE_EXTRA_CA_CERTS", file: "/etc/ca.pem" },
+      spec: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },
+    });
+    expect(env).toEqual({
+      PATH: "/bin",
+      LANG: "C",
+      HOME: "/h",
+      NODE_EXTRA_CA_CERTS: "/etc/ca.pem",
+      CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
+    });
+  });
+});
+
+describe("srt runner: the probe refuses to start without the pinned srt (S7)", () => {
+  it("is ready with the pinned version on macOS and Linux", async () => {
+    expect(await box(fakeSrt()).probe()).toEqual({ kind: "ready" });
+    expect(await box(fakeSrt(), { ...HOST, platform: "linux" }).probe()).toEqual({ kind: "ready" });
+  });
+
+  it("refuses a missing srt, another version, and Windows", async () => {
+    const missing = await box(fakeSrt({ version: { code: 127, stdout: "", stderr: "spawn srt ENOENT" } })).probe();
+    expect(missing).toEqual({
+      kind: "missing",
+      reason: `srt does not answer (spawn srt ENOENT); install it: npm install --global @anthropic-ai/sandbox-runtime@${SRT_VERSION}`,
+    });
+    const other = await box(fakeSrt({ version: { code: 0, stdout: "0.0.82\n", stderr: "" } })).probe();
+    expect(other).toMatchObject({ kind: "missing", reason: expect.stringContaining(`not the pinned ${SRT_VERSION}`) });
+    expect(readSrtProbe({ platform: "win32", version: VERSION })).toMatchObject({ kind: "missing" });
+  });
+});
+
+describe("srt runner: start, run and stop (#114)", () => {
+  it("writes the policy outside the clone, runs the command in the clone through srt, and removes its folder on stop", async () => {
+    const fake = fakeSrt();
+    const runner = box(fake);
+    const started = await runner.start(SPEC);
+    if (started.kind !== "started") throw new Error(started.reason);
+    expect(started.session.place).toBe("srt");
+    const ran = await runner.run({
+      session: started.session,
+      command: { argv: ["claude", "-p", "--verbose"], stdin: { kind: "text", text: "the prompt" }, timeoutSeconds: 30 },
+    });
+    expect(ran).toEqual({ kind: "exited", code: 0, stdout: "", stderr: "" });
+    const call = fake.calls.at(-1);
+    if (call === undefined) throw new Error("no call");
+    const policyFile = join(RUNS, started.session.id, "policy.json");
+    expect(call.args).toEqual(["--settings", policyFile, "--", "claude", "-p", "--verbose"]);
+    expect(call.cwd).toBe(WORKTREE);
+    expect(call.stdin).toBe("the prompt");
+    expect(call.env).toEqual({
+      PATH: "/usr/bin:/bin",
+      HOME: join(RUNS, started.session.id, "home"),
+      CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
+    });
+    const policy: unknown = JSON.parse(readFileSync(policyFile, "utf8"));
+    expect(policy).toMatchObject({ filesystem: { allowWrite: [WORKTREE, join(RUNS, started.session.id, "home")] } });
+    expect(await runner.stop(started.session)).toEqual({ kind: "ok" });
+    expect(existsSync(join(RUNS, started.session.id))).toBe(false);
+  });
+
+  it("stops a command at its timeout, and reads it as timed out", async () => {
+    const fake = fakeSrt({ hang: true });
+    const runner = box(fake);
+    const started = await runner.start(SPEC);
+    if (started.kind !== "started") throw new Error(started.reason);
+    const ran = await runner.run({ session: started.session, command: { ...TRUE, timeoutSeconds: 0.05 } });
+    expect(ran).toEqual({ kind: "timedOut", seconds: 0.05 });
+    await runner.stop(started.session);
+  });
+
+  it("stops a running command when the runner stops", async () => {
+    const fake = fakeSrt({ hang: true });
+    const runner = box(fake);
+    const started = await runner.start(SPEC);
+    if (started.kind !== "started") throw new Error(started.reason);
+    const running = runner.run({ session: started.session, command: TRUE });
+    await runner.stop(started.session);
+    expect(await running).toMatchObject({ kind: "exited", code: 143 });
+    expect(fake.calls.at(-1)?.stop?.aborted).toBe(true);
+  });
+
+  it("refuses a relative clone, a read-only path outside it, and a variable srt or the runner sets", async () => {
+    const runner = box(fakeSrt());
+    expect(await runner.start({ ...SPEC, worktree: "repo" })).toMatchObject({ kind: "failed" });
+    expect(await runner.start({ ...SPEC, readOnly: ["../x"] })).toMatchObject({ kind: "failed" });
+    for (const name of ["HOME", "HTTPS_PROXY", "SRT_DEBUG", "TMPDIR"]) {
+      expect(await runner.start({ ...SPEC, env: { [name]: "x" } })).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining(name),
+      });
+    }
+  });
+});

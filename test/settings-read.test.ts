@@ -56,7 +56,7 @@ describe("settings are read through the one adapter (#254)", () => {
     expect(reads('const n = name("FACTORY_WRITER_MODEL");')).toEqual(["FACTORY_WRITER_MODEL"]);
     expect(reads("// env.FACTORY_MAX_USD is the cap")).toEqual([]);
     expect(reads("const a = env.FACTORY_REPO;")).toEqual([]);
-    expect(reads('reason: "FACTORY_BOX is not set; set it to vm"')).toEqual([]);
+    expect(reads('reason: "FACTORY_BOX is not set; set it to srt or vm"')).toEqual([]);
     expect(reads('env.FACTORY_MAX_USD = "2";')).toEqual([]);
     expect(reads('const a = settingOf(env, "caps.usdPerRun");')).toEqual([]);
   });

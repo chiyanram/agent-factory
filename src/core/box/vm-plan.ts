@@ -47,6 +47,7 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NETWORK = /^factory-int-[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const SPEC_RULES: readonly ((spec: BoxSpec) => Check)[] = [
+  (s) => (s.image.kind === "pinned" ? OK : refuse("the vm runner runs only a pinned image; this spec names none")),
   (s) =>
     s.worktree.startsWith("/") && mountable(s.worktree)
       ? OK
@@ -137,7 +138,8 @@ export function runArgs(input: { readonly name: string; readonly spec: BoxSpec }
     "--tmpfs",
     `${HOME}:rw,nosuid,nodev,mode=0700`,
     ...[`HTTP_PROXY=${spec.proxy}`, `HTTPS_PROXY=${spec.proxy}`, `NO_PROXY=${LOCAL}`].flatMap((e) => ["--env", e]),
-    spec.image.ref,
+    // checkSpec refused a spec with no image before this runs
+    spec.image.kind === "pinned" ? spec.image.ref : "",
   ];
 }
 

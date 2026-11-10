@@ -162,6 +162,34 @@ describe("processRunner (#228)", () => {
     expect(exit.stdout).toBe("x\n".repeat(50));
   });
 
+  it("starts a call in its folder, and a stop ends the call's whole process group (#114)", async () => {
+    const env = { PATH: process.env.PATH };
+    const here = await run({ bin: "sh", args: ["-c", "pwd"], stdin: "", env, cwd: "/" });
+    expect(here.stdout.trim()).toBe("/");
+    const stop = new AbortController();
+    // a child that would outlive its shell: the stop reaches it through the group
+    const running = run({
+      bin: "sh",
+      args: ["-c", "sleep 30 & wait"],
+      stdin: "",
+      env,
+      keep: "tail",
+      stop: stop.signal,
+    });
+    setTimeout(() => stop.abort(), 50);
+    const began = Date.now();
+    expect((await running).code).not.toBe(0);
+    expect(Date.now() - began).toBeLessThan(5000);
+    const stoppedFirst = new AbortController();
+    stoppedFirst.abort();
+    const never = await run({ bin: "sh", args: ["-c", "sleep 30"], stdin: "", env, stop: stoppedFirst.signal });
+    expect(never.code).not.toBe(0);
+    // a stoppable call that keeps all of its output is still stopped past the cap
+    expect((await run({ ...LOUD, stop: new AbortController().signal })).code).not.toBe(0);
+    const quiet = await run({ bin: "sh", args: ["-c", "echo hi"], stdin: "", env, stop: new AbortController().signal });
+    expect(quiet).toEqual({ code: 0, stdout: "hi\n", stderr: "" });
+  });
+
   it("gives a tail call's exit code and stderr, and a program that cannot start fails", async () => {
     const failed = await run({ ...LOUD, args: ["-c", "echo no >&2; exit 3"], keep: "tail" });
     expect(failed).toEqual({ code: 3, stdout: "", stderr: "no\n" });
