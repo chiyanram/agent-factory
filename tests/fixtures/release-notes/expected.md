@@ -18,4 +18,4 @@
 
 * **dispatch** — poll each forge once per pass · PR [#162](https://github.com/chiyanram/agent-factory/pull/162)
 
-Install: `npm i -g github:chiyanram/agent-factory#v0.2.0`
+Install: [build and install the packed tarball](https://github.com/chiyanram/agent-factory/blob/v0.2.0/GUIDE.md#install-a-pinned-version)

@@ -2,7 +2,7 @@
 // need their own templates and transform, which live in scripts/release_notes.mjs (#157).
 //
 // A release is a tag vX.Y.Z, a GitHub release and a CHANGELOG.md entry; nothing is published to npm (package.json is
-// private). A colleague installs a pinned version with: npm i -g github:chiyanram/agent-factory#vX.Y.Z
+// private). A colleague installs a pinned version from its packed tarball: GUIDE.md#install-a-pinned-version
 import { releaseNotes } from './scripts/release_notes.mjs'
 
 export default {
