@@ -113,8 +113,8 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the agent CLIs at pinned versions. A
   project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. `agent-factory box build` builds and
   pins it ([The runner image](#the-runner-image)).
-- Work laptop (`FACTORY_BOX=srt`, #114): install the pinned sandbox runtime, `npm install --global
-  @anthropic-ai/sandbox-runtime@0.0.81` (on Linux also `bubblewrap`, `socat` and `ripgrep`). Each implementer run, ready
+- Work laptop (`FACTORY_BOX=srt`, #114): install the pinned sandbox runtime, `npm install --global --omit=optional
+  @anthropic-ai/sandbox-runtime@0.0.82` (on Linux also `bubblewrap`, `socat` and `ripgrep`). Each implementer run, ready
   check and local verifier runs inside `srt` with one policy the factory writes per run: writes only in the run's clone
   and a private home; your whole home hidden, but for the clone, the private home and, read-only, the folders `claude`
   and its Node are installed in (found from `PATH`, and the factory's own Node and package, for the lint hook); the
