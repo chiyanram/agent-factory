@@ -409,6 +409,18 @@ describe("agent-factory setup", () => {
     expect(run.out).not.toContain(TOKEN);
   });
 
+  it("status lists a refused srt.readOnly folder under the srt runner, and fails (#371)", async () => {
+    await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+    const run = await cli(["setup", "status"], {
+      FACTORY_HOME: home,
+      FACTORY_BOX: "srt",
+      FACTORY_SRT_READ_ONLY: JSON.stringify(["/usr"]),
+    });
+    expect(run.code).toBe(1);
+    expect(run.out).toMatch(/^box: srt\n {2}risk: /);
+    expect(run.out).toContain('  refused: srt.readOnly "/usr" is not under your home');
+  });
+
   it("status fails when no box is chosen", async () => {
     await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
     const run = await cli(["setup", "status"], { FACTORY_HOME: home });

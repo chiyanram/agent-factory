@@ -12,7 +12,8 @@
 //               read-only; srt adds its own mandatory denies (.git/hooks, .git/config, shell rc files)
 //   reads       the person's whole home is hidden (review issue 6 on #30; the operator's choice A on #114,
 //               2026-11-10). srt's allowRead wins over its denyRead, so the clone, the private HOME and the agent's
-//               programs (the CLI's install and its Node, srt-programs.ts) are allowed back, the programs read-only.
+//               programs (the CLI's install and its Node, srt-programs.ts) and the toolchains (a detected toolchain
+//               manager's install folder, and srt.readOnly: srt-toolchains.ts, #371) are allowed back read-only.
 //               A denyRead more specific than an allowed folder still holds, so the credential paths, the factory home
 //               (its secrets and every other run) and the Docker sockets are denied by name as well, in case a
 //               program folder holds one
@@ -25,6 +26,7 @@
 import { join } from "node:path";
 import type { Exit, Result } from "../forge/api.js";
 import type { Upstream } from "../egress/squid.js";
+import type { Toolchains } from "./srt-toolchains.js";
 import type { Command, Probe } from "./types.js";
 
 // the pinned srt (S7): an exact version, pinned only after its changes were reviewed (0.0.82, 2026-11-10). A new pin is
@@ -76,6 +78,12 @@ const DOCKER_SOCKETS: readonly string[] = ["/var/run/docker.sock", "/run/docker.
 // the Docker sockets under the home: Docker Desktop, Rancher Desktop, Colima
 const HOME_SOCKETS: readonly string[] = [".rd/docker.sock", ".colima/default/docker.sock", ".colima/docker.sock"];
 
+// secretPaths : every path under the home that no run may read, and that no folder allowed back may be or hold: the
+// credential paths, the Docker sockets under the home, and the factory home. Pure.
+export function secretPaths(home: string, factoryHome: string): readonly string[] {
+  return [...[...CREDENTIAL_PATHS, ...HOME_SOCKETS].map((p) => join(home, p)), factoryHome];
+}
+
 // the host the srt runner runs on
 export type SrtHost = {
   readonly platform: NodeJS.Platform;
@@ -86,6 +94,9 @@ export type SrtHost = {
   // the folders under the home the run reads back, read-only: the agent CLI and its Node (srt-programs.ts), or why
   // they cannot be found, which the probe refuses
   readonly programs: Result<readonly string[]>;
+  // the toolchain folders allowed back read-only, and the srt.readOnly entries refused, which the probe refuses
+  // (srt-toolchains.ts, #371)
+  readonly toolchains: Toolchains;
 };
 
 // the project's egress, as the srt runner keeps it: the allowlist parseAllowlist checked, the company proxy, and the
@@ -146,7 +157,6 @@ export function srtPolicy(input: {
   readonly run: SrtRun;
 }): SrtPolicy {
   const { host, egress, run } = input;
-  const underHome = (p: string): string => join(host.home, p);
   return {
     network: {
       allowedDomains: srtDomains(egress.hosts),
@@ -156,18 +166,14 @@ export function srtPolicy(input: {
       ...parentOf(egress.upstream),
     },
     filesystem: {
-      denyRead: [
-        host.home,
-        ...CREDENTIAL_PATHS.map(underHome),
-        ...HOME_SOCKETS.map(underHome),
-        ...DOCKER_SOCKETS,
-        host.factoryHome,
-      ],
-      // the run's own folders are inside the factory home; the agent's programs and the company CA may be in the home
+      denyRead: [host.home, ...secretPaths(host.home, host.factoryHome), ...DOCKER_SOCKETS],
+      // the run's own folders are inside the factory home; the agent's programs, the toolchains and the company CA
+      // may be in the home. None of them is ever in allowWrite.
       allowRead: [
         run.worktree,
         run.home,
         ...(host.programs.kind === "ok" ? host.programs.value : []),
+        ...host.toolchains.allowed.map((t) => t.dir),
         ...(egress.caCerts === "" ? [] : [egress.caCerts]),
       ],
       allowWrite: [run.worktree, run.home],
@@ -187,19 +193,23 @@ export function srtArgs(policyFile: string, command: Command): readonly string[]
 
 export const VERSION_ARGS: readonly string[] = ["--version"];
 
-// readSrtProbe : the runner can start when the platform is one srt sandboxes, the agent's programs were found, and
-// `srt --version` prints the pinned version (S7: refuse to start when the runner is missing or not the pinned one).
-// Pure.
+// readSrtProbe : the runner can start when the platform is one srt sandboxes, the agent's programs were found, no
+// srt.readOnly entry was refused, and `srt --version` prints the pinned version (S7: refuse to start when the
+// runner is missing or not the pinned one). Pure.
 export function readSrtProbe(input: {
   readonly platform: NodeJS.Platform;
   readonly programs: Result<readonly string[]>;
+  readonly refused: readonly string[];
   readonly version: Exit;
 }): Probe {
-  const { platform, programs } = input;
+  const { platform, programs, refused } = input;
   if (!PLATFORMS.has(platform)) {
     return { kind: "missing", reason: `srt does not sandbox ${platform} here; the srt runner runs on macOS or Linux` };
   }
-  return programs.kind === "failed" ? { kind: "missing", reason: programs.reason } : readVersion(input.version);
+  if (programs.kind === "failed") {
+    return { kind: "missing", reason: programs.reason };
+  }
+  return refused.length > 0 ? { kind: "missing", reason: refused.join("; ") } : readVersion(input.version);
 }
 
 // readVersion : ready when `srt --version` printed the pinned version. Pure.

@@ -15,9 +15,10 @@ import { start } from "./core/start.js";
 import { readWaiver, waive } from "./core/waiver.js";
 import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
-import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type Built } from "./core/box/index.js";
+import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type BoxChoice, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
 import { locatePrograms } from "./core/box/srt-programs.js";
+import { locateToolchains, toolchainLines } from "./core/box/srt-toolchains.js";
 import { openEgress } from "./core/egress/index.js";
 import {
   claudeTokenStatus,
@@ -620,6 +621,7 @@ function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
             execPath: process.execPath,
             packageDir: packageDir(),
           }),
+          toolchains: await locateToolchains({ env: io.env, home: homedir(), factoryHome: home }),
         },
         egress,
         caName: settingName("egress.caCerts"),
@@ -1036,15 +1038,26 @@ function tokenLine(status: Status): { readonly line: string; readonly ok: boolea
     : ageLine(status.age, status.meta);
 }
 
+// srtLines : the srt runner's toolchain folders as setup status prints them (#371), and whether none was refused
+async function srtLines(io: Io, box: BoxChoice): Promise<{ readonly lines: readonly string[]; readonly ok: boolean }> {
+  const home = factoryHome(io.env);
+  if (box.kind !== "chosen" || box.place !== "srt" || home.kind === "refused") {
+    return { lines: [], ok: true };
+  }
+  const toolchains = await locateToolchains({ env: io.env, home: homedir(), factoryHome: home.path });
+  return { lines: toolchainLines(toolchains, homedir()), ok: toolchains.refused.length === 0 };
+}
+
 async function setupStatus({ store, io }: { readonly store: TokenStore; readonly io: Io }): Promise<number> {
   const box = chooseBox(io.env);
+  const srt = await srtLines(io, box);
   const boxLines =
     box.kind === "chosen"
-      ? [`box: ${box.place}`, ...box.risks.map((r) => `  risk: ${r}`)]
+      ? [`box: ${box.place}`, ...box.risks.map((r) => `  risk: ${r}`), ...srt.lines.map((l) => `  ${l}`)]
       : [`box: refused: ${box.reason}`];
   const token = tokenLine(await claudeTokenStatus({ store, now: new Date() }));
   io.out([...boxLines, token.line].map((l) => `${l}\n`).join(""));
-  return box.kind === "chosen" && token.ok ? 0 : 1;
+  return box.kind === "chosen" && srt.ok && token.ok ? 0 : 1;
 }
 
 // this package's folder: next to dist/ (or src/ in a test)
@@ -1223,7 +1236,10 @@ async function setupStep({
     io.err(`agent-factory setup: ${store.reason}\n`);
     return 1;
   }
-  return step.run({ store: store.store, io });
+  // status reads the user and machine layers, so a user file's srt.readOnly shows (#371)
+  return step.name === "status"
+    ? resolvedRun("setup status", undefined, io, (resolved) => step.run({ store: store.store, io: resolved }))
+    : step.run({ store: store.store, io });
 }
 
 const COMMANDS: readonly Command[] = [

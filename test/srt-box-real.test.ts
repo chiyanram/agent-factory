@@ -8,12 +8,13 @@
 // api.anthropic.com alone, the same policy a writer run gets.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { srtBox } from "../src/core/box/srt.js";
-import { locatePrograms } from "../src/core/box/srt-programs.js";
+import { locatePrograms, under } from "../src/core/box/srt-programs.js";
+import { locateToolchains, type Toolchains } from "../src/core/box/srt-toolchains.js";
 import { NO_IMAGE, type Box, type Ran } from "../src/core/box/types.js";
 import { runProcess } from "../src/core/forge/api.js";
 import { tempDir } from "./temp.js";
@@ -28,7 +29,10 @@ const HOME = homedir();
 const CANARY = join(HOME, ".ssh", "canary");
 const OFF_LIST = "https://example.com";
 
-// the runner as app.ts makes it: the whole home hidden, the agent CLI's install and its Node allowed back read-only
+const toolchains = await locateToolchains({ env: process.env, home: HOME, factoryHome: FACTORY });
+
+// the runner as app.ts makes it: the whole home hidden, the agent CLI's install, its Node and the toolchains allowed
+// back read-only
 async function makeBox(): Promise<Box> {
   const programs = await locatePrograms({
     env: process.env,
@@ -41,7 +45,7 @@ async function makeBox(): Promise<Box> {
     run: runProcess,
     bin: "srt",
     env: process.env,
-    host: { platform: process.platform, home: HOME, factoryHome: FACTORY, programs },
+    host: { platform: process.platform, home: HOME, factoryHome: FACTORY, programs, toolchains },
     egress: { hosts: ["api.anthropic.com"], upstream: { kind: "none" }, caCerts: "" },
     caName: "NODE_EXTRA_CA_CERTS",
     runsDir: join(FACTORY, "srt-runs"),
@@ -59,6 +63,28 @@ async function why(box: Box): Promise<string> {
 
 const box = await makeBox();
 const skip = await why(box);
+
+// the programs a toolchain case tries, in this order, each with --version
+const TRIED = ["java", "node", "python3", "go", "ruby"];
+
+type Tool = { readonly dir: string; readonly program: string };
+
+// programsIn : each tried program in one PATH folder
+function programsIn(dir: string, entry: string): readonly Tool[] {
+  const names = existsSync(entry) ? readdirSync(entry) : [];
+  return TRIED.filter((n) => names.includes(n)).map((n) => ({ dir, program: join(entry, n) }));
+}
+
+// toolchainProgram : a program on PATH inside a detected manager's install folder (#371), or "none"
+function toolchainProgram(found: Toolchains): Tool | "none" {
+  const path = (process.env.PATH ?? "").split(delimiter);
+  const tools = found.allowed
+    .filter((a) => a.from !== "srt.readOnly")
+    .flatMap((t) => path.filter((p) => under(p, t.dir)).flatMap((p) => programsIn(t.dir, p)));
+  return tools[0] ?? "none";
+}
+
+const tool = toolchainProgram(toolchains);
 
 // inSrt : one command in a fresh runner on the clone
 async function inSrt(argv: readonly [string, ...string[]]): Promise<Ran> {
@@ -104,6 +130,19 @@ describe.skipIf(skip !== "")(`srt runner on the real srt${skip === "" ? "" : ` (
     expect(await inSrt(["claude", "--version"])).toMatchObject({ kind: "exited", code: 0 });
     expect(await inSrt(["node", "-e", "process.exit(0)"])).toMatchObject({ kind: "exited", code: 0 });
   });
+
+  it.skipIf(tool === "none")(
+    `runs a toolchain under a detected manager, and cannot write to its folder${tool === "none" ? " (skipped: no mise, SDKMAN!, asdf or nvm install folder on PATH)" : ""}`,
+    async () => {
+      if (tool === "none") {
+        return;
+      }
+      expect(await inSrt([tool.program, "--version"])).toMatchObject({ kind: "exited", code: 0 });
+      const planted = join(tool.dir, `srt-write-${randomUUID()}`);
+      expect(failed(await inSrt(["sh", "-c", `echo no > '${planted}'`]))).toBe(true);
+      expect(existsSync(planted)).toBe(false);
+    },
+  );
 
   it("cannot connect direct, skipping the proxy, nor reach a host off the allowlist through it", async () => {
     expect(failed(await inSrt(["curl", "-sS", "--max-time", "20", "--noproxy", "*", "https://1.1.1.1"]))).toBe(true);

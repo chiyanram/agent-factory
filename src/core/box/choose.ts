@@ -24,7 +24,7 @@ const VM_RISKS: readonly string[] = [
 // The srt runner's risks (#114): the sandbox is the host's own kernel and the agent runs as the person.
 const SRT_RISKS: readonly string[] = [
   "the runner is an OS sandbox (sandbox-exec on macOS, bubblewrap on Linux) around a process that runs as you: a flaw in it, or in the kernel, reaches your whole account",
-  "your home is hidden but for the run's clone and the agent CLI's and Node's install folders, which it reads: a secret kept inside one of those folders can be read by the run",
+  "your home is hidden but for the run's clone, the agent CLI's and Node's install folders, and the toolchain folders listed below, which it reads: a secret kept inside one of those folders can be read by the run",
   "a host on the egress allowlist (the model API, the package registries) can still carry data out",
   "the runner holds the model-only token: a tricked writer can spend model budget with it until the token is revoked",
   "there is no Docker in the runner: tests that need containers fail there and run on git host CI",
