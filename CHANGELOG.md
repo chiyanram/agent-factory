@@ -3,6 +3,18 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.31.0](https://github.com/chiyanram/agent-factory/compare/v0.30.2...v0.31.0) (2026-11-10)
+
+### ✨ Features
+
+* **settings** — every command reads the project's git host and clone from the project file · [#382](https://github.com/chiyanram/agent-factory/issues/382) (PR [#394](https://github.com/chiyanram/agent-factory/pull/394))
+
+### 🐛 Fixes
+
+* **onboard** — the brief carries the repo's AGENTS.md MUSTs and a verified line must be backed by its cite · [#383](https://github.com/chiyanram/agent-factory/issues/383) (PR [#393](https://github.com/chiyanram/agent-factory/pull/393))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.31.0/chiyanram-agent-factory-0.31.0.tgz`
+
 ## [0.30.2](https://github.com/chiyanram/agent-factory/compare/v0.30.1...v0.30.2) (2026-11-10)
 
 ### 🐛 Fixes
