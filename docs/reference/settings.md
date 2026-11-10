@@ -146,10 +146,15 @@ onboarder:
    "Project rules", each MUST of the root `AGENTS.md` and `CLAUDE.md`, which the engine reads itself (a list item
    under a MUST heading, or a statement with MUST, MUST NOT, SHALL or NEVER in capitals), one line each, cited to its
    line (#383); then every line marked verified or inferred, a cite the default branch does not hold marked inferred,
-   the project's `AGENTS.md`, `CONTEXT.md` and ADRs linked, and a term `CONTEXT.md` defines linked there. A line
-   that says a file is absent is never verified by its cite: it is checked against the default branch's file list,
-   and a brief that says a file the repo holds is absent is refused with the reason, and nothing is staged. It prints
-   both hashes. What it spent goes in `runs/<project>/onboarder.jsonl`.
+   the project's `AGENTS.md`, `CONTEXT.md` and ADRs linked, and a term `CONTEXT.md` defines linked there. "Project
+   rules" is the engine's alone: a model line titled "Project rules", or one that names `AGENTS.md`, `CLAUDE.md`,
+   `.claude/`, `.agents/` or an agent instruction file, is dropped, since the model's copy of the code holds none of
+   them. A line that says a file is absent is never verified by its cite: the engine reads the names it claims absent
+   (the phrase after "no", "without" or "missing", or before "is absent"), never any other file it names, and checks
+   them against the default branch's file list; one the repo holds, or one it cannot tell apart, drops the line.
+   Each dropped line is printed with its reason and staged in `staged/dropped.md`, which is never accepted or sent
+   to a run. Only a brief whose every model line was dropped is refused, and then nothing is staged. It prints both
+   hashes. What it spent goes in `runs/<project>/onboarder.jsonl`, refused or not.
 2. Read both files, then `agent-factory onboard accept <project> <brief hash> <glossary hash>`: they move into the
    project home, with `knowledge.json` recording the hashes, who and when. Hashes that no longer match are refused.
 3. Every implementer run then gets them as `.factory/brief.md` and `.factory/glossary.md`. Each `file:line` they cite

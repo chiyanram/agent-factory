@@ -1,14 +1,21 @@
 // brief — brief.md and glossary.md, written from the onboarder's answer and what the engine read itself (#235;
 // docs/DESIGN.md section 5 "Project knowledge"). Every line is marked verified or inferred:
 //
-//   project rules        each MUST of the root AGENTS.md and CLAUDE.md, read by the engine itself (musts.ts), one
-//                        line each, verified at its file:line
+//   project rules        the engine's alone: each MUST of the root AGENTS.md and CLAUDE.md, read by the engine itself
+//                        (musts.ts), one line each, verified at its file:line
 //   commands             the engine's listing (listing.ts), each verified at the file:line it was read from
 //   where rules live     the project's own instruction files, glossary and decision records, linked, never copied
 //   stack, modules,      the model's answer; an item is verified only when its cite names a file and line the default
-//   gotchas, terms       branch holds, else it is inferred and loses the cite. A line that says a file is absent is
-//                        never verified by its cite: it is checked against the file list (cites.ts "absence"), and
-//                        one the file list contradicts refuses the whole brief, with the reason
+//   gotchas, terms       branch holds, else it is inferred and loses the cite
+//
+// The model's copy of the code holds no rule file (review/code.ts prunes them), so whatever it says of them is wrong
+// by construction. Two kinds of model line are dropped, never sent to a run, each with a note for the human who reads
+// the staged brief (#383):
+//   - a line that speaks of the project's rules: one titled "Project rules", or one that names AGENTS.md, CLAUDE.md,
+//     .claude/, .agents/ or an agent instruction file
+//   - a line that says a file is absent which the default branch holds (cites.ts "absence"), or one the engine cannot
+//     tell apart from such a claim
+// A brief is refused only when the model gave lines and none is left; the brief with what is left is staged otherwise.
 //
 // A term the project's own glossary (CONTEXT.md or GLOSSARY.md) defines is linked there, never given a meaning of ours.
 // No count goes in. Each kept cite is returned with its line's text, so every later run can check it again (cites.ts).
@@ -16,7 +23,7 @@
 
 import type { Answer, Cite, Item, Module, Term } from "./answer.js";
 import type { Result } from "../forge/api.js";
-import { absence } from "./cites.js";
+import { type Absence, absence } from "./cites.js";
 import type { Commands } from "./listing.js";
 import { projectMusts, RULE_FILES } from "./musts.js";
 
@@ -35,7 +42,13 @@ export type BriefInput = {
   readonly answer: Answer;
 };
 
-export type Written = { readonly brief: string; readonly glossary: string; readonly cites: readonly KeptCite[] };
+// dropped: one note per model line the engine left out of the brief, for the human, never for a run
+export type Written = {
+  readonly brief: string;
+  readonly glossary: string;
+  readonly cites: readonly KeptCite[];
+  readonly dropped: readonly string[];
+};
 
 // where a project keeps its rules, in the order the brief lists them
 const RULE_PLACES = [
@@ -66,34 +79,63 @@ function lineText(lines: readonly string[], line: number): string {
   return line === 0 ? "" : (lines[line - 1] ?? "");
 }
 
-type Mark = { readonly mark: string; readonly cite: KeptCite | "none"; readonly refused?: string };
+type Mark = { readonly mark: string; readonly cite: KeptCite | "none" } | { readonly dropped: string };
 
-// absentMark : the mark of a line that says a file is absent, checked against the file list (cites.ts "absence"); a
-// line the file list contradicts is refused; undefined when the line is no such claim
-function absentMark(input: BriefInput, item: Cite, text: string): Mark | undefined {
-  const absent = absence(text, item.file, input.files);
-  switch (absent.kind) {
-    case "false":
-      return {
-        mark: "(refused)",
-        cite: "none",
-        refused: `"${text}" says a file is absent, but the default branch holds ${absent.held.join(", ")}`,
-      };
-    case "true":
-      return { mark: "(verified against the file list)", cite: "none" };
-    case "unchecked":
-      return { mark: `(inferred: ${absent.why})`, cite: "none" };
-    case "not-absence":
-      return undefined;
-  }
+// a line that speaks of the project's rules, which only the engine writes (musts.ts)
+const RULES_TALK = [
+  /^\s*project rules\b/i,
+  /\b(?:AGENTS|CLAUDE)\.md\b/i,
+  /\b(?:AGENTS|CLAUDE)\b/,
+  /(?:^|[\s(`'"])\.(?:claude|agents)\b/i,
+  /\b(?:agent|AI)\s+instructions?\b/i,
+  /\binstruction files?\b/i,
+] as const;
+
+// rulesTalk : whether a model line speaks of the project's rules
+export function rulesTalk(text: string): boolean {
+  const plain = text.replace(/[`*]/g, "");
+  return RULES_TALK.some((r) => r.test(plain));
 }
 
-// markOf : how a line is marked: verified with its cite, verified against the file list, or inferred; or refused
-function markOf(input: BriefInput, item: Cite & { readonly verified: boolean }, text: string): Mark {
-  const absent = absentMark(input, item, text);
-  if (absent !== undefined) {
-    return absent;
+const ENGINE_RULES = "the engine writes Project rules itself, from the root AGENTS.md and CLAUDE.md";
+
+// absentMark : the mark of a line that says a file is absent, checked against the file list (cites.ts "absence"); a
+// line the file list contradicts, or may, is dropped; undefined when the line is no such claim
+function absentMark(input: BriefInput, item: Cite, text: string): Mark | undefined {
+  const absent = absence(text, item.file, input.files);
+  if (absent.kind === "not-absence") {
+    return undefined;
   }
+  if ("held" in absent) {
+    return { dropped: `"${text}": ${droppedWhy(absent)}` };
+  }
+  return {
+    mark: absent.kind === "true" ? "(verified against the file list)" : `(inferred: ${absent.why})`,
+    cite: "none",
+  };
+}
+
+// droppedWhy : why an absence claim is dropped: the repo holds a file it claims absent, or one it may mean
+function droppedWhy(absent: Extract<Absence, { readonly held: readonly string[] }>): string {
+  const held = absent.held.join(", ");
+  return absent.kind === "false"
+    ? `it says ${absent.names.join(", ")} absent, but the default branch holds ${held}`
+    : `it says a file is absent, and the default branch holds ${held}, which it names`;
+}
+
+// markOf : how a line is marked: verified with its cite, verified against the file list, or inferred; or, for a model
+// line, dropped with the reason
+function markOf(input: BriefInput, item: Cite & { readonly verified: boolean }, text: string, model: boolean): Mark {
+  return (model ? modelMark(input, item, text) : undefined) ?? citedMark(input, item);
+}
+
+// modelMark : a model line dropped, or marked against the file list; undefined when its cite decides
+function modelMark(input: BriefInput, item: Cite, text: string): Mark | undefined {
+  return rulesTalk(text) ? { dropped: `"${text}": ${ENGINE_RULES}` } : absentMark(input, item, text);
+}
+
+// citedMark : a line marked by its cite: verified or inferred at its file:line, or inferred without one
+function citedMark(input: BriefInput, item: Cite & { readonly verified: boolean }): Mark {
   const cite = checked(input, item);
   if (cite === "none") {
     return { mark: "(inferred)", cite };
@@ -105,19 +147,25 @@ function markOf(input: BriefInput, item: Cite & { readonly verified: boolean }, 
 type Lines = {
   readonly lines: readonly string[];
   readonly cites: readonly KeptCite[];
-  readonly refused: readonly string[];
+  readonly dropped: readonly string[];
+  // how many lines the model gave, kept or dropped
+  readonly given: number;
 };
+
+const NONE: Pick<Lines, "dropped" | "given"> = { dropped: [], given: 0 };
 
 function rendered<T extends Cite & { readonly verified: boolean }>(
   input: BriefInput,
   items: readonly T[],
   body: (item: T) => string,
+  model = true,
 ): Lines {
-  const marks = items.map((item) => ({ text: body(item), ...markOf(input, item, body(item)) }));
+  const marks = items.map((item) => ({ text: body(item), ...markOf(input, item, body(item), model) }));
   return {
-    lines: marks.map((m) => `- ${m.text} ${m.mark}`),
-    cites: marks.flatMap((m) => (m.cite === "none" ? [] : [m.cite])),
-    refused: marks.flatMap((m) => (m.refused === undefined ? [] : [m.refused])),
+    lines: marks.flatMap((m) => ("mark" in m ? [`- ${m.text} ${m.mark}`] : [])),
+    cites: marks.flatMap((m) => ("cite" in m && m.cite !== "none" ? [m.cite] : [])),
+    dropped: marks.flatMap((m) => ("dropped" in m ? [m.dropped] : [])),
+    given: model ? items.length : 0,
   };
 }
 
@@ -132,11 +180,13 @@ function commandLines(input: BriefInput): Lines {
     return {
       lines: [c.kind === "inferred" ? `- ${c.why} (inferred)` : "- none listed in the repo's root files (inferred)"],
       cites: [],
-      refused: [],
+      ...NONE,
     };
   }
   const items = c.commands.map((l) => Object.assign({ verified: true }, l));
-  return rendered(input, items, (l) => (l.help === "" ? `\`${l.command}\`` : `\`${l.command}\`: ${l.help}`));
+  const body = (l: (typeof items)[number]): string =>
+    l.help === "" ? `\`${l.command}\`` : `\`${l.command}\`: ${l.help}`;
+  return rendered(input, items, body, false);
 }
 
 function ruleLines(input: BriefInput): readonly string[] {
@@ -153,7 +203,7 @@ function ruleMustLines(input: BriefInput): Lines {
     return {
       lines: musts.map((m) => `- ${m.text} (\`${m.file}:${m.line}\`, verified)`),
       cites: musts.map((m) => ({ file: m.file, line: m.line, text: lineText(input.lines(m.file) ?? [], m.line) })),
-      refused: [],
+      ...NONE,
     };
   }
   const held = RULE_FILES.filter((f) => input.lines(f) !== undefined);
@@ -161,7 +211,7 @@ function ruleMustLines(input: BriefInput): Lines {
     held.length === 0
       ? `- no ${RULE_FILES.join(" or ")} at the root (verified against the file list)`
       : `- no MUST in ${held.map((f) => `[${f}](${f})`).join(" or ")}: read ${held.length === 1 ? "it" : "them"} whole (verified)`;
-  return { lines: [line], cites: [], refused: [] };
+  return { lines: [line], cites: [], ...NONE };
 }
 
 const stackLine = (i: Item): string => i.text;
@@ -192,7 +242,12 @@ function briefOf(input: BriefInput): Lines {
     "",
   ];
   const parts = [rules, stack, commands, modules, gotchas];
-  return { lines, cites: parts.flatMap((p) => p.cites), refused: parts.flatMap((p) => p.refused) };
+  return {
+    lines,
+    cites: parts.flatMap((p) => p.cites),
+    dropped: parts.flatMap((p) => p.dropped),
+    given: parts.reduce((n, p) => n + p.given, 0),
+  };
 }
 
 // defined : the terms a glossary defines, as "**Term**:" at a line's start, in lower case
@@ -230,18 +285,24 @@ function glossaryOf(input: BriefInput): Lines {
       "",
     ],
     cites: ours.cites,
-    refused: ours.refused,
+    dropped: ours.dropped,
+    given: input.answer.terms.length,
   };
 }
 
-// written : brief.md, glossary.md, and every cite they keep; or refused, with each line that says a file is absent
-// which the default branch holds, since the brief would contradict its own "Where the rules live" and the file list
+// written : brief.md, glossary.md, every cite they keep, and a note for each model line the engine dropped; refused
+// only when the model gave lines and the engine dropped every one, since a brief of the engine's lines alone would hide
+// that the model's answer was unusable
 export function written(input: BriefInput): Result<Written> {
   const brief = briefOf(input);
   const glossary = glossaryOf(input);
-  const refused = [...brief.refused, ...glossary.refused];
-  if (refused.length > 0) {
-    return { kind: "failed", reason: `the brief is refused: ${refused.join("; ")}` };
+  const dropped = [...brief.dropped, ...glossary.dropped];
+  const given = brief.given + glossary.given;
+  if (given > 0 && dropped.length === given) {
+    return {
+      kind: "failed",
+      reason: `the brief is refused: the engine dropped every line the onboarder gave: ${dropped.join("; ")}`,
+    };
   }
   return {
     kind: "ok",
@@ -249,6 +310,7 @@ export function written(input: BriefInput): Result<Written> {
       brief: brief.lines.join("\n"),
       glossary: glossary.lines.join("\n"),
       cites: [...brief.cites, ...glossary.cites],
+      dropped,
     },
   };
 }
