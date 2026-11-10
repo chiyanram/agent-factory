@@ -1056,7 +1056,10 @@ describe("one finder per lens (#237)", () => {
     // round that allowed only one gives up after 2 s and fails on 1
     const twoInFlight = async (): Promise<void> => {
       const until = Date.now() + 2_000;
-      while (now < 2 && Date.now() < until) {
+      for (;;) {
+        if (now >= 2 || Date.now() >= until) {
+          return;
+        }
         await new Promise((r) => setTimeout(r, 1));
       }
     };
