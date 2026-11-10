@@ -3,7 +3,7 @@
 //
 // A release is a tag vX.Y.Z, a GitHub release and a CHANGELOG.md entry; nothing is published to npm (package.json is
 // private). Each release attaches the packed package (`npm pack`), so a colleague installs a pinned version with one
-// line: GUIDE.md#install-a-pinned-version
+// line: docs/how-to/install.md
 import { releaseNotes } from './scripts/release_notes.mjs'
 
 export default {

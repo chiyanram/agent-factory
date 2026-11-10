@@ -3,104 +3,67 @@
 [![ci](https://github.com/chiyanram/agent-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/chiyanram/agent-factory/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-AI implementer and automated review runs on your pull requests, while humans keep approval and merge.
+A software factory for your own repos: AI runs build and review a ticket's pull request, and a human approves and
+merges it.
+
+```mermaid
+flowchart LR
+    H([human]) -- "start, approve" --> O{{orchestrator<br/>code, no AI}}
+    H -- talks --> C{{coordinator AI<br/>spec, questions}}
+    O -- "fresh run on a runner" --> I[implementer]
+    I --> RC[ready check<br/>evidence re-run]
+    RC --> R[automated review<br/>finders + verify pass]
+    R -- "Act on" --> I
+    R --> G[gate: CI or local verify]
+    G -- green --> M([human merges])
+```
 
 ## What it is
 
-You talk to one coordinator AI. An orchestrator (code, no LLM) takes each ticket a human STARTed or approved and gets
-its pull request built, reviewed and gate-green by fresh AI runs, each on a runner. Then a human merges it. The git host
-(GitLab or GitHub) and the run records hold every piece of state, so a restart loses nothing.
+- **Code decides each step.** The orchestrator follows a fixed table; no model chooses what runs next.
+- **Every run is fresh** and runs on a runner (`srt` on a laptop, or a Sysbox container on a VM), with no git host
+  login. The host pushes and posts for it.
+- **A human owns the gates.** A human STARTs each ticket, approves the spec above the tiny lane, and merges. The AI
+  never approves, and zero findings is not a pass.
+- **Standards plug in** from a pinned Claude Code plugin, such as `rulebook@chiyanram`
+  ([chiyanram/skills](https://github.com/chiyanram/skills)), and from the project's own `AGENTS.md`.
 
-- **Humans keep the gates.** A human approves before any code, and a human merges. The bot cannot merge.
-- **Code starts runs, not the AI.** The coordinator talks with you; it holds no git host login and starts no run.
-- **Runs execute on a runner.** No git host token, no network except the model API and package registries. The host
-  pushes.
-- **Fresh runs.** Each task starts a new run, so no run drifts or forgets its instructions.
-- **Automated review, two steps.** A finder run per lens lists findings; a verify pass drops what does not hold. It
-  may block, never approve.
-- **Rules from the default branch.** A pull request cannot change the rules it is judged by.
+## Who it is for, and what it is not
 
-> **Status (2026-11-09).** The TypeScript package runs the orchestrator, the implementer in a runner, the host push,
-> the ready check, the automated review and the local gate. The design on one page, with what is still to build and the
-> order, is [docs/DESIGN.md](docs/DESIGN.md); its words are in [GLOSSARY.md](GLOSSARY.md). Map #30 tracks the work.
-> The first pilot is a small personal project on the VM (#62).
+For a developer or a small team who wants agent-built pull requests on their own GitHub or GitLab repos, with each
+run sandboxed and capped. It is not a hosted service, not always on (nothing runs until a human starts a ticket), and
+not a merge bot. Today the runs need a Claude plan; Copilot is #162.
 
-The rules the runs follow live in the `rulebook` plugin in [chiyanram/skills](https://github.com/chiyanram/skills)
-and in each project's own `AGENTS.md` files, not here.
+## Install and set up
 
-## Quick start
-
-You need Node 22 or later, git, make and the Claude Code CLI. Check the package:
+You need Node 22 or later, git and the Claude Code CLI. Install a pinned release, then run `init` in your clone:
 
 ```bash
-git clone https://github.com/chiyanram/agent-factory.git
-cd agent-factory
-make lint && make test
+V=0.30.1
+npm i -g https://github.com/chiyanram/agent-factory/releases/download/v$V/chiyanram-agent-factory-$V.tgz
+cd ~/workspace/<your clone> && agent-factory init     # Enter takes the recommended choices
 ```
 
-Set up a laptop and a project in one guided run. Install a release ([GUIDE.md](GUIDE.md#install-a-pinned-version)),
-then, inside the product clone:
+`init` writes the settings outside the repo, pins the plugins, checks each piece and prints the commands only you run
+next. The manual steps are in [docs/how-to/](docs/how-to/).
 
-```bash
-cd ~/workspace/ledger                    # your clone of the project, such as chiyanram/ledger
-agent-factory init                       # asks one round of choices; Enter takes the recommended ones
-```
+## Your first ticket
 
-`init` reads the clone (git host and project from `origin`, build tool, tests, migrations, CI, toolchain), writes the
-runner to `~/.factory/user.json` and the project file to `~/.factory/projects/<project>.json` (no shell exports), pins
-the plugins, checks each piece with its fix, and prints the commands only you run next: `claude setup-token` and
-`agent-factory setup claude` when the model token is missing, then `agent-factory onboard <project>`, `onboard accept`
-and `start`. Run it again any time: it asks only what is missing and shows a diff before it replaces a value. The
-manual steps stay in [GUIDE.md](GUIDE.md#set-up-with-agent-factory-init).
+1. `agent-factory coordinator`: talk the ticket through; the coordinator writes the spec.
+2. `agent-factory start <project> <ticket>`; above the tiny lane, also `agent-factory approve`.
+3. The orchestrator loop builds, checks and reviews the pull request, then pings you to merge.
 
-Then start the coordinator (`agent-factory coordinator`) and follow [GUIDE.md](GUIDE.md#run-the-loop). The orchestrator
-loop (`agent-factory dispatch <project>`) runs the trigger table; `agent-factory start` and `approve` start it.
+## Status
 
-## How it works
-
-```mermaid
-flowchart LR
-    H([human]) -- talks --> C{{coordinator<br/>spec and design; never approves}}
-    H -- "start, approve: local records" --> D{{orchestrator<br/>code}}
-    F[(git host)] -- poll --> D
-    D -- start --> W[implementer<br/>on a runner]
-    W -- "exit + report" --> RC[ready check<br/>on a runner]
-    RC --> R[automated review<br/>finders + verify pass]
-    R -- "Act on" --> W
-    R -- "no Act on" --> G[gate<br/>CI, no secrets]
-    G -- red --> W
-    G -- green --> H2([human undrafts, merges])
-```
-
-1. A human STARTs the ticket (`agent-factory start`), and, above the tiny lane, approves its spec and design
-   (`agent-factory approve`) in their own terminal. The coordinator can run neither. A `/approved` note on the PR
-   approves nothing.
-2. The orchestrator claims the PR and starts a fresh **implementer** run on a runner, in its own clone.
-3. The implementer commits, writes `.factory/report.json` (done, asked or blocked) and exits. The host checks it, pushes and
-   posts it.
-4. A ready check re-runs the evidence. Then a fresh **automated review** posts a verdict, plus a script-made list of
-   protected files and new dependencies.
-5. The implementer fixes what the review marks **Act on**. After three rounds, a human decides.
-6. When the gate is green, a human reads that list, undrafts and merges. Zero findings is never a pass.
-
-```mermaid
-flowchart LR
-    P["agent-factory<br/>poll · dispatch · review · approve · spec<br/>claim · release · status · ask · block · reconcile"]
-    P --> SEAM["git host seam<br/>src/core/forge"]
-    SEAM --> GL["glab api"]
-    SEAM --> GH["gh api"]
-```
-
-The orchestrator decides from its table (`src/core/dispatch/table.ts`); the coordinator only talks, asks and writes
-the spec. Every command prints one line. Every call to the git host goes through one seam, so the commands do not know
-which git host they talk to. The tests stub the seam and the `claude` CLI, so they need no network.
+A pilot on one small personal project (#62). The code does not follow the design everywhere yet; each place that
+differs is marked **Today:** in the docs, and [the roadmap](docs/explanation/roadmap.md) lists what is still to build.
 
 ## Docs
 
-- [GUIDE.md](GUIDE.md): set up the bot, the settings, run the loop, the guardrails and the terms.
-- [CONTRIBUTING.md](CONTRIBUTING.md): set up, test, add a script or a check, commit messages.
-- [AGENTS.md](AGENTS.md): instructions for coding agents that work in this repo.
-- [docs/adr/](docs/adr/): the decisions behind the design.
+- [docs/how-to/](docs/how-to/): install, set up, check the runner.
+- [docs/reference/](docs/reference/): the commands, the settings and the connectors.
+- [docs/explanation/](docs/explanation/): the architecture, the safety model, measurement and the roadmap.
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [AGENTS.md](AGENTS.md) · [docs/adr/](docs/adr/) · [GLOSSARY.md](GLOSSARY.md)
 
 ## License
 

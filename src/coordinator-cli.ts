@@ -2,7 +2,7 @@
 // `agent-factory coordinator [copilot]` starts its session there (#106). The settings come from src/core/coordinator.ts.
 //
 //   <FACTORY_HOME>/coordinator/.claude/settings.json   the wall, read-only (0444)
-//   <FACTORY_HOME>/coordinator/CLAUDE.md               "follow GUIDE.md", read-only
+//   <FACTORY_HOME>/coordinator/CLAUDE.md               "follow prompts/coordinator.md", read-only
 //   FACTORY_BOT_HOME                                   the factory user's home on the VM (default /home/factory)
 //
 // checkWall is what the orchestrator runs before each pass (#105, #227): it refuses to start while the coordinator's

@@ -26,16 +26,31 @@ export const OLD: readonly { readonly word: RegExp; readonly use: string }[] = [
   { word: /\bworkers?\b/i, use: "run" },
 ];
 
-// DOCS : the files checked, from ROOT, with every role card
-export function docs(root: string): readonly string[] {
-  const roles = join(root, "prompts", "roles");
-  const cards = existsSync(roles)
-    ? readdirSync(roles)
+// the .md files in DIR, from ROOT, sorted; none when DIR is not there
+function mdIn(root: string, dir: string): readonly string[] {
+  const at = join(root, dir);
+  return existsSync(at)
+    ? readdirSync(at)
         .filter((f) => f.endsWith(".md"))
         .toSorted()
-        .map((f) => `prompts/roles/${f}`)
+        .map((f) => `${dir}/${f}`)
     : [];
-  return ["README.md", "GUIDE.md", "AGENTS.md", "CONTRIBUTING.md", "docs/DESIGN.md", ...cards];
+}
+
+// DOCS : the files checked, from ROOT: the root docs, the how-to, reference and explanation pages (#378), the
+// coordinator's instructions and every role card
+export function docs(root: string): readonly string[] {
+  const pages = ["docs/how-to", "docs/reference", "docs/explanation"].flatMap((d) => mdIn(root, d));
+  return [
+    "README.md",
+    "GUIDE.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "docs/DESIGN.md",
+    ...pages,
+    "prompts/coordinator.md",
+    ...mdIn(root, "prompts/roles"),
+  ];
 }
 
 // prose : one line with what names an identifier, a path or a link taken out

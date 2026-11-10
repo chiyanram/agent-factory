@@ -22,7 +22,7 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to an automated review input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed modules that start programs, no git host token or skip-permissions flag outside the git host seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `node scripts/check-words.ts .` (no old word from `GLOSSARY.md` in the prose of `README.md`, `GUIDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/DESIGN.md` or a role card; an identifier goes in backticks), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
+| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to an automated review input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed modules that start programs, no git host token or skip-permissions flag outside the git host seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `node scripts/check-words.ts .` (no old word from `GLOSSARY.md` in the prose of `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, every `.md` under `docs/` but the ADRs, `prompts/coordinator.md` or a role card; an identifier goes in backticks), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
 | `make test` | builds, then runs the vitest suite. CI runs it on Linux only; `make lint` catches the macOS temp-folder trap, and a local run on macOS covers the rest. One file: `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
@@ -46,7 +46,7 @@ ticket ──▶ branch ──▶ make lint + make test ──▶ pull request �
    the review is resolved. A merge queue would do that step, but a repo owned by a user cannot have one (#323).
 
 A good pull request has one concern, a test that fails without the change, and no secrets, tokens or real project
-data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md](GUIDE.md) or an ADR too.
+data. When it changes behaviour the coordinator relies on, it updates [prompts/coordinator.md](prompts/coordinator.md) or an ADR too.
 
 ## Add a command
 
@@ -59,8 +59,8 @@ No bash ships: every component is TypeScript in the package and calls CLIs
 3. Call the git host only through the `Forge` seam in `src/core/forge/`, and git on a project's clone only through
    `hostGit` (`src/core/git.ts`). Read a setting only through `settingOf`.
 4. Print one line on success. Write errors to stderr and exit non-zero.
-5. Add the command to the Scripts table in [GUIDE.md](GUIDE.md#scripts), and any new setting to
-   [Settings](GUIDE.md#settings).
+5. Add the command to the Scripts table in [docs/reference/cli.md](docs/reference/cli.md), and any new setting to
+   [Settings](docs/reference/settings.md#settings).
 
 ## Add a check
 
@@ -127,7 +127,7 @@ way as chiyanram/skills.
   `docs`, `chore`, `ci`, `style`, `refactor`, `test` and `build` release nothing.
 - A release is a tag `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`, which semantic-release writes; do not
   edit it by hand. Nothing is published to npm; the release attaches the packed package
-  (`chiyanram-agent-factory-<version>.tgz`, from `npm pack`) for the one-line install in `GUIDE.md`.
+  (`chiyanram-agent-factory-<version>.tgz`, from `npm pack`) for the one-line install in `docs/how-to/install.md`.
 - The release notes come from the PR titles on `main` (`scripts/release_notes.mjs`, #157). The sections are
   `⚠️ Breaking changes`, `✨ Features`, `🐛 Fixes`, `⚡ Performance` and `⏪ Reverts`, and each change is one bullet
   `**scope** — subject · #ticket (PR #pr)`. Put the ticket as `(#N)` at the end of the PR title; GitHub adds the PR
@@ -141,9 +141,9 @@ way as chiyanram/skills.
 | symptom | fix |
 |---|---|
 | `broken link: <file>:<line>: <target>` | a relative link points at a missing file; fix the path |
-| `too long: AGENTS.md` | the root `AGENTS.md` reached 200 lines; move detail into `GUIDE.md` and link it |
-| `refused: … a human account` | log the CLI in as the bot ([GUIDE.md](GUIDE.md#set-up-identity)) |
-| `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | run `agent-factory init` in the clone, which writes them to the project file; or export the setting ([GUIDE.md](GUIDE.md#settings)) |
+| `too long: AGENTS.md` | the root `AGENTS.md` reached 200 lines; move detail into `docs/` and link it |
+| `refused: … a human account` | log the CLI in as the bot ([Set up identity](docs/how-to/set-up-identity.md)) |
+| `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | run `agent-factory init` in the clone, which writes them to the project file; or export the setting ([Settings](docs/reference/settings.md)) |
 | `cannot list live runs: claude agents --json failed` | the `claude` CLI is missing or too old |
 | `github: rate limited until <time>: HTTP 200 after 1 try on graphql` | the git host is rate-limiting; the orchestrator loop waits until that time by itself; by hand, run again after it |
 
