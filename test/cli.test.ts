@@ -328,6 +328,74 @@ function branchGlab(there: boolean): string {
   return path;
 }
 
+// issueGlab : a fake glab that answers issue 2's description from <home>/issue.json, and refuses anything else
+function issueGlab(): string {
+  const path = join(home, "glab");
+  writeFileSync(
+    path,
+    `#!/bin/sh\ncase "$*" in\n  *issues/2*) printf 'HTTP/2.0 200 OK\\r\\n\\r\\n'; cat '${join(home, "issue.json")}' ;;\n  *) exit 3 ;;\nesac\n`,
+    { mode: 0o755 },
+  );
+  return path;
+}
+
+describe("the issue spec store (#381)", () => {
+  const ISSUE = SPEC.replace("# PROJ-1: a title", "# 2: a title");
+  const issue = (description: string | null): void =>
+    writeFileSync(join(home, "issue.json"), JSON.stringify({ iid: 2, description }));
+  const project = (extra: object = {}): void => {
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(
+      join(home, "projects", "ledger.json"),
+      JSON.stringify({ gitHost: "gitlab", gitHostProject: "a/ledger", clone: home, specStore: "issue", ...extra }),
+    );
+  };
+  const env = () => ({ FACTORY_HOME: home, FACTORY_GLAB: issueGlab() });
+
+  it("spec reads and hashes the issue's body; approve binds it; an edit to the issue makes the approval stale", async () => {
+    project();
+    issue(ISSUE.replaceAll("\n", "\r\n"));
+    const hash = specHash(ISSUE);
+    const read = await cli(["spec", "ledger", "2"], env());
+    expect(read).toMatchObject({ code: 0, out: `spec ledger/2 ${hash} issue #2 of a/ledger\ndesign none\n` });
+    expect((await cli(["approve", "ledger", "2", hash, "--no-loop"], env())).code).toBe(0);
+    expect((await cli(["approval", "ledger", "2"], env())).code).toBe(0);
+    issue(ISSUE.replace("It works.", "It works, fast."));
+    const stale = await cli(["approval", "ledger", "2"], env());
+    expect(stale).toMatchObject({ code: 3, out: expect.stringContaining("approve again") });
+    expect((await cli(["approve", "ledger", "2", hash, "--no-loop"], env())).err).toContain("it changed");
+  });
+
+  it("checks the issue's body by the template; an empty body is no spec; a ticket must be the issue number", async () => {
+    project();
+    issue(ISSUE.replace("1. It works.", "TBD"));
+    expect(await cli(["spec", "ledger", "2"], env())).toMatchObject({
+      code: 2,
+      err: expect.stringContaining("Acceptance criteria"),
+    });
+    issue(null);
+    expect(await cli(["spec", "ledger", "2"], env())).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("no spec at issue #2 of a/ledger; write the spec in the issue's body"),
+    });
+    expect(await cli(["spec", "ledger", "PROJ-1"], env())).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("the ticket is the issue number"),
+    });
+  });
+
+  it("a work project refuses the issue store; a local spec is never read from the issue", async () => {
+    project({ work: true });
+    issue(ISSUE);
+    expect(await cli(["spec", "ledger", "2"], env())).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("where the spec stays local"),
+    });
+    project({ specStore: "local" });
+    expect((await cli(["spec", "ledger", "2"], env())).err).toContain(join(home, "specs", "ledger", "2", "spec.md"));
+  });
+});
+
 describe("agent-factory start (#227)", () => {
   const env = (there: boolean) => ({
     FACTORY_HOME: home,

@@ -304,8 +304,11 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
       lanes: { oneWayDoor: ["src/main/resources/db/migration/**"] },
       plugins: ["rulebook@chiyanram"],
       connectors: {},
+      specStore: "issue",
     });
     expect(file).not.toHaveProperty("verify");
+    expect(ran.out).toContain("6. Where do the ticket specs live?");
+    expect(ran.out).toContain("write the ticket's spec in its git host issue's body");
     expect(json(join(home, "projects", "ledger.plugins.json"))).toHaveProperty(["rulebook@chiyanram", "sha256"]);
     expect(ran.out).toContain("1. Which project on the git host is this clone?");
     expect(ran.out).toContain("(recommended)");
@@ -320,7 +323,13 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
     expect(settings).toMatchObject({
       kind: "ok",
       value: {
-        env: { FACTORY_FORGE: "github", FACTORY_PROJECT: "chiyanram/ledger", FACTORY_REPO: dir, FACTORY_BOX: "srt" },
+        env: {
+          FACTORY_FORGE: "github",
+          FACTORY_PROJECT: "chiyanram/ledger",
+          FACTORY_REPO: dir,
+          FACTORY_BOX: "srt",
+          FACTORY_SPEC_STORE: "issue",
+        },
       },
     });
   });
@@ -364,14 +373,26 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
     token("2027-11-01T00:00:00Z");
     const dir = ledger();
     writeFileSync(join(home, "user.json"), JSON.stringify({ runner: "srt" }));
-    const ran = await init(dir, { replies: ["2B 3B 4B", "y"] });
+    const ran = await init(dir, { replies: ["2B 3B 4B 5B", "y"] });
     expect(ran.out).not.toContain("Where do runs run");
     expect(json(projectPath(home, "ledger"))).toMatchObject({
       gate: "local",
       verify: ["./gradlew", "check"],
       plugins: [],
+      specStore: "local",
     });
     expect(json(projectPath(home, "ledger"))).not.toHaveProperty("lanes");
+  });
+
+  it("does not ask a work project where its specs live: they stay local (#381)", async () => {
+    token("2027-11-01T00:00:00Z");
+    const dir = ledger();
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(projectPath(home, "ledger"), JSON.stringify({ work: true }));
+    const ran = await init(dir, { yes: true });
+    expect(ran.out).not.toContain("Where do the ticket specs live?");
+    expect(json(projectPath(home, "ledger"))).not.toHaveProperty("specStore");
+    expect(ran.out).toContain("agent-factory spec --template <ticket>");
   });
 
   it("refuses: off a terminal without --yes, a stop answer, a project file it cannot read", async () => {

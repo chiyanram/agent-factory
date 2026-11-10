@@ -50,7 +50,8 @@ import type { RoundPart } from "../dispatch/spend.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { readProcess, type PluginDir, type Process } from "../process/read.js";
 import { attempt } from "./safe.js";
-import { plainName } from "../spec.js";
+import { plainName, type SpecStore } from "../spec.js";
+import { issuesFrom, specStoreOf } from "../spec-store.js";
 import { statusBox, type Box } from "./status.js";
 import {
   BUCKET_NAMES,
@@ -162,13 +163,17 @@ async function specFor(ctx: Ctx, lanes: readonly LaneProps[]): Promise<Result<Sp
       `${s.forge.mark}${s.number} is on ${branch}, not ${BRANCH_PREFIX}<ticket>, so it names no spec to review against; a person reviews it`,
     );
   }
-  const approval = await approvalFor({ home: s.home, project: s.project, ticket, lanes });
+  const store = specStoreOf({ env: s.env, home: s.home, open: issuesFrom(s.forge) });
+  if (store.kind === "failed") {
+    return store;
+  }
+  const approval = await approvalFor({ home: s.home, project: s.project, ticket, lanes, store: store.value });
   return approval.kind === "failed"
     ? approval
     : {
         kind: "ok",
         value: {
-          store: { kind: "local", root: join(s.home, "specs") },
+          store: store.value,
           project: s.project,
           ticket,
           approval: approval.value,
@@ -183,6 +188,7 @@ async function approvalFor(where: {
   readonly project: string;
   readonly ticket: string;
   readonly lanes: readonly LaneProps[];
+  readonly store: SpecStore;
 }): Promise<Result<Approval>> {
   const stored = await readApproval(where);
   if (stored.kind !== "missing") {

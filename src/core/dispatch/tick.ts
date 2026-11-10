@@ -26,7 +26,13 @@ import type { PluginHash } from "../process/use.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { approvalState, currentSpec, type ApprovalRecord, type Current } from "../approval.js";
+import {
+  approvalState,
+  currentSpec,
+  type ApprovalRecord,
+  type Current,
+  type Where as ApprovalWhere,
+} from "../approval.js";
 import { NEEDS_HUMAN } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
@@ -34,7 +40,7 @@ import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
 import { needsApproval, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
-import { plainName, type Lane, type Spec } from "../spec.js";
+import { plainName, type Lane, type Spec, type SpecStore } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
 import type { Evidence } from "../report.js";
@@ -191,6 +197,8 @@ export type TickSetup = {
   readonly lanes?: readonly LaneProps[];
   // the ticket, day and window caps (#131)
   readonly caps: Caps;
+  // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
+  readonly specs?: SpecStore;
 };
 
 export type Decision = { readonly ticket: string; readonly action: Action };
@@ -232,7 +240,7 @@ async function startedView(
   started: StartRecord,
   stale: boolean,
 ): Promise<ApprovalView> {
-  const spec = await currentSpec({ home: setup.home, project: setup.project, ticket });
+  const spec = await currentSpec(ticketAt(setup, ticket));
   if (spec.kind !== "spec") {
     return { kind: "unwritten" };
   }
@@ -281,7 +289,7 @@ async function saidOf(setup: TickSetup, ticket: string): Promise<Result<Said>> {
   if (!go) {
     return said;
   }
-  const spec = await currentSpec({ home: setup.home, project: setup.project, ticket });
+  const spec = await currentSpec(ticketAt(setup, ticket));
   return spec.kind === "spec" ? plannedView(setup, ticket, said.value, spec.spec) : said;
 }
 
@@ -290,7 +298,7 @@ async function humanSaid(setup: TickSetup, ticket: string): Promise<Result<Said>
   if (started.kind === "failed") {
     return started;
   }
-  const state = await approvalState({ home: setup.home, project: setup.project, ticket });
+  const state = await approvalState(ticketAt(setup, ticket));
   if (state.kind === "approved") {
     const view = approvedView(state.record, state.spec.lane, started.value);
     return { kind: "ok", value: { view, record: state.record } };
@@ -350,7 +358,7 @@ async function designDue(setup: TickSetup, ticket: string, said: Said): Promise<
   if (!DESIGN_KINDS.has(said.view.kind) || !(await hasStart(setup, ticket))) {
     return "off";
   }
-  const spec = await currentSpec({ home: setup.home, project: setup.project, ticket });
+  const spec = await currentSpec(ticketAt(setup, ticket));
   return spec.kind === "spec" && needsDesignReview(spec.spec.lane, setup.lanes) ? spec : "off";
 }
 
@@ -449,6 +457,16 @@ function where(
   state: TicketState,
 ): { readonly home: string; readonly project: string; readonly ticket: string } {
   return { home: setup.home, project: setup.project, ticket: state.ticket };
+}
+
+// ticketAt : where the ticket's spec and approval are read, with the project's spec store
+function ticketAt(setup: TickSetup, ticket: string): ApprovalWhere {
+  return {
+    home: setup.home,
+    project: setup.project,
+    ticket,
+    ...(setup.specs === undefined ? {} : { store: setup.specs }),
+  };
 }
 
 // handOver : needs-human, the claim released (as block does), one note, and a record so the same stop is never posted
@@ -659,7 +677,7 @@ function evidenceOf(state: TicketState): readonly Evidence[] {
 
 // readyFacts : the spec's acceptance criteria and the project's one-way-door paths, read on the host before the check
 async function readyFacts(setup: TickSetup, state: TicketState): Promise<Result<ReadyFacts>> {
-  const spec = await currentSpec(where(setup, state));
+  const spec = await currentSpec(ticketAt(setup, state.ticket));
   if (spec.kind !== "spec") {
     return { kind: "failed", reason: spec.kind === "missing" ? "the ticket's spec is gone" : spec.reason };
   }

@@ -413,6 +413,19 @@ export function github(client: Client, project: GithubProject): Forge {
         r.list(v, "").some((ref) => r.text(ref, "ref") === `refs/heads/${input.branch}`),
       );
     },
+    // the issues endpoint also answers a pull request, which carries pull_request: that is no issue, so it fails
+    async issueBody(input) {
+      const answer = await getJson(`${repo}/issues/${input.number}`, "github issue", (v, r) => ({
+        pull: !r.absent(v, "pull_request"),
+        body: r.absent(v, "body") ? "" : r.text(v, "body"),
+      }));
+      if (answer.kind === "failed") {
+        return answer;
+      }
+      return answer.value.pull
+        ? { kind: "failed", reason: `github: #${input.number} is a pull request, not an issue` }
+        : { kind: "ok", value: answer.value.body };
+    },
     async addLabel(input) {
       const answer = await rest(client, {
         path: `${repo}/issues/${input.number}/labels`,

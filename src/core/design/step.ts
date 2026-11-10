@@ -31,6 +31,7 @@ import { copyCode } from "../review/code.js";
 import type { Model, ModelResult } from "../review/model.js";
 import { readVerdicts, VERIFY_SCHEMA } from "../review/verdicts.js";
 import { designPath, NO_DESIGN } from "../spec.js";
+import { issuesFrom, specStoreOf } from "../spec-store.js";
 import { DESIGN_SCHEMA, keep, readDesignFindings, type DesignFinding, type Kept } from "./findings.js";
 
 export type DesignSetup = {
@@ -40,8 +41,8 @@ export type DesignSetup = {
   readonly repo: string;
   // the host's environment, for git on the project's clone; the model gets only its own (review/settings.ts claudeEnv)
   readonly env: NodeJS.ProcessEnv;
-  // the git host, for the default branch
-  readonly forge: Pick<Forge, "defaultBranch">;
+  // the git host, for the default branch, and the issue that is the spec when the project keeps its specs there (#381)
+  readonly forge: Pick<Forge, "defaultBranch" | "issueBody">;
   readonly model: Model;
   // the model each run uses, and the most one run may spend ("" for no cap)
   readonly modelName: string;
@@ -67,8 +68,16 @@ export const FLOOR = [
 
 // the spec's and design's text, if they still have the hashes the table decided on
 async function texts(setup: DesignSetup, input: DesignInput): Promise<Result<{ spec: string; design: string }>> {
-  const where = { home: setup.home, project: setup.project, ticket: input.ticket };
-  const current = await currentSpec(where);
+  const store = specStoreOf({ env: setup.env, home: setup.home, open: issuesFrom(setup.forge) });
+  if (store.kind === "failed") {
+    return store;
+  }
+  const current = await currentSpec({
+    home: setup.home,
+    project: setup.project,
+    ticket: input.ticket,
+    store: store.value,
+  });
   const same = current.kind === "spec" && current.spec.hash === input.spec && current.design === input.design;
   if (!same) {
     return failed("the spec or its design changed since the pass decided: the next pass reviews the new one");

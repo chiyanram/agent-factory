@@ -9,6 +9,7 @@ variable needs exporting.
 | `FACTORY_FORGE` | the git host adapter (`gitHost`, locked; `agent-factory init` writes it to the project file) | `gitlab` (or `github`) |
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` (`gitHostProject`, a preference; `init` writes it to the project file). The project file only: a team or user file that sets it is refused, since every project reads those. The variable still wins when set, with a warning when it differs from the project file (#369) | — |
 | `FACTORY_REPO` | a local clone of that project, an absolute path; worktrees, context packs and run files go in its `.claude/` (`clone`, a preference, the project file only, like `gitHostProject`) | — |
+| `FACTORY_SPEC_STORE` | where the ticket specs live (`specStore`, a ladder: `issue` < `local`). `local`: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, never on the git host, the rule at work. `issue`: the body of the git host issue whose number is the ticket, read through the git host seam; `spec`, `approve`, `approval`, `request` and `dispatch` check and hash it exactly like a local spec, so an edit to the issue makes its approval stale, and the ticket must be the issue number. A ladder, so a team or user file that says `local` holds every project to it, and a project marked `work` that says `issue` is refused. `agent-factory init` asks it, recommending `issue` for a personal project on github.com or gitlab.com (#381). **Today:** the coordinator cannot write a spec to the issue (no connector serves the issue's body), so the person writes or pastes it there | `local` |
 | `FACTORY_DEFAULT_PROJECT` | the project a command that names none acts on (`poll`, `claim`, `status` and the rest); `agent-factory coordinator <project>` sets it in its session, so you never export it (#382). Not a settings key | — |
 | `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
@@ -119,7 +120,8 @@ there.
   and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
   above tiny stops the pass. **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
   only to the next ticket; the records show the change. The review cannot run with no plugin yet (#232).
-- `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it.
+- `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it, and `specStore` must stay
+  `local`.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
   [docs/DESIGN.md](../DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing
   commits them yet; the setting is only checked.
@@ -178,7 +180,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 
 | class | rule | keys |
 |---|---|---|
-| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits`, `runner` (none, srt, vm) |
+| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits`, `runner` (none, srt, vm), `specStore` (issue, local) |
 | cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow`, `srt.readOnly` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |

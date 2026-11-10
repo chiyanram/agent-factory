@@ -457,6 +457,13 @@ export function gitlab(client: Client, project: string): Forge {
       );
       return found.kind === "ok" ? { kind: "ok", value: found.value === true } : found;
     },
+    // an issue's description; GitLab numbers issues and merge requests apart, so an iid here is always an issue
+    async issueBody(input) {
+      const body = await get(`${base}/issues/${input.number}`, "gitlab issue", (v, r) =>
+        r.absent(v, "description") ? "" : r.text(v, "description"),
+      );
+      return body.kind === "ok" ? { kind: "ok", value: String(body.value) } : body;
+    },
     // a commit status with the branch as ref: GitLab adds it to an external pipeline for that head, which the merge
     // request shows as its head pipeline
     async status(input: CommitStatus) {

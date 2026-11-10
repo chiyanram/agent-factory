@@ -88,6 +88,7 @@ function forge(now: () => Changes | "down"): Forge {
     change: notUsed,
     defaultBranch: notUsed,
     branchExists: async () => ({ kind: "ok", value: false }),
+    issueBody: notUsed,
     openChange: notUsed,
     notes: notUsed,
     setBody: notUsed,

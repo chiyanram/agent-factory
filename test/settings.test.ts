@@ -713,6 +713,24 @@ describe("every module reads the resolved settings (#254)", () => {
     expect(errors(resolved([layer("project", { repoCommits: "yes" })]))[0]).toContain("must be true or false");
   });
 
+  it("specStore is a ladder: local by default, a project may choose issue, local above wins, and work refuses issue (#381)", () => {
+    expect(valueOf(resolved([]), "specStore")?.set).toBe(false);
+    const issue = resolved([layer("project", { specStore: "issue" })]);
+    expect(valueOf(issue, "specStore")?.value).toBe("issue");
+    expect(errors(issue)).toEqual([]);
+    const teamLocal = resolved([layer("team", { specStore: "local" }), layer("project", { specStore: "issue" })]);
+    expect(errors(teamLocal)[0]).toContain(
+      'specStore: the project layer (/project.json:2) "issue" is looser than "local"',
+    );
+    const userLocal = resolved([layer("project", { specStore: "issue" }), layer("user", { specStore: "local" })]);
+    expect(valueOf(userLocal, "specStore")?.value).toBe("local");
+    const atWork = resolved([layer("team", { work: true }), layer("project", { specStore: "issue" })]);
+    expect(errors(atWork)).toEqual([
+      'specStore: /project.json:2 keeps the specs in the git host issues, and /team.json:2 marks the project as work, where the spec stays local; set "specStore": "local"',
+    ]);
+    expect(errors(resolved([layer("project", { specStore: "jira" })]))[0]).toContain('one of "issue", "local"');
+  });
+
   it("start resolves the project's layers, and poll and the loop commands the user and machine layers", async () => {
     const commit = commitTeam({ caps: { usdPerRun: 1 } });
     writeProject({ ...BASE, team: `acme@${commit}` });

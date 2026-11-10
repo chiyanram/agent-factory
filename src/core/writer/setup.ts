@@ -14,6 +14,7 @@ import type { LaneProps } from "../lane.js";
 import type { PushTarget, WriterSetup } from "./step.js";
 import type { PluginDir } from "../process/read.js";
 import { settingOf } from "../settings/machine.js";
+import { issuesFrom, specStoreOf } from "../spec-store.js";
 
 export type WriterInput = {
   readonly env: NodeJS.ProcessEnv;
@@ -71,6 +72,10 @@ export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
   if (settings.kind === "failed") {
     return Promise.resolve(settings);
   }
+  const specs = specStoreOf({ env: input.env, home: input.home, open: issuesFrom(input.forge) });
+  if (specs.kind === "failed") {
+    return Promise.resolve(specs);
+  }
   const { box, store, push } = where.value;
   return Promise.resolve({
     kind: "ok",
@@ -85,6 +90,7 @@ export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
       login: () => boxTokenFrom({ store, now: new Date() }),
       pusher: input.pusher,
       lanes: input.lanes,
+      specs: specs.value,
     },
   });
 }

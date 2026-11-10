@@ -12,6 +12,8 @@ import {
   type Spec,
   type SpecRead,
 } from "../src/core/spec.js";
+import { issueStore, openOnce, specStoreKind, specStoreOf } from "../src/core/spec-store.js";
+import type { Result } from "../src/core/forge/api.js";
 import { tempDir } from "./temp.js";
 
 const GOOD = [
@@ -226,5 +228,51 @@ describe("prBlock", () => {
   it("cleans the approver line, which comes from the machine, not the person's spec", () => {
     const block = prBlock({ spec: spec(GOOD), approver: { by: "@all fixes #1", at: "t" } });
     expect(block).not.toMatch(/@all|#1/);
+  });
+});
+
+describe("the project's spec store (#381)", () => {
+  const forge = (bodies: Readonly<Record<number, Result<string>>>, opened: { n: number }) => () => {
+    opened.n += 1;
+    return Promise.resolve({
+      kind: "ok" as const,
+      value: {
+        issueBody: async ({ number }: { readonly number: number }): Promise<Result<string>> =>
+          bodies[number] ?? { kind: "failed", reason: "HTTP 404" },
+      },
+    });
+  };
+
+  it("is local unless the setting says issue; any other value is refused", () => {
+    const opened = { n: 0 };
+    const open = forge({}, opened);
+    expect(specStoreOf({ env: {}, home: "/h", open })).toEqual({
+      kind: "ok",
+      value: { kind: "local", root: join("/h", "specs") },
+    });
+    expect(specStoreOf({ env: { FACTORY_SPEC_STORE: "issue" }, home: "/h", open })).toMatchObject({
+      kind: "ok",
+      value: { kind: "issue" },
+    });
+    expect(specStoreKind({ FACTORY_SPEC_STORE: "jira" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("FACTORY_SPEC_STORE must be one of issue, local"),
+    });
+    expect(opened.n).toBe(0);
+  });
+
+  it("reads issue N's body for ticket N: found, missing when empty, refused when the git host fails or N is no number", async () => {
+    const opened = { n: 0 };
+    const store = issueStore({
+      open: openOnce(forge({ 2: { kind: "ok", value: GOOD }, 3: { kind: "ok", value: " \n" } }, opened)),
+      hostProject: "a/ledger",
+    });
+    const read = (ticket: string) => readSpec({ store, project: "ledger", ticket });
+    expect(await read("2")).toEqual({ kind: "found", text: GOOD, where: "issue #2 of a/ledger" });
+    expect(await read("3")).toEqual({ kind: "missing", where: "issue #3 of a/ledger" });
+    expect(await read("4")).toMatchObject({ kind: "refused", reason: expect.stringContaining("HTTP 404") });
+    expect(await read("PROJ-1")).toMatchObject({ kind: "refused", reason: expect.stringContaining("issue number") });
+    expect(await read("02")).toMatchObject({ kind: "refused" });
+    expect(opened.n).toBe(1);
   });
 });
