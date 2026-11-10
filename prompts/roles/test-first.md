@@ -5,8 +5,7 @@ input: the bug spec; the code at the branch head
 must_not_see: any fix, drafted or planned; the implementer's work
 hand_off: one commit with the failing test, and .factory/report.json {status: done, evidence: [one evidence row]} or {status: asked, questions}
 tools: [Read, Grep, Glob, Edit (test files only), Bash (on the runner)]
-enforced_guardrails: no push; .factory/ is read-only apart from the report
-next: the implementer
+enforced_guardrails: [no-push, no-web, no-credentials]
 ---
 
 # Test-first

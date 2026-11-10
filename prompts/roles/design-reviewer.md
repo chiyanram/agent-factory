@@ -5,8 +5,7 @@ input: the spec; the design it links; the code at the default branch
 must_not_see: the coordinator's conversation with the human
 hand_off: the findings, one entry per decision {id, decision, verdict: aligned | conflict | open, file, line, rule, severity, grade: cited | walked | ran, finding, fix}
 tools: [Read, Grep, Glob]
-enforced_guardrails: read-only tools; no approve, push or edit
-next: the verify pass for each conflict and open, then the human's approval
+enforced_guardrails: [read-only]
 ---
 
 # Design-reviewer

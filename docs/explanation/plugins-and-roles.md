@@ -35,10 +35,11 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 | field | the engine | how |
 |---|---|---|
 | `role` | enforces | the card must name the role it is read for |
-| `tools` | enforces the tool names | the run gets only the card's tools, each one the engine gives that role. **Today:** a path scope such as "(test files only)" is dropped |
+| `tools` | enforces the tool names, and an `Edit` path scope | the run gets only the card's tools, each one the engine gives that role. `Edit(src/test/**)`, in Claude Code's permission syntax, is a path scope: the host checks the run's commits after it stops, and an edit outside the scope blocks the run (`src/core/writer/scope.ts`). Only `Edit` takes a scope. A note with a space, such as "Edit (test files only)", is text. **Today:** the built-in test-first card has that note, not a scope, so its edits are not limited |
 | `must_not_see` | enforces | those inputs are left out of the run, on top of the role's own floor, which no card can drop |
 | `hand_off` | enforces | every field it names must be a field of the engine's schema for the role; what the run returns is read with that schema |
-| `input`, `steps`, `rules`, `next`, `enforced_guardrails` | reads no meaning | text the model reads; **Today:** `enforced_guardrails` enforces nothing |
+| `enforced_guardrails` | enforces | a `[list]` of IDs from the engine's closed list (`src/core/process/guardrails.ts`): `read-only`, `no-push`, `no-web`, `no-credentials`, `judge-files-locked`, `edit-scope`. Each ID names the code that enforces it. The role's floor always applies; a card may add an ID its role can have, never drop one. An unknown ID, or one the role cannot have, refuses the card. **Today:** plain text, the old form, is still read and ignored for one release |
+| `input`, `steps`, `rules` | reads no meaning | text the model reads. `next` is dropped, because the lanes hold the flow. **Today:** a card that still has it is read for one release |
 
 The engine starts a run from a card for six roles: implementer, test-first, cleanup, design-reviewer, verify pass and
 onboarder. Every run record carries the card's hash.
@@ -60,7 +61,7 @@ Decided in the design audit (2026-11-10), not built:
 
 | change | why |
 |---|---|
-| `enforced_guardrails` becomes a list of IDs from a closed list the engine owns (for example `tests-read-only`); an unknown ID is refused. `tools` keeps path scopes in Claude Code's permission syntax (`Edit(src/test/**)`). `next` is dropped: the lanes hold the flow | a guardrail only in text is advice, not a guardrail |
+| `tests-read-only` joins the guardrail IDs with #422, and `own-hunks` with #423; plain-text `enforced_guardrails` and `next` are refused one release after #424 | each ID lands with the code that enforces it |
 | one process plugin per project: a second plugin with a process is a `config check` error; other plugins add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
 | the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade (#438, after #216) | a project cannot replace the finder today |
 | a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline (#216 first) | today `plugin update` runs `config check` only, no eval |

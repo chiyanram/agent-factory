@@ -120,7 +120,7 @@ export function recordedKept(value: unknown): readonly Kept[] | undefined {
   return recorded(value, keptOf);
 }
 
-// toVerify : the findings a verify pass checks: every conflict and open (the design-reviewer card's next). Pure.
+// toVerify : the findings a verify pass checks: every conflict and open. Pure.
 export function toVerify(findings: readonly DesignFinding[]): readonly DesignFinding[] {
   return findings.filter((f) => f.verdict !== "aligned");
 }

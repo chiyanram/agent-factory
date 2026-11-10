@@ -5,8 +5,7 @@ input: the approved spec; the act_on list of the last review round (rework only)
 must_not_see: review findings other than the act_on list; earlier verdicts
 hand_off: commits, .factory/report.json {status: done, evidence: [evidence rows]} or {status: asked, questions} or {status: blocked, blocker}, and .factory/pr.md
 tools: [Read, Grep, Glob, Edit, Bash (on the runner)]
-enforced_guardrails: the test checks; no edit to judge files, CI or .factory/ apart from the report and the PR body; no push; no rewrite of commits already on the branch; the run's caps
-next: cleanup
+enforced_guardrails: [no-push, no-web, no-credentials, judge-files-locked]
 ---
 
 # Implementer

@@ -5,8 +5,7 @@ input: the findings; the code; the spec and design
 must_not_see: the implementer's report; the coordinator's conversation with the human
 hand_off: the verdicts, one entry per finding {id, bucket: act_on | consider | noted | dismissed, why, severity, grade}
 tools: [Read, Grep, Glob]
-enforced_guardrails: read-only tools; no approve, merge, push or edit; no new findings
-next: after a design review, the human's approval
+enforced_guardrails: [read-only]
 ---
 
 # Verify pass

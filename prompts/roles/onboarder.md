@@ -5,8 +5,7 @@ input: the product repo at the default branch; the commands the engine listed; t
 must_not_see: none
 hand_off: brief.md and glossary.md in the project home, staged for a human
 tools: [Read, Grep, Glob]
-enforced_guardrails: writes only to the project home; never to the product repo; no push
-next: a human reviews the brief once; every role then reads brief.md and glossary.md as input
+enforced_guardrails: []
 ---
 
 # Onboarder

@@ -5,8 +5,7 @@ input: the branch diff; the code at the head; the evidence rows of the implement
 must_not_see: review findings; earlier verdicts
 hand_off: commits, and .factory/report.json {status: done, evidence: [the evidence rows, run again], deferred: [each cleanup that would change behaviour]}
 tools: [Read, Grep, Glob, Edit, Bash (on the runner)]
-enforced_guardrails: the test checks; no edit to judge files, CI or .factory/ apart from the report; no push; edits only lines the branch changed
-next: the ready check, then the automated review
+enforced_guardrails: [no-push, no-web, no-credentials, judge-files-locked]
 ---
 
 # Cleanup

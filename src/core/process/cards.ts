@@ -6,13 +6,18 @@
 //
 // A card is frontmatter, then the body the model reads. The engine enforces the frontmatter where it has the control:
 //   role          the card names the role it is read for
-//   tools         only tools the engine gives that role; the run then gets the card's tools and no others
+//   tools         only tools the engine gives that role; the run then gets the card's tools and no others. An Edit may
+//                 carry a path scope in Claude Code's permission syntax, Edit(src/test/**): an edit outside it blocks
+//                 the run (writer/scope.ts, #424). Only Edit takes one. "Bash (on the runner)", with a space, is a note
+//   enforced_guardrails  a [list] of IDs from the engine's closed list (guardrails.ts): an unknown ID, or one the role
+//                 cannot have, refuses the card. The role's floor always applies. Plain text is the old form: read for
+//                 one release and ignored, then refused (#424)
 //   must_not_see  what the engine leaves out of the run's input, on top of the role's own floor (MUST_NOT_SEE), which no
 //                 card can drop; a card that leaves out an input the run cannot do without is refused at the run
 //   hand_off      every field it names in {…} is a field of the engine's schema for the role (HAND_OFF), and what the
 //                 run returns is read with that schema (report.ts, design/findings.ts, review/verdicts.ts)
-// Every other field (steps, input, enforced_guardrails, rules, next) is the card's own text: the engine reads no
-// meaning into it. Every run record carries the card's hash, so a person can tell which card a run used.
+// Every other field (steps, input, rules) is the card's own text: the engine reads no meaning into it. next is dropped:
+// the lanes hold the flow; a card that still has it is read for one release, then refused (#424). Every run record carries the card's hash, so a person can tell which card a run used.
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -23,6 +28,7 @@ import { DESIGN_SCHEMA } from "../design/findings.js";
 import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
+import { allowedGuardrails, GUARDRAIL_FLOOR, isGuardrail, type GuardrailId } from "./guardrails.js";
 import { processDir, type PluginDir } from "./read.js";
 
 const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts", "roles");
@@ -89,6 +95,10 @@ export type Card = {
   readonly tools: readonly string[];
   // what the run must not see: the role's floor, then the card's own entries
   readonly mustNotSee: readonly string[];
+  // the guardrails that apply to the run: the role's floor, then the card's own IDs (guardrails.ts)
+  readonly guardrails: readonly GuardrailId[];
+  // where the run may edit, as globs from its Edit(…) scopes; none is anywhere in the clone
+  readonly editScope: readonly string[];
   // the sha256 of the whole card file, for the run record
   readonly sha256: string;
   // where it came from, as a person reads it
@@ -107,14 +117,43 @@ function field(front: string, name: string): string | undefined {
   return line?.slice(name.length + 1).trim();
 }
 
-// toolsOf : the frontmatter's tools list, each tool by its name alone ("Bash (on the runner)" is Bash). Pure.
-function toolsOf(list: string): readonly string[] {
+// a card's tool: its name, and its path scope in permission syntax; "" for none
+type Tool = { readonly name: string; readonly scope: string };
+
+const SCOPED = /^(\w+)\(([^()]*)\)$/;
+
+// toolOf : one entry of the tools list: Edit(src/test/**) has a scope; "Bash (on the runner)" is Bash with a note. Pure.
+function toolOf(entry: string): Tool {
+  const scoped = SCOPED.exec(entry);
+  return scoped === null
+    ? { name: entry.split(/\s/)[0] ?? "", scope: "" }
+    : { name: scoped[1] ?? "", scope: (scoped[2] ?? "").trim() };
+}
+
+// listOf : a frontmatter list's entries, with or without its [brackets]. Pure.
+function listOf(list: string): readonly string[] {
   return list
     .replace(/^\[/, "")
     .replace(/\]$/, "")
     .split(",")
-    .map((t) => t.trim().split(/\s/)[0] ?? "")
+    .map((t) => t.trim())
     .filter((t) => t !== "");
+}
+
+function toolListOf(list: string): readonly Tool[] {
+  return listOf(list)
+    .map(toolOf)
+    .filter((t) => t.name !== "");
+}
+
+// toolsOf : the frontmatter's tools list, each tool by its name alone. Pure.
+function toolsOf(list: string): readonly string[] {
+  return toolListOf(list).map((t) => t.name);
+}
+
+// scopeOf : the globs of the card's Edit(…) scopes; none is anywhere. Pure.
+function scopeOf(list: string): readonly string[] {
+  return toolListOf(list).flatMap((t) => (t.name === "Edit" && t.scope !== "" ? [t.scope] : []));
 }
 
 // entriesOf : the must_not_see list, one entry per ";"; "none" is none. Pure.
@@ -140,7 +179,56 @@ function toolsProblem(role: Role, tools: string | undefined): string {
     return `the card names no tools; the ${role} may have ${allowed.join(", ")}`;
   }
   const extra = asked.filter((t) => !allowed.includes(t));
-  return extra.length === 0 ? "" : `the ${role} gets only ${allowed.join(", ")}; the card asks for ${extra.join(", ")}`;
+  return extra.length === 0
+    ? scopeProblem(tools ?? "")
+    : `the ${role} gets only ${allowed.join(", ")}; the card asks for ${extra.join(", ")}`;
+}
+
+// scopeProblem : a path scope on a tool other than Edit, or "". Pure.
+function scopeProblem(tools: string): string {
+  const other = toolListOf(tools).find((t) => t.scope !== "" && t.name !== "Edit");
+  return other === undefined ? "" : `only Edit takes a path scope; the card gives ${other.name}(${other.scope})`;
+}
+
+// namedGuardrails : the IDs a card's enforced_guardrails names; none for the old plain text, read for one release.
+// Pure.
+function namedGuardrails(value: string | undefined): readonly string[] {
+  return value?.startsWith("[") === true ? listOf(value) : [];
+}
+
+// guardrailsProblem : an ID that is not on the list, one the role cannot have, or edit-scope with no Edit(…) scope;
+// "". Pure.
+function guardrailsProblem(role: Role, front: string): string {
+  const named = namedGuardrails(field(front, "enforced_guardrails"));
+  const unknown = named.find((id) => !isGuardrail(id));
+  if (unknown !== undefined) {
+    return `the card's enforced_guardrails names ${JSON.stringify(unknown)}, which is not a guardrail ID the engine enforces`;
+  }
+  return roleGuardrailProblem(role, named) || scopeGuardrailProblem(named, field(front, "tools") ?? "");
+}
+
+// roleGuardrailProblem : an ID the role cannot have, or "". Pure.
+function roleGuardrailProblem(role: Role, named: readonly string[]): string {
+  const allowed: readonly string[] = allowedGuardrails(role);
+  const other = named.find((id) => !allowed.includes(id));
+  return other === undefined
+    ? ""
+    : `the ${role} cannot have the guardrail ${other} (it may have ${allowed.join(", ")})`;
+}
+
+// scopeGuardrailProblem : edit-scope named with no Edit(…) path to hold it to, or "". Pure.
+function scopeGuardrailProblem(named: readonly string[], tools: string): string {
+  return named.includes("edit-scope") && scopeOf(tools).length === 0
+    ? "the card names edit-scope, but its tools give no Edit(…) path"
+    : "";
+}
+
+// guardrailsOf : the guardrails that apply to the run: the role's floor, the card's IDs, and edit-scope when an Edit
+// has a scope. The card passed guardrailsProblem. Pure.
+function guardrailsOf(role: Role, front: string): readonly GuardrailId[] {
+  const named = namedGuardrails(field(front, "enforced_guardrails")).filter(isGuardrail);
+  const scoped: readonly GuardrailId[] = scopeOf(field(front, "tools") ?? "").length > 0 ? ["edit-scope"] : [];
+  return [...new Set([...GUARDRAIL_FLOOR[role], ...named, ...scoped])];
 }
 
 // handOffProblem : the hand-off's fields that the engine's schema for the role does not have, or "". Pure.
@@ -157,7 +245,11 @@ function frontProblem(role: Role, front: string): string {
   if (named !== role) {
     return `the card names the role ${JSON.stringify(named)}, not ${role}`;
   }
-  return toolsProblem(role, field(front, "tools")) || handOffProblem(role, field(front, "hand_off"));
+  return (
+    toolsProblem(role, field(front, "tools")) ||
+    handOffProblem(role, field(front, "hand_off")) ||
+    guardrailsProblem(role, front)
+  );
 }
 
 // cardOf : a card's text, checked against the role it is read for. Pure.
@@ -171,17 +263,24 @@ export function cardOf(role: Role, text: string, from: string): Result<Card> {
   if (problem !== "") {
     return failed(`${from}: ${problem}`);
   }
-  const sha256 = createHash("sha256").update(text, "utf8").digest("hex");
+  return { kind: "ok", value: cardFrom(role, { text, head, body: text.slice(front[0].length), from }) };
+}
+
+// cardFrom : the card a checked text gives. Pure.
+function cardFrom(
+  role: Role,
+  read: { readonly text: string; readonly head: string; readonly body: string; readonly from: string },
+): Card {
+  const tools = field(read.head, "tools") ?? "";
   return {
-    kind: "ok",
-    value: {
-      role,
-      body: text.slice(front[0].length).trim(),
-      tools: [...new Set(toolsOf(field(head, "tools") ?? ""))],
-      mustNotSee: [...MUST_NOT_SEE[role], ...entriesOf(field(head, "must_not_see"))],
-      sha256,
-      from,
-    },
+    role,
+    body: read.body.trim(),
+    tools: [...new Set(toolsOf(tools))],
+    mustNotSee: [...MUST_NOT_SEE[role], ...entriesOf(field(read.head, "must_not_see"))],
+    guardrails: guardrailsOf(role, read.head),
+    editScope: scopeOf(tools),
+    sha256: createHash("sha256").update(read.text, "utf8").digest("hex"),
+    from: read.from,
   };
 }
 
