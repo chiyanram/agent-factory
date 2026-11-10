@@ -144,6 +144,8 @@ function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
   return new Promise((resolve) => {
     const child = spawn(call.bin, [...call.args], optionsOf(call));
     const kept = { stdout: "", stderr: "" };
+    // past the cap the call fails, even when it ended before the kill reached it, as execFile's maxBuffer does
+    let over = false;
     const keep = (name: "stdout" | "stderr") => (chunk: unknown) => {
       const text = kept[name] + String(chunk);
       if (!keepAll) {
@@ -152,6 +154,7 @@ function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
       }
       kept[name] = text.slice(0, limits.maxBuffer);
       if (text.length > limits.maxBuffer) {
+        over = true;
         signalGroup(child, "SIGKILL");
         child.kill("SIGKILL");
       }
@@ -162,7 +165,9 @@ function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
     child.stderr?.on("data", keep("stderr"));
     // a program that cannot start: 'close' may follow, and the first answer stands
     child.on("error", (error) => resolve({ code: 1, stdout: kept.stdout, stderr: error.message }));
-    child.on("close", (code) => resolve({ code: code ?? 1, ...kept }));
+    child.on("close", (code) =>
+      resolve(over ? { ...kept, code: 1, stderr: "stdout maxBuffer length exceeded" } : { code: code ?? 1, ...kept }),
+    );
     fed(child, call);
     stoppable(child, call);
   });

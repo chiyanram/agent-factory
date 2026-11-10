@@ -584,7 +584,7 @@ describe("boxPlan", () => {
       openEgress,
       srtFor: (egress) => {
         srtEgresses.push(egress);
-        return srtRunner;
+        return Promise.resolve(srtRunner);
       },
     });
   const reason = (text: string) => ({
