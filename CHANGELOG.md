@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.30.2](https://github.com/chiyanram/agent-factory/compare/v0.30.1...v0.30.2) (2026-11-10)
+
+### 🐛 Fixes
+
+* **forge** — back off on a GitHub rate limit instead of retrying, and spend fewer points per pass · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#388](https://github.com/chiyanram/agent-factory/pull/388))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.30.2/chiyanram-agent-factory-0.30.2.tgz`
+
 ## [0.30.1](https://github.com/chiyanram/agent-factory/compare/v0.30.0...v0.30.1) (2026-11-10)
 
 ### 🐛 Fixes
