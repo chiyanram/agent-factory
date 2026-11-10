@@ -3,6 +3,18 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.28.0](https://github.com/chiyanram/agent-factory/compare/v0.27.0...v0.28.0) (2026-11-10)
+
+### ✨ Features
+
+* **box** — run the implementer inside srt on the work laptop · [#114](https://github.com/chiyanram/agent-factory/issues/114) (PR [#360](https://github.com/chiyanram/agent-factory/pull/360))
+
+### 🐛 Fixes
+
+* **box** — the srt runner hides the whole home and allows back only the agent CLI and Node · [#114](https://github.com/chiyanram/agent-factory/issues/114) (PR [#362](https://github.com/chiyanram/agent-factory/pull/362))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.28.0`
+
 ## [0.27.0](https://github.com/chiyanram/agent-factory/compare/v0.26.0...v0.27.0) (2026-11-10)
 
 ### ✨ Features
