@@ -61,6 +61,16 @@ function refsLine({ tickets, pr }, { host, owner, repository }) {
   return ticketLinks && prLink ? `${ticketLinks} (${prLink})` : ticketLinks || prLink
 }
 
+const TRAILER = /^[A-Za-z][\w-]*: \S/
+
+// A breaking-change note runs to the end of the message, so it picks up the git trailers after it, such as
+// `Co-Authored-By:`; drop each trailing paragraph made only of trailers (chiyanram/skills#283, agent-factory#343).
+export function withoutTrailers(text) {
+  const paragraphs = text.split(/\n\s*\n/)
+  while (paragraphs.length > 1 && paragraphs.at(-1).split('\n').every((line) => TRAILER.test(line))) paragraphs.pop()
+  return paragraphs.join('\n\n').trim()
+}
+
 const preset = createPreset({ types }).writer
 
 function transform(commit, context) {
@@ -68,7 +78,8 @@ function transform(commit, context) {
   const entry = preset.transform({ ...commit, subject: refs.text }, context)
   if (!entry) return entry
   const subject = typeof entry.subject === 'string' ? crossRepoLinks(entry.subject, context) : entry.subject
-  return { ...entry, subject, references: [], refs: refsLine(refs, context) }
+  const notes = entry.notes.map((note) => ({ ...note, text: withoutTrailers(note.text) }))
+  return { ...entry, subject, notes, references: [], refs: refsLine(refs, context) }
 }
 
 export const releaseNotes = {
