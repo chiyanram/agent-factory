@@ -19,6 +19,9 @@
 //           secrets, the run records, the pending writes and the write log, and the plugin list;
 //           `agent-factory plugin`, `agent-factory project` and `agent-factory init`; reading the secret paths
 //
+// Each rule is a command prefix, so it holds the form that names the project too (`agent-factory poll ledger`, #382);
+// `agent-factory coordinator <project>` starts the session with that project as its commands' default.
+//
 // The coordinator never runs in bypass-permissions mode: the settings disable it and claudeArgv never asks for it. The
 // orchestrator refuses to start while the settings it finds are looser than this wall (wallProblems, #105), and
 // `make lint` runs the same check on the template (scripts/check-coordinator.ts).

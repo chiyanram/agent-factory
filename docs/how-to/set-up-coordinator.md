@@ -5,12 +5,21 @@ sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issue
 
 1. `agent-factory setup coordinator` writes `$FACTORY_HOME/coordinator/.claude/settings.json` and a `CLAUDE.md` that
    points at this guide, both mode 0444, and refuses a symlink in their place. Run it again after each upgrade.
-2. `agent-factory coordinator` starts Claude Code there with `--setting-sources project`, so the allow rules of your
-   own user settings do not apply; `agent-factory coordinator copilot` starts Copilot CLI with its command rules as flags (see Today below).
+2. `agent-factory coordinator [<project>]` starts Claude Code there with `--setting-sources project`, so the allow rules of your
+   own user settings do not apply; `agent-factory coordinator [<project>] copilot` starts Copilot CLI with its command rules as flags (see Today below).
+   It needs no `FACTORY_*` export (#382): the session is for the project you name, or the only one in
+   `$FACTORY_HOME/projects`, and each command it runs (`poll`, `status`, `claim`, `release`, `block`, `reconcile`) reads
+   that project's `gitHost`, `gitHostProject` and `clone` from its project file. With several projects and none named,
+   it starts with no default, and each command names its project (`agent-factory poll ledger`). For the ledger pilot:
+
+   ```bash
+   agent-factory coordinator ledger
+   ```
 
 The wall (`src/core/coordinator.ts`):
 
-- **Runs with no prompt:** `agent-factory poll`, `spec`, `approval` and `status`, and `agent-factory request`, whose
+- **Runs with no prompt:** `agent-factory poll`, `spec`, `approval` and `status`, with or without the project word
+  (`agent-factory poll ledger`), and `agent-factory request`, whose
   write the project's policy decides in code ([Writes](../reference/connectors.md#writes)).
 - **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it. **Today:** the start commands
   too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`); they become denied once the

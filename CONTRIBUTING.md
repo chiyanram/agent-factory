@@ -143,7 +143,7 @@ way as chiyanram/skills.
 | `broken link: <file>:<line>: <target>` | a relative link points at a missing file; fix the path |
 | `too long: AGENTS.md` | the root `AGENTS.md` reached 200 lines; move detail into `docs/` and link it |
 | `refused: … a human account` | log the CLI in as the bot ([Set up identity](docs/how-to/set-up-identity.md)) |
-| `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` | run `agent-factory init` in the clone, which writes them to the project file; or export the setting ([Settings](docs/reference/settings.md)) |
+| `FACTORY_PROJECT is not set` / `FACTORY_REPO must be a local clone` / `no project in …/projects` / `holds 2 projects` | run `agent-factory init` in the clone, which writes them to the project file; name the project (`agent-factory poll ledger`) when there are several; or export the setting ([Settings](docs/reference/settings.md)) |
 | `cannot list live runs: claude agents --json failed` | the `claude` CLI is missing or too old |
 | `github: rate limited until <time>: HTTP 200 after 1 try on graphql` | the git host is rate-limiting; the orchestrator loop waits until that time by itself; by hand, run again after it |
 

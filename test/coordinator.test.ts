@@ -156,6 +156,10 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     for (const command of [
       "agent-factory poll",
       "agent-factory poll --json",
+      // the forms that name the project (#382)
+      "agent-factory poll ledger",
+      "agent-factory poll ledger --json",
+      'agent-factory status ledger 12 aaaa1111 "writer started"',
       "agent-factory spec ledger PROJ-1",
       "agent-factory approval ledger PROJ-1",
       'agent-factory status 12 aaaa1111 "writer started"',
@@ -170,6 +174,10 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory release 12",
       "agent-factory block 12 why",
       "agent-factory reconcile",
+      "agent-factory claim ledger 12",
+      "agent-factory release ledger 12",
+      "agent-factory block ledger 12 why",
+      "agent-factory reconcile ledger",
       "agent-factory review ledger 12",
       "agent-factory dispatch ledger --once",
       "agent-factory setup claude",
@@ -221,6 +229,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory plugin add /tmp/x",
       "agent-factory project init ledger",
       "agent-factory ask 12 aaaa1111 q",
+      "agent-factory ask ledger 12 aaaa1111 q",
       "security find-generic-password -s x",
       "chmod 644 /home/ram/.factory/coordinator/.claude/settings.json",
     ]) {
