@@ -1,5 +1,7 @@
 # 0003 · Rulebook layout that every agent tool reads
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-20 (#1 "Box 5"); file plan approved 2026-10-23 (#21)
 
 ## Context

@@ -1,5 +1,7 @@
 # 0013 · A TypeScript package that calls CLIs
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-11-06 (operator, map #30: Q13, Q16, the integration rule, gap 4). Changes the order in
 ADR-0011 D13.
 
