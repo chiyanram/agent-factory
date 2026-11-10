@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphql, processRunner, readAnswer, rest, waitSeconds } from "../src/core/forge/api.js";
+import { graphql, processRunner, rateLimitedUntil, readAnswer, rest, waitSeconds } from "../src/core/forge/api.js";
 import { fake, field, ok } from "./fake-forge.js";
 
 const GET = { path: "repos/o/r/pulls/12", method: "GET", body: { kind: "none" } } as const;
@@ -29,13 +29,14 @@ describe("rest", () => {
     expect(f.slept).toEqual([7]);
   });
 
-  it("four rate limits in a row fail and say so", async () => {
+  it("four rate limits in a row fail and say so, with the time the limit lasts until", async () => {
     const f = fake("gitlab", Array(4).fill({ status: 429, body: {}, headers: { "retry-after": "1" } }));
     expect(await rest(f.client, GET)).toMatchObject({
       kind: "failed",
-      reason: expect.stringContaining("HTTP 429 after 4 tries"),
+      reason: expect.stringContaining("rate limited until 1970-01-12T13:46:41Z: HTTP 429 after 4 tries"),
     });
     expect(f.calls).toHaveLength(4);
+    expect(f.slept).toEqual([1, 1, 1]);
   });
 
   it("a GitHub 403 is a rate limit with Retry-After, with no requests left, or with a secondary-limit message (#71)", async () => {
@@ -43,6 +44,7 @@ describe("rest", () => {
       { status: 403, body: {}, headers: { "retry-after": "5" } },
       { status: 403, body: {}, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000030" } },
       { status: 403, body: { message: "You have exceeded a secondary rate limit." } },
+      { status: 403, body: { message: "You have triggered an abuse detection mechanism." } },
     ]) {
       const f = fake("github", [limit, ok([])]);
       expect(await rest(f.client, GET)).toEqual({ kind: "ok", value: [] });
@@ -51,13 +53,35 @@ describe("rest", () => {
     expect(waitSeconds(new Map(), 1_000_000)).toBe(60);
   });
 
-  it("waits for the reset only when no requests are left, at least a minute otherwise, and never past 5 minutes (#71)", () => {
-    const at = (h: Record<string, string>) => waitSeconds(new Map(Object.entries(h)), 1_000_000);
+  it("waits for the reset only when no requests are left, else a minute doubled for each limit in a row (#71, #62)", () => {
+    const at = (h: Record<string, string>, tries = 1) => waitSeconds(new Map(Object.entries(h)), 1_000_000, tries);
     expect(at({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000030" })).toBe(30);
     // a secondary limit: requests are left, and the reset is a second away
     expect(at({ "x-ratelimit-remaining": "4000", "x-ratelimit-reset": "1000001" })).toBe(60);
-    expect(at({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1003600" })).toBe(300);
-    expect(at({ "retry-after": "7200" })).toBe(300);
+    expect(at({ "x-ratelimit-remaining": "4000" }, 2)).toBe(120);
+    expect(at({}, 3)).toBe(240);
+    expect(at({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1003600" })).toBe(3600);
+    expect(at({ "retry-after": "7200" })).toBe(7200);
+  });
+
+  it("a limit that lasts past 5 minutes is not waited: one call, and the reason names the reset (#62)", async () => {
+    const f = fake("github", [
+      {
+        status: 403,
+        body: { message: "API rate limit exceeded" },
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1001200" },
+      },
+      ok([]),
+    ]);
+    const sent = await rest(f.client, GET);
+    expect(sent).toEqual({
+      kind: "failed",
+      reason:
+        "github: rate limited until 1970-01-12T14:06:40Z: HTTP 403 after 1 try on repos/o/r/pulls/12: API rate limit exceeded",
+    });
+    expect(f.calls).toHaveLength(1);
+    expect(f.slept).toEqual([]);
+    expect(rateLimitedUntil(sent.kind === "failed" ? sent.reason : "")).toBe(1_001_200_000);
   });
 
   it("any other error fails at once and names the status", async () => {
@@ -129,6 +153,61 @@ describe("graphql", () => {
     ]);
     expect(await graphql(f.client, Q)).toEqual({ kind: "ok", value: { x: 2 } });
     expect(f.slept).toEqual([60]);
+  });
+
+  // #62: "already exceeded" came back as a plain GraphQL error, and the pass failed with it as if it were any other
+  it("knows a rate limit in each form: by type, by code, by message, at 200 or 403, primary or secondary (#62)", async () => {
+    const reset = { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1002000" };
+    for (const limit of [
+      ok({ errors: [{ message: "API rate limit already exceeded for user ID 15411573." }] }),
+      ok({ errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded for user ID 1." }] }),
+      ok({ errors: [{ code: "graphql_rate_limit", message: "no more" }] }),
+      {
+        status: 200,
+        body: { errors: [{ message: "API rate limit already exceeded for user ID 1." }] },
+        headers: reset,
+      },
+      { status: 403, body: { errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }] } },
+      { status: 403, body: { message: "You have exceeded a secondary rate limit. Please wait a few minutes." } },
+      { status: 403, body: { documentation_url: "x" }, headers: { "retry-after": "30" } },
+      { status: 429, body: {} },
+    ] as const) {
+      const f = fake("github", [limit, ok({ data: { x: 3 } })], 1);
+      const sent = await graphql(f.client, Q);
+      expect(sent).toMatchObject({ kind: "failed", reason: expect.stringContaining("github: rate limited until ") });
+      expect(rateLimitedUntil(sent.kind === "failed" ? sent.reason : "")).not.toBe("none");
+      expect(f.calls).toHaveLength(1);
+    }
+    expect(rateLimitedUntil("github: GraphQL: Could not resolve to a Repository")).toBe("none");
+  });
+
+  it("no retry storm: a limit with no time is tried at most 4 times, a minute apart and doubling (#62)", async () => {
+    const limit = ok({ errors: [{ message: "API rate limit already exceeded for user ID 15411573." }] });
+    const f = fake("github", Array(10).fill(limit));
+    const sent = await graphql(f.client, Q);
+    expect(f.calls).toHaveLength(4);
+    expect(f.slept).toEqual([60, 120, 240]);
+    expect(sent).toEqual({
+      kind: "failed",
+      reason:
+        "github: rate limited until 1970-01-12T13:54:40Z: HTTP 200 after 4 tries on graphql: API rate limit already exceeded for user ID 15411573.",
+    });
+  });
+
+  it("a primary limit whose reset is far off fails at once with the reset time (#62)", async () => {
+    const f = fake("github", [
+      {
+        status: 200,
+        body: { errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded for user ID 1." }] },
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1001800" },
+      },
+    ]);
+    expect(await graphql(f.client, Q)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("rate limited until 1970-01-12T14:16:40Z: HTTP 200 after 1 try on graphql"),
+    });
+    expect(f.calls).toHaveLength(1);
+    expect(f.slept).toEqual([]);
   });
 });
 

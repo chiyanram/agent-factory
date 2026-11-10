@@ -85,8 +85,11 @@ const COMMENT = "body createdAt author { login __typename }";
 const COLLABORATORS = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   collaborators(first: 100, after: $after) { pageInfo { hasNextPage endCursor } edges { permission node { login } } } } }`;
 
+// GitHub prices a query at the requests its connections could need, over 100, rounded: a page of n open pull requests,
+// each with its labels, its last commit and its comments, is 1 + 3n requests. 30 to a page is 91: 1 point, where 50 was
+// 151: 2 points, for the same pull requests (#62). The page sizes inside a pull request add nothing to the price.
 const OPEN = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
-  pullRequests(states: [OPEN], first: 50, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
+  pullRequests(states: [OPEN], first: 30, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
     nodes { number isDraft headRefOid headRefName isCrossRepository mergeable
       labels(first: 100) { pageInfo { hasNextPage } nodes { name } }

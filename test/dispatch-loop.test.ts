@@ -14,6 +14,8 @@ import {
   orchestratorLoop,
 } from "../src/core/dispatch/orchestrator-loop.js";
 import { lock, STEPS_TODAY, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
+import type { Call, Runner } from "../src/core/forge/api.js";
+import { github } from "../src/core/forge/github.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { NO_NOTIFY } from "../src/core/notify.js";
 import { specHash } from "../src/core/spec.js";
@@ -123,6 +125,8 @@ function loopWith(
   changes: () => Changes | "down",
   steps: Steps = STEPS_TODAY,
   caps: Caps = NO_CAPS,
+  gitHost: Forge = forge(changes),
+  onSleep: () => void = () => undefined,
 ): Loop & { readonly run: () => ReturnType<typeof orchestratorLoop> } {
   const slept: number[] = [];
   const lines: string[] = [];
@@ -130,7 +134,7 @@ function loopWith(
     home,
     project: "ledger",
     gate: "forge-ci",
-    forge: forge(changes),
+    forge: gitHost,
     label: "agent::claimed",
     steps,
     now: () => Date.parse("2026-11-07T10:00:00Z"),
@@ -153,6 +157,7 @@ function loopWith(
       // the fake clock: a wait returns at once, and is counted
       sleep: async (ms) => {
         slept.push(ms);
+        onSleep();
       },
       log: (l) => lines.push(l),
       now: () => Date.parse("2026-11-07T10:00:00Z"),
@@ -344,6 +349,176 @@ describe("the orchestrator loop (#305)", () => {
     }));
     expect(await merged.run()).toMatchObject({ kind: "ok", value: { held: [] } });
     expect(await statusLine()).toBe("no orchestrator loop running; run `agent-factory dispatch ledger`; posted #12");
+  });
+});
+
+// the loop's clock in these tests, and the reset of the rate limit the fake gh meets: 40 minutes on
+const NOW = Date.parse("2026-11-07T10:00:00Z");
+const RESET = Date.parse("2026-11-07T10:40:00Z");
+
+// a fake gh behind the real GitHub adapter (#62): the user is ram, each GraphQL list answers from `now()`, a write
+// answers 200, and a limit, while set, answers every call with GitHub's "already exceeded" error, no requests left
+// and the reset at RESET; every call is counted
+function gh(now: () => Changes, limit: () => boolean): { readonly calls: Call[]; readonly forge: Forge } {
+  const calls: Call[] = [];
+  const run: Runner = async (call) => {
+    calls.push(call);
+    return limit() ? LIMITED : answered(bodyOf(call, now()));
+  };
+  const client = {
+    name: "github",
+    bin: "gh",
+    env: {},
+    run,
+    sleep: async () => undefined,
+    maxTries: 4,
+    now: () => NOW / 1000,
+  };
+  return { calls, forge: github(client, { owner: "chiyanram", name: "ledger" }) };
+}
+
+const answered = (body: unknown, head = "") => ({
+  code: 0,
+  stdout: `HTTP/2.0 200 OK\r\n${head}\r\n${JSON.stringify(body)}`,
+  stderr: "",
+});
+
+const LIMITED = answered(
+  { errors: [{ message: "API rate limit already exceeded for user ID 15411573." }] },
+  `x-ratelimit-remaining: 0\r\nx-ratelimit-reset: ${RESET / 1000}\r\n`,
+);
+
+const PAGE = { hasNextPage: false, endCursor: null };
+const pulls = (nodes: readonly unknown[]) => ({ data: { repository: { pullRequests: { pageInfo: PAGE, nodes } } } });
+
+const openNode = (o: OpenChange) => ({
+  number: o.number,
+  isDraft: o.draft,
+  headRefOid: o.head,
+  headRefName: o.branch,
+  isCrossRepository: o.fork,
+  mergeable: "MERGEABLE",
+  labels: { pageInfo: { hasNextPage: false }, nodes: o.labels.map((name) => ({ name })) },
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: "PENDING" } } }] },
+  comments: {
+    pageInfo: { hasPreviousPage: false, startCursor: null },
+    nodes: o.comments.map((n) => ({
+      body: n.body,
+      createdAt: n.at,
+      author: { login: n.author.name, __typename: "User" },
+    })),
+  },
+});
+
+// the answer to one call: the user, each GraphQL list by its query, else a write's label list
+const ANSWERS: readonly (readonly [(call: Call) => boolean, (c: Changes) => unknown])[] = [
+  [(call) => call.args[2] === "user", () => ({ login: "ram" })],
+  [
+    (call) => queryOf(call).includes("collaborators"),
+    (c) => ({
+      data: {
+        repository: {
+          collaborators: {
+            pageInfo: PAGE,
+            edges: c.team.map((p) => ({ permission: "ADMIN", node: { login: p.name } })),
+          },
+        },
+      },
+    }),
+  ],
+  [(call) => queryOf(call).includes("states: [OPEN]"), (c) => pulls(c.open.map(openNode))],
+  [
+    (call) => queryOf(call).includes("states: [MERGED]"),
+    (c) => pulls(c.merged.map((m) => ({ number: m.number, headRefName: m.branch, isCrossRepository: m.fork }))),
+  ],
+];
+
+const queryOf = (call: Call): string => call.args.find((a) => a.startsWith("query=")) ?? "";
+
+function bodyOf(call: Call, c: Changes): unknown {
+  const found = ANSWERS.find(([match]) => match(call));
+  return found === undefined ? [{ name: "agent::claimed" }] : found[1](c);
+}
+
+describe("the orchestrator loop and the git host's rate limit (#62)", () => {
+  it("a pass that did nothing reads the git host once: its login and 3 GraphQL lists, where it made 8 calls", async () => {
+    await approved();
+    // the writer, the ready check and the review are done at the head, and CI runs there: the ticket waits on CI, in
+    // flight, and a pass does nothing
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    await record({
+      where,
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "cleanup",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence: [],
+        hung: false,
+      },
+    });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    await record({ where, event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 } });
+    let merged = false;
+    // a person spoke 5 minutes ago, so the claim is not quiet
+    const said = { body: "go on", author: { name: "ram" }, at: "2026-11-07T09:55:00Z" };
+    const host = gh(
+      () =>
+        merged
+          ? { team, open: [], merged: [{ number: 12, branch: "factory/PROJ-1", fork: false }] }
+          : { team, open: [open({ labels: ["agent::claimed"], comments: [said] })], merged: [] },
+      () => false,
+    );
+    const marks: number[] = [];
+    const loop = loopWith(
+      () => "down",
+      STEPS_TODAY,
+      NO_CAPS,
+      host.forge,
+      () => {
+        marks.push(host.calls.length);
+        merged = marks.length >= 2;
+      },
+    );
+    const ended = await loop.run();
+    expect(ended).toMatchObject({ kind: "ok", value: { passes: 3 } });
+    expect(loop.lines.filter((l) => l.startsWith("PROJ-1: wait: CI"))).toHaveLength(2);
+    // pass 1 posted the approval's shared copy, so it looked again: its login, 3 lists, the note, 3 lists
+    const [first = 0, second = 0] = marks;
+    expect(first).toBe(8);
+    // pass 2 did nothing: its login and the 3 lists, each one call; before #62 it read them twice, with the login
+    const pass2 = host.calls.slice(first, second);
+    expect(pass2.map((c) => c.args[2])).toEqual(["user", "graphql", "graphql", "graphql"]);
+    // no pass of this one-ticket project makes more than 8 calls
+    expect(host.calls.length - second).toBeLessThanOrEqual(8);
+  });
+
+  it("a pass that meets the limit makes one call, and the next pass waits until the reset, with no retry storm", async () => {
+    await approved();
+    let limited = true;
+    const host = gh(
+      () => ({ team, open: [], merged: [] }),
+      () => limited,
+    );
+    const loop = loopWith(
+      () => "down",
+      STEPS_TODAY,
+      NO_CAPS,
+      host.forge,
+      () => {
+        limited = false;
+      },
+    );
+    expect(await loop.run()).toMatchObject({ kind: "ok", value: { passes: 2 } });
+    expect(loop.slept).toEqual([RESET - NOW]);
+    expect(loop.lines[0]).toMatch(
+      /^pass 1 failed: github: rate limited until 2026-11-07T10:40:00Z: HTTP 200 after 1 try on user: API rate limit already exceeded for user ID 15411573\./,
+    );
+    expect(loop.lines).toContain("next pass in 40 min, when the rate limit is over");
+    // the limited pass stopped at its first call; the next pass read the user once and the three lists
+    expect(host.calls.length).toBe(1 + 4);
   });
 });
 

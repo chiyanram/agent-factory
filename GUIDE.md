@@ -449,7 +449,7 @@ variable needs exporting.
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through, the vm runner's Squid and the srt runner's own (`parentProxy` in its policy); a setting of the machine, not of a project | none: direct |
 | `NODE_EXTRA_CA_CERTS` | at work: the company CA's PEM file, an absolute path (`egress.caCerts`, a preference). The srt runner hands it to `srt` and the run, and reads it even inside the factory home. Add the CA to the OS trust store as well, for programs that are not Node. **Today:** the vm runner does not pass it on (#114) | none |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the finder's and the verify pass's instructions. They replace the instructions only: the engine sends its floor ahead of them on every run (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
-| `FACTORY_MAX_TRIES` | tries per request on a rate limit | `4` |
+| `FACTORY_MAX_TRIES` | tries per request on a short rate limit, the wait doubling from a minute; a limit that lasts past 5 minutes ends the request at once with "rate limited until <time>" (#62) | `4` |
 
 ### The project file
 
@@ -831,7 +831,9 @@ a `/stop`); a loop with nothing in flight ends after its first pass. It never wa
 a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
 what to do. A step that is not set up says so, and says to run `agent-factory dispatch <project>` again once it is; the project-day cap says to run it again tomorrow; the window's share says when the
 window has room ("the window is full until HH:MM UTC"); outside the run hours it says when they are. Three
-failed passes in a row end it too. `agent-factory start` and `approve` start it in
+failed passes in a row end it too. A pass that fails on the git host's rate limit says until when ("rate limited until
+<time>"), and the next pass waits for that time, never asking the git host again before it (#62). A pass in which
+nothing happened reads the git host's changes once, not twice. `agent-factory start` and `approve` start it in
 the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
 While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
 the runs a pass may start, hold in each pass. A laptop that sleeps stops the loop; run `dispatch` again and it carries
@@ -980,7 +982,7 @@ request, and `!12` stands for `#12`.
 | `agent-factory reconcile` | removes each claim and run worktree with no live run, and each claim left on a merged PR; a live-run list it cannot read releases nothing. It never removes an implementer's worktree that holds unlanded work (#189): commits no remote branch holds, after a fetch, or uncommitted files. For an open PR it labels `needs-human` before any claim is released, pushes the commits on top of the PR's branch through the host push, with a blocked run's guards (fast-forward only, no `.factory`, no CI file), and posts one note naming the commits, the push and every uncommitted file, which it never commits. It tells you once for what the worktree holds, until that changes. A merged or closed PR gets no label and no push. A folder that is not one of the clone's worktrees, or a worktree it cannot fetch for, is kept and labels nothing. An automated review's worktree is removed as before. `FACTORY_DRY_RUN=1` fetches nothing and says which it would keep |
 
 `poll` keeps no state, so a restart re-reads everything. It reads the git host through its CLI (`gh api`, `glab api`),
-pages every list to its end, and waits out a rate limit. It does not read approvals: an approval is the local
+pages every list to its end, and waits out a short rate limit; a longer one fails with the time it lasts until. It does not read approvals: an approval is the local
 `agent-factory approve`. A note is the factory's only when it comes from the factory's login **and** starts with a
 role prefix (`src/core/notes.ts`, #128); every other note is a person's. `asks` counts each `[coordinator] OPEN:` or
 `[writer] OPEN:` note with no note after it from a project member: a GitLab Developer or more, or a GitHub
