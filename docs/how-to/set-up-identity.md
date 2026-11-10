@@ -98,7 +98,7 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
 - Work laptop (`FACTORY_BOX=srt`, #114): install the pinned sandbox runtime, `npm install --global --omit=optional
   @anthropic-ai/sandbox-runtime@0.0.82` (on Linux also `bubblewrap`, `socat` and `ripgrep`). Each implementer run, ready
   check and local verifier runs inside `srt` with one policy the factory writes per run: writes only in the run's clone
-  and a private home, whose `tmp/` folder is the run's temp folder (`TMPDIR`; never `/tmp`, #62); your whole home hidden, but for the clone, the private home and, read-only, the folders `claude`
+  and a private home, and the run's own temp folder `/tmp/af-<6 characters>` (`TMPDIR`; never `/tmp` itself, #62); your whole home hidden, but for the clone, the private home and, read-only, the folders `claude`
   and its Node are installed in (found from `PATH`, and the factory's own Node and package, for the lint hook), and the
   project's toolchain (below); the credential paths, the factory home and the Docker sockets denied by name as well; network only through srt's own
   proxy and the project's `egress.allow`; and no Docker socket. There is no Docker in the runner: container tests run on git host CI. A run

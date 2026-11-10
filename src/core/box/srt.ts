@@ -2,24 +2,27 @@
 // generated policy and one private HOME per started runner. srt-plan.ts decides the policy, the arguments and how each
 // answer reads; this file writes the policy, runs srt and keeps the runners it started. Nothing here throws.
 //
-// A started runner is a folder of its own, outside the clone: policy.json (0600, which the run cannot write), home/
-// (0700, the run's HOME) and home/tmp/ (0700, the run's temp folder: srt-plan.ts tmpEnv, #62). stop removes it. A
+// A started runner is a folder of its own, outside the clone: policy.json (0600, which the run cannot write) and home/
+// (0700, the run's HOME); and a temp folder with a short path, /tmp/af-<6 characters> (0700, srt-plan.ts tmpEnv, #62).
+// stop removes both. A
 // command that outlives its timeout, or a stop, gets SIGTERM and then SIGKILL, sent to srt's whole process group, so
 // the sandboxed agent and everything it started go with it.
 
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Call, Exit, Runner } from "../forge/api.js";
+import type { Call, Exit, Result, Runner } from "../forge/api.js";
 import { attempt } from "../review/safe.js";
 import {
   checkEnv,
   insideClone,
   readSrtProbe,
-  RUN_TMP,
+  RUN_TMP_PREFIX,
+  RUN_TMP_ROOT,
   srtArgs,
   srtEnv,
   srtPolicy,
+  tmpTooLong,
   VERSION_ARGS,
   type SrtEgress,
   type SrtHost,
@@ -40,6 +43,8 @@ export type SrtBoxSetup = {
   readonly runsDir: string;
   // a new runner name; a test passes its own
   readonly newName?: () => string;
+  // where each run's temp folder goes (#62); /tmp unless a test passes its own
+  readonly tmpRoot?: string;
 };
 
 type Failed = { readonly kind: "failed"; readonly reason: string };
@@ -48,6 +53,7 @@ type Failed = { readonly kind: "failed"; readonly reason: string };
 type Live = {
   readonly spec: BoxSpec;
   readonly dir: string;
+  readonly tmp: string;
   readonly policy: string;
   readonly env: Readonly<Record<string, string>>;
   readonly running: Set<AbortController>;
@@ -77,6 +83,21 @@ async function timed(exit: Promise<Exit>, stop: AbortController, seconds: number
     : { kind: "exited", code: ended.code, stdout: ended.stdout, stderr: ended.stderr };
 }
 
+// runTmp : a fresh 0700 temp folder for one run under the root, by its real path, so srt's rule and the sockets it
+// makes there name one folder (/tmp is /private/tmp on macOS); refused when srt's sockets would not fit in it (#62)
+async function runTmp(root: string): Promise<Result<string>> {
+  const made = await attempt(
+    async () => mkdtemp(join(await realpath(root), RUN_TMP_PREFIX)),
+    `cannot make a temp folder in ${root}`,
+  );
+  const long = made.kind === "ok" ? tmpTooLong(made.value) : "";
+  if (made.kind === "ok" && long !== "") {
+    await rm(made.value, { recursive: true, force: true }).catch(() => undefined);
+    return { kind: "failed", reason: long };
+  }
+  return made;
+}
+
 export function srtBox(setup: SrtBoxSetup): Box {
   const newName = setup.newName ?? (() => `factory-srt-${randomUUID()}`);
   const live = new Map<string, Live>();
@@ -90,34 +111,37 @@ export function srtBox(setup: SrtBoxSetup): Box {
   const prepare = async (name: string, spec: BoxSpec): Promise<Live | Failed> => {
     const dir = join(setup.runsDir, name);
     const home = join(dir, "home");
-    const tmp = join(home, RUN_TMP);
     const policy = join(dir, "policy.json");
+    const tmp = await runTmp(setup.tmpRoot ?? RUN_TMP_ROOT);
+    if (tmp.kind === "failed") {
+      return tmp;
+    }
     const text = `${JSON.stringify(
       srtPolicy({
         host: setup.host,
         egress: setup.egress,
-        run: { worktree: spec.worktree, readOnly: spec.readOnly, home },
+        run: { worktree: spec.worktree, readOnly: spec.readOnly, home, tmp: tmp.value },
       }),
       null,
       2,
     )}\n`;
     const made = await attempt(async () => {
       await mkdir(home, { recursive: true, mode: 0o700 });
-      await mkdir(tmp, { mode: 0o700 });
       await writeFile(policy, text, { mode: 0o600 });
     }, `cannot prepare the srt runner in ${dir}`);
     if (made.kind === "failed") {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(tmp.value, { recursive: true, force: true }).catch(() => undefined);
       return made;
     }
     const env = srtEnv({
       host: setup.env,
       home,
-      tmp,
+      tmp: tmp.value,
       ca: { name: setup.caName, file: setup.egress.caCerts },
       spec: spec.env,
     });
-    return { spec, dir, policy, env, running: new Set() };
+    return { spec, dir, tmp: tmp.value, policy, env, running: new Set() };
   };
 
   const remove = async (name: string, runner: Live): Promise<Done> => {
@@ -125,10 +149,10 @@ export function srtBox(setup: SrtBoxSetup): Box {
       stop.abort();
     }
     live.delete(name);
-    const removed = await attempt(
-      () => rm(runner.dir, { recursive: true, force: true }),
-      `cannot remove ${runner.dir}`,
-    );
+    const removed = await attempt(async () => {
+      await rm(runner.dir, { recursive: true, force: true });
+      await rm(runner.tmp, { recursive: true, force: true });
+    }, `cannot remove ${runner.dir}`);
     return removed.kind === "ok" ? { kind: "ok" } : removed;
   };
 
