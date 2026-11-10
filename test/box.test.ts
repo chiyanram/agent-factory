@@ -28,7 +28,7 @@ describe("chooseBox", () => {
     expect(choice.place).toBe("srt");
     const risks = choice.risks.join("\n");
     expect(risks).toMatch(/sandbox-exec on macOS, bubblewrap on Linux/);
-    expect(risks).toMatch(/credential paths/);
+    expect(risks).toMatch(/your home is hidden/);
     expect(risks).toMatch(/no Docker/);
   });
 

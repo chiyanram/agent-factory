@@ -10,9 +10,12 @@
 // The policy (srt's README, at the pinned version):
 //   writes      only the run's clone and the run's private HOME (ADR-0012 S15); the clone's read-only paths stay
 //               read-only; srt adds its own mandatory denies (.git/hooks, .git/config, shell rc files)
-//   reads       open, but for the credential paths under the person's home (review issue 6 on #30), the factory home
-//               (its secrets and every other run), and the Docker sockets; the clone and the private HOME are allowed
-//               back inside the factory home
+//   reads       the person's whole home is hidden (review issue 6 on #30; the operator's choice A on #114,
+//               2026-11-10). srt's allowRead wins over its denyRead, so the clone, the private HOME and the agent's
+//               programs (the CLI's install and its Node, srt-programs.ts) are allowed back, the programs read-only.
+//               A denyRead more specific than an allowed folder still holds, so the credential paths, the factory home
+//               (its secrets and every other run) and the Docker sockets are denied by name as well, in case a
+//               program folder holds one
 //   network     only through srt's own proxy, which allows the project's checked egress allowlist on port 443 alone
 //               (the same rule as the vm runner's Squid proxy, egress/squid.ts) and chains to the company proxy at work
 //   sockets     no local binding, no Unix socket: no Docker socket (on Linux srt blocks them with seccomp)
@@ -20,7 +23,7 @@
 // S7: the version is pinned. The probe refuses a missing srt, another version, and a platform srt does not sandbox.
 
 import { join } from "node:path";
-import type { Exit } from "../forge/api.js";
+import type { Exit, Result } from "../forge/api.js";
 import type { Upstream } from "../egress/squid.js";
 import type { Command, Probe } from "./types.js";
 
@@ -78,6 +81,9 @@ export type SrtHost = {
   readonly home: string;
   // the factory home: its secrets, its records and every other run's folders
   readonly factoryHome: string;
+  // the folders under the home the run reads back, read-only: the agent CLI and its Node (srt-programs.ts), or why
+  // they cannot be found, which the probe refuses
+  readonly programs: Result<readonly string[]>;
 };
 
 // the project's egress, as the srt runner keeps it: the allowlist parseAllowlist checked, the company proxy, and the
@@ -149,13 +155,19 @@ export function srtPolicy(input: {
     },
     filesystem: {
       denyRead: [
+        host.home,
         ...CREDENTIAL_PATHS.map(underHome),
         ...HOME_SOCKETS.map(underHome),
         ...DOCKER_SOCKETS,
         host.factoryHome,
       ],
-      // the run's own folders are inside the factory home; the company CA may be too
-      allowRead: [run.worktree, run.home, ...(egress.caCerts === "" ? [] : [egress.caCerts])],
+      // the run's own folders are inside the factory home; the agent's programs and the company CA may be in the home
+      allowRead: [
+        run.worktree,
+        run.home,
+        ...(host.programs.kind === "ok" ? host.programs.value : []),
+        ...(egress.caCerts === "" ? [] : [egress.caCerts]),
+      ],
       allowWrite: [run.worktree, run.home],
       denyWrite: run.readOnly.map((p) => join(run.worktree, p)),
     },
@@ -173,13 +185,23 @@ export function srtArgs(policyFile: string, command: Command): readonly string[]
 
 export const VERSION_ARGS: readonly string[] = ["--version"];
 
-// readSrtProbe : the runner can start when the platform is one srt sandboxes and `srt --version` prints the pinned
-// version (S7: refuse to start when the runner is missing or not the pinned one). Pure.
-export function readSrtProbe(input: { readonly platform: NodeJS.Platform; readonly version: Exit }): Probe {
-  const { platform, version } = input;
+// readSrtProbe : the runner can start when the platform is one srt sandboxes, the agent's programs were found, and
+// `srt --version` prints the pinned version (S7: refuse to start when the runner is missing or not the pinned one).
+// Pure.
+export function readSrtProbe(input: {
+  readonly platform: NodeJS.Platform;
+  readonly programs: Result<readonly string[]>;
+  readonly version: Exit;
+}): Probe {
+  const { platform, programs } = input;
   if (!PLATFORMS.has(platform)) {
     return { kind: "missing", reason: `srt does not sandbox ${platform} here; the srt runner runs on macOS or Linux` };
   }
+  return programs.kind === "failed" ? { kind: "missing", reason: programs.reason } : readVersion(input.version);
+}
+
+// readVersion : ready when `srt --version` printed the pinned version. Pure.
+function readVersion(version: Exit): Probe {
   if (version.code !== 0) {
     const said = version.stderr.trim().split("\n").at(-1) ?? "";
     return { kind: "missing", reason: `srt does not answer (${said}); install it: ${SRT_INSTALL}` };

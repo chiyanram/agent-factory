@@ -116,8 +116,10 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
 - Work laptop (`FACTORY_BOX=srt`, #114): install the pinned sandbox runtime, `npm install --global
   @anthropic-ai/sandbox-runtime@0.0.81` (on Linux also `bubblewrap`, `socat` and `ripgrep`). Each implementer run, ready
   check and local verifier runs inside `srt` with one policy the factory writes per run: writes only in the run's clone
-  and a private home, reads of the credential paths denied, network only through srt's own proxy and the project's
-  `egress.allow`, and no Docker socket. There is no Docker in the runner: container tests run on git host CI. A run
+  and a private home; your whole home hidden, but for the clone, the private home and, read-only, the folders `claude`
+  and its Node are installed in (found from `PATH`, and the factory's own Node and package, for the lint hook); the
+  credential paths, the factory home and the Docker sockets denied by name as well; network only through srt's own
+  proxy and the project's `egress.allow`; and no Docker socket. There is no Docker in the runner: container tests run on git host CI. A run
   refuses to start when `srt` is missing or is not that version. Run the laptop check once ([Check the srt
   runner](#check-the-srt-runner)).
 - Whoever started the work does not approve it. Write this rule down for the team; a git host on a free plan cannot
@@ -610,6 +612,8 @@ check, and fails on the first that gets through. Where `srt` is missing or anoth
 Tick each one on #114 with the output:
 
 - [ ] reading `~/.ssh/canary` inside `srt` fails;
+- [ ] a file in `~/Documents` is unreadable: the whole home is hidden;
+- [ ] `claude --version` and `node` still run inside `srt` when they are installed under your home;
 - [ ] a direct connection that skips the proxy (`curl --noproxy '*' https://1.1.1.1`) fails;
 - [ ] a host off the allowlist (`https://example.com`) is refused by srt's proxy;
 - [ ] a call to `https://api.anthropic.com` goes through (any HTTP answer); at work, through `FACTORY_UPSTREAM_PROXY`
@@ -620,9 +624,10 @@ Tick each one on #114 with the output:
 - [ ] by hand: one implementer run with `claude` finishes inside `srt` (`FACTORY_BOX=srt agent-factory dispatch
   <project>`); a run with Copilot comes with #162.
 
-**Today:** reads outside the named credential paths stay open to the run (a secret kept elsewhere in your home can be
-read); [review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531) prefers hiding the whole
-home. The run's private home and `--setting-sources user` keep the agent itself from loading anything of yours.
+The policy hides your whole home ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531);
+the operator's choice A on #114). It allows back only the run's clone and private home, and the install folders of
+`claude` and its Node, read-only. A program kept elsewhere under your home cannot be read inside `srt`, so install
+what the project's build needs outside it or in one of those folders.
 
 ## Run the loop
 

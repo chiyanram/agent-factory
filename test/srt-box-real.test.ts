@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { srtBox } from "../src/core/box/srt.js";
+import { locatePrograms } from "../src/core/box/srt-programs.js";
 import { NO_IMAGE, type Box, type Ran } from "../src/core/box/types.js";
 import { runProcess } from "../src/core/forge/api.js";
 import { tempDir } from "./temp.js";
@@ -27,12 +28,20 @@ const HOME = homedir();
 const CANARY = join(HOME, ".ssh", "canary");
 const OFF_LIST = "https://example.com";
 
-function makeBox(): Box {
+// the runner as app.ts makes it: the whole home hidden, the agent CLI's install and its Node allowed back read-only
+async function makeBox(): Promise<Box> {
+  const programs = await locatePrograms({
+    env: process.env,
+    home: HOME,
+    cli: "claude",
+    execPath: process.execPath,
+    packageDir: join(import.meta.dirname, ".."),
+  });
   return srtBox({
     run: runProcess,
     bin: "srt",
     env: process.env,
-    host: { platform: process.platform, home: HOME, factoryHome: FACTORY },
+    host: { platform: process.platform, home: HOME, factoryHome: FACTORY, programs },
     egress: { hosts: ["api.anthropic.com"], upstream: { kind: "none" }, caCerts: "" },
     caName: "NODE_EXTRA_CA_CERTS",
     runsDir: join(FACTORY, "srt-runs"),
@@ -48,7 +57,7 @@ async function why(box: Box): Promise<string> {
   return probe.kind === "ready" ? "" : `no srt runner here: ${probe.reason}`;
 }
 
-const box = makeBox();
+const box = await makeBox();
 const skip = await why(box);
 
 // inSrt : one command in a fresh runner on the clone
@@ -75,6 +84,25 @@ describe.skipIf(skip !== "")(`srt runner on the real srt${skip === "" ? "" : ` (
     const ran = await inSrt(["cat", CANARY]);
     expect(failed(ran)).toBe(true);
     expect(ran.kind === "exited" ? ran.stdout : "").not.toContain("canary");
+  });
+
+  it("cannot read a file in ~/Documents: the whole home is hidden", async () => {
+    const documents = join(HOME, "Documents");
+    mkdirSync(documents, { recursive: true });
+    const file = join(documents, `srt-canary-${randomUUID()}.txt`);
+    writeFileSync(file, "documents-canary\n");
+    try {
+      const ran = await inSrt(["cat", file]);
+      expect(failed(ran)).toBe(true);
+      expect(ran.kind === "exited" ? ran.stdout : "").not.toContain("documents-canary");
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  it("still runs the agent CLI and its Node when they are installed under the home", async () => {
+    expect(await inSrt(["claude", "--version"])).toMatchObject({ kind: "exited", code: 0 });
+    expect(await inSrt(["node", "-e", "process.exit(0)"])).toMatchObject({ kind: "exited", code: 0 });
   });
 
   it("cannot connect direct, skipping the proxy, nor reach a host off the allowlist through it", async () => {

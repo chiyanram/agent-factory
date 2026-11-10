@@ -17,6 +17,7 @@ import { hostGit } from "./core/git.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
+import { locatePrograms } from "./core/box/srt-programs.js";
 import { openEgress } from "./core/egress/index.js";
 import {
   claudeTokenStatus,
@@ -603,12 +604,23 @@ function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
     project,
     boxesFor: (image) => [vmBox({ docker, image: image.ref, owner: { uid: io.system.uid, gid: io.system.gid } })],
     openEgress: (o) => openEgress({ ...o, dir: join(home, "egress"), docker }),
-    srtFor: (egress) =>
+    srtFor: async (egress) =>
       srtBox({
         run: io.system.run,
         bin: "srt",
         env: io.env,
-        host: { platform: io.system.platform, home: homedir(), factoryHome: home },
+        host: {
+          platform: io.system.platform,
+          home: homedir(),
+          factoryHome: home,
+          programs: await locatePrograms({
+            env: io.env,
+            home: homedir(),
+            cli: "claude",
+            execPath: process.execPath,
+            packageDir: packageDir(),
+          }),
+        },
         egress,
         caName: settingName("egress.caCerts"),
         runsDir: join(home, "srt-runs"),

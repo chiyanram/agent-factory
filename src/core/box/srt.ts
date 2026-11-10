@@ -146,6 +146,7 @@ export function srtBox(setup: SrtBoxSetup): Box {
     probe: async (): Promise<Probe> =>
       readSrtProbe({
         platform: setup.host.platform,
+        programs: setup.host.programs,
         version: await setup.run({ bin: setup.bin, args: VERSION_ARGS, stdin: "", env: setup.env }),
       }),
 

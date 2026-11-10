@@ -59,7 +59,7 @@ export type PlanInput = {
   readonly boxesFor: (image: PinnedImage) => readonly Box[];
   readonly openEgress: EgressOpener;
   // this host's srt runner, for the project's egress (#114)
-  readonly srtFor: (egress: SrtEgress) => Box;
+  readonly srtFor: (egress: SrtEgress) => Promise<Box>;
 };
 
 type Egress = { readonly upstream: Upstream; readonly image: PinnedImage; readonly gitHosts: readonly string[] };
@@ -150,7 +150,7 @@ async function placedSrt(input: PlanInput, project: ProjectFile): Promise<Result
   if (egress.kind === "failed") {
     return egress;
   }
-  const opened = await openBox({ env: input.env, boxes: [input.srtFor(egress.value)] });
+  const opened = await openBox({ env: input.env, boxes: [await input.srtFor(egress.value)] });
   return opened.kind === "ready"
     ? {
         kind: "ok",
