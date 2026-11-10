@@ -42,7 +42,7 @@ const commitPartial = `* {{#if scope}}**{{scope}}** — {{/if}}{{#if subject}}{{
 `
 
 const footerPartial = `
-Install: [build and install the packed tarball]({{host}}/{{owner}}/{{repository}}/blob/{{currentTag}}/GUIDE.md#install-a-pinned-version)
+Install: \`npm i -g {{host}}/{{owner}}/{{repository}}/releases/download/{{currentTag}}/chiyanram-agent-factory-{{version}}.tgz\`
 `
 
 const TRAILING_REFS = /(?:\s*\(#\d+\))+\s*$/

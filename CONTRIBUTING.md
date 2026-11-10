@@ -126,7 +126,8 @@ way as chiyanram/skills.
 - `feat` releases a minor version, `fix` and `perf` a patch, and `!` or a `BREAKING CHANGE:` footer a major one.
   `docs`, `chore`, `ci`, `style`, `refactor`, `test` and `build` release nothing.
 - A release is a tag `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`, which semantic-release writes; do not
-  edit it by hand. Nothing is published to npm.
+  edit it by hand. Nothing is published to npm; the release attaches the packed package
+  (`chiyanram-agent-factory-<version>.tgz`, from `npm pack`) for the one-line install in `GUIDE.md`.
 - The release notes come from the PR titles on `main` (`scripts/release_notes.mjs`, #157). The sections are
   `⚠️ Breaking changes`, `✨ Features`, `🐛 Fixes`, `⚡ Performance` and `⏪ Reverts`, and each change is one bullet
   `**scope** — subject · #ticket (PR #pr)`. Put the ticket as `(#N)` at the end of the PR title; GitHub adds the PR

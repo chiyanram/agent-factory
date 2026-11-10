@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# the packed package semantic-release attaches to each release (release.config.mjs)
+dist-release/
 # made by scripts/build-plugins.mjs from dist/ (#134)
 plugins/*/lib/
 # git worktrees of this repo (Claude Code puts them here); every repo-wide tool must skip them (#148)
