@@ -49,6 +49,12 @@ _Avoid_: session
 with its own Docker) and `srt` (Anthropic's sandbox runtime, on a laptop). In code: `src/core/box/`, `FACTORY_BOX`.
 _Avoid_: box, sandbox, server, host, compute
 
+**Toolchain**: the compilers, runtimes and build tools a project's build needs, such as a JDK, Node or Gradle. The
+project declares it in its own file (`mise.toml`, `.tool-versions`, `.sdkmanrc`); the runner provides it. The `srt`
+runner allows back a detected toolchain manager's install folder read-only, plus `runner.readOnly`; the `vm` runner
+builds it into the project's `box.Dockerfile`. In code: `src/core/box/srt-toolchains.ts`.
+_Avoid_: SDK (for the whole toolchain)
+
 **Agent CLI**: the program that runs the model inside a run: `claude` or `copilot`. It is chosen per role.
 _Avoid_: runner (for the program), agent (alone)
 

@@ -147,6 +147,7 @@ export function srtBox(setup: SrtBoxSetup): Box {
       readSrtProbe({
         platform: setup.host.platform,
         programs: setup.host.programs,
+        refused: setup.host.toolchains.refused,
         version: await setup.run({ bin: setup.bin, args: VERSION_ARGS, stdin: "", env: setup.env }),
       }),
 

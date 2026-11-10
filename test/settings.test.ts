@@ -155,12 +155,14 @@ describe("settings golden: no team file and no user file resolve to today's valu
     expect(keys.map((r) => ({ id: r.key.id, value: r.value }))).toEqual(keys.map((r) => ownValue(raw, r)));
   });
 
-  it("the machine layer is the FACTORY_* variables as they are, one adapter for all", () => {
+  it("the machine layer is the FACTORY_* variables as they are, one adapter for all; a list key's as a list", () => {
     const env = Object.fromEntries(machineKeys().map((k, i) => [k.env, `v${i}`]));
     const r = resolve({ layers: [], modes: new Map(), env, problems: [] });
     for (const k of machineKeys()) {
       const got = r.values.find((v) => v.key.id === k.id);
-      expect(got).toMatchObject({ value: env[k.env], sources: [{ layer: "machine", file: `env ${k.env}` }] });
+      const listed = k.class === "allow-list" || k.class === "deny-list";
+      const value = listed ? [env[k.env]] : env[k.env];
+      expect(got).toMatchObject({ value, sources: [{ layer: "machine", file: `env ${k.env}` }] });
     }
     const none = resolve({ layers: [], modes: new Map(), env: {}, problems: [] });
     expect(none.values.filter((v) => v.key.where === "machine" && v.set)).toEqual([]);
@@ -347,6 +349,10 @@ function resolved(layers: readonly FileLayer[]): ReturnType<typeof resolve> {
 function valueOf(r: ReturnType<typeof resolve>, id: string): Resolved | undefined {
   return r.values.find((v) => v.key.id === id);
 }
+// readOnly : one key's resolved value, runner.readOnly by default
+function readOnly(r: ReturnType<typeof resolve>, id = "runner.readOnly"): unknown {
+  return valueOf(r, id)?.value;
+}
 function errors(r: ReturnType<typeof resolve>): readonly string[] {
   return r.problems.filter((p) => p.level === "error").map((p) => p.text);
 }
@@ -386,6 +392,31 @@ describe("resolve: each class (#229)", () => {
     const widened = resolved([open, layer("project", { egress: { allow: ["b.example.com"] } })]);
     expect(valueOf(widened, "egress.allow")?.value).toEqual(["a.example.com", "b.example.com"]);
     expect(errors(widened)).toEqual([]);
+  });
+
+  it("runner.readOnly: an allow-list at runnerReadOnly in a file, and FACTORY_RUNNER_READ_ONLY below it (#371)", () => {
+    const team = layer("team", { runner: "srt", runnerReadOnly: ["~/.cargo"] });
+    const add = resolved([team, layer("user", { runnerReadOnly: ["~/.cargo", "~/tools"] })]);
+    expect(valueOf(add, "runner.readOnly")).toMatchObject({ value: ["~/.cargo"], key: { class: "allow-list" } });
+    expect(errors(add)[0]).toContain('runner.readOnly: the user layer (/user.json:2) adds ["~/tools"]');
+    // the runner kind sits beside it, unchanged
+    expect(readOnly(add, "runner")).toBe("srt");
+    const open = layer("team", { runnerReadOnly: ["~/.cargo"], modes: { "runner.readOnly": "open" } });
+    const widened = resolved([open, layer("user", { runnerReadOnly: ["~/tools"] })]);
+    expect(readOnly(widened)).toEqual(["~/.cargo", "~/tools"]);
+    expect(errors(widened)).toEqual([]);
+    // the machine layer: a JSON list or a PATH-style list, which adds only where the team marks it open
+    const env = (value: string, layers: readonly FileLayer[]) =>
+      resolve({ layers, modes: modesOf(layers.at(0)).modes, env: { FACTORY_RUNNER_READ_ONLY: value }, problems: [] });
+    expect(readOnly(env("~/a:~/b", []))).toEqual(["~/a", "~/b"]);
+    expect(readOnly(env('["~/a"]', []))).toEqual(["~/a"]);
+    expect(errors(env("~/.cargo:~/x", [team]))[0]).toContain('adds ["~/x"]');
+    expect(readOnly(env("~/x", [open]))).toEqual(["~/.cargo", "~/x"]);
+    // a team or user file must hold a list of folders
+    expect(errors(resolved([layer("user", { runnerReadOnly: "~/.cargo" })]))[0]).toContain(
+      "runner.readOnly in /user.json:2 must be a list of folders under your home",
+    );
+    expect(settingOf(runEnv({}, widened), "runner.readOnly")).toBe('["~/.cargo","~/tools"]');
   });
 
   it("deny-list: every layer adds", () => {

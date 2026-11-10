@@ -29,11 +29,20 @@ const PROGRAMS = [
   "/Users/op/.local/share/claude/versions",
   "/Users/op/.nvm/versions/node/v22.12.0",
 ];
+const TOOLCHAINS = ["/Users/op/.local/share/mise/installs", "/Users/op/.cargo"];
 const HOST: SrtHost = {
   platform: "darwin",
   home: "/Users/op",
   factoryHome: "/Users/op/.factory",
   programs: { kind: "ok", value: PROGRAMS },
+  toolchains: {
+    allowed: [
+      { dir: TOOLCHAINS[0] ?? "", from: "mise" },
+      { dir: TOOLCHAINS[1] ?? "", from: "runner.readOnly" },
+    ],
+    refused: [],
+    warnings: [],
+  },
 };
 const EGRESS: SrtEgress = { hosts: [".npmjs.org", "api.anthropic.com"], upstream: { kind: "none" }, caCerts: "" };
 const WORKTREE = "/Users/op/.factory/box-runs/run-1/repo";
@@ -142,9 +151,16 @@ describe("srt runner: the policy (#114)", () => {
       expect(deny).toContain(path);
     }
     expect(deny.length).toBeGreaterThanOrEqual(CREDENTIAL_PATHS.length);
-    // the clone and the private HOME come back writable; the agent CLI's install and its Node come back read-only
-    expect(policy.filesystem.allowRead).toEqual([WORKTREE, "/Users/op/.factory/srt-runs/r/home", ...PROGRAMS]);
-    expect(policy.filesystem.allowWrite.filter((w) => PROGRAMS.includes(w))).toEqual([]);
+    // the clone and the private HOME come back writable; the agent CLI's install, its Node and the toolchains (#371)
+    // come back read-only
+    expect(policy.filesystem.allowRead).toEqual([
+      WORKTREE,
+      "/Users/op/.factory/srt-runs/r/home",
+      ...PROGRAMS,
+      ...TOOLCHAINS,
+    ]);
+    expect(policy.filesystem.allowWrite.filter((w) => [...PROGRAMS, ...TOOLCHAINS].includes(w))).toEqual([]);
+    expect(policy.filesystem.allowWrite.some((w) => TOOLCHAINS.some((t) => t.startsWith(w)))).toBe(false);
   });
 
   it("allows only the checked allowlist, on port 443, no local binding and no Unix socket, and no weaker mode", () => {
@@ -211,12 +227,18 @@ describe("srt runner: the probe refuses to start without the pinned srt (S7)", (
     });
     const other = await box(fakeSrt({ version: { code: 0, stdout: "0.0.81\n", stderr: "" } })).probe();
     expect(other).toMatchObject({ kind: "missing", reason: expect.stringContaining(`not the pinned ${SRT_VERSION}`) });
-    expect(readSrtProbe({ platform: "win32", programs: HOST.programs, version: VERSION })).toMatchObject({
+    expect(readSrtProbe({ platform: "win32", programs: HOST.programs, refused: [], version: VERSION })).toMatchObject({
       kind: "missing",
     });
     // an agent CLI that cannot be found is refused before srt is asked
     const noCli = { ...HOST, programs: { kind: "failed", reason: "claude is not on PATH" } } as const;
     expect(await box(fakeSrt(), noCli).probe()).toEqual({ kind: "missing", reason: "claude is not on PATH" });
+  });
+
+  it("refuses to start while a runner.readOnly entry is refused, and says why (#371)", async () => {
+    const reason = 'runner.readOnly "~/.ssh" is or holds ~/.ssh, a credential path, which no run may read';
+    const refused = { ...HOST, toolchains: { ...HOST.toolchains, refused: [reason] } };
+    expect(await box(fakeSrt(), refused).probe()).toEqual({ kind: "missing", reason });
   });
 });
 

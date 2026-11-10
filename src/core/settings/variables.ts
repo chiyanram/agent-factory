@@ -29,6 +29,26 @@ export const list: Check = (value) => (words(value) ? "" : 'a list of words, suc
 
 const text: Check = (value) => (word(value) ? "" : "a word");
 
+// listText : a list key's variable as a list: a JSON list of words, as runEnv writes it, or words split on ":", as a
+// person writes PATH; "bad" for anything else. Pure.
+export function listText(value: string): readonly string[] | "bad" {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("[")) {
+    return trimmed.split(":").filter((w) => w !== "");
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return Array.isArray(parsed) && parsed.every(word) ? parsed : "bad";
+  } catch {
+    return "bad";
+  }
+}
+
+// what a folder list must hold, for its refusal
+export const FOLDERS_HINT = 'a list of folders under your home, such as ["~/.cargo"]';
+
+const folders: Check = (value) => (words(value) ? "" : FOLDERS_HINT);
+
 // pinnedModel : true for a model's full id, one that names its version, such as "claude-sonnet-5-5"; false for an
 // alias ("sonnet", "opus", "sonnet[1m]", "...-latest"), which the agent CLI moves to a new model with no PR here
 // (ADR-0015 E9, #213). Pure.
@@ -98,6 +118,17 @@ export const MACHINE_KEYS = [
     oneOf(RUNNERS),
     RUNNERS,
   ),
+  {
+    // in a file at "runnerReadOnly", since "runner" holds the runner kind (#371)
+    ...machine(
+      "runner.readOnly",
+      "FACTORY_RUNNER_READ_ONLY",
+      "allow-list",
+      "the srt runner: more folders under your home it allows back read-only, such as a toolchain no known manager holds (#371)",
+      folders,
+    ),
+    path: ["runnerReadOnly"],
+  },
   machine("egress.image", "FACTORY_EGRESS_IMAGE", "locked", "the egress proxy's image, pinned by digest"),
   machine("egress.upstreamProxy", "FACTORY_UPSTREAM_PROXY", "preference", "at work: the company proxy, host:port"),
   machine(

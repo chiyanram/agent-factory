@@ -189,6 +189,19 @@ rots, such as counts, goes in, and every `file:line` is checked again on each ru
 - The host Docker socket is never mounted.
 - The egress allowlist refuses git host names.
 
+**Toolchains: the project declares, the runner provides** (operator, 2026-11-10, #371). The hybrid model:
+
+| part | model | in agent-factory |
+|---|---|---|
+| engine | Jenkins-like: defaults, layered config, plugins | built-in defaults, the settings layers, connectors and plugins pinned by hash |
+| shared config | Renovate-like presets | the team layer, pinned by commit |
+| toolchains | GitHub Actions and devcontainers: the project declares, the runner provides | the repo's `mise.toml`, `.tool-versions` or `.sdkmanrc`; `srt` allows back the detected manager's install folders read-only (mise, SDKMAN!, asdf, nvm) plus `runner.readOnly`; `vm` builds them into `box.Dockerfile` |
+
+- The home stays hidden (#114). A folder allowed back is read-only, under the home, never the home itself, and never a
+  credential path or a folder that holds one. A manager's config and shims never come back.
+- Each folder allowed back is a risk line in `setup status`.
+- Rejected for now: Nix or devbox, too heavy for colleagues to adopt.
+
 **Work setup.** A company proxy and CA, a package mirror, the allowed models, and a separate home (`~/.factory-work`)
 so work and personal logins never mix.
 

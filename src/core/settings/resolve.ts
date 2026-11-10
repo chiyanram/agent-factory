@@ -9,6 +9,7 @@
 
 import { isOldConnectors, OLD_CONNECTORS } from "../process/plugins.js";
 import { pathKey } from "./lines.js";
+import { listText } from "./variables.js";
 import { KEYS, PROJECT_META, TEAM_META, type Key, type KeyClass } from "./keys.js";
 
 export type LayerName = "engine" | "team" | "project" | "user" | "machine" | "default";
@@ -188,8 +189,8 @@ type Context = {
 
 const NUMBER = /^\d+(\.\d+)?$/;
 
-// machineEntry : a machine key's variable, the lowest layer; a cap's number is compared as a number, any other text
-// is left as it is, for the module's own check
+// machineEntry : a machine key's variable, the lowest layer; a cap's number is compared as a number, a list key's
+// list as a list (listText), any other text is left as it is, for the module's own check
 function machineEntry(key: Key, env: NodeJS.ProcessEnv): readonly Entry[] {
   const text = key.where === "machine" ? env[key.env] : undefined;
   return key.where === "machine" && text !== undefined
@@ -197,7 +198,17 @@ function machineEntry(key: Key, env: NodeJS.ProcessEnv): readonly Entry[] {
     : [];
 }
 
+const LISTS: ReadonlySet<KeyClass> = new Set(["allow-list", "deny-list"]);
+
+function listValue(text: string): unknown {
+  const items = listText(text);
+  return items === "bad" ? text : items;
+}
+
 function machineValue(key: Key, text: string): unknown {
+  if (LISTS.has(key.class)) {
+    return listValue(text);
+  }
   return key.class === "cap" && NUMBER.test(text) ? Number(text) : text;
 }
 
