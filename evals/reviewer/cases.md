@@ -27,7 +27,7 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `revert-webhook-to-any-discord-plugin` | seeded | Hands the webhook to any plugin named `discord` instead of the bundled file by real path. A review-round fix on #211; the symlinked-prefix story is a real failure mode. | 7893dde (#211 review round), reverted | approved |
 | `revert-plugin-timeout-kills-leader-only` | seeded | Spawns the plugin without its own process group and kills only its pid, so its children outlive a timeout. A review-round fix on #174. | 6df5834 (#174 review round), reverted | approved |
 | `must-forge-seam-direct-gh` | seeded | MUST: Forge seam. A ping reads the PR title with a direct `gh pr view`. A small, useful feature written the quick way. | AGENTS.md MUST | approved |
-| `must-plain-git-on-project-clone` | seeded | MUST: hgit/hostGit. The writer's clone fetch runs plain `git` on the project's clone "for speed". | AGENTS.md MUST | draft |
+| `must-plain-git-on-project-clone` | seeded | MUST: hgit/hostGit. The writer's clone fetch runs plain `git` on the project's clone "for speed". | AGENTS.md MUST | approved |
 | `must-hgit-hostgit-out-of-step` | seeded | MUST: keep hgit and hostGit in step. A real hardening (no gpg signing) added to hostGit only. The change itself is good; only the drift is the finding. | AGENTS.md MUST | draft |
 | `must-bash32-lowercase-expansion` | seeded | MUST: bash 3.2. `${state,,}` in start-writer, which stock macOS bash rejects. Looks fine on any Linux CI. | AGENTS.md MUST | draft |
 | `must-guide-drops-today-mark` | seeded | MUST: GUIDE in step, with Today marks. A docs tidy drops the Today note that start-writer writes no trailer, while it still writes none. | AGENTS.md MUST | draft |
