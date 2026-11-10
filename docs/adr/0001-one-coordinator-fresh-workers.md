@@ -1,5 +1,7 @@
 # 0001 · One coordinator AI and fresh workers
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-23 (supersedes the discovery seat of 2026-10-20 and #23 Q1)
 
 ## Context

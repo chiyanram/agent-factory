@@ -128,6 +128,10 @@ way as chiyanram/skills.
   `tests/fixtures/release-notes/expected.md`; change both together.
 - The versions are `0.x` until the pilot (#62) has run; `1.0.0` means the CLI is meant to stay stable.
 - `npm run release:preview` shows the next version without releasing (it needs a GitHub login).
+- The release job pushes its `chore(release)` commit with the owner's token, repo secret `RELEASE_TOKEN`: a
+  fine-grained token for this repo only, with contents, issues and pull requests write. Ruleset `main` lets only the
+  admin role bypass its pull-request rule, and a user-owned repo cannot give that bypass to the GitHub Actions app
+  (#350). When the token expires, the release job fails at its first step; make a new one and set the secret again.
 
 ## Troubleshooting
 

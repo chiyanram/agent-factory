@@ -27,9 +27,21 @@ jobs:
       issues: write         # comment "released in" on the issues a release closes
       pull-requests: write  # comment "released in" on the merged pull requests
     steps:
+      # Ruleset main takes changes only through a pull request; its bypass is the admin role, so the release commit
+      # is pushed with the owner's token. The GitHub Actions app cannot bypass a ruleset on a user-owned repo (#350).
+      - name: The release token is set
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::Secret RELEASE_TOKEN is not set: the release commit cannot pass ruleset main. See CONTRIBUTING.md#releases."
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -49,5 +61,5 @@ jobs:
 
       - name: semantic-release
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: npx semantic-release

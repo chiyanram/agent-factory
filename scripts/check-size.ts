@@ -1,5 +1,5 @@
 // check-size — fails when ROOT/AGENTS.md has 200 lines or more (ported from check-size.sh, #138). The limit is
-// ADR-0003's: "AGENTS.md (root, <200 lines" (docs/adr/0003-rulebook-layout-across-tools.md:14).
+// ADR-0003's: "AGENTS.md (root, <200 lines" (docs/adr/0003-rulebook-layout-across-tools.md:16).
 //
 //   node scripts/check-size.ts [ROOT]      (make lint)
 //
