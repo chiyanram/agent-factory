@@ -349,8 +349,8 @@ function resolved(layers: readonly FileLayer[]): ReturnType<typeof resolve> {
 function valueOf(r: ReturnType<typeof resolve>, id: string): Resolved | undefined {
   return r.values.find((v) => v.key.id === id);
 }
-// readOnly : one key's resolved value, runner.readOnly by default
-function readOnly(r: ReturnType<typeof resolve>, id = "runner.readOnly"): unknown {
+// readOnly : one key's resolved value, srt.readOnly by default
+function readOnly(r: ReturnType<typeof resolve>, id = "srt.readOnly"): unknown {
   return valueOf(r, id)?.value;
 }
 function errors(r: ReturnType<typeof resolve>): readonly string[] {
@@ -394,29 +394,29 @@ describe("resolve: each class (#229)", () => {
     expect(errors(widened)).toEqual([]);
   });
 
-  it("runner.readOnly: an allow-list at runnerReadOnly in a file, and FACTORY_RUNNER_READ_ONLY below it (#371)", () => {
-    const team = layer("team", { runner: "srt", runnerReadOnly: ["~/.cargo"] });
-    const add = resolved([team, layer("user", { runnerReadOnly: ["~/.cargo", "~/tools"] })]);
-    expect(valueOf(add, "runner.readOnly")).toMatchObject({ value: ["~/.cargo"], key: { class: "allow-list" } });
-    expect(errors(add)[0]).toContain('runner.readOnly: the user layer (/user.json:2) adds ["~/tools"]');
+  it("srt.readOnly: an allow-list, nested under srt in a file, and FACTORY_SRT_READ_ONLY below it (#371)", () => {
+    const team = layer("team", { runner: "srt", srt: { readOnly: ["~/.cargo"] } });
+    const add = resolved([team, layer("user", { srt: { readOnly: ["~/.cargo", "~/tools"] } })]);
+    expect(valueOf(add, "srt.readOnly")).toMatchObject({ value: ["~/.cargo"], key: { class: "allow-list" } });
+    expect(errors(add)[0]).toContain('srt.readOnly: the user layer (/user.json:3) adds ["~/tools"]');
     // the runner kind sits beside it, unchanged
     expect(readOnly(add, "runner")).toBe("srt");
-    const open = layer("team", { runnerReadOnly: ["~/.cargo"], modes: { "runner.readOnly": "open" } });
-    const widened = resolved([open, layer("user", { runnerReadOnly: ["~/tools"] })]);
+    const open = layer("team", { srt: { readOnly: ["~/.cargo"] }, modes: { "srt.readOnly": "open" } });
+    const widened = resolved([open, layer("user", { srt: { readOnly: ["~/tools"] } })]);
     expect(readOnly(widened)).toEqual(["~/.cargo", "~/tools"]);
     expect(errors(widened)).toEqual([]);
     // the machine layer: a JSON list or a PATH-style list, which adds only where the team marks it open
     const env = (value: string, layers: readonly FileLayer[]) =>
-      resolve({ layers, modes: modesOf(layers.at(0)).modes, env: { FACTORY_RUNNER_READ_ONLY: value }, problems: [] });
+      resolve({ layers, modes: modesOf(layers.at(0)).modes, env: { FACTORY_SRT_READ_ONLY: value }, problems: [] });
     expect(readOnly(env("~/a:~/b", []))).toEqual(["~/a", "~/b"]);
     expect(readOnly(env('["~/a"]', []))).toEqual(["~/a"]);
     expect(errors(env("~/.cargo:~/x", [team]))[0]).toContain('adds ["~/x"]');
     expect(readOnly(env("~/x", [open]))).toEqual(["~/.cargo", "~/x"]);
     // a team or user file must hold a list of folders
-    expect(errors(resolved([layer("user", { runnerReadOnly: "~/.cargo" })]))[0]).toContain(
-      "runner.readOnly in /user.json:2 must be a list of folders under your home",
+    expect(errors(resolved([layer("user", { srt: { readOnly: "~/.cargo" } })]))[0]).toContain(
+      "srt.readOnly in /user.json:3 must be a list of folders under your home",
     );
-    expect(settingOf(runEnv({}, widened), "runner.readOnly")).toBe('["~/.cargo","~/tools"]');
+    expect(settingOf(runEnv({}, widened), "srt.readOnly")).toBe('["~/.cargo","~/tools"]');
   });
 
   it("deny-list: every layer adds", () => {

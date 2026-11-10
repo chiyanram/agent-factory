@@ -1236,7 +1236,7 @@ async function setupStep({
     io.err(`agent-factory setup: ${store.reason}\n`);
     return 1;
   }
-  // status reads the user and machine layers, so a user file's runner.readOnly shows (#371)
+  // status reads the user and machine layers, so a user file's srt.readOnly shows (#371)
   return step.name === "status"
     ? resolvedRun("setup status", undefined, io, (resolved) => step.run({ store: store.store, io: resolved }))
     : step.run({ store: store.store, io });

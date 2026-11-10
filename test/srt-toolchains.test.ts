@@ -1,5 +1,5 @@
 // The toolchain folders the srt runner allows back read-only inside the hidden home (#371): a known manager found from
-// PATH, the runner.readOnly setting, and the refusals (the home, outside it, a credential path, a manager's config or
+// PATH, the srt.readOnly setting, and the refusals (the home, outside it, a credential path, a manager's config or
 // shims), on a planted home. No srt and no real toolchain needed.
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -90,7 +90,7 @@ describe("srt toolchains: the pure parts (#371)", () => {
     expect(folderProblem(`${H}/.cargo`, H, F)).toBe("");
   });
 
-  it("reads a runner.readOnly entry as ~/x or an absolute path, nothing else", () => {
+  it("reads a srt.readOnly entry as ~/x or an absolute path, nothing else", () => {
     expect(expand("~/.cargo", H)).toBe(`${H}/.cargo`);
     expect(expand("~", H)).toBe(H);
     expect(expand("~/a/../..", H)).toBe("/home");
@@ -146,11 +146,11 @@ describe("srt toolchains: on a planted home (#371)", () => {
     });
   });
 
-  it("allows back runner.readOnly's folders, and refuses each bad entry with the reason", async () => {
+  it("allows back srt.readOnly's folders, and refuses each bad entry with the reason", async () => {
     const home = plantHome("setting");
     const env = {
       PATH: "/usr/bin",
-      FACTORY_RUNNER_READ_ONLY: JSON.stringify([
+      FACTORY_SRT_READ_ONLY: JSON.stringify([
         "~/.cargo",
         "~",
         "/usr",
@@ -162,30 +162,30 @@ describe("srt toolchains: on a planted home (#371)", () => {
       ]),
     };
     const found = await locateToolchains({ env, home, factoryHome: join(home, ".factory") });
-    expect(found.allowed).toEqual([{ dir: join(home, ".cargo"), from: "runner.readOnly" }]);
+    expect(found.allowed).toEqual([{ dir: join(home, ".cargo"), from: "srt.readOnly" }]);
     expect(found.refused).toEqual([
-      'runner.readOnly "~" is your home itself, which the srt runner hides',
-      'runner.readOnly "/usr" is not under your home; list only folders under it (one outside it is not hidden)',
-      'runner.readOnly "~/.ssh" is or holds ~/.ssh, a credential path, which no run may read',
-      `runner.readOnly "~/.config/mise" is or holds ~/.config/mise, mise's config, which no run may read`,
-      'runner.readOnly "~/missing" is not a folder',
-      'runner.readOnly ".cargo" must be ~/<folder> or an absolute path',
-      `runner.readOnly "~/.local/share/mise/shims" is or holds ~/.local/share/mise/shims, mise's shims, which no run may read`,
+      'srt.readOnly "~" is your home itself, which the srt runner hides',
+      'srt.readOnly "/usr" is not under your home; list only folders under it (one outside it is not hidden)',
+      'srt.readOnly "~/.ssh" is or holds ~/.ssh, a credential path, which no run may read',
+      `srt.readOnly "~/.config/mise" is or holds ~/.config/mise, mise's config, which no run may read`,
+      'srt.readOnly "~/missing" is not a folder',
+      'srt.readOnly ".cargo" must be ~/<folder> or an absolute path',
+      `srt.readOnly "~/.local/share/mise/shims" is or holds ~/.local/share/mise/shims, mise's shims, which no run may read`,
     ]);
     // a PATH-style list works too; a broken JSON list is refused whole
     const colon = await locateToolchains({
-      env: { FACTORY_RUNNER_READ_ONLY: "~/.cargo:~/Documents" },
+      env: { FACTORY_SRT_READ_ONLY: "~/.cargo:~/Documents" },
       home,
       factoryHome: join(home, ".factory"),
     });
     expect(colon.allowed.map((t) => t.dir)).toEqual([join(home, ".cargo"), join(home, "Documents")]);
     const bad = await locateToolchains({
-      env: { FACTORY_RUNNER_READ_ONLY: "[1" },
+      env: { FACTORY_SRT_READ_ONLY: "[1" },
       home,
       factoryHome: join(home, ".factory"),
     });
     expect(bad.refused).toEqual([
-      `FACTORY_RUNNER_READ_ONLY must be a list of folders under your home, such as ["~/.cargo"]`,
+      `FACTORY_SRT_READ_ONLY must be a list of folders under your home, such as ["~/.cargo"]`,
     ]);
   });
 
@@ -200,12 +200,12 @@ describe("srt toolchains: on a planted home (#371)", () => {
     expect(found.warnings[0]).toContain("PATH reaches mise only through its shims");
   });
 
-  it("lists a folder once when a manager and runner.readOnly both name it", async () => {
+  it("lists a folder once when a manager and srt.readOnly both name it", async () => {
     const home = plantHome("twice");
     const found = await locateToolchains({
       env: {
         PATH: join(home, ".nvm/versions/node/v22.12.0/bin"),
-        FACTORY_RUNNER_READ_ONLY: JSON.stringify(["~/.nvm/versions"]),
+        FACTORY_SRT_READ_ONLY: JSON.stringify(["~/.nvm/versions"]),
       },
       home,
       factoryHome: join(home, ".factory"),

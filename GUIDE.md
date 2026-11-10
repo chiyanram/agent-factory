@@ -135,7 +135,7 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   nvm `~/.nvm/versions`. Never the manager's config (mise's `~/.config/mise` can hold `env` secrets) and never its
   shims. So put the real install folders on `PATH`: use `mise activate`, not `mise activate --shims`; with asdf, put the
   install's `bin` folder on `PATH`. A `PATH` that reaches a manager only through its shims gets a warning in `setup
-  status`. Anything else goes in `runner.readOnly` (below). `setup status` lists each folder allowed back as a risk.
+  status`. Anything else goes in `srt.readOnly` (below). `setup status` lists each folder allowed back as a risk.
 - Whoever started the work does not approve it. Write this rule down for the team; a git host on a free plan cannot
   enforce it.
 - When a developer leaves, revoke the GitLab token and block the account, or delete the App's key or the App.
@@ -373,7 +373,7 @@ The commands read their settings from the environment.
 | `FACTORY_RUN_HOURS` | run hours (`runHours`): the hours in UTC, `HH-HH`, in which a `dispatch` pass may start a run, such as `22-06` across midnight or `00-24` for the whole day. Outside them a pass starts no run and lists each one as held; nothing is stopped mid-run, and nothing waits in the background: `dispatch` prints "run hours are 22-06 UTC; run `agent-factory dispatch <project>` again then", and the orchestrator loop ends after that pass. The tickets keep their records, so the next `dispatch` inside the hours starts their runs. A cap: a lower layer may only narrow the hours (#299) | any hour |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every finder and verify pass run, and every implementer run | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each git host write instead of making it, and end their line in "(dry run)"; reads still go to the git host; `agent-factory review` refuses it | off |
-| `FACTORY_RUNNER_READ_ONLY` | the srt runner: more folders under your home it allows back read-only, such as a toolchain no known manager holds (`runner.readOnly`, an allow-list; in a file `"runnerReadOnly": ["~/.cargo"]`, since `runner` holds the runner kind). Each is `~/<folder>` or an absolute path; the variable is a JSON list or folders split by `:`. A folder that is your home, is outside it, or is or holds a credential path, the factory home, or a manager's config or shims is refused with the reason, and no run starts until it is fixed. `setup status` lists each one as a risk (#371) | none |
+| `FACTORY_SRT_READ_ONLY` | the srt runner: more folders under your home it allows back read-only, such as a toolchain no known manager holds (`srt.readOnly`, an allow-list; in a file `"srt": { "readOnly": ["~/.cargo"] }`). Each is `~/<folder>` or an absolute path; the variable is a JSON list or folders split by `:`. A folder that is your home, is outside it, or is or holds a credential path, the factory home, or a manager's config or shims is refused with the reason, and no run starts until it is fixed. `setup status` lists each one as a risk (#371) | none |
 | `FACTORY_BOX` | the runner kind (`runner`, a ladder: `none` < `srt` < `vm`, so a team that sets `vm` keeps a user from `srt`): `vm` runs each runner as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `srt` runs each one inside Anthropic's sandbox runtime on a work laptop, with no Docker (#114); `none` starts no run. No runner starts without it | — (refused) |
 | `FACTORY_WINDOW_HOURS` | `usage`: the length of the subscription's usage window, in hours, from 1 to 24 (`window.hours`) | `5` |
 | `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
@@ -525,7 +525,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 |---|---|---|
 | ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits`, `runner` (none, srt, vm) |
 | cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
-| allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow`, `runner.readOnly` |
+| allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow`, `srt.readOnly` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
 | locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor` |
 | preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes` |
@@ -643,9 +643,9 @@ Tick each one on #114 with the output:
 
 The policy hides your whole home ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531);
 the operator's choice A on #114). It allows back only the run's clone and private home, and, read-only, the install
-folders of `claude` and its Node, the detected toolchain managers' install folders, and the `runner.readOnly` folders.
+folders of `claude` and its Node, the detected toolchain managers' install folders, and the `srt.readOnly` folders.
 A program kept elsewhere under your home cannot be read inside `srt`: put its manager's real install folder on `PATH`,
-or add its folder to `runner.readOnly`.
+or add its folder to `srt.readOnly`.
 
 ## Run the loop
 

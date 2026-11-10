@@ -118,17 +118,13 @@ export const MACHINE_KEYS = [
     oneOf(RUNNERS),
     RUNNERS,
   ),
-  {
-    // in a file at "runnerReadOnly", since "runner" holds the runner kind (#371)
-    ...machine(
-      "runner.readOnly",
-      "FACTORY_RUNNER_READ_ONLY",
-      "allow-list",
-      "the srt runner: more folders under your home it allows back read-only, such as a toolchain no known manager holds (#371)",
-      folders,
-    ),
-    path: ["runnerReadOnly"],
-  },
+  machine(
+    "srt.readOnly",
+    "FACTORY_SRT_READ_ONLY",
+    "allow-list",
+    "the srt runner: more folders under your home it allows back read-only, such as a toolchain no known manager holds (#371)",
+    folders,
+  ),
   machine("egress.image", "FACTORY_EGRESS_IMAGE", "locked", "the egress proxy's image, pinned by digest"),
   machine("egress.upstreamProxy", "FACTORY_UPSTREAM_PROXY", "preference", "at work: the company proxy, host:port"),
   machine(

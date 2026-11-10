@@ -79,7 +79,7 @@ function programsIn(dir: string, entry: string): readonly Tool[] {
 function toolchainProgram(found: Toolchains): Tool | "none" {
   const path = (process.env.PATH ?? "").split(delimiter);
   const tools = found.allowed
-    .filter((a) => a.from !== "runner.readOnly")
+    .filter((a) => a.from !== "srt.readOnly")
     .flatMap((t) => path.filter((p) => under(p, t.dir)).flatMap((p) => programsIn(t.dir, p)));
   return tools[0] ?? "none";
 }

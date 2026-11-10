@@ -5,7 +5,7 @@
 // holds a credential path (srt-plan.ts secretPaths). Nothing here throws.
 //
 //   a known manager    present when a PATH entry lies inside its install folder; then that whole folder comes back
-//   runner.readOnly    a list of folders under the home (~/x or an absolute path), an allow-list key read through
+//   srt.readOnly    a list of folders under the home (~/x or an absolute path), an allow-list key read through
 //                      settingOf; an entry that breaks a rule is refused with the reason, and the probe refuses to start
 //   shims              a PATH that reaches a manager only through its shims gets a warning that says how to put the real
 //                      install folders on PATH, since the shims need the manager's config, which stays hidden
@@ -64,12 +64,12 @@ export const MANAGERS: readonly Manager[] = [
   },
 ];
 
-// one folder allowed back, and why: a manager's name, or runner.readOnly
+// one folder allowed back, and why: a manager's name, or srt.readOnly
 export type Toolchain = { readonly dir: string; readonly from: string };
 
 export type Toolchains = {
   readonly allowed: readonly Toolchain[];
-  // each runner.readOnly entry refused, with the reason
+  // each srt.readOnly entry refused, with the reason
   readonly refused: readonly string[];
   // each manager PATH reaches only through its shims
   readonly warnings: readonly string[];
@@ -108,7 +108,7 @@ export function folderProblem(dir: string, home: string, factoryHome: string): s
   return near === undefined ? "" : `is or holds ${tilde(near.path, home)}, ${near.what}, which no run may read`;
 }
 
-// expand : one runner.readOnly entry as an absolute path: ~ and ~/x are under the home; undefined for any other
+// expand : one srt.readOnly entry as an absolute path: ~ and ~/x are under the home; undefined for any other
 // relative path. Pure.
 export function expand(entry: string, home: string): string | undefined {
   if (entry === "~" || entry.startsWith("~/")) {
@@ -152,9 +152,9 @@ async function isDir(path: string): Promise<boolean> {
 
 type Checked = { readonly kind: "ok"; readonly dir: string } | { readonly kind: "refused"; readonly reason: string };
 
-// checkEntry : one runner.readOnly entry, at its real path, or why it is refused
+// checkEntry : one srt.readOnly entry, at its real path, or why it is refused
 async function checkEntry(entry: string, home: string, factoryHome: string): Promise<Checked> {
-  const name = `runner.readOnly ${JSON.stringify(entry)}`;
+  const name = `srt.readOnly ${JSON.stringify(entry)}`;
   const path = expand(entry, home);
   if (path === undefined) {
     return { kind: "refused", reason: `${name} must be ~/<folder> or an absolute path` };
@@ -167,13 +167,13 @@ async function checkEntry(entry: string, home: string, factoryHome: string): Pro
   return problem === "" ? { kind: "ok", dir } : { kind: "refused", reason: `${name} ${problem}` };
 }
 
-// readOnlyEntries : runner.readOnly as a list, or why it is not one
+// readOnlyEntries : srt.readOnly as a list, or why it is not one
 function readOnlyEntries(env: NodeJS.ProcessEnv): readonly string[] | "bad" {
-  const text = settingOf(env, "runner.readOnly");
+  const text = settingOf(env, "srt.readOnly");
   return text === undefined ? [] : listText(text);
 }
 
-// fromSetting : the folders runner.readOnly allows back, and the entries it refuses
+// fromSetting : the folders srt.readOnly allows back, and the entries it refuses
 async function fromSetting(
   env: NodeJS.ProcessEnv,
   home: string,
@@ -181,11 +181,11 @@ async function fromSetting(
 ): Promise<Pick<Toolchains, "allowed" | "refused">> {
   const entries = readOnlyEntries(env);
   if (entries === "bad") {
-    return { allowed: [], refused: [`${settingName("runner.readOnly")} must be ${FOLDERS_HINT}`] };
+    return { allowed: [], refused: [`${settingName("srt.readOnly")} must be ${FOLDERS_HINT}`] };
   }
   const checked = await Promise.all(entries.map((e) => checkEntry(e, home, factoryHome)));
   return {
-    allowed: checked.flatMap((c) => (c.kind === "ok" ? [{ dir: c.dir, from: "runner.readOnly" }] : [])),
+    allowed: checked.flatMap((c) => (c.kind === "ok" ? [{ dir: c.dir, from: "srt.readOnly" }] : [])),
     refused: checked.flatMap((c) => (c.kind === "refused" ? [c.reason] : [])),
   };
 }
@@ -201,7 +201,7 @@ async function fromManagers(path: readonly string[], home: string, factoryHome: 
   return found.flat();
 }
 
-// locateToolchains : the toolchain folders under `home` the srt runner allows back read-only, the runner.readOnly
+// locateToolchains : the toolchain folders under `home` the srt runner allows back read-only, the srt.readOnly
 // entries it refuses, and the shims warnings
 export async function locateToolchains(input: {
   readonly env: NodeJS.ProcessEnv;

@@ -38,7 +38,7 @@ const HOST: SrtHost = {
   toolchains: {
     allowed: [
       { dir: TOOLCHAINS[0] ?? "", from: "mise" },
-      { dir: TOOLCHAINS[1] ?? "", from: "runner.readOnly" },
+      { dir: TOOLCHAINS[1] ?? "", from: "srt.readOnly" },
     ],
     refused: [],
     warnings: [],
@@ -235,8 +235,8 @@ describe("srt runner: the probe refuses to start without the pinned srt (S7)", (
     expect(await box(fakeSrt(), noCli).probe()).toEqual({ kind: "missing", reason: "claude is not on PATH" });
   });
 
-  it("refuses to start while a runner.readOnly entry is refused, and says why (#371)", async () => {
-    const reason = 'runner.readOnly "~/.ssh" is or holds ~/.ssh, a credential path, which no run may read';
+  it("refuses to start while a srt.readOnly entry is refused, and says why (#371)", async () => {
+    const reason = 'srt.readOnly "~/.ssh" is or holds ~/.ssh, a credential path, which no run may read';
     const refused = { ...HOST, toolchains: { ...HOST.toolchains, refused: [reason] } };
     expect(await box(fakeSrt(), refused).probe()).toEqual({ kind: "missing", reason });
   });

@@ -195,7 +195,7 @@ rots, such as counts, goes in, and every `file:line` is checked again on each ru
 |---|---|---|
 | engine | Jenkins-like: defaults, layered config, plugins | built-in defaults, the settings layers, connectors and plugins pinned by hash |
 | shared config | Renovate-like presets | the team layer, pinned by commit |
-| toolchains | GitHub Actions and devcontainers: the project declares, the runner provides | the repo's `mise.toml`, `.tool-versions` or `.sdkmanrc`; `srt` allows back the detected manager's install folders read-only (mise, SDKMAN!, asdf, nvm) plus `runner.readOnly`; `vm` builds them into `box.Dockerfile` |
+| toolchains | GitHub Actions and devcontainers: the project declares, the runner provides | the repo's `mise.toml`, `.tool-versions` or `.sdkmanrc`; `srt` allows back the detected manager's install folders read-only (mise, SDKMAN!, asdf, nvm) plus `srt.readOnly`; `vm` builds them into `box.Dockerfile` |
 
 - The home stays hidden (#114). A folder allowed back is read-only, under the home, never the home itself, and never a
   credential path or a folder that holds one. A manager's config and shims never come back.

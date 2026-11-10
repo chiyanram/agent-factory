@@ -51,7 +51,7 @@ _Avoid_: box, sandbox, server, host, compute
 
 **Toolchain**: the compilers, runtimes and build tools a project's build needs, such as a JDK, Node or Gradle. The
 project declares it in its own file (`mise.toml`, `.tool-versions`, `.sdkmanrc`); the runner provides it. The `srt`
-runner allows back a detected toolchain manager's install folder read-only, plus `runner.readOnly`; the `vm` runner
+runner allows back a detected toolchain manager's install folder read-only, plus `srt.readOnly`; the `vm` runner
 builds it into the project's `box.Dockerfile`. In code: `src/core/box/srt-toolchains.ts`.
 _Avoid_: SDK (for the whole toolchain)
 

@@ -13,7 +13,7 @@
 //   reads       the person's whole home is hidden (review issue 6 on #30; the operator's choice A on #114,
 //               2026-11-10). srt's allowRead wins over its denyRead, so the clone, the private HOME and the agent's
 //               programs (the CLI's install and its Node, srt-programs.ts) and the toolchains (a detected toolchain
-//               manager's install folder, and runner.readOnly: srt-toolchains.ts, #371) are allowed back read-only.
+//               manager's install folder, and srt.readOnly: srt-toolchains.ts, #371) are allowed back read-only.
 //               A denyRead more specific than an allowed folder still holds, so the credential paths, the factory home
 //               (its secrets and every other run) and the Docker sockets are denied by name as well, in case a
 //               program folder holds one
@@ -94,7 +94,7 @@ export type SrtHost = {
   // the folders under the home the run reads back, read-only: the agent CLI and its Node (srt-programs.ts), or why
   // they cannot be found, which the probe refuses
   readonly programs: Result<readonly string[]>;
-  // the toolchain folders allowed back read-only, and the runner.readOnly entries refused, which the probe refuses
+  // the toolchain folders allowed back read-only, and the srt.readOnly entries refused, which the probe refuses
   // (srt-toolchains.ts, #371)
   readonly toolchains: Toolchains;
 };
@@ -194,7 +194,7 @@ export function srtArgs(policyFile: string, command: Command): readonly string[]
 export const VERSION_ARGS: readonly string[] = ["--version"];
 
 // readSrtProbe : the runner can start when the platform is one srt sandboxes, the agent's programs were found, no
-// runner.readOnly entry was refused, and `srt --version` prints the pinned version (S7: refuse to start when the
+// srt.readOnly entry was refused, and `srt --version` prints the pinned version (S7: refuse to start when the
 // runner is missing or not the pinned one). Pure.
 export function readSrtProbe(input: {
   readonly platform: NodeJS.Platform;
