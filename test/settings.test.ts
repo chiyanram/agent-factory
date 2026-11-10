@@ -849,6 +849,25 @@ describe("connectors and the plugin list (#232)", () => {
     expect(pluginListOf("/p.json", { plugins: "rulebook@chiyanram" })).toMatchObject({ kind: "failed" });
   });
 
+  it("config check refuses two pinned plugins that each hold a process, naming both (#426)", async () => {
+    const pin = (name: string, sha: string, process: boolean): readonly [string, object] => {
+      const dir = join(home, "plugins", "acme", name, sha, "skills", "flow", process ? "process" : "references");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, process ? "lanes.json" : "x.md"), "{}");
+      return [`${name}@acme`, { commit: "c".repeat(40), version: "1.0.0", sha256: sha }];
+    };
+    const pins = [pin("team", "a".repeat(64), true), pin("rules", "b".repeat(64), false)];
+    writeFileSync(join(home, "projects", "ledger.plugins.json"), text(Object.fromEntries(pins)));
+    writeProject({ ...BASE, plugins: ["team@acme", "rules@acme", "other@acme"] });
+    expect(await cli(["config", "check", "ledger"])).toMatchObject({ code: 0, err: "" });
+
+    const both = [...pins, pin("other", "d".repeat(64), true)];
+    writeFileSync(join(home, "projects", "ledger.plugins.json"), text(Object.fromEntries(both)));
+    const r = await cli(["config", "check", "ledger"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("error: team@acme and other@acme each hold a process");
+  });
+
   it("config check refuses a bad plugin list in the project file, and in a user file", async () => {
     writeProject({ ...BASE, plugins: ["rulebook"] });
     const r = await cli(["config", "check", "ledger"]);

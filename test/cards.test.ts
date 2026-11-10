@@ -64,6 +64,24 @@ describe("role cards (#236)", () => {
     });
   });
 
+  it("refuses a card when a second plugin holds a process, naming both (#426)", async () => {
+    const dir = plugin({ cleanup: "---\nrole: cleanup\ntools: [Read, Edit]\n---\n\nTidy the team's way.\n" });
+    const team = join(root, "team", "skills", "flow", "process");
+    mkdirSync(team, { recursive: true });
+    writeFileSync(join(team, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+    const card = await readCard(
+      [
+        { label: "rulebook@chiyanram", dir },
+        { label: "team@acme", dir: join(root, "team") },
+      ],
+      "cleanup",
+    );
+    expect(card).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("rulebook@chiyanram and team@acme each hold a process"),
+    });
+  });
+
   it("a card for the wrong role, with no frontmatter, or asking for a tool its role does not get is refused", async () => {
     expect(cardOf("design-reviewer", "---\nrole: cleanup\n---\nx", "p")).toMatchObject({
       kind: "failed",

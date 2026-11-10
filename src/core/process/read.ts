@@ -1,6 +1,7 @@
 // read — the process a project runs on (#232; docs/DESIGN.md section 5 "The process plugin"): the lanes and the
-// review baseline, read from the first plugin that holds a process, or the engine's built-in process when none does.
-// The engine runs alone: with no plugin, or with plugins that hold no process, every value is the built-in one.
+// review baseline, read from the one plugin that holds a process, or the engine's built-in process when none does.
+// The engine runs alone: with no plugin, or with plugins that hold no process, every value is the built-in one. A
+// project whose plugins hold two processes is refused, naming each plugin, never run on the first one (#426).
 //
 //   <plugin>/skills/<skill>/process/lanes.json    {"lanes": [{"lane": "tiny", "approval": false, "lenses": "1", …}, …]}
 //   <plugin>/skills/<skill>/process/review.json   {"baseline": [{"skill": "crq", "reference": "review-process"}, …]}
@@ -128,14 +129,37 @@ async function processAt(label: string, plugin: string, dir: string): Promise<Re
     : baseline;
 }
 
-// readProcess : the process of the first plugin, in the project's order, that holds one; the built-in process when
-// none does. A process that is there but does not read is refused, never skipped for the next plugin's.
-export async function readProcess(plugins: readonly PluginDir[]): Promise<Result<Process>> {
-  for (const plugin of plugins) {
-    const dir = await processDir(plugin.dir);
-    if (dir !== "") {
-      return processAt(plugin.label, plugin.dir, dir);
-    }
+// one plugin that holds a process, and its process folder
+export type Holder = { readonly plugin: PluginDir; readonly dir: string };
+
+// the plugin that holds the project's process; "none" when no plugin holds one
+export type Found = Result<Holder> | { readonly kind: "none" };
+
+// oneHolder : the one plugin among those that hold a process; refused when two or more do, naming each one (#426). Pure.
+export function oneHolder(holders: readonly Holder[]): Found {
+  const [first, second] = holders;
+  if (first === undefined) {
+    return { kind: "none" };
   }
-  return { kind: "ok", value: BUILT_IN };
+  return second === undefined
+    ? { kind: "ok", value: first }
+    : failed(
+        `${holders.map((h) => h.plugin.label).join(" and ")} each hold a process (${holders.map((h) => h.dir).join(", ")}); a project runs on one process plugin, so list only one plugin with a skills/<skill>/process folder`,
+      );
+}
+
+// findProcess : the plugin, among the project's, that holds the process; refused when two or more hold one
+export async function findProcess(plugins: readonly PluginDir[]): Promise<Found> {
+  const dirs = await Promise.all(plugins.map(async (plugin) => ({ plugin, dir: await processDir(plugin.dir) })));
+  return oneHolder(dirs.filter((h) => h.dir !== ""));
+}
+
+// readProcess : the process of the one plugin that holds one; the built-in process when none does. A process that is
+// there but does not read is refused, and so is a second process plugin (#426).
+export async function readProcess(plugins: readonly PluginDir[]): Promise<Result<Process>> {
+  const found = await findProcess(plugins);
+  if (found.kind !== "ok") {
+    return found.kind === "none" ? { kind: "ok", value: BUILT_IN } : found;
+  }
+  return processAt(found.value.plugin.label, found.value.plugin.dir, found.value.dir);
 }

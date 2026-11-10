@@ -137,9 +137,10 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   runs no eval set ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)).
 - **One ticket, one set of versions.** Run records carry the hash of the spec, the design, each plugin and each rubric
   used, so an update applies to the next ticket only.
-- **Order.** Decided: one process plugin per project; other plugins add rules only, and their rule IDs carry the
-  plugin's name ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)). **Today:** the first plugin
-  with a process wins.
+- **Order.** One process plugin per project: a second plugin with a process is a `config check` error, and a run stops
+  on it (#426). Decided: other plugins add rules only, and their rule IDs carry the plugin's name
+  ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)). **Today:** their rule IDs carry no plugin
+  name.
 
 **The process plugin** holds the lanes, as data, and one role card per role. The rulebook's crq is the first such plugin,
 and the engine ships a small default one.

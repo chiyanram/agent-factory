@@ -10,6 +10,7 @@ import { changedFiles, fetchPlugin, targetCommit, type Fetched } from "./core/pr
 import {
   listedPlugins,
   marketplaceDir,
+  pinnedDirs,
   readPins,
   storeDir,
   treeHash,
@@ -18,7 +19,7 @@ import {
   type Pins,
 } from "./core/process/pins.js";
 import { refText, type PluginRef } from "./core/process/plugins.js";
-import { readProcess, type PluginDir } from "./core/process/read.js";
+import { readProcess } from "./core/process/read.js";
 import { plainName } from "./core/spec.js";
 import { checkProblems } from "./settings-cli.js";
 
@@ -77,19 +78,11 @@ async function showChange(io: PinIo, ref: PluginRef, before: Pin | undefined, af
   io.out(lines.length === 0 ? "no file changes\n" : lines.map((l) => `${l}\n`).join(""));
 }
 
-// processDirs : the project's plugins in order, the updated one at its new version
-function processDirs(io: PinIo, refs: readonly PluginRef[], pins: Pins): readonly PluginDir[] {
-  return refs.flatMap((r) => {
-    const pin = pins[refText(r)];
-    return pin === undefined ? [] : [{ label: refText(r), dir: storeDir(io.home, r, pin.sha256) }];
-  });
-}
-
 // checked : config check and the process read, with the new pins; every reason it fails
 async function checked(io: PinIo, project: string, pins: Pins): Promise<readonly string[]> {
   const problems = await checkProblems(io, project);
   const refs = await listedPlugins({ home: io.home, project, env: io.env });
-  const proc = await readProcess(processDirs(io, refs.kind === "ok" ? refs.value : [], pins));
+  const proc = await readProcess(pinnedDirs(io.home, refs.kind === "ok" ? refs.value : [], pins));
   return [
     ...(problems.kind === "ok"
       ? problems.value.filter((p) => p.level === "error").map((p) => p.text)

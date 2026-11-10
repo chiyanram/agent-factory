@@ -43,6 +43,15 @@ export function storeDir(home: string, ref: PluginRef, sha256: string): string {
   return join(home, "plugins", ref.marketplace, ref.name, sha256);
 }
 
+// pinnedDirs : the listed plugins that hold a pin, in the list's order, each at its pinned store folder; a plugin not
+// pinned yet is left out. Its hash is not checked here: a run checks it (pinnedPlugins). Pure.
+export function pinnedDirs(home: string, refs: readonly PluginRef[], pins: Pins): readonly PluginDir[] {
+  return refs.flatMap((r) => {
+    const pin = pins[refText(r)];
+    return pin === undefined ? [] : [{ label: refText(r), dir: storeDir(home, r, pin.sha256) }];
+  });
+}
+
 // ---- the hash
 
 // fileLines : one line per file under dir, "<mode> <sha256> <path>", sorted by path; a symlink is refused

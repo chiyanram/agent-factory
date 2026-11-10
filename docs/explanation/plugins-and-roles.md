@@ -23,9 +23,11 @@ swappable part, are in [Connectors](../reference/connectors.md).
   (`prompts/roles/`).
 - **A plugin is a normal Claude Code plugin.** Its skills and references are what the runs read. The rulebook
   (`rulebook@chiyanram`, from [chiyanram/skills](https://github.com/chiyanram/skills)) is one plugin, not a dependency.
-- **The process plugin** is the first listed plugin that holds `skills/<skill>/process/lanes.json`
+- **The process plugin** is the one listed plugin that holds `skills/<skill>/process/lanes.json`
   (`src/core/process/read.ts`). It gives the lanes, the review baseline (`review.json`) and the role cards
   (`process/roles/<role>.md`). A lanes file that drops the approval for any lane above tiny stops the run.
+- **One process plugin per project.** A second listed plugin with a process is an error: `config check` names both
+  plugins, and a run stops on it rather than take the first (#426).
 - **A plugin that is not pinned**, or whose stored copy no longer has its hash, stops the pass.
 
 ## What a role card controls
@@ -62,7 +64,7 @@ Decided in the design audit (2026-11-10), not built:
 | change | why |
 |---|---|
 | `tests-read-only` joins the guardrail IDs with #422, and `own-hunks` with #423; plain-text `enforced_guardrails` and `next` are refused one release after #424 | each ID lands with the code that enforces it |
-| one process plugin per project: a second plugin with a process is a `config check` error; other plugins add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
+| plugins other than the process plugin add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
 | the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade (#438, after #216) | a project cannot replace the finder today |
 | a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline (#216 first) | today `plugin update` runs `config check` only, no eval |
 | with the Copilot runner (#162), `.github/skills/`, `.github/copilot-instructions.md` and `.github/instructions/` join the agent settings the host push protects | Copilot reads them; a run could plant one |
