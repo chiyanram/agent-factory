@@ -39,7 +39,6 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `clean-plugin-test-temp-root` | clean | A three-line test fix: resolve the temp root for macOS. | f2b6305 (#196) | approved |
 | `clean-lint-skips-worktrees` | clean | Config only: Biome, oxlint and vitest skip the repo's own worktrees. | 60d40ff (#152) | approved |
 | `clean-guide-ci-backstop` | clean | Docs only: a GUIDE paragraph on the CI backstop. Tests that the review raises no doc finding on correct prose. | 2c7f6e5 (#183) | approved |
-| `clean-writer-agent-trailer` | clean | The `Agent: writer` trailer hook and the push guard that refuses a commit without it. | 5191d08 (#191) | draft |
 | `clean-forge-open-change` | clean | `openChange` on both forge adapters, with tests. | 4b19e4a (#165) | approved |
 | `clean-box-canary-test` | clean | Tests only: a host canary and a forge token never reach the writer's box. | 4b0a52c (#202) | approved |
 | `clean-posting-template` | clean | The posting template that makes every posted field inert. | f0c6d10 (#133) | approved |
