@@ -3,6 +3,15 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.32.2](https://github.com/chiyanram/agent-factory/compare/v0.32.1...v0.32.2) (2026-11-10)
+
+### 🐛 Fixes
+
+* **box** — give each srt run a short temp folder, so srt's sockets fit macOS's limit · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#437](https://github.com/chiyanram/agent-factory/pull/437))
+* **dispatch** — pick test-first from the lanes file's test_first, not the lane name "bug" · [#417](https://github.com/chiyanram/agent-factory/issues/417) (PR [#436](https://github.com/chiyanram/agent-factory/pull/436))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.32.2/chiyanram-agent-factory-0.32.2.tgz`
+
 ## [0.32.1](https://github.com/chiyanram/agent-factory/compare/v0.32.0...v0.32.1) (2026-11-10)
 
 ### 🐛 Fixes
