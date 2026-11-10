@@ -3,6 +3,15 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.33.1](https://github.com/chiyanram/agent-factory/compare/v0.33.0...v0.33.1) (2026-11-10)
+
+### 🐛 Fixes
+
+* **coordinator** — use the rulebook's rt4 types for retro actions · [#425](https://github.com/chiyanram/agent-factory/issues/425) (PR [#449](https://github.com/chiyanram/agent-factory/pull/449))
+* **writer** — tell the implementer to quote evidence patterns with single quotes · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#458](https://github.com/chiyanram/agent-factory/pull/458))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.33.1/chiyanram-agent-factory-0.33.1.tgz`
+
 ## [0.33.0](https://github.com/chiyanram/agent-factory/compare/v0.32.2...v0.33.0) (2026-11-10)
 
 ### ✨ Features
