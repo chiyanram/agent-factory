@@ -9,7 +9,7 @@ agent-factory box build <project>
 ```
 
 It packs this package with `npm pack` and builds the base image with it installed (`images/factory-box`: Ubuntu
-24.04, Docker, Node 22, the agent CLIs, `agent-factory`), then, if
+24.04, Docker, Node 26, the agent CLIs, `agent-factory`), then, if
 `$FACTORY_HOME/projects/<project>/box.Dockerfile` exists, the project's own layer on top of it, and pins the result's
 ID in `$FACTORY_HOME/projects/<project>/box.json`. The orchestrator runs exactly that ID. A project Dockerfile must end
 on the base:

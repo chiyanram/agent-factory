@@ -36,7 +36,7 @@ not a merge bot. Today the runs need a Claude plan; Copilot is #162.
 
 ## Install and set up
 
-You need Node 22 or later, git and the Claude Code CLI. Install a pinned release, then run `init` in your clone:
+You need Node 22 or later (CI tests 22 and 26; 26 is recommended), git and the Claude Code CLI. Install a pinned release, then run `init` in your clone:
 
 ```bash
 V=0.30.1

@@ -11,7 +11,7 @@ code in other projects, such as how to write tests or Java, go to the `rulebook`
 | git, make | everything; the package runs on macOS and on Linux |
 | `glab` or `gh` | running the factory against GitLab or GitHub; the tests stub both |
 | `claude` (Claude Code CLI) | running the implementer and the automated review; the tests stub it |
-| Node 22 or later (npm 10 is fine) | the TypeScript package (ADR-0013): `make` runs `npm ci` from `package-lock.json` |
+| Node 22 or later; 26 recommended, CI tests both (npm 10 is fine) | the TypeScript package (ADR-0013): `make` runs `npm ci` from `package-lock.json` |
 | npm 11 | only to change dependencies: `npx npm@11 install <pkg>`. npm 10 crashes when it re-resolves the tree (an arborist bug on vite's optional peer `vitest@*`), so never add `legacy-peer-deps` |
 
 ```bash
