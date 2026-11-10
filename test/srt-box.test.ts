@@ -2,7 +2,7 @@
 // (missing srt, the wrong version, a platform srt does not sandbox), its timeout and its stop. No srt is needed: the
 // real one is checked on the laptop by test/srt-box-real.test.ts (GUIDE.md "Check the srt runner").
 
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
@@ -10,6 +10,7 @@ import { srtBox } from "../src/core/box/srt.js";
 import {
   CREDENTIAL_PATHS,
   readSrtProbe,
+  RUN_TMP,
   SRT_VERSION,
   srtDomains,
   srtEnv,
@@ -196,10 +197,21 @@ describe("srt runner: the policy (#114)", () => {
     expect(work.filesystem.allowRead).toContain("/etc/ca.pem");
   });
 
-  it("hands srt the host's PATH and locale, the private HOME and the CA, and no other host variable", () => {
+  it("hands srt the host's PATH and locale, the private HOME, its temp folder and the CA, and no other host variable", () => {
     const env = srtEnv({
-      host: { PATH: "/bin", LANG: "C", HOME: "/Users/op", GH_TOKEN: "x", HTTPS_PROXY: "http://corp:8080" },
+      host: {
+        PATH: "/bin",
+        LANG: "C",
+        HOME: "/Users/op",
+        GH_TOKEN: "x",
+        HTTPS_PROXY: "http://corp:8080",
+        TMPDIR: "/var/folders/xy/T/",
+        TMP: "/tmp",
+        TEMP: "/tmp",
+        CLAUDE_CODE_TMPDIR: "/tmp",
+      },
       home: "/h",
+      tmp: "/h/tmp",
       ca: { name: "NODE_EXTRA_CA_CERTS", file: "/etc/ca.pem" },
       spec: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },
     });
@@ -207,9 +219,36 @@ describe("srt runner: the policy (#114)", () => {
       PATH: "/bin",
       LANG: "C",
       HOME: "/h",
+      CLAUDE_CODE_TMPDIR: "/h/tmp",
+      TMP: "/h/tmp",
+      TEMP: "/h/tmp",
       NODE_EXTRA_CA_CERTS: "/etc/ca.pem",
       CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
     });
+  });
+
+  // ledger/4 (#62): with no writable temp folder, Claude Code's Bash tool failed every call with EPERM on
+  // /private/tmp/claude-501/...; srt sets the run's TMPDIR to CLAUDE_CODE_TMPDIR
+  it("gives the run a temp folder inside what it may write, and never allows /tmp (#62)", () => {
+    const home = "/Users/op/.factory/srt-runs/r/home";
+    const env = srtEnv({
+      host: { PATH: "/bin" },
+      home,
+      tmp: join(home, RUN_TMP),
+      ca: { name: "X", file: "" },
+      spec: {},
+    });
+    const tmp = env.CLAUDE_CODE_TMPDIR ?? "";
+    expect(policy.filesystem.allowWrite.some((w) => tmp.startsWith(`${w}/`))).toBe(true);
+    expect([env.TMP, env.TEMP]).toEqual([tmp, tmp]);
+    // srt sets TMPDIR in the run itself; one handed to srt would only move srt's own sockets
+    expect(env.TMPDIR).toBeUndefined();
+    const tmps = ["/tmp", "/private/tmp", "/var/tmp", "/tmp/claude"];
+    expect(
+      [...policy.filesystem.allowWrite, ...policy.filesystem.allowRead].filter((p) =>
+        tmps.some((t) => p === t || p.startsWith(`${t}/`)),
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -260,11 +299,18 @@ describe("srt runner: start, run and stop (#114)", () => {
     expect(call.args).toEqual(["--settings", policyFile, "--", "claude", "-p", "--verbose"]);
     expect(call.cwd).toBe(WORKTREE);
     expect(call.stdin).toBe("the prompt");
+    const tmp = join(RUNS, started.session.id, "home", "tmp");
     expect(call.env).toEqual({
       PATH: "/usr/bin:/bin",
       HOME: join(RUNS, started.session.id, "home"),
+      CLAUDE_CODE_TMPDIR: tmp,
+      TMP: tmp,
+      TEMP: tmp,
       CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
     });
+    // the run's temp folder is made before the run, private to it (#62)
+    expect(statSync(tmp).isDirectory()).toBe(true);
+    expect(statSync(tmp).mode & 0o777).toBe(0o700);
     const policy: unknown = JSON.parse(readFileSync(policyFile, "utf8"));
     expect(policy).toMatchObject({ filesystem: { allowWrite: [WORKTREE, join(RUNS, started.session.id, "home")] } });
     expect(await runner.stop(started.session)).toEqual({ kind: "ok" });
@@ -296,7 +342,7 @@ describe("srt runner: start, run and stop (#114)", () => {
     const runner = box(fakeSrt());
     expect(await runner.start({ ...SPEC, worktree: "repo" })).toMatchObject({ kind: "failed" });
     expect(await runner.start({ ...SPEC, readOnly: ["../x"] })).toMatchObject({ kind: "failed" });
-    for (const name of ["HOME", "HTTPS_PROXY", "SRT_DEBUG", "TMPDIR"]) {
+    for (const name of ["HOME", "HTTPS_PROXY", "SRT_DEBUG", "TMPDIR", "TMP", "TEMP", "CLAUDE_CODE_TMPDIR"]) {
       expect(await runner.start({ ...SPEC, env: { [name]: "x" } })).toMatchObject({
         kind: "failed",
         reason: expect.stringContaining(name),

@@ -173,6 +173,21 @@ describe.skipIf(skip !== "")(`srt runner on the real srt${skip === "" ? "" : ` (
     expect(existsSync(outside)).toBe(false);
   });
 
+  // ledger/4 (#62): Claude Code's Bash tool failed every call with EPERM on /private/tmp/claude-501/... inside srt
+  // the call runs inside srt, so it names the run's temp folder; written as .call so check-temp-dirs, which keeps this
+  // test's own temp folders on tempDir(), does not read it as one
+  it("makes a temp folder under the run's own temp folder, and cannot write to /tmp directly", async () => {
+    const made = await inSrt([
+      "node",
+      "-e",
+      "const os = require('os'); require('fs').mkdtempSync(os.tmpdir.call(os) + '/x')",
+    ]);
+    expect(made).toMatchObject({ kind: "exited", code: 0 });
+    const direct = join("/tmp", `srt-write-${randomUUID()}`);
+    expect(failed(await inSrt(["sh", "-c", `echo no > '${direct}'`]))).toBe(true);
+    expect(existsSync(direct)).toBe(false);
+  });
+
   it("reads none of the git host logins nor the factory home's secrets", async () => {
     mkdirSync(join(FACTORY, "secrets"), { recursive: true });
     writeFileSync(join(FACTORY, "secrets", "token"), "factory-secret\n");

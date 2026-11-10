@@ -9,7 +9,9 @@
 //
 // The policy (srt's README, at the pinned version):
 //   writes      only the run's clone and the run's private HOME (ADR-0012 S15); the clone's read-only paths stay
-//               read-only; srt adds its own mandatory denies (.git/hooks, .git/config, shell rc files)
+//               read-only; srt adds its own mandatory denies (.git/hooks, .git/config, shell rc files). The run's temp
+//               folder is inside its private HOME (srtEnv), never /tmp: a Claude Code with no writable temp folder fails
+//               every Bash call with EPERM (#62)
 //   reads       the person's whole home is hidden (review issue 6 on #30; the operator's choice A on #114,
 //               2026-11-10). srt's allowRead wins over its denyRead, so the clone, the private HOME and the agent's
 //               programs (the CLI's install and its Node, srt-programs.ts) and the toolchains (a detected toolchain
@@ -230,7 +232,22 @@ function readVersion(version: Exit): Probe {
 // the variables of the host a run may see besides its spec's: the toolchain on PATH (S15) and the locale
 const PASSED = ["PATH", "LANG", "LC_ALL", "TERM"] as const;
 // names the srt runner sets itself, or srt does: passing one in would change srt, not the run
-const RESERVED = /^(HOME|TMPDIR|SRT_.*|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|ALL_PROXY|all_proxy)$/;
+const RESERVED =
+  /^(HOME|TMPDIR|TMP|TEMP|CLAUDE_CODE_TMPDIR|CLAUDE_TMPDIR|SRT_.*|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|ALL_PROXY|all_proxy)$/;
+
+// the run's temp folder, inside its private HOME
+export const RUN_TMP = "tmp";
+
+// tmpEnv : the run's temp folder in the variables that name it (#62). srt sets the run's TMPDIR itself, to
+// CLAUDE_CODE_TMPDIR when that is set and to /tmp/claude otherwise (srt 0.0.82 generateProxyEnvVars), so a TMPDIR handed
+// to srt never reaches the run; it would only move srt's own host-side files, such as its proxy sockets, whose paths
+// macOS caps at 104 bytes. Claude Code reads CLAUDE_CODE_TMPDIR for its own temp root (its Bash tool's
+// claude-<uid>/<cwd> folder) before it falls back to os.tmpdir(). TMP and TEMP are for the programs that read those.
+// Pure.
+export function tmpEnv(tmp: string): Readonly<Record<string, string>> {
+  return { CLAUDE_CODE_TMPDIR: tmp, TMP: tmp, TEMP: tmp };
+}
+
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // checkEnv : a spec's variable names, each one a run may be given; the first that is not is the reason. Pure.
@@ -239,13 +256,15 @@ export function checkEnv(env: Readonly<Record<string, string>>): string {
   return bad === undefined ? "" : `env name ${JSON.stringify(bad)} is not allowed in the srt runner`;
 }
 
-// srtEnv : everything srt and the run see: the host's PATH and locale, the private HOME, the company CA when there is
-// one, and the spec's own variables; no other host variable (ADR-0014 P11, #181). srt itself adds the proxy variables
-// that point at its own proxy, and with no parentProxy in the policy it would chain to an HTTP(S)_PROXY it was started
-// with: none is passed, so the policy alone decides. Pure.
+// srtEnv : everything srt and the run see: the host's PATH and locale, the private HOME and the temp folder inside it
+// (tmpEnv), the company CA when there is one, and the spec's own variables; no other host variable, so not the host's
+// own TMPDIR either (ADR-0014 P11, #181). srt itself adds the proxy variables that point at its own proxy, and with no
+// parentProxy in the policy it would chain to an HTTP(S)_PROXY it was started with: none is passed, so the policy alone
+// decides. Pure.
 export function srtEnv(input: {
   readonly host: NodeJS.ProcessEnv;
   readonly home: string;
+  readonly tmp: string;
   readonly ca: { readonly name: string; readonly file: string };
   readonly spec: Readonly<Record<string, string>>;
 }): Readonly<Record<string, string>> {
@@ -256,6 +275,7 @@ export function srtEnv(input: {
   return {
     ...Object.fromEntries(passed),
     HOME: input.home,
+    ...tmpEnv(input.tmp),
     ...(input.ca.file === "" ? {} : { [input.ca.name]: input.ca.file }),
     ...input.spec,
   };
