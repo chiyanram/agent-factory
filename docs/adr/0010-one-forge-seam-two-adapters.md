@@ -1,5 +1,7 @@
 # 0010 · One forge seam, two adapters
 
+> Words: this record keeps the words it was written in; read it as **one git-host seam, two adapters**. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-11-04 (operator, #64 Q1–Q3); the bot amended to a GitHub App on 2026-11-05. Amends ADR-0009.
 
 ## Context

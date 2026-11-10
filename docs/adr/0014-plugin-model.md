@@ -1,5 +1,7 @@
 # 0014 · A small core with extension points, and a plugin for every outside tool
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-11-07 (operator, map #30: plugin model Q1–Q11). Extends ADR-0013 T2 and T3, and widens
 ADR-0012 S18 from context sources to every outside tool.
 

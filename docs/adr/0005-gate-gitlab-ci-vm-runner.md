@@ -1,5 +1,7 @@
 # 0005 · Gate: GitLab CI on the VM runner, done by kind
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-18 (#4 Q4, Q5a); speed decided 2026-10-22 (#20)
 
 ## Context

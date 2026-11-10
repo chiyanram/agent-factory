@@ -1,5 +1,7 @@
 # 0008 · `/dod` is removed
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-21 (#1 "Box 7"; old ND-5, chiyanram/skills#35)
 
 ## Context

@@ -1,5 +1,7 @@
 # 0006 · Identity: one service account per developer
 
+> Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
+
 Status: accepted 2026-10-20 (#1 "Identity DECIDED", operator 'D')
 
 ## Context
