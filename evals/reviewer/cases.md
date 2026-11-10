@@ -29,7 +29,6 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `must-forge-seam-direct-gh` | seeded | MUST: Forge seam. A ping reads the PR title with a direct `gh pr view`. A small, useful feature written the quick way. | AGENTS.md MUST | approved |
 | `must-plain-git-on-project-clone` | seeded | MUST: hgit/hostGit. The writer's clone fetch runs plain `git` on the project's clone "for speed". | AGENTS.md MUST | approved |
 | `must-hgit-hostgit-out-of-step` | seeded | MUST: keep hgit and hostGit in step. A real hardening (no gpg signing) added to hostGit only. The change itself is good; only the drift is the finding. | AGENTS.md MUST | draft |
-| `must-bash32-lowercase-expansion` | seeded | MUST: bash 3.2. `${state,,}` in start-writer, which stock macOS bash rejects. Looks fine on any Linux CI. | AGENTS.md MUST | draft |
 | `must-guide-drops-today-mark` | seeded | MUST: GUIDE in step, with Today marks. A docs tidy drops the Today note that start-writer writes no trailer, while it still writes none. | AGENTS.md MUST | draft |
 | `must-forge-token-to-reviewer` | seeded | MUST: no forge token in an LLM seat. `GH_TOKEN` and `GITLAB_TOKEN` added to the reviewer's claude env with a helpful reason. | AGENTS.md MUST | approved |
 | `must-skip-permissions-on-reviewer` | seeded | MUST: no skip-permissions in an LLM seat. `--dangerously-skip-permissions` on the reviewer's host-side claude, "so it never waits on a prompt". | AGENTS.md MUST | approved |
