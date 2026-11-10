@@ -8,6 +8,7 @@ import type { Box, BoxSpec, Command, Ran } from "../src/core/box/types.js";
 import type { RunInput } from "../src/core/dispatch/tick.js";
 import type { Task } from "../src/core/dispatch/records.js";
 import { keepText, recordsDirOf } from "../src/core/kept.js";
+import { commandArgv } from "../src/core/ready/command.js";
 import { READY_FILE, VERIFY_FILE } from "../src/core/ready/steps.js";
 import { keepActOn } from "../src/core/review/act-on.js";
 import type { Sorted } from "../src/core/review/verdicts.js";
@@ -1165,6 +1166,22 @@ describe("the writer's words and settings", () => {
       "grep, test, wc, ls, cat, head, tail, git (only diff, log, show, status, ls-files, rev-parse), ./gradlew.",
     );
     expect(evidenceRules([])).toContain("never the evidence for what a file says");
+  });
+
+  // ledger#5 (#62): a row quoted its pattern in double quotes with a backtick inside, which a shell runs as a command,
+  // so the ready check refused it three times; the rule tells the writer to use single quotes, and its own example runs
+  it("tells the writer to quote patterns with single quotes, and its example is a row the ready check runs (#62)", () => {
+    const rules = evidenceRules(["./gradlew"]);
+    expect(rules).toContain("Quote patterns with single quotes");
+    const example = /\((grep -n -E '[^']*' README\.md)\)/.exec(rules)?.[1] ?? "";
+    expect(commandArgv(example, ["./gradlew"])).toEqual({
+      kind: "ok",
+      value: ["grep", "-n", "-E", "^## Commands|^- `./gradlew", "README.md"],
+    });
+    expect(commandArgv('grep -n -E "^## Commands|^- `./gradlew" README.md', ["./gradlew"])).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("needs a shell"),
+    });
   });
 
   it("tells the writer of every mode the floor and to keep its subagents and commands in the foreground (#192, #232)", async () => {
