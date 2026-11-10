@@ -28,6 +28,8 @@ export default {
         message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}',
       },
     ],
-    '@semantic-release/github',
+    // no "released in" comments or labels on each closed issue and PR: they spent the account's hourly API limit and
+    // failed the v0.29.0 run after the release was out. The release page and CHANGELOG.md list what shipped.
+    ['@semantic-release/github', { successComment: false, releasedLabels: false }],
   ],
 }
