@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_LANES, heavier, lanesOf, needsApproval, oneWayDoorPathsOf, plannedRaise } from "../src/core/lane.js";
+import {
+  DEFAULT_LANES,
+  heavier,
+  lanesOf,
+  needsApproval,
+  needsTestFirst,
+  oneWayDoorPathsOf,
+  plannedRaise,
+} from "../src/core/lane.js";
 import { checkSpec, type Spec } from "../src/core/spec.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
 import { commentsOnly, contentLane, diffLane, valuesOnly } from "../src/core/ready/lane.js";
@@ -98,6 +106,38 @@ describe("the lens count of a lane (#237)", () => {
   it("refuses a count that is not one, rather than run no lens", () => {
     for (const bad of ["none", "0", 0, -1, 1.5, true]) {
       expect(lanesOf([{ name: "tiny", approval: false, lenses: bad }], "plugin")).toMatchObject({ kind: "failed" });
+    }
+  });
+});
+
+describe("test-first, a lane's property (#417)", () => {
+  it("starts only the bug lane with a failing test by default", () => {
+    expect(DEFAULT_LANES.map((l) => needsTestFirst(l.name))).toEqual([false, true, false, false]);
+  });
+
+  it("reads it from the lanes, keeps the default lane's when left out, and lets a process turn it off for bug", () => {
+    const read = lanesOf(
+      [
+        { name: "tiny", approval: false, lenses: 1 },
+        { name: "bug", approval: true, lenses: 3, testFirst: false },
+        { name: "feature", approval: true, lenses: 3, testFirst: true },
+      ],
+      "plugin",
+    );
+    const lanes = read.kind === "ok" ? read.value : DEFAULT_LANES;
+    expect(read.kind).toBe("ok");
+    expect([needsTestFirst("tiny", lanes), needsTestFirst("bug", lanes), needsTestFirst("feature", lanes)]).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it("refuses a value that is not true or false, rather than guess", () => {
+    for (const bad of ["yes", 1, null]) {
+      expect(lanesOf([{ name: "tiny", approval: false, lenses: 1, testFirst: bad }], "plugin")).toMatchObject({
+        kind: "failed",
+      });
     }
   });
 });

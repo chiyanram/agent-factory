@@ -76,9 +76,10 @@ import type { DesignStep } from "./records.js";
 // what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
 // is the newer of the two records, and the run records count from then
 export type ApprovalView =
-  | { readonly kind: "approved"; readonly at: string; readonly lane: Lane }
+  // testFirst: the lane's build starts with a failing test (its lanes entry, #417)
+  | { readonly kind: "approved"; readonly at: string; readonly lane: Lane; readonly testFirst: boolean }
   // a START alone, in a lane that needs no approval
-  | { readonly kind: "started"; readonly at: string; readonly lane: Lane }
+  | { readonly kind: "started"; readonly at: string; readonly lane: Lane; readonly testFirst: boolean }
   | { readonly kind: "stale" }
   | { readonly kind: "missing" }
   // a START, and a spec whose lane needs an approval the ticket does not have
@@ -273,10 +274,12 @@ const noChange: Rule = (s) =>
     ? { kind: "needs-human", why: `a run ended, but no change is open on factory/${s.ticket} (closed?)` }
     : "next";
 
-// a bug's fix waits for its failing test, however the test-first run ended
+// in a test-first lane the fix waits for its failing test, however the test-first run ended (#417: the lane's
+// property, never its name)
 function nextTask(s: TicketState): Task {
-  const bug = s.approval.kind === "approved" && s.approval.lane === "bug";
-  return { kind: bug && !s.runs.testFirstDone ? "test-first" : "fix" };
+  const said = s.approval.kind === "approved" || s.approval.kind === "started";
+  const testFirst = said && s.approval.testFirst;
+  return { kind: testFirst && !s.runs.testFirstDone ? "test-first" : "fix" };
 }
 
 const AGAIN: Readonly<Record<"asked" | "blocked", string>> = {

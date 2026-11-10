@@ -71,6 +71,24 @@ describe("readProcess: the lanes and the review baseline from the process plugin
     ]);
   });
 
+  it("maps a lanes file's test_first to the lane's testFirst (#417)", async () => {
+    const lanes = JSON.stringify({
+      lanes: [
+        { lane: "tiny", approval: false, lenses: "1" },
+        { lane: "bug", approval: true, lenses: "~3", test_first: false },
+        { lane: "feature", approval: true, lenses: "~3", test_first: true },
+      ],
+    });
+    const team = plugin("team", { "skills/flow/process/lanes.json": lanes });
+    const read = await readProcess([{ label: "team@local", dir: team }]);
+    const value = read.kind === "ok" ? read.value : BUILT_IN;
+    expect(value.lanes.map((l) => [l.name, l.testFirst])).toEqual([
+      ["tiny", false],
+      ["bug", false],
+      ["feature", true],
+    ]);
+  });
+
   it("takes the first plugin in the list that holds a process, and keeps the built-in baseline without review.json", async () => {
     const rules = plugin("rules", { "skills/java/references/x.md": "# x\n" });
     const team = plugin("team", { "skills/flow/process/lanes.json": readFileSync(RULEBOOK_LANES, "utf8") });
