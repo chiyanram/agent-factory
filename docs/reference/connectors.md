@@ -129,3 +129,13 @@ failure. `forge.write` is the orchestrator's alone, and no Jira status, assignee
 - No tracker or chat connector is bundled yet, so a write needs a connector you add yourself.
 - Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
   `pending/` until you remove it.
+
+## Decided, not built
+
+From the design audit (2026-11-10), for [ADR-0014](../adr/0014-plugin-model.md):
+
+- **The front door is not a connector.** How work arrives (`agent-factory start`, a Discord command, a spec PR) is
+  not a `describe` and `call` connector; ADR-0014 is scoped to say so (P1).
+- **The MCP bridge is pinned and sandboxed.** When the `mcp-bridge` connector is built, the MCP servers it runs are
+  pinned by version and hash and run sandboxed, like every other connector (P4). **Today:** there is no bridge.
+
