@@ -36,7 +36,7 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `spec-check-size-claude-md` | seeded | A spec mismatch: AC-1 in `pr.md` says CLAUDE.md is checked too, and the code checks it only when there is no AGENTS.md; AC-3's test is missing. | written for the set | approved |
 | `clean-hgit-hostgit-nosystem` | clean | The #167 fix in both git wrappers, with tests on each side. | 7cd3d24 (#168) | approved |
 | `clean-writer-prompt-foreground` | clean | The foreground rule added to every writer prompt, with a test per mode. | bd4225c (#210) | approved |
-| `clean-plugin-test-temp-root` | clean | A three-line test fix: resolve the temp root for macOS. | f2b6305 (#196) | draft |
+| `clean-plugin-test-temp-root` | clean | A three-line test fix: resolve the temp root for macOS. | f2b6305 (#196) | approved |
 | `clean-lint-skips-worktrees` | clean | Config only: Biome, oxlint and vitest skip the repo's own worktrees. | 60d40ff (#152) | draft |
 | `clean-guide-ci-backstop` | clean | Docs only: a GUIDE paragraph on the CI backstop. Tests that the review raises no doc finding on correct prose. | 2c7f6e5 (#183) | draft |
 | `clean-writer-agent-trailer` | clean | The `Agent: writer` trailer hook and the push guard that refuses a commit without it. | 5191d08 (#191) | draft |
