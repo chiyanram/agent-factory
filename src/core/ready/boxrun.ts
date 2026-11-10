@@ -1,7 +1,9 @@
 // boxrun — branch code run in a fresh box, never on the host (#91; ADR-0012 S5, S8). The ready check and the local
 // verifier both come here:
 //   1 the change's branch is fetched into the clone through hostGit, and its tip must be the head the run is for
-//   2 the tree at that head is copied into a private folder with no checkout filter (code.ts); nothing of it runs here
+//   2 the tree at that head is copied into a private folder with no checkout filter (code.ts); nothing of it runs here.
+//     For a ready check with a git row (#444), the host makes that folder a repository of its own: the branch at the
+//     head and the default branch, fetched from the clone through hostGit, so the row reads history in the box
 //   3 the project's egress proxy starts (#130), then a fresh box with only that folder mounted, no forge token, on the
 //     project's internal network, its egress through that proxy
 //   4 the commands run one by one, each with no shell and a time limit; the first that fails ends the run
@@ -14,10 +16,11 @@ import type { Box, NoImage, PinnedImage, Ran, Session } from "../box/index.js";
 import { proxyEnv } from "../egress/env.js";
 import type { Started as EgressStarted } from "../egress/start.js";
 import type { Result } from "../forge/api.js";
-import { hostGit } from "../git.js";
+import { hostGit, type RepoTarget } from "../git.js";
 import type { Argv } from "../project.js";
 import { copyCode } from "../review/code.js";
 import { attempt } from "../review/safe.js";
+import { BASE_REF } from "./floor.js";
 
 // the run's egress: the project's Squid proxy, started, on its internal network (vm), or the runner's own proxy, which
 // the srt runner was made with from the same checked allowlist (#114)
@@ -45,6 +48,8 @@ export type BoxJob = {
   readonly head: string;
   readonly commands: readonly Argv[];
   readonly timeoutSeconds: number;
+  // the branch's history in the box's copy, with the default branch the floor guard fetched (#444); none by default
+  readonly history?: { readonly base: string };
 };
 
 // one command's run: exited with a code, or ran out of time
@@ -141,10 +146,14 @@ export async function startBox(setup: BoxSetup, spec: RunSpec): Promise<Result<S
 }
 
 // inBox : a fresh box on the tree in `code`; it is stopped whatever happens
-async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>> {
+async function inBox(
+  job: BoxJob,
+  code: string,
+  env: Readonly<Record<string, string>>,
+): Promise<Result<readonly Row[]>> {
   const { box } = job.setup;
   // no agent runs here, so there are no settings to hold read-only; the copy is thrown away after
-  const session = await startBox(job.setup, { worktree: code, readOnly: [], env: {} });
+  const session = await startBox(job.setup, { worktree: code, readOnly: [], env });
   if (session.kind === "failed") {
     return session;
   }
@@ -156,10 +165,57 @@ async function inBox(job: BoxJob, code: string): Promise<Result<readonly Row[]>>
     : { kind: "failed", reason: `the box ${session.value.id} did not stop: ${stopped.reason}` };
 }
 
+// the box's git reads its own repository, whoever owns the copy: command scope, which git honours for this key
+const GIT_SAFE: Readonly<Record<string, string>> = {
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "safe.directory",
+  GIT_CONFIG_VALUE_0: "*",
+};
+
+// withHistory : the copy made a repository on the host, through hostGit: the branch at the head checked out, the
+// default branch as <base> and origin/<base>; the files stay the ones code.ts copied
+async function withHistory(job: BoxJob, code: string, base: string): Promise<Result<string>> {
+  const git = (args: readonly string[], repo: RepoTarget) =>
+    hostGit({ args, repo, env: job.setup.env, stdin: { kind: "none" } });
+  const branch = `refs/heads/${job.branch}`;
+  const copy: RepoTarget = { kind: "repo", path: code };
+  const steps: readonly (readonly [readonly string[], RepoTarget])[] = [
+    [["init", "-q", code], { kind: "none" }],
+    [
+      [
+        "fetch",
+        "-q",
+        "--no-tags",
+        job.setup.repo,
+        `+refs/factory/mr-${job.number}:${branch}`,
+        `+${BASE_REF}:refs/heads/${base}`,
+        `+${BASE_REF}:refs/remotes/origin/${base}`,
+      ],
+      copy,
+    ],
+    [["symbolic-ref", "HEAD", branch], copy],
+    [["reset", "-q"], copy],
+  ];
+  for (const [args, repo] of steps) {
+    const ran = await git(args, repo);
+    if (ran.kind !== "ok") {
+      return { kind: "failed", reason: `cannot give the box the branch's history: ${gitReason(ran)}` };
+    }
+  }
+  return { kind: "ok", value: code };
+}
+
 async function inFolder(job: BoxJob, dir: string): Promise<Result<readonly Row[]>> {
   const code = join(dir, "code");
   const copied = await copyCode({ repo: job.setup.repo, sha: job.head, into: code, env: job.setup.env, prune: "none" });
-  return copied.kind === "ok" ? inBox(job, code) : copied;
+  if (copied.kind !== "ok") {
+    return copied;
+  }
+  if (job.history === undefined) {
+    return inBox(job, code, {});
+  }
+  const repo = await withHistory(job, code, job.history.base);
+  return repo.kind === "ok" ? inBox(job, code, GIT_SAFE) : repo;
 }
 
 // runInBox : the commands at the change's head, in a fresh box; the rows that ran, up to the first that failed

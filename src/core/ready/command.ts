@@ -1,8 +1,8 @@
 // command — an evidence row's command as argv, for a run with no shell (#91; ADR-0011 D12). The writer wrote it as one
 // line, so this reads it the way a shell would read a plain command: words split on blanks, quotes group a word. Any
 // character a shell would act on (a pipe, &&, a redirect, $, a glob, a backslash) is refused rather than passed as text,
-// since the row would then mean something else than what the writer ran. The program must be on the project file's
-// list.
+// since the row would then mean something else than what the writer ran. The program must be one the ready check
+// always allows (READ_ONLY_PROGRAMS, #444: git only with a read subcommand) or one on the project file's list.
 
 import type { Result } from "../forge/api.js";
 import type { Argv } from "../project.js";
@@ -92,8 +92,40 @@ export function commandWords(command: string): Result<readonly string[]> {
   return l.quote === "none" ? { kind: "ok", value: l.words } : { kind: "failed", reason: "a quote is not closed" };
 }
 
-// commandArgv : the row's command as argv, when it runs one program from the list with no shell
-export function commandArgv(command: string, programs: readonly string[]): Result<Argv> {
+// the programs every ready check allows, besides the project file's ready.programs (#444): they read the tree and
+// print what they find, so a criterion about a file's content can be shown without the build. Each still runs with
+// no shell, in a fresh runner.
+// an evidence row's git: run in the box on its own copy of the branch (boxrun.ts), never on the host's clone
+export const GIT_PROGRAM = "git";
+export const READ_ONLY_PROGRAMS: readonly string[] = ["grep", "test", "wc", "ls", "cat", "head", "tail", GIT_PROGRAM];
+
+// git's read subcommands: the only ones the default set allows; a project that lists "git" itself allows any
+export const GIT_READS: readonly string[] = ["diff", "log", "show", "status", "ls-files", "rev-parse"];
+
+// evidencePrograms : every program an evidence row may start with: the read-only set, then the project's own. Pure.
+export function evidencePrograms(listed: readonly string[]): readonly string[] {
+  return [...new Set([...READ_ONLY_PROGRAMS, ...listed])];
+}
+
+// programsLine : the programs as the writer and a reason read them, git's limit named. Pure.
+export function programsLine(listed: readonly string[]): string {
+  const git = listed.includes(GIT_PROGRAM) ? GIT_PROGRAM : `${GIT_PROGRAM} (only ${GIT_READS.join(", ")})`;
+  return evidencePrograms(listed)
+    .map((p) => (p === GIT_PROGRAM ? git : p))
+    .join(", ");
+}
+
+// gitRead : why a git row of the default set is refused, or "" when it is a read. Pure.
+function gitRead(rest: readonly string[], listed: readonly string[]): string {
+  const sub = rest[0] ?? "";
+  return listed.includes(GIT_PROGRAM) || GIT_READS.includes(sub)
+    ? ""
+    : `"${GIT_PROGRAM} ${sub}" is not a read: the ready check runs ${GIT_PROGRAM} only with ${GIT_READS.join(", ")}, unless the project file lists it in ready.programs`;
+}
+
+// commandArgv : the row's command as argv, when it runs one allowed program with no shell; `listed` is the project
+// file's ready.programs
+export function commandArgv(command: string, listed: readonly string[]): Result<Argv> {
   const split = commandWords(command);
   if (split.kind === "failed") {
     return split;
@@ -102,10 +134,14 @@ export function commandArgv(command: string, programs: readonly string[]): Resul
   if (program === undefined) {
     return { kind: "failed", reason: "it is empty" };
   }
-  return programs.includes(program)
-    ? { kind: "ok", value: [program, ...rest] }
-    : {
-        kind: "failed",
-        reason: `${JSON.stringify(program)} is not a program the project file lets a ready check run (${programs.join(", ")})`,
-      };
+  const why = refusedProgram(program, rest, listed);
+  return why === "" ? { kind: "ok", value: [program, ...rest] } : { kind: "failed", reason: why };
+}
+
+// refusedProgram : why a row may not start with this program and these words, or "" when it may. Pure.
+function refusedProgram(program: string, rest: readonly string[], listed: readonly string[]): string {
+  if (!evidencePrograms(listed).includes(program)) {
+    return `${JSON.stringify(program)} is not a program a ready check may run (${programsLine(listed)})`;
+  }
+  return program === GIT_PROGRAM ? gitRead(rest, listed) : "";
 }

@@ -132,7 +132,8 @@ function out(result: GitResult, what: string): Result<string> {
   return failed(`the floor guard cannot ${what}: ${why || "git failed"}`);
 }
 
-const BASE_REF = "refs/factory/floor-base";
+// the default branch as the floor guard fetched it; the ready check's git rows diff against it too (boxrun.ts, #444)
+export const BASE_REF = "refs/factory/floor-base";
 const HEAD_REF = "refs/factory/floor-head";
 
 // mergeBase : the default branch and the change's branch fetched, the change's tip checked against the head, and the

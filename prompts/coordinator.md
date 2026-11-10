@@ -156,7 +156,9 @@ ended goes to a person. A ticket's change is the one on `factory/<ticket>` in th
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: to go on, the human
-STARTs again or approves the spec again; the newer of the two records starts every count afresh (#227). The build
+STARTs again or approves the spec again; the newer of the two records starts every count afresh (#227). A stop whose
+reason no longer holds, such as a rework that changed only its evidence rows (the ready check runs them, #444), goes on
+once the label is removed. The build
 begins only on a human's word: a START in the tiny lane, a START and an approval in the others. An approval with no
 START waits, since nothing runs without one. In a lane with a design review, the design-reviewer and its verify pass
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
@@ -207,7 +209,10 @@ drops it is refused (`lanesOf`). **Today:** a config file's change counts as val
 same keys, so a dependency's major bump in `package.json` still reads as tiny; the automated review's LN2 check is
 what catches it. Each acceptance criterion must also have an evidence row: the n-th criterion is `AC-n`, and a row
 names it when its `criterion` starts with that id; a criterion with no row fails the check and counts towards its 3
-tries. Then it runs each evidence row of the implementer's report again at the head,
+tries. A row may start with a read-only program (`grep`, `test`, `wc`, `ls`, `cat`, `head`, `tail`, `git diff`,
+`log`, `show`, `status`, `ls-files`, `rev-parse`) or one of `ready.programs`; one gate command (`./gradlew check`,
+`make test`) given for several criteria, or a result that quotes nothing the command printed, fails the check (#444).
+Then it runs each evidence row of the implementer's report again at the head,
 and the local verifier the project file's `verify`, each on a fresh runner with no git host token and its egress
 through the project's own proxy; nothing of the branch runs on the host. Each runner starts that proxy afresh, inside
 the project's lock. The orchestrator opens the vm runner when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set, and the srt runner

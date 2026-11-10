@@ -26,6 +26,7 @@ import {
   KNOWLEDGE,
   PROJECT_INSTRUCTIONS,
   runPrompt,
+  evidenceRules,
   writerStep,
   type WriterSetup,
 } from "../src/core/writer/step.js";
@@ -1150,6 +1151,20 @@ describe("the writer's words and settings", () => {
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
     expect(text).not.toContain('"deferred"');
+  });
+
+  it("names the exact programs an evidence row may start with, and that its result is the command's output, in every mode (#444)", async () => {
+    const card = await readCard([], "implementer");
+    if (card.kind !== "ok") throw new Error(card.reason);
+    const names = { ticket: "PROJ-1", branch: "b", head: "h", base: "main" };
+    for (const mode of ["fix", "test-first", "rework", "cleanup"] as const) {
+      const text = runPrompt({ card: card.value, mode, names, tools: [], programs: ["./gradlew"] });
+      expect(text).toContain(`${FLOOR}\n${evidenceRules(["./gradlew"])}\n\n`);
+    }
+    expect(evidenceRules(["./gradlew"])).toContain(
+      "grep, test, wc, ls, cat, head, tail, git (only diff, log, show, status, ls-files, rev-parse), ./gradlew.",
+    );
+    expect(evidenceRules([])).toContain("never the evidence for what a file says");
   });
 
   it("tells the writer of every mode the floor and to keep its subagents and commands in the foreground (#192, #232)", async () => {

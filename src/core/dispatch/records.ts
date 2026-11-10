@@ -139,6 +139,8 @@ export type Event =
       readonly nextTry?: NextTry;
       // the lane the diff needs (#230); none on a line older than the lane check
       readonly lane?: Lane;
+      // every program the check let a row start with (#444); none on an older line
+      readonly programs?: readonly string[];
     }
   // the local verifier's run (#91); its result is the commit status it posted
   | {
@@ -529,14 +531,35 @@ function humanField(raw: unknown): { readonly human?: boolean } | Bad {
   return typeof human === "boolean" ? { human } : BAD;
 }
 
-// readyExtras : a ready line's optional fields, its nextTry, its lane and its human flag, as fields to spread, or BAD
-function readyExtras(
-  raw: unknown,
-): { readonly nextTry?: NextTry; readonly lane?: Lane; readonly human?: boolean } | Bad {
+// programsField : a ready line's programs, as a field to spread: none on a line older than #444, BAD when it is there
+// but not a list of words
+function programsField(raw: unknown): { readonly programs?: readonly string[] } | Bad {
+  const programs = prop(raw, "programs");
+  if (programs === undefined) {
+    return {};
+  }
+  return Array.isArray(programs) && programs.every((p) => typeof p === "string")
+    ? { programs: programs.map(String) }
+    : BAD;
+}
+
+// readyExtras : a ready line's optional fields, its nextTry, its lane, its human flag and its programs, as fields to
+// spread, or BAD
+function readyExtras(raw: unknown):
+  | {
+      readonly nextTry?: NextTry;
+      readonly lane?: Lane;
+      readonly human?: boolean;
+      readonly programs?: readonly string[];
+    }
+  | Bad {
   const next = nextTryField(raw);
   const lane = laneField(raw);
   const human = humanField(raw);
-  return next === BAD || lane === BAD || human === BAD ? BAD : { ...next, ...lane, ...human };
+  const programs = programsField(raw);
+  return next === BAD || lane === BAD || human === BAD || programs === BAD
+    ? BAD
+    : { ...next, ...lane, ...human, ...programs };
 }
 
 function readyEndedOf(raw: unknown, at: string): Event | Bad {
@@ -673,6 +696,8 @@ export type LastWriter =
       readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
       readonly evidence: readonly Evidence[];
+      // when it ended (#444); none in a summary built by hand
+      readonly at?: string;
     };
 
 export type Summary = {
@@ -699,6 +724,10 @@ export type Summary = {
         readonly human: boolean;
         // the lane the diff needs (#230); none on a line older than the lane check
         readonly lane?: Lane;
+        // the rows it ran: the last writer's when it ended (#444); none in a summary built by hand
+        readonly evidence?: readonly Evidence[];
+        // every program it let a row start with (#444); none on a line older than that
+        readonly programs?: readonly string[];
       };
   readonly lastVerify:
     | { readonly kind: "none" }
@@ -768,6 +797,7 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
       outcome: e.outcome,
       patch: e.patch,
       evidence: e.evidence,
+      at: e.at,
     },
     testFirstDone: s.testFirstDone || testFirst,
     rebaseRuns: s.rebaseRuns + Number(e.mode === "rebase"),
@@ -797,6 +827,8 @@ const STEPS: Steps = {
       why: e.why,
       human: e.human === true,
       ...(e.lane === undefined ? {} : { lane: e.lane }),
+      evidence: s.lastWriter.kind === "ended" ? s.lastWriter.evidence : [],
+      ...(e.programs === undefined ? {} : { programs: e.programs }),
     },
     readyFailures: s.readyFailures + Number(!e.passed),
     nextTry: nextTryView(e.nextTry),

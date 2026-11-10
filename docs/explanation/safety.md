@@ -82,7 +82,9 @@ Two rules follow from this, decided on 2026-11-10:
 - **Enforced: the implementer never pushes.** The host pushes its branch for it through the host push
   (`src/core/push.ts`), with `--force-with-lease` against the head it saw (#113, #138).
 - **Enforced: ready is checked, not reported.** No review starts until code has run the change's evidence commands
-  again at its head, on a fresh runner (ADR-0012 S5, #91), with no shell and only the programs the project file lists.
+  again at its head, on a fresh runner (ADR-0012 S5, #91), with no shell and only the read-only set (`grep`, `git`'s
+  reads and the like, #444) or the programs the project file lists. A gate run given for several criteria, or a result
+  that is prose rather than what the command printed, fails the check.
 - **The automated review reads, and the script posts.** It runs in a throwaway folder (under
   `$FACTORY_HOME/review-runs/`) with the pack and a copy of the whole code at the head. Every `CLAUDE.md`, `AGENTS.md`,
   `.claude/` and `.agents/` is removed from that copy, so the PR cannot choose the rules it is judged by. It has Read,

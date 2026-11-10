@@ -8,8 +8,11 @@
 //            or the waiver fails the step, so a person looks. The lane check (lane.ts, #230) reads the lane the same
 //            diff needs, and the result carries it for the dispatcher to compare with the lane a human said yes to. An
 //            acceptance criterion with no evidence row (AC-n) fails the check. Then each evidence row of the
-//            writer's report runs again at the head. A row whose command needs a shell, or starts with a program the
-//            project file does not list, fails the check: the writer is sent back to fix it. A failed check keeps
+//            writer's report runs again at the head. A row whose command needs a shell, or starts with a program that
+//            is neither one of the read-only set (command.ts, #444) nor on the project file's list, fails the check:
+//            the writer is sent back to fix it. So does a row that cannot prove its criterion (proof.ts, #444): one
+//            gate command given for several criteria, before any box starts, or a result that quotes nothing its
+//            command printed, after the rows ran. A failed check keeps
 //            why it failed with the head (kept.ts), and a failed row's output with it, before its result is recorded:
 //            the writer's rework run reads it (#199).
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
@@ -24,7 +27,8 @@ import type { Forge, StatusState } from "../forge/types.js";
 import type { ReadyFacts, RunInput, Steps } from "../dispatch/tick.js";
 import type { Argv, ProjectFile } from "../project.js";
 import type { Evidence } from "../report.js";
-import { commandArgv } from "./command.js";
+import { commandArgv, evidencePrograms, GIT_PROGRAM } from "./command.js";
+import { gateReused, unquoted } from "./proof.js";
 import { rowLine, runInBox, type BoxSetup, type Row } from "./boxrun.js";
 import type { Lane } from "../spec.js";
 import { floorGuard, forHuman, hitsLine, type FloorInput } from "./floor.js";
@@ -86,7 +90,7 @@ function argvs(evidence: readonly Evidence[], programs: readonly string[]): Resu
 function verdict(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
   const bad = failedRow(rows);
   if (bad === "none") {
-    return { ...PASSED, row: "none" };
+    return quoted(evidence, rows);
   }
   const i = rows.indexOf(bad);
   return {
@@ -95,6 +99,21 @@ function verdict(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
     human: false,
     row: bad,
   };
+}
+
+// quoted : rows that all ran pass when each result quotes what its command printed; the first that does not fails
+// the check, with its output kept for the writer (#444)
+function quoted(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
+  const prose = unquoted(evidence, rows.map(printedText));
+  const row = prose === "none" ? undefined : rows[prose.at];
+  return prose === "none" || row === undefined
+    ? { ...PASSED, row: "none" }
+    : { passed: false, why: prose.why, human: false, row };
+}
+
+// printedText : what a row printed, stdout then stderr. Pure.
+function printedText(row: Row): string {
+  return row.ran.kind === "exited" ? `${row.ran.stdout}\n${row.ran.stderr}` : "";
 }
 
 type Guarding = { readonly plan: ReadyPlan; readonly forge: Forge; readonly waiver: WaiverHead };
@@ -151,13 +170,19 @@ export function uncovered(criteria: readonly string[], evidence: readonly Eviden
 
 // covered : a guarded diff whose every acceptance criterion has an evidence row runs the rows again; a missing row
 // fails the check for the writer, and counts towards its tries
-async function covered(plan: ReadyPlan, open: Open, input: ReadyInput, guarded: Checked): Promise<Result<Judged>> {
+async function covered(
+  plan: ReadyPlan,
+  open: Open,
+  input: ReadyInput,
+  at: { readonly guarded: Checked; readonly base: string },
+): Promise<Result<Judged>> {
+  const { guarded } = at;
   if (!guarded.passed) {
     return { kind: "ok", value: judged(guarded) };
   }
   const missing = uncovered(input.criteria, input.evidence);
   return missing.length === 0
-    ? rerun(plan, open, input)
+    ? rerun(plan, open, input, at.base)
     : {
         kind: "ok",
         value: judged({
@@ -178,6 +203,11 @@ async function guardedLane(at: FloorInput, input: ReadyInput): Promise<Result<Ch
   return lane.kind === "ok" ? { kind: "ok", value: { ...guarded.value, lane: lane.value.lane } } : lane;
 }
 
+// baseOf : the default branch the floor guard read, or "" when it could not be read. Pure.
+function baseOf(at: Result<FloorInput>): string {
+  return at.kind === "ok" ? at.value.base : "";
+}
+
 async function check(g: Guarding, open: Open, input: ReadyInput): Promise<Result<Judged>> {
   if (input.evidence.length === 0) {
     return {
@@ -190,24 +220,35 @@ async function check(g: Guarding, open: Open, input: ReadyInput): Promise<Result
   if (guarded.kind === "failed") {
     return guarded;
   }
-  const ran = await covered(g.plan, open, input, guarded.value);
+  const ran = await covered(g.plan, open, input, { guarded: guarded.value, base: baseOf(at) });
   return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, lane: guarded.value.lane } } : ran;
 }
 
-async function rerun(plan: ReadyPlan, open: Open, input: ReadyInput): Promise<Result<Judged>> {
+async function rerun(plan: ReadyPlan, open: Open, input: ReadyInput, base: string): Promise<Result<Judged>> {
   const parsed = argvs(input.evidence, plan.project.ready.programs);
   if (parsed.kind === "failed") {
     return { kind: "ok", value: judged({ passed: false, why: parsed.reason, human: false }) };
   }
   const commands = parsed.value.flatMap((a) => (a.kind === "ok" ? [a.value] : []));
+  const reused = gateReused(input.evidence, commands, plan.project);
+  if (reused !== "") {
+    return { kind: "ok", value: judged({ passed: false, why: reused, human: false }) };
+  }
   const rows = await runInBox({
     setup: plan.setup,
     ...open,
     head: input.head,
     commands,
     timeoutSeconds: plan.project.ready.timeoutSeconds,
+    // a git row reads the branch's history: the box's copy gets it, with the default branch to diff against
+    ...(commands.some((c) => c[0] === GIT_PROGRAM) ? { history: { base } } : {}),
   });
   return rows.kind === "ok" ? { kind: "ok", value: verdict(input.evidence, rows.value) } : rows;
+}
+
+// readyPrograms : every program the project's evidence rows may start with, or none without a project file (#444)
+export function readyPrograms(plan: BoxPlan): readonly string[] | undefined {
+  return plan.kind === "ready" ? evidencePrograms(plan.project.ready.programs) : undefined;
 }
 
 // The writer's task file is cut at 20,000 characters from its end (writer/task.ts, MAX_TASK_CHARS), so a kept file

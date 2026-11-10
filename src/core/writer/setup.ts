@@ -46,7 +46,13 @@ function pushTarget(input: WriterInput): Result<PushTarget> {
     : host;
 }
 
-type Placed = { readonly box: BoxSetup; readonly store: TokenStore; readonly push: PushTarget };
+type Placed = {
+  readonly box: BoxSetup;
+  readonly store: TokenStore;
+  readonly push: PushTarget;
+  // the project file's ready.programs (#444)
+  readonly programs: readonly string[];
+};
 
 // placed : the box, the token store and where to push, or the first one missing
 function placed(input: WriterInput): Result<Placed> {
@@ -58,7 +64,15 @@ function placed(input: WriterInput): Result<Placed> {
   }
   const push = pushTarget(input);
   return push.kind === "ok"
-    ? { kind: "ok", value: { box: input.plan.setup, store: input.store.value, push: push.value } }
+    ? {
+        kind: "ok",
+        value: {
+          box: input.plan.setup,
+          store: input.store.value,
+          push: push.value,
+          programs: input.plan.project.ready.programs,
+        },
+      }
     : push;
 }
 
@@ -76,7 +90,7 @@ export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
   if (specs.kind === "failed") {
     return Promise.resolve(specs);
   }
-  const { box, store, push } = where.value;
+  const { box, store, push, programs } = where.value;
   return Promise.resolve({
     kind: "ok",
     value: {
@@ -89,6 +103,7 @@ export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
       label: input.label,
       login: () => boxTokenFrom({ store, now: new Date() }),
       pusher: input.pusher,
+      programs,
       lanes: input.lanes,
       specs: specs.value,
     },
