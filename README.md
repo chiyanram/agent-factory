@@ -22,7 +22,7 @@ its pull request built, reviewed and gate-green by fresh AI runs, each on a runn
 
 > **Status (2026-11-09).** The TypeScript package runs the orchestrator, the implementer in a runner, the host push,
 > the ready check, the automated review and the local gate. The design on one page, with what is still to build and the
-> order, is [docs/DESIGN.md](docs/DESIGN.md); its words are in [GLOSSARY.md](GLOSSARY.md). Map #30 tracks the work.
+> order, is [docs/explanation/architecture.md](docs/explanation/architecture.md); its words are in [GLOSSARY.md](GLOSSARY.md). Map #30 tracks the work.
 > The first pilot is a small personal project on the VM (#62).
 
 The rules the runs follow live in the `rulebook` plugin in [chiyanram/skills](https://github.com/chiyanram/skills)
@@ -38,7 +38,7 @@ cd agent-factory
 make lint && make test
 ```
 
-Set up a laptop and a project in one guided run. Install a release ([GUIDE.md](GUIDE.md#install-a-pinned-version)),
+Set up a laptop and a project in one guided run. Install a release ([Install](docs/how-to/install.md)),
 then, inside the product clone:
 
 ```bash
@@ -51,9 +51,9 @@ runner to `~/.factory/user.json` and the project file to `~/.factory/projects/<p
 the plugins, checks each piece with its fix, and prints the commands only you run next: `claude setup-token` and
 `agent-factory setup claude` when the model token is missing, then `agent-factory onboard <project>`, `onboard accept`
 and `start`. Run it again any time: it asks only what is missing and shows a diff before it replaces a value. The
-manual steps stay in [GUIDE.md](GUIDE.md#set-up-with-agent-factory-init).
+manual steps stay in [docs/how-to/](docs/how-to/).
 
-Then start the coordinator (`agent-factory coordinator`) and follow [GUIDE.md](GUIDE.md#run-the-loop). The orchestrator
+Then start the coordinator (`agent-factory coordinator`) and follow [its instructions](prompts/coordinator.md). The orchestrator
 loop (`agent-factory dispatch <project>`) runs the trigger table; `agent-factory start` and `approve` start it.
 
 ## How it works
@@ -97,7 +97,10 @@ which git host they talk to. The tests stub the seam and the `claude` CLI, so th
 
 ## Docs
 
-- [GUIDE.md](GUIDE.md): set up the bot, the settings, run the loop, the guardrails and the terms.
+- [docs/how-to/](docs/how-to/): install, set up with `init` or by hand, check the runner.
+- [docs/reference/](docs/reference/): the commands, the settings and the connectors.
+- [docs/explanation/](docs/explanation/): the architecture, the safety model, measurement and the roadmap.
+- [prompts/coordinator.md](prompts/coordinator.md): the coordinator's instructions: run the loop.
 - [CONTRIBUTING.md](CONTRIBUTING.md): set up, test, add a script or a check, commit messages.
 - [AGENTS.md](AGENTS.md): instructions for coding agents that work in this repo.
 - [docs/adr/](docs/adr/): the decisions behind the design.
