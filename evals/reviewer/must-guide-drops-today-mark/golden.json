@@ -1,9 +1,0 @@
-[
-  {
-    "file": "GUIDE.md",
-    "line": 32,
-    "issue": "Drops the **Today:** mark that says the bash start-writer writes no Agent: trailer, but start-writer still writes none: a reader now takes the trailer for enforced on every writer commit (AGENTS.md MUST: mark each place a script still differs with Today:).",
-    "severity": "warning",
-    "category": "doc_defect"
-  }
-]
