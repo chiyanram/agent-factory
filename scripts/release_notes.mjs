@@ -42,7 +42,7 @@ const commitPartial = `* {{#if scope}}**{{scope}}** — {{/if}}{{#if subject}}{{
 `
 
 const footerPartial = `
-Install: \`npm i -g github:{{owner}}/{{repository}}#{{currentTag}}\`
+Install: [build and install the packed tarball]({{host}}/{{owner}}/{{repository}}/blob/{{currentTag}}/GUIDE.md#install-a-pinned-version)
 `
 
 const TRAILING_REFS = /(?:\s*\(#\d+\))+\s*$/
