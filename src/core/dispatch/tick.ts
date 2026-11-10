@@ -79,6 +79,10 @@ import {
 
 export const BRANCH_PREFIX = "factory/";
 
+// Logged : an action that ended, with what the log says of it in place of "done" (#62: a writer run that stopped, and
+// why)
+export type Logged = { readonly kind: "ok"; readonly said?: string } | Extract<Done, { kind: "failed" }>;
+
 // held: a cap kept the run from starting (#131, #237), not a step that is not set up
 export type Unavailable = { readonly kind: "unavailable"; readonly reason: string; readonly held?: boolean };
 export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O>> };
@@ -121,6 +125,9 @@ export type Steps = {
       readonly deferred?: readonly string[];
       // each cite of the project's brief that went stale (#235)
       readonly stale?: readonly string[];
+      // why a run that is not done stopped, and the file that keeps the end of its output (#62)
+      readonly why?: string;
+      readonly output?: string;
     }
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
@@ -541,20 +548,28 @@ async function informed(setup: TickSetup, message: Ping): Promise<Done> {
   return { kind: "ok" };
 }
 
-// writerPing : a writer run that ended on a person: a question that waits on them, or a blocked run
-function writerPing(state: TicketState, outcome: "done" | "asked" | "blocked"): Ping | "none" {
+// writerPing : a writer run that ended on a person: a question that waits on them, or a blocked run, with why (#62)
+function writerPing(state: TicketState, value: WriterValue): Ping | "none" {
   const change = number(state);
-  if (outcome === "asked") {
+  if (value.outcome === "asked") {
     return { kind: "asked", ticket: state.ticket, change };
   }
-  return outcome === "blocked"
-    ? {
-        kind: "needs-you",
-        ticket: state.ticket,
-        change,
-        why: "the writer's run is blocked; its note on the change says why",
-      }
+  const why = value.why ?? "its note on the change says why";
+  return value.outcome === "blocked"
+    ? { kind: "needs-you", ticket: state.ticket, change, why: `the writer's run is blocked: ${why}` }
     : "none";
+}
+
+// writerSaid : the log line of a writer run that is not done, in place of "done" (#62): why it stopped, the file that
+// keeps its output, and, before the change is opened, that this line and the record are the only place it is said.
+// "" for a done run. Pure.
+function writerSaid(state: TicketState, value: WriterValue): string {
+  if (value.outcome === "done") {
+    return "";
+  }
+  const output = value.output === undefined ? "" : `; output kept in ${value.output}`;
+  const nowhere = number(state) === "none" ? "; there is no open change to say so on" : "";
+  return `writer ${value.outcome}: ${value.why ?? "no reason recorded"}${output}${nowhere}`;
 }
 
 async function reconcile(setup: TickSetup, state: TicketState): Promise<Done> {
@@ -584,7 +599,7 @@ async function forgeAction(setup: TickSetup, state: TicketState, action: Action)
 export type Ran = {
   readonly ticket: string;
   readonly action: Action;
-  readonly result: Done | Unavailable;
+  readonly result: Logged | Unavailable;
   readonly held?: boolean;
 };
 
@@ -604,7 +619,7 @@ function headOf(state: TicketState): string {
   return state.change.kind === "open" ? state.change.line.head : "";
 }
 
-async function runWriter(setup: TickSetup, state: TicketState, task: Task): Promise<Done | Unavailable> {
+async function runWriter(setup: TickSetup, state: TicketState, task: Task): Promise<Logged | Unavailable> {
   const step = setup.steps.writer;
   if (step.kind === "unavailable") {
     return step;
@@ -631,19 +646,21 @@ type WriterValue = Extract<
   { kind: "ok" }
 >["value"];
 
-// writerEnded : the run's end recorded, then the person pinged when it ended on them
+// writerEnded : the run's end recorded, then the person pinged when it ended on them; the pass logs why it stopped
 async function writerEnded(
   setup: TickSetup,
   state: TicketState,
   mode: ReturnType<typeof modeOf>,
   value: WriterValue,
-): Promise<Done> {
+): Promise<Logged> {
   const ended = await record({
     where: where(setup, state),
     event: { at: at(setup), kind: "writer-ended", mode, ...value },
   });
-  const message = writerPing(state, value.outcome);
-  return ended.kind === "ok" && message !== "none" ? informed(setup, message) : ended;
+  const message = writerPing(state, value);
+  const done = ended.kind === "ok" && message !== "none" ? await informed(setup, message) : ended;
+  const said = writerSaid(state, value);
+  return done.kind === "ok" && said !== "" ? { kind: "ok", said } : done;
 }
 
 // usedBy : the plugins and hashes a run of this pass records
@@ -1001,7 +1018,7 @@ async function designPosted(setup: TickSetup, state: TicketState, ended: DesignE
 }
 
 // the actions that start a run; "none" for the rest
-const RUN: Handler<Promise<Done | Unavailable> | "none"> = {
+const RUN: Handler<Promise<Logged | Unavailable> | "none"> = {
   writer: (setup, state, a) => runWriter(setup, state, a.task),
   ready: (setup, state, a) => runReady(setup, state, a.head),
   review: (setup, state, a) => runReview(setup, state, a.head),
@@ -1014,7 +1031,7 @@ const RUN: Handler<Promise<Done | Unavailable> | "none"> = {
   wait: () => "none",
 };
 
-function runAction(setup: TickSetup, state: TicketState, action: Action): Promise<Done | Unavailable> | "none" {
+function runAction(setup: TickSetup, state: TicketState, action: Action): Promise<Logged | Unavailable> | "none" {
   return dispatchOn(RUN, action.kind, setup, state, action);
 }
 
@@ -1041,8 +1058,8 @@ function describe(action: Action): string {
   return describeAs(action.kind, action);
 }
 
-function logResult(setup: TickSetup, ticket: string, result: Done | Unavailable): void {
-  setup.log(`${ticket}: ${result.kind === "ok" ? "done" : `${result.kind}: ${result.reason}`}`);
+function logResult(setup: TickSetup, ticket: string, result: Logged | Unavailable): void {
+  setup.log(`${ticket}: ${result.kind === "ok" ? (result.said ?? "done") : `${result.kind}: ${result.reason}`}`);
 }
 
 type Later = { readonly state: TicketState; readonly action: Action };
@@ -1193,7 +1210,7 @@ async function someRuns(setup: TickSetup, later: readonly Later[], ran: Ran[], m
 }
 
 // heldOf : a result a cap held, marked held, as a field to spread. Pure.
-function heldOf(result: Done | Unavailable): { readonly held?: true } {
+function heldOf(result: Logged | Unavailable): { readonly held?: true } {
   return result.kind === "unavailable" && result.held === true ? { held: true } : {};
 }
 

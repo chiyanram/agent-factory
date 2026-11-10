@@ -49,6 +49,14 @@ does not run every trigger below yet; run the rest by hand ([Triggers](#triggers
   round's `review-ended` record keeps what its passes spent the same way (#131). A run stopped before its result event
   has no `spend`: `usage` counts it as unmeasured, never as free. The dollar figure is the CLI's own; on a
   subscription it need not be what you are charged, so count tokens there (an open check on #131).
+  A run that ends `blocked` or `asked` says why, even before its PR exists (#62): its `writer-ended` record carries
+  `why` (the implementer's blocker or questions, or the host's reason, such as `the run exited 1` or `the run wrote no
+  .factory/report.json`, followed by `the run said: …`, the CLI's last words), and the pass logs
+  `<ticket>: writer blocked: <why>` in place of `done`, with `there is no open change to say so on` when no PR exists
+  yet, and the ping says it too. A run the host blocked also keeps the last 40 lines of its stdout and stderr in
+  `$FACTORY_HOME/runs/<project>/<ticket>/writer-<time>.log`, named as `output` in the record and the log line. Every
+  reason and kept line has what looks like a token or key scrubbed (`src/core/writer/why.ts`). To read why a run
+  stopped, read that record line and that file; on a PR, the run's note says the same.
   The caps then hold before each run, never during one (`src/core/dispatch/caps.ts`): per run, `FACTORY_MAX_USD` is
   the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
   and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice
