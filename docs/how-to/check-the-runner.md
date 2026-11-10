@@ -100,9 +100,11 @@ Tick each one on #114 with the output:
 The policy hides your whole home ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531);
 the operator's choice A on #114). It allows back only the run's clone and private home, and, read-only, the install
 folders of `claude` and its Node, the detected toolchain managers' install folders, and the `srt.readOnly` folders.
-A run writes only in its clone and its private home. Its temp folder is `tmp/` in that private home, made before the
-run and removed with it: the runner sets `CLAUDE_CODE_TMPDIR`, `TMP` and `TEMP` to it, and srt sets the run's `TMPDIR`
-from `CLAUDE_CODE_TMPDIR`. The policy never allows `/tmp` (srt keeps only its own `/tmp/claude` writable), so a run
-with no temp folder of its own fails every Bash call with `EPERM` (#62).
+A run writes only in its clone, its private home and its own temp folder: a fresh folder with a short path,
+`/tmp/af-<6 characters>` (mode 0700), made before the run and removed after it. The run's `TMPDIR` names it; srt sets
+that from `CLAUDE_CODE_TMPDIR`, and srt makes its own control sockets there too, so the path must stay short: macOS caps
+a socket path at 104 bytes, and a temp folder inside the private home failed every command with `listen EINVAL`. The
+policy never allows `/tmp` itself (srt keeps only its own `/tmp/claude` writable); a run with no temp folder of its own
+fails every Bash call with `EPERM` (#62).
 A program kept elsewhere under your home cannot be read inside `srt`: put its manager's real install folder on `PATH`,
 or add its folder to `srt.readOnly`.

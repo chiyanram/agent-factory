@@ -9,9 +9,10 @@
 //
 // The policy (srt's README, at the pinned version):
 //   writes      only the run's clone and the run's private HOME (ADR-0012 S15); the clone's read-only paths stay
-//               read-only; srt adds its own mandatory denies (.git/hooks, .git/config, shell rc files). The run's temp
-//               folder is inside its private HOME (srtEnv), never /tmp: a Claude Code with no writable temp folder fails
-//               every Bash call with EPERM (#62)
+//               read-only; srt adds its own mandatory denies (.git/hooks, .git/config, shell rc files); and the run's
+//               own temp folder, a fresh 0700 folder with a short path such as /private/tmp/af-Xy12Ab, never /tmp
+//               itself (#62): a Claude Code with no writable temp folder fails every Bash call with EPERM, and srt puts
+//               its own control sockets in that folder, whose paths macOS caps at 104 bytes
 //   reads       the person's whole home is hidden (review issue 6 on #30; the operator's choice A on #114,
 //               2026-11-10). srt's allowRead wins over its denyRead, so the clone, the private HOME and the agent's
 //               programs (the CLI's install and its Node, srt-programs.ts) and the toolchains (a detected toolchain
@@ -114,6 +115,8 @@ export type SrtRun = {
   readonly worktree: string;
   readonly readOnly: readonly string[];
   readonly home: string;
+  // the run's own temp folder (#62): short, so srt's sockets in it fit macOS's 104-byte limit
+  readonly tmp: string;
 };
 
 // the settings file srt reads, as far as the factory writes it (srt's SandboxRuntimeConfig)
@@ -174,11 +177,12 @@ export function srtPolicy(input: {
       allowRead: [
         run.worktree,
         run.home,
+        run.tmp,
         ...(host.programs.kind === "ok" ? host.programs.value : []),
         ...host.toolchains.allowed.map((t) => t.dir),
         ...(egress.caCerts === "" ? [] : [egress.caCerts]),
       ],
-      allowWrite: [run.worktree, run.home],
+      allowWrite: [run.worktree, run.home, run.tmp],
       denyWrite: run.readOnly.map((p) => join(run.worktree, p)),
     },
     enableWeakerNestedSandbox: false,
@@ -235,15 +239,27 @@ const PASSED = ["PATH", "LANG", "LC_ALL", "TERM"] as const;
 const RESERVED =
   /^(HOME|TMPDIR|TMP|TEMP|CLAUDE_CODE_TMPDIR|CLAUDE_TMPDIR|SRT_.*|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|ALL_PROXY|all_proxy)$/;
 
-// the run's temp folder, inside its private HOME
-export const RUN_TMP = "tmp";
+// the run's temp folder: a fresh folder under this root, named af-<6 characters>
+export const RUN_TMP_ROOT = "/tmp";
+export const RUN_TMP_PREFIX = "af-";
+// macOS caps a Unix socket's path at 104 bytes; srt names its sockets like srt-mux-<pid>-<n>.sock in the temp folder
+const SOCKET_MAX = 104;
+const SOCKET_NAME = "/srt-mux-4194304-99.sock";
+
+// tmpTooLong : why a temp folder's path leaves srt no room for its sockets, or "". Pure.
+export function tmpTooLong(tmp: string): string {
+  const longest = Buffer.byteLength(`${tmp}${SOCKET_NAME}`);
+  return longest <= SOCKET_MAX
+    ? ""
+    : `the run's temp folder ${tmp} is too long for srt's sockets (${longest} of ${SOCKET_MAX} bytes)`;
+}
 
 // tmpEnv : the run's temp folder in the variables that name it (#62). srt sets the run's TMPDIR itself, to
-// CLAUDE_CODE_TMPDIR when that is set and to /tmp/claude otherwise (srt 0.0.82 generateProxyEnvVars), so a TMPDIR handed
-// to srt never reaches the run; it would only move srt's own host-side files, such as its proxy sockets, whose paths
-// macOS caps at 104 bytes. Claude Code reads CLAUDE_CODE_TMPDIR for its own temp root (its Bash tool's
-// claude-<uid>/<cwd> folder) before it falls back to os.tmpdir(). TMP and TEMP are for the programs that read those.
-// Pure.
+// CLAUDE_CODE_TMPDIR when that is set and to /tmp/claude otherwise (srt 0.0.82 generateProxyEnvVars), and makes its
+// own control sockets there too (srt-mux-<pid>-<n>.sock), so the folder's path must be short: one inside the private
+// HOME under the factory home failed every command with "listen EINVAL" on macOS. Claude Code reads
+// CLAUDE_CODE_TMPDIR for its own temp root (its Bash tool's claude-<uid>/<cwd> folder) before it falls back to
+// os.tmpdir(). TMP and TEMP are for the programs that read those. Pure.
 export function tmpEnv(tmp: string): Readonly<Record<string, string>> {
   return { CLAUDE_CODE_TMPDIR: tmp, TMP: tmp, TEMP: tmp };
 }

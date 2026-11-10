@@ -10,7 +10,7 @@ import { srtBox } from "../src/core/box/srt.js";
 import {
   CREDENTIAL_PATHS,
   readSrtProbe,
-  RUN_TMP,
+  tmpTooLong,
   SRT_VERSION,
   srtDomains,
   srtEnv,
@@ -23,7 +23,11 @@ import { boxContract } from "./box-contract.js";
 import { tempDir } from "./temp.js";
 
 const RUNS = tempDir("srt-runs-");
-afterAll(() => rmSync(RUNS, { recursive: true, force: true }));
+const TMPS = tempDir("srt-tmps-");
+afterAll(() => {
+  rmSync(RUNS, { recursive: true, force: true });
+  rmSync(TMPS, { recursive: true, force: true });
+});
 
 const PROGRAMS = [
   "/Users/op/.local/bin",
@@ -94,6 +98,7 @@ function box(fake: { readonly run: Runner }, host: SrtHost = HOST, egress: SrtEg
     egress,
     caName: "NODE_EXTRA_CA_CERTS",
     runsDir: RUNS,
+    tmpRoot: TMPS,
     newName: () => `srt-test-${++n}-${Math.random().toString(36).slice(2, 8)}`,
   });
 }
@@ -125,11 +130,20 @@ describe("srt runner: the policy (#114)", () => {
   const policy = srtPolicy({
     host: HOST,
     egress: EGRESS,
-    run: { worktree: WORKTREE, readOnly: [".git/config"], home: "/Users/op/.factory/srt-runs/r/home" },
+    run: {
+      worktree: WORKTREE,
+      readOnly: [".git/config"],
+      home: "/Users/op/.factory/srt-runs/r/home",
+      tmp: "/private/tmp/af-Xy12Ab",
+    },
   });
 
   it("lets the run write only in its clone and its private HOME, and keeps the read-only paths read-only", () => {
-    expect(policy.filesystem.allowWrite).toEqual([WORKTREE, "/Users/op/.factory/srt-runs/r/home"]);
+    expect(policy.filesystem.allowWrite).toEqual([
+      WORKTREE,
+      "/Users/op/.factory/srt-runs/r/home",
+      "/private/tmp/af-Xy12Ab",
+    ]);
     expect(policy.filesystem.denyWrite).toEqual([`${WORKTREE}/.git/config`]);
   });
 
@@ -157,6 +171,7 @@ describe("srt runner: the policy (#114)", () => {
     expect(policy.filesystem.allowRead).toEqual([
       WORKTREE,
       "/Users/op/.factory/srt-runs/r/home",
+      "/private/tmp/af-Xy12Ab",
       ...PROGRAMS,
       ...TOOLCHAINS,
     ]);
@@ -188,7 +203,7 @@ describe("srt runner: the policy (#114)", () => {
         upstream: { kind: "proxy", host: "proxy.corp.example", port: 8080 },
         caCerts: "/etc/ca.pem",
       },
-      run: { worktree: WORKTREE, readOnly: [], home: "/h" },
+      run: { worktree: WORKTREE, readOnly: [], home: "/h", tmp: "/private/tmp/af-a" },
     });
     expect(work.network.parentProxy).toEqual({
       http: "http://proxy.corp.example:8080",
@@ -211,7 +226,7 @@ describe("srt runner: the policy (#114)", () => {
         CLAUDE_CODE_TMPDIR: "/tmp",
       },
       home: "/h",
-      tmp: "/h/tmp",
+      tmp: "/private/tmp/af-Xy12Ab",
       ca: { name: "NODE_EXTRA_CA_CERTS", file: "/etc/ca.pem" },
       spec: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },
     });
@@ -219,36 +234,33 @@ describe("srt runner: the policy (#114)", () => {
       PATH: "/bin",
       LANG: "C",
       HOME: "/h",
-      CLAUDE_CODE_TMPDIR: "/h/tmp",
-      TMP: "/h/tmp",
-      TEMP: "/h/tmp",
+      CLAUDE_CODE_TMPDIR: "/private/tmp/af-Xy12Ab",
+      TMP: "/private/tmp/af-Xy12Ab",
+      TEMP: "/private/tmp/af-Xy12Ab",
       NODE_EXTRA_CA_CERTS: "/etc/ca.pem",
       CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
     });
   });
 
   // ledger/4 (#62): with no writable temp folder, Claude Code's Bash tool failed every call with EPERM on
-  // /private/tmp/claude-501/...; srt sets the run's TMPDIR to CLAUDE_CODE_TMPDIR
-  it("gives the run a temp folder inside what it may write, and never allows /tmp (#62)", () => {
-    const home = "/Users/op/.factory/srt-runs/r/home";
-    const env = srtEnv({
-      host: { PATH: "/bin" },
-      home,
-      tmp: join(home, RUN_TMP),
-      ca: { name: "X", file: "" },
-      spec: {},
-    });
-    const tmp = env.CLAUDE_CODE_TMPDIR ?? "";
-    expect(policy.filesystem.allowWrite.some((w) => tmp.startsWith(`${w}/`))).toBe(true);
-    expect([env.TMP, env.TEMP]).toEqual([tmp, tmp]);
-    // srt sets TMPDIR in the run itself; one handed to srt would only move srt's own sockets
+  // /private/tmp/claude-501/...; srt sets the run's TMPDIR to CLAUDE_CODE_TMPDIR. A folder inside the private HOME then
+  // failed every command with "listen EINVAL" on macOS: srt makes its sockets in it, and their paths are capped at 104
+  // bytes
+  it("gives the run its own short temp folder, writable, and never /tmp itself (#62)", () => {
+    const tmp = "/private/tmp/af-Xy12Ab";
+    const env = srtEnv({ host: { PATH: "/bin" }, home: "/h", tmp, ca: { name: "X", file: "" }, spec: {} });
+    expect([env.CLAUDE_CODE_TMPDIR, env.TMP, env.TEMP]).toEqual([tmp, tmp, tmp]);
+    // srt sets TMPDIR in the run itself
     expect(env.TMPDIR).toBeUndefined();
-    const tmps = ["/tmp", "/private/tmp", "/var/tmp", "/tmp/claude"];
-    expect(
-      [...policy.filesystem.allowWrite, ...policy.filesystem.allowRead].filter((p) =>
-        tmps.some((t) => p === t || p.startsWith(`${t}/`)),
-      ),
-    ).toEqual([]);
+    expect(policy.filesystem.allowWrite).toContain("/private/tmp/af-Xy12Ab");
+    const roots = new Set(["/tmp", "/private/tmp", "/var/tmp", "/tmp/claude"]);
+    expect([...policy.filesystem.allowWrite, ...policy.filesystem.allowRead].filter((p) => roots.has(p))).toEqual([]);
+  });
+
+  it("refuses a temp folder too long for srt's sockets", () => {
+    expect(tmpTooLong("/private/tmp/af-Xy12Ab")).toBe("");
+    const long = "/Users/someone/.factory/srt-runs/factory-srt-a74b9ea0-0e56-4017-8926-a249b211b387/home/tmp";
+    expect(tmpTooLong(long)).toMatch(/too long for srt's sockets/);
   });
 });
 
@@ -299,7 +311,8 @@ describe("srt runner: start, run and stop (#114)", () => {
     expect(call.args).toEqual(["--settings", policyFile, "--", "claude", "-p", "--verbose"]);
     expect(call.cwd).toBe(WORKTREE);
     expect(call.stdin).toBe("the prompt");
-    const tmp = join(RUNS, started.session.id, "home", "tmp");
+    const tmp = call.env?.CLAUDE_CODE_TMPDIR ?? "";
+    expect(tmp.startsWith(join(TMPS, "af-"))).toBe(true);
     expect(call.env).toEqual({
       PATH: "/usr/bin:/bin",
       HOME: join(RUNS, started.session.id, "home"),
@@ -312,9 +325,12 @@ describe("srt runner: start, run and stop (#114)", () => {
     expect(statSync(tmp).isDirectory()).toBe(true);
     expect(statSync(tmp).mode & 0o777).toBe(0o700);
     const policy: unknown = JSON.parse(readFileSync(policyFile, "utf8"));
-    expect(policy).toMatchObject({ filesystem: { allowWrite: [WORKTREE, join(RUNS, started.session.id, "home")] } });
+    expect(policy).toMatchObject({
+      filesystem: { allowWrite: [WORKTREE, join(RUNS, started.session.id, "home"), tmp] },
+    });
     expect(await runner.stop(started.session)).toEqual({ kind: "ok" });
     expect(existsSync(join(RUNS, started.session.id))).toBe(false);
+    expect(existsSync(tmp)).toBe(false);
   });
 
   it("stops a command at its timeout, and reads it as timed out", async () => {
