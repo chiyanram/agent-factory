@@ -108,8 +108,9 @@ Pin every GitHub Actions step to a full commit SHA, with the version in a commen
 ## Releases
 
 Releases are manual during the dev phase (#327). A merge to `main` runs the checks only. To release, open
-**Actions → ci → Run workflow** on `main`, or run `gh workflow run ci.yml --ref main`; semantic-release
-(`release.config.mjs`, #153) then runs after the checks pass, the same way as chiyanram/skills.
+**Actions → release → Run workflow** on `main`, or run `gh workflow run release.yml --ref main`. It runs the checks
+from `ci.yml` first (#351); semantic-release (`release.config.mjs`, #153) then runs after the checks pass, the same
+way as chiyanram/skills.
 
 - Pull requests are squash-merged with the PR title as the commit subject, so **the PR title decides the release**.
   CI fails a title that is not `type(scope): lower-case summary (#ticket)`, such as `feat(box): one box seam (#112)`, and
