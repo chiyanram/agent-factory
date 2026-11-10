@@ -21,16 +21,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Node 22 is the minimum (package.json engines) and Node 26 the version we build, release and ship on. The Node 26 leg
-  # keeps the job's name, lint-and-test, so the required check on ruleset main still matches it.
+  # Node 26 is the one version we support, test, build, release and ship on (package.json engines; operator,
+  # 2026-11-10, #30). The job keeps its name, lint-and-test, so the required check on ruleset main matches it.
   lint-and-test:
-    name: ${{ matrix.node == 26 && 'lint-and-test' || format('lint-and-test (node {0})', matrix.node) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [22, 26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,7 +34,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 26
       - run: make lint
       - run: make test
       - run: make build
