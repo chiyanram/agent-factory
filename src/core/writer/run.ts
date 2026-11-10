@@ -39,6 +39,7 @@ import { PR_BODY_PATH } from "../pr-body.js";
 import type { BoxPlace, Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { pluginPaths, type Clone } from "./clone.js";
+import { outsideScope, scoped } from "./scope.js";
 import { NO_STREAM, streamOf, streamSpend, type Spend, type Stream } from "../dispatch/spend.js";
 
 export type Claude = {
@@ -75,6 +76,8 @@ export type WriterRun = {
   readonly plugins: number;
   // the role card's tools (process/cards.ts): the run gets these and no others (#232)
   readonly tools: readonly string[];
+  // where the card lets the run edit (process/cards.ts editScope); none is anywhere in the clone (#424)
+  readonly editScope: readonly string[];
   readonly completion: Completion;
   readonly stallMs: number;
 };
@@ -445,6 +448,20 @@ async function committed(run: WriterRun): Promise<Result<{ readonly tip: string;
   return patch.kind === "ok" ? { kind: "ok", value: { tip: sha, patch: patch.value } } : patch;
 }
 
+// reasonOf : the first of two results' reasons; "" when both are ok. Pure.
+function reasonOf(a: Result<unknown>, b: Result<unknown>): string {
+  return a.kind === "failed" ? a.reason : b.kind === "failed" ? b.reason : "";
+}
+
+// changedPaths : every path the run's commits touch, a rename as both its paths; none when it changed nothing
+async function changedPaths(run: WriterRun, tip: string): Promise<Result<readonly string[]>> {
+  if (tip === run.clone.start || run.editScope.length === 0) {
+    return { kind: "ok", value: [] };
+  }
+  const names = await git(run, ["diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", run.clone.start, tip]);
+  return names.kind === "ok" ? { kind: "ok", value: names.value.split("\0").filter((p) => p !== "") } : names;
+}
+
 // prOf : the PR body a done run wrote, read after the box stopped, as a field to spread; none when it wrote none, or
 // one the host cannot read safely (a symlink, too large)
 async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: string }> {
@@ -465,7 +482,13 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
   });
   const pr = await prOf(run, outcome);
   const tip = await committed(run);
-  return tip.kind === "ok"
-    ? { kind: "ok", value: { outcome, ending: endingOf(end), spend, said: words, output, ...pr, ...tip.value } }
-    : { kind: "failed", reason: `cannot read what the run committed: ${tip.reason}` };
+  const paths = tip.kind === "ok" ? await changedPaths(run, tip.value.tip) : tip;
+  if (tip.kind === "failed" || paths.kind === "failed") {
+    return { kind: "failed", reason: `cannot read what the run committed: ${reasonOf(tip, paths)}` };
+  }
+  const final = scoped(outcome, outsideScope(paths.value, run.editScope), run.editScope);
+  return {
+    kind: "ok",
+    value: { outcome: final, ending: endingOf(end), spend, said: words, output, ...pr, ...tip.value },
+  };
 }

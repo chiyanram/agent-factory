@@ -1413,6 +1413,27 @@ describe("the writer step: role cards from the process plugin (#232)", () => {
     await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), { kind: "test-first" });
     expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^# Test-first\n/) });
   });
+
+  it("blocks a run that edits outside its card's Edit(…) scope, and names the path (#424)", async () => {
+    const dir = join(p.root, "scoped", "skills", "crq", "process");
+    mkdirSync(join(dir, "roles"), { recursive: true });
+    writeFileSync(join(dir, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+    writeFileSync(
+      join(dir, "roles", "test-first.md"),
+      "---\nrole: test-first\ntools: [Read, Edit(src/test/**), Bash]\nhand_off: {status: done, evidence}\n---\n\n# Test-first\n",
+    );
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []);
+    const scoped = { ...s, settings: { ...s.settings, plugins: [{ label: "scoped", dir: join(p.root, "scoped") }] } };
+    const out = await run(scoped, { kind: "test-first" });
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: {
+        outcome: "blocked",
+        why: expect.stringContaining("Renewal.java, outside its card's edit scope (src/test/**)"),
+      },
+    });
+  });
 });
 
 // the roles a ticket's flow runs from cards

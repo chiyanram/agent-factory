@@ -146,8 +146,8 @@ and the engine ships a small default one.
 - **The approval floor:** a lanes file can make a lane stricter, never drop the approval for any lane above tiny.
 - **The roles:** coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro and
   onboarder.
-- **A role card's frontmatter**: the engine enforces `role`, `tools`, `must_not_see` and `hand_off`; the other fields
-  are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
+- **A role card's frontmatter**: the engine enforces `role`, `tools` (with an `Edit(…)` path scope), `must_not_see`,
+  `hand_off` and `enforced_guardrails` (IDs from a closed list); `input`, `steps` and `rules` are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
 
 **Connectors** are the engine's swappable parts (ADR-0014). Each has a dry mode that shows what it would write and writes
 nothing. Each passes the shared test kit: approve, stale after an edit, refuse a bot.

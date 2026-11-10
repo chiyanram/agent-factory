@@ -177,3 +177,57 @@ describe("role card frontmatter, enforced (#232)", () => {
     });
   });
 });
+
+describe("role card guardrails and edit scope (#424)", () => {
+  const card = (role: Role, front: string) => cardOf(role, `---\nrole: ${role}\n${front}\n---\n\nx\n`, "team");
+
+  it("refuses a guardrail ID that is not on the engine's list", () => {
+    expect(card("implementer", "tools: [Read]\nenforced_guardrails: [no-push, tests-green]")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"tests-green", which is not a guardrail ID'),
+    });
+  });
+
+  it("refuses an ID the role cannot have, and edit-scope with no Edit(…) path", () => {
+    expect(card("verify-pass", "tools: [Read]\nenforced_guardrails: [judge-files-locked]")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("the verify-pass cannot have the guardrail judge-files-locked"),
+    });
+    expect(card("implementer", "tools: [Read, Edit]\nenforced_guardrails: [edit-scope]")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("no Edit(…) path"),
+    });
+  });
+
+  it("keeps the role's floor, whatever the card names, and adds edit-scope for an Edit(…) path", () => {
+    const read = card("test-first", "tools: [Read, Edit(src/test/**), Edit(**/*.test.ts)]\nenforced_guardrails: []");
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: {
+        tools: ["Read", "Edit"],
+        editScope: ["src/test/**", "**/*.test.ts"],
+        guardrails: ["no-push", "no-web", "no-credentials", "edit-scope"],
+      },
+    });
+  });
+
+  it("refuses a path scope on a tool other than Edit; a note with a space is text", () => {
+    expect(card("implementer", "tools: [Read(src/**)]")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("only Edit takes a path scope; the card gives Read(src/**)"),
+    });
+    expect(card("implementer", "tools: [Edit (test files only)]")).toMatchObject({
+      kind: "ok",
+      value: { tools: ["Edit"], editScope: [] },
+    });
+  });
+
+  it("reads the old plain-text guardrails and next for one release, and ignores them", () => {
+    expect(
+      card("cleanup", "tools: [Read]\nenforced_guardrails: the test checks; no push\nnext: the ready check"),
+    ).toMatchObject({
+      kind: "ok",
+      value: { guardrails: ["no-push", "no-web", "no-credentials", "judge-files-locked"] },
+    });
+  });
+});

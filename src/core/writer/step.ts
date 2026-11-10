@@ -542,6 +542,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
     plugins: setup.settings.plugins.length,
     tools: work.card.tools,
+    editScope: work.card.editScope,
     completion: setup.settings.completion,
     stallMs: setup.settings.stallMs,
   });
