@@ -85,7 +85,7 @@ export type ReviewSetup = {
   // where specs and approvals live (<home>/specs, <home>/approvals), and the project they are kept under
   readonly home: string;
   readonly project: string;
-  // the project's plugins, in order: the first that holds a process gives the lanes, baseline and references (#232)
+  // the project's plugins, in order: the one that holds a process gives the lanes, baseline and references (#232, #426)
   readonly plugins: readonly PluginDir[];
   readonly packDir: string;
   // where each pass's answer is kept, per change and head (ADR-0011 D16)

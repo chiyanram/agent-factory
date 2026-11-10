@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_LANES } from "../src/core/lane.js";
-import { BUILT_IN, readProcess } from "../src/core/process/read.js";
+import { BUILT_IN, oneHolder, readProcess, type Holder } from "../src/core/process/read.js";
 import { BASELINE } from "../src/core/review/rules.js";
 import { tempDir } from "./temp.js";
 
@@ -89,27 +89,49 @@ describe("readProcess: the lanes and the review baseline from the process plugin
     ]);
   });
 
-  it("takes the first plugin in the list that holds a process, and keeps the built-in baseline without review.json", async () => {
+  it("takes the one plugin in the list that holds a process, and keeps the built-in baseline without review.json", async () => {
     const rules = plugin("rules", { "skills/java/references/x.md": "# x\n" });
     const team = plugin("team", { "skills/flow/process/lanes.json": readFileSync(RULEBOOK_LANES, "utf8") });
     const read = await readProcess([
       { label: "rules@acme", dir: rules },
       { label: "team@acme", dir: team },
-      { label: "rulebook@chiyanram", dir: rulebook() },
     ]);
     expect(read).toMatchObject({ kind: "ok", value: { from: expect.stringContaining("team@acme") } });
     expect(read.kind === "ok" ? read.value.baseline : []).toBe(BASELINE);
   });
 
+  it("refuses a second plugin that holds a process, naming both, never taking the first (#426)", async () => {
+    const rules = plugin("rules", { "skills/java/references/x.md": "# x\n" });
+    const team = plugin("team", { "skills/flow/process/lanes.json": readFileSync(RULEBOOK_LANES, "utf8") });
+    const read = await readProcess([
+      { label: "team@acme", dir: team },
+      { label: "rules@acme", dir: rules },
+      { label: "rulebook@chiyanram", dir: rulebook() },
+    ]);
+    expect(read).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("team@acme and rulebook@chiyanram each hold a process"),
+    });
+    expect(read.kind === "failed" ? read.reason : "").not.toContain("rules@acme");
+  });
+
+  it("oneHolder: none, the one, or refused for two or more", () => {
+    const holder = (label: string): Holder => ({ plugin: { label, dir: `/p/${label}` }, dir: `/p/${label}/process` });
+    expect(oneHolder([])).toEqual({ kind: "none" });
+    expect(oneHolder([holder("a@m")])).toEqual({ kind: "ok", value: holder("a@m") });
+    expect(oneHolder([holder("a@m"), holder("b@m"), holder("c@m")])).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("a@m and b@m and c@m each hold a process (/p/a@m/process, /p/b@m/process"),
+    });
+  });
+
   it("refuses a lanes file that drops the approval floor, or names a lane the engine has not, never skipping it", async () => {
     const open = lanesText("feature", "approval", false);
     const team = plugin("team", { "skills/flow/process/lanes.json": open });
-    expect(
-      await readProcess([
-        { label: "team@acme", dir: team },
-        { label: "rulebook@chiyanram", dir: rulebook() },
-      ]),
-    ).toMatchObject({ kind: "failed", reason: expect.stringContaining("approval floor); feature would run") });
+    expect(await readProcess([{ label: "team@acme", dir: team }])).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("approval floor); feature would run"),
+    });
     const renamed = lanesText("tiny", "lane", "small");
     const small = plugin("small", { "skills/flow/process/lanes.json": renamed });
     expect(await readProcess([{ label: "small@acme", dir: small }])).toMatchObject({

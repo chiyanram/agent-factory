@@ -29,7 +29,7 @@ import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
 import { allowedGuardrails, GUARDRAIL_FLOOR, isGuardrail, type GuardrailId } from "./guardrails.js";
-import { processDir, type PluginDir } from "./read.js";
+import { findProcess, type PluginDir } from "./read.js";
 
 const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts", "roles");
 
@@ -330,21 +330,19 @@ async function textAt(path: string): Promise<string | undefined> {
   return readFile(path, "utf8").catch(() => undefined);
 }
 
-// pluginCard : the first plugin's card for the role, in the project's order, among the plugins that hold a process;
-// "none" when none holds that card
+// pluginCard : the process plugin's card for the role; "none" when no plugin holds a process, or the process holds no
+// card for the role. Two process plugins are refused (#426).
 async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Result<Card> | "none"> {
-  for (const plugin of plugins) {
-    const dir = await processDir(plugin.dir);
-    const path = join(dir, "roles", `${role}.md`);
-    const text = dir === "" ? undefined : await textAt(path);
-    if (text !== undefined) {
-      return cardOf(role, text, `${plugin.label} (${path})`);
-    }
+  const found = await findProcess(plugins);
+  if (found.kind !== "ok") {
+    return found.kind === "none" ? "none" : found;
   }
-  return "none";
+  const path = join(found.value.dir, "roles", `${role}.md`);
+  const text = await textAt(path);
+  return text === undefined ? "none" : cardOf(role, text, `${found.value.plugin.label} (${path})`);
 }
 
-// readCard : the role's card from the project's process plugins, or the built-in card when none holds one. A card that
+// readCard : the role's card from the project's process plugin, or the built-in card when none holds one. A card that
 // is there but does not pass its check is refused, never skipped for the built-in one.
 export async function readCard(plugins: readonly PluginDir[], role: Role, builtIn = BUILT_IN): Promise<Result<Card>> {
   const found = await pluginCard(plugins, role);

@@ -3,7 +3,8 @@
 // these commands are for the human: the coordinator's deny list covers the user and team settings (#227).
 //
 //   config show    every key: its value, the layer and `file:line` it came from, its class, and the team's mode
-//   config check   the layers resolved and the project file's readers run on the result: exit 0, or 1 with each error
+//   config check   the layers resolved and the project file's readers run on the result, and the pinned plugins looked
+//                  at for a second process (#426): exit 0, or 1 with each error
 //   team update    the resolved values at the team's new commit against the pinned one, a check, then the pin moved
 
 import { readFile, rename, writeFile } from "node:fs/promises";
@@ -11,7 +12,9 @@ import { codeOf } from "./core/dispatch/records.js";
 import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { pluginConfigOf } from "./core/plugin/config.js";
+import { pinnedDirs, readPins } from "./core/process/pins.js";
 import { pluginListOf } from "./core/process/plugins.js";
+import { findProcess } from "./core/process/read.js";
 import { projectPath, readyFieldsOf } from "./core/project.js";
 import { layered, readTeamAt, teamDir, type Layered, type Pin, type Read } from "./core/settings/layers.js";
 import { canonical, where, type Problem, type Resolved } from "./core/settings/resolve.js";
@@ -68,6 +71,23 @@ function readerErrors(path: string, effective: object): readonly Problem[] {
   return [ready, connectors, plugins].flatMap((r) =>
     r.kind === "failed" ? [{ level: "error" as const, text: r.reason }] : [],
   );
+}
+
+// processProblems : a second plugin that holds a process, among the project's pinned plugins, naming each one (#426).
+// A bad plugin list is the readers' error, and a plugin not pinned yet is left out: plugin update checks it.
+async function processProblems(
+  home: string,
+  project: string,
+  path: string,
+  effective: object,
+): Promise<readonly Problem[]> {
+  const refs = pluginListOf(path, effective);
+  const pins = await readPins(home, project);
+  if (pins.kind === "failed") {
+    return [{ level: "error", text: pins.reason }];
+  }
+  const found = await findProcess(pinnedDirs(home, refs.kind === "ok" ? refs.value : [], pins.value));
+  return found.kind === "failed" ? [{ level: "error", text: found.reason }] : [];
 }
 
 function allProblems(path: string, layers: Layered): readonly Problem[] {
@@ -182,7 +202,10 @@ async function check(io: SettingsIo, project: string): Promise<number> {
     return 1;
   }
   const layers = await resolved(io, loaded.value);
-  const problems = allProblems(loaded.value.path, layers);
+  const problems = [
+    ...allProblems(loaded.value.path, layers),
+    ...(await processProblems(io.home, project, loaded.value.path, layers.effective)),
+  ];
   printProblems(io, problems);
   if (problems.some((p) => p.level === "error")) {
     return 1;

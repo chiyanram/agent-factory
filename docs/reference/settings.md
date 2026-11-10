@@ -114,11 +114,12 @@ there.
   Each `dispatch` pass checks every pin, then copies each plugin into the implementer's clone as `.factory/plugins/<n>`
   (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
   each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
-  pass. The first plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
+  pass. The one plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
   the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
   the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
   and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
-  above tiny stops the pass. **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
+  above tiny stops the pass, and so does a second plugin that holds a process; `config check` names both (#426).
+  **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
   only to the next ticket; the records show the change. The review cannot run with no plugin yet (#232).
 - `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it, and `specStore` must stay
   `local`.
@@ -198,7 +199,8 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 - An unknown key is a warning with "did you mean" for one release, then an error.
 - With no team pin and no user file, every value is the project file's own, as before the layers.
 - `agent-factory config show <project>` prints each key's value, layer, `file:line` and class; `config check <project>`
-  resolves the layers, runs the project file's checks on the result, and exits 0 or 1; `team update <project>
+  resolves the layers, runs the project file's checks on the result, refuses a second pinned plugin that holds a
+  process (naming both), and exits 0 or 1; `team update <project>
   [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
   Fetch the team's clone yourself first; nothing here uses the network.
 - The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch`, `review` and
