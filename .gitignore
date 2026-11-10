@@ -7,5 +7,5 @@ plugins/*/lib/
 # git worktrees of this repo (Claude Code puts them here); every repo-wide tool must skip them (#148)
 .claude/worktrees/
 # personal working notes and editor files, never repo content (#373)
-review/
+/review/
 .zed/

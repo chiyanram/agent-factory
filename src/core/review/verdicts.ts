@@ -24,7 +24,15 @@ import {
 } from "../finding.js";
 import type { Result } from "../forge/api.js";
 
-export { GRADES, readVerdicts, VERIFY_SCHEMA, type Bucket, type Grade, type Severity, type Verdict } from "../finding.js";
+export {
+  GRADES,
+  readVerdicts,
+  VERIFY_SCHEMA,
+  type Bucket,
+  type Grade,
+  type Severity,
+  type Verdict,
+} from "../finding.js";
 
 export type Axis = "standards" | "spec";
 export type Kind = "rule" | "logic";
@@ -96,7 +104,12 @@ export function sortFindings<F extends Finding>(
   findings: readonly F[],
   verdicts: readonly Verdict[],
 ): readonly (F & { readonly bucket: Bucket; readonly why: string })[] {
-  return findings.map((f) => settle(f, verdicts.find((x) => x.id === f.id)));
+  return findings.map((f) =>
+    settle(
+      f,
+      verdicts.find((x) => x.id === f.id),
+    ),
+  );
 }
 
 export const BUCKET_NAMES: Readonly<Record<Bucket, string>> = {
