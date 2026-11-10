@@ -120,7 +120,7 @@ export const ALLOW: readonly Allow[] = [
     file: "src/core/writer/run.ts",
     rule: "skip-permissions",
     has: '"--dangerously-skip-permissions"',
-    why: "the writer runs only in a box, where S11 allows skip-all; it holds no forge credential (S6)",
+    why: "the writer runs only in a runner (vm or srt), where S11 allows skip-all (#114); it holds no forge credential (S6)",
   },
   {
     file: "src/core/plugin/contract.ts",

@@ -113,8 +113,13 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
   The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the agent CLIs at pinned versions. A
   project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. `agent-factory box build` builds and
   pins it ([The runner image](#the-runner-image)).
-- Work laptop (`FACTORY_BOX=laptop`): in Rancher Desktop, share no home folder with its VM. The implementer's runner
-  is a container there, with its own Docker inside ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)).
+- Work laptop (`FACTORY_BOX=srt`, #114): install the pinned sandbox runtime, `npm install --global
+  @anthropic-ai/sandbox-runtime@0.0.81` (on Linux also `bubblewrap`, `socat` and `ripgrep`). Each implementer run, ready
+  check and local verifier runs inside `srt` with one policy the factory writes per run: writes only in the run's clone
+  and a private home, reads of the credential paths denied, network only through srt's own proxy and the project's
+  `egress.allow`, and no Docker socket. There is no Docker in the runner: container tests run on git host CI. A run
+  refuses to start when `srt` is missing or is not that version. Run the laptop check once ([Check the srt
+  runner](#check-the-srt-runner)).
 - Whoever started the work does not approve it. Write this rule down for the team; a git host on a free plan cannot
   enforce it.
 - When a developer leaves, revoke the GitLab token and block the account, or delete the App's key or the App.
@@ -352,7 +357,7 @@ The commands read their settings from the environment.
 | `FACTORY_RUN_HOURS` | run hours (`runHours`): the hours in UTC, `HH-HH`, in which a `dispatch` pass may start a run, such as `22-06` across midnight or `00-24` for the whole day. Outside them a pass starts no run and lists each one as held; nothing is stopped mid-run, and nothing waits in the background: `dispatch` prints "run hours are 22-06 UTC; run `agent-factory dispatch <project>` again then", and the orchestrator loop ends after that pass. The tickets keep their records, so the next `dispatch` inside the hours starts their runs. A cap: a lower layer may only narrow the hours (#299) | any hour |
 | `FACTORY_MAX_USD` | the most one `claude -p` run may spend, in US dollars: every finder and verify pass run, and every implementer run | no cap |
 | `FACTORY_DRY_RUN` | `1` makes `claim`, `release`, `status`, `ask`, `block` and `reconcile` print each git host write instead of making it, and end their line in "(dry run)"; reads still go to the git host; `agent-factory review` refuses it | off |
-| `FACTORY_BOX` | the runner kind ([review 1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)): `vm` runs each runner as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `laptop` on Rancher Desktop is **planned** (#129). No runner starts without it | — (refused) |
+| `FACTORY_BOX` | the runner kind (`runner`, a ladder: `none` < `srt` < `vm`, so a team that sets `vm` keeps a user from `srt`): `vm` runs each runner as a container with its own Docker engine under Sysbox, on this host's Docker (#113; install Sysbox first, #158); `srt` runs each one inside Anthropic's sandbox runtime on a work laptop, with no Docker (#114); `none` starts no run. No runner starts without it | — (refused) |
 | `FACTORY_WINDOW_HOURS` | `usage`: the length of the subscription's usage window, in hours, from 1 to 24 (`window.hours`) | `5` |
 | `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
 | `FACTORY_MAX_USD_DAY`, `FACTORY_MAX_TOKENS_DAY` | `dispatch`: the most a project's runs may spend in a UTC day (`caps.usdPerProjectDay`, `caps.tokensPerProjectDay`); at either, no new run starts that day and one notice goes out (#131) | no cap |
@@ -365,7 +370,8 @@ The commands read their settings from the environment.
 | `FACTORY_RULEBOOK` | **Deprecated** (#232; read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the implementer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
 | `FACTORY_CLAUDE` | the `claude` CLI the automated review runs | `claude` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
-| `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through; a setting of the machine, not of a project | none: direct |
+| `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through, the vm runner's Squid and the srt runner's own (`parentProxy` in its policy); a setting of the machine, not of a project | none: direct |
+| `NODE_EXTRA_CA_CERTS` | at work: the company CA's PEM file, an absolute path (`egress.caCerts`, a preference). The srt runner hands it to `srt` and the run, and reads it even inside the factory home. Add the CA to the OS trust store as well, for programs that are not Node. **Today:** the vm runner does not pass it on (#114) | none |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the finder's and the verify pass's instructions. They replace the instructions only: the engine sends its floor ahead of them on every run (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_MAX_TRIES` | tries per request on a rate limit | `4` |
 
@@ -500,7 +506,7 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 
 | class | rule | keys |
 |---|---|---|
-| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits` |
+| ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits`, `runner` (none, srt, vm) |
 | cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
@@ -584,7 +590,39 @@ line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each
 - [ ] the open question: does the work build need a private-registry token? Run the work project's build in the
   runner; if a registry answers 401, record it on #130.
 
-**Today:** `--internal` with Rancher Desktop's containerd engine is unverified; the laptop runner is stage B (#129).
+On the work laptop there is no Squid proxy: the srt runner keeps its own, and `egress check` says so; run the srt
+check below instead.
+
+### Check the srt runner
+
+**Today:** the srt runner is tested only on a fake `srt` (`test/srt-box.test.ts`); that its policy holds on a real
+laptop is proven only by this check (#114). Run it on the work laptop after installing the pinned `srt`, in a checkout
+of this package, as the user that runs the orchestrator:
+
+```bash
+echo canary > ~/.ssh/canary
+FACTORY_TEST_SRT=1 npx vitest run test/srt-box-real.test.ts
+rm ~/.ssh/canary
+```
+
+It starts a fresh srt runner on an empty clone, with `api.anthropic.com` as the only allowed host, runs one command per
+check, and fails on the first that gets through. Where `srt` is missing or another version, it is skipped and says why.
+Tick each one on #114 with the output:
+
+- [ ] reading `~/.ssh/canary` inside `srt` fails;
+- [ ] a direct connection that skips the proxy (`curl --noproxy '*' https://1.1.1.1`) fails;
+- [ ] a host off the allowlist (`https://example.com`) is refused by srt's proxy;
+- [ ] a call to `https://api.anthropic.com` goes through (any HTTP answer); at work, through `FACTORY_UPSTREAM_PROXY`
+  and the company CA;
+- [ ] a write in the clone works, and a write elsewhere in your home fails;
+- [ ] the factory home's files and your `gh`, `glab`, `.netrc` and `.git-credentials` logins cannot be read;
+- [ ] no Docker socket answers (Docker Desktop, Rancher Desktop);
+- [ ] by hand: one implementer run with `claude` finishes inside `srt` (`FACTORY_BOX=srt agent-factory dispatch
+  <project>`); a run with Copilot comes with #162.
+
+**Today:** reads outside the named credential paths stay open to the run (a secret kept elsewhere in your home can be
+read); [review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531) prefers hiding the whole
+home. The run's private home and `--setting-sources user` keep the agent itself from loading anything of yours.
 
 ## Run the loop
 
@@ -771,7 +809,8 @@ names it when its `criterion` starts with that id; a criterion with no row fails
 tries. Then it runs each evidence row of the implementer's report again at the head,
 and the local verifier the project file's `verify`, each on a fresh runner with no git host token and its egress
 through the project's own proxy; nothing of the branch runs on the host. Each runner starts that proxy afresh, inside
-the project's lock. The orchestrator opens the vm runner when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set;
+the project's lock. The orchestrator opens the vm runner when `FACTORY_BOX=vm`, `box.json` and `egress.allow` are set, and the srt runner
+when `FACTORY_BOX=srt`, the pinned `srt` answers and `egress.allow` is set;
 otherwise the implementer, the ready check and the verifier say what is missing and wait. The orchestrator runs a
 ticket's `test-first` and `fix` runs on the runner, on a fresh clone of the branch (or of the default branch on a first run), and the host pushes
 and posts what it committed. A `rework` or `ci` run (#171) works the same way, with its task in a read-only
@@ -882,8 +921,12 @@ it is a prompt instruction at most.
 - **Decided: runs execute on a runner.** No git host token, network only to the model API and registries; the host
   pushes and posts ([Q1](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6680836108)). Every implementer run does so (#113): the bash `start-writer`
   that ran one unsandboxed, as you, with the bot's login, is gone (#138).
-- **Decided: no skip-permissions on the laptop**, an allow-list instead; config never from the branch
-  ([Q6, Q7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370)).
+- **Enforced: skip-all permissions only inside a runner** (`vm` or `srt`), never bare on the host; config never from
+  the branch ([Q6, Q7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370), #114). The
+  implementer's `.factory/settings.json` also holds its lists: allow Bash (inside the runner) and edits in the clone;
+  deny `git push`, `WebFetch`, `curl` and reads of the credential paths. Claude Code keeps deny rules even with
+  skip-all; the runner is the wall, the lists are the second line. **Today:** the automated review, the design review
+  and the onboarder, which only read, still run on the host with Read, Grep and Glob, not in `srt` (#113).
 - **Decided: zero findings is never green.** Only a human undrafts. Every PR gets a script-made status list of protected
   files and new dependencies ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)).
 

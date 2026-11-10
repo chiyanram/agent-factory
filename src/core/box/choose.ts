@@ -2,10 +2,11 @@
 // image is pinned, and whether a run may start. openBox (index.ts) is the one place that asks a Box anything: the probe.
 //
 // There is no default place. An unset FACTORY_BOX is refused, so setup (#136) must ask, and a run never starts in a
-// place nobody chose.
+// place nobody chose. The key is a ladder, none < srt < vm (#114): a team that sets vm keeps a user from srt, and none,
+// which a layer may set to say "no runner here", starts no run at all: no run ever runs bare.
 
 import type { Box, BoxPlace, PinnedImage, Probe } from "./types.js";
-import { settingOf } from "../settings/machine.js";
+import { settingName, settingOf } from "../settings/machine.js";
 
 export type BoxChoice =
   | { readonly kind: "chosen"; readonly place: BoxPlace; readonly risks: readonly string[] }
@@ -20,19 +21,32 @@ const VM_RISKS: readonly string[] = [
   "the box holds the model-only token: a tricked writer can spend model budget with it until the token is revoked",
 ];
 
+// The srt runner's risks (#114): the sandbox is the host's own kernel and the agent runs as the person.
+const SRT_RISKS: readonly string[] = [
+  "the runner is an OS sandbox (sandbox-exec on macOS, bubblewrap on Linux) around a process that runs as you: a flaw in it, or in the kernel, reaches your whole account",
+  "reads are open but for the credential paths the policy names: a secret kept anywhere else in your home can be read by the run",
+  "a host on the egress allowlist (the model API, the package registries) can still carry data out",
+  "the runner holds the model-only token: a tricked writer can spend model budget with it until the token is revoked",
+  "there is no Docker in the runner: tests that need containers fail there and run on git host CI",
+];
+
+const name = settingName("runner");
+
 const PLACES: readonly Place[] = [
   { value: "vm", choice: { kind: "chosen", place: "vm", risks: VM_RISKS } },
-  { value: "laptop", choice: { kind: "refused", reason: "FACTORY_BOX=laptop is stage B (#129); use vm" } },
+  { value: "srt", choice: { kind: "chosen", place: "srt", risks: SRT_RISKS } },
+  { value: "none", choice: { kind: "refused", reason: `${name}=none starts no run; set it to srt or vm` } },
+  { value: "laptop", choice: { kind: "refused", reason: `${name}=laptop is replaced by srt (#114); use srt or vm` } },
 ];
 
 export function chooseBox(env: NodeJS.ProcessEnv): BoxChoice {
   const set = settingOf(env, "runner");
   if (set === undefined || set.trim() === "") {
-    return { kind: "refused", reason: "FACTORY_BOX is not set; set it to vm" };
+    return { kind: "refused", reason: `${name} is not set; set it to srt or vm` };
   }
   const place = PLACES.find((p) => p.value === set);
   return place === undefined
-    ? { kind: "refused", reason: `FACTORY_BOX=${JSON.stringify(set)} is not a box; use vm` }
+    ? { kind: "refused", reason: `${name}=${JSON.stringify(set)} is not a runner kind; use srt or vm` }
     : place.choice;
 }
 

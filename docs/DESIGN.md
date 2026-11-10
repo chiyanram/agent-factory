@@ -247,7 +247,7 @@ so work and personal logins never mix.
 | `report.json` has no `deferred` list | an optional `deferred` list (cleanup) |
 | the PR body is built by the host | the host posts the implementer's `.factory/pr.md` below its own lines, cleaned (#335, built) |
 | a team template copied once (ADR-0014 P3) | live settings layers, pinned by commit |
-| one runner kind, `vm`; the laptop is refused (`box/choose.ts:24`) | `srt` on the work laptop |
+| one runner kind, `vm`; the laptop is refused (`box/choose.ts:24`) | `srt` on the work laptop (built for `claude`, #114) |
 | `claude` only | an agent CLI connector: claude and copilot |
 | caps per run only | caps per run, ticket and project-day, plus usage records |
 | no project knowledge | the onboarder's brief and glossary in the project home |

@@ -7,7 +7,7 @@ const EXIT_0 = { kind: "exited", code: 0, stdout: "", stderr: "" } as const;
 
 describe("chooseBox", () => {
   it("refuses when FACTORY_BOX is not set, so setup has to ask", () => {
-    expect(chooseBox({})).toEqual({ kind: "refused", reason: "FACTORY_BOX is not set; set it to vm" });
+    expect(chooseBox({})).toEqual({ kind: "refused", reason: "FACTORY_BOX is not set; set it to srt or vm" });
     expect(chooseBox({ FACTORY_BOX: "  " }).kind).toBe("refused");
   });
 
@@ -21,17 +21,32 @@ describe("chooseBox", () => {
     expect(choice.risks.join("\n")).toMatch(/model-only token/);
   });
 
-  it("refuses the laptop box until stage B", () => {
+  it("chooses the srt runner on a laptop and names its risks: no laptop is refused any more (#114)", () => {
+    const choice = chooseBox({ FACTORY_BOX: "srt" });
+    expect(choice.kind).toBe("chosen");
+    if (choice.kind !== "chosen") return;
+    expect(choice.place).toBe("srt");
+    const risks = choice.risks.join("\n");
+    expect(risks).toMatch(/sandbox-exec on macOS, bubblewrap on Linux/);
+    expect(risks).toMatch(/credential paths/);
+    expect(risks).toMatch(/no Docker/);
+  });
+
+  it("refuses none, which starts no run, and the old laptop kind, which srt replaced (#114)", () => {
+    expect(chooseBox({ FACTORY_BOX: "none" })).toEqual({
+      kind: "refused",
+      reason: "FACTORY_BOX=none starts no run; set it to srt or vm",
+    });
     expect(chooseBox({ FACTORY_BOX: "laptop" })).toEqual({
       kind: "refused",
-      reason: "FACTORY_BOX=laptop is stage B (#129); use vm",
+      reason: "FACTORY_BOX=laptop is replaced by srt (#114); use srt or vm",
     });
   });
 
   it("refuses a place that is not a box", () => {
     expect(chooseBox({ FACTORY_BOX: "host" })).toEqual({
       kind: "refused",
-      reason: 'FACTORY_BOX="host" is not a box; use vm',
+      reason: 'FACTORY_BOX="host" is not a runner kind; use srt or vm',
     });
     expect(chooseBox({ FACTORY_BOX: "VM" }).kind).toBe("refused");
   });
@@ -78,7 +93,7 @@ describe("openBox", () => {
   });
 
   it("refuses to start when the chosen place has no box yet", async () => {
-    const laptop = fakeBox({ place: "laptop" });
+    const laptop = fakeBox({ place: "srt" });
     expect(await openBox({ env: { FACTORY_BOX: "vm" }, boxes: [laptop.box] })).toEqual({
       kind: "refused",
       reason: "the vm box is not built yet (#113)",

@@ -608,6 +608,24 @@ describe("every module reads the resolved settings (#254)", () => {
     );
   });
 
+  it("the runner kind is a ladder, none < srt < vm: a lower layer may climb, never loosen (#114)", () => {
+    const team = layer("team", { runner: "srt" });
+    expect(errors(withEnv([team], { FACTORY_BOX: "vm" }))).toEqual([]);
+    expect(errors(withEnv([team], { FACTORY_BOX: "none" }))[0]).toContain("is looser");
+    expect(errors(withEnv([layer("team", { runner: "vm" })], { FACTORY_BOX: "srt" }))[0]).toContain("is looser");
+    expect(runEnv({}, withEnv([layer("user", { runner: "srt" })], {}))).toMatchObject({ FACTORY_BOX: "srt" });
+    expect(errors(withEnv([layer("user", { runner: "laptop" })], {}))[0]).toContain('"none", "srt", "vm"');
+  });
+
+  it("the company CA is a preference key in NODE_EXTRA_CA_CERTS, an absolute path (#114)", () => {
+    expect(runEnv({}, withEnv([layer("user", { egress: { caCerts: "/etc/ca.pem" } })], {}))).toMatchObject({
+      NODE_EXTRA_CA_CERTS: "/etc/ca.pem",
+    });
+    expect(errors(withEnv([layer("user", { egress: { caCerts: "ca.pem" } })], {}))[0]).toContain(
+      "an absolute file path",
+    );
+  });
+
   it("runEnv puts only a file's values in the variables; a variable alone stays exactly as it is", () => {
     const env = { FACTORY_MAX_USD: "2.50", FACTORY_DRY_RUN: "1" };
     expect(runEnv(env, withEnv([], env))).toEqual(env);

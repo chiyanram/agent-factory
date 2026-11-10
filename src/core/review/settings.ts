@@ -148,7 +148,8 @@ const CLAUDE_ENV = new Set([
   "https_proxy",
   "http_proxy",
   "no_proxy",
-  "NODE_EXTRA_CA_CERTS",
+  // the company CA (egress.caCerts, #114)
+  settingName("egress.caCerts"),
   "SSL_CERT_FILE",
 ]);
 

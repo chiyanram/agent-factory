@@ -72,6 +72,13 @@ async function inRunner(input: LiveInput, folder: string): Promise<Result<readon
   if (egress.kind === "failed") {
     return { kind: "failed", reason: `the egress proxy did not start: ${egress.reason}` };
   }
+  if (egress.kind === "own") {
+    return {
+      kind: "failed",
+      reason:
+        "the srt runner keeps its own proxy, and this check needs a vm runner; on the laptop run the srt check (GUIDE.md, Check the srt runner)",
+    };
+  }
   // the proxy is started once: the runner joins the one these checks then probe
   const setup: BoxSetup = { ...input.setup, egress: () => Promise.resolve(egress) };
   const session = await startBox(setup, { worktree: folder, readOnly: [], env: {} });

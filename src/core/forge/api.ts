@@ -28,6 +28,11 @@ export type Call = {
   // "all" (the default): the Exit holds all of stdout, and a call that prints past the cap is stopped. "tail": the Exit
   // holds only stdout's and stderr's ends, and no cap applies, for a long run whose output only a watcher reads (#228)
   readonly keep?: Keep;
+  // the folder the program starts in; unset: this process's own (#114: the srt runner starts in the run's clone)
+  readonly cwd?: string;
+  // aborts the call: the program and every process it started get SIGTERM, then SIGKILL after a grace. A call with a
+  // stop runs in its own process group, so the stop reaches the whole tree (#114)
+  readonly stop?: AbortSignal;
 };
 export type Keep = "all" | "tail";
 export type Exit = { readonly code: number; readonly stdout: string; readonly stderr: string };
@@ -64,6 +69,49 @@ export const LIMITS: Limits = { maxBuffer: 64 * 1024 * 1024, tailChars: 64 * 102
 
 type Child = ReturnType<typeof spawn>;
 
+// how long a stopped call's processes get after SIGTERM before SIGKILL
+const KILL_GRACE_MS = 10_000;
+
+// optionsOf : the child's environment, its folder when the call names one, and its own process group when the call
+// can be stopped. Pure.
+function optionsOf(call: Call): { readonly env: NodeJS.ProcessEnv; readonly cwd?: string; readonly detached?: true } {
+  return {
+    env: call.env,
+    ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
+    ...(call.stop === undefined ? {} : { detached: true }),
+  };
+}
+
+// signalGroup : a signal to the child's whole process group; false when there is none left
+function signalGroup(child: Child, signal: NodeJS.Signals): boolean {
+  if (child.pid === undefined) {
+    return false;
+  }
+  try {
+    return process.kill(-child.pid, signal);
+  } catch {
+    return false;
+  }
+}
+
+// stoppable : the call's stop, wired to the child's process group: SIGTERM, then SIGKILL after the grace
+function stoppable(child: Child, call: Call): void {
+  const { stop } = call;
+  if (stop === undefined) {
+    return;
+  }
+  const end = (): void => {
+    signalGroup(child, "SIGTERM");
+    setTimeout(() => signalGroup(child, "SIGKILL"), KILL_GRACE_MS).unref();
+  };
+  if (stop.aborted) {
+    end();
+    return;
+  }
+  stop.addEventListener("abort", end, { once: true });
+  child.once("close", () => stop.removeEventListener("abort", end));
+}
+
 // fed : the child's input given, and its stdout handed to the watcher as it comes
 function fed(child: Child, call: Call): void {
   const { watch } = call;
@@ -80,7 +128,7 @@ function keptAll(call: Call, limits: Limits): Promise<Exit> {
     const child = execFile(
       call.bin,
       [...call.args],
-      { env: call.env, maxBuffer: limits.maxBuffer },
+      { ...optionsOf(call), maxBuffer: limits.maxBuffer },
       (error, stdout, stderr) => {
         const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1;
         resolve({ code, stdout, stderr: stderr.length > 0 || error === null ? stderr : error.message });
@@ -90,13 +138,23 @@ function keptAll(call: Call, limits: Limits): Promise<Exit> {
   });
 }
 
-// keptTail : the call with only the ends of its output kept, so a run that prints for hours holds little memory
-function keptTail(call: Call, limits: Limits): Promise<Exit> {
+// spawned : the call over spawn, which can run it in its own process group (execFile cannot): each output's end only
+// ("tail"), or all of it up to the cap ("all"), past which the call is stopped as execFile would stop it
+function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
   return new Promise((resolve) => {
-    const child = spawn(call.bin, [...call.args], { env: call.env });
+    const child = spawn(call.bin, [...call.args], optionsOf(call));
     const kept = { stdout: "", stderr: "" };
     const keep = (name: "stdout" | "stderr") => (chunk: unknown) => {
-      kept[name] = (kept[name] + String(chunk)).slice(-limits.tailChars);
+      const text = kept[name] + String(chunk);
+      if (!keepAll) {
+        kept[name] = text.slice(-limits.tailChars);
+        return;
+      }
+      kept[name] = text.slice(0, limits.maxBuffer);
+      if (text.length > limits.maxBuffer) {
+        signalGroup(child, "SIGKILL");
+        child.kill("SIGKILL");
+      }
     };
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -106,12 +164,17 @@ function keptTail(call: Call, limits: Limits): Promise<Exit> {
     child.on("error", (error) => resolve({ code: 1, stdout: kept.stdout, stderr: error.message }));
     child.on("close", (code) => resolve({ code: code ?? 1, ...kept }));
     fed(child, call);
+    stoppable(child, call);
   });
 }
 
-// processRunner : a Runner over real processes, within these limits; a test passes smaller ones
+// processRunner : a Runner over real processes, within these limits; a test passes smaller ones. A call that can be
+// stopped runs over spawn, in its own process group.
 export function processRunner(limits: Limits = LIMITS): Runner {
-  return (call) => (call.keep === "tail" ? keptTail(call, limits) : keptAll(call, limits));
+  return (call) =>
+    call.keep === "tail" || call.stop !== undefined
+      ? spawned(call, limits, call.keep !== "tail")
+      : keptAll(call, limits);
 }
 
 export const runProcess: Runner = processRunner();

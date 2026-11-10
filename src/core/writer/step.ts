@@ -467,9 +467,14 @@ function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
     : result;
 }
 
+// personHome : the person's real home, for the deny list's credential paths (tools.ts writerDenies); "" when unknown
+function personHome(env: NodeJS.ProcessEnv): string {
+  return env.HOME ?? "";
+}
+
 async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
   const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
-  const settings = settingsOf(tools);
+  const settings = settingsOf(tools, personHome(setup.box.env));
   const known = await knownFor({
     home: setup.home,
     project: setup.project,

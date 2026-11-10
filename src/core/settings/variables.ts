@@ -48,6 +48,14 @@ const runHours: Check = (value) => (hoursOf(value) === "bad" ? HOURS_HINT : "");
 
 const DRY: readonly string[] = ["0", "1"];
 
+// the runner kinds, from the loosest to the strictest (#114): none runs no runner, so no run starts; srt is Anthropic's
+// sandbox runtime on a laptop; vm is a container with its own Docker under Sysbox. A lower layer may only climb.
+export const RUNNERS = ["none", "srt", "vm"] as const;
+
+// a file path a value names: absolute, so it means the same file wherever the factory runs. Pure.
+const absolutePath: Check = (value) =>
+  typeof value === "string" && value.startsWith("/") && !value.includes("\u0000") ? "" : "an absolute file path";
+
 // how a run's questions are asked: all at once, as one numbered round of choices (the default), or one at a time
 // (#320)
 export const QUESTIONS = ["round", "one-at-a-time"] as const;
@@ -71,9 +79,10 @@ function machine<const I extends string>(
   keyClass: KeyClass,
   about: string,
   check: Check = MACHINE_CHECK[keyClass],
+  ladder: readonly string[] = DRY,
 ): MachineKey & { readonly id: I } {
   const common = { id, where: "machine", env, class: keyClass, path: id.split("."), check, about } as const;
-  return keyClass === "ladder" ? { ...common, ladder: DRY } : common;
+  return keyClass === "ladder" ? { ...common, ladder } : common;
 }
 
 export const MACHINE_KEYS = [
@@ -81,9 +90,23 @@ export const MACHINE_KEYS = [
   machine("gitHost", "FACTORY_FORGE", "locked", "the git host's kind: gitlab or github"),
   machine("gitHostName", "FACTORY_FORGE_HOST", "locked", "the git host's name, when it is not the public one"),
   machine("identity", "FACTORY_IDENTITY", "locked", "own (your gh or glab login) or app (a GitHub App)"),
-  machine("runner", "FACTORY_BOX", "locked", "where a runner runs: vm"),
+  machine(
+    "runner",
+    "FACTORY_BOX",
+    "ladder",
+    "the runner kind: none < srt < vm, the strictest wins; none starts no run (#114)",
+    oneOf(RUNNERS),
+    RUNNERS,
+  ),
   machine("egress.image", "FACTORY_EGRESS_IMAGE", "locked", "the egress proxy's image, pinned by digest"),
   machine("egress.upstreamProxy", "FACTORY_UPSTREAM_PROXY", "preference", "at work: the company proxy, host:port"),
+  machine(
+    "egress.caCerts",
+    "NODE_EXTRA_CA_CERTS",
+    "preference",
+    "at work: the company CA's PEM file, which the srt runner and its agent trust besides the usual roots (#114)",
+    absolutePath,
+  ),
   machine("rulebook", "FACTORY_RULEBOOK", "locked", "the rulebook plugin's folder"),
   machine("review.findPrompt", "FACTORY_REVIEW_FIND", "locked", "the automated review's find instructions"),
   machine("review.verifyPrompt", "FACTORY_REVIEW_VERIFY", "locked", "the automated review's verify instructions"),
