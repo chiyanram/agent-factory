@@ -153,6 +153,7 @@ const TASKS: Readonly<Record<RunMode, (n: Names) => string>> = {
 export function evidenceRules(listed: readonly string[]): string {
   return [
     `Each evidence row's command must start with one of these programs, or the ready check refuses it: ${programsLine(listed)}.`,
+    "Each row is one command that runs with no shell: no pipe, &&, ;, redirect or command substitution, and nothing outside quotes that a shell would act on ($, backtick, *, ?, [, ], {, }, ~, !, #, backslash). Quote patterns with single quotes, where every character is literal (grep -n -E '^## Commands|^- `./gradlew' README.md), never with double quotes, where a shell runs $ and backticks; give alternatives as one pattern or as grep -e A -e B. The ready check refuses a row it cannot run that way.",
     "A row's result is what its command printed, copied, never your own description of it. A build or test run such as the gate command proves behaviour its tests check; it is never the evidence for what a file says, and never for more than one criterion: show a file's content with grep, or a change with git diff.",
   ].join("\n");
 }
