@@ -136,10 +136,10 @@ describe("role card frontmatter, enforced (#232)", () => {
     expect(
       cardOf(
         "verify-pass",
-        "---\nrole: verify-pass\ntools: [Read]\nhand_off: {id, bucket, why, severity}\n---\nx",
+        "---\nrole: verify-pass\ntools: [Read]\nhand_off: {id, bucket, why, confidence}\n---\nx",
         "t",
       ),
-    ).toMatchObject({ kind: "failed", reason: expect.stringContaining('"severity"') });
+    ).toMatchObject({ kind: "failed", reason: expect.stringContaining('"confidence"') });
   });
 
   it("keeps the role's must_not_see floor, whatever the card says, and adds the card's own entries", () => {

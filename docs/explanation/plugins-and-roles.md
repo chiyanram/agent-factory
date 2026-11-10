@@ -48,11 +48,11 @@ onboarder. Every run record carries the card's hash.
 | role | returns | checked by the engine |
 |---|---|---|
 | implementer, test-first, cleanup | `.factory/report.json`: `done` with evidence rows, `asked` with questions, or `blocked` | yes (`src/core/report.ts`) |
-| design-reviewer | one verdict per design decision: aligned, conflict or open | yes (`src/core/design/findings.ts`) |
-| verify pass | one bucket per finding: act on, consider, noted, dismissed | yes (`src/core/review/verdicts.ts`); it has no grade or severity field |
+| design-reviewer | a **Finding** per design decision, with its verdict: aligned, conflict or open | yes (`src/core/design/findings.ts`) |
+| verify pass | one bucket per finding: act on, consider, noted, dismissed; it may set a lower severity or grade, never a higher one | yes (`src/core/finding.ts`): a verdict that raises either is refused, and the finding is Consider. **Today:** only the design review's card asks for it; the review's prompt waits for #438 |
 | onboarder | the brief and the glossary | yes (`src/core/onboard/answer.ts`) |
-| finder | findings with lens, rule, `file:line`, grade | **Today:** its card is not used; the review runs `prompts/review-find.md` until its eval has a baseline |
-| coordinator, retro | free text | no |
+| finder | a **Finding** each, with lens, rule, `file:line`, grade | yes (`src/core/review/verdicts.ts`). **Today:** its card is not used; the review runs `prompts/review-find.md` until its eval has a baseline (#438) |
+| coordinator | a **Question** per ask: the question, 2 to 4 choices, the recommended one; the retro's actions as JSON | no: its prompt asks for the shape |
 
 ## What is decided next
 
@@ -62,8 +62,6 @@ Decided in the design audit (2026-11-10), not built:
 |---|---|
 | `enforced_guardrails` becomes a list of IDs from a closed list the engine owns (for example `tests-read-only`); an unknown ID is refused. `tools` keeps path scopes in Claude Code's permission syntax (`Edit(src/test/**)`). `next` is dropped: the lanes hold the flow | a guardrail only in text is advice, not a guardrail |
 | one process plugin per project: a second plugin with a process is a `config check` error; other plugins add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
-| three shared records the engine owns: **Report** (the build roles), **Finding** (finder and design-reviewer), **Question** (coordinator, implementer, test-first); the finder card is used with its schema | today one concept has three shapes |
-| the verify pass sets the final severity and grade; it may lower them, never raise them | the finder grades its own evidence today |
-| the retro's actions become JSON | the improvement loop can read them without a model |
+| the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade (#438, after #216) | a project cannot replace the finder today |
 | a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline (#216 first) | today `plugin update` runs `config check` only, no eval |
 | with the Copilot runner (#162), `.github/skills/`, `.github/copilot-instructions.md` and `.github/instructions/` join the agent settings the host push protects | Copilot reads them; a run could plant one |

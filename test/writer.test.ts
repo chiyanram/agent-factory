@@ -948,6 +948,7 @@ describe("the writer step: a later run on the change", () => {
 
 const FINDING: Sorted = {
   id: "F-1",
+  source: "review",
   lens: "baseline",
   axis: "standards",
   kind: "logic",

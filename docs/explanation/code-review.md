@@ -64,7 +64,7 @@ Decided in the design audit (2026-11-10), not built:
 | change | why |
 |---|---|
 | merge findings after the verify pass, by a nearby location and the same underlying issue, not only by exact `file:line` and rule; keep every lens on the kept finding | two lenses cite different rules for one bug |
-| the verify pass sets the final severity and grade; it may lower them, never raise them | the finder grades its own proof today |
+| the review's verify prompt asks for the final severity and grade (#438). The code already refuses a verdict that raises them (#425) | the finder grades its own proof until the prompt asks |
 | a lens or rule is listed for the operator on its acted-on rate and precision, never retired for being quiet | a quiet security rule may be doing its job |
 | count acted-on per rule ID, not only per kind | the improvement loop needs to know which rule paid |
 | a human reply marked `/act` on a review thread becomes an Act on item | today human review comments never reach the implementer |
