@@ -23,7 +23,7 @@ make lint && make test
 | target | does |
 |---|---|
 | `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to an automated review input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed modules that start programs, no git host token or skip-permissions flag outside the git host seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `node scripts/check-words.ts .` (no old word from `GLOSSARY.md` in the prose of `README.md`, `GUIDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/DESIGN.md` or a role card; an identifier goes in backticks), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
-| `make test` | builds, then runs the vitest suite. CI runs it on Linux and on macOS. One file: `npx vitest run test/poll.test.ts` |
+| `make test` | builds, then runs the vitest suite. CI runs it on Linux; macOS runs only in a release or by hand, `gh workflow run ci.yml --ref <branch>` (#357). One file: `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make help` | lists the targets |
 
@@ -42,9 +42,8 @@ ticket ──▶ branch ──▶ make lint + make test ──▶ pull request �
 4. Open one pull request per ticket. Its title and description become the commit on `main`; see
    [Commit messages](#commit-messages).
 5. A maintainer reviews it. Answer each comment with a change or a reason.
-6. A maintainer adds it to the merge queue once CI is green and the review is resolved. The queue builds it on top
-   of the pull requests ahead of it, runs `lint-and-test` and `test-macos` there, and squash-merges it only when
-   both pass (#323). Do not merge `main` into a branch only to bring it up to date: the queue does that.
+6. A maintainer squash-merges it once `lint-and-test` is green on the branch with the latest `main` merged in, and
+   the review is resolved. A merge queue would do that step, but a repo owned by a user cannot have one (#323).
 
 A good pull request has one concern, a test that fails without the change, and no secrets, tokens or real project
 data. When it changes behaviour the coordinator relies on, it updates [GUIDE.md](GUIDE.md) or an ADR too.
