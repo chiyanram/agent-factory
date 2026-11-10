@@ -106,6 +106,13 @@ Pin every GitHub Actions step to a full commit SHA, with the version in a commen
 
 ## Releases
 
+```text
+merge to main          ──▶ ci.yml        checks only, no release
+Run workflow on main   ──▶ release.yml
+                             ├─ checks   ci.yml, called with workflow_call
+                             └─ release  semantic-release, only after the checks pass
+```
+
 Releases are manual during the dev phase (#327). A merge to `main` runs the checks only. To release, open
 **Actions → release → Run workflow** on `main`, or run `gh workflow run release.yml --ref main`. It runs the checks
 from `ci.yml` first (#351); semantic-release (`release.config.mjs`, #153) then runs after the checks pass, the same
