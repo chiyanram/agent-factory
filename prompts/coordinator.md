@@ -244,8 +244,8 @@ heavy run (a build, an IT suite or a deploy) per machine.
 
 | when the git host shows | do |
 |---|---|
-| the PR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `agent-factory dispatch <project>` (`approve` starts it): it claims the change and starts the implementer on a runner; for a bug, the test-first run first |
-| a bug's test-first run ended with a pushed `test:` commit and `asks=0` | the orchestrator loop starts the fix run |
+| the PR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `agent-factory dispatch <project>` (`approve` starts it): it claims the change and starts the implementer on a runner; in a lane with `test_first` (bug by default), the test-first run first |
+| a test-first run (a lane with `test_first`, bug by default) ended with a pushed `test:` commit and `asks=0` | the orchestrator loop starts the fix run |
 | the implementer's report is `done` and the host pushed and posted it | the ready check runs its evidence rows at the head on a runner, then `agent-factory review <project> <pr>` |
 | an open Act on thread, or the gate is red, with `needs_human=no` | the orchestrator loop starts a rework run; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not an implementer run |
 | the evidence fails at the head | the orchestrator loop starts a rework run; after 3 failures, label `needs-human` |

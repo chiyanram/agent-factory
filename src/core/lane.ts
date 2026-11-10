@@ -34,25 +34,32 @@ import { LANES, type Lane, type Spec } from "./spec.js";
 export type LensCount = number | "all";
 
 // one lane's properties, in the lanes' order from the lightest
-// designReview: whether the lane's spec and design get a design review (#236); a lane that does not say keeps the
-// default lane's
+// designReview: whether the lane's spec and design get a design review (#236); testFirst: whether a failing test is
+// committed before the fix (ADR-0007, #417). A lane that does not say keeps the default lane's
 export type LaneProps = {
   readonly name: Lane;
   readonly approval: boolean;
   readonly lenses: LensCount;
   readonly designReview?: boolean;
+  readonly testFirst?: boolean;
 };
 
 // the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well. Tiny runs one
 // lens, bug and feature about 3, and the one-way door all; every lane but tiny gets a design review (docs/DESIGN.md
-// section 3)
+// section 3); only bug starts with a failing test (ADR-0007)
 const DEFAULT_COUNTS: Readonly<Record<Lane, LensCount>> = { tiny: 1, bug: 3, feature: 3, "one-way door": "all" };
 
 export const DEFAULT_LANES: readonly LaneProps[] = [
-  { name: "tiny", approval: false, lenses: DEFAULT_COUNTS.tiny, designReview: false },
-  { name: "bug", approval: true, lenses: DEFAULT_COUNTS.bug, designReview: true },
-  { name: "feature", approval: true, lenses: DEFAULT_COUNTS.feature, designReview: true },
-  { name: "one-way door", approval: true, lenses: DEFAULT_COUNTS["one-way door"], designReview: true },
+  { name: "tiny", approval: false, lenses: DEFAULT_COUNTS.tiny, designReview: false, testFirst: false },
+  { name: "bug", approval: true, lenses: DEFAULT_COUNTS.bug, designReview: true, testFirst: true },
+  { name: "feature", approval: true, lenses: DEFAULT_COUNTS.feature, designReview: true, testFirst: false },
+  {
+    name: "one-way door",
+    approval: true,
+    lenses: DEFAULT_COUNTS["one-way door"],
+    designReview: true,
+    testFirst: false,
+  },
 ];
 
 // countText : a lens count as a person writes it: "all…" for every lens, else its first whole number ("~3" is 3)
@@ -85,11 +92,16 @@ function defaultDesignReview(lane: Lane): boolean {
   return DEFAULT_LANES.find((l) => l.name === lane)?.designReview ?? true;
 }
 
-// designReviewOf : the design review value, or "bad" when it is there but not true or false. Pure.
-function designReviewOf(value: unknown, lane: Lane): boolean | "bad" {
-  const given = prop(value, "designReview");
+// defaultTestFirst : the default lanes' testFirst for a lane, for a lanes value that does not say. Pure.
+function defaultTestFirst(lane: Lane): boolean {
+  return DEFAULT_LANES.find((l) => l.name === lane)?.testFirst ?? false;
+}
+
+// flagOf : a lane's true-or-false property, the fallback when it is left out, or "bad" when it is neither. Pure.
+function flagOf(value: unknown, key: "designReview" | "testFirst", fallback: boolean): boolean | "bad" {
+  const given = prop(value, key);
   if (given === undefined) {
-    return defaultDesignReview(lane);
+    return fallback;
   }
   return typeof given === "boolean" ? given : "bad";
 }
@@ -102,12 +114,17 @@ function propsOf(value: unknown): LaneProps | "bad" {
   const name = prop(value, "name");
   const approval = prop(value, "approval");
   const lane = LANES.find((l) => l === name);
-  if (lane === undefined || typeof approval !== "boolean") {
-    return "bad";
-  }
+  return lane === undefined || typeof approval !== "boolean" ? "bad" : laneOf(value, lane, approval);
+}
+
+// laneOf : a named lane's counted and flagged properties, or "bad" when one of them is. Pure.
+function laneOf(value: unknown, lane: Lane, approval: boolean): LaneProps | "bad" {
   const lenses = lensCountOf(prop(value, "lenses"), lane);
-  const designReview = designReviewOf(value, lane);
-  return lenses === "bad" || designReview === "bad" ? "bad" : { name: lane, approval, lenses, designReview };
+  const designReview = flagOf(value, "designReview", defaultDesignReview(lane));
+  const testFirst = flagOf(value, "testFirst", defaultTestFirst(lane));
+  return lenses === "bad" || designReview === "bad" || testFirst === "bad"
+    ? "bad"
+    : { name: lane, approval, lenses, designReview, testFirst };
 }
 
 // namedLanes : every lane's properties, or "bad" when the value is not a list of them. Pure.
@@ -129,7 +146,7 @@ export function lanesOf(value: unknown, from: string): Result<readonly LaneProps
   const named = namedLanes(value);
   if (named === "bad") {
     return failed(
-      `${from}: the lanes must be a list of {"name", "approval", "lenses"} (and an optional "designReview"), with a name one of ${LANES.join(", ")} and lenses a count or "all"`,
+      `${from}: the lanes must be a list of {"name", "approval", "lenses"} (and an optional "designReview" and "testFirst"), with a name one of ${LANES.join(", ")} and lenses a count or "all"`,
     );
   }
   const breaks = floorBreaks(named);
@@ -149,6 +166,12 @@ export function needsApproval(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_
 // needsDesignReview : whether a lane's spec and design get a design review before the human's approval (#236). Pure.
 export function needsDesignReview(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
   return lanes.find((l) => l.name === lane)?.designReview ?? defaultDesignReview(lane);
+}
+
+// needsTestFirst : whether a lane's build starts with a failing test, from the lane's properties, never its name
+// (ADR-0007, #417). Pure.
+export function needsTestFirst(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
+  return lanes.find((l) => l.name === lane)?.testFirst ?? defaultTestFirst(lane);
 }
 
 function rank(lane: Lane): number {

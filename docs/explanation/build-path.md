@@ -7,18 +7,21 @@ coordinator's view of it is in [the coordinator's instructions](../../prompts/co
 ## The path
 
 ```text
- START (+ approval) ──▶ orchestrator loop ──▶ test-first (bug lane) ──▶ implementer ──▶ cleanup
+ START (+ approval) ──▶ orchestrator loop ──▶ test-first (bug lane*) ──▶ implementer ──▶ cleanup
                         a human's command starts it;                     │ first push: the host opens the draft PR
                         it ends when nothing is in flight                ▼
                                             ready check ──▶ automated review ──▶ gate ──▶ ping ──▶ human merges
                                             fails, or Act on, or red gate: a rework run, at most 3 rounds, then a human
 ```
 
+\* By default only the bug lane starts with a failing test (ADR-0007). A process plugin's lanes file sets it per lane
+with `test_first`; the engine reads that property, never the lane's name (#417).
+
 | step | what it does | checked by code |
 |---|---|---|
 | orchestrator loop | one pass of the decision table every `FACTORY_POLL_MINUTES`; no cron; caps hold before each run | yes |
 | lane | tiny, bug, feature or one-way door; checked on the spec's planned files before the build and on the real diff after; only ever raised | yes (`src/core/ready/lane.ts`) |
-| test-first | in the bug lane, one commit with a failing test before the fix | the commit exists; **Today:** not that the test fails on the base and passes after |
+| test-first | in a lane whose `test_first` is set (bug by default), one commit with a failing test before the fix | the commit exists; **Today:** not that the test fails on the base and passes after |
 | implementer | builds on a fresh runner; ends with `done` and evidence rows, `asked`, or `blocked` | the report's shape (`src/core/report.ts`) |
 | cleanup | tidies the branch's own lines, re-runs the evidence, lists what would change behaviour as `deferred` | **Today:** not that it stayed inside the branch's lines |
 | PR body | the engine's lines, the deferred list, then the implementer's `.factory/pr.md`, cleaned | yes (`src/core/pr-body.ts`) |
@@ -43,7 +46,6 @@ Decided in the design audit (2026-11-10), not built:
 | a team may raise the stall time, up to 20 minutes | a long, quiet build (such as Maven) is killed as a stall |
 | jitter on the retry backoff | many tickets retrying at the same moment |
 | a human may lower a raised lane only through `agent-factory waive`, with the reason on the ticket | today no way is defined |
-| test-first is chosen by the lanes file's `test_first`, not by the lane's name | `src/core/dispatch/table.ts:278` checks the name "bug", against the rule that the engine acts on a lane's properties |
 | the engine checks that the new test fails on the base and passes on the branch; a revert check; tests are read-only while fixing; a new test passes k times in a row | today these are rules in the role cards only |
 | the engine checks that cleanup stays inside the branch's own lines, and runs the tests that cover them | today this is a rule in the cleanup card only |
 | the PR body shows the engine's re-run results beside the implementer's claim | a reader sees what code saw, not only what the model said |

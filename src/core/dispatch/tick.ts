@@ -39,7 +39,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { needsApproval, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
+import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec, type SpecStore } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
@@ -235,8 +235,15 @@ function newest(a: string, b: string): string {
 
 // approvedView : an approval lets the build begin only with a START; the newer of the two is when the counts start,
 // so a person who takes the ticket back from needs-human may START or approve again
-function approvedView(approval: ApprovalRecord, lane: Lane, started: StartRecord | "none"): ApprovalView {
-  return started === "none" ? { kind: "unstarted" } : { kind: "approved", at: newest(approval.at, started.at), lane };
+function approvedView(
+  approval: ApprovalRecord,
+  lane: Lane,
+  started: StartRecord | "none",
+  lanes: readonly LaneProps[] | undefined,
+): ApprovalView {
+  return started === "none"
+    ? { kind: "unstarted" }
+    : { kind: "approved", at: newest(approval.at, started.at), lane, testFirst: needsTestFirst(lane, lanes) };
 }
 
 // startedView : a START with no current approval: the build may begin in the tiny lane only. A spec the coordinator
@@ -253,7 +260,7 @@ async function startedView(
   }
   const { lane } = spec.spec;
   if (!needsApproval(lane, setup.lanes)) {
-    return { kind: "started", at: started.at, lane };
+    return { kind: "started", at: started.at, lane, testFirst: needsTestFirst(lane, setup.lanes) };
   }
   return stale ? { kind: "stale" } : { kind: "unapproved", lane };
 }
@@ -307,7 +314,7 @@ async function humanSaid(setup: TickSetup, ticket: string): Promise<Result<Said>
   }
   const state = await approvalState(ticketAt(setup, ticket));
   if (state.kind === "approved") {
-    const view = approvedView(state.record, state.spec.lane, started.value);
+    const view = approvedView(state.record, state.spec.lane, started.value, setup.lanes);
     return { kind: "ok", value: { view, record: state.record } };
   }
   return state.kind === "refused"

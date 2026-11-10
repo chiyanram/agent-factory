@@ -57,7 +57,7 @@ function state(over: Partial<TicketState> = {}): TicketState {
   return {
     ticket: "PROJ-1",
     gate: "forge-ci",
-    approval: { kind: "approved", at: APPROVED_AT, lane: "feature" },
+    approval: { kind: "approved", at: APPROVED_AT, lane: "feature", testFirst: false },
     change: { kind: "open", line: line() },
     runs: wrote({ ...reviewed(0) }),
     now: NOW,
@@ -140,7 +140,7 @@ describe("decide: one row each", () => {
         decide(
           state({
             runs: quiet,
-            approval: { kind: "approved", at: "2026-11-05T08:00:00Z", lane: "feature" },
+            approval: { kind: "approved", at: "2026-11-05T08:00:00Z", lane: "feature", testFirst: false },
             change: { kind: "open", line: line(over) },
           }),
         ),
@@ -187,7 +187,7 @@ describe("decide: one row each", () => {
       task: { kind: "fix" },
       why: "approved; no run yet",
     });
-    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug" } as const;
+    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug", testFirst: true } as const;
     expect(decide(state({ approval: bug, change: { kind: "none" }, runs: EMPTY }))).toMatchObject({
       kind: "writer",
       task: { kind: "test-first" },
@@ -230,8 +230,26 @@ describe("decide: one row each", () => {
     expect(decide(state({ change: { kind: "none" }, runs: blocked }))).toMatchObject({ kind: "needs-human" });
   });
 
+  it("test-first follows the lane's testFirst property, never its name (#417)", () => {
+    const featureFirst = { kind: "approved", at: APPROVED_AT, lane: "feature", testFirst: true } as const;
+    expect(decide(state({ approval: featureFirst, change: { kind: "none" }, runs: EMPTY }))).toMatchObject({
+      kind: "writer",
+      task: { kind: "test-first" },
+    });
+    const bugNoTest = { kind: "approved", at: APPROVED_AT, lane: "bug", testFirst: false } as const;
+    expect(decide(state({ approval: bugNoTest, change: { kind: "none" }, runs: EMPTY }))).toMatchObject({
+      kind: "writer",
+      task: { kind: "fix" },
+    });
+    const tinyFirst = { kind: "started", at: APPROVED_AT, lane: "tiny", testFirst: true } as const;
+    expect(decide(state({ approval: tinyFirst, change: { kind: "none" }, runs: EMPTY }))).toMatchObject({
+      kind: "writer",
+      task: { kind: "test-first" },
+    });
+  });
+
   it("a bug's test-first run that asked or was blocked runs as test-first again, never as the fix", () => {
-    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug" } as const;
+    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug", testFirst: true } as const;
     const asked = wrote({
       lastWriter: { kind: "ended", mode: "test-first", head: H, outcome: "asked", patch: "t", evidence: [] },
     });
@@ -471,12 +489,17 @@ describe("the lane the diff needs: raise only (#230)", () => {
     });
   const RAISED =
     "the lane is raised from tiny to bug (the ready check read the real diff): the coordinator raises the spec's lane, and a human approves it";
-  const tinyStart = { kind: "started", at: APPROVED_AT, lane: "tiny" } as const;
+  const tinyStart = { kind: "started", at: APPROVED_AT, lane: "tiny", testFirst: false } as const;
 
   it("a START in the tiny lane whose diff changes code stops for a person, whatever else the check found", () => {
     for (const passed of [true, false]) {
       expect(
-        decide(state({ approval: { kind: "started", at: APPROVED_AT, lane: "tiny" }, runs: readAs("bug", passed) })),
+        decide(
+          state({
+            approval: { kind: "started", at: APPROVED_AT, lane: "tiny", testFirst: false },
+            runs: readAs("bug", passed),
+          }),
+        ),
       ).toEqual({
         kind: "needs-human",
         why: "the lane is raised from tiny to bug (the ready check read the real diff): the coordinator raises the spec's lane, and a human approves it",
@@ -485,7 +508,7 @@ describe("the lane the diff needs: raise only (#230)", () => {
   });
 
   it("an approved lane is raised to the one-way door, and never lowered by a lighter diff", () => {
-    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug" } as const;
+    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug", testFirst: true } as const;
     expect(decide(state({ approval: bug, runs: readAs("one-way door") }))).toMatchObject({
       kind: "needs-human",
       why: expect.stringContaining("raised from bug to one-way door"),
