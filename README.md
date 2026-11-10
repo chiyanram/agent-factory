@@ -63,7 +63,7 @@ differs is marked **Today:** in the docs, and [the roadmap](docs/explanation/roa
 
 - [docs/how-to/](docs/how-to/): install, set up, check the runner.
 - [docs/reference/](docs/reference/): the commands, the settings and the connectors.
-- [docs/explanation/](docs/explanation/): the architecture, the safety model, plugins and role cards, code review, the improvement loop, measurement and the roadmap.
+- [docs/explanation/](docs/explanation/): the architecture, the safety model, spec and project knowledge, plugins and role cards, code review, the improvement loop, measurement and the roadmap.
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [AGENTS.md](AGENTS.md) · [docs/adr/](docs/adr/) · [GLOSSARY.md](GLOSSARY.md)
 
 ## License
