@@ -7,67 +7,51 @@
 // approved spec, never from the model (#219).
 // The finding contract is docs/DESIGN.md's (decided on #237, 2026-11-09): the finder gives its grade, cited, walked or
 // ran, and the evidence behind it; the engine adds the lens, the one the finder run was for, never the model's word.
+// The finding is ADR-0017's shared record (finding.ts): the core every finding has, and the review's own part here.
+// The verify pass's verdict and its schema are shared with the design review, and live there too.
 
-import { prop } from "../dispatch/records.js";
 import { CATEGORIES, type Category } from "../eval/golden.js";
+import {
+  CORE_PROPERTIES,
+  CORE_REQUIRED,
+  coreOf,
+  get,
+  oneOf,
+  settle,
+  type Bucket,
+  type FindingCore,
+  type Verdict,
+} from "../finding.js";
 import type { Result } from "../forge/api.js";
+
+export { GRADES, readVerdicts, VERIFY_SCHEMA, type Bucket, type Grade, type Severity, type Verdict } from "../finding.js";
 
 export type Axis = "standards" | "spec";
 export type Kind = "rule" | "logic";
-export type Severity = "blocker" | "warning" | "nit";
-export type Bucket = "act_on" | "consider" | "noted" | "dismissed";
-// how far the finder went to show it: cited the line, walked the failure through, or ran it (rulebook crq RV7)
-export const GRADES = ["cited", "walked", "ran"] as const;
-export type Grade = (typeof GRADES)[number];
 export type { Category };
 
-export type Finding = {
-  readonly id: string;
+// a finder's finding: the shared core, and what the review adds: which lens found it (the engine's word), its axis,
+// kind and category, and the evidence behind its grade
+export type Finding = FindingCore & {
+  readonly source: "review";
   readonly lens: string;
   readonly axis: Axis;
   readonly kind: Kind;
-  readonly file: string;
-  readonly line: number;
-  readonly rule: string;
   readonly category: Category;
-  readonly severity: Severity;
-  readonly grade: Grade;
   readonly evidence: string;
-  readonly finding: string;
-  readonly fix: string;
 };
 
 export type Sorted = Finding & { readonly bucket: Bucket; readonly why: string };
 
 const FINDING_SCHEMA = {
   type: "object",
-  required: [
-    "id",
-    "axis",
-    "kind",
-    "file",
-    "line",
-    "rule",
-    "category",
-    "severity",
-    "grade",
-    "evidence",
-    "finding",
-    "fix",
-  ],
+  required: [...CORE_REQUIRED, "axis", "kind", "category", "evidence"],
   properties: {
-    id: { type: "string" },
+    ...CORE_PROPERTIES,
     axis: { enum: ["standards", "spec"] },
     kind: { enum: ["rule", "logic"] },
-    file: { type: "string" },
-    line: { type: "integer" },
-    rule: { type: "string" },
     category: { enum: CATEGORIES },
-    severity: { enum: ["blocker", "warning", "nit"] },
-    grade: { enum: GRADES },
     evidence: { type: "string" },
-    finding: { type: "string" },
-    fix: { type: "string" },
   },
 };
 
@@ -77,140 +61,42 @@ export const FIND_SCHEMA = JSON.stringify({
   properties: { findings: { type: "array", items: FINDING_SCHEMA } },
 });
 
-export const VERIFY_SCHEMA = JSON.stringify({
-  type: "object",
-  required: ["verdicts"],
-  properties: {
-    verdicts: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["id", "bucket", "why"],
-        properties: {
-          id: { type: "string" },
-          bucket: { enum: ["act_on", "consider", "noted", "dismissed"] },
-          why: { type: "string" },
-        },
-      },
-    },
-  },
-});
+type Own = Pick<Finding, "axis" | "kind" | "category" | "evidence">;
 
-// a field that is not there, or not what it should be
-const BAD: unique symbol = Symbol("bad");
-type Bad = typeof BAD;
-
-function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | Bad {
-  return allowed.find((a) => a === value) ?? BAD;
+// ownOf : the review's own part of one finding, or undefined when a field is missing or not what it should be. Pure.
+function ownOf(raw: unknown): Own | undefined {
+  const axis = oneOf(get(raw, "axis"), ["standards", "spec"] as const);
+  const kind = oneOf(get(raw, "kind"), ["rule", "logic"] as const);
+  const category = oneOf(get(raw, "category"), CATEGORIES);
+  const evidence = get(raw, "evidence");
+  return axis === undefined || kind === undefined || category === undefined || typeof evidence !== "string"
+    ? undefined
+    : { axis, kind, category, evidence };
 }
 
-function text(value: unknown): string | Bad {
-  return typeof value === "string" ? value : BAD;
-}
-
-type Fields = {
-  readonly axis: Axis;
-  readonly kind: Kind;
-  readonly category: Category;
-  readonly severity: Severity;
-  readonly grade: Grade;
-};
-
-// how much it matters and how far the finder went to show it
-function weight(raw: unknown): Pick<Fields, "severity" | "grade"> | Bad {
-  const severity = oneOf(prop(raw, "severity"), ["blocker", "warning", "nit"] as const);
-  const grade = oneOf(prop(raw, "grade"), GRADES);
-  return severity === BAD || grade === BAD ? BAD : { severity, grade };
-}
-
-function enums(raw: unknown): Fields | Bad {
-  const axis = oneOf(prop(raw, "axis"), ["standards", "spec"] as const);
-  const kind = oneOf(prop(raw, "kind"), ["rule", "logic"] as const);
-  const category = oneOf(prop(raw, "category"), CATEGORIES);
-  const w = weight(raw);
-  return axis === BAD || kind === BAD || category === BAD || w === BAD ? BAD : { axis, kind, category, ...w };
-}
-
-type Words = {
-  readonly file: string;
-  readonly rule: string;
-  readonly evidence: string;
-  readonly finding: string;
-  readonly fix: string;
-};
-
-// the finding's words: what the finder saw, what is wrong, and the fix
-function prose(raw: unknown): Pick<Words, "evidence" | "finding" | "fix"> | Bad {
-  const evidence = text(prop(raw, "evidence"));
-  const finding = text(prop(raw, "finding"));
-  const fix = text(prop(raw, "fix"));
-  return evidence === BAD || finding === BAD || fix === BAD ? BAD : { evidence, finding, fix };
-}
-
-function words(raw: unknown): Words | Bad {
-  const file = text(prop(raw, "file"));
-  const rule = text(prop(raw, "rule"));
-  const said = prose(raw);
-  return file === BAD || rule === BAD || said === BAD
-    ? BAD
-    : { file: file.replace(/^(\.\/)?code\//, ""), rule, ...said };
-}
-
-function findingOf(raw: unknown, i: number, lens: string): Finding | Bad {
-  const e = enums(raw);
-  const w = words(raw);
-  const line = prop(raw, "line");
-  if (e === BAD || w === BAD || !Number.isSafeInteger(line)) {
-    return BAD;
-  }
-  return { id: `F${i + 1}`, lens, ...e, ...w, line: Number(line) };
-}
-
-function isFinding(f: Finding | Bad): f is Finding {
-  return f !== BAD;
+function findingOf(raw: unknown, i: number, lens: string): Finding | undefined {
+  const core = coreOf(raw, `F${i + 1}`, (t) => t);
+  const own = ownOf(raw);
+  return core === undefined || own === undefined ? undefined : { ...core, source: "review", lens, ...own };
 }
 
 // readFindings : one finder run's output, renumbered, each finding stamped with the lens the run was for; one malformed
 // finding fails the run
 export function readFindings(output: unknown, lens: string): Result<readonly Finding[]> {
-  const list = prop(output, "findings");
-  const found: readonly (Finding | Bad)[] = Array.isArray(list) ? list.map((raw, i) => findingOf(raw, i, lens)) : [BAD];
-  return found.every(isFinding)
-    ? { kind: "ok", value: found.filter(isFinding) }
+  const list = get(output, "findings");
+  const found = Array.isArray(list) ? list.map((raw, i) => findingOf(raw, i, lens)) : [undefined];
+  const good = found.filter((f): f is Finding => f !== undefined);
+  return good.length === found.length
+    ? { kind: "ok", value: good }
     : { kind: "failed", reason: "the find pass gave a finding that is not well formed" };
 }
 
-export type Verdict = { readonly id: string; readonly bucket: Bucket; readonly why: string };
-
-function verdictOf(raw: unknown): Verdict | Bad {
-  const id = text(prop(raw, "id"));
-  const bucket = oneOf(prop(raw, "bucket"), ["act_on", "consider", "noted", "dismissed"] as const);
-  const why = text(prop(raw, "why"));
-  return id === BAD || bucket === BAD || why === BAD ? BAD : { id, bucket, why };
-}
-
-function isVerdict(v: Verdict | Bad): v is Verdict {
-  return v !== BAD;
-}
-
-// readVerdicts : the verify pass's output
-export function readVerdicts(output: unknown): Result<readonly Verdict[]> {
-  const list = prop(output, "verdicts");
-  const read: readonly (Verdict | Bad)[] = Array.isArray(list) ? list.map(verdictOf) : [BAD];
-  return read.every(isVerdict)
-    ? { kind: "ok", value: read.filter(isVerdict) }
-    : { kind: "failed", reason: "the verify pass gave a verdict that is not well formed" };
-}
-
-// sortFindings : every finding in exactly one bucket; one the verify pass skipped is Consider
+// sortFindings : every finding in exactly one bucket, settled by its verdict (finding.ts settle)
 export function sortFindings<F extends Finding>(
   findings: readonly F[],
   verdicts: readonly Verdict[],
 ): readonly (F & { readonly bucket: Bucket; readonly why: string })[] {
-  return findings.map((f) => {
-    const v = verdicts.find((x) => x.id === f.id);
-    return { ...f, bucket: v?.bucket ?? "consider", why: v?.why ?? "the verify pass gave no verdict" };
-  });
+  return findings.map((f) => settle(f, verdicts.find((x) => x.id === f.id)));
 }
 
 export const BUCKET_NAMES: Readonly<Record<Bucket, string>> = {

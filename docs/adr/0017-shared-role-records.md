@@ -1,6 +1,7 @@
 # 0017 · Three shared records for what a run returns
 
-Status: accepted 2026-11-10 (operator, design audit). Not built.
+Status: accepted 2026-11-10 (operator, design audit). Built in #425, but for the finder card and the review's verify
+prompt (#438, after the first eval baseline, #216).
 
 ## Context
 

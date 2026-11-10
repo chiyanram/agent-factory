@@ -88,7 +88,9 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
 2. **Grill.** Ask in small rounds, one decision each, with your recommendation first, worded so "yes" accepts it.
    Restate what is decided, the live state of each option, and one concrete example. Once the draft PR exists, post
    each ask as a `[coordinator] OPEN: …` note, so `poll` lists it until a human answers. A two-option ask accepts
-   only "A" or "B"; any other reply gets one re-ask. Done when the human has answered every open question.
+   only "A" or "B"; any other reply gets one re-ask. Each ask is a Question, the shape the implementer's report uses
+   too (ADR-0017): the question, 2 to 4 short choices, and the one you recommend. Done when the human has answered
+   every open question.
 3. **Write the contract.** Write the spec where the project file's `specStore` keeps it (`agent-factory config show
    <project>` prints it). `local`, the default and the rule at work: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`.
    `issue`, on a personal project: the body of the git host issue whose number is the ticket; `agent-factory spec`,
@@ -119,7 +121,9 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    types → lint → test → docs. Read `agent-factory usage <project>` for what each ticket cost, and its `kind` column
    for what each run kind cost (design-reviewer, test-first, implementer, cleanup, finder, verify pass, onboarder;
    a ticket's finders per lens) today, in the window and this month (#337). In the pilot, compare it with one `/crq`
-   session on a like change at the same budget; a phase that does not change outcomes is retired.
+   session on a like change at the same budget; a phase that does not change outcomes is retired. Post the retro's
+   actions as one JSON list, so code can count them (ADR-0017): `[{"type": "architecture" | "types" | "lint" | "test" | "docs" | "retire",
+   "owner": "<who>", "due": "<YYYY-MM-DD>", "ticket": "#<n>"}]`, one entry per action.
 
 ## Triggers
 

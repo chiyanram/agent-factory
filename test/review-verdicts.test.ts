@@ -21,7 +21,7 @@ describe("readFindings (#218: a category, and the severity kept)", () => {
   it("reads each finding's category and severity", () => {
     expect(readFindings({ findings: [RAW] }, "correctness")).toEqual({
       kind: "ok",
-      value: [{ ...RAW, id: "F1", lens: "correctness", file: "src/a.ts" }],
+      value: [{ ...RAW, id: "F1", source: "review", lens: "correctness", file: "src/a.ts" }],
     });
   });
 

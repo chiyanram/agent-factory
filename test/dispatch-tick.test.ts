@@ -1475,6 +1475,7 @@ describe("the design review and the cleanup run (#236)", () => {
   const CARD = "c".repeat(64);
   const finding = {
     id: "D1",
+    source: "design",
     decision: "renewals keep their own table",
     verdict: "conflict",
     file: "src/loans.ts",

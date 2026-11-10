@@ -33,6 +33,7 @@ function done<T>(out: Result<DesignRan<T>>): T {
 
 const FINDING = {
   id: "x",
+  source: "design",
   decision: "one table per ticket",
   verdict: "conflict",
   file: "svc/Main.java",
