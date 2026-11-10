@@ -13,7 +13,7 @@
 # `agent-factory box build` puts this package in the build context as agent-factory.tgz (npm pack of the host's own
 # copy, #171), so the writer's lint hook runs the same agent-factory as the host. Build it through box build only.
 
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS node
+FROM node:26-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS node
 
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 

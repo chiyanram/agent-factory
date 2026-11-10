@@ -44,7 +44,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 26
 
       # The first run has no v* tag. Tag this commit v0.0.0, so semantic-release counts from here and the next feat
       # releases 0.1.0, instead of reading the whole history and starting at 1.0.0 (#153). Every later run finds a

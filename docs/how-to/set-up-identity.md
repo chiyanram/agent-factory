@@ -92,7 +92,7 @@ so start the coordinator only with `agent-factory coordinator`. The key itself s
 - VM (`FACTORY_BOX=vm`): install Sysbox on the VM first ([#158](https://github.com/chiyanram/agent-factory/issues/158)).
   The runner runs its own Docker under `--runtime=sysbox-runc`, so its root is an unprivileged user on the VM. Without
   Sysbox the runner refuses to start; it never falls back to `--privileged` ([decision](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6704930024)).
-  The image is `images/factory-box/Dockerfile`: git, Docker, Node 22 and the agent CLIs at pinned versions. A
+  The image is `images/factory-box/Dockerfile`: git, Docker, Node 26 and the agent CLIs at pinned versions. A
   project's toolchain goes in its own `box.Dockerfile`, built `FROM` that image. `agent-factory box build` builds and
   pins it ([The runner image](check-the-runner.md#the-runner-image)).
 - Work laptop (`FACTORY_BOX=srt`, #114): install the pinned sandbox runtime, `npm install --global --omit=optional
