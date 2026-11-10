@@ -156,7 +156,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 
 | item | what it holds |
 |---|---|
-| spec | intent · lane · acceptance criteria (the form is open, see section 9) · design link · out of scope · planned files (optional) |
+| spec | intent · lane · acceptance criteria (numbered `AC-n`, [Spec, design and project knowledge](spec-and-knowledge.md)) · design link · out of scope · planned files (optional) |
 | report | `.factory/report.json`: `done` with evidence per AC (and an optional `deferred` list), `asked` with questions, or `blocked` |
 | PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner (#335; ADR-0012 S13) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |

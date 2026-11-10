@@ -59,7 +59,5 @@ Each step widens only after its exit check passes. Map #30 keeps the current lis
 
 ## 9. Open
 
-- **Acceptance criteria form:** Gherkin (the rulebook's GA1–GA6) or numbered lines (the spec template here). Decided in
-  chiyanram/skills#237.
 - **Copilot CLI and Claude plugins:** whether Copilot CLI loads them. If not, the engine passes it the plugin's skills
   folder (the #162 spike).
