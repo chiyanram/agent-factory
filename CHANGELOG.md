@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.30.0](https://github.com/chiyanram/agent-factory/compare/v0.29.0...v0.30.0) (2026-11-10)
+
+### ✨ Features
+
+* **setup** — agent-factory init sets up a laptop and a project in one guided run · [#369](https://github.com/chiyanram/agent-factory/issues/369) (PR [#377](https://github.com/chiyanram/agent-factory/pull/377))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.30.0/chiyanram-agent-factory-0.30.0.tgz`
+
 ## [0.29.0](https://github.com/chiyanram/agent-factory/compare/v0.28.0...v0.29.0) (2026-11-10)
 
 ### ✨ Features
