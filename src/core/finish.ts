@@ -2,7 +2,9 @@
 // login; the host pushes and posts for it, as the project's identity (#108), and every post goes through the template
 // (#126).
 //
-//   done     push the writer's commits; post the evidence; next: the ready check re-runs the evidence rows
+//   done     push the writer's commits; post the evidence, then the build's deviations from the design in one
+//            "[writer] DEVIATION: …" note (ADR-0018, #430; none when there are none); next: the ready check re-runs the
+//            evidence rows
 //   asked    push; post the questions in one "[writer] OPEN: …" note, which poll counts as one open ask (one note, so a
 //            retry after a failure never posts a question twice); next: wait for a person. By default the note is one
 //            numbered round: every question, its lettered choices with the recommended one marked, and how to answer
@@ -29,7 +31,15 @@ import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
 import type { Questions } from "./settings/variables.js";
 import { hostPush, newCommits, type Guard, type PushRequest } from "./push.js";
-import { hungLine, type Ending, type Evidence, type Outcome, type Question } from "./report.js";
+import {
+  DEVIATION,
+  hungLine,
+  type Deviation,
+  type Ending,
+  type Evidence,
+  type Outcome,
+  type Question,
+} from "./report.js";
 
 export const NEEDS_HUMAN = "needs-human";
 
@@ -245,8 +255,24 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
 }
 
-async function done(input: FinishInput, evidence: readonly Evidence[]): Promise<Result<Next>> {
+// deviationPost : the build's deviations from the design, one item each, where and why. Pure.
+export function deviationPost(head: string, deviations: readonly Deviation[]): Post {
+  return {
+    seat: "writer",
+    title: `${DEVIATION} ${deviations.length} change(s) from the approved design at ${short(head)}`,
+    fields: [],
+    items: deviations.map((d) => `${d.file}:${d.line} · ${d.what} · why: ${d.why}`),
+  };
+}
+
+// deviated : the deviation note, when the run gave any
+async function deviated(input: FinishInput, deviations: readonly Deviation[]): Promise<Done> {
+  return deviations.length === 0 ? { kind: "ok" } : post(input, deviationPost(input.push.commit, deviations));
+}
+
+async function done(input: FinishInput, outcome: Extract<Outcome, { kind: "done" }>): Promise<Result<Next>> {
   const head = input.push.commit;
+  const { evidence } = outcome;
   const items = evidence.map((e) => `${e.criterion} · ${e.command} · ${e.result}`);
   const said = await post(input, {
     seat: "writer",
@@ -254,7 +280,8 @@ async function done(input: FinishInput, evidence: readonly Evidence[]): Promise<
     fields: runFields(input.ending),
     items,
   });
-  return said.kind === "ok" ? { kind: "ok", value: { kind: "ready-check", head, evidence } } : said;
+  const noted = said.kind === "ok" ? await deviated(input, outcome.deviations ?? []) : said;
+  return noted.kind === "ok" ? { kind: "ok", value: { kind: "ready-check", head, evidence } } : noted;
 }
 
 const LETTERS = "ABCD";
@@ -326,7 +353,7 @@ export async function finishRun(input: FinishInput): Promise<Result<Next>> {
   if (sent.kind === "failed") {
     return blocked(input, { reason: `the push failed: ${sent.reason}`, by: "host", pushFirst: false });
   }
-  return outcome.kind === "done" ? done(input, outcome.evidence) : asked(input, outcome.questions);
+  return outcome.kind === "done" ? done(input, outcome) : asked(input, outcome.questions);
 }
 
 // finishFirst : a ticket's first run: push the new branch with every guard, open its change, then finish on it. A push

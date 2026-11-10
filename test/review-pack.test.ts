@@ -292,6 +292,14 @@ describe("buildPack: the approved spec (#224)", () => {
     expect(section(text, 7)).not.toContain("the design this change links");
   });
 
+  it("section 6 carries the build's deviation notes beside the design, fenced as data (#430)", async () => {
+    const note = "[writer] DEVIATION: 1 change(s) from the approved design at abc\n\n- svc/Main.java:3 · x · why: y";
+    const six = section(await pack({ deviations: [note] }), 6);
+    expect(six).toContain("Judge the change against the design plus these notes");
+    expect(six).toContain("svc/Main.java:3 · x · why: y");
+    expect(section(await pack({ dir: join(p.root, "packs-2") }), 6)).not.toContain("deviation notes");
+  });
+
   it("section 6 lists a design URL without fetching it, and names a linked file that is not on the default branch", async () => {
     const linked = specText("https://example.com/design.md and docs/design/gone.md");
     writeSpec(home(), linked);

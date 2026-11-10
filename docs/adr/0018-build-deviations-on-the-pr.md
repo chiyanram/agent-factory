@@ -1,6 +1,7 @@
 # 0018 · A build deviation is a note on the PR, not a design edit
 
-Status: accepted 2026-11-10 (operator, design audit). Not built.
+Status: accepted 2026-11-10 (operator, design audit). Built in #430: the implementer's report carries `deviations`, the
+host posts them, and the review pack reads them. Decision 4 is a rule in the role cards only.
 
 ## Context
 

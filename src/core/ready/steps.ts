@@ -14,7 +14,8 @@
 //            gate command given for several criteria, before any box starts, or a result that quotes nothing its
 //            command printed, after the rows ran. A failed check keeps
 //            why it failed with the head (kept.ts), and a failed row's output with it, before its result is recorded:
-//            the writer's rework run reads it (#199).
+//            the writer's rework run reads it (#199). Once the rows ran, the host posts each row's re-run beside the
+//            result the writer claimed (rerun-note.ts, #430).
 //   verify   the project file's one verify command runs at the head (gate "local" only), and the host posts its result
 //            as the commit status agent-factory/verify, for people and branch protection. The dispatcher decides from
 //            its own record of the run, never from the forge, where any other check could read as green. It posts
@@ -34,6 +35,7 @@ import type { Lane } from "../spec.js";
 import { floorGuard, forHuman, hitsLine, type FloorInput } from "./floor.js";
 import { judgeFiles } from "./judge.js";
 import { diffLane } from "./lane.js";
+import { rerunPost } from "./rerun-note.js";
 
 export const VERIFY_CONTEXT = "agent-factory/verify";
 
@@ -171,7 +173,7 @@ export function uncovered(criteria: readonly string[], evidence: readonly Eviden
 // covered : a guarded diff whose every acceptance criterion has an evidence row runs the rows again; a missing row
 // fails the check for the writer, and counts towards its tries
 async function covered(
-  plan: ReadyPlan,
+  g: Guarding,
   open: Open,
   input: ReadyInput,
   at: { readonly guarded: Checked; readonly base: string },
@@ -182,7 +184,7 @@ async function covered(
   }
   const missing = uncovered(input.criteria, input.evidence);
   return missing.length === 0
-    ? rerun(plan, open, input, at.base)
+    ? rerun(g, open, input, at.base)
     : {
         kind: "ok",
         value: judged({
@@ -220,11 +222,12 @@ async function check(g: Guarding, open: Open, input: ReadyInput): Promise<Result
   if (guarded.kind === "failed") {
     return guarded;
   }
-  const ran = await covered(g.plan, open, input, { guarded: guarded.value, base: baseOf(at) });
+  const ran = await covered(g, open, input, { guarded: guarded.value, base: baseOf(at) });
   return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, lane: guarded.value.lane } } : ran;
 }
 
-async function rerun(plan: ReadyPlan, open: Open, input: ReadyInput, base: string): Promise<Result<Judged>> {
+async function rerun(g: Guarding, open: Open, input: ReadyInput, base: string): Promise<Result<Judged>> {
+  const { plan } = g;
   const parsed = argvs(input.evidence, plan.project.ready.programs);
   if (parsed.kind === "failed") {
     return { kind: "ok", value: judged({ passed: false, why: parsed.reason, human: false }) };
@@ -243,7 +246,16 @@ async function rerun(plan: ReadyPlan, open: Open, input: ReadyInput, base: strin
     // a git row reads the branch's history: the box's copy gets it, with the default branch to diff against
     ...(commands.some((c) => c[0] === GIT_PROGRAM) ? { history: { base } } : {}),
   });
-  return rows.kind === "ok" ? { kind: "ok", value: verdict(input.evidence, rows.value) } : rows;
+  return rows.kind === "ok" ? reported(g, open, input, rows.value) : rows;
+}
+
+// reported : the rows' verdict, after the note that puts each re-run beside its claim (rerun-note.ts, #430); a note
+// that cannot be posted fails the step, so a person looks
+async function reported(g: Guarding, open: Open, input: ReadyInput, rows: readonly Row[]): Promise<Result<Judged>> {
+  const judgedRows = verdict(input.evidence, rows);
+  const note = rerunPost(input.head, input.evidence, rows, judgedRows.passed);
+  const noted = await g.forge.note({ number: open.number, post: note });
+  return noted.kind === "ok" ? { kind: "ok", value: judgedRows } : noted;
 }
 
 // readyPrograms : every program the project's evidence rows may start with, or none without a project file (#444)

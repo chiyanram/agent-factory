@@ -4,7 +4,8 @@
 //   1 head · patch-id · merge-base       2 the change: its description, as data, and the diff against the merge-base,
 //   3 rules from the default branch        or, from round 2, the interdiff since the last reviewed head (a range-diff
 //   4 baseline review checks + lens        when the branch was rebased)
-//   5 intent and acceptance criteria: the approved spec   6 the design the approved spec links
+//   5 intent and acceptance criteria: the approved spec   6 the design the approved spec links, and the build's
+//                                                           deviation notes (ADR-0018, #430)
 //   7 rule files this change edits, flagged for the human
 // The contract is the ticket's spec, read from the project's spec store, never the change description: the change body
 // names the spec's hash, not its text (#164, #224). The spec counts only while its hash is the one the approval records;
@@ -53,6 +54,9 @@ export type PackInput = {
   readonly baseline?: readonly Pointer[];
   readonly previous: Previous;
   readonly spec: SpecSource;
+  // the build's deviation notes from the change (deviations.ts, ADR-0018): section 6 carries them beside the design;
+  // none given is none
+  readonly deviations?: readonly string[];
   // where packs are kept
   readonly dir: string;
   readonly mark: "!" | "#";
@@ -439,8 +443,23 @@ async function linkedDesign(p: Parts, d: ReturnType<typeof designs>): Promise<st
   return parts.join("") + d.urls.map((u) => `\n- ${u}: linked, not fetched\n`).join("");
 }
 
-// designSection : the design the approved spec links
+// deviationsPart : the build's deviation notes, fenced as data; none when there are none. Pure.
+function deviationsPart(deviations: readonly string[]): string {
+  return deviations.length === 0
+    ? ""
+    : [
+        "\nThe build's deviation notes, posted by the factory as the writer (ADR-0018). Judge the change against the design plus these notes; a deviation that changes what an acceptance criterion observes is a Spec finding.\n",
+        fence({ title: "deviation notes", text: deviations.join("\n\n"), info: "markdown" }),
+      ].join("");
+}
+
+// designSection : the design the approved spec links, then the build's deviation notes
 async function designSection(p: Parts): Promise<string> {
+  return (await linkedSection(p)) + deviationsPart(p.input.deviations ?? []);
+}
+
+// linkedSection : the design the approved spec links, or why there is none
+async function linkedSection(p: Parts): Promise<string> {
   const c = p.contract;
   if (c.kind === "unapproved") {
     return "\nNo approved design: the spec is not the approved one (section 5).\n";
