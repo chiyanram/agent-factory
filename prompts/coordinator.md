@@ -122,8 +122,8 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    for what each run kind cost (design-reviewer, test-first, implementer, cleanup, finder, verify pass, onboarder;
    a ticket's finders per lens) today, in the window and this month (#337). In the pilot, compare it with one `/crq`
    session on a like change at the same budget; a phase that does not change outcomes is retired. Post the retro's
-   actions as one JSON list, so code can count them (ADR-0017): `[{"type": "architecture" | "types" | "lint" | "test" | "docs" | "retire",
-   "owner": "<who>", "due": "<YYYY-MM-DD>", "ticket": "#<n>"}]`, one entry per action.
+   actions as one JSON list, so code can count them (ADR-0017): `[{"type": "rule" | "script" | "check" | "playbook",
+   "owner": "<who>", "due": "<YYYY-MM-DD>", "ticket": "#<n>"}]`, one entry per action, typed as the rulebook's RT4 says.
 
 ## Triggers
 
