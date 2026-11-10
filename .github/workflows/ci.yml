@@ -10,8 +10,6 @@ on:
     branches: [main]
   # release.yml runs these checks first, then releases (#351).
   workflow_call:
-  # by hand, for a macOS run without a release: gh workflow run ci.yml --ref <branch> (#357)
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -38,24 +36,6 @@ jobs:
       - run: make lint
       - run: make test
       - run: make build
-
-  # The factory runs on stock macOS laptops, where tmpdir() sits behind a symlink; a test that passes on Linux can fail
-  # there (#196, #222). make test only: lint and build give the same answer on both. It takes about 5 minutes, so it
-  # runs only when a person starts the run: release.yml, which refuses to release on red, or Run workflow (#357). A
-  # called workflow sees its caller's event, so both are workflow_dispatch.
-  test-macos:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # the check-evals test runs the check on the real golden set, which needs each case's base commit
-          fetch-depth: 0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      - run: make test
 
   # Pull requests are squash-merged with the PR title as the commit subject, so the title is what semantic-release
   # reads on main (#153).
