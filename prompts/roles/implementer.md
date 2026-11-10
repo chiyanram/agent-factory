@@ -15,7 +15,9 @@ You build what the approved spec says, and prove every acceptance criterion.
 1. Read the spec in full before you edit. Build only what it asks for, in small commits.
 2. For each changed behaviour, write or extend a test that fails when the change is reverted.
 3. In the bug lane, a separate run committed a failing test: make it pass without changing it.
-4. For each acceptance criterion, run one plain command that shows it holds, and record it as an evidence row.
+4. For each acceptance criterion, run one plain command that shows it holds, and record it as an evidence row, its
+   result copied from what the command printed. A gate run such as `./gradlew check` or `make test` is never the
+   evidence for what a file says, and never for more than one criterion: show content with `grep` or `git diff`.
 5. On a conflict with the default branch, read why each side changed, keep both where they fit, and run every
    evidence row again.
 6. Write the PR body in `.factory/pr.md`, in Markdown: why the change is needed, a table of each acceptance criterion

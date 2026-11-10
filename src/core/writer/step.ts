@@ -40,6 +40,7 @@ import { writerRun, type Ended } from "./run.js";
 import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
 import { ciText, taskText, verifyText } from "./task.js";
 import { VERIFY_FILE } from "../ready/steps.js";
+import { programsLine } from "../ready/command.js";
 import type { WriterSettings } from "./settings.js";
 import { inputsOf, readCard, type Card, type Part, type Role } from "../process/cards.js";
 
@@ -78,6 +79,8 @@ export type WriterSetup = {
   readonly login: () => Promise<BoxToken>;
   // the host push: hostPush; a test passes its own
   readonly pusher: Pusher;
+  // the project file's ready.programs, which the prompt names for the evidence rows (#444); none in a test's setup
+  readonly programs?: readonly string[];
   // the project's lanes (#232); the default lanes when absent
   readonly lanes?: readonly LaneProps[];
   // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
@@ -145,6 +148,20 @@ const TASKS: Readonly<Record<RunMode, (n: Names) => string>> = {
     `This run tidies ticket ${n.ticket}'s branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md; the implementer's evidence rows, and how to diff against origin/${n.base}, are in .factory/task.md.`,
 };
 
+// evidenceRules : what the writer's evidence rows may run and must show (#444): the exact programs, and that a row's
+// result is what its command printed. Pure.
+export function evidenceRules(listed: readonly string[]): string {
+  return [
+    `Each evidence row's command must start with one of these programs, or the ready check refuses it: ${programsLine(listed)}.`,
+    "A row's result is what its command printed, copied, never your own description of it. A build or test run such as the gate command proves behaviour its tests check; it is never the evidence for what a file says, and never for more than one criterion: show a file's content with grep, or a change with git diff.",
+  ].join("\n");
+}
+
+// programsOf : the project's ready.programs, as a field of the prompt's input to spread (#444)
+function programsOf(setup: WriterSetup): { readonly programs?: readonly string[] } {
+  return setup.programs === undefined ? {} : { programs: setup.programs };
+}
+
 // CLEANUP_REPORT : the words a cleanup run's prompt adds to the report's schema (#236)
 export const CLEANUP_REPORT =
   'A cleanup run\'s "done" report may add "deferred": a list of each cleanup you did not make because it would change behaviour, each with why. It goes in the PR body for a person.';
@@ -157,10 +174,13 @@ export function runPrompt(input: {
   readonly names: Names;
   // what the prompt says of the project's quick tools (tools.ts)
   readonly tools: readonly string[];
+  // the project file's ready.programs (#444): the prompt names every program an evidence row may start with
+  readonly programs?: readonly string[];
 }): string {
   const listed = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
   const cleanup = input.mode === "cleanup" ? `\n${CLEANUP_REPORT}` : "";
-  return `${input.card.body}\n\n${TASKS[input.mode](input.names)}\n\n${FLOOR}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${listed}\n\n${REPORT_INSTRUCTIONS}${cleanup}\n`;
+  const evidence = input.programs === undefined ? "" : `\n${evidenceRules(input.programs)}`;
+  return `${input.card.body}\n\n${TASKS[input.mode](input.names)}\n\n${FLOOR}${evidence}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${listed}\n\n${REPORT_INSTRUCTIONS}${cleanup}\n`;
 }
 
 // deferredOf : a done report's deferred list, as a field to spread
@@ -531,6 +551,7 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     mode: work.mode,
     names: { ticket: input.ticket, branch: clone.value.branch, head: clone.value.start, base: p.base },
     tools: [...knowledgeLines(known), ...toolLines(tools)],
+    ...programsOf(setup),
   });
   const ended = await writerRun({
     setup: setup.box,

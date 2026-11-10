@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readProjectFile } from "../src/core/project.js";
-import { commandArgv } from "../src/core/ready/command.js";
+import { commandArgv, evidencePrograms, GIT_READS, READ_ONLY_PROGRAMS } from "../src/core/ready/command.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
 import { tempDir } from "./temp.js";
 
@@ -94,6 +94,28 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
 
 describe("commandArgv: an evidence row with no shell (#91)", () => {
   const programs = ["make", "./gradlew", "npm"];
+
+  it("allows the read-only set besides the project's list, and git only with a read unless the list names git (#444)", () => {
+    expect(commandArgv('grep -c "a b" README.md', programs)).toEqual({
+      kind: "ok",
+      value: ["grep", "-c", "a b", "README.md"],
+    });
+    for (const sub of GIT_READS) {
+      expect(commandArgv(`git ${sub}`, programs)).toMatchObject({ kind: "ok" });
+    }
+    expect(commandArgv("git commit -m x", programs)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"git commit" is not a read'),
+    });
+    expect(commandArgv("git -c core.pager=x diff", programs)).toMatchObject({ kind: "failed" });
+    expect(commandArgv("git commit -m x", [...programs, "git"])).toMatchObject({ kind: "ok" });
+    expect(evidencePrograms(["./gradlew", "grep"])).toEqual([...READ_ONLY_PROGRAMS, "./gradlew"]);
+    expect(commandArgv("curl x", ["./gradlew"])).toEqual({
+      kind: "failed",
+      reason:
+        '"curl" is not a program a ready check may run (grep, test, wc, ls, cat, head, tail, git (only diff, log, show, status, ls-files, rev-parse), ./gradlew)',
+    });
+  });
 
   it("splits on blanks and lets quotes group a word", () => {
     expect(commandArgv("make test", programs)).toEqual({ kind: "ok", value: ["make", "test"] });

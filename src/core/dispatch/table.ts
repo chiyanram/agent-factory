@@ -33,6 +33,7 @@
 //   the writer was blocked and a person removed needs-human    writer again
 //   the head is not the writer's (a person pushed)             wait: stand off
 //   the same patch twice, or a run that changed nothing        needs-human
+//     (but see a rework at the same head, below)
 //   the change conflicts with its target (poll's conflict)     implementer merges the default branch in
 //                                                              1 failure → needs-human (still conflicting after the
 //                                                              merge run); nothing rebases or force-pushes
@@ -43,6 +44,9 @@
 //   ready check stopped by a test check (#231)                 needs-human, the hits listed; a human's waiver at
 //                                                              this head, newer than that check, runs it again
 //   ready check failed                                         writer again        3 failures → needs-human
+//   ready check failed at this head, and what it ran is not     ready check again (#444): the writer's rework changed
+//   what it would run now: other evidence rows, or other        its rows, not its code, or the project file changed
+//   allowed programs                                           the programs; each run counts towards the 3 failures
 //   ready check passed, no review at this head                 reviewer            3 rounds → needs-human
 //   Act on findings                                            writer again        3 rounds → needs-human
 //   CI red                                                     writer again        2 CI rounds → needs-human
@@ -60,7 +64,8 @@
 // FACTORY_QUIET_MINUTES releases the claim, so a stuck change goes back to the queue. A stop the dispatcher already
 // handed to a person is not handed over again: removing needs-human does not lift it. The way back from needs-human
 // (#227, #151 gap 1): a person removes the label and STARTs again (tiny) or approves the spec again (the other lanes);
-// the newer record starts every count afresh, and the next pass picks the ticket up.
+// the newer record starts every count afresh, and the next pass picks the ticket up. A hold whose reason no longer
+// holds (the ready check would now run other rows or programs, #444) needs only the label removed.
 //
 // The ticket's cap (#131; caps.ts) holds over every run: a ticket whose runs since the approval spent its cap goes to
 // needs-human, with the spend shown, instead of starting another.
@@ -72,6 +77,7 @@ import type { Retried, Summary, Task, WriterMode } from "./records.js";
 import { ticketCapped, type Caps } from "./caps.js";
 import type { DesignView } from "./design.js";
 import type { DesignStep } from "./records.js";
+import type { Evidence } from "../report.js";
 
 // what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
 // is the newer of the two records, and the run records count from then
@@ -120,6 +126,9 @@ export type TicketState = {
   readonly caps: Caps;
   // where the design review of the current spec and design stands (#236)
   readonly design: DesignView;
+  // every program an evidence row may start with this pass (#444; ready/command.ts evidencePrograms); none when the
+  // ready check has no project file
+  readonly programs?: readonly string[];
 };
 
 export type Action =
@@ -315,10 +324,67 @@ const headMoved: Rule = (s) => {
     : "next";
 };
 
+type LastReadyEnded = Extract<Summary["lastReady"], { kind: "ended" }>;
+
+// sameList : two lists with the same items in the same order. Pure.
+function sameList<T>(a: readonly T[], b: readonly T[], same: (x: T, y: T) => boolean): boolean {
+  return a.length === b.length && a.every((x, i) => i in b && same(x, b[i] ?? x));
+}
+
+function sameRow(a: Evidence, b: Evidence): boolean {
+  return a.criterion === b.criterion && a.command === b.command && a.result === b.result;
+}
+
+// readyInputsChanged : what the ready check would run now is not what it ran: the last writer gave other rows, or the
+// allowed programs changed (#444). A line that does not say what it ran (built by hand, or older than #444) counts as
+// unchanged, so no ticket re-runs a check it already failed. Pure.
+function readyInputsChanged(s: TicketState, r: LastReadyEnded): boolean {
+  return rowsChanged(s, r) || programsChanged(s, r);
+}
+
+function rowsChanged(s: TicketState, r: LastReadyEnded): boolean {
+  const w = s.runs.lastWriter;
+  const rows = w.kind === "ended" ? w.evidence : [];
+  return r.evidence !== undefined && !sameList(r.evidence, rows, sameRow);
+}
+
+function programsChanged(s: TicketState, r: LastReadyEnded): boolean {
+  const then = r.programs ?? "unknown";
+  const now = s.programs ?? "unknown";
+  return then !== "unknown" && now !== "unknown" && !sameList(then, now, (a, b) => a === b);
+}
+
+// recheck : the last ready check failed for the writer at this head, and it would now run other rows or programs: it
+// runs again rather than send the writer back, or hand a rework that changed no code to a person (#444)
+function recheck(s: TicketState, head: string): boolean {
+  const r = s.runs.lastReady;
+  return r.kind === "ended" && r.head === head && !r.passed && !r.human && readyInputsChanged(s, r);
+}
+
+// checkedSince : the last ready check at the writer's head ran after the writer's run ended, so it judged that run's
+// rows (#444). Pure.
+function checkedSince(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
+  const r = s.runs.lastReady;
+  const ended = Date.parse(w.at ?? "");
+  return r.kind === "ended" && r.head === w.head && !(Date.parse(r.at) < ended);
+}
+
+// evidenceRework : a rework that changed no code, whose rows the ready check judges: it has run them since, or would
+// now run other rows or programs than it last did (#444)
+function evidenceRework(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
+  return w.patch === "" && w.mode === "rework" && (checkedSince(s, w) || recheck(s, w.head));
+}
+
+// patchChecked : a run whose patch the same-patch check leaves alone: a cleanup that left nothing to tidy commits
+// nothing, and that is its right answer (#236); a rework whose evidence, not its code, was the problem changes no
+// code, and the ready check judges its new rows (#444)
+function patchChecked(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
+  return w.mode !== "cleanup" && !evidenceRework(s, w);
+}
+
 const samePatch: Rule = (s) => {
   const w = s.runs.lastWriter;
-  // a cleanup that left nothing to tidy commits nothing, and that is its right answer (#236)
-  if (w.kind !== "ended" || w.mode === "cleanup") {
+  if (w.kind !== "ended" || !patchChecked(s, w)) {
     return "next";
   }
   if (w.patch === "") {
@@ -335,10 +401,11 @@ const samePatch: Rule = (s) => {
 // the cleanup's own
 const CLEANED: ReadonlySet<WriterMode> = new Set(["fix", "rework", "ci"]);
 
-// cleanup : after the implementer's done run, and its checks for the same patch and a conflict, the cleanup run
+// cleanup : after the implementer's done run, and its checks for the same patch and a conflict, the cleanup run; a run
+// that changed no code left no lines to tidy (#444)
 const cleanup: Rule = (s) => {
   const w = s.runs.lastWriter;
-  return w.kind === "ended" && w.outcome === "done" && CLEANED.has(w.mode)
+  return w.kind === "ended" && w.outcome === "done" && CLEANED.has(w.mode) && w.patch !== ""
     ? {
         kind: "writer",
         task: { kind: "cleanup", head: w.head, evidence: w.evidence },
@@ -380,7 +447,7 @@ function raisedLaneWhy(s: TicketState, lane: Lane | undefined): string {
     : "";
 }
 
-type LastReady = Extract<Summary["lastReady"], { kind: "ended" }>;
+type LastReady = LastReadyEnded;
 
 // alsoStopped : the test checks' own stop at the same check, when they stopped it too and no waiver lifted it (#231)
 function alsoStopped(s: TicketState, head: string, r: LastReady): string {
@@ -401,10 +468,17 @@ function waivedSince(waiver: WaiverView, head: string, checkedAt: string): boole
   return waiver.kind === "waived" && waiver.head === head && Date.parse(waiver.at) > Date.parse(checkedAt);
 }
 
+// due : no ready check stands at this head: none yet, one at another head, or a failed one that would now run other
+// rows or programs (#444)
+function due(s: TicketState, head: string): boolean {
+  const r = s.runs.lastReady;
+  return r.kind === "none" || r.head !== head || recheck(s, head);
+}
+
 const ready: Rule = (s) => {
   const head = writerHead(s);
   const r = s.runs.lastReady;
-  if (r.kind === "none" || r.head !== head) {
+  if (r.kind === "none" || due(s, head)) {
     return { kind: "ready", head };
   }
   if (r.passed) {

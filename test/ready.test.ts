@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import type { Box, PinnedImage, Ran } from "../src/core/box/types.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
 import type { SrtEgress } from "../src/core/box/srt-plan.js";
@@ -698,5 +699,115 @@ describe("boxPlan", () => {
       kind: "failed",
       reason: expect.stringContaining('"gate" must be'),
     });
+  });
+});
+
+describe("evidence that can prove its criterion (#444)", () => {
+  const printed = (stdout: string, code = 0): Ran => ({ kind: "exited", code, stdout, stderr: "" });
+  const said = (command: string, result: string, criterion = "AC-1"): Evidence => ({ criterion, command, result });
+
+  it("runs grep, test, wc and git's reads with no ready.programs entry for them; refuses git's writes", async () => {
+    const fake = fakeBox({ runs: [printed("1\n"), printed(""), printed("3 README.md\n")] });
+    const out = await ready(fake.box, [
+      said('grep -c "records each" README.md', "1"),
+      said("test -f README.md", "exit 0", "AC-2"),
+      said("wc -l README.md", "3 README.md", "AC-3"),
+    ]);
+    expect(out).toMatchObject({ kind: "ok", value: { passed: true } });
+    const refused = fakeBox({});
+    expect(await ready(refused.box, [said("git commit -m x", "")])).toMatchObject({
+      kind: "ok",
+      value: { passed: false, why: expect.stringContaining('"git commit" is not a read') },
+    });
+    expect(await ready(refused.box, [said("curl x", "")])).toMatchObject({
+      kind: "ok",
+      value: { passed: false, why: expect.stringContaining("grep, test, wc, ls, cat, head, tail, git (only diff") },
+    });
+    expect(refused.calls.filter((c) => c.op === "start")).toEqual([]);
+  });
+
+  it("refuses one gate command given for several criteria, before any box starts", async () => {
+    const fake = fakeBox({});
+    const prose = "I read it by hand: line 3 is the paragraph. The gate still passes.";
+    const out = await ready(fake.box, [said("./gradlew check", prose), said("./gradlew check", prose, "AC-2")]);
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: {
+        passed: false,
+        why: expect.stringMatching(/^rows 1 \(AC-1\), 2 \(AC-2\) all give "\.\/gradlew check": a gate run is never/),
+      },
+    });
+    expect(fake.calls.filter((c) => c.op === "start")).toEqual([]);
+    // the local gate's verify command counts as a gate run too; a targeted test run for two criteria does not
+    expect(await ready(fakeBox({}).box, [said("make verify", "ok"), said("make verify", "ok", "AC-2")])).toMatchObject({
+      kind: "ok",
+      value: { passed: false },
+    });
+    const targeted = fakeBox({ runs: [exited(0), exited(0)] });
+    const tests = "./gradlew test --tests 'OrderSpec'";
+    expect(await ready(targeted.box, [said(tests, "ok"), said(tests, "ok", "AC-2")])).toMatchObject({
+      kind: "ok",
+      value: { passed: true },
+    });
+  });
+
+  it("refuses a result that quotes nothing its command printed, after the rows ran", async () => {
+    const gradle = "> Task :check\n\nBUILD SUCCESSFUL in 58s\n5 actionable tasks: 5 executed\n";
+    const prose = fakeBox({ runs: [printed(gradle)] });
+    expect(
+      await ready(prose.box, [said("./gradlew check", "I read it by hand: line 3 is the paragraph. The gate passes.")]),
+    ).toMatchObject({
+      kind: "ok",
+      value: {
+        passed: false,
+        why: 'row 1 (AC-1): its result does not quote what "./gradlew check" printed: copy a line of the command\'s own output into the result, never a description of it',
+      },
+    });
+    // the writer's rework reads what the command did print, to quote it
+    const kept = await readKept({ recordsDir: recordsDirOf(p.clone), change: 12, head }, READY_FILE);
+    expect(kept).toMatchObject({ kind: "ok", value: expect.stringContaining("BUILD SUCCESSFUL in 58s") });
+    // a fragment, a whole line, or the same words with another time all quote it
+    for (const result of ["BUILD SUCCESSFUL", "5 actionable tasks: 5 executed", "BUILD SUCCESSFUL in 1m 2s"]) {
+      const quoted = fakeBox({ runs: [printed(gradle)] });
+      expect(await ready(quoted.box, [said("./gradlew check", result)])).toMatchObject({ value: { passed: true } });
+    }
+  });
+
+  it("gives a git row the branch's history in the box: the head checked out, the default branch to diff against", async () => {
+    // a box that runs each row in its copy, as a runner would; the host's git config does not reach it
+    const fake = fakeBox({});
+    const outputs: string[] = [];
+    const box: Box = {
+      ...fake.box,
+      run: async (call) => {
+        const start = fake.calls.findLast((c) => c.op === "start");
+        const spec = start?.op === "start" ? start.spec : undefined;
+        const [program, ...args] = call.command.argv;
+        const stdout = execFileSync(program, args, {
+          cwd: spec?.worktree,
+          env: { PATH: process.env.PATH, HOME: p.root, GIT_CONFIG_NOSYSTEM: "1", ...spec?.env },
+          encoding: "utf8",
+        });
+        outputs.push(stdout);
+        return { kind: "exited", code: 0, stdout, stderr: "" };
+      },
+    };
+    const out = await ready(box, [
+      said("git diff --name-only main...HEAD", "svc/Extra.java"),
+      said("git status --porcelain", "", "AC-2"),
+      said("git rev-parse HEAD", head, "AC-3"),
+    ]);
+    expect(out).toMatchObject({ kind: "ok", value: { passed: true } });
+    // the branch's own files, not main's Makefile, which the branch merged in
+    expect(outputs[0]?.split("\n")).toContain("svc/Extra.java");
+    expect(outputs[0]?.split("\n")).not.toContain("Makefile");
+    expect(outputs.slice(1)).toEqual(["", `${head}\n`]);
+    const start = fake.calls.find((c) => c.op === "start");
+    expect(start?.op === "start" ? start.spec.env : {}).toMatchObject({ GIT_CONFIG_KEY_0: "safe.directory" });
+    // a check with no git row gets no repository
+    const plain = fakeBox({ runs: [exited(0)] });
+    const seen: string[][] = [];
+    await ready(watched(plain, seen), [row("make test")]);
+    expect(seen[0]).not.toContain(".git");
   });
 });

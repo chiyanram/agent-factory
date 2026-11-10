@@ -47,7 +47,7 @@ import { writerStep } from "./core/writer/step.js";
 import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
 import { readProcess, type PluginDir } from "./core/process/read.js";
 import type { LaneProps } from "./core/lane.js";
-import { readyStep, verifyStep } from "./core/ready/steps.js";
+import { readyPrograms, readyStep, verifyStep, type BoxPlan } from "./core/ready/steps.js";
 import { designSteps } from "./core/design/step.js";
 import { designSetup } from "./core/design/settings.js";
 import { countsLine } from "./core/review/verdicts.js";
@@ -670,6 +670,7 @@ function dispatchSettings(env: NodeJS.ProcessEnv): DispatchSettings {
 
 type Planned = {
   readonly gate: Gate;
+  readonly readyPrograms?: readonly string[];
   readonly steps: Steps;
   readonly plugins: readonly PluginHash[];
   readonly lanes: readonly LaneProps[];
@@ -789,8 +790,20 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   };
   return {
     kind: "ok",
-    value: { gate, steps, plugins: hashesOf(used.value.plugins), lanes: own.value.lanes },
+    value: {
+      gate,
+      steps,
+      plugins: hashesOf(used.value.plugins),
+      lanes: own.value.lanes,
+      ...programsOf(plan),
+    },
   };
+}
+
+// programsOf : the programs the project's evidence rows may start with, as a field to spread (#444)
+function programsOf(plan: BoxPlan): { readonly readyPrograms?: readonly string[] } {
+  const programs = readyPrograms(plan);
+  return programs === undefined ? {} : { readyPrograms: programs };
 }
 
 type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number; readonly caps: Caps };

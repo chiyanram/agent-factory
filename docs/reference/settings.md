@@ -73,8 +73,18 @@ there.
   the implementer back.
   It also posts the result as the commit status `agent-factory/verify` at the head, for people and branch protection.
   **Today:** that status is tested against GitHub's API shape only; on GitLab it is not yet tried on a live project.
-- `ready.programs`: an evidence row's command must start with one of these, and run with no shell (no pipe, `&&`,
-  redirect, `$`, glob or backslash); any other row fails the ready check.
+- `ready.programs`: the programs an evidence row's command may start with, besides the read-only set every ready
+  check allows (#444): `grep`, `test`, `wc`, `ls`, `cat`, `head`, `tail`, and `git` with a read subcommand only
+  (`diff`, `log`, `show`, `status`, `ls-files`, `rev-parse`; list `git` here to allow any). A row runs with no shell
+  (no pipe, `&&`, redirect, `$`, glob or backslash), in a fresh runner; any other row fails the ready check. A check
+  with a `git` row gives the runner's copy the branch's history, with the default branch as `main` and
+  `origin/main` (its own name) to diff against. The implementer's, test-first and cleanup prompts name the exact list.
+  `init` writes only the build's programs here. It is an allow-list key, so a team narrows what a project adds; the
+  read-only set always stays. The ready check also refuses a row that cannot prove its criterion
+  (`src/core/ready/proof.ts`): one gate command (the `verify` command, or a listed build program run with only gate
+  tasks, such as `./gradlew check` or `make test`) given for more than one criterion, and a result that quotes none of
+  what its command printed. Each ready check records the programs it allowed; when they change after a failed check,
+  the next pass runs the check again rather than send the implementer back.
 - `ready.testFiles`: the globs the floor guard reads as test files; they replace the built-in list (`src/test/**`,
   `test/**`, `tests/**`, `__tests__/**`, `*Test.java`, `*Spec.groovy`, `*.test.*`, `*.spec.*`, `test_*.py`,
   `*_test.go` and the like; `src/core/ready/floor.ts`).

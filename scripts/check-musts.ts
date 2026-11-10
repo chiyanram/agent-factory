@@ -104,6 +104,12 @@ export const RULES: readonly LineRule[] = [
 // the real exceptions, each with its reason
 export const ALLOW: readonly Allow[] = [
   {
+    file: "src/core/ready/command.ts",
+    rule: "host-git",
+    has: 'export const GIT_PROGRAM = "git";',
+    why: "the name of a program an evidence row runs in the box, on the box's own copy, never git on the host (#444)",
+  },
+  {
     file: "src/core/coordinator.ts",
     rule: "forge-seam",
     has: '"gh",',

@@ -187,6 +187,8 @@ export type TickSetup = {
   readonly steps: Steps;
   // the project file's gate (#91)
   readonly gate: Gate;
+  // every program an evidence row may start with (#444; ready/steps.ts readyPrograms); none without a project file
+  readonly readyPrograms?: readonly string[];
   readonly now: () => number;
   readonly quietMinutes: number;
   // how long the orchestrator loop waits between passes (poll.minutes), kept with the last-poll time for status
@@ -385,6 +387,11 @@ async function designOf(setup: TickSetup, ticket: string, said: Said, events: re
   return designView({ events, spec: spec.spec.hash, design: spec.design, approvedAt, now: setup.now() });
 }
 
+// programsField : the pass's allowed evidence programs, as a field to spread: none without a project file (#444)
+function programsField(setup: TickSetup): { readonly programs?: readonly string[] } {
+  return setup.readyPrograms === undefined ? {} : { programs: setup.readyPrograms };
+}
+
 // Decided's ticket: its state for the table, and the current approval with whether its shared copy is posted
 type Read = {
   readonly state: TicketState;
@@ -427,6 +434,7 @@ async function stateOf(
         quietMinutes: setup.quietMinutes,
         caps: setup.caps,
         design,
+        ...programsField(setup),
       },
       approved,
       shared: sharedBefore(events.value, approved),
@@ -757,6 +765,7 @@ function readyEnded(
     why: value.why,
     ...(value.human ? { human: true } : {}),
     ...(value.lane === undefined ? {} : { lane: value.lane }),
+    ...programsField(setup),
     ...failedAt(setup, "ready", forWriter, state.runs.readyFailures),
   };
 }

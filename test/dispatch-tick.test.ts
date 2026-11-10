@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
+import type { Evidence } from "../src/core/report.js";
 import { waive } from "../src/core/waiver.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
@@ -416,6 +417,72 @@ describe("tick", () => {
     expect(wrote).toEqual(["ready-failed", "cleanup"]);
     await pass("2026-11-07T10:01:20Z");
     expect(wrote).toEqual(["ready-failed", "cleanup", "ready-failed"]);
+  });
+
+  it("ledger ticket 4 (#444): ready failed, a rework that changed only its rows, a hold a person clears, then the ready check on the new rows", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const grep = [{ criterion: "AC-1: README", command: 'grep -c "records" README.md', result: "1" }];
+    const gate = [{ criterion: "AC-1: README", command: "./gradlew check", result: "BUILD SUCCESSFUL" }];
+    const lines: readonly Event[] = [
+      {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "cleanup",
+        head: H,
+        outcome: "done",
+        patch: "",
+        evidence: grep,
+        hung: false,
+      },
+      { at: "2026-11-07T09:01:00Z", kind: "ready-ended", head: H, passed: false, why: "row 1: grep is not allowed" },
+      {
+        at: "2026-11-07T09:05:00Z",
+        kind: "writer-ended",
+        mode: "rework",
+        head: H,
+        outcome: "done",
+        patch: "",
+        evidence: gate,
+        hung: false,
+      },
+      // what the release before #444 did with it
+      { at: "2026-11-07T09:06:00Z", kind: "blocked", why: "the writer's run changed nothing" },
+    ];
+    for (const event of lines) {
+      await record({ where, event });
+    }
+    const checked: (readonly Evidence[])[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      ready: {
+        kind: "available",
+        run: async (input) => (
+          checked.push(input.evidence), { kind: "ok", value: { passed: true, why: "", human: false } }
+        ),
+      },
+    };
+    const programs = ["grep", "test", "wc", "ls", "cat", "head", "tail", "git", "./gradlew"];
+    const pass = (labels: readonly string[]) =>
+      tick(
+        setup({ team, open: [open({ head: H, labels })], merged: [] }, [], {
+          steps,
+          readyPrograms: programs,
+          now: () => Date.parse("2026-11-07T10:00:00Z"),
+        }),
+      );
+    // the hold stands while the label is on
+    await pass(["needs-human"]);
+    expect(checked).toEqual([]);
+    // the person removes needs-human: the next pass runs the ready check on the rework's rows, and records the programs
+    await pass([]);
+    expect(checked).toEqual([gate]);
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({
+      kind: "ready-ended",
+      passed: true,
+      programs,
+    });
   });
 
   it("a test check hit goes to a person, never back to the writer; a human's waiver at the head runs it again (#231)", async () => {

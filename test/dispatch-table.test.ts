@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { backoffMs, EMPTY, type Summary } from "../src/core/dispatch/records.js";
+import {
+  backoffMs,
+  EMPTY,
+  summarize,
+  type Event,
+  type Summary,
+  type WriterMode,
+} from "../src/core/dispatch/records.js";
+import type { Evidence } from "../src/core/report.js";
 import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import {
   decide,
@@ -751,5 +759,115 @@ describe("inFlight: whether the orchestrator loop carries the ticket on (#305)",
       blocked: [`Act on findings after ${MAX_REVIEW_ROUNDS} review rounds`],
     });
     expect(inFlight(state({ runs: blocked }))).toBe(false);
+  });
+});
+
+// the ledger's ticket 4 (#444): the ready check failed at the head on a row's program, and the rework ended done at
+// the same head with new rows and no code change. Each step is the run record's own lines, summarized as tick does.
+describe("a rework at the same head after a failed ready check (#444)", () => {
+  const AC = (n: number, command: string, result = "1"): Evidence => ({
+    criterion: `AC-${n}: README.md says it`,
+    command,
+    result,
+  });
+  const GREP = [AC(1, 'grep -c "records each factory ticket" README.md')];
+  const GATE = [AC(1, "./gradlew check", "I read it by hand: line 3 is the paragraph. The gate still passes.")];
+  const BEFORE = ["./gradlew"];
+  const AFTER = ["grep", "test", "wc", "ls", "cat", "head", "tail", "git", "./gradlew"];
+  const t = (minute: number): string => `2026-11-07T09:${String(minute).padStart(2, "0")}:00Z`;
+  const ended = (minute: number, mode: WriterMode, patch: string, evidence: readonly Evidence[]): Event => ({
+    at: t(minute),
+    kind: "writer-ended",
+    mode,
+    head: H,
+    outcome: "done",
+    patch,
+    evidence,
+    hung: false,
+  });
+  const readyEnded = (minute: number, passed: boolean, programs?: readonly string[]): Event => ({
+    at: t(minute),
+    kind: "ready-ended",
+    head: H,
+    passed,
+    why: passed ? "" : 'row 1 (AC-1): "grep" is not a program a ready check may run (./gradlew)',
+    ...(programs === undefined ? {} : { programs }),
+    ...(passed ? {} : { nextTry: { step: "ready", at: t(minute) } }),
+  });
+  // fix, cleanup, the ready check that failed, and the rework that changed no code
+  const FAILED: readonly Event[] = [
+    ended(10, "fix", "p1", GREP),
+    ended(20, "cleanup", "", GREP),
+    readyEnded(21, false, BEFORE),
+  ];
+  const runsOf = (events: readonly Event[]): Summary => summarize({ events, since: APPROVED_AT }) satisfies Summary;
+  const at = (events: readonly Event[], programs: readonly string[], over: Partial<TicketState> = {}) =>
+    state({ runs: runsOf(events), programs, ...over });
+
+  it("ready failed → rework done at the same head with other rows → the ready check runs the new rows, in flight", () => {
+    const events = [...FAILED, ended(30, "rework", "", GATE)];
+    expect(decide(at(events, BEFORE))).toEqual({ kind: "ready", head: H });
+    expect(inFlight(at(events, BEFORE))).toBe(true);
+  });
+
+  it("ready failed → the project file allows more programs → the ready check runs again, before any writer run", () => {
+    expect(decide(at(FAILED, BEFORE))).toMatchObject({ kind: "writer", task: { kind: "ready-failed" } });
+    expect(decide(at(FAILED, AFTER))).toEqual({ kind: "ready", head: H });
+    // and after a rework that changed nothing, not even its rows
+    const same = [...FAILED, ended(30, "rework", "", GREP)];
+    expect(decide(at(same, AFTER))).toEqual({ kind: "ready", head: H });
+  });
+
+  it("ready failed → rework done at the same head, same rows, same programs → needs-human: it changed nothing", () => {
+    const same = [...FAILED, ended(30, "rework", "", GREP)];
+    expect(decide(at(same, BEFORE))).toEqual({ kind: "needs-human", why: "the writer's run changed nothing" });
+    expect(inFlight(at(same, BEFORE))).toBe(false);
+  });
+
+  it("the re-run that fails again sends the writer back, and the third failure goes to a person", () => {
+    const again = [...FAILED, ended(30, "rework", "", GATE), readyEnded(31, false, AFTER)];
+    expect(decide(at(again, AFTER))).toMatchObject({ kind: "writer", task: { kind: "ready-failed", head: H } });
+    const third = [...again, ended(40, "rework", "", GREP), readyEnded(41, false, AFTER)];
+    expect(decide(at(third, AFTER))).toEqual({
+      kind: "needs-human",
+      why: `the ready check failed ${MAX_READY_FAILURES} times`,
+    });
+  });
+
+  it("the re-run that passes goes on to the review, with no cleanup run for a rework that changed no code", () => {
+    // the same rows as before, but the project file allows grep now: the check ran them and passed
+    const passed = [...FAILED, ended(30, "rework", "", GREP), readyEnded(31, true, AFTER)];
+    expect(decide(at(passed, AFTER))).toEqual({ kind: "review", head: H });
+  });
+
+  it("a ready line older than #444 names no programs: the rows decide, so no check runs again on its own", () => {
+    const old = [ended(10, "fix", "p1", GREP), ended(20, "cleanup", "", GREP), readyEnded(21, false)];
+    expect(decide(at(old, AFTER))).toMatchObject({ kind: "writer", task: { kind: "ready-failed" } });
+    expect(decide(at([...old, ended(30, "rework", "", GATE)], AFTER))).toEqual({ kind: "ready", head: H });
+  });
+
+  it("a person clears the hold: with the label gone the ticket goes on; a stop already handed over waits for a new START", () => {
+    const blocked: Event = { at: t(31), kind: "blocked", why: "the writer's run changed nothing" };
+    // ticket 4 on this release: the rework gave other rows, so the hold no longer applies once the label is gone
+    const ledger = [...FAILED, ended(30, "rework", "", GATE), blocked];
+    // the hand-over took the claim off and put the label on
+    const labelled = { change: { kind: "open" as const, line: line({ needsHuman: true, claimed: false }) } };
+    const cleared = { change: { kind: "open" as const, line: line({ claimed: false }) } };
+    expect(decide(at(ledger, AFTER, labelled))).toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("needs-human"),
+    });
+    expect(decide(at(ledger, AFTER, cleared))).toEqual({ kind: "ready", head: H });
+    expect(inFlight(at(ledger, AFTER, cleared))).toBe(true);
+    // the same stop would come again: removing the label does not lift it, and a new START (or approval) does
+    const same = [...FAILED, ended(30, "rework", "", GREP), blocked];
+    expect(decide(at(same, BEFORE, cleared))).toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("handed to a person earlier: the writer's run changed nothing; START again"),
+    });
+    const restarted = { kind: "approved" as const, at: t(45), lane: "feature" as const, testFirst: false };
+    const fresh = state({ runs: summarize({ events: same, since: restarted.at }), approval: restarted, ...cleared });
+    expect(decide(fresh)).toMatchObject({ kind: "writer", task: { kind: "fix" } });
+    expect(inFlight(fresh)).toBe(true);
   });
 });
