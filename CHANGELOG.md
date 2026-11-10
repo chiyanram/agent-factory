@@ -3,6 +3,52 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.27.0](https://github.com/chiyanram/agent-factory/compare/v0.26.0...v0.27.0) (2026-11-10)
+
+### ✨ Features
+
+* **dispatch** — a human's command starts the orchestrator loop, which ends by itself; no cron · [#305](https://github.com/chiyanram/agent-factory/issues/305) (PR [#311](https://github.com/chiyanram/agent-factory/pull/311))
+* **dispatch** — cap spend per ticket, per project-day and per window share · [#131](https://github.com/chiyanram/agent-factory/issues/131) (PR [#294](https://github.com/chiyanram/agent-factory/pull/294))
+* **dispatch** — flag a late orchestrator in status, and merge the default branch in on a conflict · [#103](https://github.com/chiyanram/agent-factory/issues/103) (PR [#259](https://github.com/chiyanram/agent-factory/pull/259))
+* **dispatch** — record every run's tokens and cost, and add the usage command · [#131](https://github.com/chiyanram/agent-factory/issues/131) (PR [#286](https://github.com/chiyanram/agent-factory/pull/286))
+* **dispatch** — run the design review before the approval and the cleanup run after the implementer · [#236](https://github.com/chiyanram/agent-factory/issues/236) (PR [#313](https://github.com/chiyanram/agent-factory/pull/313))
+* **dispatch** — runs at once and run hours for the orchestrator · [#299](https://github.com/chiyanram/agent-factory/issues/299) (PR [#308](https://github.com/chiyanram/agent-factory/pull/308))
+* **dispatch** — the run record keeps each lens's unique findings, and ADR-0004 says what is built · [#237](https://github.com/chiyanram/agent-factory/issues/237) (PR [#333](https://github.com/chiyanram/agent-factory/pull/333))
+* **dispatch** — usage shows spend by run kind · [#337](https://github.com/chiyanram/agent-factory/issues/337) (PR [#338](https://github.com/chiyanram/agent-factory/pull/338))
+* **dispatch** — usage splits a review round into finder and verify pass · [#337](https://github.com/chiyanram/agent-factory/issues/337) (PR [#340](https://github.com/chiyanram/agent-factory/pull/340))
+* **egress** — agent-factory egress check runs the live egress checks in a real runner · [#130](https://github.com/chiyanram/agent-factory/issues/130) (PR [#292](https://github.com/chiyanram/agent-factory/pull/292))
+* **egress** — plan and read the live egress checks, with a Node probe for the runner · [#130](https://github.com/chiyanram/agent-factory/issues/130) (PR [#291](https://github.com/chiyanram/agent-factory/pull/291))
+* **egress** — refuse a git host on the egress allowlist · [#130](https://github.com/chiyanram/agent-factory/issues/130) (PR [#290](https://github.com/chiyanram/agent-factory/pull/290))
+* **eval** — CI proof check for a change to a reviewer input · [#217](https://github.com/chiyanram/agent-factory/issues/217) (PR [#289](https://github.com/chiyanram/agent-factory/pull/289))
+* **lint** — check each AGENTS.md MUST that code can check · [#221](https://github.com/chiyanram/agent-factory/issues/221) (PR [#284](https://github.com/chiyanram/agent-factory/pull/284))
+* **onboard** — stage a project's brief and glossary in the project home for a human, and hand them to every run · [#235](https://github.com/chiyanram/agent-factory/issues/235) (PR [#314](https://github.com/chiyanram/agent-factory/pull/314))
+* **plugin** — add plugin update <project> <name@marketplace>, which shows the change, runs config check, then moves the pin · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#293](https://github.com/chiyanram/agent-factory/pull/293))
+* **plugin** — fetch a plugin version from its marketplace's clone into the factory home's store, by its hash · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#288](https://github.com/chiyanram/agent-factory/pull/288))
+* **plugin** — hand the pinned plugins to the writer with --plugin-dir and record their hashes · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#297](https://github.com/chiyanram/agent-factory/pull/297))
+* **plugin** — pin each listed plugin by commit and hash in the factory home, and check the hash before every run · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#287](https://github.com/chiyanram/agent-factory/pull/287))
+* **plugin** — read the lanes and the review baseline from the process plugin, with a built-in default · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#261](https://github.com/chiyanram/agent-factory/pull/261))
+* **review** — a finding carries its lens, grade and evidence, and a lane its lens count · [#237](https://github.com/chiyanram/agent-factory/issues/237) (PR [#321](https://github.com/chiyanram/agent-factory/pull/321))
+* **review** — a Spec finding quotes the approved spec's criterion it fails · [#219](https://github.com/chiyanram/agent-factory/issues/219) (PR [#309](https://github.com/chiyanram/agent-factory/pull/309))
+* **review** — add a Martian category to each finding, and keep its severity · [#218](https://github.com/chiyanram/agent-factory/issues/218) (PR [#304](https://github.com/chiyanram/agent-factory/pull/304))
+* **review** — one finder run per picked lens, merged, then one verify pass · [#237](https://github.com/chiyanram/agent-factory/issues/237) (PR [#332](https://github.com/chiyanram/agent-factory/pull/332))
+* **review** — pick a round's lenses by blast radius, and merge their findings by file:line and rule · [#237](https://github.com/chiyanram/agent-factory/issues/237) (PR [#310](https://github.com/chiyanram/agent-factory/pull/310))
+* **review** — pin the reviewer's and the judge's models to full ids, and refuse an alias · [#213](https://github.com/chiyanram/agent-factory/issues/213) (PR [#303](https://github.com/chiyanram/agent-factory/pull/303))
+* **review** — record the automated review's acted-on rate, and show it in usage · [#220](https://github.com/chiyanram/agent-factory/issues/220) (PR [#312](https://github.com/chiyanram/agent-factory/pull/312))
+* **review** — send the engine's floor ahead of every find and verify pass, whatever instructions replace the default · [#232](https://github.com/chiyanram/agent-factory/issues/232) (PR [#302](https://github.com/chiyanram/agent-factory/pull/302))
+* **review** — the project's lenses in the settings, and what each finder is given · [#237](https://github.com/chiyanram/agent-factory/issues/237) (PR [#331](https://github.com/chiyanram/agent-factory/pull/331))
+* **settings** — every module reads the resolved settings through one adapter · [#254](https://github.com/chiyanram/agent-factory/issues/254) (PR [#258](https://github.com/chiyanram/agent-factory/pull/258))
+* **writer** — ask every open question at once, as one round of choices with a recommendation · [#320](https://github.com/chiyanram/agent-factory/issues/320) (PR [#325](https://github.com/chiyanram/agent-factory/pull/325))
+* **writer** — post the implementer's PR body as cleaned Markdown · [#335](https://github.com/chiyanram/agent-factory/issues/335) (PR [#336](https://github.com/chiyanram/agent-factory/pull/336))
+
+### 🐛 Fixes
+
+* **dispatch** — count a failed review round's spend toward the caps · [#131](https://github.com/chiyanram/agent-factory/issues/131) (PR [#300](https://github.com/chiyanram/agent-factory/pull/300))
+* **onboard** — read the project's plugins and the pinned model, and drop ownHelper, so main builds again · [#235](https://github.com/chiyanram/agent-factory/issues/235) (PR [#318](https://github.com/chiyanram/agent-factory/pull/318))
+* **release** — leave git trailers out of breaking-change release notes · [#343](https://github.com/chiyanram/agent-factory/issues/343) (PR [#349](https://github.com/chiyanram/agent-factory/pull/349))
+* **review** — name the rulebook setting through settingName, so main's no-direct-read test passes · [#254](https://github.com/chiyanram/agent-factory/issues/254) (PR [#283](https://github.com/chiyanram/agent-factory/pull/283))
+
+Install: `npm i -g github:chiyanram/agent-factory#v0.27.0`
+
 ## [0.26.0](https://github.com/chiyanram/agent-factory/compare/v0.25.0...v0.26.0) (2026-11-09)
 
 ### ✨ Features
