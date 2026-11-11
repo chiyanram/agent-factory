@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { parseAllowlist } from "../src/core/egress/allowlist.js";
+import { ownGitHostsOf, parseAllowlist } from "../src/core/egress/allowlist.js";
+import { readyFieldsOf } from "../src/core/project.js";
 import { squidConf } from "../src/core/egress/squid.js";
 import { proxyEnv } from "../src/core/egress/env.js";
 
 describe("parseAllowlist", () => {
   it("keeps host names, sorted, and drops one a dotted entry covers", () => {
     expect(
-      parseAllowlist([" api.anthropic.com ", ".npmjs.org", "registry.npmjs.org", "npmjs.org", "repo1.maven.org", ""]),
+      parseAllowlist(
+        [" api.anthropic.com ", ".npmjs.org", "registry.npmjs.org", "npmjs.org", "repo1.maven.org", ""],
+        [],
+      ),
     ).toEqual({
       kind: "ok",
       hosts: [".npmjs.org", "api.anthropic.com", "repo1.maven.org"],
@@ -14,18 +18,18 @@ describe("parseAllowlist", () => {
   });
 
   it("does not let a dotted entry cover a host that only ends with the same letters", () => {
-    expect(parseAllowlist([".x.com", "foox.com"])).toEqual({ kind: "ok", hosts: [".x.com", "foox.com"] });
+    expect(parseAllowlist([".x.com", "foox.com"], [])).toEqual({ kind: "ok", hosts: [".x.com", "foox.com"] });
   });
 
   it("keeps a name listed twice once", () => {
-    expect(parseAllowlist(["api.anthropic.com", "api.anthropic.com"])).toEqual({
+    expect(parseAllowlist(["api.anthropic.com", "api.anthropic.com"], [])).toEqual({
       kind: "ok",
       hosts: ["api.anthropic.com"],
     });
   });
 
   it("refuses an empty list", () => {
-    expect(parseAllowlist(["", "  "]).kind).toBe("refused");
+    expect(parseAllowlist(["", "  "], []).kind).toBe("refused");
   });
 
   it.each([
@@ -36,7 +40,7 @@ describe("parseAllowlist", () => {
     ["API.Anthropic.com", "lower-case host name"],
     ["localhost", "lower-case host name"],
   ])("refuses %s and says why", (entry, why) => {
-    expect(parseAllowlist(["api.anthropic.com", entry])).toEqual({
+    expect(parseAllowlist(["api.anthropic.com", entry], [])).toEqual({
       kind: "refused",
       reason: expect.stringContaining(why),
     });
@@ -45,28 +49,28 @@ describe("parseAllowlist", () => {
   it.each(["github.com", "api.github.com", ".github.com", "gitlab.com", ".gitlab.com", "registry.gitlab.com"])(
     "refuses the public git host %s, since the runner holds no git login and needs none",
     (entry) => {
-      expect(parseAllowlist(["api.anthropic.com", entry])).toEqual({
+      expect(parseAllowlist(["api.anthropic.com", entry], [])).toEqual({
         kind: "refused",
         reason: `${JSON.stringify(entry)} is a git host; the runner needs none, because the host clones, pushes and posts`,
       });
     },
   );
 
-  it("refuses the project's own git host, and a dotted entry that covers it, only when the caller names it", () => {
-    expect(parseAllowlist(["gitlab.corp.example"]).kind).toBe("ok");
+  it("refuses the project's own git host, and a dotted entry that covers it", () => {
+    expect(parseAllowlist(["gitlab.corp.example"], []).kind).toBe("ok");
     expect(parseAllowlist(["gitlab.corp.example"], ["gitlab.corp.example"]).kind).toBe("refused");
     expect(parseAllowlist([".corp.example"], ["gitlab.corp.example"]).kind).toBe("refused");
   });
 
   it("keeps a host that only ends with a git host's letters, and the image registries near them", () => {
-    expect(parseAllowlist(["notgithub.com", "ghcr.io", "objects.githubusercontent.com"])).toEqual({
+    expect(parseAllowlist(["notgithub.com", "ghcr.io", "objects.githubusercontent.com"], [])).toEqual({
       kind: "ok",
       hosts: ["ghcr.io", "notgithub.com", "objects.githubusercontent.com"],
     });
   });
 
   it("names every bad entry at once", () => {
-    const result = parseAllowlist(["*.a.com", "10.0.0.1"]);
+    const result = parseAllowlist(["*.a.com", "10.0.0.1"], []);
     expect(result.kind).toBe("refused");
     if (result.kind !== "refused") return;
     expect(result.reason).toContain('"*.a.com" is a wildcard');
@@ -124,5 +128,39 @@ describe("proxyEnv", () => {
   it("points every JVM at the proxy", () => {
     expect(env.JAVA_TOOL_OPTIONS).toContain("-Dhttps.proxyHost=factory-egress -Dhttps.proxyPort=3128");
     expect(env.JAVA_TOOL_OPTIONS).toContain("-Dhttp.nonProxyHosts=localhost|127.*|[::1]");
+  });
+});
+
+// AC-4 of #485: a project on a company GitLab gets that host refused, whichever layer names it, and every caller
+// passes the project's own host (parseAllowlist has no default for it)
+describe("the project's own git host on the allowlist (#485)", () => {
+  const file = { gate: "local", verify: ["make", "test"], ready: { programs: ["make"] } };
+
+  it("refuses the company GitLab the machine names", () => {
+    const read = readyFieldsOf(
+      "/p.json",
+      { ...file, egress: { allow: ["gitlab.corp.example"] } },
+      {
+        FACTORY_FORGE_HOST: "gitlab.corp.example",
+      },
+    );
+    expect(read.kind).toBe("failed");
+    expect(read.kind === "failed" ? read.reason : "").toContain("is a git host");
+  });
+
+  it("refuses the company GitLab a settings file names", () => {
+    const raw = { ...file, gitHostName: "GitLab.Corp.Example ", egress: { allow: [".corp.example"] } };
+    expect(readyFieldsOf("/p.json", raw, {}).kind).toBe("failed");
+  });
+
+  it("keeps a harmless host when the project's own git host is set", () => {
+    const raw = { ...file, gitHostName: "gitlab.corp.example", egress: { allow: ["api.anthropic.com"] } };
+    expect(readyFieldsOf("/p.json", raw, {}).kind).toBe("ok");
+  });
+
+  it("reads the own host lower case, once, and never a public one", () => {
+    expect(ownGitHostsOf([" GitLab.Corp.Example", "gitlab.corp.example", "github.com", "", undefined])).toEqual([
+      "gitlab.corp.example",
+    ]);
   });
 });

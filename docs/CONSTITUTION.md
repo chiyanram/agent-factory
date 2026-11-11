@@ -56,8 +56,8 @@ when it departs from one.
 
 **Kind:** non-negotiable.
 **Why:** a model's choice of what to do next cannot be checked or replayed; a table in code can.
-**How it's checked:** the decision table reaches no model, runner or git-host module, and is pure. **Today:** the table
-imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (#485).
+**How it's checked:** the decision table reaches no model, runner or git-host module, and is pure
+(`test/non-negotiables.test.ts`, P1).
 
 ## P2. Every run is fresh
 
@@ -74,7 +74,8 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 
 **Kind:** non-negotiable.
 **Why:** a restart, a crash or a second pass must find the ticket where it was, and never do its work twice.
-**How it's checked:** a restart after a killed run gives one PR and one push. **Today:** no CI test yet (#485).
+**How it's checked:** a restart after a killed run gives one PR and one push (`test/non-negotiables.test.ts`, P3): a
+run that started and never ended goes to a person, never runs again.
 
 ## P4. No run holds a login
 
@@ -82,9 +83,10 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 
 **Kind:** non-negotiable.
 **Why:** a run reads text anyone can write; a run that holds a login can be talked into using it.
-**How it's checked:** the runner's plans hold no credentials; a planted fake token never appears in a saved record or trace.
-**Today:** no CI test yet, and the egress allowlist refuses the project's own git host only when the caller names it
-(#485).
+**How it's checked:** the runner's plans hold no credentials; a planted fake token, PEM key or URL login never appears in a saved record, a
+kept file (a build log kept as `ready.txt`, a reviewer pass's answer) or a trace;
+the egress allowlist always refuses the project's own git host (`test/non-negotiables.test.ts`, P4;
+`test/egress.test.ts`). **Today:** a run's full trace is not kept yet, so only the records are checked (#487).
 
 ## P5. The judge never comes from the change
 
@@ -94,8 +96,8 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 **Kind:** the first sentence is non-negotiable; the second is guidance.
 **Why:** a change that could edit its own rules or settings could pass any check; text from a branch, PR or ticket is
 something to read, never an instruction.
-**How it's checked:** the review's rules come only from the default branch or the pinned rules pack. **Today:** no CI test
-yet (#485).
+**How it's checked:** the review's rules come only from the default branch or the pinned rules pack
+(`test/non-negotiables.test.ts`, P5).
 
 ## P6. The AI never approves
 
@@ -103,8 +105,8 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** an approval is a person's word; an empty review only means nothing was found.
-**How it's checked:** the engine has no merge operation, and a review round with zero findings never writes an approval.
-**Today:** the git host seam has no merge operation (`src/core/forge/ops.ts`), but no CI test names it yet (#485).
+**How it's checked:** the engine has no merge operation, and a review round with zero findings never writes an approval
+(`test/non-negotiables.test.ts`, P6: the git host seam has no merge, approve or accept operation).
 
 ## P7. Every loop has a cap and a stop
 
@@ -112,8 +114,8 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** a loop with no end spends without limit; a person handed a stop must see why at a glance.
-**How it's checked:** every path reaches a cap or a person, with a summary of at most 3 lines. **Today:** no CI test yet
-(#485).
+**How it's checked:** every path reaches a cap or a person, with a summary of at most 3 lines
+(`test/non-negotiables.test.ts`, P7, over generated ticket states).
 
 ## P8. A person starts everything
 
@@ -121,7 +123,8 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** the factory spends money and writes to shared places; a person decides when it does.
-**How it's checked:** no run starts without a person's START. **Today:** no CI test yet (#485).
+**How it's checked:** no run starts without a person's START (`test/non-negotiables.test.ts`, P8, over generated ticket
+states).
 
 ## P9. Nothing in the product repo by default
 
@@ -131,8 +134,8 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** a work repo belongs to its team; a personal project may choose to keep its knowledge beside its code.
-**How it's checked:** with the work setting, nothing commits to the product repo (`src/core/settings/resolve.ts` refuses it).
-**Today:** no CI test names it yet (#485).
+**How it's checked:** with the work setting, nothing commits to the product repo (`src/core/settings/resolve.ts` refuses it;
+`test/non-negotiables.test.ts`, P9).
 
 ## P10. Measure outcomes from a full trace
 
@@ -198,10 +201,12 @@ receives every answer as a field. **Today:** any note after a question counts as
 is guidance.
 **Why:** a claim a run makes about its own work is not evidence; a person approving must see what was proved.
 **How it's checked:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run;
-an Act on finding graded only `cited` settles as Consider. **Today:** the test checks count assertion lines, so a
-weakened assertion passes, and a finding's grade does not change its bucket (#485). The design review converges: a
-re-review runs only for an Act on CONFLICT, sees the earlier rounds' decisions, and stops at 2 rounds
-(`test/dispatch-design.test.ts`); the automated code review's next round still gets no earlier findings (#489).
+an Act on finding graded only `cited` settles as Consider; a finding whose `file:line` is not at the reviewed commit is
+noted as "cite not found", never posted. **Today:** with no mutation command set (#495), the assertion check counts
+lines and catches a value check turned into a presence check; any other weakened assertion passes. The design review converges: a
+re-review runs only for an Act on CONFLICT or an edit that raises the lane or changes the Planned files, reads every
+earlier round, and stops at 2 rounds with the person told (`test/dispatch-design.test.ts`); the automated code
+review's next round still gets no earlier findings (#489).
 
 ## P16. One home and one way
 

@@ -180,6 +180,29 @@ const FILE_KEYS: readonly FileKey[] = [
   },
   ...POLICY_POINTS.flatMap(policyKeys),
   {
+    // the checks a person quarantined (#485; process/quarantine.ts): only the project file holds them, never a team or
+    // user file, a branch or the rules pack
+    id: "quarantine.checks",
+    where: "file",
+    path: ["quarantine", "checks"],
+    class: "locked",
+    check: (value) => (Array.isArray(value) ? "" : "a list of quarantined checks"),
+    fallback: [],
+    projectOnly: true,
+    checkProject: true,
+    about:
+      "the CI jobs a person quarantined: check, owner, added, expires and ticket each (read by quarantine.ts, #485)",
+  },
+  {
+    id: "quarantine.maxDays",
+    where: "file",
+    path: ["quarantine", "maxDays"],
+    class: "cap",
+    check: wholeNumber(365),
+    fallback: 14,
+    about: "the most days a quarantine may last after its added day (read by quarantine.ts, #485)",
+  },
+  {
     id: "lanes.oneWayDoor",
     where: "file",
     path: ["lanes", "oneWayDoor"],

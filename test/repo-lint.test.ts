@@ -50,7 +50,7 @@ describe("check-temp-dirs (#222)", () => {
       code: 1,
       out:
         "test/a.test.ts:5: calls tmpdir itself; make the folder with tempDir() from test/temp.ts, which answers its real path\n" +
-        "check-temp-dirs: 1 call(s) to tmpdir in test/\n",
+        "check-temp-dirs: 1 call(s) to tmpdir in test/ or scripts/\n",
     });
     expect(run("check-temp-dirs.ts", fixture("temp-ok"))).toEqual({ code: 0, out: "" });
   });

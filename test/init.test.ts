@@ -108,6 +108,7 @@ async function init(
     readonly env?: NodeJS.ProcessEnv;
     readonly probes?: Partial<Probes>;
     readonly project?: string;
+    readonly setupCoordinator?: InitIo["setupCoordinator"];
   } = {},
 ): Promise<Ran> {
   let out = "";
@@ -129,6 +130,7 @@ async function init(
         }),
     probes: probes(opts.probes),
     markets: { chiyanram: market() },
+    ...(opts.setupCoordinator === undefined ? {} : { setupCoordinator: opts.setupCoordinator }),
   };
   const code = await initCommand({ project: opts.project, dir, yes: opts.yes === true }, io);
   return { code, out, err, asked };
@@ -286,6 +288,28 @@ describe("the round (#369)", () => {
 });
 
 describe("agent-factory init --yes on the ledger (#369)", () => {
+  // #485: setup is three commands, install, init and start; init writes the coordinator's settings itself
+  it("writes the coordinator's settings itself, after the files and the pins, and says where", async () => {
+    token("2027-11-01T00:00:00Z");
+    let calls = 0;
+    const dir = ledger();
+    const ran = await init(dir, {
+      yes: true,
+      setupCoordinator: async () => {
+        calls += 1;
+        return { kind: "ok", value: "/home/ram/.factory/coordinator" };
+      },
+    });
+    expect(calls).toBe(1);
+    expect(ran.out).toContain("wrote the coordinator's settings in /home/ram/.factory/coordinator");
+    expect(ran.out).not.toContain("agent-factory setup coordinator\n");
+    const failed = await init(dir, {
+      yes: true,
+      setupCoordinator: async () => ({ kind: "failed", reason: "a symlink in its place" }),
+    });
+    expect(failed.out).toContain("cannot write the coordinator's settings: a symlink in its place");
+  });
+
   it("writes the project file and user.json, pins the plugin, and every check passes", async () => {
     token("2027-11-01T00:00:00Z");
     const dir = ledger();
