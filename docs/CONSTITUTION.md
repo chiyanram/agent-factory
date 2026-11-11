@@ -56,7 +56,7 @@ when it departs from one.
 
 **Kind:** non-negotiable.
 **Why:** a model's choice of what to do next cannot be checked or replayed; a table in code can.
-**Checked by:** the decision table reaches no model, runner or git-host module, and is pure. **Today:** the table
+**How it's checked:** the decision table reaches no model, runner or git-host module, and is pure. **Today:** the table
 imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (#485).
 
 ## P2. Every run is fresh
@@ -65,6 +65,7 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 
 **Kind:** guidance.
 **Why:** a fresh run reads only what the engine hands it, so what it saw is known and a bad run leaves nothing behind.
+**How it's checked:** review only.
 
 ## P3. One record per ticket
 
@@ -73,7 +74,7 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 
 **Kind:** non-negotiable.
 **Why:** a restart, a crash or a second pass must find the ticket where it was, and never do its work twice.
-**Checked by:** a restart after a killed run gives one PR and one push. **Today:** no CI test yet (#485).
+**How it's checked:** a restart after a killed run gives one PR and one push. **Today:** no CI test yet (#485).
 
 ## P4. No run holds a login
 
@@ -81,7 +82,7 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 
 **Kind:** non-negotiable.
 **Why:** a run reads text anyone can write; a run that holds a login can be talked into using it.
-**Checked by:** the runner's plans hold no credentials; a planted fake token never appears in a saved record or trace.
+**How it's checked:** the runner's plans hold no credentials; a planted fake token never appears in a saved record or trace.
 **Today:** no CI test yet, and the egress allowlist refuses the project's own git host only when the caller names it
 (#485).
 
@@ -93,7 +94,7 @@ imports none (`src/core/dispatch/table.ts`), but no CI test holds it there yet (
 **Kind:** the first sentence is non-negotiable; the second is guidance.
 **Why:** a change that could edit its own rules or settings could pass any check; text from a branch, PR or ticket is
 something to read, never an instruction.
-**Checked by:** the review's rules come only from the default branch or the pinned rules pack. **Today:** no CI test
+**How it's checked:** the review's rules come only from the default branch or the pinned rules pack. **Today:** no CI test
 yet (#485).
 
 ## P6. The AI never approves
@@ -102,7 +103,7 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** an approval is a person's word; an empty review only means nothing was found.
-**Checked by:** the engine has no merge operation, and a review round with zero findings never writes an approval.
+**How it's checked:** the engine has no merge operation, and a review round with zero findings never writes an approval.
 **Today:** the git host seam has no merge operation (`src/core/forge/ops.ts`), but no CI test names it yet (#485).
 
 ## P7. Every loop has a cap and a stop
@@ -111,7 +112,7 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** a loop with no end spends without limit; a person handed a stop must see why at a glance.
-**Checked by:** every path reaches a cap or a person, with a summary of at most 3 lines. **Today:** no CI test yet
+**How it's checked:** every path reaches a cap or a person, with a summary of at most 3 lines. **Today:** no CI test yet
 (#485).
 
 ## P8. A person starts everything
@@ -120,7 +121,7 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** the factory spends money and writes to shared places; a person decides when it does.
-**Checked by:** no run starts without a person's START. **Today:** no CI test yet (#485).
+**How it's checked:** no run starts without a person's START. **Today:** no CI test yet (#485).
 
 ## P9. Nothing in the product repo by default
 
@@ -130,7 +131,7 @@ yet (#485).
 
 **Kind:** non-negotiable.
 **Why:** a work repo belongs to its team; a personal project may choose to keep its knowledge beside its code.
-**Checked by:** with the work setting, nothing commits to the product repo (`src/core/settings/resolve.ts` refuses it).
+**How it's checked:** with the work setting, nothing commits to the product repo (`src/core/settings/resolve.ts` refuses it).
 **Today:** no CI test names it yet (#485).
 
 ## P10. Measure outcomes from a full trace
@@ -141,7 +142,7 @@ yet (#485).
 **Kind:** guidance.
 **Why:** a count of PRs is not a measure; what a change cost and whether it held up is. A trace says why a run failed,
 which skills it read and where its tokens went.
-**How:** traces stay on the machine beside the ticket's records for 30 days. The outcome is reported at 2 weeks after
+**How it's checked:** review only. Traces stay on the machine beside the ticket's records for 30 days. The outcome is reported at 2 weeks after
 merge, and a revert or a fix to the same lines up to 30 days updates it (#487).
 
 ## P11. Change the factory only by experiment
@@ -154,6 +155,7 @@ merge, and a revert or a fix to the same lines up to 30 days updates it (#487).
 **Kind:** guidance.
 **Why:** an unmeasured tweak can make things worse without anyone seeing; a change that only lowers cost must still be
 allowed.
+**How it's checked:** review only.
 
 ## P12. Learn at the source
 
@@ -163,6 +165,7 @@ allowed.
 **Kind:** guidance.
 **Why:** the same review comment forever is a failure of the factory, not of the run. A mistake counts as repeated
 after two sightings; how a lesson is found and fixed lives in the rules pack's retro reference.
+**How it's checked:** review only.
 
 ## P13. Typed hand-offs, people included
 
@@ -173,7 +176,7 @@ after two sightings; how a lesson is found and fixed lives in the rules pack's r
 
 **Kind:** non-negotiable.
 **Why:** an answer lost between runs is work done twice, and any note read as an answer lets a run go on unanswered.
-**Checked by:** a reply that answers only some questions (`1A` to two questions) keeps the rest open, and the next run
+**How it's checked:** a reply that answers only some questions (`1A` to two questions) keeps the rest open, and the next run
 receives every answer as a field. **Today:** any note after a question counts as its answer (#486).
 
 ## P14. Only what the step needs
@@ -183,6 +186,7 @@ receives every answer as a field. **Today:** any note after a question counts as
 
 **Kind:** guidance.
 **Why:** a run that reads less is cheaper and less confused, and a cap guessed too low or too high stops the wrong run.
+**How it's checked:** review only.
 
 ## P15. Proof, not claims
 
@@ -193,7 +197,7 @@ receives every answer as a field. **Today:** any note after a question counts as
 **Kind:** non-negotiable for "the writer cannot change what judges it" and "a blocking finding needs proof"; the rest
 is guidance.
 **Why:** a claim a run makes about its own work is not evidence; a person approving must see what was proved.
-**Checked by:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run;
+**How it's checked:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run;
 an Act on finding graded only `cited` settles as Consider. **Today:** the test checks count assertion lines, so a
 weakened assertion passes, and a finding's grade does not change its bucket (#485).
 
@@ -203,6 +207,7 @@ weakened assertion passes, and a finding's grade does not change its bucket (#48
 
 **Kind:** guidance.
 **Why:** two copies drift, and two ways to do one job double what must be kept working.
+**How it's checked:** review only.
 
 ## P17. One port per outside tool
 
@@ -211,6 +216,7 @@ weakened assertion passes, and a finding's grade does not change its bucket (#48
 **Kind:** guidance.
 **Why:** the same engine runs on GitHub and GitLab, with Jira or issues, on a laptop or a VM; a tool named in the core
 breaks the others.
+**How it's checked:** review only.
 
 ## P18. One versioned contract with the rules pack
 
@@ -220,7 +226,7 @@ breaks the others.
 
 **Kind:** non-negotiable.
 **Why:** the two repos change on their own schedules; a pack the engine cannot read must fail in CI, not in a run.
-**Checked by:** CI validates each card of the pinned rules pack against the pack's own schema. **Today:** not built
+**How it's checked:** CI validates each card of the pinned rules pack against the pack's own schema. **Today:** not built
 until #484 lands.
 
 ## P19. People work from where they are
@@ -230,6 +236,7 @@ until #484 lands.
 
 **Kind:** guidance.
 **Why:** a new app nobody opens is no front door; a setup no test runs breaks unnoticed.
+**How it's checked:** review only.
 
 ## P20. The codebase gets better over time
 
@@ -238,6 +245,7 @@ until #484 lands.
 **Kind:** guidance.
 **Why:** each change working is not enough; the next change must stay easy. Tidying inside an unrelated change hides
 it from review.
+**How it's checked:** review only.
 
 ## P21. Brakes scale with risk
 
@@ -246,7 +254,7 @@ it from review.
 
 **Kind:** non-negotiable (the floor).
 **Why:** risk is in the change, not its author; a lanes file that could drop an approval would undo every other brake.
-**Checked by:** every lanes file (one lane, all lanes, missing lanes, `approval: false` on each, unknown names, any
+**How it's checked:** every lanes file (one lane, all lanes, missing lanes, `approval: false` on each, unknown names, any
 order) leaves bug, feature and one-way door needing approval, and a lane can only be raised. **Today:** the first lane
 listed skips the floor check until #483 lands.
 
