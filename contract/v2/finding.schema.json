@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chiyanram/agent-factory/blob/main/contract/v2/finding.schema.json",
+  "title": "agent-factory finding (a finder run's answer holds a list of these)",
+  "x-contract-version": 2,
+  "type": "object",
+  "required": [
+    "id",
+    "file",
+    "line",
+    "rule",
+    "severity",
+    "grade",
+    "finding",
+    "fix",
+    "axis",
+    "kind",
+    "category",
+    "evidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string"
+    },
+    "line": {
+      "type": "integer"
+    },
+    "rule": {
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "blocker",
+        "warning",
+        "nit"
+      ]
+    },
+    "grade": {
+      "enum": [
+        "cited",
+        "walked",
+        "ran"
+      ]
+    },
+    "finding": {
+      "type": "string"
+    },
+    "fix": {
+      "type": "string"
+    },
+    "axis": {
+      "enum": [
+        "standards",
+        "spec"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "rule",
+        "logic"
+      ]
+    },
+    "category": {
+      "enum": [
+        "bug",
+        "security",
+        "concurrency",
+        "data",
+        "api",
+        "perf",
+        "test_gap",
+        "doc_defect",
+        "style",
+        "speculative"
+      ]
+    },
+    "evidence": {
+      "type": "string"
+    }
+  }
+}

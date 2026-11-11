@@ -12,6 +12,7 @@
     "agent-factory": "dist/cli.js"
   },
   "files": [
+    "contract",
     "dist",
     "docs",
     "images",

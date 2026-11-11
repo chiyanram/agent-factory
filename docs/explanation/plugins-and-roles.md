@@ -46,6 +46,22 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 The engine starts a run from a card for six roles: implementer, test-first, cleanup, design-reviewer, verify pass and
 onboarder. Every run record carries the card's hash.
 
+## The contract between the engine and a rules pack
+
+The card's frontmatter, the lanes file and the finding a finder run returns are one versioned contract
+(`src/core/process/contract.ts`, #484). The package publishes a JSON schema for each part, built from the engine's own
+lists: [`contract/v2/card.schema.json`](../../contract/v2/card.schema.json),
+[`contract/v2/lanes.schema.json`](../../contract/v2/lanes.schema.json) and
+[`contract/v2/finding.schema.json`](../../contract/v2/finding.schema.json). A rules pack's CI checks its files against
+the schemas of the engine version it pins; the lanes schema holds the approval floor too.
+
+The engine reads this version and the one before: a version 1 card (plain-text `enforced_guardrails`, a `next:` field)
+still loads. A change a rules pack must follow is a new version.
+
+This repo pins chiyanram/skills by a full commit in [`contract/rules-pack.json`](../../contract/rules-pack.json). CI
+checks that commit out and loads every role card of it through `cards.ts`, and reads each plugin's process, so a card
+the engine would refuse fails CI here. To move the pin, change the commit in that file in its own pull request.
+
 ## What each role returns
 
 | role | returns | checked by the engine |

@@ -51,7 +51,8 @@ export type Finding = FindingCore & {
 
 export type Sorted = Finding & { readonly bucket: Bucket; readonly why: string };
 
-const FINDING_SCHEMA = {
+// one finding as a finder run gives it; published as the contract's finding schema (process/contract.ts, #484)
+export const FINDING_SCHEMA = {
   type: "object",
   required: [...CORE_REQUIRED, "axis", "kind", "category", "evidence"],
   properties: {
