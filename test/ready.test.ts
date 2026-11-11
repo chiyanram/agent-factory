@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Post } from "../src/core/post.js";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -134,6 +135,22 @@ async function ready(box: Box, evidence: readonly Evidence[], at = head) {
 }
 
 describe("the ready check (#91, #138)", () => {
+  it("posts each row's re-run beside the result the writer claimed (#430)", async () => {
+    const noted: Post[] = [];
+    const step = readyStep(plan(fakeBox({ runs: [exited(0), exited(1)] }).box), statusForge([], noted), NO_WAIVER);
+    if (step.kind !== "available") throw new Error("unavailable");
+    await step.run(input([row("make test"), row("make it", "AC2")], head));
+    expect(noted).toHaveLength(1);
+    expect(noted[0]).toMatchObject({
+      seat: "coordinator",
+      title: expect.stringContaining("a row failed when run again"),
+    });
+    expect(noted[0]?.items).toEqual([
+      expect.stringMatching(/^AC1 · claimed: .* · re-run: make test exited 0/),
+      expect.stringMatching(/^AC2 · claimed: .* · re-run: make it exited 1/),
+    ]);
+  });
+
   it("runs each evidence row in a fresh box at the head, never on the host, and passes when all exit 0", async () => {
     const fake = fakeBox({ runs: [exited(0), exited(0)] });
     const seen: string[][] = [];
@@ -250,7 +267,8 @@ describe("the ready check (#91, #138)", () => {
   });
 });
 
-function statusForge(posted: CommitStatus[]): Forge {
+// statusForge : a forge that keeps the statuses and the notes the host posts, and refuses every other call
+function statusForge(posted: CommitStatus[], noted: Post[] = []): Forge {
   const notUsed = async () => ({ kind: "failed" as const, reason: "not used" });
   return {
     name: "github",
@@ -263,7 +281,7 @@ function statusForge(posted: CommitStatus[]): Forge {
     openChange: notUsed,
     addLabel: notUsed,
     removeLabel: notUsed,
-    note: notUsed,
+    note: async ({ post }) => (noted.push(post), { kind: "ok" }),
     setBody: notUsed,
     notes: notUsed,
     lineFinding: notUsed,

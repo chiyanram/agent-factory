@@ -47,6 +47,7 @@ import {
 import { holdRun, type Sessions } from "./live.js";
 import type { Model, ModelAnswer } from "./model.js";
 import type { RoundPart } from "../dispatch/spend.js";
+import { deviationNotes } from "./deviations.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { readProcess, type PluginDir, type Process } from "../process/read.js";
 import { attempt } from "./safe.js";
@@ -122,7 +123,13 @@ export type Outcome =
   | { readonly kind: "no-progress"; readonly head: string; readonly why: string }
   | { readonly kind: "moved"; readonly from: string; readonly to: string };
 
-type Ctx = { readonly setup: ReviewSetup; readonly change: Change; readonly past: History };
+// deviations: the build's deviation notes, which the pack's design section carries (deviations.ts, #430)
+type Ctx = {
+  readonly setup: ReviewSetup;
+  readonly change: Change;
+  readonly past: History;
+  readonly deviations: readonly string[];
+};
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -143,7 +150,12 @@ async function load(setup: ReviewSetup): Promise<Result<Ctx>> {
   return notes.kind === "ok"
     ? {
         kind: "ok",
-        value: { setup, change: change.value, past: history({ notes: notes.value, factory: setup.factory }) },
+        value: {
+          setup,
+          change: change.value,
+          past: history({ notes: notes.value, factory: setup.factory }),
+          deviations: deviationNotes(notes.value, setup.factory),
+        },
       }
     : notes;
 }
@@ -248,6 +260,7 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
     baseline: own.value.baseline,
     previous: last.kind === "round" ? { kind: "head", sha: last.head } : { kind: "none" },
     spec: spec.value,
+    deviations: ctx.deviations,
     dir: s.packDir,
     mark: s.forge.mark,
   });

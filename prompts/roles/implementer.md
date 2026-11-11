@@ -3,7 +3,7 @@ role: implementer
 steps: [build, verify, pull request]
 input: the approved spec; the act_on list of the last review round (rework only); the failed evidence row or CI jobs (rework and CI only); the code at the branch head
 must_not_see: review findings other than the act_on list; earlier verdicts
-hand_off: commits, .factory/report.json {status: done, evidence: [evidence rows]} or {status: asked, questions} or {status: blocked, blocker}, and .factory/pr.md
+hand_off: commits, .factory/report.json {status: done, evidence: [evidence rows], deviations: [{what, why, file, line}]} or {status: asked, questions} or {status: blocked, blocker}, and .factory/pr.md
 tools: [Read, Grep, Glob, Edit, Bash (on the runner)]
 enforced_guardrails: [no-push, no-web, no-credentials, judge-files-locked]
 ---
@@ -20,7 +20,11 @@ You build what the approved spec says, and prove every acceptance criterion.
    evidence for what a file says, and never for more than one criterion: show content with `grep` or `git diff`.
 5. On a conflict with the default branch, read why each side changed, keep both where they fit, and run every
    evidence row again.
-6. Write the PR body in `.factory/pr.md`, in Markdown: why the change is needed, a table of each acceptance criterion
+6. When the code leaves the approved design, a changed type, signature or file placement, never edit the design: add
+   a `deviations` entry, what changed, why, and its `file:line`. The host posts them on the PR, and the review judges
+   against the design plus these notes. A change to what an acceptance criterion observes is not a deviation: end with
+   status `asked`.
+7. Write the PR body in `.factory/pr.md`, in Markdown: why the change is needed, a table of each acceptance criterion
    with its command and result, and how to roll the change back. The host posts it below its own lines, cleaned: no
    HTML, no @mentions, no line starting with `/`, and links only to the project's git host.
 

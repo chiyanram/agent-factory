@@ -7,6 +7,8 @@
 //   questions  [{question, choices, recommended}], one to five, required when asked: every open question at once, each
 //              with 2 to 4 short choices and the index of the recommended one (#320). A plain "…" is still read, for one
 //              release, as a question with no choices; then it is refused.
+//   deviations [{what, why, file, line}], at most ten, done only: each change of a type, signature or file placement
+//              from the approved design, posted by the host as a [writer] DEVIATION: note (ADR-0018, #430)
 //   blocker    "…"                                          required when blocked
 //
 // Anything else is blocked, with the reason: a missing, unreadable or malformed report, an unknown status, a field the
@@ -29,12 +31,20 @@ const MAX_TEXT = 2000;
 const MAX_EVIDENCE = 50;
 const MAX_QUESTIONS = 5;
 const MAX_DEFERRED = 20;
+const MAX_DEVIATIONS = 10;
 // a question's choices: 2 to 4 short ones, so a person answers with a letter (#320)
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 4;
 const MAX_CHOICE = 200;
 
 export type Evidence = { readonly criterion: string; readonly command: string; readonly result: string };
+
+// one way the build left the approved design (ADR-0018): what changed, why, and where; the design is never edited
+export type Deviation = { readonly what: string; readonly why: string; readonly file: string; readonly line: number };
+
+// DEVIATION : the title every deviation note starts with, after its [writer] seat; the review pack looks for it
+// (review/deviations.ts)
+export const DEVIATION = "DEVIATION:";
 
 // One open question (#320). With choices, a person answers with a letter, and recommended is the index of the one the
 // writer recommends. A plain question is the old report's string: read for one release, with no choices, then refused.
@@ -49,7 +59,13 @@ export type Question =
 
 export type Outcome =
   // deferred: what a cleanup run left for a person, as each would change behaviour (#236); none when the report has none
-  | { readonly kind: "done"; readonly evidence: readonly Evidence[]; readonly deferred?: readonly string[] }
+  // deviations: how the build left the approved design (ADR-0018, #430); none when the report has none
+  | {
+      readonly kind: "done";
+      readonly evidence: readonly Evidence[];
+      readonly deferred?: readonly string[];
+      readonly deviations?: readonly Deviation[];
+    }
   | { readonly kind: "asked"; readonly questions: readonly Question[] }
   // by: the writer said so, or the host decided it from how the run ended
   | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" };
@@ -107,6 +123,7 @@ export type ReportFile =
 // The words the writer's prompt carries, so the writer knows the schema it is held to.
 export const REPORT_INSTRUCTIONS = `When you stop, write ${REPORT_PATH} in the worktree and exit. Never commit it. It is JSON with one "status":
 - "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed. Start each "criterion" with the criterion's id, AC-1 for the first, AC-2 for the second, and so on: a criterion with no row fails the ready check.
+  When the code leaves the approved design (a changed type, signature or file placement), add "deviations", a list of {"what", "why", "file", "line"}, at most ten; never edit the design. A change to what an acceptance criterion observes is no deviation: stop with "asked".
 - "asked": add "questions": every question the spec does not answer, all at once in one list, one to five. Each is {"question", "choices", "recommended"}: "choices" is a list of 2 to 4 short answers, and "recommended" is the index of the one you recommend, 0 for the first. Never guess an answer.
 - "blocked": add "blocker", what stops you. Commit the work you have first.
 No other field. A missing or malformed report counts as blocked.`;
@@ -244,7 +261,7 @@ function malformed(problem: string): Outcome {
 // the fields each status may hold, the one it requires first; a Map, so "constructor" or "__proto__" is never a status.
 // done may add "deferred", the cleanup run's list (#236).
 const FIELDS: ReadonlyMap<string, readonly string[]> = new Map([
-  ["done", ["evidence", "deferred"]],
+  ["done", ["evidence", "deferred", "deviations"]],
   ["asked", ["questions"]],
   ["blocked", ["blocker"]],
 ]);
@@ -258,20 +275,82 @@ function deferredOf(value: unknown): Check<{ readonly deferred?: readonly string
   return list.kind === "ok" ? ok({ deferred: list.value }) : list;
 }
 
+const DEVIATION_CELLS = ["what", "why", "file", "line"] as const;
+
+function lineOf(value: unknown, what: string): Check<number> {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? ok(Number(value))
+    : bad(`${what} line must be a whole number`);
+}
+
+function deviationRow(row: unknown, i: number): Check<Deviation> {
+  const what = `deviation ${i + 1}`;
+  if (!isRecord(row)) {
+    return bad(`${what} must be {what, why, file, line}`);
+  }
+  const extra = extras(row, DEVIATION_CELLS);
+  return extra > 0 ? bad(`${what} has ${extra} field(s) the schema does not name`) : deviationCells(row, what);
+}
+
+// deviationCells : one deviation's texts and line, each checked
+function deviationCells(row: Field, what: string): Check<Deviation> {
+  const texts = deviationTexts(row, what);
+  const line = lineOf(row.line, what);
+  if (texts.kind === "bad") {
+    return bad(texts.problem);
+  }
+  return line.kind === "bad" ? bad(line.problem) : ok({ ...texts.value, line: line.value });
+}
+
+function deviationTexts(row: Field, what: string): Check<Omit<Deviation, "line">> {
+  const said = text(row.what, `${what} what`);
+  const why = text(row.why, `${what} why`);
+  const file = text(row.file, `${what} file`);
+  if (said.kind === "bad") {
+    return bad(said.problem);
+  }
+  if (why.kind === "bad") {
+    return bad(why.problem);
+  }
+  return file.kind === "bad" ? bad(file.problem) : ok({ what: said.value, why: why.value, file: file.value });
+}
+
+// deviationsOf : a done report's deviations, as a field to spread: none when it has none, and an empty list is none
+function deviationsOf(value: unknown): Check<{ readonly deviations?: readonly Deviation[] }> {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+    return ok({});
+  }
+  const list = listOf(value, "deviations", MAX_DEVIATIONS, deviationRow);
+  return list.kind === "ok" ? ok({ deviations: list.value }) : list;
+}
+
+// doneOf : a done report's outcome, every list checked
+function doneOf(body: Field): Outcome {
+  const evidence = listOf(body.evidence, "evidence", MAX_EVIDENCE, evidenceRow);
+  const deferred = deferredOf(body.deferred);
+  const deviations = deviationsOf(body.deviations);
+  if (deferred.kind === "bad") {
+    return malformed(deferred.problem);
+  }
+  if (deviations.kind === "bad") {
+    return malformed(deviations.problem);
+  }
+  return evidence.kind === "ok"
+    ? { kind: "done", evidence: evidence.value, ...deferred.value, ...deviations.value }
+    : malformed(evidence.problem);
+}
+
 // REPORT_FIELDS : every field the report's schema names, at any depth: what a role card's hand-off may name (#232)
-export const REPORT_FIELDS: readonly string[] = ["status", ...[...FIELDS.values()].flat(), ...CELLS, ...QUESTION_CELLS];
+export const REPORT_FIELDS: readonly string[] = [
+  "status",
+  ...[...FIELDS.values()].flat(),
+  ...CELLS,
+  ...QUESTION_CELLS,
+  ...DEVIATION_CELLS,
+];
 
 const READ: Readonly<Record<string, (body: Field) => Outcome>> = {
-  done: (body) => {
-    const evidence = listOf(body.evidence, "evidence", MAX_EVIDENCE, evidenceRow);
-    const deferred = deferredOf(body.deferred);
-    if (deferred.kind === "bad") {
-      return malformed(deferred.problem);
-    }
-    return evidence.kind === "ok"
-      ? { kind: "done", evidence: evidence.value, ...deferred.value }
-      : malformed(evidence.problem);
-  },
+  done: doneOf,
   asked: (body) => {
     const questions = listOf(body.questions, "questions", MAX_QUESTIONS, questionOf);
     return questions.kind === "ok" ? { kind: "asked", questions: questions.value } : malformed(questions.problem);
