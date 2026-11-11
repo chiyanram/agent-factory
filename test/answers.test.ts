@@ -1,6 +1,6 @@
 // only a real answer closes a question, and it reaches the next run as a typed field (#486; P13)
 import { describe, expect, it } from "vitest";
-import { answersIn, answersText, askedIn, roundOf, type Asked } from "../src/core/answers.js";
+import { answersIn, answersText, askedIn, roundIn, roundOf, type Asked } from "../src/core/answers.js";
 import { lastAnswers, openAsks, type Note, type Readers } from "../src/core/notes.js";
 import { renderPost } from "../src/core/post.js";
 
@@ -124,5 +124,50 @@ describe("open asks on a change (#486)", () => {
   it("has no answers while the newest writer round is open, or with no ask", () => {
     expect(lastAnswers({ notes: [note("ram", ask(2)), note("lee", "1A")], readers })).toEqual([]);
     expect(lastAnswers({ notes: [], readers })).toEqual([]);
+  });
+});
+
+// #517: a round whose items do not match its title never reads as answered; a numbered prose line is never a choice
+describe("malformed rounds and numbered prose (#517)", () => {
+  it("AC-2: a round with no question, or not the ones its title names, stays open whatever the replies", () => {
+    expect(roundOf([], [])).toMatchObject({ kind: "open", malformed: "it holds no question" });
+    expect(roundIn("[coordinator] OPEN: 2 questions")).toEqual({
+      asked: [],
+      malformed: "it names 2 question(s) and holds 0",
+    });
+    const short = roundIn(
+      ask(2)
+        .split("\n")
+        .filter((l) => !l.startsWith("- 2."))
+        .join("\n"),
+    );
+    expect(short.malformed).toBe("it names 2 question(s) and holds 1");
+    expect(roundOf(short.asked, ["1A", "accept all"], short.malformed)).toMatchObject({ kind: "open" });
+    expect(roundIn(ask(2)).malformed).toBe("");
+  });
+
+  it("AC-2: a coordinator round posted with no items holds the change after a member's reply", () => {
+    const notes = [note("ram", "[coordinator] OPEN: 2 questions"), note("lee", "1A 2B")];
+    expect(openAsks({ notes, readers })).toBe(1);
+    // a round that holds one of the two questions its title names: a reply to that one does not close it
+    const one = ask(2, "coordinator")
+      .split("\n")
+      .filter((l) => !l.startsWith("- 2."))
+      .join("\n");
+    expect(openAsks({ notes: [note("ram", one), note("lee", "1A")], readers })).toBe(1);
+  });
+
+  it("AC-3: '1. a bit risky' and '1: A cheaper' are words, never choice A; '1A', '1: A', '1: A, cheaper' and '1. b' are", () => {
+    const q = lettered(2);
+    expect(answersIn("1. a bit risky, but fine\n2. a better plan is a table", q)).toEqual([]);
+    expect(answersIn("1: A cheaper\n2: B", q).map((a) => a.question)).toEqual([2]);
+    for (const [reply, choices] of [
+      ["1A 2B", ["A", "B"]],
+      ["1: A\n2: B", ["A", "B"]],
+      ["1: A, cheaper\n2. b", ["A", "B"]],
+      ["1: a\n2) B - the table", ["A", "B"]],
+    ] as const) {
+      expect(answersIn(reply, q).map((a) => a.choice)).toEqual(choices);
+    }
   });
 });

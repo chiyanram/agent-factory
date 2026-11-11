@@ -49,9 +49,10 @@ const CHOICE = /^([A-D])\) (.*?)( \(recommended\))?$/;
 // a line made of letter answers alone: "1A 2C", "1A2C", "1: A, 2) B"
 const LETTER_LINE = /^\s*(?:\d{1,2}\s*[:.)]?\s*[A-Da-d](?![A-Za-z])[\s,;.]*)+$/;
 const LETTER_PAIR = /(\d{1,2})\s*[:.)]?\s*([A-Da-d])(?![A-Za-z])/g;
-// "1: words", "1. words", "1) words"; a letter alone at its start is a choice ("1: A, cheaper")
+// "1: words", "1. words", "1) words"; a letter at its start is a choice only when it stands alone or punctuation
+// follows it ("1: A", "1: A, cheaper", "1. b"); "1. a bit risky" is words, never choice A (#517)
 const WORDS = /^\s*(\d{1,2})\s*[:.)]\s*(.+?)\s*$/;
-const LETTER_FIRST = /^([A-Da-d])(?![A-Za-z])[\s,;.:-]*(.*)$/;
+const LETTER_FIRST = /^([A-Da-d])(?:\s*$|\s*[,;:.)-]\s*(.*)$)/;
 const ACCEPT_ALL = /^\s*accept all\s*\.?\s*$/i;
 
 function cut(text: string): string {
@@ -74,20 +75,37 @@ function itemOf(number: number, rest: string): Asked {
   };
 }
 
-// askedIn : the questions an OPEN note asks, with their choices; one plain question for an OPEN note with no round.
+// an OPEN note's questions, and why it is malformed ("" when it is not): a round whose title names a number of
+// questions it does not hold, none included (#517)
+export type RoundAsk = { readonly asked: readonly Asked[]; readonly malformed: string };
+
+// roundIn : the questions an OPEN note asks, with their choices; one plain question for an OPEN note with no round.
 // Pure.
-export function askedIn(askBody: string): readonly Asked[] {
+export function roundIn(askBody: string): RoundAsk {
   const lines = askBody.split(/\r?\n/);
   const title = lines[0] ?? "";
-  if (ROUND_TITLE.test(title)) {
-    const items = lines.flatMap((l) => {
-      const m = ITEM.exec(l);
-      return m === null ? [] : [itemOf(Number(m[1]), m[2] ?? "")];
-    });
-    return items.slice(0, MOST_QUESTIONS);
+  const round = ROUND_TITLE.exec(title);
+  if (round !== null) {
+    return roundItems(Number(round[2]), lines);
   }
   const plain = PLAIN_TITLE.exec(title)?.[2] ?? "";
-  return [{ number: 1, text: plain, choices: [], recommended: -1 }];
+  return { asked: [{ number: 1, text: plain, choices: [], recommended: -1 }], malformed: "" };
+}
+
+// roundItems : a round's item lines as questions, malformed unless it holds the number its title names. Pure.
+function roundItems(named: number, lines: readonly string[]): RoundAsk {
+  const items = lines.flatMap((l) => {
+    const m = ITEM.exec(l);
+    return m === null ? [] : [itemOf(Number(m[1]), m[2] ?? "")];
+  });
+  const malformed =
+    named === items.length && named > 0 ? "" : `it names ${named} question(s) and holds ${items.length}`;
+  return { asked: items.slice(0, MOST_QUESTIONS), malformed };
+}
+
+// askedIn : the questions an OPEN note asks (roundIn, without why it is malformed). Pure.
+export function askedIn(askBody: string): readonly Asked[] {
+  return roundIn(askBody).asked;
 }
 
 // writerAsk : whether an OPEN note is the writer's: only its round's answers go to the next run (a coordinator's OPEN
@@ -187,7 +205,7 @@ function wholeReply(body: string, asked: readonly Asked[]): readonly Answer[] {
 
 export type Round =
   | { readonly kind: "answered"; readonly answers: readonly Answer[] }
-  | { readonly kind: "open"; readonly answered: number; readonly count: number };
+  | { readonly kind: "open"; readonly answered: number; readonly count: number; readonly malformed?: string };
 
 // addReply : a reply's answers over the earlier ones: each replaces an earlier answer, but a plain reply never does
 function addReply(byQuestion: Map<number, Answer>, reply: Reply): void {
@@ -198,7 +216,24 @@ function addReply(byQuestion: Map<number, Answer>, reply: Reply): void {
 
 // roundOf : one round, from the replies after it in time order: a later valid answer to a question replaces an earlier
 // one. Pure.
-export function roundOf(asked: readonly Asked[], replies: readonly string[]): Round {
+export function roundOf(asked: readonly Asked[], replies: readonly string[], malformed = ""): Round {
+  const why = malformedWhy(asked, malformed);
+  return why === ""
+    ? answeredRound(asked, replies)
+    : { kind: "open", answered: 0, count: asked.length, malformed: why };
+}
+
+// malformedWhy : why a round never reads as answered, whatever the replies (#517): it holds no question, or not the
+// ones its title names; the person deletes the note. "" for a round that can be answered. Pure.
+function malformedWhy(asked: readonly Asked[], malformed: string): string {
+  if (malformed !== "") {
+    return malformed;
+  }
+  return asked.length === 0 ? "it holds no question" : "";
+}
+
+// answeredRound : the round from the replies after it, in time order. Pure.
+function answeredRound(asked: readonly Asked[], replies: readonly string[]): Round {
   const byQuestion = new Map<number, Answer>();
   for (const reply of replies.map((r) => replyOf(r, asked))) {
     addReply(byQuestion, reply);

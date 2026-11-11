@@ -53,6 +53,16 @@ describe("decide", () => {
     expect(one(change(1, { comments: [ask, n("ram", "EUR", "2026-11-02T11:00:00Z")] })).asks).toBe(0);
   });
 
+  it("a coordinator round with no items, as status posts it, holds the change and is named malformed (#517)", () => {
+    const ask = n("ram", agent("coordinator", "OPEN: 2 questions"), "2026-11-02T10:00:00Z");
+    const line = one(change(1, { comments: [ask, n("Lee", "1A 2B", "2026-11-02T11:00:00Z")] }));
+    expect(line).toMatchObject({ asks: 1, malformed: 1 });
+    expect(line.kind === "open" ? format({ line, mark: "!" }) : "").toMatch(
+      / malformed_asks=1 \(an OPEN round whose items do not match its title: delete it\)$/,
+    );
+    expect(one(change(1)).kind === "open" && "malformed" in one(change(1))).toBe(false);
+  });
+
   it("lists merged claims, all in change-number order", () => {
     const lines = decide({ changes: changes([change(7), change(2)], [5]), label: "agent::claimed", factory: "ram" });
     expect(lines.map((l) => [l.kind, l.number])).toEqual([

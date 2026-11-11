@@ -491,12 +491,20 @@ function building(runs: Summary, change: ChangeView): boolean {
   return runs.lastWriter.kind !== "none" || change.kind !== "none";
 }
 
-// blockerState : where a blocker's change stands; one the git host cannot answer for reads as not started, so the
-// ticket waits rather than goes to a person on a passing failure
-async function blockerState(setup: TickSetup, ticket: string): Promise<BlockerState> {
+// what the tick read of one blocker: where it stands, and why the git host did not answer when it did not
+type BlockerRead = { readonly state: BlockerState; readonly unread?: string };
+
+// blockerState : where a blocker's change stands; one the git host cannot answer for is unread, so the ticket waits on
+// a passing failure, and a person looks only after repeated passes (#494 AC-7)
+async function blockerState(setup: TickSetup, ticket: string): Promise<BlockerRead> {
   const read = await setup.forge.branchState({ branch: `${BRANCH_PREFIX}${ticket}` });
-  const branch = read.kind === "ok" ? read.value : "none";
-  return branch === "merged" || !issueTicket(setup, ticket) ? branch : issueBlocker(setup, Number(ticket), branch);
+  if (read.kind === "failed") {
+    return { state: "none", unread: read.reason };
+  }
+  const branch = read.value;
+  return branch === "merged" || !issueTicket(setup, ticket)
+    ? { state: branch }
+    : issueBlocker(setup, Number(ticket), branch);
 }
 
 // issueTicket : whether the ticket is a git host issue: the project keeps its specs in issues, and it is a number
@@ -509,9 +517,9 @@ const ISSUE_NUMBER = /^[1-9]\d{0,9}$/;
 
 // issueBlocker : a blocker that is a git host issue, by its issue too (#494 AC-9): closed as completed by a person's
 // change on any branch it is merged; an issue the git host cannot answer for leaves the branch's state
-async function issueBlocker(setup: TickSetup, issue: number, branch: BranchState): Promise<BlockerState> {
+async function issueBlocker(setup: TickSetup, issue: number, branch: BranchState): Promise<BlockerRead> {
   const read = await setup.forge.issueState({ number: issue });
-  return read.kind === "ok" ? withIssue(branch, read.value) : branch;
+  return read.kind === "ok" ? { state: withIssue(branch, read.value) } : { state: branch, unread: read.reason };
 }
 
 // blockersOf : where the ticket's blockers stand, read only while its build has not begun (#494): each blocker's
@@ -533,8 +541,8 @@ async function blockersOf(
 async function blockersRead(setup: TickSetup, blockedBy: readonly string[]): Promise<readonly Blocker[]> {
   const read: Blocker[] = [];
   for (const [b, list] of await specsBehind(setup, blockedBy)) {
-    const state = blockedBy.includes(b) ? await blockerState(setup, b) : "none";
-    read.push({ ticket: b, state, blockedBy: list });
+    const state: BlockerRead = blockedBy.includes(b) ? await blockerState(setup, b) : { state: "none" };
+    read.push({ ticket: b, ...state, blockedBy: list });
   }
   return read;
 }
@@ -791,6 +799,9 @@ const FORGE: Handler<Promise<Done> | "none"> = {
   release: (setup, state, a) => releaseClaim(setup, state, a.why),
   ping: (setup, state, a) => ping(setup, state, a.head),
   "design-note": (setup, state, a) => designNote(setup, state, a),
+  held: (setup, state, a) => holdRecorded(setup, state, a),
+  "blockers-unread": (setup, state, a) =>
+    record({ where: where(setup, state), event: { at: at(setup), kind: "blockers-unread", why: a.why } }),
   reconcile: (setup, state) => reconcile(setup, state),
   wait: () => "none",
   writer: () => "none",
@@ -1309,6 +1320,16 @@ async function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAct
 
 type DesignNoteAction = Extract<Action, { kind: "design-note" }>;
 
+// holdRecorded : the build held by the spec's "Blocked by", recorded so the next pass waits without a word, and the person told
+// once when what it waits on changed (#494 AC-10); a ping only informs
+async function holdRecorded(setup: TickSetup, state: TicketState, a: Extract<Action, { kind: "held" }>): Promise<Done> {
+  const kept = await record({ where: where(setup, state), event: { at: at(setup), kind: "held", why: a.why } });
+  if (kept.kind === "failed" || !a.ping) {
+    return kept;
+  }
+  return informed(setup, { kind: "held", ticket: state.ticket, change: number(state), why: a.why });
+}
+
 // designPost : the verify pass's kept findings, as the note on the ticket's PR. Pure.
 export function designPost(ended: DesignEnded): Post {
   const counted = ended.kept.length === 0 ? "no finding kept" : `${ended.kept.length} finding(s) kept`;
@@ -1347,6 +1368,8 @@ const RUN: Handler<Promise<Logged | Unavailable> | "none"> = {
   release: () => "none",
   ping: () => "none",
   "design-note": () => "none",
+  held: () => "none",
+  "blockers-unread": () => "none",
   reconcile: () => "none",
   wait: () => "none",
 };
@@ -1368,6 +1391,8 @@ const DESCRIBE: Describe = {
   design: (a) => `${a.step === "review" ? "design review" : "design verify pass"} at spec ${a.spec.slice(0, 8)}`,
   ping: (a) => `ping at ${a.head.slice(0, 8)}`,
   "design-note": (a) => `design note: ${a.why}`,
+  held: (a) => `wait: ${a.why}${a.ping ? " (the person is told)" : ""}`,
+  "blockers-unread": (a) => `wait: the git host did not answer for a blocker: ${a.why}`,
   reconcile: () => "reconcile: merged; remove the claim",
 };
 

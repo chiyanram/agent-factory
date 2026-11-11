@@ -68,9 +68,12 @@ A `[writer] OPEN:` note asks one numbered round, each question with its lettered
 "(no choices: answer in words)" ([`src/core/answers.ts`](../../src/core/answers.ts)). Only a project member's notes after it count, and
 a note that ends with `?` counts for nothing. The round closes once those notes name an answer for every question:
 `1A 2C` or `1A2C` on a line of answers alone, one per line as `1: A` or `1. B` (with words after the letter if they
-like: `1: A, cheaper`), `1: <words>` for a question with no choices, or `accept all` for the recommended choices. A
-whole reply answers only a round of one question with no choices. Prose never reads as a choice: `we ship 2 a day`
-answers nothing. Replies add up, and a later valid answer to a question replaces an earlier one.
+like, after punctuation: `1: A, cheaper`), `1: <words>` for a question with no choices, or `accept all` for the
+recommended choices. A whole reply answers only a round of one question with no choices. Prose never reads as a
+choice: `we ship 2 a day` answers nothing, and neither does `1. a bit risky`, since a letter followed by words is words
+(#517). Replies add up, and a later valid answer to a question replaces an earlier one. A round whose title names a
+number of questions its items do not hold, none included, never closes: `poll` shows it as `malformed_asks=N`, and
+the way on is to delete that note (#517).
 
 The answers come only from the newest `[writer] OPEN:` round; a `[coordinator] OPEN:` note holds the change open but
 gives the implementer nothing. Each answer reaches the next implementer run as a typed field with the question, the
@@ -120,7 +123,11 @@ begins only on a human's word: a START in the tiny lane, a START and an approval
 holds the first build (no implementer run yet and no change open) until each blocker is merged, read through the git host seam: its
 `factory/<ticket>` change merged, or, for a ticket that is a git host issue, the issue closed as completed (on GitLab,
 which keeps no close reason, only when a merged PR closes or mentions it). A blocker closed with no merge,
-the ticket itself or a cycle in the `Blocked by` sections goes to `needs-human`: with no change to label yet, the pass records the stop and pings the person once; the build then
+the ticket itself or a cycle in the `Blocked by` sections goes to `needs-human`: with no change to label yet, the pass records the stop and pings the person once. A held ticket is recorded (`held`)
+and pings the person once with what it waits on, and again only when that changes. A pass on which the git host does
+not answer for a blocker waits and is counted (`blockers-unread`); such passes are a poll interval apart. On the third in
+a row the ticket goes to `needs-human` with the first error and when the outage began, told once per outage; the
+passes after it keep counting quietly, and a pass that reads the blockers again starts the count afresh. The build then
 starts from the default branch, never another ticket's branch (#494). An approval with no
 START waits, since nothing runs without one. In a lane with a design review, the design-reviewer and its verify pass
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that

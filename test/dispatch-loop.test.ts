@@ -426,6 +426,17 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
     expect(loop.lines).toContain("in flight: PROJ-1 (waiting on CI); next pass in 7 min");
   });
 
+  // #494 review: a pass that only recorded a hold or an unanswered blocker read waits the poll interval, so three
+  // unanswered passes are a poll interval apart, never a few seconds of git host errors back to back
+  it("waits the poll interval after a pass that only recorded a hold or an unread blocker", () => {
+    for (const action of [
+      { kind: "blockers-unread", why: "PROJ-0: github: 502" },
+      { kind: "held", why: "blocked by PROJ-0 (open, not merged)", ping: true },
+    ] as const) {
+      expect(pace([{ ticket: "PROJ-1", action, result: { kind: "ok" } }], new Set())).toMatchObject({ kind: "sleep" });
+    }
+  });
+
   it("falls back to the poll interval when a step fails the same way twice in a row", async () => {
     const step = { kind: "ready", head: H } as const;
     const failed = { ticket: "PROJ-1", action: step, result: { kind: "failed", reason: "no box" } } as const;

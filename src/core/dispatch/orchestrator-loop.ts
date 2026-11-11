@@ -168,6 +168,10 @@ export function failureOf(r: Ran): string {
 // pace : after a pass, whether the next pass runs at once: it does after an action the factory took itself, a step
 // it ran or a git host write, unless each one that ended failed as in the pass before (`before`, from failureOf); a
 // wait, a broken ticket and a run that did not start are not actions. A rate limit an action met wins (#62). Pure.
+// the actions that only keep a line in the ticket's record and wait (#494): a pass that did only these waits the poll
+// interval, so three passes the git host did not answer are a poll interval apart, never back to back
+const RECORD_ONLY: ReadonlySet<Ran["action"]["kind"]> = new Set(["wait", "held", "blockers-unread"]);
+
 export function pace(ran: readonly Ran[], before: ReadonlySet<string>): Pace {
   const limits = ran.flatMap((r) => {
     const until = r.result.kind === "failed" ? rateLimitedUntil(r.result.reason) : "none";
@@ -176,7 +180,7 @@ export function pace(ran: readonly Ran[], before: ReadonlySet<string>): Pace {
   if (limits.length > 0) {
     return { kind: "limited", until: Math.max(...limits) };
   }
-  const acted = ran.filter((r) => r.action.kind !== "wait" && r.result.kind !== "unavailable");
+  const acted = ran.filter((r) => !RECORD_ONLY.has(r.action.kind) && r.result.kind !== "unavailable");
   const fresh = acted.some((r) => r.result.kind === "ok" || !before.has(failureOf(r)));
   return fresh
     ? { kind: "now" }
