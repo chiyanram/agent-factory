@@ -17,5 +17,5 @@ This guide moved into [docs/](docs/) in four parts (#378). Find each old section
 | Settings, the project file, project knowledge, settings layers | [docs/reference/settings.md](docs/reference/settings.md) |
 | The runner image, check the egress proxy, check the srt runner | [docs/how-to/check-the-runner.md](docs/how-to/check-the-runner.md) |
 | Run the loop, Steps, Triggers, Escalation, Terms | [prompts/coordinator.md](prompts/coordinator.md), the coordinator's instructions |
-| Scripts | [docs/reference/cli.md](docs/reference/cli.md) |
+| Commands | [docs/reference/cli.md](docs/reference/cli.md) |
 | Guardrails | [docs/explanation/safety.md](docs/explanation/safety.md) |

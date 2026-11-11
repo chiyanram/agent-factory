@@ -1,7 +1,7 @@
 # Code review
 
 How the automated review judges a pull request, where it sits beside human review, and what is decided next. The
-command is `agent-factory review` ([CLI](../reference/cli.md#scripts)); the round is `src/core/review/round.ts`.
+command is `agent-factory review` ([CLI](../reference/cli.md#commands)); the round is `src/core/review/round.ts`.
 
 ## Where it sits
 

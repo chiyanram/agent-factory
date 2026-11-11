@@ -37,7 +37,9 @@ export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" |
 // the two runs of a design review (#236)
 export type DesignStep = "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
-// never rebases (#103: nothing force-pushes; the name predates that decision and stays, so older lines still read)
+// never rebases (#103: every push is --force-with-lease against the head the host saw, push.ts, so a merge goes out
+// as a fast-forward and a person's push in between is never overwritten; the name predates that decision and stays,
+// so older lines still read)
 // "cleanup" is the cleanup run after the implementer's done run (#236): the same branch, its own role card
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase" | "cleanup";
 

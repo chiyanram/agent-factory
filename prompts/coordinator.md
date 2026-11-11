@@ -241,7 +241,8 @@ start. Run the table below by hand for the rest.
 
 A change that does not merge into its target (`poll` shows `conflict=yes`) sends the implementer on a merge run (#103):
 the host fetches the default branch into the run's clone as `origin/<default>`, the implementer merges it in and
-resolves the conflicts, and the host pushes the merge as a fast-forward. Nothing rebases or force-pushes. A change that
+resolves the conflicts, and the host pushes the merge as a fast-forward. Nothing rebases. The host's one push is
+`--force-with-lease` against the head it saw, so a person's push in between is never overwritten. A change that
 still conflicts after that one merge run goes to a person. `conflict=unknown` (the git host has not checked yet) has
 no row. Each pass that polled writes its last-poll time to `$FACTORY_HOME/runs/<project>/last-poll.json` (a dry run
 does not), and `agent-factory status` puts "orchestrator last ran N min ago" at the head of its line. While a loop is
