@@ -49,7 +49,7 @@ case with no row in `cases.md`. It needs the whole history, so CI checks out wit
 ## Run the eval
 
 ```bash
-FACTORY_RULEBOOK=/abs/path/to/skills/plugins/rulebook agent-factory eval reviewer [<repo>] [--drafts] [--allow-partial]
+FACTORY_RULEBOOK=/abs/path/to/skills/plugins/rulebook agent-factory eval reviewer [<repo>] [--drafts]
 ```
 
 It runs on the host, as the production review does, and refuses in CI (`CI` set) and in a dry run. `<repo>` is this
@@ -67,10 +67,10 @@ repository's checkout (default `.`): its golden set, and the history every `base
   most 3 per seed, by one model run with [prompts/eval-judge.md](../../prompts/eval-judge.md). A match needs "same
   underlying issue" with confidence 0.7 or more, and one finding matches one seed at most.
 - **The cap (E11).** $100 a pass. Every review run is capped at `FACTORY_MAX_USD` (default 2 for the eval) and every
-  judge run at `FACTORY_JUDGE_MAX_USD` (default 0.50), through the agent CLI's own budget flag. Before it starts, a pass
-  whose worst case (every run at its cap) is over $100 is refused; `--allow-partial` runs it anyway. During a pass, a
-  round or judge run that might not fit under the cap never starts: the pass stops and the result is partial. A
-  partial result is never proof.
+  judge run at `FACTORY_JUDGE_MAX_USD` (default 0.50), through the agent CLI's own budget flag. Before it starts, the
+  pass prints its worst case (every run at its cap); a worst case over $100 is no reason to refuse, since the cap is
+  kept while the pass runs: a round or judge run that might not fit under the cap never starts, the pass stops, and
+  the result is partial. Under the cap is proof; stopped at the cap is partial, never proof.
 - **Settings.** `FACTORY_CLAUDE` (the agent CLI), `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL`,
   `FACTORY_REVIEW_FIND` and `FACTORY_REVIEW_VERIFY` as for `agent-factory review`; `FACTORY_JUDGE_MODEL` (default
   `claude-sonnet-5-5`) and `FACTORY_EVAL_JUDGE` (the judge's instructions). Every model is a full id: a pass refuses

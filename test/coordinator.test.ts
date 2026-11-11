@@ -193,7 +193,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory start ledger PROJ-1",
       "agent-factory spec ledger PROJ-1 && agent-factory start ledger PROJ-1 --yes",
       "agent-factory eval reviewer",
-      "agent-factory eval reviewer . --allow-partial",
+      "agent-factory eval reviewer . --drafts",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
     }

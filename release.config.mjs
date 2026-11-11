@@ -32,10 +32,20 @@ export default {
     ],
     // no "released in" comments or labels on each closed issue and PR: they spent the account's hourly API limit and
     // failed the v0.29.0 run after the release was out. The release page and CHANGELOG.md list what shipped.
+    // successCommentCondition: false skips the comments without the deprecated successComment: false (#384), and
+    // failCommentCondition: false skips the success step's search for semantic-release's own failure issues, which
+    // went red with graphql_rate_limit after two releases were out (#483; @semantic-release/github 12.0.10,
+    // lib/success.js lines 68 and 271). With it no failure issue is opened either: a failed release stays visible as
+    // the red run.
     // The packed package goes on the release page as chiyanram-agent-factory-<version>.tgz for the one-line install.
     [
       '@semantic-release/github',
-      { assets: [{ path: 'dist-release/*.tgz' }], successComment: false, releasedLabels: false },
+      {
+        assets: [{ path: 'dist-release/*.tgz' }],
+        successCommentCondition: false,
+        failCommentCondition: false,
+        releasedLabels: false,
+      },
     ],
   ],
 }

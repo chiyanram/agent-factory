@@ -12,13 +12,13 @@ import { claudeModel, runInFolder } from "./core/review/model.js";
 import { claudeEnv, unpinnedModel } from "./core/review/settings.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
-export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--allow-partial]
+export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts]
                                the automated review's eval (ADR-0015): each case the operator approved in
                                evals/reviewer/cases.md, 3 runs of the real review round on a throwaway clone, Act on
                                findings matched with the seeds by place and judge; writes
                                evals/reviewer/results/<date>-<sha>.json. <repo> is this repository's checkout (default
-                               .). --drafts runs draft cases too (never proof). It refuses a pass that could spend over
-                               $100 unless --allow-partial, which stops at the cap and marks the result partial. Host
+                               .). --drafts runs draft cases too (never proof). It stops before it spends over $100 and
+                               marks that result partial, never proof. Host
                                only: refused in CI. A human runs it; the coordinator's settings deny it. Exit 0 written, 3 written but partial, 1 refused
 `;
 
@@ -31,7 +31,6 @@ export type EvalIo = {
 type Parsed = {
   readonly root: string;
   readonly drafts: boolean;
-  readonly allowPartial: boolean;
 };
 
 function parsed(argv: readonly string[]): Parsed | "usage" {
@@ -39,12 +38,10 @@ function parsed(argv: readonly string[]): Parsed | "usage" {
     const { values, positionals } = parseArgs({
       args: [...argv],
       allowPositionals: true,
-      options: { drafts: { type: "boolean" }, "allow-partial": { type: "boolean" } },
+      options: { drafts: { type: "boolean" } },
     });
     const [what, root = ".", ...rest] = positionals;
-    return what === "reviewer" && rest.length === 0
-      ? { root: resolve(root), drafts: values.drafts === true, allowPartial: values["allow-partial"] === true }
-      : "usage";
+    return what === "reviewer" && rest.length === 0 ? { root: resolve(root), drafts: values.drafts === true } : "usage";
   } catch {
     return "usage";
   }
@@ -139,7 +136,7 @@ function note(w: Written): string {
 export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<number> {
   const p = parsed(argv);
   if (p === "usage") {
-    io.err(`usage: agent-factory eval reviewer [<repo>] [--drafts] [--allow-partial]\n`);
+    io.err(`usage: agent-factory eval reviewer [<repo>] [--drafts]\n`);
     return 64;
   }
   const refused = refusal(io.env);
@@ -147,5 +144,5 @@ export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<
     io.err(`agent-factory eval: ${refused}\n`);
     return 1;
   }
-  return run(p, evalSettings(io.env, { drafts: p.drafts, allowPartial: p.allowPartial }), io);
+  return run(p, evalSettings(io.env, { drafts: p.drafts }), io);
 }

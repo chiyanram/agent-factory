@@ -15,6 +15,21 @@ export type Spend = { readonly usd: number; readonly tokens: number };
 
 export const NO_SPEND: Spend = { usd: 0, tokens: 0 };
 
+// a run that failed after it spent: its spend is still recorded, as a "spent" line (#131, #483); none when the run
+// reported none
+export type FailedSpent = {
+  readonly kind: "failed";
+  readonly reason: string;
+  readonly spend?: Spend;
+  // a review round's spend per run (#337)
+  readonly split?: RoundSpend;
+};
+
+// spentFailure : a failure that keeps what the run spent, when it reported any. Pure.
+export function spentFailure(reason: string, spend: Spend | "unmeasured"): FailedSpent {
+  return spend === "unmeasured" ? { kind: "failed", reason } : { kind: "failed", reason, spend };
+}
+
 const TOKEN_FIELDS = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"];
 
 // tokensOf : every token a CLI answer's usage counts, cache reads and writes too. Pure.

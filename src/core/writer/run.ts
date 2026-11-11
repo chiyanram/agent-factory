@@ -40,7 +40,15 @@ import type { BoxPlace, Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { pluginPaths, type Clone } from "./clone.js";
 import { outsideScope, scoped } from "./scope.js";
-import { NO_STREAM, streamOf, streamSpend, type Spend, type Stream } from "../dispatch/spend.js";
+import {
+  NO_STREAM,
+  spentFailure,
+  streamOf,
+  streamSpend,
+  type FailedSpent,
+  type Spend,
+  type Stream,
+} from "../dispatch/spend.js";
 
 export type Claude = {
   // "" for no cap (FACTORY_MAX_USD)
@@ -473,8 +481,8 @@ async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: s
 }
 
 // writerRun : the run, then its outcome, the branch's tip, the patch and the PR body it wrote. A failure here is the
-// host's, not the run's.
-export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
+// host's, not the run's, and still says what the run spent (#483).
+export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedSpent> {
   const { end, spend, said: words, output } = await inBox(run);
   const outcome = decide({
     end,
@@ -484,7 +492,7 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended>> {
   const tip = await committed(run);
   const paths = tip.kind === "ok" ? await changedPaths(run, tip.value.tip) : tip;
   if (tip.kind === "failed" || paths.kind === "failed") {
-    return { kind: "failed", reason: `cannot read what the run committed: ${reasonOf(tip, paths)}` };
+    return spentFailure(`cannot read what the run committed: ${reasonOf(tip, paths)}`, spend);
   }
   const final = scoped(outcome, outsideScope(paths.value, run.editScope), run.editScope);
   return {

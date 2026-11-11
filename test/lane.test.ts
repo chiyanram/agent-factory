@@ -80,6 +80,46 @@ describe("the approval floor (#230)", () => {
     });
   });
 
+  it("goes by the lane's name, not its place: whatever lanes file, bug, feature and one-way door need an approval (#483)", () => {
+    const HEAVY = ["bug", "feature", "one-way door"] as const;
+    const shapes: readonly (readonly { name: string; approval: boolean; lenses: number }[])[] = [
+      [{ name: "bug", approval: false, lenses: 1 }],
+      [{ name: "one-way door", approval: false, lenses: 1 }],
+      [
+        { name: "feature", approval: false, lenses: 1 },
+        { name: "tiny", approval: false, lenses: 1 },
+      ],
+      DEFAULT_LANES.toReversed().map((l) => ({ name: l.name, approval: false, lenses: 1 })),
+      DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.name !== "bug", lenses: 1 })),
+      [
+        { name: "tiny", approval: false, lenses: 1 },
+        { name: "chore", approval: false, lenses: 1 },
+      ],
+    ];
+    for (const shape of shapes) {
+      const read = lanesOf(shape, "plugin");
+      // a refused lanes file stops the run (process/read.ts), so no lane runs on it at all
+      expect(read.kind).toBe("failed");
+    }
+    // a lanes file that is read: a lane it leaves out needs an approval, in any order
+    for (const kept of [[{ name: "tiny", approval: false, lenses: 1 }], DEFAULT_LANES.toReversed()]) {
+      const read = lanesOf(kept, "plugin");
+      expect(read.kind).toBe("ok");
+      const lanes = read.kind === "ok" ? read.value : [];
+      expect(HEAVY.map((l) => needsApproval(l, lanes))).toEqual([true, true, true]);
+    }
+  });
+
+  it("lets tiny skip the approval, or be raised to need one, wherever it is listed", () => {
+    const tinyLast = [
+      { name: "bug", approval: true, lenses: 3 },
+      { name: "tiny", approval: false, lenses: 1 },
+    ];
+    expect(lanesOf(tinyLast, "plugin").kind).toBe("ok");
+    const raised = lanesOf([{ name: "tiny", approval: true, lenses: 1 }], "plugin");
+    expect(raised.kind === "ok" && needsApproval("tiny", raised.value)).toBe(true);
+  });
+
   it("refuses a value that is not a list of lanes, rather than read it as none", () => {
     for (const value of [undefined, [], {}, [{ name: "tiny" }], [{ name: "chore", approval: true }]]) {
       expect(lanesOf(value, "team settings")).toMatchObject({ kind: "failed" });

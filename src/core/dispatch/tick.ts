@@ -59,7 +59,7 @@ import { writeLastPoll } from "./last-poll.js";
 import { designView, type DesignView } from "./design.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
-import { NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
+import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
 import type { Acted } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
@@ -85,16 +85,12 @@ export type Logged = { readonly kind: "ok"; readonly said?: string } | Extract<D
 
 // held: a cap kept the run from starting (#131, #237), not a step that is not set up
 export type Unavailable = { readonly kind: "unavailable"; readonly reason: string; readonly held?: boolean };
-export type Step<I, O> = Unavailable | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O>> };
+// F: how a failed run may say what it spent, for a step whose runs spend (#483)
+export type Step<I, O, F = never> =
+  | Unavailable
+  | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O> | F> };
 
-// a run that failed after it spent: its spend is still recorded (#131)
-export type FailedSpent = {
-  readonly kind: "failed";
-  readonly reason: string;
-  readonly spend: Spend;
-  // the round's spend per run (#337)
-  readonly split?: RoundSpend;
-};
+export type { FailedSpent } from "./spend.js";
 
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 // what a design review's run reads (#236): the spec and design with these hashes, and for the verify pass the
@@ -128,7 +124,9 @@ export type Steps = {
       // why a run that is not done stopped, and the file that keeps the end of its output (#62)
       readonly why?: string;
       readonly output?: string;
-    }
+    },
+    // a writer step that fails after the run still says what the run spent (#483)
+    FailedSpent
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
   // says a test check stopped it for a person (#231). It reads the lane the real diff needs (#230), and holds each
@@ -408,7 +406,7 @@ async function stateOf(
   if (said.kind === "failed") {
     return said;
   }
-  const events = await readRecords({ home: setup.home, project: setup.project, ticket });
+  const events = await readRecords({ home: setup.home, project: setup.project, ticket }, setup.log);
   if (events.kind === "failed") {
     return events;
   }
@@ -652,8 +650,11 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
     return claimed;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task });
-  // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person
-  return ran.kind === "ok" ? writerEnded(setup, state, mode, ran.value) : ran;
+  // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person; what the
+  // run spent is still recorded (#483)
+  return ran.kind === "ok"
+    ? writerEnded(setup, state, mode, ran.value)
+    : failedSpent(setup, state, headOf(state), ran, "writer");
 }
 
 type WriterValue = Extract<
@@ -849,7 +850,9 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
     return started;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head });
-  return ran.kind === "ok" ? reviewEnded(setup, state, head, ran.value) : failedSpent(setup, state, head, ran);
+  return ran.kind === "ok"
+    ? reviewEnded(setup, state, head, ran.value)
+    : failedSpent(setup, state, head, ran, "review");
 }
 
 function reviewEnded(
@@ -885,22 +888,23 @@ function splitIn(ran: { readonly split?: RoundSpend }): { readonly split?: Round
   return ran.split === undefined ? {} : { split: ran.split };
 }
 
-// failedSpent : a review that failed leaves its start alone, so a person looks; what it spent is still recorded, as a
-// spent line, so the caps and usage count it (#131)
+// failedSpent : a writer run or a review that failed leaves its start alone, so a person looks; what it spent is still
+// recorded, as a spent line, so the caps and usage count it (#131, #483)
 async function failedSpent(
   setup: TickSetup,
   state: TicketState,
   head: string,
-  ran: { readonly kind: "failed"; readonly reason: string; readonly spend?: Spend; readonly split?: RoundSpend },
+  ran: FailedSpent,
+  phase: "writer" | "review",
 ): Promise<Done> {
   const spend = ran.spend ?? NO_SPEND;
   if (spend.usd > 0 || spend.tokens > 0) {
     const kept = await record({
       where: where(setup, state),
-      event: { at: at(setup), kind: "spent", phase: "review", head, spend, ...splitIn(ran) },
+      event: { at: at(setup), kind: "spent", phase, head, spend, ...splitIn(ran) },
     });
     if (kept.kind === "failed") {
-      setup.log(`${state.ticket}: the failed review's spend was not recorded: ${kept.reason}`);
+      setup.log(`${state.ticket}: the failed ${phase} run's spend was not recorded: ${kept.reason}`);
     }
   }
   return { kind: "failed", reason: ran.reason };
@@ -914,7 +918,7 @@ async function designFindings(
   state: TicketState,
   a: DesignAction,
 ): Promise<Result<readonly DesignFinding[]>> {
-  const events = await readRecords(where(setup, state));
+  const events = await readRecords(where(setup, state), setup.log);
   if (events.kind === "failed") {
     return events;
   }

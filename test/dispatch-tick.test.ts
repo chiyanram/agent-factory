@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
-import { readRecords, record, summarize, type Event } from "../src/core/dispatch/records.js";
+import { readRecords, record, summarize, tornPath, type Event } from "../src/core/dispatch/records.js";
 import type { Evidence } from "../src/core/report.js";
 import { waive } from "../src/core/waiver.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
@@ -204,7 +204,7 @@ describe("records", () => {
     });
   });
 
-  it("a start with no end is an interrupted run; a line that is not a record fails the read", async () => {
+  it("a start with no end is an interrupted run; a middle line that is not a record fails the read", async () => {
     await record({
       where: where(),
       event: { at: "2026-11-07T09:00:00Z", kind: "started", phase: "review", mode: "none", head: H },
@@ -213,11 +213,50 @@ describe("records", () => {
     expect(
       summarize({ events: read.kind === "ok" ? read.value : [], since: "2026-11-07T08:00:00Z" }).interrupted,
     ).toEqual({ kind: "interrupted", phase: "review", at: "2026-11-07T09:00:00Z" });
-    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), '{"kind":"started"}\n', { flag: "a" });
+    const ping = `${JSON.stringify({ at: "2026-11-07T09:05:00Z", kind: "pinged", head: H })}\n`;
+    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `{"kind":"started"}\n${ping}`, { flag: "a" });
     expect(await readRecords(where())).toMatchObject({ kind: "failed", reason: expect.stringContaining("line 2") });
     expect(
       await record({ where: { ...where(), ticket: "../x" }, event: { at: "t", kind: "pinged", head: H } }),
     ).toMatchObject({ kind: "failed" });
+  });
+});
+
+describe("records: a torn last line (#483)", () => {
+  const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
+  const file = () => join(home, "runs", "ledger", "PROJ-1.jsonl");
+
+  it("reads with a warning, moves the line aside, and reads its run as one that never ended", async () => {
+    await record({
+      where: where(),
+      event: { at: "2026-11-07T09:00:00Z", kind: "started", phase: "writer", mode: "fix", head: H },
+    });
+    writeFileSync(file(), '{"at":"2026-11-07T09:10:00Z","kind":"writer-en', { flag: "a" });
+    const warned: string[] = [];
+    const read = await readRecords(where(), (l) => warned.push(l));
+    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }] });
+    expect(warned).toEqual([expect.stringContaining("line 2 was torn")]);
+    expect(readFileSync(tornPath(file()), "utf8")).toBe('{"at":"2026-11-07T09:10:00Z","kind":"writer-en\n');
+    expect(
+      summarize({ events: read.kind === "ok" ? read.value : [], since: "2026-11-07T08:00:00Z" }).interrupted,
+    ).toEqual({ kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" });
+    // the next line appended starts on its own line, and the record reads clean, with no second warning
+    await record({ where: where(), event: { at: "2026-11-07T09:20:00Z", kind: "pinged", head: H } });
+    const again = await readRecords(where(), (l) => warned.push(l));
+    expect(again).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "pinged" }] });
+    expect(warned).toHaveLength(1);
+  });
+
+  it("a torn line in the middle still stops the ticket, naming the line", async () => {
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(
+      file(),
+      `{"at":"2026-11-07T09:10:00Z","kind":"writer-en\n${JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H })}\n`,
+    );
+    expect(await readRecords(where(), () => undefined)).toEqual({
+      kind: "failed",
+      reason: `${file()} line 1 is not a record; fix or remove it`,
+    });
   });
 });
 
@@ -233,7 +272,7 @@ describe("records: evidence", () => {
     expect(read).toMatchObject({ kind: "ok", value: [{ evidence: [] }, { why: "" }] });
     writeFileSync(
       file,
-      `${JSON.stringify({ at: "2026-11-07T09:02:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p", evidence: [{ criterion: "AC1" }] })}\n`,
+      `${JSON.stringify({ at: "2026-11-07T09:02:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p", evidence: [{ criterion: "AC1" }] })}\n${JSON.stringify({ at: "2026-11-07T09:03:00Z", kind: "pinged", head: H })}\n`,
       { flag: "a" },
     );
     expect(await readRecords({ home, project: "ledger", ticket: "PROJ-1" })).toMatchObject({ kind: "failed" });
@@ -335,8 +374,35 @@ describe("tick", () => {
     writeFileSync(join(home, "runs", "ledger", "OLD-1.jsonl"), `${JSON.stringify(line)}\n`);
     const read = await readRecords({ home, project: "ledger", ticket: "OLD-1" });
     expect(read).toEqual({ kind: "ok", value: [line] });
-    writeFileSync(join(home, "runs", "ledger", "OLD-2.jsonl"), `${JSON.stringify({ ...line, why: 7 })}\n`);
+    writeFileSync(
+      join(home, "runs", "ledger", "OLD-2.jsonl"),
+      `${JSON.stringify({ ...line, why: 7 })}\n${JSON.stringify(line)}\n`,
+    );
     expect(await readRecords({ home, project: "ledger", ticket: "OLD-2" })).toMatchObject({ kind: "failed" });
+  });
+
+  it("a writer step that fails after the run records what the run spent, and usage and the caps count it (#483)", async () => {
+    await approved();
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async () => ({ kind: "failed", reason: "the push failed", spend: { usd: 0.3, tokens: 900 } }),
+      },
+    };
+    await tick(setup({ team, open: [], merged: [] }, [], { steps }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: [
+        { kind: "started", phase: "writer" },
+        { kind: "spent", phase: "writer", spend: { usd: 0.3, tokens: 900 } },
+      ],
+    });
+    const spends = await readSpends({ home, project: "ledger" });
+    expect(spends.runs.map((r) => r.spend)).toEqual([{ usd: 0.3, tokens: 900 }]);
+    const summary = summarize({ events: read.kind === "ok" ? read.value : [], since: "1970-01-01T00:00:00Z" });
+    expect(summary.spent).toEqual({ usd: 0.3, tokens: 900 });
   });
 
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
@@ -626,19 +692,21 @@ describe("tick", () => {
   it("keeps a run's spend; a line from before #131 has none; a spend that is not two amounts fails the read", async () => {
     const where = { home, project: "ledger", ticket: "PROJ-1" };
     const path = join(home, "runs", "ledger", "PROJ-1.jsonl");
+    // a bad line is followed by a good one: only a bad middle line fails the read (a torn last line is set aside, #483)
+    const ping = `${JSON.stringify({ at: "2026-11-07T09:30:00Z", kind: "pinged", head: H })}\n`;
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     const base = { at: "2026-11-07T09:00:00Z", kind: "review-ended", head: H, actOn: 0 };
     writeFileSync(path, `${JSON.stringify(base)}\n${JSON.stringify({ ...base, spend: { usd: 0.1, tokens: 7 } })}\n`);
     const read = await readRecords(where);
     expect(read.kind === "ok" ? read.value : []).toEqual([base, { ...base, spend: { usd: 0.1, tokens: 7 } }]);
-    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: -1, tokens: 7 } })}\n`);
+    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: -1, tokens: 7 } })}\n${ping}`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
-    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: 1 } })}\n`);
+    writeFileSync(path, `${JSON.stringify({ ...base, spend: { usd: 1 } })}\n${ping}`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
     // each lens's unique findings (#237): kept, and a count that is not one fails the read
     writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: 2 } })}\n`);
     expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, lenses: { errors: 2 } }] });
-    writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: "two" } })}\n`);
+    writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: "two" } })}\n${ping}`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
     // the round's spend per run (#337): kept; a split whose finders are not spends by lens fails the read
     writeFileSync(path, `${JSON.stringify({ ...base, split: SPLIT })}\n`);
@@ -648,7 +716,7 @@ describe("tick", () => {
       { finders: [], verify: { usd: 0, tokens: 0 } },
       { finders: {} },
     ]) {
-      writeFileSync(path, `${JSON.stringify({ ...base, split: bad })}\n`);
+      writeFileSync(path, `${JSON.stringify({ ...base, split: bad })}\n${ping}`);
       expect(await readRecords(where)).toMatchObject({ kind: "failed" });
     }
   });
@@ -744,7 +812,11 @@ describe("tick", () => {
     await approved("PROJ-1");
     await approved("PROJ-2");
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
-    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), "not a record\n", { flag: "a" });
+    writeFileSync(
+      join(home, "runs", "ledger", "PROJ-1.jsonl"),
+      `not a record\n${JSON.stringify({ at: "2026-11-07T09:30:00Z", kind: "pinged", head: H })}\n`,
+      { flag: "a" },
+    );
     const log: string[] = [];
     const passed = await tick(
       setup({ team, open: [], merged: [{ number: 9, branch: "factory/PROJ-2", fork: false }] }, log),
