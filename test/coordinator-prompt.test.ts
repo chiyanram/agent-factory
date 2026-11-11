@@ -26,6 +26,19 @@ describe("prompts/coordinator.md (#486)", () => {
     expect(reference).toContain("A red check is a fail: the factory\nnever re-runs it");
   });
 
+  it("keeps the by-hand duties the orchestrator does not do yet, each behind the person's yes, until #497", () => {
+    expect(prompt.replace(/\s+/g, " ")).toContain(
+      "**Today:** you still run `agent-factory block`, `reconcile`, `claim` and `release` by hand where the orchestrator does not yet, each only with the person's yes, until #497 removes them.",
+    );
+  });
+
+  it("the reference says how many questions a round holds and that only the writer's round gives answers", () => {
+    const flat = reference.replace(/\s+/g, " ");
+    expect(flat).toContain("`asked` with one to twenty `questions` (`MOST_QUESTIONS`)");
+    expect(flat).not.toContain("one to five");
+    expect(flat).toContain("The answers come only from the newest `[writer] OPEN:` round");
+  });
+
   it("marks the rewrite untested by an eval (P11)", () => {
     expect(prompt).toContain("**Untested by an eval** (P11)");
   });

@@ -627,11 +627,26 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good) };
 }
 
+// optionalText : an optional string field, as a field to spread; "bad" when it is there and not a string. Pure.
+function optionalText(raw: unknown, name: "asked" | "chosen"): { readonly [k: string]: string } | "bad" {
+  const v = prop(raw, name);
+  if (v === undefined) {
+    return {};
+  }
+  return typeof v === "string" ? { [name]: v } : "bad";
+}
+
+// readBack : the question and the chosen choice's text an answer carries, or "bad" when either is not a string. Pure.
+function readBack(raw: unknown): { readonly [k: string]: string } | "bad" {
+  const [asked, chosen] = [optionalText(raw, "asked"), optionalText(raw, "chosen")];
+  return asked === "bad" || chosen === "bad" ? "bad" : { ...asked, ...chosen };
+}
+
 function answerOf(raw: unknown): Answer | undefined {
   const [question, choice, text] = [prop(raw, "question"), prop(raw, "choice"), prop(raw, "text")];
-  return Number.isSafeInteger(question) && typeof choice === "string" && typeof text === "string"
-    ? { question: Number(question), choice, text }
-    : undefined;
+  const back = readBack(raw);
+  const ok = Number.isSafeInteger(question) && typeof choice === "string" && typeof text === "string";
+  return ok && back !== "bad" ? { question: Number(question), choice, text, ...back } : undefined;
 }
 
 function answeredOf(raw: unknown, at: string): Event | Bad {

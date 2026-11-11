@@ -391,7 +391,12 @@ describe("tick", () => {
         hung: false,
       },
     });
-    const asked = renderPost({ seat: "writer", title: "OPEN: 2 questions", fields: [], items: ["1. a?", "2. b?"] });
+    const asked = renderPost({
+      seat: "writer",
+      title: "OPEN: 2 questions",
+      fields: [],
+      items: ["1. a? A) x · B) y (recommended)", "2. b? A) x · B) y (recommended)"],
+    });
     const comments = [
       { author: { name: "ram" }, body: asked.kind === "ok" ? asked.text : "", at: "2026-11-07T09:01:00Z" },
       { author: { name: "ram" }, body: "1A 2B", at: "2026-11-07T09:30:00Z" },
@@ -413,8 +418,8 @@ describe("tick", () => {
       {
         kind: "fix",
         answers: [
-          { question: 1, choice: "A", text: "" },
-          { question: 2, choice: "B", text: "" },
+          { question: 1, choice: "A", text: "", asked: "a?", chosen: "x" },
+          { question: 2, choice: "B", text: "", asked: "b?", chosen: "y" },
         ],
       },
     ]);

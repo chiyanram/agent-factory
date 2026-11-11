@@ -20,6 +20,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
   `$FACTORY_HOME/specs/`, never your own settings.
 - **Today:** the coordinator holds no git host login only by these settings; running as its own user on the VM is
   #493.
+- **Today:** you still run `agent-factory block`, `reconcile`, `claim` and `release` by hand where the orchestrator
+  does not yet, each only with the person's yes, until #497 removes them.
 
 ## How you work
 

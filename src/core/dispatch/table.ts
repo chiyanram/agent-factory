@@ -311,11 +311,10 @@ function answersOn(s: TicketState): readonly Answer[] {
 
 // after : the writer's next run once the last one ended; "next" when it finished its work
 function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): Action | "next" {
-  if (w.outcome === "asked") {
-    return { kind: "writer", task: answered(s, nextTask(s)), why: AGAIN.asked };
-  }
+  // the answers ride on every run until one finishes done: a run that asked, or one that was blocked after the answer,
+  // gets them again (#486 review)
   if (w.outcome !== "done") {
-    return { kind: "writer", task: nextTask(s), why: AGAIN[w.outcome] };
+    return { kind: "writer", task: answered(s, nextTask(s)), why: AGAIN[w.outcome] };
   }
   return w.mode === "test-first"
     ? { kind: "writer", task: { kind: "fix" }, why: "the failing test is in; now the fix" }
@@ -326,7 +325,10 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
   const said = s.approval.kind === "started" ? "started" : "approved";
-  return w.kind === "none" ? { kind: "writer", task: nextTask(s), why: `${said}; no run yet` } : after(s, w);
+  // a ticket STARTed again after a hand-over starts its counts afresh; the change's answered round still holds
+  return w.kind === "none"
+    ? { kind: "writer", task: answered(s, nextTask(s)), why: `${said}; no run yet` }
+    : after(s, w);
 };
 
 function writerHead(s: TicketState): string {

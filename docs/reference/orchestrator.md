@@ -8,10 +8,10 @@ table it follows, the ready check, and what each rework run is handed. The coord
 ## How a run ends
 
 A run ends with a report (#109, [`src/core/report.ts`](../../src/core/report.ts)). The implementer writes `.factory/report.json` (never committed)
-and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to five `questions`,
-or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
+and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to twenty `questions`
+(`MOST_QUESTIONS`), or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
 `done` → push, post the evidence, run the ready check; `asked` → push, post the questions in one `[writer] OPEN:`
-note, wait; `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
+note, wait (the answers that close it, and how the next run receives them, are under [Answers](#answers)); `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
 `blocked: <reason>` (with the implementer's prefix when the implementer said it). A missing, unreadable or malformed
 report, any other field, a non-zero exit, a timeout, a cap or a failed runner is `blocked` with the reason; a reason
 never quotes the report. The host decides from the report only after the runner has stopped, never through a
@@ -61,6 +61,22 @@ stops the run for a person. The design review's runs follow the same card rules.
 and verify passes still read `prompts/review-find.md` and `prompts/review-verify.md`, not the finder and verify-pass
 cards: they and `prompts/eval-judge.md` stay until the automated review's eval has a baseline
 (`scripts/check-eval-proof.ts`).
+
+## Answers
+
+A `[writer] OPEN:` note asks one numbered round, each question with its lettered choices (one marked recommended) or
+"(no choices: answer in words)" ([`src/core/answers.ts`](../../src/core/answers.ts)). Only a project member's notes after it count, and
+a note that ends with `?` counts for nothing. The round closes once those notes name an answer for every question:
+`1A 2C` or `1A2C` on a line of answers alone, one per line as `1: A` or `1. B` (with words after the letter if they
+like: `1: A, cheaper`), `1: <words>` for a question with no choices, or `accept all` for the recommended choices. A
+whole reply answers only a round of one question with no choices. Prose never reads as a choice: `we ship 2 a day`
+answers nothing. Replies add up, and a later valid answer to a question replaces an earlier one.
+
+The answers come only from the newest `[writer] OPEN:` round; a `[coordinator] OPEN:` note holds the change open but
+gives the implementer nothing. Each answer reaches the next implementer run as a typed field with the question, the
+chosen choice's own text and the person's words, marked as data with `<` and `>` escaped, and is recorded as an
+`answered` event with the spec's hash first. The answers ride on every run until one ends `done`, so a run that is
+blocked after the answer does not lose them.
 
 ## The decision table and the loop
 

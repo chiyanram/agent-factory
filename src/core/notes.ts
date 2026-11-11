@@ -18,7 +18,7 @@
 // Agent commits carry an "Agent: <seat>" trailer, so the history shows which commits an agent made even under the
 // developer's own login. commitKind reads it as git reads trailers, so what it counts is what `git log` shows.
 
-import { questionsIn, roundOf, type Answer, type Round } from "./answers.js";
+import { askedIn, roundOf, writerAsk, type Answer, type Round } from "./answers.js";
 import type { Seat } from "./post.js";
 
 export type Author = { readonly name: string };
@@ -98,7 +98,9 @@ function inOrder(request: { readonly notes: readonly Note[]; readonly readers: R
 
 // rounds : each ask, in time order, with where its round stands: answered once the members' notes after it name a
 // choice for every question it asked (answers.ts, #486)
-function rounds(request: { readonly notes: readonly Note[]; readonly readers: Readers }): readonly Round[] {
+type AskRound = { readonly writer: boolean; readonly round: Round };
+
+function rounds(request: { readonly notes: readonly Note[]; readonly readers: Readers }): readonly AskRound[] {
   const read = inOrder(request);
   return read.flatMap((r, i) => {
     if (!isAsk(r.kind)) {
@@ -108,24 +110,25 @@ function rounds(request: { readonly notes: readonly Note[]; readonly readers: Re
       .slice(i + 1)
       .filter((x) => isMemberReply(x.kind))
       .map((x) => x.note.body);
-    return [roundOf(questionsIn(r.note.body), replies)];
+    return [{ writer: writerAsk(r.note.body), round: roundOf(askedIn(r.note.body), replies) }];
   });
 }
 
 // openAsks : how many asks are not answered yet: a member's note after an ask closes it only when, with the members'
 // other notes after it, it names a choice for every question the ask holds (#486; answers.ts)
 export function openAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
-  return rounds(request).filter((r) => r.kind === "open").length;
+  return rounds(request).filter((r) => r.round.kind === "open").length;
 }
 
-// lastAnswers : the newest ask's answers, when it is answered; none while it is open, or with no ask at all. The next
-// writer run receives them as a typed field (#486).
+// lastAnswers : the newest writer ask's answers, when it is answered; none while it is open, or with no writer ask at
+// all. A coordinator's OPEN is its own grill, never the writer's answers. The next writer run receives them as a typed
+// field (#486).
 export function lastAnswers(request: {
   readonly notes: readonly Note[];
   readonly readers: Readers;
 }): readonly Answer[] {
-  const last = rounds(request).at(-1);
-  return last?.kind === "answered" ? last.answers : [];
+  const last = rounds(request).findLast((r) => r.writer);
+  return last?.round.kind === "answered" ? last.round.answers : [];
 }
 
 const SEATS: readonly Seat[] = ["writer", "reviewer", "coordinator"];

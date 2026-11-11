@@ -227,6 +227,20 @@ describe("decide: one row each", () => {
     ).toMatchObject({ kind: "writer", why: "a person removed needs-human" });
   });
 
+  it("the answers ride on every run until one finishes done: an answered run that is blocked loses none (#486)", () => {
+    const answers = [{ question: 1, choice: "A", text: "", asked: "which store?", chosen: "a file" }];
+    const change = { kind: "open", line: line({ answers }) } as const;
+    const ended = (outcome: "asked" | "blocked" | "done") =>
+      wrote({ lastWriter: { kind: "ended", mode: "fix", head: H, outcome, patch: "p1", evidence: [] } });
+    for (const outcome of ["asked", "blocked"] as const) {
+      expect(decide(state({ change, runs: ended(outcome) }))).toMatchObject({
+        kind: "writer",
+        task: { kind: "fix", answers },
+      });
+    }
+    expect(decide(state({ change, runs: ended("done") }))).not.toMatchObject({ task: { answers } });
+  });
+
   it("a run that ended with no change open goes to a person, never back to the writer (a closed change)", () => {
     expect(decide(state({ change: { kind: "none" } }))).toMatchObject({
       kind: "needs-human",
