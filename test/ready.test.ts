@@ -282,6 +282,8 @@ function statusForge(posted: CommitStatus[], noted: Post[] = []): Forge {
     change: notUsed,
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
+    branchState: async () => ({ kind: "ok", value: "none" }),
+    issueState: async () => ({ kind: "ok", value: "open" }),
     issueBody: notUsed,
     openChange: notUsed,
     addLabel: notUsed,

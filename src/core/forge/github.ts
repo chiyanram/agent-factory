@@ -8,6 +8,7 @@ import { graphql, rest, restText, type Client, type Done, type Result } from "./
 import { reader } from "./read.js";
 import {
   after,
+  branchStateOf,
   completeAll,
   done,
   logOf,
@@ -30,6 +31,7 @@ import type {
   CommitStatus,
   FailedJob,
   Forge,
+  IssueState,
   Level,
   Mergeable,
   MergedChange,
@@ -147,6 +149,14 @@ export function redStatuses(answer: unknown, r: ReturnType<typeof reader>): read
         why: `a commit status, with no log: ${r.absent(s, "description") ? "" : r.text(s, "description")}`,
       },
     }));
+}
+
+// githubIssueState : an issue's state from GitHub's state and state_reason (#494). Pure.
+function githubIssueState(state: string, reason: string): IssueState {
+  if (state === "open") {
+    return "open";
+  }
+  return reason === "not_planned" ? "not_planned" : "completed";
 }
 
 export function github(client: Client, project: GithubProject): Forge {
@@ -412,6 +422,36 @@ export function github(client: Client, project: GithubProject): Forge {
       return getJson(`${repo}/git/matching-refs/heads/${input.branch}`, "github refs", (v, r) =>
         r.list(v, "").some((ref) => r.text(ref, "ref") === `refs/heads/${input.branch}`),
       );
+    },
+    // every pull request from this branch of the repository itself, in any state: head=owner:branch leaves forks out
+    async branchState(input) {
+      if (!plainBranch(input.branch)) {
+        return { kind: "failed", reason: `github: not a plain branch name: ${JSON.stringify(input.branch)}` };
+      }
+      const head = encodeURIComponent(`${project.owner}:${input.branch}`);
+      return getJson(`${repo}/pulls?state=all&head=${head}&per_page=100`, "github pull requests", (v, r) =>
+        branchStateOf(
+          r
+            .list(v, "")
+            .map((p) => (!r.absent(p, "merged_at") ? "merged" : r.text(p, "state") === "open" ? "opened" : "closed")),
+        ),
+      );
+    },
+    // an issue's state by its state_reason: closed as not_planned is not planned, any other close is completed (#494);
+    // a pull request is no issue, so it fails
+    async issueState(input) {
+      const answer = await getJson(`${repo}/issues/${input.number}`, "github issue", (v, r) => ({
+        pull: !r.absent(v, "pull_request"),
+        state: r.text(v, "state"),
+        reason: r.absent(v, "state_reason") ? "" : r.text(v, "state_reason"),
+      }));
+      if (answer.kind === "failed") {
+        return answer;
+      }
+      const { pull, state, reason } = answer.value;
+      return pull
+        ? { kind: "failed", reason: `github: #${input.number} is a pull request, not an issue` }
+        : { kind: "ok", value: githubIssueState(state, reason) };
     },
     // the issues endpoint also answers a pull request, which carries pull_request: that is no issue, so it fails
     async issueBody(input) {

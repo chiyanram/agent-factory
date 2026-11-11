@@ -7,7 +7,7 @@ import { cleanField, renderBody, renderPost, type BodyPost, type Post } from "..
 import { plainBranch } from "../branch.js";
 import type { Done, Failed, Result, Variable } from "./api.js";
 import type { Reader } from "./read.js";
-import type { ChangeRequest, FailedJob, JobLog, OpenChange } from "./types.js";
+import type { BranchState, ChangeRequest, FailedJob, JobLog, OpenChange } from "./types.js";
 
 // A page of a list, and where the next one starts.
 export type Cursor = { readonly kind: "start" } | { readonly kind: "after"; readonly cursor: string };
@@ -231,4 +231,11 @@ export async function withLogs<T>(
 // logOf : a log read as text, as a job's log
 export function logOf(read: Result<string>): JobLog {
   return read.kind === "ok" ? { kind: "tail", text: tailOf(read.value) } : { kind: "none", why: read.reason };
+}
+
+// branchStateOf : one state for a branch's changes: merged when any is, else opened when any is, else closed when any
+// is, else none (#494). Pure.
+export function branchStateOf(states: readonly string[]): BranchState {
+  const order: readonly BranchState[] = ["merged", "opened", "closed"];
+  return order.find((s) => states.includes(s)) ?? "none";
 }
