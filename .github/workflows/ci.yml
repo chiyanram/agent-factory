@@ -64,6 +64,15 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
+      # the same pinned rules pack as the Linux job: test/pack-schema.test.ts fails in CI without it (#484)
+      - name: Fetch the pinned rules pack
+        run: |
+          repo=$(node -p "require('./.github/rules-pack.json').repo")
+          commit=$(node -p "require('./.github/rules-pack.json').commit")
+          git init -q "$RUNNER_TEMP/rules-pack"
+          git -C "$RUNNER_TEMP/rules-pack" fetch -q --depth 1 "$repo" "$commit"
+          git -C "$RUNNER_TEMP/rules-pack" checkout -q FETCH_HEAD
+          echo "FACTORY_RULES_PACK=$RUNNER_TEMP/rules-pack" >> "$GITHUB_ENV"
       - run: make test
 
   # Pull requests are squash-merged with the PR title as the commit subject, so the title is what semantic-release
