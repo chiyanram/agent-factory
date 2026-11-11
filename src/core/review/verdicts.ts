@@ -85,7 +85,13 @@ function ownOf(raw: unknown): Own | undefined {
 function findingOf(raw: unknown, i: number, lens: string): Finding | undefined {
   const core = coreOf(raw, `F${i + 1}`, (t) => t);
   const own = ownOf(raw);
-  return core === undefined || own === undefined ? undefined : { ...core, source: "review", lens, ...own };
+  return core === undefined || own === undefined ? undefined : styleNit({ ...core, source: "review", lens, ...own });
+}
+
+// styleNit : a style finding is always a nit, as the rules pack's finding format says; the engine only ever lowers a
+// severity, never raises one (#484). Pure.
+function styleNit(f: Finding): Finding {
+  return f.category === "style" && f.severity !== "nit" ? { ...f, severity: "nit" } : f;
 }
 
 // categoryNote : the first category no finding may have, named, so it is never read as another (#484). Pure.

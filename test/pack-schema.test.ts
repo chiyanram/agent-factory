@@ -207,6 +207,13 @@ describe("findings as the pack's finding format writes them (#484)", () => {
     });
   });
 
+  it("reads a style finding as a nit, as the pack's format says; it never raises a severity", () => {
+    expect(readFindings({ findings: [{ ...finding, category: "style", severity: "blocker" }] }, "rule")).toMatchObject({
+      kind: "ok",
+      value: [{ category: "style", severity: "nit" }],
+    });
+  });
+
   it("names an unknown category, never reads it as another", () => {
     expect(readFindings({ findings: [{ ...finding, category: "vibes" }] }, "logic")).toEqual({
       kind: "failed",
