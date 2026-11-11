@@ -25,6 +25,7 @@ import type { DesignView } from "../src/core/dispatch/design.js";
 import type { OpenLine } from "../src/core/poll.js";
 import { srtEnv } from "../src/core/box/srt-plan.js";
 import { keepText } from "../src/core/kept.js";
+import { keepActOn, readActOn } from "../src/core/review/act-on.js";
 import { claudeEnv } from "../src/core/review/settings.js";
 import { buildPack } from "../src/core/review/pack.js";
 import { resolve as resolveSettings, type FileLayer } from "../src/core/settings/resolve.js";
@@ -388,6 +389,40 @@ describe("P4: no kept file holds a secret", () => {
     const text = readFileSync(kept.value, "utf8");
     expect(text).not.toMatch(/ghp_FAKE|MIIEow|glpat-planted|oauth2:/);
     expect(text).toContain("the test failed at OrderTest.java:12");
+  });
+});
+
+describe("P4: a kept JSON file holds no secret and still reads back", () => {
+  let home = "";
+  beforeEach(() => {
+    home = tempDir("factory-p4-json-");
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it("an Act on finding about a hard-coded secret round-trips through keep and read, scrubbed", async () => {
+    const at = { recordsDir: home, change: 12, head: H };
+    const finding = {
+      id: "F1",
+      source: "review",
+      axis: "standards",
+      kind: "rule",
+      file: "a.ts",
+      line: 3,
+      rule: "SEC1",
+      category: "security",
+      severity: "blocker",
+      lens: "security",
+      grade: "walked",
+      evidence: `token ${FAKE_TOKEN} in a.ts:3`,
+      finding: 'A hard-coded password = "hunter2" sits in the config',
+      fix: "read it from the vault",
+      bucket: "act_on",
+      why: "it holds",
+    } as const;
+    expect(await keepActOn({ ...at, sorted: [finding] })).toMatchObject({ kind: "ok" });
+    const read = await readActOn(at);
+    if (read.kind !== "ok") throw new Error(read.reason);
+    expect(read.value.map((f) => f.finding)).toEqual(['A hard-coded password = "[scrubbed]" sits in the config']);
   });
 });
 

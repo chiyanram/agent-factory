@@ -28,7 +28,7 @@ import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
-import { scrubSecrets } from "../scrub.js";
+import { scrubbedJson } from "../scrub.js";
 import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 import { isActedRow, type Acted } from "../review/acted-on.js";
@@ -226,9 +226,7 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   try {
     await mkdir(dirname(path.value), { recursive: true, mode: 0o700 });
     // every string the line keeps is scrubbed: no record holds a secret, whatever a run or a person wrote (P4, #485)
-    const line = JSON.stringify(input.event, (_key, value: unknown) =>
-      typeof value === "string" ? scrubSecrets(value) : value,
-    );
+    const line = scrubbedJson(input.event);
     await appendFile(path.value, `${line}\n`, { mode: 0o600 });
     return { kind: "ok" };
   } catch {

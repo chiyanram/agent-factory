@@ -4,7 +4,7 @@
 // goes to a person (round.ts), never to a rework run.
 
 import type { Result } from "../forge/api.js";
-import { keepText, keptPath, readKept, type At } from "../kept.js";
+import { keepJson, keptPath, readKept, type At } from "../kept.js";
 import type { Sorted } from "./verdicts.js";
 
 export const ACT_ON_FILE = "act-on.json";
@@ -25,7 +25,7 @@ export function actOnOf(sorted: readonly Sorted[]): readonly ActOn[] {
 
 // keepActOn : the round's Act on findings, written with the head
 export function keepActOn(input: At & { readonly sorted: readonly Sorted[] }): Promise<Result<string>> {
-  return keepText(input, ACT_ON_FILE, `${JSON.stringify(actOnOf(input.sorted), null, 2)}\n`);
+  return keepJson(input, ACT_ON_FILE, actOnOf(input.sorted));
 }
 
 const FIELDS = ["id", "file", "rule", "severity", "finding", "fix"] as const;

@@ -28,7 +28,7 @@ import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
 import { checkCites } from "../cite-check.js";
-import { scrubSecrets } from "../scrub.js";
+import { scrubbedJson } from "../scrub.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
@@ -360,7 +360,7 @@ async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
           .replace(/-$/, "")}.jsonl`,
       ),
       // what a pass answered is kept as a record: every string scrubbed (P4, #485)
-      `${JSON.stringify(answer, (_key, value: unknown) => (typeof value === "string" ? scrubSecrets(value) : value))}\n`,
+      `${scrubbedJson(answer)}\n`,
       { mode: 0o600 },
     );
   }, "cannot keep the pass's answer");

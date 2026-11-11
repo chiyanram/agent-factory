@@ -386,6 +386,30 @@ describe("reviewRound", () => {
     expect(summary).toContain("(cite not found: svc/Main.java:99 is past the end of the file (2 lines))");
   });
 
+  // P4 (#485 review): what a reviewer pass answered is kept as a record, with no secret in it
+  it("a token a finder repeats in its answer never reaches the saved reviewer pass files", async () => {
+    const token = "ghp_PLANTEDPLANTEDPLANTED1234";
+    const leaky = { ...FINDING, finding: `the log prints GH_TOKEN=${token}`, evidence: `export GH_TOKEN=${token}` };
+    const inner = model([findAnswer([leaky]), verdicts([{ id: "F1", bucket: "act_on", why: `holds: ${token}` }])], []);
+    // the CLI's answer carries the model's own words, as the real one's result event does
+    const m: Model = async (run) => {
+      const r = await inner(run);
+      return r.kind === "ok"
+        ? {
+            ...r,
+            value: { ...r.value, answer: { usage: { input_tokens: 10 }, result: JSON.stringify(r.value.output) } },
+          }
+        : r;
+    };
+    await reviewRound(setup(forge(fresh()), m));
+    const dir = join(p.root, "records", "12", p.head2);
+    const files = readdirSync(dir).filter((f) => f.startsWith("reviewer-") && f.endsWith(".jsonl"));
+    expect(files.length).toBeGreaterThan(0);
+    const saved = files.map((f) => readFileSync(join(dir, f), "utf8")).join("");
+    expect(saved).not.toContain(token);
+    expect(saved).toContain("[scrubbed]");
+  });
+
   it("the next full round rates the last round's Act on and Consider findings: acted on when a commit changed their region (#220)", async () => {
     const log = fresh();
     const far = { ...FINDING, kind: "logic", axis: "spec", file: "code/docs/design/order.md", line: 1 };
