@@ -687,8 +687,9 @@ export function tornPath(recordFile: string): string {
 }
 
 // setAside : move a torn last line to the side file and cut it from the record, so the next line appended starts on a
-// line of its own. The cut is made only while the file is still the size it was read at: a line appended since is
-// never lost.
+// line of its own. The cut is made only while the file is still the size it was read at. This assumes one dispatcher
+// writes a ticket's file at a time (the pass lock, tick.ts): between the size check and the cut, an append from a
+// second process could otherwise be lost. So only the pass that holds the lock asks for the cut (readRecords).
 async function setAside(file: string, size: number, line: Line): Promise<Done> {
   try {
     await appendFile(tornPath(file), `${line.text}\n`, { mode: 0o600 });
@@ -708,21 +709,26 @@ async function setAside(file: string, size: number, line: Line): Promise<Done> {
   }
 }
 
-// readRecords : every line of the ticket's file, oldest first; no file is no events. A broken line in the middle fails
-// the read with its line number, since a count summed past it could let a run go on that should have stopped. A broken
-// last line is a write the dispatcher died during (#483): it is moved to <ticket>.jsonl.torn with a warning, and the
-// run it belonged to reads as one that never ended, so the table counts it as a failed try (or hands it to a person
-// when it may have pushed), as for any run the dispatcher died during.
-export async function readRecords(
-  where: Where,
-  warn: (line: string) => void = (line) => process.stderr.write(`${line}\n`),
-): Promise<Result<readonly Event[]>> {
+// how a reader treats a torn last line: the pass that holds the lock sets it aside; every other reader (usage, a
+// command run by hand) skips it with a warning and writes nothing
+export type ReadOptions = {
+  readonly warn?: (line: string) => void;
+  readonly setAside?: boolean;
+};
+
+// readRecords : every line of the ticket's file, oldest first; no file is no events. A bad line fails the read with
+// its line number, since a count summed past it could let a run go on that should have stopped. The one exception is a
+// torn last line (#483): a write cut short, which leaves the file without its closing newline and the line not JSON.
+// It is read past with a warning, and the run it belonged to reads as one that never ended, so the table counts it as
+// a failed try (or hands it to a person when it may have pushed), as for any run the dispatcher died during. With
+// setAside (only the pass, which holds the lock) it is also moved to <ticket>.jsonl.torn and cut from the record.
+export async function readRecords(where: Where, options: ReadOptions = {}): Promise<Result<readonly Event[]>> {
   const path = recordPath(where);
   if (path.kind === "failed") {
     return path;
   }
   const text = await recordText(path.value);
-  return text.kind === "ok" ? eventsIn(path.value, text.value, warn) : text;
+  return text.kind === "ok" ? eventsIn(path.value, text.value, options) : text;
 }
 
 // recordText : the record file's text; "" when there is none
@@ -734,31 +740,44 @@ async function recordText(path: string): Promise<Result<string>> {
   }
 }
 
-// lastOnly : the line at `index` when it is the last one; none for a line in the middle. Pure.
-function lastOnly(lines: readonly Line[], index: number): Line | undefined {
-  return index === lines.length - 1 ? lines[index] : undefined;
+// tornLine : the line at `index` when it is a write cut short: the last line, the file has no closing newline, and the
+// line is not JSON; none for any other bad line. Pure.
+function tornLine(text: string, lines: readonly Line[], index: number): Line | undefined {
+  const line = index === lines.length - 1 && !text.endsWith("\n") ? lines[index] : undefined;
+  return line !== undefined && parseLine(line.text) === undefined ? line : undefined;
 }
 
-// eventsIn : the events of a record file's text; a torn last line set aside, a broken middle line refused
-async function eventsIn(path: string, text: string, warn: (line: string) => void): Promise<Result<readonly Event[]>> {
+function warnOf(options: ReadOptions): (line: string) => void {
+  return options.warn ?? ((line) => process.stderr.write(`${line}\n`));
+}
+
+// tornRead : the events before a torn last line, with a warning; the line set aside when the caller holds the lock
+async function tornRead(path: string, text: string, torn: Line, options: ReadOptions): Promise<Done> {
+  const aside =
+    options.setAside === true ? await setAside(path, Buffer.byteLength(text), torn) : { kind: "ok" as const };
+  const where = options.setAside === true ? `it is moved to ${tornPath(path)}` : "it is skipped";
+  if (aside.kind === "ok") {
+    warnOf(options)(
+      `warning: the last line of ${path} was torn (a write cut short); ${where}, and its run counts as one that never ended`,
+    );
+  }
+  return aside;
+}
+
+// eventsIn : the events of a record file's text; a torn last line read past, any other bad line refused
+async function eventsIn(path: string, text: string, options: ReadOptions): Promise<Result<readonly Event[]>> {
   const lines = linesOf(text);
   const events = lines.map((l) => eventOf(l.text));
   const first = events.indexOf(BAD);
   if (first < 0) {
     return { kind: "ok", value: events.filter(isEvent) };
   }
-  const torn = lastOnly(lines, first);
+  const torn = tornLine(text, lines, first);
   if (torn === undefined) {
     return { kind: "failed", reason: `${path} line ${first + 1} is not a record; fix or remove it` };
   }
-  const aside = await setAside(path, Buffer.byteLength(text), torn);
-  if (aside.kind === "failed") {
-    return aside;
-  }
-  warn(
-    `warning: ${path} line ${first + 1} was torn (a write cut short); it is moved to ${tornPath(path)} and its run counts as one that never ended`,
-  );
-  return { kind: "ok", value: events.filter(isEvent) };
+  const read = await tornRead(path, text, torn, options);
+  return read.kind === "ok" ? { kind: "ok", value: events.filter(isEvent) } : read;
 }
 
 export type LastWriter =

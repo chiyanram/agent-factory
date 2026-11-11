@@ -406,7 +406,10 @@ async function stateOf(
   if (said.kind === "failed") {
     return said;
   }
-  const events = await readRecords({ home: setup.home, project: setup.project, ticket }, setup.log);
+  const events = await readRecords(
+    { home: setup.home, project: setup.project, ticket },
+    { warn: setup.log, setAside: true },
+  );
   if (events.kind === "failed") {
     return events;
   }
@@ -918,7 +921,7 @@ async function designFindings(
   state: TicketState,
   a: DesignAction,
 ): Promise<Result<readonly DesignFinding[]>> {
-  const events = await readRecords(where(setup, state), setup.log);
+  const events = await readRecords(where(setup, state), { warn: setup.log, setAside: true });
   if (events.kind === "failed") {
     return events;
   }

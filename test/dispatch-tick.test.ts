@@ -1,6 +1,6 @@
 import { NO_NOTIFY, type Notify, type Ping } from "../src/core/notify.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, tornPath, type Event } from "../src/core/dispatch/records.js";
@@ -225,35 +225,74 @@ describe("records", () => {
 describe("records: a torn last line (#483)", () => {
   const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
   const file = () => join(home, "runs", "ledger", "PROJ-1.jsonl");
-
-  it("reads with a warning, moves the line aside, and reads its run as one that never ended", async () => {
-    await record({
+  const TORN = '{"at":"2026-11-07T09:10:00Z","kind":"writer-en';
+  const started = () =>
+    record({
       where: where(),
       event: { at: "2026-11-07T09:00:00Z", kind: "started", phase: "writer", mode: "fix", head: H },
     });
-    writeFileSync(file(), '{"at":"2026-11-07T09:10:00Z","kind":"writer-en', { flag: "a" });
+
+  it("the pass sets a write cut short aside, warns once, and reads its run as one that never ended", async () => {
+    await started();
+    writeFileSync(file(), TORN, { flag: "a" });
     const warned: string[] = [];
-    const read = await readRecords(where(), (l) => warned.push(l));
+    const read = await readRecords(where(), { warn: (l) => warned.push(l), setAside: true });
     expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }] });
-    expect(warned).toEqual([expect.stringContaining("line 2 was torn")]);
-    expect(readFileSync(tornPath(file()), "utf8")).toBe('{"at":"2026-11-07T09:10:00Z","kind":"writer-en\n');
+    expect(warned).toEqual([expect.stringContaining("was torn (a write cut short); it is moved to")]);
+    expect(readFileSync(tornPath(file()), "utf8")).toBe(`${TORN}\n`);
     expect(
       summarize({ events: read.kind === "ok" ? read.value : [], since: "2026-11-07T08:00:00Z" }).interrupted,
     ).toEqual({ kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" });
     // the next line appended starts on its own line, and the record reads clean, with no second warning
     await record({ where: where(), event: { at: "2026-11-07T09:20:00Z", kind: "pinged", head: H } });
-    const again = await readRecords(where(), (l) => warned.push(l));
+    const again = await readRecords(where(), { warn: (l) => warned.push(l), setAside: true });
     expect(again).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "pinged" }] });
     expect(warned).toHaveLength(1);
   });
 
+  it("any other reader skips it with a warning and writes nothing: usage leaves the file as it was", async () => {
+    await started();
+    writeFileSync(file(), TORN, { flag: "a" });
+    const before = readFileSync(file(), "utf8");
+    const warned: string[] = [];
+    expect(await readRecords(where(), { warn: (l) => warned.push(l) })).toMatchObject({ kind: "ok" });
+    expect(warned).toEqual([expect.stringContaining("it is skipped")]);
+    const spends = await readSpends({ home, project: "ledger" });
+    expect(spends.problems).toEqual([]);
+    expect(readFileSync(file(), "utf8")).toBe(before);
+    expect(existsSync(tornPath(file()))).toBe(false);
+  });
+
+  it("a complete last line that is not a record fails the read, an unknown kind from a newer engine too", async () => {
+    await started();
+    writeFileSync(file(), `${JSON.stringify({ at: "2026-11-07T09:10:00Z", kind: "from-a-newer-engine" })}\n`, {
+      flag: "a",
+    });
+    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toEqual({
+      kind: "failed",
+      reason: `${file()} line 2 is not a record; fix or remove it`,
+    });
+    // the same line with no closing newline parses as JSON, so it is no write cut short: it fails, and nothing is cut
+    writeFileSync(file(), `{"at":"2026-11-07T09:00:00Z","kind":"from-a-newer-engine"}`);
+    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toMatchObject({ kind: "failed" });
+    expect(existsSync(tornPath(file()))).toBe(false);
+  });
+
+  it("a valid last line with no closing newline is read, never cut", async () => {
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    const line = JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H });
+    writeFileSync(file(), line);
+    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toMatchObject({
+      kind: "ok",
+      value: [{ kind: "pinged" }],
+    });
+    expect(readFileSync(file(), "utf8")).toBe(line);
+  });
+
   it("a torn line in the middle still stops the ticket, naming the line", async () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
-    writeFileSync(
-      file(),
-      `{"at":"2026-11-07T09:10:00Z","kind":"writer-en\n${JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H })}\n`,
-    );
-    expect(await readRecords(where(), () => undefined)).toEqual({
+    writeFileSync(file(), `${TORN}\n${JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H })}\n`);
+    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toEqual({
       kind: "failed",
       reason: `${file()} line 1 is not a record; fix or remove it`,
     });
