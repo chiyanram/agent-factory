@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileProblems, kindProblem, placeProblems, shaProblem, tableProblems } from "../scripts/check-evals.js";
-import { findingProblems, readGolden, tableRows } from "../src/core/eval/golden.js";
+import { CATEGORIES, findingProblems, readGolden, tableRows } from "../src/core/eval/golden.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -33,7 +33,7 @@ describe("readGolden", () => {
       "finding 2: line is not a whole number from 1",
       "finding 2: issue is empty",
       "finding 2: severity is not one of blocker, warning, nit",
-      "finding 2: category is not one of bug, security, concurrency, data, api, perf, test_gap, doc_defect, style, speculative",
+      `finding 2: category "logic" is not one of ${CATEGORIES.join(", ")}`,
     ]);
     expect(findingProblems({ file: "a.ts", line: 1.5 }, 0)).toEqual([
       "finding 1: no issue",
@@ -42,7 +42,7 @@ describe("readGolden", () => {
       "finding 1: line is not a whole number from 1",
       "finding 1: issue is empty",
       "finding 1: severity is not one of blocker, warning, nit",
-      "finding 1: category is not one of bug, security, concurrency, data, api, perf, test_gap, doc_defect, style, speculative",
+      `finding 1: category undefined is not one of ${CATEGORIES.join(", ")}`,
     ]);
     expect(findingProblems("a.ts:3", 0)).toEqual(["finding 1: is not an object"]);
     expect(readGolden(JSON.stringify([good, { ...good, severity: "high" }]))).toEqual({

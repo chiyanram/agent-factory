@@ -7,7 +7,8 @@
 //   <plugin>/skills/<skill>/process/review.json   {"baseline": [{"skill": "crq", "reference": "review-process"}, …]}
 //
 // The plugin's "lane" is the engine's lane name. Every lanes value comes through lanesOf (lane.ts), which refuses one
-// that drops the approval floor, so a bad lanes file stops the run rather than loosening it. A process with no
+// that drops the approval floor, so a bad lanes file stops the run rather than loosening it. Before that, the lanes
+// file is checked against the rules pack's own lanes schema, when the pack ships one (pack-schema.ts, #484). A process with no
 // review.json keeps the built-in baseline.
 
 import { readdir, readFile } from "node:fs/promises";
@@ -16,6 +17,7 @@ import type { Result } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
 import { DEFAULT_LANES, lanesOf, type LaneProps } from "../lane.js";
 import { BASELINE, type Pointer } from "../review/rules.js";
+import { packProblem, readPackSchemas } from "./pack-schema.js";
 
 export type Process = {
   // where it came from, as a person reads it
@@ -90,7 +92,10 @@ async function lanesAt(dir: string): Promise<Result<readonly LaneProps[]>> {
   if (raw.kind !== "ok") {
     return raw.kind === "none" ? failed(`${path}: cannot be read`) : raw;
   }
-  return lanesOf(engineLanes(raw.value), path);
+  // the rules pack's own lanes format first, when it ships one (#484), then the engine's floor
+  const schemas = await readPackSchemas(dir);
+  const problem = schemas.kind === "ok" ? packProblem(schemas.value, "lanes", raw.value, path) : schemas.reason;
+  return problem === "" ? lanesOf(engineLanes(raw.value), path) : failed(problem);
 }
 
 function pointerOf(value: unknown): Pointer | undefined {

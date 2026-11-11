@@ -46,6 +46,26 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 The engine starts a run from a card for six roles: implementer, test-first, cleanup, design-reviewer, verify pass and
 onboarder. Every run record carries the card's hash.
 
+## The rules pack's own format
+
+The repos are one-way: the rules pack owns the format of its cards, lanes and findings, and publishes it as JSON
+schemas in its process folder, `process/schema/<part>-v<N>.schema.json` (`card`, `lanes`, `finding`). The engine is
+one user of it (`src/core/process/pack-schema.ts`, #484): before it uses a plugin's role card or lanes file, it checks
+the file against the pack's own schema, then runs its own checks (the role's tools, guardrails and hand-off; the
+approval floor).
+
+The pack's format version is the highest `N` it ships. The engine reads that version and the one before; a pack with
+no schema folder is version 0 and is read by the engine's own checks alone. A newer version is refused with both
+versions named, so an old engine never half-reads a new pack. A pack whose card format allows a role or guardrail ID the
+engine does not know is refused, so a pack never names a guardrail the engine would skip (the engine may know more).
+The engine's finding values (categories, severities, grades) are the pinned pack's: CI fails when they differ. A
+finding's line may be a range, read as its first line, and its rule may be null. The finding schema is read; **Today:** the finder runs
+from the built-in prompt, not its card, so nothing checks a finding against it yet (#438).
+
+This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI
+checks that commit out and reads every plugin's process and every role card the engine runs, so a pack the engine
+cannot read fails CI here. To move the pin, change the commit in that file in its own pull request.
+
 ## What each role returns
 
 | role | returns | checked by the engine |
