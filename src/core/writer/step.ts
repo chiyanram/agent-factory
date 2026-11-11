@@ -39,6 +39,7 @@ import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js
 import { writerRun, type Ended } from "./run.js";
 import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
 import { ciText, taskText, verifyText } from "./task.js";
+import { answersText, type Answer } from "../answers.js";
 import { VERIFY_FILE } from "../ready/steps.js";
 import { programsLine } from "../ready/command.js";
 import type { WriterSettings } from "./settings.js";
@@ -135,9 +136,9 @@ type Names = { readonly ticket: string; readonly branch: string; readonly head: 
 // the run's own task, in the engine's words, by its mode
 const TASKS: Readonly<Record<RunMode, (n: Names) => string>> = {
   "test-first": (n) =>
-    `This run writes the failing test for the bug in ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md.`,
+    `This run writes the failing test for the bug in ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md. When .factory/task.md is there, it holds the person's answers to your last questions.`,
   fix: (n) =>
-    `This run builds ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design.`,
+    `This run builds ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design. When .factory/task.md is there, it holds the person's answers to your last questions.`,
   rework: (n) =>
     `This run reworks ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. Your contract is the approved spec in .factory/spec.md. What you must fix now is in .factory/task.md: either the evidence row that failed when the host ran it again at your head, or the factory review's Act on findings. Fix each one. If a finding is wrong, change nothing for it and say why in the report. Change nothing the task does not name, other than what its fix needs.`,
   ci: (n) =>
@@ -775,8 +776,18 @@ async function cleanupPlan(
     : { kind: "hand-over", reason: `the cleanup run has no default branch to diff against: ${base.reason}` };
 }
 
-const plain = (mode: "test-first" | "fix"): Promise<Drafted> =>
-  Promise.resolve({ kind: "run", work: { mode, task: { kind: "none" } } });
+// the person's answers to the writer's last round of questions (#486; answers.ts), in .factory/task.md
+const ANSWERS: Part = { names: ["the person's answers", "the answers"], needed: true };
+
+// plain : a test-first or fix run; after an answered round its task holds the person's answers, as data (P13)
+const plain = (mode: "test-first" | "fix", answers: readonly Answer[] = []): Promise<Drafted> =>
+  Promise.resolve({
+    kind: "run",
+    work: {
+      mode,
+      task: answers.length === 0 ? { kind: "none" } : { kind: "text", text: answersText(answers), part: ANSWERS },
+    },
+  });
 
 // each task by its kind, so a planner per kind is typed without an assertion, and a new kind fails to compile here
 type TaskMap = { readonly [T in Task as T["kind"]]: T };
@@ -785,8 +796,8 @@ type Planners = {
 };
 
 const PLANNERS: Planners = {
-  "test-first": () => plain("test-first"),
-  fix: () => plain("fix"),
+  "test-first": (_setup, _input, task) => plain("test-first", task.answers),
+  fix: (_setup, _input, task) => plain("fix", task.answers),
   "ready-failed": reworkPlan,
   "act-on": reworkPlan,
   "ci-red": ciPlan,

@@ -77,6 +77,7 @@ import type { Caps } from "./caps.js";
 import { ticketCapped } from "./ticket-cap.js";
 import type { DesignView } from "./design.js";
 import type { DesignStep } from "./records.js";
+import type { Answer } from "../answers.js";
 import type { Evidence } from "../report.js";
 
 // what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
@@ -301,13 +302,27 @@ const AGAIN: Readonly<Record<"asked" | "blocked", string>> = {
   blocked: "a person removed needs-human",
 };
 
+// answered : the next task with the person's answers in it, when the run follows an answered round (#486, P13)
+function answered(s: TicketState, task: Task): Task {
+  const answers = answersOn(s);
+  return answers.length === 0 || (task.kind !== "fix" && task.kind !== "test-first") ? task : { ...task, answers };
+}
+
+// answersOn : the answers the ticket's change holds, none with no open change
+function answersOn(s: TicketState): readonly Answer[] {
+  const line = open(s);
+  return line === "none" ? [] : (line.answers ?? []);
+}
+
 // after : the writer's next run once the last one ended; "next" when it finished its work
 function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): Action | "next" {
+  // the answers ride on every run until one finishes done: a run that asked, or one that was blocked after the answer,
+  // gets them again, and a test-first run that ended done hands them to the fix run after it (#486 review)
   if (w.outcome !== "done") {
-    return { kind: "writer", task: nextTask(s), why: AGAIN[w.outcome] };
+    return { kind: "writer", task: answered(s, nextTask(s)), why: AGAIN[w.outcome] };
   }
   return w.mode === "test-first"
-    ? { kind: "writer", task: { kind: "fix" }, why: "the failing test is in; now the fix" }
+    ? { kind: "writer", task: answered(s, { kind: "fix" }), why: "the failing test is in; now the fix" }
     : "next";
 }
 
@@ -315,7 +330,10 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
   const said = s.approval.kind === "started" ? "started" : "approved";
-  return w.kind === "none" ? { kind: "writer", task: nextTask(s), why: `${said}; no run yet` } : after(s, w);
+  // a ticket STARTed again after a hand-over starts its counts afresh; the change's answered round still holds
+  return w.kind === "none"
+    ? { kind: "writer", task: answered(s, nextTask(s)), why: `${said}; no run yet` }
+    : after(s, w);
 };
 
 function writerHead(s: TicketState): string {

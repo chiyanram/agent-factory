@@ -22,7 +22,8 @@
 // access: a CI bot's note never answers an ask, and its "/stop" never stops. Only the PR's conversation is read, not
 // review comments or review bodies.
 
-import { classify, openAsks, type Note, type Readers } from "./notes.js";
+import type { Answer } from "./answers.js";
+import { classify, lastAnswers, openAsks, type Note, type Readers } from "./notes.js";
 import type { Quarantined } from "./process/quarantine.js";
 import type { Result } from "./forge/api.js";
 import type { Changes, Forge, Mergeable, OpenChange, Person, Pipeline } from "./forge/types.js";
@@ -48,6 +49,8 @@ export type OpenLine = {
   readonly needsHuman: boolean;
   readonly stop: Stop;
   readonly asks: number;
+  // the newest ask's answers once every question is answered (#486); none while it is open or with no ask
+  readonly answers?: readonly Answer[];
   readonly mergeable: Mergeable;
   // the quarantined checks that let a red head read as passed (#485; process/quarantine.ts); set by the pass, never poll
   readonly quarantined?: readonly Quarantined[];
@@ -101,6 +104,10 @@ export function stop(input: {
   return Number.isFinite(time) ? { kind: "stopped", at: new Date(time).toISOString() } : { kind: "undated" };
 }
 
+function answersField(answers: readonly Answer[]): { readonly answers?: readonly Answer[] } {
+  return answers.length === 0 ? {} : { answers };
+}
+
 function openLine(change: OpenChange, label: string, readers: Readers, maintainers: ReadonlySet<string>): OpenLine {
   return {
     kind: "open",
@@ -115,6 +122,7 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
     needsHuman: change.labels.includes("needs-human"),
     stop: stop({ comments: change.comments, readers, maintainers }),
     asks: openAsks({ notes: change.comments, readers }),
+    ...answersField(lastAnswers({ notes: change.comments, readers })),
     mergeable: change.mergeable,
   };
 }
