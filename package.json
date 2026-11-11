@@ -26,7 +26,7 @@
     "release": "semantic-release",
     "release:preview": "semantic-release --dry-run --no-ci",
     "test": "vitest run",
-    "prepare": "npm run build"
+    "prepack": "npm run build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

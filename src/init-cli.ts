@@ -42,6 +42,8 @@ import {
   type Probes,
 } from "./core/init/checks.js";
 import { detect, type Detected } from "./core/init/detect.js";
+import { versionCheck } from "./core/init/latest.js";
+import { exportPlaces, exportsText } from "./core/init/exports.js";
 import { applied, at, changeOf, diffLines, projectEntries, questionsFor, type Change } from "./core/init/plan.js";
 import { answersOf, asking, HOW_TO_ANSWER, valueOf, type Question } from "./core/init/round.js";
 import { pinUpdate } from "./plugin-pin-cli.js";
@@ -397,6 +399,7 @@ async function checksOf(io: InitIo, plan: Plan, runner: unknown): Promise<readon
     ...(await toolchainChecks(p, d.toolchain)),
     await wallCheck(p),
     await configCheck(io, plan.name),
+    ...(p.latest === undefined ? [] : [versionCheck(p.version, await p.latest())]),
   ];
 }
 
@@ -407,14 +410,13 @@ const MOVED = [
   { id: "clone", path: ["clone"] },
 ] as const;
 
-function exportLines(io: InitIo, file: object, user: object): string {
+// exportLines : the exports the files now make needless, each with the profile file and line that holds it (#482)
+async function exportLines(io: InitIo, file: object, user: object): Promise<string> {
   const same = [
     ...MOVED.filter((m) => settingOf(io.env, m.id) === at(file, m.path)).map((m) => settingName(m.id)),
     ...(settingOf(io.env, "runner") === at(user, ["runner"]) ? [settingName("runner")] : []),
   ];
-  return same.length === 0
-    ? ""
-    : `\nThe files now hold ${same.join(", ")}: you can remove their exports from your shell profile.\n`;
+  return exportsText(same, await exportPlaces(io.env.HOME ?? "", same));
 }
 
 // specLine : how the person writes a ticket's spec, in the store the project file names (#381)
@@ -527,7 +529,7 @@ async function finish(io: InitIo, plan: Plan, written: Written, yes: boolean): P
   const user = applied(heldOf(plan.user), plan.userChanges, !written.kept);
   const checks = [...pins, ...(await checksOf(io, plan, at(user, ["runner"])))];
   io.out(`\nChecks:\n${checkLines(checks)}`);
-  io.out(exportLines(io, written.projectFile, user));
+  io.out(await exportLines(io, written.projectFile, user));
   io.out(await nextLines(io, plan.name, checks, { clone: plan.detected.clone, projectFile: written.projectFile }));
   if (written.kept) {
     return 3;

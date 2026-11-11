@@ -6,7 +6,7 @@
 
 import { access } from "node:fs/promises";
 import type { Result } from "./core/forge/api.js";
-import { changedFiles, fetchPlugin, targetCommit, type Fetched } from "./core/process/fetch.js";
+import { changedFiles, fetchPlugin, folderCounts, targetCommit, type Fetched } from "./core/process/fetch.js";
 import {
   listedPlugins,
   marketplaceDir,
@@ -70,10 +70,16 @@ async function fetched(io: PinIo, ref: PluginRef, given: string | undefined): Pr
   return commit.kind === "ok" ? fetchPlugin({ home: io.home, env: io.env, ref, commit: commit.value }) : commit;
 }
 
-// showChange : the pin before and after, and the files the new version adds (+), removes (-) and changes (~)
+// changedSince : the files a new version adds, removes and changes against the pinned one
+async function changedSince(io: PinIo, ref: PluginRef, before: Pin, after: Fetched): Promise<readonly string[]> {
+  const old = await treeHash(storeDir(io.home, ref, before.sha256));
+  return changedFiles(old.kind === "ok" ? old.value.files : [], after.files);
+}
+
+// showChange : the pin before and after, and the files the new version adds (+), removes (-) and changes (~); a first
+// pin shows a count per folder instead of every file (#482)
 async function showChange(io: PinIo, ref: PluginRef, before: Pin | undefined, after: Fetched): Promise<void> {
-  const old = before === undefined ? undefined : await treeHash(storeDir(io.home, ref, before.sha256));
-  const lines = changedFiles(old?.kind === "ok" ? old.value.files : [], after.files);
+  const lines = before === undefined ? folderCounts(after.files) : await changedSince(io, ref, before, after);
   io.out(`${refText(ref)}: ${pinLine(before)} -> ${pinLine(after)}\n`);
   io.out(lines.length === 0 ? "no file changes\n" : lines.map((l) => `${l}\n`).join(""));
 }

@@ -21,5 +21,8 @@ cd /tmp && rm -rf af-$V && git clone -q --depth 1 --branch v$V https://github.co
 cd af-$V && npm ci && npm pack && npm i -g ./chiyanram-agent-factory-$V.tgz && agent-factory --version
 ```
 
+The packed package declares no script an install runs (it builds in `prepack`, when it is packed), so installing it
+gives no `allowScripts` warning (#482).
+
 We do not use `npm i -g github:chiyanram/agent-factory#v<version>`, because npm does not give that build its
 devDependencies, so the build fails.

@@ -27,6 +27,8 @@ export type Probes = {
   readonly now: Date;
   // this package's version
   readonly version: string;
+  // the latest release's version (#482); none in a test
+  readonly latest?: () => Promise<Result<string>>;
   // the project's default branch, read through the Forge seam with the project's identity: the login works
   readonly gitHost: (project: string) => Promise<Result<string>>;
   // the coordinator's settings hold its wall

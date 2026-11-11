@@ -7,6 +7,7 @@ import { constants } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli } from "./app.js";
+import { latestRelease } from "./core/init/latest.js";
 import { runProcess } from "./core/forge/api.js";
 import { readHidden } from "./core/token/index.js";
 import { createInterface, type Interface } from "node:readline/promises";
@@ -53,6 +54,7 @@ runCli(process.argv.slice(2), {
   err: (text) => process.stderr.write(text),
   readSecret: readHidden,
   ...(process.stdin.isTTY ? { readLine } : {}),
+  latestRelease: () => latestRelease((url) => fetch(url, { signal: AbortSignal.timeout(5000) })),
   readStdin: async () => {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) {

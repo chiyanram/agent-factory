@@ -29,14 +29,17 @@ agent-factory init            # the project's name defaults to the clone folder'
    exits 3. A list key only grows. It runs `config check` on the result first, and writes nothing when that fails.
 4. **Pins each plugin** through `agent-factory plugin update` after it says what that does and you say yes: it clones
    the marketplace to `$FACTORY_HOME/marketplaces/<marketplace>` through hostGit when it is not there
-   (`https://github.com/chiyanram/skills` for `chiyanram`).
+   (`https://github.com/chiyanram/skills` for `chiyanram`). A first pin shows a count of files per folder
+   (`+ 12 files in skills/crq`), not every file; a later update shows each file it adds, removes or changes (#482).
 5. **Checks each piece** and prints ✓ or ✗ with the fix: `srt` at the pinned version (the exact install command, with
    `--omit=optional`), the `claude` CLI, `agent-factory` and `srt` under the active Node (after a Node upgrade they
    are gone; it prints the reinstall commands), the model token's days left (read from its expiry record in
    `tokens.json`, never the token), the git host login for the project (the project's default branch, through the
    `Forge` seam), each tool the toolchain file declares against the one `PATH` gives a run (for example SDKMAN!'s Java
    25 first on `PATH` while `mise.toml` declares 27: it names the manager that wins and the fix), the coordinator's
-   settings, and `config check`.
+   settings, `config check`, and the installed `agent-factory` against the latest release, with the install line when
+   a newer one is out (it never fails the run, and says so when the release list cannot be read; `agent-factory setup
+   status` shows the same line, #482).
 6. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
    claude` when the token is missing, opening `claude` once in the clone, `agent-factory onboard <project>`,
    `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec (in the issue's body with the issue
@@ -47,7 +50,8 @@ It never handles a secret and never runs a command only a human runs (`setup cla
 `start`, `approve`, `waive`). The coordinator's settings deny `agent-factory init`, since it writes the settings that
 hold the coordinator's wall. Exit 0 when every check passes, 1 when one fails or init refuses, 3 when `--yes` kept a
 value. Running it again is safe: it asks only what is missing and writes nothing when nothing changed. Once the files
-hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports:
+hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports, naming
+each profile file and line that sets one (a symlinked profile by the file it points to, #482):
 every command, the coordinator's `poll`, `status` and the loop commands too, reads them from the files (#382).
 
 The sections below are the manual steps, kept as reference.

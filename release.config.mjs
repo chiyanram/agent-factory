@@ -21,7 +21,8 @@ export default {
       },
     ],
     // sets "version" in package.json and package-lock.json, then packs the package into dist-release/ (npm pack runs
-    // the prepare script, which builds dist/); publishes nothing, because the package is private
+    // the prepack script, which builds dist/); publishes nothing, because the package is private. The build is prepack,
+    // not prepare, so the packed package declares no script an install runs (#482)
     ['@semantic-release/npm', { npmPublish: false, tarballDir: 'dist-release' }],
     [
       '@semantic-release/git',

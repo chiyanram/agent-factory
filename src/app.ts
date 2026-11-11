@@ -70,6 +70,7 @@ import type { Probes } from "./core/init/checks.js";
 import { which } from "./core/box/srt-programs.js";
 import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
 import { onboardSetup } from "./core/onboard/settings.js";
+import { versionCheck } from "./core/init/latest.js";
 import { capsOf, type Caps } from "./core/dispatch/caps.js";
 
 const HELP = `usage: agent-factory <command>
@@ -174,6 +175,8 @@ export type Io = {
   readonly readStdin: () => Promise<string>;
   // one line the person types at a terminal, for init's questions (#369); none off a terminal
   readonly readLine?: (prompt: string) => Promise<string>;
+  // the latest release's version, for init and setup status (#482); none in a test, so no test reaches the network
+  readonly latestRelease?: () => Promise<Result<string>>;
   // the machine setup stores tokens on; a test passes linux and its own uid, so it never touches a Keychain
   readonly system: {
     readonly platform: NodeJS.Platform;
@@ -1208,6 +1211,11 @@ async function srtLines(io: Io, box: BoxChoice): Promise<{ readonly lines: reado
   return { lines: toolchainLines(toolchains, homedir()), ok: toolchains.refused.length === 0 };
 }
 
+// latestLines : the installed version against the latest release (#482); none when this run cannot read it
+async function latestLines(io: Io): Promise<readonly string[]> {
+  return io.latestRelease === undefined ? [] : [versionCheck(version(), await io.latestRelease()).line];
+}
+
 async function setupStatus({ store, io }: { readonly store: TokenStore; readonly io: Io }): Promise<number> {
   const box = chooseBox(io.env);
   const srt = await srtLines(io, box);
@@ -1216,7 +1224,7 @@ async function setupStatus({ store, io }: { readonly store: TokenStore; readonly
       ? [`box: ${box.place}`, ...box.risks.map((r) => `  risk: ${r}`), ...srt.lines.map((l) => `  ${l}`)]
       : [`box: refused: ${box.reason}`];
   const token = tokenLine(await claudeTokenStatus({ store, now: new Date() }));
-  io.out([...boxLines, token.line].map((l) => `${l}\n`).join(""));
+  io.out([...boxLines, token.line, ...(await latestLines(io))].map((l) => `${l}\n`).join(""));
   return box.kind === "chosen" && srt.ok && token.ok ? 0 : 1;
 }
 
@@ -1365,6 +1373,7 @@ function initProbes(io: Io, home: string): Probes {
     platform: io.system.platform,
     now: new Date(),
     version: version(),
+    ...(io.latestRelease === undefined ? {} : { latest: io.latestRelease }),
     gitHost: async (project) => {
       const settings = await runSettings({ home, project, env: io.env });
       const opened =

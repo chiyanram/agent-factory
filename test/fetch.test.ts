@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { changedFiles, entryOf, fetchPlugin, targetCommit, type Fetched } from "../src/core/process/fetch.js";
+import {
+  changedFiles,
+  entryOf,
+  fetchPlugin,
+  folderCounts,
+  targetCommit,
+  type Fetched,
+} from "../src/core/process/fetch.js";
 import { marketplaceDir, treeHash } from "../src/core/process/pins.js";
 import { commitMarket, GIT_ENV, setUpMarket } from "./market.js";
 import { tempDir } from "./temp.js";
@@ -57,5 +64,15 @@ describe("fetching a plugin version (#232)", () => {
     expect([of("../r"), of("/etc"), of("."), of({ source: "github" }), of(undefined)]).toEqual(Array(5).fill("failed"));
     expect(entryOf("not json", "r").kind).toBe("failed");
     expect(changedFiles(["- a x", "- b y", "- e v"], ["- a x", "x b y", "- d z"])).toEqual(["- v", "~ y", "+ z"]);
+    // a first pin: a count per folder, two parts deep (#482)
+    expect(
+      folderCounts([
+        "- a skills/crq/references/x.md",
+        "- b skills/crq/references/y.md",
+        "- c skills/crq/SKILL.md",
+        "- d README.md",
+        "- e .claude-plugin/plugin.json",
+      ]),
+    ).toEqual(["+ 1 file in .", "+ 1 file in .claude-plugin", "+ 3 files in skills/crq"]);
   });
 });

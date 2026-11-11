@@ -43,7 +43,9 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     const r = await update();
     expect(r).toMatchObject({ code: 0, err: "" });
     expect(r.out).toContain(`rulebook@chiyanram: not pinned -> ${first.slice(0, 12)} 1.1.0 sha256:`);
-    expect(r.out).toContain("+ skills/crq/process/lanes.json");
+    // a first pin counts the files per folder, never lists each one (#482)
+    expect(r.out).toContain("+ 1 file in skills/crq\n");
+    expect(r.out).not.toContain("lanes.json");
     const pins = await readPins(home, "ledger");
     const sha256 = pins.kind === "ok" ? (pins.value["rulebook@chiyanram"]?.sha256 ?? "") : "";
     expect(pins).toEqual({ kind: "ok", value: { "rulebook@chiyanram": { commit: first, version: "1.1.0", sha256 } } });
