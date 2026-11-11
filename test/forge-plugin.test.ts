@@ -82,6 +82,22 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
+  it("carries a GitLab issue closed with no merge seen through the bundled gitlab plugin (#494)", async () => {
+    expect(existsSync(join(BUNDLED, "gitlab", "lib")), "run npm run build first").toBe(true);
+    const fakes = await makeFakes(
+      ["glab"],
+      [http("200 OK", { iid: 7, state: "closed" }), http("200 OK", []), http("200 OK", [])],
+    );
+    if (fakes.kind === "failed") {
+      throw new Error(fakes.reason);
+    }
+    const setup: Setup = { home, env: { HOME: root, LANG: "C" }, path: `${fakes.value.dir}:${NODE_DIR}` };
+    expect((await addPlugin(setup, join(BUNDLED, "gitlab", "plugin"))).kind).toBe("ok");
+    const forge = pluginForge({ setup, plugin: "gitlab", forge: "gitlab", project: "group/ledger" });
+    expect(await forge.issueState({ number: 7 })).toEqual({ kind: "ok", value: "closed" });
+    await fakes.value.remove();
+  });
+
   it("carries a status and a line finding, and an answer past 1 MiB, as the built-in adapter does", async () => {
     const big = "x".repeat(2 * 1024 * 1024);
     const comment = { body: big, user: { login: "alice", type: "User" }, created_at: "2026-11-08T00:00:00Z" };

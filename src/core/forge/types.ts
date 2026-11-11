@@ -22,8 +22,9 @@ export type ChangeState = "opened" | "merged" | "closed";
 // a branch's changes, as one state: none when no change was ever opened from it (#494)
 export type BranchState = ChangeState | "none";
 
-// an issue's state: open, or closed as completed or as not planned (#494: a blocker a person closed counts by why)
-export type IssueState = "open" | "completed" | "not_planned";
+// an issue's state: open; closed as completed or as not planned; or closed with no merge seen, where the git host keeps
+// no reason for a close and no merged change closes or mentions it (#494: a blocker a person closed counts by why)
+export type IssueState = "open" | "completed" | "not_planned" | "closed";
 
 // Whether a change merges into its target as it stands (#103): conflict, clean, or unknown while the git host has not
 // worked it out yet (GitHub and GitLab both check it lazily, after a push to either branch).

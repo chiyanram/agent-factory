@@ -39,6 +39,7 @@ import type {
   Forge,
   Level,
   Mergeable,
+  IssueState,
   MergedChange,
   OpenChange,
   Person,
@@ -166,6 +167,26 @@ export function gitlab(client: Client, project: string): Forge {
     }
     const r = reader(context);
     return r.done(read(answer.value, r));
+  }
+
+  // mergedFor : whether a merged merge request of this project is among an issue's list at `which`
+  async function mergedFor(issue: number, which: "closed_by" | "related_merge_requests"): Promise<Result<boolean>> {
+    const found = await get(`${base}/issues/${issue}/${which}?per_page=100`, `gitlab issue ${which}`, (v, r) =>
+      r.list(v, "").some((m) => r.text(m, "state") === "merged"),
+    );
+    return found.kind === "ok" ? { kind: "ok", value: found.value === true } : found;
+  }
+
+  // closedState : a closed issue is completed when a merged merge request closes it, else when one mentions it; else
+  // it is closed with no merge seen (#494)
+  async function closedState(issue: number): Promise<Result<IssueState>> {
+    for (const which of ["closed_by", "related_merge_requests"] as const) {
+      const merged = await mergedFor(issue, which);
+      if (merged.kind === "failed" || merged.value) {
+        return merged.kind === "failed" ? merged : { kind: "ok", value: "completed" };
+      }
+    }
+    return { kind: "ok", value: "closed" };
   }
 
   async function change(input: { readonly number: number }): Promise<Result<Change>> {
@@ -475,13 +496,14 @@ export function gitlab(client: Client, project: string): Forge {
       );
       return found.kind === "ok" ? { kind: "ok", value: branchStateOf([String(found.value)]) } : found;
     },
-    // an issue's state: GitLab records no reason for a close, so every closed issue reads as completed (#494)
+    // an issue's state (#494). GitLab records no reason for a close, so a closed issue is completed only when a merged
+    // merge request closes it or mentions it; else it is closed with no merge seen, which a person looks at
     async issueState(input) {
       const state = await get(`${base}/issues/${input.number}`, "gitlab issue", (v, r) => r.text(v, "state"));
       if (state.kind === "failed") {
         return state;
       }
-      return { kind: "ok", value: state.value === "opened" ? "open" : "completed" };
+      return state.value === "opened" ? { kind: "ok", value: "open" } : closedState(input.number);
     },
     // an issue's description; GitLab numbers issues and merge requests apart, so an iid here is always an issue
     async issueBody(input) {

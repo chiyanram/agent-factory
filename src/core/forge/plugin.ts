@@ -120,7 +120,8 @@ export function pluginForge(target: PluginTarget): Forge {
     branchExists: (i) => read(target, "branchExists", i, (r, v) => r.bool(v, "")),
     branchState: (i) => read(target, "branchState", i, branchStateRead),
     issueBody: (i) => read(target, "issueBody", i, text),
-    issueState: (i) => read(target, "issueState", i, (r, v) => r.word(v, "", ["open", "completed", "not_planned"])),
+    issueState: (i) =>
+      read(target, "issueState", i, (r, v) => r.word(v, "", ["open", "completed", "not_planned", "closed"])),
     addLabel: (i) => written(target, "addLabel", i),
     removeLabel: (i) => written(target, "removeLabel", i),
     note: (i) => written(target, "note", i),

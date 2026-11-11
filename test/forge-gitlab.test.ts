@@ -464,12 +464,38 @@ describe("branchExists (#227)", () => {
 });
 
 describe("issueState (#494)", () => {
-  it("is open while opened, and completed once closed: GitLab keeps no reason for a close", async () => {
-    const f = fake("gitlab", [ok({ iid: 4, state: "opened" }), ok({ iid: 5, state: "closed" })]);
+  it("is open while opened; a closed issue is completed only when a merged merge request closes or mentions it", async () => {
+    const f = fake("gitlab", [
+      ok({ iid: 4, state: "opened" }),
+      // closed by a merge request that merged
+      ok({ iid: 5, state: "closed" }),
+      ok([{ iid: 9, state: "merged" }]),
+      // closed by hand; a merged merge request mentions it
+      ok({ iid: 6, state: "closed" }),
+      ok([]),
+      ok([{ iid: 10, state: "merged" }]),
+    ]);
     const forge = gitlab(f.client, project);
     expect(await forge.issueState({ number: 4 })).toEqual({ kind: "ok", value: "open" });
     expect(f.calls[0]?.args.join(" ")).toContain("/issues/4");
     expect(await forge.issueState({ number: 5 })).toEqual({ kind: "ok", value: "completed" });
+    expect(f.calls[2]?.args.join(" ")).toContain("/issues/5/closed_by");
+    expect(await forge.issueState({ number: 6 })).toEqual({ kind: "ok", value: "completed" });
+    expect(f.calls[5]?.args.join(" ")).toContain("/issues/6/related_merge_requests");
+  });
+
+  it("is closed with no merge seen when no merged merge request closes or mentions it: GitLab keeps no close reason", async () => {
+    const f = fake("gitlab", [
+      ok({ iid: 7, state: "closed" }),
+      ok([{ iid: 11, state: "closed" }]),
+      ok([{ iid: 12, state: "opened" }]),
+      ok({ iid: 8, state: "closed" }),
+      { status: 500, body: { message: "boom" } },
+    ]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.issueState({ number: 7 })).toEqual({ kind: "ok", value: "closed" });
+    // a failed read is a failure, never a guess
+    expect(await forge.issueState({ number: 8 })).toMatchObject({ kind: "failed" });
   });
 });
 
