@@ -108,6 +108,22 @@ describe("the floor guard (#190)", () => {
     expect(forHuman(found)).toBe(true);
   });
 
+  // #485 review: a comparison with null is a presence check, in an assertTrue and in a Spock then: block
+  it("finds assertEquals turned into assertTrue(x != null), and a Spock comparison turned into != null", async () => {
+    p.write(
+      "src/test/java/OrderTest.java",
+      java("    assertTrue(total() != null);\n    assertThat(count()).isEqualTo(2);\n"),
+    );
+    p.write(
+      "src/test/groovy/OrderSpec.groovy",
+      "class OrderSpec extends Specification {\n  def 'totals'() {\n    when:\n    def t = order.total()\n    then:\n    t != null\n    and:\n    order.count == 2\n  }\n}\n",
+    );
+    expect((await hits()).map((h) => `${h.file}:${h.line} ${h.what.split(":")[0]}`)).toEqual([
+      "src/test/groovy/OrderSpec.groovy:6 weakens an assertion",
+      "src/test/java/OrderTest.java:3 weakens an assertion",
+    ]);
+  });
+
   it("is silent on a value check changed to another value check, and on a presence check added beside the value checks", async () => {
     p.write(
       "src/test/java/OrderTest.java",

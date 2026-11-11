@@ -94,9 +94,10 @@ const ASSERT =
 // an assertion that checks a value: equal, same, matches, throws, has the size, contains
 const VALUE =
   /\bassert(?:Equals|NotEquals|Same|ArrayEquals|IterableEquals|LinesMatch|Throws|Equal|In|Raises|_eq|_ne)\b|\.(?:toBe|toEqual|toStrictEqual|toMatch\w*|toThrow\w*|toHaveLength|toContain\w*|toHaveProperty|isEqualTo|isSameAs|containsExactly\w*|hasSize|hasMessage\w*)\s*\(|\s(?:==|!=|===|!==)\s/;
-// an assertion that checks only that something is there, or true
+// an assertion that checks only that something is there, or true: read before VALUE, so `x != null` and
+// assertTrue(x != null) are presence checks, not comparisons (#485 review)
 const PRESENCE =
-  /\bassert(?:NotNull|Null|True|False|IsNotNone|IsNone|Truthy)\b|\.(?:toBeDefined|toBeTruthy|toBeFalsy|toBeNull|toBeUndefined|isNotNull|isNull|isTrue|isFalse|isPresent|isNotEmpty|exists)\s*\(|\bassert\s+[\w.]+\s*$|\bassert\s+[\w.]+\s+is\s+not\s+None\b/;
+  /\bassert(?:NotNull|Null|True|False|IsNotNone|IsNone|Truthy)\b|\.(?:toBeDefined|toBeTruthy|toBeFalsy|toBeNull|toBeUndefined|isNotNull|isNull|isTrue|isFalse|isPresent|isNotEmpty|exists)\s*\(|\bassert\s+[\w.]+\s*$|\bis\s+not\s+None\b|(?:!==?|==)\s*(?:null|undefined|None|nil)\b|\b(?:null|undefined|None|nil)\s*(?:!==?|==)/;
 const SUPPRESS =
   /@SuppressWarnings\b|NOSONAR|\bnoinspection\b|eslint-disable|oxlint-disable|biome-ignore|@ts-ignore|@ts-expect-error|#\s*noqa\b|#\s*type:\s*ignore|\bnolint\b/;
 // a test case: JUnit's @Test and its kin, a Spock feature (a method named by a string), it( and test( (with .each),
@@ -371,9 +372,10 @@ function weakened(
   f: File,
   seen: { readonly from: string; readonly removed: readonly number[]; readonly added: readonly number[] },
 ): readonly Hit[] {
-  const valueOf = (text: readonly string[], lines: readonly number[]) => lines.filter((n) => VALUE.test(at(text, n)));
+  const valueOf = (text: readonly string[], lines: readonly number[]) =>
+    lines.filter((n) => VALUE.test(at(text, n)) && !PRESENCE.test(at(text, n)));
   const presenceOf = (text: readonly string[], lines: readonly number[]) =>
-    lines.filter((n) => PRESENCE.test(at(text, n)) && !VALUE.test(at(text, n)));
+    lines.filter((n) => PRESENCE.test(at(text, n)));
   const lostValue = valueOf(f.before, seen.removed).length > valueOf(f.after, seen.added).length;
   const gainedPresence = presenceOf(f.after, seen.added).length > presenceOf(f.before, seen.removed).length;
   return lostValue && gainedPresence

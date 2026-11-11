@@ -27,7 +27,8 @@ import { goAhead } from "../start.js";
 import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
-import { checkCites, citesNotFound } from "../cite-check.js";
+import { checkCites } from "../cite-check.js";
+import { scrubSecrets } from "../scrub.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
@@ -358,7 +359,8 @@ async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/-$/, "")}.jsonl`,
       ),
-      `${JSON.stringify(answer)}\n`,
+      // what a pass answered is kept as a record: every string scrubbed (P4, #485)
+      `${JSON.stringify(answer, (_key, value: unknown) => (typeof value === "string" ? scrubSecrets(value) : value))}\n`,
       { mode: 0o600 },
     );
   }, "cannot keep the pass's answer");
@@ -822,7 +824,11 @@ function lensesLine(lenses: Readonly<Record<string, number>>): string {
     .join(" · ");
 }
 
-async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outcome>> {
+async function post(
+  ctx: Ctx,
+  pack: Pack,
+  result: Reviewed & { readonly citesNotFound: number },
+): Promise<Result<Outcome>> {
   const box = await boxFor(ctx, pack);
   if (box.kind === "failed") {
     return box;
@@ -866,7 +872,7 @@ async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outc
           tokens: result.spent.find + result.spent.verify,
           acted,
           lenses: result.lenses,
-          citesNotFound: citesNotFound(result.sorted),
+          citesNotFound: result.citesNotFound,
         },
       }
     : summary;
@@ -883,8 +889,10 @@ async function review(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
     return result;
   }
   // a finding whose file:line is not at the reviewed head is noted as "cite not found", never posted (#485)
-  const sorted = await checkCites({ repo: ctx.setup.repo, env: ctx.setup.env, sha: pack.head }, result.value.sorted);
-  return guarded(ctx, () => post(ctx, pack, { ...result.value, sorted }));
+  const cited = await checkCites({ repo: ctx.setup.repo, env: ctx.setup.env, sha: pack.head }, result.value.sorted);
+  return guarded(ctx, () =>
+    post(ctx, pack, { ...result.value, sorted: cited.findings, citesNotFound: cited.notFound }),
+  );
 }
 
 // decideRound : what this round does once the pack is built

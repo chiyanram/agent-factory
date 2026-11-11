@@ -4,6 +4,7 @@
 // Nothing here throws.
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { scrubSecrets } from "./scrub.js";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 import { attempt } from "./review/safe.js";
@@ -30,7 +31,8 @@ export async function keepText(at: At, file: string, text: string): Promise<Resu
   const path = keptPath(at, file);
   return attempt(async () => {
     await mkdir(join(at.recordsDir, String(at.change), at.head), { recursive: true, mode: 0o700 });
-    await writeFile(path, text, { mode: 0o600 });
+    // a kept file is a record too: no secret stays in it (P4, #485)
+    await writeFile(path, scrubSecrets(text), { mode: 0o600 });
     return path;
   }, `cannot keep ${path}`);
 }

@@ -4,14 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkCites, citeChecked, citeProblem, citesNotFound, lineCount } from "../src/core/cite-check.js";
+import { checkCites, citeChecked, citeProblem, lineCount } from "../src/core/cite-check.js";
 import { coreOf } from "../src/core/finding.js";
+import { FIND_SCHEMA } from "../src/core/review/verdicts.js";
 import { tempDir } from "./temp.js";
 
 type F = {
   readonly id: string;
   readonly file: string;
   readonly line: number;
+  readonly lineEnd?: number;
   readonly bucket: "act_on" | "consider" | "noted" | "dismissed";
   readonly why: string;
 };
@@ -56,8 +58,17 @@ describe("citeProblem and citeChecked: pure", () => {
     expect(coreOf({ ...raw, line: "2" }, "F1", (t) => t)).not.toHaveProperty("lineEnd");
   });
 
-  it("counts the findings noted as cite not found, for the run record", () => {
-    expect(citesNotFound([f({}), f({ why: "cite not found: x" }), f({ why: "cite not found: y" })])).toBe(2);
+  // #485 review: the finder's schema lets "N-M" through, and a reversed range is noted as malformed, never read as N
+  it('asks the finder for a line as a number or "N-M" text, and notes a reversed range as malformed', () => {
+    const line = JSON.parse(FIND_SCHEMA).properties.findings.items.properties.line;
+    expect(line).toEqual({ anyOf: [{ type: "integer" }, { type: "string", pattern: "^[0-9]+(-[0-9]+)?$" }] });
+    const raw = { file: "a.ts", rule: null, severity: "warning", grade: "walked", finding: "f", fix: "x" };
+    const reversed = coreOf({ ...raw, line: "12-5" }, "F1", (t) => t);
+    expect(reversed).toMatchObject({ line: 12, lineEnd: 5 });
+    expect(citeChecked(f({ file: "a.ts", line: 12, lineEnd: 5 }), 40)).toMatchObject({
+      bucket: "noted",
+      why: "cite not found: a.ts:12-5 is a malformed range: it ends before it starts",
+    });
   });
 
   it("counts a file's lines, with or without a last newline", () => {
@@ -88,24 +99,28 @@ describe("checkCites: at the reviewed commit, through git", () => {
 
   it("keeps a valid cite, and notes a missing file, a line past the end and a path that is not a plain path", async () => {
     const at = { repo, env: process.env, sha };
-    const checked = await checkCites(at, [
+    const { findings: checked, notFound } = await checkCites(at, [
       f({ id: "ok", file: "a.ts", line: 3 }),
       f({ id: "gone", file: "b.ts", line: 1 }),
       f({ id: "past", file: "a.ts", line: 5 }),
       f({ id: "odd", file: "--output=x", line: 1 }),
+      // a why the verify pass wrote in the check's own words is not the check's: it is not counted (#485)
+      f({ id: "said", file: "a.ts", line: 1, bucket: "noted", why: "cite not found: the model said so" }),
     ]);
+    expect(notFound).toBe(3);
     expect(checked.map((c) => [c.id, c.bucket])).toEqual([
       ["ok", "act_on"],
       ["gone", "noted"],
       ["past", "noted"],
       ["odd", "noted"],
+      ["said", "noted"],
     ]);
     expect(checked[2]?.why).toBe("cite not found: a.ts:5 is past the end of the file (3 lines)");
   });
 
   it("checks a file the caller holds the text of against that text, not the commit", async () => {
     const own = { "spec.md": "# spec\n\n1. one\n" };
-    const checked = await checkCites(
+    const { findings: checked } = await checkCites(
       { repo, env: process.env, sha },
       [f({ id: "in", file: "spec.md", line: 3 }), f({ id: "past", file: "spec.md", line: 4 })],
       own,

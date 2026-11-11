@@ -23,17 +23,24 @@ export function citeProblem(cite: Cite, lines: number | undefined): string {
   return lines === undefined ? `${cite.file} is not in the reviewed commit` : pastEnd(cite, lines);
 }
 
-// pastEnd : why a cite runs past the file's last line, or "" when it does not. Pure.
+// pastEnd : why a cite runs past the file's last line, or is a reversed range, or "" when it is neither. Pure.
 function pastEnd(cite: Cite, lines: number): string {
+  return reversed(cite)
+    ? `${cite.file}:${cite.line}-${cite.lineEnd} is a malformed range: it ends before it starts`
+    : beyond(cite, lines);
+}
+
+// reversed : a range that ends before it starts. Pure.
+function reversed(cite: Cite): boolean {
+  return cite.lineEnd !== undefined && cite.lineEnd < cite.line;
+}
+
+// beyond : why a cite runs past the file's last line, or "". Pure.
+function beyond(cite: Cite, lines: number): string {
   const end = cite.lineEnd ?? cite.line;
   const shown = cite.lineEnd === undefined ? `${cite.line}` : `${cite.line}-${cite.lineEnd}`;
   const count = `${lines} line${lines === 1 ? "" : "s"}`;
   return end <= lines ? "" : `${cite.file}:${shown} is past the end of the file (${count})`;
-}
-
-// citesNotFound : how many findings the cite check noted as "cite not found", for the run record. Pure.
-export function citesNotFound(findings: readonly { readonly why: string }[]): number {
-  return findings.filter((f) => f.why.startsWith(`${CITE_NOT_FOUND}:`)).length;
 }
 
 // citeChecked : a settled finding, moved out of Act on or Consider to noted when its cite does not exist. Pure.
@@ -85,16 +92,21 @@ async function linesAt(
   return out;
 }
 
+// Checked : the findings, each cite checked, and how many the check itself noted as "cite not found": a why the
+// verify pass wrote with those words is not counted
+export type Checked<F> = { readonly findings: readonly F[]; readonly notFound: number };
+
 // checkCites : every finding, each cite checked at the reviewed commit; a file `own` names (the design review's spec.md
 // and design.md, which are no file of the repo) is checked against its own text instead
 export async function checkCites<F extends Cited>(
   at: { readonly repo: string; readonly env: NodeJS.ProcessEnv; readonly sha: string },
   findings: readonly F[],
   own: Readonly<Record<string, string>> = {},
-): Promise<readonly F[]> {
+): Promise<Checked<F>> {
   const inRepo = findings.map((f) => f.file).filter((f) => !Object.hasOwn(own, f));
   const lines = await linesAt(at, inRepo);
   const linesOf = (file: string): number | undefined =>
     Object.hasOwn(own, file) ? lineCount(own[file] ?? "") : lines.get(file);
-  return findings.map((f) => citeChecked(f, linesOf(f.file)));
+  const checked = findings.map((f) => citeChecked(f, linesOf(f.file)));
+  return { findings: checked, notFound: checked.filter((c, i) => c !== findings[i]).length };
 }

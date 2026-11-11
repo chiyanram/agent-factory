@@ -83,7 +83,8 @@ run that started and never ended goes to a person, never runs again.
 
 **Kind:** non-negotiable.
 **Why:** a run reads text anyone can write; a run that holds a login can be talked into using it.
-**How it's checked:** the runner's plans hold no credentials; a planted fake token never appears in a saved record or trace;
+**How it's checked:** the runner's plans hold no credentials; a planted fake token, PEM key or URL login never appears in a saved record, a
+kept file (a build log kept as `ready.txt`, a reviewer pass's answer) or a trace;
 the egress allowlist always refuses the project's own git host (`test/non-negotiables.test.ts`, P4;
 `test/egress.test.ts`). **Today:** a run's full trace is not kept yet, so only the records are checked (#487).
 

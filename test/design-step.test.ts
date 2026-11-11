@@ -170,6 +170,20 @@ describe("the design review's runs (#236)", () => {
     ]);
   });
 
+  // #485 review: the cite check reads the texts and commit the run read, so an edit during the run cannot skip it
+  it("checks the cites against what the run read, even when the spec is edited while the verify pass runs", async () => {
+    const verdicts = { verdicts: [{ id: "D1", bucket: "act_on", why: "it holds" }] };
+    const editing: Model = async (run) => {
+      writeSpec(home, `${specText()}\nedited while the run ran\n`);
+      return model([], [verdicts])(run);
+    };
+    const steps = designSteps({ kind: "ok", value: setup(editing) });
+    if (steps.designVerify.kind !== "available") throw new Error("unavailable");
+    const findings: readonly DesignFinding[] = [{ ...FINDING, id: "D1", file: "spec.md", line: 99 }];
+    const kept = done(await steps.designVerify.run({ ...input(), findings })).kept;
+    expect(kept.map((k) => [k.id, k.bucket])).toEqual([["D1", "noted"]]);
+  });
+
   it("a spec edited since the pass decided fails the run and runs no model; a bad answer fails it with its spend", async () => {
     const seen: Seen[] = [];
     const steps = designSteps({

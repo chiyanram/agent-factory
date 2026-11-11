@@ -7,7 +7,7 @@
 // with #486; P15 in floor.test.ts, finding.test.ts and cite-check.test.ts; P18 in pack-schema.test.ts; P21 in
 // lane.test.ts).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync, readdirSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import { EMPTY, readRecords, record, type Summary } from "../src/core/dispatch/records.js";
@@ -24,6 +24,7 @@ import {
 import type { DesignView } from "../src/core/dispatch/design.js";
 import type { OpenLine } from "../src/core/poll.js";
 import { srtEnv } from "../src/core/box/srt-plan.js";
+import { keepText } from "../src/core/kept.js";
 import { claudeEnv } from "../src/core/review/settings.js";
 import { buildPack } from "../src/core/review/pack.js";
 import { resolve as resolveSettings, type FileLayer } from "../src/core/settings/resolve.js";
@@ -39,18 +40,22 @@ const NOW = Date.parse("2026-11-07T10:00:00Z");
 
 // ---- P1: the decision table reaches no model, runner or git-host module, and is pure
 
-// valueImports : the modules a source file imports for their values; `import type` and `export type` erase at build
-function valueImports(file: string): readonly string[] {
-  const text = readFileSync(file, "utf8");
-  const found = [...text.matchAll(/^(?:import|export)\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gms)].map((m) => m[1] ?? "");
-  return found.filter((s) => s !== "");
+// valueImports : the modules a source file imports for their values: static imports and re-exports, side-effect
+// imports (import "x"), and dynamic ones (import("x")); `import type` and `export type` erase at build
+function valueImports(text: string): readonly string[] {
+  const forms = [
+    /^(?:import|export)\s+(?!type\b)[^;]*?from\s+"([^"]+)";/gms,
+    /^import\s+"([^"]+)";/gm,
+    /\bimport\s*\(\s*"([^"]+)"\s*\)/g,
+  ];
+  return forms.flatMap((f) => [...text.matchAll(f)].map((m) => m[1] ?? "")).filter((s) => s !== "");
 }
 
 // reached : every module the file reaches through value imports: a source path under src/, or a bare name (node:fs)
-function reached(file: string): ReadonlySet<string> {
+function reached(file: string, root: string = ROOT): ReadonlySet<string> {
   const seen = new Set<string>();
   const walk = (at: string): void => {
-    for (const spec of valueImports(at)) {
+    for (const spec of valueImports(readFileSync(at, "utf8"))) {
       const next = spec.startsWith(".") ? resolve(dirname(at), spec.replace(/\.js$/, ".ts")) : spec;
       if (seen.has(next)) {
         continue;
@@ -62,7 +67,7 @@ function reached(file: string): ReadonlySet<string> {
     }
   };
   walk(file);
-  return new Set([...seen].map((m) => (m.startsWith("/") ? relative(ROOT, m) : m)));
+  return new Set([...seen].map((m) => (m.startsWith("/") ? relative(root, m) : m)));
 }
 
 // what the table must never reach: a model, a runner, a git host, a process, the network or the disk
@@ -82,6 +87,21 @@ describe("P1: the engine decides every routine step", () => {
     const mods = reached(join(ROOT, "src", "core", "dispatch", "table.ts"));
     expect(mods.size).toBeGreaterThan(0);
     expect([...mods].filter((m) => FORBIDDEN.some((f) => f.test(m)))).toEqual([]);
+  });
+
+  // #485 review: a dynamic import or a side-effect import reaches its module too
+  it("the walk follows a side-effect import and a dynamic one, planted in a module the table could reach", () => {
+    const dir = tempDir("factory-p1-");
+    try {
+      writeFileSync(
+        join(dir, "a.ts"),
+        'import "./b.js";\nexport async function f() {\n  return import("node:fs");\n}\n',
+      );
+      writeFileSync(join(dir, "b.ts"), 'import "node:child_process";\n');
+      expect([...reached(join(dir, "a.ts"), dir)].toSorted()).toEqual(["b.ts", "node:child_process", "node:fs"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("the table is pure: it reads no clock or chance of its own, and the same state gives the same action", () => {
@@ -229,14 +249,41 @@ describe("P7: every loop has a cap and a stop", () => {
     expect(whys.filter((w) => w.trim() === "" || w.split("\n").length > 3)).toEqual([]);
   });
 
+  // each state reaches its cap row (the change is fresh, the design review done, the review at the writer's head), so
+  // the cap is what decides it: one below the cap runs the step again, at the cap a person decides
   it("a step at its cap never runs again: the ready check, the review rounds and the CI rounds each go to a person", () => {
-    const base = states().filter((s) => s.approval.kind === "approved" && s.change.kind === "open");
-    const capped = (r: Summary): boolean =>
-      r.readyFailures >= MAX_READY_FAILURES || r.reviewRounds >= MAX_REVIEW_ROUNDS || r.ciRounds >= MAX_CI_ROUNDS;
-    const atCap = base.filter((s) => capped(s.runs));
-    expect(atCap.length).toBeGreaterThan(0);
-    for (const s of atCap) {
-      expect(decide(s).kind).not.toBe("writer");
+    const now = new Date(NOW).toISOString();
+    const at = (runs: Partial<Summary>, pipeline: OpenLine["pipeline"] = { kind: "success" }): TicketState => ({
+      ticket: "PROJ-1",
+      gate: "forge-ci",
+      approval: { kind: "approved", at: AT, lane: "feature", testFirst: false },
+      waiver: { kind: "none" },
+      change: { kind: "open", line: line({ lastNoteAt: now, pipeline }) },
+      runs: { ...EMPTY, lastWriter: done, lastAt: now, ...runs },
+      now: NOW,
+      quietMinutes: 30,
+      caps: NO_CAPS,
+      design: { kind: "done" },
+    });
+    const ready = (n: number) => at({ lastReady: readyFailed, readyFailures: n });
+    const review = (n: number) =>
+      at({ lastReady: readyOk, lastReview: { kind: "ended", head: H, actOn: 2 }, reviewRounds: n });
+    const ci = (n: number) =>
+      at(
+        { lastReady: readyOk, lastReview: { kind: "ended", head: H, actOn: 0 }, reviewRounds: 1, ciRounds: n },
+        {
+          kind: "failed",
+        },
+      );
+    for (const [state, cap] of [
+      [ready, MAX_READY_FAILURES],
+      [review, MAX_REVIEW_ROUNDS],
+      [ci, MAX_CI_ROUNDS],
+    ] as const) {
+      expect(decide(state(cap - 1)).kind).toBe("writer");
+      const capped = decide(state(cap));
+      expect(capped.kind).toBe("needs-human");
+      expect(RUNS_A_STEP.has(capped.kind)).toBe(false);
     }
   });
 });
@@ -316,6 +363,31 @@ describe("P4: no run holds a login", () => {
     // the record still reads, with the rest of its words
     const read = await readRecords(where);
     expect(read.kind === "ok" ? JSON.stringify(read.value) : read.reason).toContain("the run printed");
+  });
+});
+
+describe("P4: no kept file holds a secret", () => {
+  let home = "";
+  beforeEach(() => {
+    home = tempDir("factory-p4-kept-");
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it("a build log kept as ready.txt with a planted token, a PEM key and a login in a URL keeps none of them", async () => {
+    const at = { recordsDir: home, change: 12, head: H };
+    const log = [
+      `GH_TOKEN=${FAKE_TOKEN}`,
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "MIIEowIBAAKCAQEAplanted",
+      "-----END RSA PRIVATE KEY-----",
+      "cloning https://oauth2:glpat-plantedtoken1234@gitlab.corp.example/x.git",
+      "the test failed at OrderTest.java:12",
+    ].join("\n");
+    const kept = await keepText(at, "ready.txt", log);
+    if (kept.kind !== "ok") throw new Error(kept.reason);
+    const text = readFileSync(kept.value, "utf8");
+    expect(text).not.toMatch(/ghp_FAKE|MIIEow|glpat-planted|oauth2:/);
+    expect(text).toContain("the test failed at OrderTest.java:12");
   });
 });
 

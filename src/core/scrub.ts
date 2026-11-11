@@ -7,11 +7,16 @@ export const SCRUBBED = "[scrubbed]";
 // what looks like a secret: the model login and API keys, git host tokens, cloud and chat keys, a JWT, an
 // Authorization header's value, and NAME=value where the name says token, secret, password or key
 const SECRETS: readonly (readonly [RegExp, string])[] = [
+  // a PEM private key, whole, across its lines
+  [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g, SCRUBBED],
+  // a login in a URL: scheme://user:password@host
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, `$1${SCRUBBED}@`],
   [/\bsk-ant-[\w-]+/g, SCRUBBED],
   [/\bsk-[\w-]{20,}/g, SCRUBBED],
-  [/\bgh[opsur]_\w{16,}/g, SCRUBBED],
-  [/\bgithub_pat_\w{16,}/g, SCRUBBED],
-  [/\bglpat-[\w-]{16,}/g, SCRUBBED],
+  // git host tokens, short ones too: a prefix this specific is never prose
+  [/\bgh[opsur]_\w{4,}/g, SCRUBBED],
+  [/\bgithub_pat_\w{4,}/g, SCRUBBED],
+  [/\bglpat-[\w-]{4,}/g, SCRUBBED],
   [/\bxox[abeoprs]-[\w-]{8,}/g, SCRUBBED],
   [/\bAKIA[0-9A-Z]{16}\b/g, SCRUBBED],
   [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]*/g, SCRUBBED],

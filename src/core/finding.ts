@@ -35,7 +35,8 @@ export const CORE_REQUIRED = ["id", "file", "line", "rule", "severity", "grade",
 export const CORE_PROPERTIES = {
   id: { type: "string" },
   file: { type: "string" },
-  line: { type: "integer" },
+  // a whole number, or text "N" or "N-M", as the rules pack's finding format allows (#484, #485)
+  line: { anyOf: [{ type: "integer" }, { type: "string", pattern: "^[0-9]+(-[0-9]+)?$" }] },
   rule: { type: "string" },
   severity: { enum: SEVERITIES },
   grade: { enum: GRADES },
@@ -62,12 +63,13 @@ function lineOf(raw: unknown): number | undefined {
   return Number.isSafeInteger(n) && Number(n) >= 0 ? Number(n) : undefined;
 }
 
-// lineEndOf : the end of a cited range "N-M" when it is past N; undefined for a single line. Pure.
+// lineEndOf : the end of a cited range "N-M" when it is not N; undefined for a single line. A reversed range keeps its
+// end below N, so the cite check notes it as malformed rather than reading it as N alone. Pure.
 function lineEndOf(raw: unknown): number | undefined {
   const line = get(raw, "line");
   const end = typeof line === "string" ? /^(\d+)-(\d+)$/.exec(line) : null;
   const [from, to] = end === null ? [0, 0] : [Number(end[1]), Number(end[2])];
-  return to > from ? to : undefined;
+  return to === from ? undefined : to;
 }
 
 // firstLine : a line as given, or the first line of "N" or "N-M" text. Pure.
