@@ -6,6 +6,9 @@ fails when a folder has no row, a row has no folder, or a kind or status is not 
 
 - **seeded**: a change with a known defect; `golden.json` names it. Seeded from a fix in our history reverted, one per
   `AGENTS.md` MUST, a weakened test, a correctness slip and a spec mismatch.
+- **found-by-eval**: a seeded case whose bug an eval pass of this reviewer found first, on a case then labelled clean.
+  Its recall is reported apart (`overall_without_found_by_eval`), since a case picked because the reviewer found it
+  flatters recall (P11: cases it was not tuned on).
 - **clean**: a PR as it merged, diffed against its parent; `golden.json` is `[]`, and any Act on finding is a
   clean-floor hit (E2). A clean case is a merged PR whose lines no later fix touched, as far as `git log` shows; the
   operator confirms each one.
@@ -34,8 +37,8 @@ carry, so the automated review sees an ordinary PR. The `#999` in those titles i
 | `weakened-test-agent-settings-case` | seeded | A weakened test: the settings match turns case-sensitive and the test drops the mixed-case paths that would catch it. Two findings: the code and the test. | the floor guard's S3 shape (#190) | approved |
 | `slip-reconcile-nothing-left-or` | seeded | A correctness slip: `&&` becomes a logical or in `nothingLeft`, so a worktree with only commits or only files is removed. Framed as a readability refactor. | written for the set | approved |
 | `spec-check-size-claude-md` | seeded | A spec mismatch: AC-1 in `pr.md` says CLAUDE.md is checked too, and the code checks it only when there is no AGENTS.md; AC-3's test is missing. | written for the set | approved |
-| `found-posting-template` | seeded | The posting template that makes every posted field inert, as it merged. Labelled clean until the first eval pass found two real bugs in it (an `_www.` link and a `GH-12` reference left live), fixed in #463; it now seeds them. | f0c6d10 (#133), found by the eval | approved |
-| `found-notes-trailer-blank-lines` | seeded | Notes told apart by login and seat prefix, as it merged. Labelled clean until the first eval pass found a real bug in it (two blank lines before the trailers make an agent commit a person's), fixed in #463; it now seeds it. | 5e78272 (#141), found by the eval | approved |
+| `found-posting-template` | found-by-eval | The posting template that makes every posted field inert, as it merged. Labelled clean until the first eval pass found two real bugs in it (an `_www.` link and a `GH-12` reference left live), fixed in #463; it now seeds them. | f0c6d10 (#133), found by the eval | approved |
+| `found-notes-trailer-blank-lines` | found-by-eval | Notes told apart by login and seat prefix, as it merged. Labelled clean until the first eval pass found a real bug in it (two blank lines before the trailers make an agent commit a person's), fixed in #463; it now seeds it. | 5e78272 (#141), found by the eval | approved |
 | `clean-hgit-hostgit-nosystem` | clean | The #167 fix in both git wrappers, with tests on each side. | 7cd3d24 (#168) | approved |
 | `clean-writer-prompt-foreground` | clean | The foreground rule added to every writer prompt, with a test per mode. | bd4225c (#210) | approved |
 | `clean-plugin-test-temp-root` | clean | A three-line test fix: resolve the temp root for macOS. | f2b6305 (#196) | approved |

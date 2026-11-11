@@ -63,12 +63,17 @@ export function tableProblems(folders: readonly string[], rows: readonly Row[]):
   return [...noRow, ...noCase, ...twice, ...rows.flatMap(rowProblems)];
 }
 
-// kindProblem : a clean case expects no finding and a seeded one at least one; a rulebook copy may be either. Pure.
+// kindProblem : a clean case expects no finding, and a seeded or found-by-eval one at least one; a rulebook copy may be
+// either. Pure.
+// the kinds whose golden.json must name at least one seed
+const SEEDED_KINDS: ReadonlySet<string> = new Set(["seeded", "found-by-eval"]);
+
 export function kindProblem(kind: string, findings: readonly Finding[]): string {
   if (kind === "clean" && findings.length > 0) {
     return "a clean case's golden.json must be []";
   }
-  return kind === "seeded" && findings.length === 0 ? "a seeded case's golden.json must name its seed" : "";
+  const unnamed = SEEDED_KINDS.has(kind) && findings.length === 0;
+  return unnamed ? `a ${kind} case's golden.json must name its seed` : "";
 }
 
 type Git = { readonly code: number; readonly out: string; readonly err: string };

@@ -3,7 +3,7 @@
     "file": "src/core/notes.ts",
     "line": 135,
     "issue": "trailerBlock splits paragraphs on one blank line, so two blank lines before the trailers leave an empty line in the last paragraph; it counts as a non-trailer line, the block is refused, and a real agent commit reads as a person's (#463).",
-    "severity": "warning",
+    "severity": "blocker",
     "category": "bug"
   }
 ]

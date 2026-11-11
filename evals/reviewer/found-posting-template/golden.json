@@ -3,14 +3,14 @@
     "file": "src/core/post.ts",
     "line": 69,
     "issue": "The www. break uses \\b(www)\\., and _ is a word character, so there is no boundary before www in _www.evil.example/p: no joiner is added, and GFM autolinks www. after _, *, ~ or (, so the posted text carries a live link (#463).",
-    "severity": "warning",
+    "severity": "blocker",
     "category": "security"
   },
   {
     "file": "src/core/post.ts",
     "line": 67,
     "issue": "Only @, # and ! get a joiner, but GitHub also reads GH-12 as an issue reference, and \"Fixes GH-12\" closes the issue on merge: the form has none of the broken characters, so it is posted live (#463).",
-    "severity": "warning",
+    "severity": "blocker",
     "category": "security"
   }
 ]
