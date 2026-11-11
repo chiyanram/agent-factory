@@ -78,15 +78,19 @@ function by(list: readonly Hit[], names: readonly string[], key: "category" | "s
   );
 }
 
-// recall : recall@act_on, overall, per category and per severity (#218: a finding carries both). Pure.
+// recall : recall@act_on, overall, per category and per severity (#218: a finding carries both). A found-by-eval case
+// was chosen because this reviewer found its bug, so the overall is also given without those cases (P11: cases it was
+// not tuned on). Pure.
 export function recall(cases: readonly CaseRecord[]): {
   readonly overall: Tally;
+  readonly overall_without_found_by_eval: Tally;
   readonly by_category: Record<string, Tally>;
   readonly by_severity: Record<string, Tally>;
 } {
   const list = hits(cases);
   return {
     overall: tally(list),
+    overall_without_found_by_eval: tally(hits(cases.filter((c) => c.case.kind !== "found-by-eval"))),
     by_category: by(list, CATEGORIES, "category"),
     by_severity: by(list, SEVERITIES, "severity"),
   };

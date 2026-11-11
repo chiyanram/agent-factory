@@ -72,6 +72,8 @@ describe("the small checks", () => {
   it("kindProblem: a clean case has no finding and a seeded one has one; a rulebook copy may be either", () => {
     expect(kindProblem("clean", [good])).toBe("a clean case's golden.json must be []");
     expect(kindProblem("seeded", [])).toBe("a seeded case's golden.json must name its seed");
+    expect(kindProblem("found-by-eval", [])).toBe("a found-by-eval case's golden.json must name its seed");
+    expect(kindProblem("found-by-eval", [good])).toBe("");
     expect([kindProblem("clean", []), kindProblem("seeded", [good]), kindProblem("rulebook-copy", [])]).toEqual([
       "",
       "",
@@ -108,7 +110,7 @@ describe("the small checks", () => {
       "three: no row in cases.md",
       "ghost: a row in cases.md but no folder",
       "two: two rows in cases.md",
-      "two: cases.md: kind odd is not one of seeded, clean, rulebook-copy",
+      "two: cases.md: kind odd is not one of seeded, found-by-eval, clean, rulebook-copy",
       "two: cases.md: status done is not draft or approved",
     ]);
   });

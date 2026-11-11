@@ -17,7 +17,8 @@ export const CATEGORIES = [
   "style",
   "speculative",
 ] as const;
-export const KINDS = ["seeded", "clean", "rulebook-copy"] as const;
+// found-by-eval: a seeded case whose bug an eval pass of this reviewer found first, so its recall is reported apart
+export const KINDS = ["seeded", "found-by-eval", "clean", "rulebook-copy"] as const;
 // a case counts only once the operator sets its row to approved (evals/reviewer/README.md)
 export const STATUSES = ["draft", "approved"] as const;
 
