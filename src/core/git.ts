@@ -9,7 +9,8 @@
 // Each such key gets its last trusted value or a neutral one, passed as GIT_CONFIG_COUNT entries (command scope), as
 // Sandcastle's src/hostGitConfig.ts does (study on #83, section 3.3). A repo-set key that has no safe neutral value and
 // no trusted one is refused, and git does not run. git and every program it starts come only from the trusted PATH,
-// with GIT_TERMINAL_PROMPT=0. Without a repo, git runs from /, so it reads no repo's config. A failed read of the
+// with GIT_TERMINAL_PROMPT=0. The keys in FIXED are set the same on every call, whatever any config says, so the
+// operator's global config changes no result (#485). Without a repo, git runs from /, so it reads no repo's config. A failed read of the
 // repo's keys, or a GIT_CONFIG_COUNT that is not a whole number, is refused: nothing is ever run unchecked.
 // Every outcome is a sealed result; nothing here throws, and no null stands for a decision.
 
@@ -51,6 +52,32 @@ const ALWAYS: readonly Override[] = [
   { key: "protocol.ext.allow", value: "never" },
   { key: "submodule.recurse", value: "false" },
   { key: "fetch.recursesubmodules", value: "false" },
+];
+
+// Always set, whatever any config says (#485, hermetic host calls): keys that change what git prints or which refs it
+// keeps, so the operator's own global config (another default branch, a diff prefix, colour, pruning, signing) changes
+// no result the engine reads. A key here wins over the trusted value, unlike ALWAYS.
+export const FIXED: readonly Override[] = [
+  { key: "init.defaultbranch", value: "main" },
+  { key: "fetch.prune", value: "false" },
+  { key: "fetch.prunetags", value: "false" },
+  { key: "diff.noprefix", value: "false" },
+  { key: "diff.mnemonicprefix", value: "false" },
+  { key: "diff.relative", value: "false" },
+  { key: "diff.suppressblankempty", value: "false" },
+  { key: "diff.algorithm", value: "myers" },
+  { key: "diff.context", value: "3" },
+  { key: "diff.interhunkcontext", value: "0" },
+  { key: "diff.ignoresubmodules", value: "none" },
+  { key: "color.ui", value: "false" },
+  { key: "core.quotepath", value: "true" },
+  { key: "core.autocrlf", value: "false" },
+  { key: "log.showsignature", value: "false" },
+  { key: "commit.gpgsign", value: "false" },
+  { key: "tag.gpgsign", value: "false" },
+  { key: "pull.rebase", value: "false" },
+  { key: "rebase.autostash", value: "false" },
+  { key: "advice.detachedhead", value: "false" },
 ];
 
 // What to do with a key the repo itself sets.
@@ -251,13 +278,16 @@ export type Plan = { readonly kind: "ok"; readonly overrides: readonly Override[
 export function plan(trusted: readonly Override[], repoSet: readonly string[]): Plan {
   const ctx: Context = { values: (key) => trusted.filter((t) => t.key === key).map((t) => t.value) };
   const start: Plan = { kind: "ok", overrides: ALWAYS.map((o) => lastOr(ctx, o.key, o.value)) };
-  return repoSet.reduce<Plan>((acc, key) => {
-    if (acc.kind === "refused") {
-      return acc;
-    }
-    const next = step(ctx, key);
-    return next.kind === "refused" ? next : { kind: "ok", overrides: [...acc.overrides, ...next.overrides] };
-  }, start);
+  const fixed = (p: Plan): Plan => (p.kind === "ok" ? { kind: "ok", overrides: [...p.overrides, ...FIXED] } : p);
+  return fixed(
+    repoSet.reduce<Plan>((acc, key) => {
+      if (acc.kind === "refused") {
+        return acc;
+      }
+      const next = step(ctx, key);
+      return next.kind === "refused" ? next : { kind: "ok", overrides: [...acc.overrides, ...next.overrides] };
+    }, start),
+  );
 }
 
 type Count = { readonly kind: "count"; readonly n: number } | Refused;
@@ -277,6 +307,13 @@ function withOverrides(env: NodeJS.ProcessEnv, from: number, overrides: readonly
     out[`GIT_CONFIG_VALUE_${from + i}`] = o.value;
   });
   return out;
+}
+
+// notCallers : the overrides, less a FIXED key the caller set itself: a caller's own GIT_CONFIG_COUNT entry is the
+// engine's choice for that call, so it wins
+function notCallers(overrides: readonly Override[], env: NodeJS.ProcessEnv, n: number): readonly Override[] {
+  const own = new Set(Array.from({ length: n }, (_, i) => (env[`GIT_CONFIG_KEY_${i}`] ?? "").toLowerCase()));
+  return overrides.filter((o) => !(own.has(o.key) && FIXED.includes(o)));
 }
 
 // hostGit : runs git as the request says, hardened as the header says.
@@ -300,7 +337,7 @@ export async function hostGit(request: GitRequest): Promise<GitResult> {
   const result = await run(
     git.path,
     ["-C", dir, ...request.args],
-    withOverrides(base, count.n, decided.overrides),
+    withOverrides(base, count.n, notCallers(decided.overrides, request.env, count.n)),
     request.stdin,
   );
   return result.code === 0

@@ -3,7 +3,7 @@
 // specText, writeSpec and approveSpec put the spec of ledger/PROJ-1, and its approval, in a local store.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Change } from "../src/core/forge/types.js";
 import { specHash } from "../src/core/spec.js";
@@ -66,8 +66,56 @@ export function approveSpec(home: string, text: string = specText()): void {
 
 export const BRANCH = "factory/PROJ-1";
 
+// the repos built so far, one per branch name: each test gets a copy, which is far cheaper than building one (#485,
+// #358: building a repo per test was most of the suite's time)
+const BUILT = new Map<string, { readonly root: string; readonly head1: string; readonly head2: string }>();
+process.on("exit", () => {
+  for (const b of BUILT.values()) {
+    rmSync(b.root, { recursive: true, force: true });
+  }
+});
+
+// project : a fresh copy of the branch's repo, with its own origin
 export function project(branch: string = BRANCH): Project {
+  const built = BUILT.get(branch) ?? build(branch);
+  BUILT.set(branch, built);
   const root = tempDir("factory-review-");
+  cpSync(built.root, root, { recursive: true });
+  const p = handles(root);
+  p.git("remote", "set-url", "origin", join(root, "origin.git"));
+  return { ...p, head1: built.head1, head2: built.head2 };
+}
+
+// handles : the env and the git, write and commit helpers of a repo folder
+function handles(root: string): Omit<Project, "head1" | "head2"> {
+  const home = join(root, "home");
+  const env = {
+    PATH: process.env.PATH,
+    HOME: home,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+  };
+  const clone = join(root, "clone");
+  const run = (dir: string, args: string[]) => execFileSync("git", args, { cwd: dir, env, encoding: "utf8" }).trim();
+  const git = (...args: string[]) => run(clone, args);
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(join(clone, path)), { recursive: true });
+    writeFileSync(join(clone, path), text);
+  };
+  const commitAll = (message: string) => {
+    git("add", "-A");
+    git("commit", "-q", "-m", message);
+    return git("rev-parse", "HEAD");
+  };
+  return { root, clone, env, git, write, commitAll };
+}
+
+// build : the branch's repo, built once
+function build(branch: string): { readonly root: string; readonly head1: string; readonly head2: string } {
+  const root = tempDir("factory-review-base-");
   const home = join(root, "home");
   mkdirSync(home);
   const env = {
@@ -122,7 +170,7 @@ export function project(branch: string = BRANCH): Project {
   const head2 = commitAll("change2");
   git("push", "-q", "origin", branch);
   git("checkout", "-q", "main");
-  return { root, clone, env, head1, head2, git, write, commitAll };
+  return { root, head1, head2 };
 }
 
 // the change as the forge would report it

@@ -23,6 +23,7 @@
 // review comments or review bodies.
 
 import { classify, openAsks, type Note, type Readers } from "./notes.js";
+import type { Quarantined } from "./process/quarantine.js";
 import type { Result } from "./forge/api.js";
 import type { Changes, Forge, Mergeable, OpenChange, Person, Pipeline } from "./forge/types.js";
 
@@ -48,6 +49,8 @@ export type OpenLine = {
   readonly stop: Stop;
   readonly asks: number;
   readonly mergeable: Mergeable;
+  // the quarantined checks that let a red head read as passed (#485; process/quarantine.ts); set by the pass, never poll
+  readonly quarantined?: readonly Quarantined[];
 };
 
 export type MergedLine = {
