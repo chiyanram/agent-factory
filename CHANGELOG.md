@@ -3,6 +3,18 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.34.0](https://github.com/chiyanram/agent-factory/compare/v0.33.1...v0.34.0) (2026-11-11)
+
+### ✨ Features
+
+* **writer** — post the ready check's re-run beside each claim, and the build's deviations as notes the review reads · [#430](https://github.com/chiyanram/agent-factory/issues/430) (PR [#457](https://github.com/chiyanram/agent-factory/pull/457))
+
+### 🐛 Fixes
+
+* **dispatch** — a fix run after a new START that changes no code still goes to the ready check · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#459](https://github.com/chiyanram/agent-factory/pull/459))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.34.0/chiyanram-agent-factory-0.34.0.tgz`
+
 ## [0.33.1](https://github.com/chiyanram/agent-factory/compare/v0.33.0...v0.33.1) (2026-11-10)
 
 ### 🐛 Fixes

@@ -1,6 +1,6 @@
 {
   "name": "@chiyanram/agent-factory",
-  "version": "0.33.1",
+  "version": "0.34.0",
   "description": "The agent factory as a TypeScript package that calls CLIs (ADR-0013).",
   "private": true,
   "license": "MIT",
