@@ -887,3 +887,60 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     expect(inFlight(fresh)).toBe(true);
   });
 });
+
+// #485 (was #462) "can it get stuck?": over generated ticket states with an open change, the next decision is a step,
+// a wait the factory carries on by itself (inFlight), or a hand-over that says what the person does: the loop never
+// ends silently while a ticket's PR is open
+describe("can it get stuck? (#485)", () => {
+  const lines: readonly OpenLine[] = [
+    line(),
+    line({ pipeline: { kind: "failed" } }),
+    line({ pipeline: { kind: "running" } }),
+    line({ pipeline: { kind: "none" } }),
+    line({ pipeline: { kind: "manual" } }),
+    line({ pipeline: { kind: "unknown", raw: "weird" } }),
+    line({ needsHuman: true }),
+    line({ mergeable: "conflict" }),
+    line({ head: "2".repeat(40) }),
+    line({ asks: 1 }),
+    line({ stop: { kind: "stopped", at: "2026-11-07T09:30:00Z" } }),
+    line({ claimed: false }),
+  ];
+  const runs: readonly Summary[] = [
+    EMPTY,
+    wrote(),
+    wrote({ ...readyOk }),
+    wrote({ ...reviewed(0) }),
+    wrote({ ...reviewed(2) }),
+    wrote({ ...reviewed(2, MAX_REVIEW_ROUNDS) }),
+    wrote({ ciRounds: MAX_CI_ROUNDS, ...reviewed(0) }),
+    wrote({
+      readyFailures: MAX_READY_FAILURES,
+      lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: false, why: "x" },
+    }),
+    { ...EMPTY, lastWriter: fixDone },
+    { ...EMPTY, interrupted: { kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" } },
+  ];
+  const approvals: readonly TicketState["approval"][] = [
+    { kind: "approved", at: APPROVED_AT, lane: "feature", testFirst: false },
+    { kind: "started", at: APPROVED_AT, lane: "tiny", testFirst: false },
+    { kind: "stale" },
+    { kind: "missing" },
+  ];
+  const all = approvals.flatMap((approval) =>
+    lines.flatMap((l) => runs.map((r) => state({ approval, change: { kind: "open", line: l }, runs: r }))),
+  );
+
+  it("each state is carried on, or handed to a person with what they do", () => {
+    const silent = all.filter((s) => {
+      if (inFlight(s)) {
+        return false;
+      }
+      const a = decide(s);
+      const why = "why" in a ? a.why : "";
+      return !["needs-human", "wait", "release", "reconcile", "ping"].includes(a.kind) || why.trim().length < 10;
+    });
+    expect(all.length).toBeGreaterThan(400);
+    expect(silent.map((s) => [s.approval.kind, s.change, decide(s)])).toEqual([]);
+  });
+});

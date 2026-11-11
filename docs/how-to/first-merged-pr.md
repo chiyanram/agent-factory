@@ -26,8 +26,10 @@ agent-factory init          # Enter takes every recommended choice
 checks each piece, printing the fix for any that fails ([Set up with agent-factory init](set-up-with-init.md)). No
 file to edit, no shell export.
 
-**Today:** `init` prints the model login (`claude setup-token`, then `agent-factory setup claude`) and the
-coordinator's setup as next commands for you to run; asking for them inside `init` is #485.
+`init` also writes the coordinator's settings, as `agent-factory setup coordinator` does (#485). **Today:** it prints
+the model login (`claude setup-token`, then `agent-factory setup claude`) as a next command for you to run, since only
+you hold that login; the clean-machine install test (`scripts/install-test.ts`, on Ubuntu and macOS in CI) checks that
+install, `init` and a dry run work on a fresh home.
 
 ## 3. Let the factory read the project: `onboard`
 

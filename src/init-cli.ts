@@ -9,10 +9,11 @@
 //      never to the repo or a shell profile, after config check passes on the result; a value the files hold is
 //      replaced only after the person sees the diff and says yes (--yes keeps it, and exits 3);
 //   4. pins each listed plugin through `plugin update`, after it says what that does and the person says yes;
-//   5. checks each piece (core/init/checks.ts) and prints ✓ or ✗ with the fix, then the next commands in order.
+//   5. writes the coordinator's settings, as `agent-factory setup coordinator` does (#485: install, init, start);
+//   6. checks each piece (core/init/checks.ts) and prints ✓ or ✗ with the fix, then the next commands in order.
 //
 // It never handles a secret and never runs a command only a human runs (setup claude, onboard, onboard accept,
-// start, approve, waive): it prints them. Exit 0 every check passed, 1 a check failed or init was refused, 3 an
+// start, approve, waive): it prints them. The coordinator's settings hold no secret, so init writes them itself. Exit 0 every check passed, 1 a check failed or init was refused, 3 an
 // existing value was kept under --yes, 64 usage.
 
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -60,6 +61,9 @@ export type InitIo = {
   readonly probes: Probes;
   // each marketplace init knows, by its name: where to clone it from when it is not in the factory home yet
   readonly markets: Readonly<Record<string, string>>;
+  // writes the coordinator's settings and instructions (agent-factory setup coordinator), so setup is three commands:
+  // install, init, start (#485); none in a test that leaves it out
+  readonly setupCoordinator?: () => Promise<Result<string>>;
 };
 
 export type InitArgs = {
@@ -524,8 +528,23 @@ export async function initCommand(args: InitArgs, io: InitIo): Promise<number> {
   return finish(io, plan.value, written.value, args.yes);
 }
 
+// coordinatorSet : the coordinator's settings written, as setup coordinator writes them; a failure shows as the wall
+// check's fix, never stops init
+async function coordinatorSet(io: InitIo): Promise<void> {
+  if (io.setupCoordinator === undefined) {
+    return;
+  }
+  const done = await io.setupCoordinator();
+  io.out(
+    done.kind === "ok"
+      ? `\nwrote the coordinator's settings in ${done.value} (agent-factory setup coordinator)\n`
+      : `\ncannot write the coordinator's settings: ${done.reason}\n`,
+  );
+}
+
 async function finish(io: InitIo, plan: Plan, written: Written, yes: boolean): Promise<number> {
   const pins = await pinAll(io, plan.name, written.projectFile, yes);
+  await coordinatorSet(io);
   const user = applied(heldOf(plan.user), plan.userChanges, !written.kept);
   const checks = [...pins, ...(await checksOf(io, plan, at(user, ["runner"])))];
   io.out(`\nChecks:\n${checkLines(checks)}`);

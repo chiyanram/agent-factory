@@ -1429,6 +1429,10 @@ async function initCli({ positionals, yes, repo, io }: Args): Promise<number> {
       ...(io.readLine === undefined ? {} : { readLine: io.readLine }),
       probes: initProbes(io, home.path),
       markets: KNOWN_MARKETS,
+      setupCoordinator: async () => {
+        const places = placesOf(io);
+        return places.kind === "ok" ? installCoordinator(places.value) : places;
+      },
     },
   );
 }
