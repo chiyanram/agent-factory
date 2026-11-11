@@ -518,7 +518,7 @@ describe("tick", () => {
     expect(asked).toEqual(["factory/PROJ-0"]);
     expect(runs).toEqual([]);
     expect(held).toContain(
-      "log PROJ-1: wait: blocked by PROJ-0 (open, not merged): the build starts once each is merged",
+      "log PROJ-1: wait: blocked by PROJ-0 (open, not merged): the build starts once each is merged (the person is told)",
     );
     await tick({ ...setup(NO_CHANGES, [], { steps }), forge: at("merged", []) });
     expect(runs).toEqual(["PROJ-1"]);
@@ -572,7 +572,7 @@ describe("tick", () => {
     expect(held.join("\n")).toContain("blocked by 12 (open, not merged)");
   });
 
-  it("AC-7: a git host error on a blocker's branch or issue waits, never goes to a person", async () => {
+  it("AC-7: a git host error on a blocker's branch or issue waits, and is counted", async () => {
     const { runs, steps } = await blockedBy("12");
     const failed = async () => ({ kind: "failed", reason: "github: 502" }) as const;
     const branchDown: string[] = [];
@@ -580,7 +580,7 @@ describe("tick", () => {
       ...setup(NO_CHANGES, branchDown, { steps }),
       forge: { ...forge(NO_CHANGES, branchDown), branchState: failed },
     });
-    expect(branchDown.join("\n")).toContain("wait: blocked by 12 (not started)");
+    expect(branchDown.join("\n")).toContain("wait: the git host did not answer for a blocker: 12: github: 502");
     const issueDown: string[] = [];
     await tick({
       ...setup(NO_CHANGES, issueDown, { steps, specs: ISSUES }),
@@ -590,8 +590,76 @@ describe("tick", () => {
         issueState: failed,
       },
     });
-    expect(issueDown.join("\n")).toContain("wait: blocked by 12 (open, not merged)");
+    expect(issueDown.join("\n")).toContain("wait: the git host did not answer for a blocker: 12: github: 502");
     expect(runs).toEqual([]);
+  });
+
+  it("AC-7: on the third pass in a row the git host does not answer, a person looks, told once with the first error", async () => {
+    const { runs, steps } = await blockedBy("PROJ-0");
+    const pings: Ping[] = [];
+    const pass = async (reason: string) => {
+      const log: string[] = [];
+      const down = async () => ({ kind: "failed", reason }) as const;
+      await tick({
+        ...setup(NO_CHANGES, log, { steps, notify: pinger(pings) }),
+        forge: { ...forge(NO_CHANGES, log), branchState: down },
+      });
+      return log.join("\n");
+    };
+    expect(await pass("github: 502")).toContain("did not answer for a blocker");
+    expect(await pass("github: 503")).toContain("did not answer for a blocker");
+    expect(pings).toEqual([]);
+    const why = "the git host did not answer for the ticket's blockers on 3 passes in a row: PROJ-0: github: 502";
+    expect(await pass("github: 504")).toContain(`needs-human: ${why}`);
+    expect(pings).toEqual([
+      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `${why}; there is no change yet` },
+    ]);
+    expect(await pass("github: 505")).toContain("handed to a person earlier");
+    expect(pings).toHaveLength(1);
+    expect(runs).toEqual([]);
+  });
+
+  it("AC-7: a pass that reads the blockers again starts the count afresh", async () => {
+    const { steps } = await blockedBy("PROJ-0");
+    const pass = async (answer: "down" | "opened") => {
+      const log: string[] = [];
+      const branchState =
+        answer === "down"
+          ? async () => ({ kind: "failed", reason: "github: 502" }) as const
+          : async () => ({ kind: "ok", value: "opened" }) as const;
+      await tick({ ...setup(NO_CHANGES, log, { steps }), forge: { ...forge(NO_CHANGES, log), branchState } });
+      return log.join("\n");
+    };
+    // held first, then two unread passes, then read again with the same hold: the count starts afresh
+    await pass("opened");
+    await pass("down");
+    await pass("down");
+    expect(await pass("opened")).toContain("wait: blocked by PROJ-0 (open, not merged)");
+    expect(await pass("down")).not.toContain("needs-human");
+  });
+
+  it("AC-10: a held ticket tells the person once, recorded; a change in what it waits on tells them again", async () => {
+    const { steps } = await blockedBy("PROJ-0");
+    const pings: Ping[] = [];
+    const pass = async (state: "none" | "opened") => {
+      const log: string[] = [];
+      await tick({
+        ...setup(NO_CHANGES, log, { steps, notify: pinger(pings) }),
+        forge: { ...forge(NO_CHANGES, log), branchState: async () => ({ kind: "ok", value: state }) },
+      });
+      return log.join("\n");
+    };
+    await pass("none");
+    await pass("none");
+    const notStarted = "blocked by PROJ-0 (not started): the build starts once each is merged";
+    expect(pings).toEqual([{ kind: "held", ticket: "PROJ-1", change: "none", why: notStarted }]);
+    expect(await pass("opened")).toContain("(the person is told)");
+    expect(pings.map((p) => (p.kind === "held" ? p.why : ""))).toEqual([
+      notStarted,
+      "blocked by PROJ-0 (open, not merged): the build starts once each is merged",
+    ]);
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "held").length : 0).toBe(2);
   });
 
   it("reads no blocker while nothing lets the build begin (no START), or once its change is open (AC-6)", async () => {

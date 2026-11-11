@@ -15,6 +15,8 @@ const FACTORY_RUNS: ReadonlySet<Action["kind"]> = new Set([
   "design",
   "ping",
   "design-note",
+  "held",
+  "blockers-unread",
 ]);
 
 const AGAIN = "STARTs the ticket again (tiny) or approves its spec again: agent-factory start | approve";

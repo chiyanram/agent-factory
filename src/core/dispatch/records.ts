@@ -219,6 +219,10 @@ export type Event =
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
   | { readonly at: string; readonly kind: "blocked"; readonly why: string }
+  // the ticket's build is held by its spec's "Blocked by" for this reason; a person was pinged when it changed (#494)
+  | { readonly at: string; readonly kind: "held"; readonly why: string }
+  // the git host did not answer for a blocker on one pass, with its reason (#494 AC-7)
+  | { readonly at: string; readonly kind: "blockers-unread"; readonly why: string }
   // the shared copy of this approval (shared.ts approvalKey) is on the ticket's PR (#227); it is posted once
   | { readonly at: string; readonly kind: "shared"; readonly approval: string }
   // a person's answers to the writer's questions, as their own event, tied to the spec version they answered (#486,
@@ -741,6 +745,14 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const why = str(raw, "why");
     return why === BAD ? BAD : { at, kind: "blocked", why };
   },
+  held: (raw, at) => {
+    const why = str(raw, "why");
+    return why === BAD ? BAD : { at, kind: "held", why };
+  },
+  "blockers-unread": (raw, at) => {
+    const why = str(raw, "why");
+    return why === BAD ? BAD : { at, kind: "blockers-unread", why };
+  },
   shared: (raw, at) => {
     const approval = str(raw, "approval");
     return approval === BAD ? BAD : { at, kind: "shared", approval };
@@ -943,6 +955,12 @@ export type Summary = {
   readonly pingedAt: string;
   // every reason the dispatcher already handed the ticket to a person for
   readonly blocked: readonly string[];
+  // why the newest "held" line held the build, "" for none; and the passes since it on which the git host did not
+  // answer for a blocker (#494)
+  readonly heldWhy: string;
+  readonly unreadPasses: number;
+  // the git host's reason on the first of those passes, so a person reads one stable reason
+  readonly unreadFirst: string;
   // the time of the newest line, or "" for none
   readonly lastAt: string;
   // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
@@ -967,6 +985,9 @@ export const EMPTY: Summary = {
   rebaseRuns: 0,
   pingedAt: "",
   blocked: [],
+  heldWhy: "",
+  unreadPasses: 0,
+  unreadFirst: "",
   lastAt: "",
   spent: NO_SPEND,
 };
@@ -1054,6 +1075,13 @@ const STEPS: Steps = {
   "design-noted": (s) => s,
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
+  // a read that held the build again starts the count of passes the git host did not answer afresh
+  held: (s, e) => ({ ...s, heldWhy: e.why, unreadPasses: 0, unreadFirst: "" }),
+  "blockers-unread": (s, e) => ({
+    ...s,
+    unreadPasses: s.unreadPasses + 1,
+    unreadFirst: s.unreadFirst === "" ? e.why : s.unreadFirst,
+  }),
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice
   shared: (s) => s,
   answered: (s) => s,

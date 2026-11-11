@@ -143,6 +143,10 @@ export type Action =
   | { readonly kind: "verify"; readonly head: string }
   // a design review run at the spec's and design's hashes (#236)
   | { readonly kind: "design"; readonly step: DesignStep; readonly spec: string; readonly design: string }
+  // the build held by the spec's "Blocked by": recorded, and a person pinged when what it waits on changed (#494)
+  | { readonly kind: "held"; readonly why: string; readonly ping: boolean }
+  // the git host did not answer for a blocker this pass: recorded, so repeated passes go to a person (#494 AC-7)
+  | { readonly kind: "blockers-unread"; readonly why: string }
   // a person told, once, why the design review holds or ends at these hashes: a raised lane, the round cap (#489)
   | { readonly kind: "design-note"; readonly spec: string; readonly design: string; readonly why: string }
   | { readonly kind: "needs-human"; readonly why: string }
@@ -338,11 +342,38 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
 // starts the run counts afresh, so the open change, not the counts, says a build began.
 const blocked: Rule = (s) => {
   const b = s.blockers ?? { kind: "none" };
-  if (begun(s) || b.kind === "none") {
-    return "next";
-  }
-  return b.kind === "broken" ? { kind: "needs-human", why: b.why } : { kind: "wait", why: waitingWhy(b.on) };
+  return begun(s) || b.kind === "none" ? "next" : blockedAs(b.kind, s, b);
 };
+
+// the passes in a row on which the git host may not answer for a blocker before a person looks (#494 AC-7)
+export const MAX_UNREAD_PASSES = 3;
+
+type BlockedMap = { readonly [V in Exclude<BlockersView, { kind: "none" }> as V["kind"]]: V };
+
+const BLOCKED: { readonly [K in keyof BlockedMap]: (s: TicketState, b: BlockedMap[K]) => Action } = {
+  broken: (_s, b) => ({ kind: "needs-human", why: b.why }),
+  unread: (s, b) =>
+    s.runs.unreadPasses + 1 >= MAX_UNREAD_PASSES
+      ? {
+          kind: "needs-human",
+          why: `the git host did not answer for the ticket's blockers on ${MAX_UNREAD_PASSES} passes in a row: ${s.runs.unreadFirst || b.why}`,
+        }
+      : { kind: "blockers-unread", why: b.why },
+  waiting: (s, b) => holdAs(s, waitingWhy(b.on)),
+};
+
+function blockedAs<K extends keyof BlockedMap>(kind: K, s: TicketState, b: BlockedMap[K]): Action {
+  return BLOCKED[kind](s, b);
+}
+
+// holdAs : the wait on the blockers; a hold not recorded yet (new, changed, or after unread passes) is recorded first,
+// and the person is pinged when what it waits on changed (#494 AC-10)
+function holdAs(s: TicketState, why: string): Action {
+  if (s.runs.heldWhy === why && s.runs.unreadPasses === 0) {
+    return { kind: "wait", why };
+  }
+  return { kind: "held", why, ping: s.runs.heldWhy !== why };
+}
 
 // begun : the ticket's build began: a run since the newest approval or START, or its change open
 function begun(s: TicketState): boolean {
@@ -764,7 +795,7 @@ export function inFlight(state: TicketState): boolean {
 }
 
 // the actions that tell a person something, which the loop carries on by itself
-const TELLS: ReadonlySet<Action["kind"]> = new Set(["ping", "design-note"]);
+const TELLS: ReadonlySet<Action["kind"]> = new Set(["ping", "design-note", "held", "blockers-unread"]);
 
 // the actions decide makes of a row it holds back: a wait (a backoff, CI) or the claim given back on a quiet change
 const HELD_KINDS: ReadonlySet<Action["kind"]> = new Set(["wait", "release"]);

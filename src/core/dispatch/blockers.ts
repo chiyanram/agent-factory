@@ -22,13 +22,18 @@ export type BlockerState = BranchState | "unseen";
 export type BlockersView =
   | { readonly kind: "none" }
   | { readonly kind: "waiting"; readonly on: readonly { readonly ticket: string; readonly state: BlockerState }[] }
-  | { readonly kind: "broken"; readonly why: string };
+  | { readonly kind: "broken"; readonly why: string }
+  // the git host did not answer for a blocker this pass, with why; the ticket waits, and after repeated passes a
+  // person looks (#494 AC-7)
+  | { readonly kind: "unread"; readonly why: string };
 
 // what the tick read of one blocker: where its change stands, and its own spec's blockers, for the cycle check
 export type Blocker = {
   readonly ticket: string;
   readonly state: BlockerState;
   readonly blockedBy: readonly string[];
+  // why the git host did not answer for the blocker's branch or issue; absent when it did
+  readonly unread?: string;
 };
 
 const BY_ISSUE: Readonly<Record<IssueState, BlockerState | "branch">> = {
@@ -94,7 +99,13 @@ export function blockersView(ticket: string, blockedBy: readonly string[], read:
     return { kind: "none" };
   }
   const why = brokenWhy(ticket, blockedBy, read);
-  return why === "" ? waiting(blockedBy, read) : { kind: "broken", why };
+  if (why !== "") {
+    return { kind: "broken", why };
+  }
+  const unread = read.filter((b) => blockedBy.includes(b.ticket) && b.unread !== undefined);
+  return unread.length === 0
+    ? waiting(blockedBy, read)
+    : { kind: "unread", why: unread.map((b) => `${b.ticket}: ${b.unread ?? ""}`).join("; ") };
 }
 
 // brokenWhy : why a person must look at the ticket's blockers: itself, a cycle, or one closed with no merge; "". Pure.

@@ -44,6 +44,14 @@ function rendered(ping: Parameters<typeof pingPost>[1]): string {
 }
 const WHERE = { project: "ledger", mark: "#" };
 
+describe("the held ping (#494 AC-10)", () => {
+  it("says what the ticket waits on, and that there is no change yet", () => {
+    const text = rendered({ kind: "held", ticket: "20", change: "none", why: "blocked by 12 (open, not merged)" });
+    expect(text).toContain("20 waits: blocked by 12 (open, not merged)");
+    expect(text).toContain("no change yet");
+  });
+});
+
 describe("the Discord webhook in the token store (#119)", () => {
   it("takes only a Discord webhook URL, and never quotes what was pasted", () => {
     expect(checkWebhook(` ${HOOK}\n`)).toMatchObject({ kind: "ok" });
