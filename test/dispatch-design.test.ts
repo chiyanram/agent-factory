@@ -115,3 +115,53 @@ describe("design findings", () => {
     expect(readDesignFindings({ findings: [{ ...raw("conflict"), verdict: "approve" }] }).kind).toBe("failed");
   });
 });
+
+// #489 (P15, review converges): a re-review only for an Act on CONFLICT, at most 2 rounds, Consider never blocks
+describe("the design review converges (#489)", () => {
+  const OLD = "b".repeat(64);
+  const OLDER = "c".repeat(64);
+  const finding: DesignFinding = {
+    id: "D1",
+    source: "design",
+    decision: "one table",
+    verdict: "conflict",
+    file: "svc/Main.java",
+    line: 1,
+    rule: "SR9",
+    severity: "blocker",
+    grade: "walked",
+    finding: "Main already totals",
+    fix: "reuse Main",
+  };
+  const round = (at: string, spec: string, kept: Extract<Event, { kind: "design-ended" }>["kept"]): Event => ({
+    ...designEnd(at),
+    step: "verify",
+    spec,
+    kept,
+  });
+  const actOn = [{ ...finding, bucket: "act_on" as const, why: "it holds" }];
+  const consider = [{ ...finding, verdict: "open" as const, bucket: "consider" as const, why: "a choice" }];
+
+  it("after an edit, reviews again only when the last round kept an Act on CONFLICT", () => {
+    expect(view([round("2026-11-07T09:02:00Z", OLD, actOn)])).toEqual({
+      kind: "run",
+      step: "review",
+      spec: S,
+      design: D,
+    });
+    // Consider items and opens never block: the person decides on them, with no second review
+    expect(view([round("2026-11-07T09:02:00Z", OLD, consider)])).toEqual({ kind: "done" });
+    expect(view([round("2026-11-07T09:02:00Z", OLD, [])])).toEqual({ kind: "done" });
+  });
+
+  it("stops at 2 rounds: after them the person decides, with no third review", () => {
+    const two = [round("2026-11-07T08:02:00Z", OLDER, actOn), round("2026-11-07T09:02:00Z", OLD, actOn)];
+    expect(view(two)).toEqual({ kind: "done" });
+  });
+
+  it("an approval given before the last round's findings still waits for one after them", () => {
+    const one = [round("2026-11-07T09:02:00Z", OLD, consider)];
+    expect(view(one, "2026-11-07T08:00:00Z")).toEqual({ kind: "early", at: "2026-11-07T09:02:00Z" });
+    expect(view(one, "2026-11-07T09:30:00Z")).toEqual({ kind: "done" });
+  });
+});

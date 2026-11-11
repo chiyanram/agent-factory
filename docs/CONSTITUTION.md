@@ -199,7 +199,9 @@ is guidance.
 **Why:** a claim a run makes about its own work is not evidence; a person approving must see what was proved.
 **How it's checked:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run;
 an Act on finding graded only `cited` settles as Consider. **Today:** the test checks count assertion lines, so a
-weakened assertion passes, and a finding's grade does not change its bucket (#485).
+weakened assertion passes, and a finding's grade does not change its bucket (#485). The design review converges: a
+re-review runs only for an Act on CONFLICT, sees the earlier rounds' decisions, and stops at 2 rounds
+(`test/dispatch-design.test.ts`); the automated code review's next round still gets no earlier findings (#489).
 
 ## P16. One home and one way
 

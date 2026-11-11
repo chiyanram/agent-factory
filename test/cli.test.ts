@@ -71,6 +71,31 @@ describe("agent-factory spec", () => {
     expect(run.err).toContain("Acceptance criteria");
   });
 
+  // #489: checked at spec, before any design review: the planned files' lane, and the spec's own cites
+  it("stops a spec whose planned files need a heavier lane, and one with a cite that does not hold, exit 2", async () => {
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(
+      join(home, "projects", "ledger.json"),
+      JSON.stringify({ lanes: { oneWayDoor: ["db/migration/**"] } }),
+    );
+    writeSpec(SPEC.replace("## Lane", "## Planned files\n\n- db/migration/V2__add.sql\n\n## Lane"));
+    const raised = await cli(["spec", "ledger", "PROJ-1"]);
+    expect(raised.code).toBe(2);
+    expect(raised.err).toContain("the lane is raised from tiny to one-way door");
+    const clone = join(home, "clone");
+    mkdirSync(clone);
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["init", "-q"], { cwd: clone });
+    writeSpec(SPEC.replace("Do the thing.", "Do the thing; see src/a.ts:3@0000000."));
+    const cited = await cli(["spec", "ledger", "PROJ-1"], {
+      FACTORY_HOME: home,
+      FACTORY_REPO: clone,
+      PATH: process.env.PATH,
+    });
+    expect(cited.code).toBe(2);
+    expect(cited.err).toContain("src/a.ts:3@0000000: 0000000 is not a commit in the project's clone");
+  });
+
   it("says how to start when there is no spec, exit 1", async () => {
     const run = await cli(["spec", "ledger", "PROJ-1"]);
     expect(run.code).toBe(1);

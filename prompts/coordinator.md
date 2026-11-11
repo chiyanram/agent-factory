@@ -106,10 +106,16 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    then a verify pass over its conflicts and opens, both read-only, from their role cards (the process plugin's
    `process/roles/`, else the engine's `prompts/roles/`). Each decision gets ALIGNED, CONFLICT or OPEN. What the
    verify pass keeps goes to the pass's log, a note on the ticket's PR when one is open, and a ping; the record keeps
-   it in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl` (`design-ended`). Fix the spec or design for each CONFLICT and
-   bring every OPEN to the human; an edit runs the review again on the next pass. An approval given before the
-   review's findings does not let the build begin: the human approves again after them. Done when nothing is OPEN
-   and the human approves: run `agent-factory spec <project> <ticket>`,
+   it in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl` (`design-ended`). Its findings feed **one grill round** (#489):
+   ask the human every CONFLICT and OPEN at once, recommendation first, and write the answers into the spec. A Consider
+   item never blocks the approval: one the human leaves unanswered goes into the spec's design as a default the
+   implementer may choose and must report as a deviation. The edit reviews again only when the round kept an Act on
+   CONFLICT; the re-review gets every earlier round's findings and decisions and looks only at what changed. After 2
+   rounds there is no further review: the human decides. Cite today's code as `file:line@commit`; `agent-factory spec`
+   and the design review check each cite in the project's clone, and a broken one stops the spec, named. `spec` also
+   stops a spec whose `## Planned files` need a heavier lane than its own. An approval given before the review's
+   findings does not let the build begin: the human approves again after them. Done when the human has answered the
+   round and approves: run `agent-factory spec <project> <ticket>`,
    show them the spec hash and the design hash (`none` with no `design.md` beside the spec), and ask them to run
    `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` in their own terminal. You cannot run it: it
    is on your deny list (#227). It records a local approval bound to both hashes; an edit of the spec or the design

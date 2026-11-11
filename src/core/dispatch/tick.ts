@@ -56,7 +56,7 @@ import {
   type Task,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
-import { designView, type DesignView } from "./design.js";
+import { designView, earlierRounds, type DesignView } from "./design.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
@@ -95,7 +95,14 @@ export type { FailedSpent } from "./spend.js";
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 // what a design review's run reads (#236): the spec and design with these hashes, and for the verify pass the
 // design-reviewer's conflicts and opens
-export type DesignInput = { readonly ticket: string; readonly spec: string; readonly design: string };
+// earlier: every earlier round's kept findings and the verify pass's decision on each, for a re-review (#489); none on a
+// first round
+export type DesignInput = {
+  readonly ticket: string;
+  readonly spec: string;
+  readonly design: string;
+  readonly earlier?: readonly Kept[];
+};
 // how a design review's run ended; its card's hash and what it spent are kept either way
 export type DesignRan<T> = { readonly card: string; readonly spend?: Spend } & (
   | ({ readonly kind: "done" } & T)
@@ -916,6 +923,19 @@ async function failedSpent(
 type DesignAction = Extract<Action, { kind: "design" }>;
 
 // designFindings : the design-reviewer's findings at the action's hashes, which its verify pass checks
+// earlierOf : the earlier rounds' kept findings, as a field to spread on a re-review's input; none on a first round
+// or when the records do not read (the review then runs as a first round)
+async function earlierOf(
+  setup: TickSetup,
+  state: TicketState,
+  a: DesignAction,
+): Promise<{ readonly earlier?: readonly Kept[] }> {
+  const events = await readRecords(where(setup, state), { warn: setup.log, setAside: true });
+  const earlier =
+    events.kind === "ok" ? earlierRounds(events.value, { spec: a.spec, design: a.design }).flatMap((e) => e.kept) : [];
+  return earlier.length === 0 ? {} : { earlier };
+}
+
 async function designFindings(
   setup: TickSetup,
   state: TicketState,
@@ -974,7 +994,9 @@ async function runDesignStep(
   const input = { ticket: state.ticket, spec: a.spec, design: a.design };
   if (a.step === "review") {
     const step = setup.steps.designReview;
-    return step.kind === "available" ? step.run(input) : { kind: "failed", reason: step.reason };
+    return step.kind === "available"
+      ? step.run({ ...input, ...(await earlierOf(setup, state, a)) })
+      : { kind: "failed", reason: step.reason };
   }
   const step = setup.steps.designVerify;
   if (step.kind === "unavailable") {

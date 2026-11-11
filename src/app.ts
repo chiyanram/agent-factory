@@ -3,13 +3,26 @@
 
 import { parseArgs } from "node:util";
 import { readFileSync, realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
 import { openProject, openProjectForge } from "./core/forge/index.js";
 import type { Forge } from "./core/forge/types.js";
-import { checkSpec, designHash, plainName, readSpec, template, type Refused, type SpecStore } from "./core/spec.js";
+import {
+  checkSpec,
+  designHash,
+  designPath,
+  plainName,
+  readSpec,
+  template,
+  type Refused,
+  type Spec,
+  type SpecStore,
+} from "./core/spec.js";
+import { plannedCheck, raisedWhy } from "./core/lane.js";
+import { brokenCites } from "./core/spec-cites.js";
 import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
 import { approvalState, approve } from "./core/approval.js";
 import { start } from "./core/start.js";
@@ -404,8 +417,36 @@ async function specFound(
     io.err(`agent-factory spec: ${design.reason}\n`);
     return 1;
   }
+  const before = await beforeDesignReview(io, at, checked.spec, read.text);
+  if (before.length > 0) {
+    io.err(`agent-factory spec: ${read.where} is not ready:\n${before.map((p) => `  - ${p}\n`).join("")}`);
+    return 2;
+  }
   io.out(`spec ${at.project}/${at.ticket} ${checked.spec.hash} ${read.where}\ndesign ${design.hash}\n`);
   return 0;
+}
+
+// beforeDesignReview : what stops a spec before any design review (#489): a planned file that needs a heavier lane
+// than the spec's (#230), and a `file:line@commit` cite in the spec or its design that does not hold in the project's
+// clone; the cites are checked only when the clone is set
+async function beforeDesignReview(io: Io, at: SpecWhere, read: Spec, text: string): Promise<readonly string[]> {
+  const raise = await plannedCheck({ home: at.home, project: at.project, spec: read });
+  const raised =
+    raise.kind === "failed" ? [raise.reason] : raise.value.kind === "raised" ? [raisedWhy(raise.value)] : [];
+  const clone = settingOf(io.env, "clone") ?? "";
+  const cites = isAbsolute(clone)
+    ? await brokenCites({ repo: clone, env: io.env }, [text, await designTextOf(at)])
+    : [];
+  return [...raised, ...cites];
+}
+
+// designTextOf : the design beside a local spec, or "" when there is none
+async function designTextOf(at: SpecWhere): Promise<string> {
+  if (at.store.kind !== "local") {
+    return "";
+  }
+  const path = designPath({ root: at.store.root, project: at.project, ticket: at.ticket });
+  return path.kind === "path" ? readFile(path.path, "utf8").catch(() => "") : "";
 }
 
 // whoApproves : the OS user and, when set, the operator's own git user.name. A record, not proof: the harness prompt is
