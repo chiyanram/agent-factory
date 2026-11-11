@@ -177,7 +177,8 @@ after two sightings; how a lesson is found and fixed lives in the rules pack's r
 **Kind:** non-negotiable.
 **Why:** an answer lost between runs is work done twice, and any note read as an answer lets a run go on unanswered.
 **How it's checked:** a reply that answers only some questions (`1A` to two questions) keeps the rest open, and the next run
-receives every answer as a field. **Today:** any note after a question counts as its answer (#486).
+receives every answer as a field (`test/answers.test.ts`, `test/dispatch-tick.test.ts`). **Today:** a partial reply is
+not pinged again, and a person's pause or take-over is the `needs-human` label (#486).
 
 ## P14. Only what the step needs
 

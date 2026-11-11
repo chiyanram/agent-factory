@@ -1165,7 +1165,7 @@ describe("the writer's words and settings", () => {
     });
     expect(
       text.startsWith(
-        `${card.value.body}\n\nThis run builds ticket PROJ-1, on branch factory/PROJ-1 at head abc. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design.\n\n${FLOOR}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
+        `${card.value.body}\n\nThis run builds ticket PROJ-1, on branch factory/PROJ-1 at head abc. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design. When .factory/task.md is there, it holds the person's answers to your last questions.\n\n${FLOOR}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
       ),
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);

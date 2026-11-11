@@ -26,6 +26,7 @@ import { appendFile, mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
+import type { Answer } from "../answers.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
 import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
@@ -44,9 +45,10 @@ export type DesignStep = "review" | "verify";
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase" | "cleanup";
 
 // what one writer run is for, and so what the host hands the writer (#171). The record keeps only its mode.
+// answers: the person's answers to the writer's questions, when the run follows an answered round (#486; answers.ts)
 export type Task =
-  | { readonly kind: "test-first" }
-  | { readonly kind: "fix" }
+  | { readonly kind: "test-first"; readonly answers?: readonly Answer[] }
+  | { readonly kind: "fix"; readonly answers?: readonly Answer[] }
   // the ready check failed at this head; why it failed is kept with the head (kept.ts, #199)
   | { readonly kind: "ready-failed"; readonly head: string }
   // the factory's review at this head left Act on findings
@@ -201,7 +203,10 @@ export type Event =
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
   | { readonly at: string; readonly kind: "blocked"; readonly why: string }
   // the shared copy of this approval (shared.ts approvalKey) is on the ticket's PR (#227); it is posted once
-  | { readonly at: string; readonly kind: "shared"; readonly approval: string };
+  | { readonly at: string; readonly kind: "shared"; readonly approval: string }
+  // a person's answers to the writer's questions, as their own event, tied to the spec version they answered (#486,
+  // P13): the spec's hash, or "" when the ticket's lane needs no approval record
+  | { readonly at: string; readonly kind: "answered"; readonly spec: string; readonly answers: readonly Answer[] };
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 
@@ -622,6 +627,22 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good) };
 }
 
+function answerOf(raw: unknown): Answer | undefined {
+  const [question, choice, text] = [prop(raw, "question"), prop(raw, "choice"), prop(raw, "text")];
+  return Number.isSafeInteger(question) && typeof choice === "string" && typeof text === "string"
+    ? { question: Number(question), choice, text }
+    : undefined;
+}
+
+function answeredOf(raw: unknown, at: string): Event | Bad {
+  const spec = str(raw, "spec");
+  const list = prop(raw, "answers");
+  const answers = Array.isArray(list) ? list.map(answerOf) : [undefined];
+  return spec === BAD || answers.some((a) => a === undefined)
+    ? BAD
+    : { at, kind: "answered", spec, answers: answers.filter((a): a is Answer => a !== undefined) };
+}
+
 const PARSE: Readonly<Record<Kind, Parse>> = {
   started: startedOf,
   "writer-ended": writerEndedOf,
@@ -642,6 +663,7 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const approval = str(raw, "approval");
     return approval === BAD ? BAD : { at, kind: "shared", approval };
   },
+  answered: answeredOf,
 };
 
 function parseLine(line: string): unknown {
@@ -950,6 +972,7 @@ const STEPS: Steps = {
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice
   shared: (s) => s,
+  answered: (s) => s,
 };
 
 function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {

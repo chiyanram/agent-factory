@@ -2,7 +2,7 @@
 
 How an approved ticket becomes a pull request ready for a human to merge, which steps code checks and which the model
 only claims, and what is decided next. The full decision table is code: `src/core/dispatch/table.ts`; the
-coordinator's view of it is in [the coordinator's instructions](../../prompts/coordinator.md#triggers).
+coordinator's view of it is in [the orchestrator reference](../reference/orchestrator.md#the-decision-table-and-the-loop).
 
 ## The path
 

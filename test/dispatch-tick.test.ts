@@ -370,6 +370,69 @@ describe("tick", () => {
     expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ spend: { usd: 0.5, tokens: 900 } });
   });
 
+  // AC-3 of #486 (P13): the answers reach the next run as a typed field, kept first as their own event; the approval holds
+  it("after an answered round, the next writer run gets Q1=A, Q2=B, recorded with the spec's hash, under the same approval", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    await record({
+      where,
+      event: { at: "2026-11-07T08:30:00Z", kind: "started", phase: "writer", mode: "fix", head: H, plugins: [] },
+    });
+    await record({
+      where,
+      event: {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "asked",
+        patch: "",
+        evidence: [],
+        hung: false,
+      },
+    });
+    const asked = renderPost({ seat: "writer", title: "OPEN: 2 questions", fields: [], items: ["1. a?", "2. b?"] });
+    const comments = [
+      { author: { name: "ram" }, body: asked.kind === "ok" ? asked.text : "", at: "2026-11-07T09:01:00Z" },
+      { author: { name: "ram" }, body: "1A 2B", at: "2026-11-07T09:30:00Z" },
+    ];
+    const tasks: unknown[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => (
+          tasks.push(input.task),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+        ),
+      },
+    };
+    const changes = { team, open: [open({ comments })], merged: [] };
+    expect(await tick(setup(changes, [], { steps }))).toMatchObject({ kind: "ok" });
+    expect(tasks).toEqual([
+      {
+        kind: "fix",
+        answers: [
+          { question: 1, choice: "A", text: "" },
+          { question: 2, choice: "B", text: "" },
+        ],
+      },
+    ]);
+    const read = await readRecords(where);
+    const events = read.kind === "ok" ? read.value : [];
+    expect(events.map((e) => e.kind)).toEqual([
+      "started",
+      "writer-ended",
+      "shared",
+      "answered",
+      "started",
+      "writer-ended",
+    ]);
+    expect(events.find((e) => e.kind === "answered")).toMatchObject({ spec: specHash(SPEC("feature")) });
+    // the approval still holds: the answered run went ahead under it
+    expect((await goAhead({ home, project: "ledger", ticket: "PROJ-1" })).kind).not.toBe("stale");
+  });
+
   it("a writer run that stops before a change exists: the record, the log and the ping all say why (#62)", async () => {
     await approved();
     const log: string[] = [];

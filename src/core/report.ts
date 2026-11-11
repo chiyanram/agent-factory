@@ -4,7 +4,7 @@
 //
 //   status     done | asked | blocked                      required
 //   evidence   [{criterion, command, result}], at least one  required when done
-//   questions  [{question, choices, recommended}], one to five, required when asked: every open question at once, each
+//   questions  [{question, choices, recommended}], one to twenty, required when asked: every open question at once, each
 //              with 2 to 4 short choices and the index of the recommended one (#320). A plain "…" is still read, for one
 //              release, as a question with no choices; then it is refused.
 //   deviations [{what, why, file, line}], at most ten, done only: each change of a type, signature or file placement
@@ -23,13 +23,15 @@
 import { constants } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
+import { MOST_QUESTIONS } from "./answers.js";
 import { cleanField } from "./post.js";
 
 export const REPORT_PATH = ".factory/report.json";
 export const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_TEXT = 2000;
 const MAX_EVIDENCE = 50;
-const MAX_QUESTIONS = 5;
+// every open question in one round (#486): the whole frontier, up to what one round can hold
+const MAX_QUESTIONS = MOST_QUESTIONS;
 const MAX_DEFERRED = 20;
 const MAX_DEVIATIONS = 10;
 // a question's choices: 2 to 4 short ones, so a person answers with a letter (#320)
@@ -124,7 +126,7 @@ export type ReportFile =
 export const REPORT_INSTRUCTIONS = `When you stop, write ${REPORT_PATH} in the worktree and exit. Never commit it. It is JSON with one "status":
 - "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed. Start each "criterion" with the criterion's id, AC-1 for the first, AC-2 for the second, and so on: a criterion with no row fails the ready check.
   When the code leaves the approved design (a changed type, signature or file placement), add "deviations", a list of {"what", "why", "file", "line"}, at most ten; never edit the design. A change to what an acceptance criterion observes is no deviation: stop with "asked".
-- "asked": add "questions": every question the spec does not answer, all at once in one list, one to five. Each is {"question", "choices", "recommended"}: "choices" is a list of 2 to 4 short answers, and "recommended" is the index of the one you recommend, 0 for the first. Never guess an answer.
+- "asked": add "questions": every question the spec does not answer, all at once in one list, one to twenty. Each is {"question", "choices", "recommended"}: "choices" is a list of 2 to 4 short answers, and "recommended" is the index of the one you recommend, 0 for the first. Never guess an answer.
 - "blocked": add "blocker", what stops you. Commit the work you have first.
 No other field. A missing or malformed report counts as blocked.`;
 

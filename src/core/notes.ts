@@ -10,13 +10,15 @@
 //
 //   agent   the factory's identity, and a seat prefix on line 1
 //   person  anyone else, or the factory's identity with no seat prefix (the developer typing a reply)
-// An ask is an agent note whose first line starts "[coordinator] OPEN:" or "[writer] OPEN:". It stays open until a
-// person who is a project member writes after it. Logins are compared without case, and notes are ordered by the
+// An ask is an agent note whose first line starts "[coordinator] OPEN:" or "[writer] OPEN:". It stays open until the
+// notes of project members after it name a choice for every question it asks (answers.ts, #486): a reply that answers
+// some, a note that is itself a question, or a bot's note keeps it open. Logins are compared without case, and notes are ordered by the
 // instant they were written.
 //
 // Agent commits carry an "Agent: <seat>" trailer, so the history shows which commits an agent made even under the
 // developer's own login. commitKind reads it as git reads trailers, so what it counts is what `git log` shows.
 
+import { questionsIn, roundOf, type Answer, type Round } from "./answers.js";
 import type { Seat } from "./post.js";
 
 export type Author = { readonly name: string };
@@ -81,16 +83,49 @@ function when(at: string, kind: NoteKind): number {
   return isAsk(kind) ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
 }
 
-// openAsks : how many asks have no member's note after them. Notes are taken in time order, by the instant, not the
-// text, since a forge may write "+01:00" or leave out the milliseconds.
+type Read = { readonly note: Note; readonly kind: NoteKind; readonly time: number };
+
+// inOrder : every note with its kind, by the instant it was written, not the text of its time, since a forge may
+// write "+01:00" or leave out the milliseconds
+function inOrder(request: { readonly notes: readonly Note[]; readonly readers: Readers }): readonly Read[] {
+  return request.notes
+    .map((note) => {
+      const kind = classify({ note, readers: request.readers });
+      return { note, kind, time: when(note.at, kind) };
+    })
+    .toSorted((a, b) => a.time - b.time);
+}
+
+// rounds : each ask, in time order, with where its round stands: answered once the members' notes after it name a
+// choice for every question it asked (answers.ts, #486)
+function rounds(request: { readonly notes: readonly Note[]; readonly readers: Readers }): readonly Round[] {
+  const read = inOrder(request);
+  return read.flatMap((r, i) => {
+    if (!isAsk(r.kind)) {
+      return [];
+    }
+    const replies = read
+      .slice(i + 1)
+      .filter((x) => isMemberReply(x.kind))
+      .map((x) => x.note.body);
+    return [roundOf(questionsIn(r.note.body), replies)];
+  });
+}
+
+// openAsks : how many asks are not answered yet: a member's note after an ask closes it only when, with the members'
+// other notes after it, it names a choice for every question the ask holds (#486; answers.ts)
 export function openAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
-  const kinds = request.notes
-    .map((note) => classify({ note, readers: request.readers }))
-    .map((kind, i) => ({ kind, time: when(request.notes[i]!.at, kind) }))
-    .sort((a, b) => a.time - b.time)
-    .map((entry) => entry.kind);
-  const lastReply = kinds.map(isMemberReply).lastIndexOf(true);
-  return kinds.filter((kind, i) => i > lastReply && isAsk(kind)).length;
+  return rounds(request).filter((r) => r.kind === "open").length;
+}
+
+// lastAnswers : the newest ask's answers, when it is answered; none while it is open, or with no ask at all. The next
+// writer run receives them as a typed field (#486).
+export function lastAnswers(request: {
+  readonly notes: readonly Note[];
+  readonly readers: Readers;
+}): readonly Answer[] {
+  const last = rounds(request).at(-1);
+  return last?.kind === "answered" ? last.answers : [];
 }
 
 const SEATS: readonly Seat[] = ["writer", "reviewer", "coordinator"];
