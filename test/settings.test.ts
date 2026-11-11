@@ -145,7 +145,7 @@ describe("settings golden: no team file and no user file resolve to today's valu
     const path = writeProject(fileText);
     const raw = Object(parsedOrUndefined(fileText));
     // what the readers made of the file before the layers
-    expect(await readProjectFile({ home, project: "ledger" })).toEqual(readyFieldsOf(path, raw));
+    expect(await readProjectFile({ home, project: "ledger" })).toEqual(readyFieldsOf(path, raw, process.env));
     expect(await readPluginConfig({ home, project: "ledger" })).toEqual(pluginConfigOf(path, raw));
     expect(await readProjectRaw({ home, project: "ledger" }, "")).toEqual({ kind: "ok", path, value: raw });
     // and every file key's resolved value is the file's own, or the reader's default

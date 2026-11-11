@@ -64,8 +64,8 @@ async function resolved(io: SettingsIo, loaded: Loaded, team?: Read): Promise<La
 }
 
 // readerErrors : what the project file's own readers refuse in the resolved settings
-function readerErrors(path: string, effective: object): readonly Problem[] {
-  const ready = readyFieldsOf(path, effective);
+function readerErrors(path: string, effective: object, env: NodeJS.ProcessEnv): readonly Problem[] {
+  const ready = readyFieldsOf(path, effective, env);
   const connectors = pluginConfigOf(path, effective);
   const plugins = pluginListOf(path, effective);
   return [ready, connectors, plugins].flatMap((r) =>
@@ -90,8 +90,8 @@ async function processProblems(
   return found.kind === "failed" ? [{ level: "error", text: found.reason }] : [];
 }
 
-function allProblems(path: string, layers: Layered): readonly Problem[] {
-  return [...layers.problems, ...readerErrors(path, layers.effective)];
+function allProblems(path: string, layers: Layered, env: NodeJS.ProcessEnv): readonly Problem[] {
+  return [...layers.problems, ...readerErrors(path, layers.effective, env)];
 }
 
 function valueText(r: Resolved): string {
@@ -179,7 +179,7 @@ export async function checkProblems(
     return loaded;
   }
   const layers = await layered({ home: io.home, env: io.env, project: loaded.value });
-  return { kind: "ok", value: allProblems(loaded.value.path, layers) };
+  return { kind: "ok", value: allProblems(loaded.value.path, layers, io.env) };
 }
 
 // candidateProblems : what config check would find in a project file not yet written (init checks before it writes)
@@ -192,7 +192,7 @@ export async function candidateProblems(
   if (loaded.kind === "failed") {
     return [{ level: "error", text: loaded.reason }];
   }
-  return allProblems(path, await layered({ home: io.home, env: io.env, project: loaded.value }));
+  return allProblems(path, await layered({ home: io.home, env: io.env, project: loaded.value }), io.env);
 }
 
 async function check(io: SettingsIo, project: string): Promise<number> {
@@ -203,7 +203,7 @@ async function check(io: SettingsIo, project: string): Promise<number> {
   }
   const layers = await resolved(io, loaded.value);
   const problems = [
-    ...allProblems(loaded.value.path, layers),
+    ...allProblems(loaded.value.path, layers, io.env),
     ...(await processProblems(io.home, project, loaded.value.path, layers.effective)),
   ];
   printProblems(io, problems);
@@ -269,7 +269,7 @@ async function updateTo(io: SettingsIo, u: Update): Promise<number> {
   const after = await resolved(io, u.loaded, await readTeamAt(io.home, next, io.env));
   const lines = changes(before.values, after.values);
   io.out(lines.length === 0 ? "no resolved value changes\n" : lines.map((l) => `${l}\n`).join(""));
-  const problems = allProblems(u.loaded.path, after);
+  const problems = allProblems(u.loaded.path, after, io.env);
   printProblems(io, problems);
   if (problems.some((p) => p.level === "error")) {
     io.err(`agent-factory team update: the check failed; the pin stays at ${u.pin.commit.slice(0, 12)}\n`);

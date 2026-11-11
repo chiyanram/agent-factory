@@ -648,11 +648,13 @@ describe("boxPlan", () => {
   });
 
   it("refuses the srt runner on an empty allowlist, the project's git host on it, a relative CA path, or a runner that does not answer", async () => {
-    // the project's own git host is refused on the list too, as the Squid proxy refuses it
+    // the project's own git host is refused on the list too, as the Squid proxy refuses it: already when the project
+    // file is read, so no plan is made (#485)
     write("ledger.json", { ...LOCAL, egress: { allow: ["gitlab.corp.example"] } });
-    expect(await planFor([], { FACTORY_BOX: "srt", FACTORY_FORGE_HOST: "gitlab.corp.example" })).toMatchObject(
-      reason("a git host"),
-    );
+    expect(await planFor([], { FACTORY_BOX: "srt", FACTORY_FORGE_HOST: "gitlab.corp.example" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("a git host"),
+    });
     write("ledger.json", LOCAL);
     expect(await planFor([], { FACTORY_BOX: "srt" })).toMatchObject(reason('no "egress.allow"'));
     write("ledger.json", { ...LOCAL, egress: { allow: ["api.anthropic.com"] } });

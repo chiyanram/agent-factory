@@ -152,6 +152,7 @@ export type Steps = {
               readonly split?: RoundSpend;
               readonly acted?: Acted;
               readonly lenses?: Readonly<Record<string, number>>;
+              readonly citesNotFound?: number;
             }>
           | FailedSpent
         >;
@@ -868,6 +869,7 @@ function reviewEnded(
     readonly split?: RoundSpend;
     readonly acted?: Acted;
     readonly lenses?: Readonly<Record<string, number>>;
+    readonly citesNotFound?: number;
   },
 ): Promise<Done> {
   return record({
@@ -881,6 +883,7 @@ function reviewEnded(
       ...(value.split === undefined ? {} : { split: value.split }),
       ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
+      ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });

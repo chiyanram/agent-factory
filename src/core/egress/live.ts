@@ -15,6 +15,8 @@ import type { Started } from "./start.js";
 export type LiveInput = {
   readonly setup: BoxSetup;
   readonly allowlist: readonly string[];
+  // the project's own git host, refused on the list besides the public ones (allowlist.ts)
+  readonly gitHosts: readonly string[];
   readonly docker: { readonly run: Runner; readonly bin: string; readonly env: NodeJS.ProcessEnv };
   readonly ports: readonly number[];
   readonly modelHost: string;
@@ -48,7 +50,7 @@ async function checksFor(
   input: LiveInput,
   egress: Extract<Started, { kind: "started" }>,
 ): Promise<readonly LiveCheck[]> {
-  const list = parseAllowlist(input.allowlist);
+  const list = parseAllowlist(input.allowlist, input.gitHosts);
   return liveChecks({
     proxy: egress.proxy,
     hosts: list.kind === "ok" ? list.hosts : [],

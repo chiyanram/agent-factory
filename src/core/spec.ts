@@ -16,10 +16,10 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { LANES, type Lane } from "./lane-order.js";
 import { cleanField } from "./post.js";
 
-export const LANES = ["tiny", "bug", "feature", "one-way door"] as const;
-export type Lane = (typeof LANES)[number];
+export { LANES, type Lane } from "./lane-order.js";
 
 export type Spec = {
   readonly title: string;
