@@ -135,7 +135,7 @@ function trailerBlock(message: string): readonly Trailer[] {
   const paragraphs = message
     .replace(/\r\n?/g, "\n")
     .trim()
-    .split(/\n[ \t]*\n/);
+    .split(/\n(?:[ \t]*\n)+/);
   if (paragraphs.length < 2) {
     return [];
   }
