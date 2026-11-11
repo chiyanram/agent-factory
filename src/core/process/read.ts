@@ -5,6 +5,7 @@
 //
 //   <plugin>/skills/<skill>/process/lanes.json    {"lanes": [{"lane": "tiny", "approval": false, "lenses": "1", …}, …]}
 //   <plugin>/skills/<skill>/process/review.json   {"baseline": [{"skill": "crq", "reference": "review-process"}, …]}
+//   <plugin>/skills/<skill>/process/quarantine.json  the checks a person quarantined (quarantine.ts, #485); optional
 //
 // The plugin's "lane" is the engine's lane name. Every lanes value comes through lanesOf (lane.ts), which refuses one
 // that drops the approval floor, so a bad lanes file stops the run rather than loosening it. Before that, the lanes
@@ -18,6 +19,7 @@ import { prop } from "../dispatch/records.js";
 import { DEFAULT_LANES, lanesOf, type LaneProps } from "../lane.js";
 import { BASELINE, type Pointer } from "../review/rules.js";
 import { packProblem, readPackSchemas } from "./pack-schema.js";
+import { quarantineOf, type Quarantined } from "./quarantine.js";
 
 export type Process = {
   // where it came from, as a person reads it
@@ -26,9 +28,17 @@ export type Process = {
   readonly dir: string;
   readonly lanes: readonly LaneProps[];
   readonly baseline: readonly Pointer[];
+  // the checks a person quarantined (quarantine.ts, #485); none when the process has no quarantine.json
+  readonly quarantine: readonly Quarantined[];
 };
 
-export const BUILT_IN: Process = { from: "the built-in process", dir: "", lanes: DEFAULT_LANES, baseline: BASELINE };
+export const BUILT_IN: Process = {
+  from: "the built-in process",
+  dir: "",
+  lanes: DEFAULT_LANES,
+  baseline: BASELINE,
+  quarantine: [],
+};
 
 // one plugin on disk: what to call it, and its folder
 export type PluginDir = { readonly label: string; readonly dir: string };
@@ -123,15 +133,37 @@ async function baselineAt(dir: string): Promise<Result<readonly Pointer[]>> {
   return baselineOf(path, raw.value);
 }
 
+async function quarantineAt(dir: string): Promise<Result<readonly Quarantined[]>> {
+  const path = join(dir, "quarantine.json");
+  const raw = await jsonAt(path);
+  if (raw.kind !== "ok") {
+    return raw.kind === "none" ? { kind: "ok", value: [] } : raw;
+  }
+  return quarantineOf(raw.value, path);
+}
+
 async function processAt(label: string, plugin: string, dir: string): Promise<Result<Process>> {
   const lanes = await lanesAt(dir);
   if (lanes.kind === "failed") {
     return lanes;
   }
   const baseline = await baselineAt(dir);
-  return baseline.kind === "ok"
-    ? { kind: "ok", value: { from: `${label} (${dir})`, dir: plugin, lanes: lanes.value, baseline: baseline.value } }
-    : baseline;
+  if (baseline.kind === "failed") {
+    return baseline;
+  }
+  const quarantine = await quarantineAt(dir);
+  return quarantine.kind === "ok"
+    ? {
+        kind: "ok",
+        value: {
+          from: `${label} (${dir})`,
+          dir: plugin,
+          lanes: lanes.value,
+          baseline: baseline.value,
+          quarantine: quarantine.value,
+        },
+      }
+    : quarantine;
 }
 
 // one plugin that holds a process, and its process folder

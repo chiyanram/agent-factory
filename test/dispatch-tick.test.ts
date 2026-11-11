@@ -696,6 +696,50 @@ describe("tick", () => {
     expect(pings).toHaveLength(1);
   });
 
+  // #485 (#456 decision 3): a red check is a fail, never re-run by the factory; only a person quarantines one
+  it("a red head whose every failed job a person quarantined reads as passed and is shown; an expired one blocks", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const events: readonly Event[] = [
+      {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "cleanup",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence: [],
+        hung: false,
+      },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
+      { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+    ];
+    for (const event of events) {
+      await record({ where, event });
+    }
+    const changes = { team, open: [open({ pipeline: { kind: "failed" } })], merged: [] };
+    const red = (log: string[]): Forge => ({
+      ...forge(changes, log),
+      failedJobs: async () => ({ kind: "ok", value: [{ name: "e2e-firefox", log: { kind: "none", why: "no log" } }] }),
+    });
+    const entry = { check: "e2e-firefox", owner: "ram", expires: "2026-11-30", ticket: "#512" };
+    const held: string[] = [];
+    await tick({ ...setup(changes, held), forge: red(held), quarantine: [entry], dryRun: true });
+    expect(held).toContain(
+      "log PROJ-1: red, but quarantined by a person: e2e-firefox (owner ram, until 2026-11-30, #512); it does not block",
+    );
+    expect(held.some((l) => l.includes("ping"))).toBe(true);
+    const expired: string[] = [];
+    await tick({
+      ...setup(changes, expired),
+      forge: red(expired),
+      quarantine: [{ ...entry, expires: "2026-11-06" }],
+      dryRun: true,
+    });
+    expect(expired.some((l) => l.includes("quarantined"))).toBe(false);
+    expect(expired.some((l) => l.includes("writer"))).toBe(true);
+  });
+
   it("a review round records its Act on count, what it spent (#131) and each lens's unique findings (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };

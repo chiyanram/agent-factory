@@ -24,8 +24,8 @@ swappable part, are in [Connectors](../reference/connectors.md).
 - **A plugin is a normal Claude Code plugin.** Its skills and references are what the runs read. The rulebook
   (`rulebook@chiyanram`, from [chiyanram/skills](https://github.com/chiyanram/skills)) is one plugin, not a dependency.
 - **The process plugin** is the one listed plugin that holds `skills/<skill>/process/lanes.json`
-  (`src/core/process/read.ts`). It gives the lanes, the review baseline (`review.json`) and the role cards
-  (`process/roles/<role>.md`). A lanes file that drops the approval for any lane above tiny stops the run.
+  (`src/core/process/read.ts`). It gives the lanes, the review baseline (`review.json`), the checks a person
+  quarantined (`quarantine.json`) and the role cards (`process/roles/<role>.md`). A lanes file that drops the approval for any lane above tiny stops the run.
 - **One process plugin per project.** A second listed plugin with a process is an error: `config check` names both
   plugins, and a run stops on it rather than take the first (#426).
 - **A plugin that is not pinned**, or whose stored copy no longer has its hash, stops the pass.

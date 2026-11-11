@@ -125,8 +125,10 @@ there.
   (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
   each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
   pass. The one plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
-  the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
-  the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
+  the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline), the
+  quarantined checks (`quarantine.json`: `{"quarantine": [{"check", "owner", "expires": "YYYY-MM-DD", "ticket"}]}`; a red
+  head whose every failed job is quarantined and unexpired does not block, and each pass logs it; the factory never
+  re-runs a red check, #485) and the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
   and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
   above tiny stops the pass, and so does a second plugin that holds a process; `config check` names both (#426).
   **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not

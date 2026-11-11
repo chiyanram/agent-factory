@@ -47,6 +47,7 @@ import { writerStep } from "./core/writer/step.js";
 import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
 import { readProcess, type PluginDir } from "./core/process/read.js";
 import type { LaneProps } from "./core/lane.js";
+import type { Quarantined } from "./core/process/quarantine.js";
 import { readyPrograms, readyStep, verifyStep, type BoxPlan } from "./core/ready/steps.js";
 import { designSteps } from "./core/design/step.js";
 import { designSetup } from "./core/design/settings.js";
@@ -677,6 +678,7 @@ type Planned = {
   readonly steps: Steps;
   readonly plugins: readonly PluginHash[];
   readonly lanes: readonly LaneProps[];
+  readonly quarantine: readonly Quarantined[];
 };
 
 type Project = { readonly forge: Forge; readonly identity: Identity };
@@ -798,6 +800,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
       steps,
       plugins: hashesOf(used.value.plugins),
       lanes: own.value.lanes,
+      quarantine: own.value.quarantine,
       ...programsOf(plan),
     },
   };
