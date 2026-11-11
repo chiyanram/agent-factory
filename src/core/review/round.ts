@@ -27,7 +27,7 @@ import { goAhead } from "../start.js";
 import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
-import { checkCites } from "../cite-check.js";
+import { checkCites, citesNotFound } from "../cite-check.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
@@ -118,6 +118,8 @@ export type Outcome =
       readonly acted: Acted | "none";
       // per lens that ran, its verified findings no other lens reported (#237)
       readonly lenses: Readonly<Record<string, number>>;
+      // the findings the cite check noted as "cite not found" (#485)
+      readonly citesNotFound: number;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -864,6 +866,7 @@ async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outc
           tokens: result.spent.find + result.spent.verify,
           acted,
           lenses: result.lenses,
+          citesNotFound: citesNotFound(result.sorted),
         },
       }
     : summary;

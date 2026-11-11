@@ -7,23 +7,33 @@
 import { hostGit } from "./git.js";
 import type { Bucket } from "./finding.js";
 
-type Cited = { readonly file: string; readonly line: number; readonly bucket: Bucket; readonly why: string };
+type Cite = { readonly file: string; readonly line: number; readonly lineEnd?: number };
+type Cited = Cite & { readonly bucket: Bucket; readonly why: string };
 
 // the start of the why a finding with a missing cite settles with; a person and a test read it
 export const CITE_NOT_FOUND = "cite not found";
 
 // citeProblem : why a cite does not exist, given the file's line count at the commit (undefined: no such file); "" when
 // it exists or the finding cites no file. Pure.
-export function citeProblem(cite: { readonly file: string; readonly line: number }, lines: number | undefined): string {
+// A range "N-M" is checked by its end line M.
+export function citeProblem(cite: Cite, lines: number | undefined): string {
   if (cite.file === "") {
     return "";
   }
-  if (lines === undefined) {
-    return `${cite.file} is not in the reviewed commit`;
-  }
-  return cite.line <= lines
-    ? ""
-    : `${cite.file}:${cite.line} is past the end of the file (${lines} line${lines === 1 ? "" : "s"})`;
+  return lines === undefined ? `${cite.file} is not in the reviewed commit` : pastEnd(cite, lines);
+}
+
+// pastEnd : why a cite runs past the file's last line, or "" when it does not. Pure.
+function pastEnd(cite: Cite, lines: number): string {
+  const end = cite.lineEnd ?? cite.line;
+  const shown = cite.lineEnd === undefined ? `${cite.line}` : `${cite.line}-${cite.lineEnd}`;
+  const count = `${lines} line${lines === 1 ? "" : "s"}`;
+  return end <= lines ? "" : `${cite.file}:${shown} is past the end of the file (${count})`;
+}
+
+// citesNotFound : how many findings the cite check noted as "cite not found", for the run record. Pure.
+export function citesNotFound(findings: readonly { readonly why: string }[]): number {
+  return findings.filter((f) => f.why.startsWith(`${CITE_NOT_FOUND}:`)).length;
 }
 
 // citeChecked : a settled finding, moved out of Act on or Consider to noted when its cite does not exist. Pure.
@@ -75,14 +85,16 @@ async function linesAt(
   return out;
 }
 
-// checkCites : every finding, each cite checked at the reviewed commit
+// checkCites : every finding, each cite checked at the reviewed commit; a file `own` names (the design review's spec.md
+// and design.md, which are no file of the repo) is checked against its own text instead
 export async function checkCites<F extends Cited>(
   at: { readonly repo: string; readonly env: NodeJS.ProcessEnv; readonly sha: string },
   findings: readonly F[],
+  own: Readonly<Record<string, string>> = {},
 ): Promise<readonly F[]> {
-  const lines = await linesAt(
-    at,
-    findings.map((f) => f.file),
-  );
-  return findings.map((f) => citeChecked(f, lines.get(f.file)));
+  const inRepo = findings.map((f) => f.file).filter((f) => !Object.hasOwn(own, f));
+  const lines = await linesAt(at, inRepo);
+  const linesOf = (file: string): number | undefined =>
+    Object.hasOwn(own, file) ? lineCount(own[file] ?? "") : lines.get(file);
+  return findings.map((f) => citeChecked(f, linesOf(f.file)));
 }

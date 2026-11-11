@@ -278,24 +278,46 @@ async function verify(
           : verdicts;
       }),
     };
-  }).then((ran) => citesChecked(setup, ran));
+  }).then((ran) => citesChecked(setup, input, ran));
 }
 
-// citesChecked : the kept findings, each file:line checked at the default branch the review read; a cite that is not
-// there is noted as "cite not found", so it neither blocks nor is posted as a finding (#485)
+// citesChecked : the kept findings, each file:line checked at the default branch the review read, and a cite of the
+// run's spec.md or design.md against that text; a cite that is not there is noted as "cite not found", so it neither
+// blocks nor is posted as a finding (#485)
 async function citesChecked(
   setup: DesignSetup,
+  input: DesignInput,
   ran: Awaited<ReturnType<typeof verify>>,
 ): Promise<Awaited<ReturnType<typeof verify>>> {
   if (ran.kind !== "ok" || ran.value.kind !== "done" || ran.value.kept.length === 0) {
     return ran;
   }
+  const at = await citeBase(setup, input);
+  return at.kind === "ok"
+    ? { kind: "ok", value: { ...ran.value, kept: await checkCites(at.value.at, ran.value.kept, at.value.own) } }
+    : ran;
+}
+
+// citeBase : the default branch's commit the review read, and the spec's and design's own text
+async function citeBase(
+  setup: DesignSetup,
+  input: DesignInput,
+): Promise<
+  Result<{
+    readonly at: { readonly repo: string; readonly env: NodeJS.ProcessEnv; readonly sha: string };
+    readonly own: Readonly<Record<string, string>>;
+  }>
+> {
   const sha = await git(setup, ["rev-parse", "--verify", "-q", "refs/factory/design-base^{commit}"]);
   if (sha.kind === "failed") {
-    return ran;
+    return sha;
   }
-  const kept = await checkCites({ repo: setup.repo, env: setup.env, sha: sha.value }, ran.value.kept);
-  return { kind: "ok", value: { ...ran.value, kept } };
+  const read = await texts(setup, input);
+  if (read.kind === "failed") {
+    return read;
+  }
+  const own = { "spec.md": read.value.spec, ...(read.value.design === "" ? {} : { "design.md": read.value.design }) };
+  return { kind: "ok", value: { at: { repo: setup.repo, env: setup.env, sha: sha.value }, own } };
 }
 
 // designSteps : the design review's two steps, or why they cannot run here

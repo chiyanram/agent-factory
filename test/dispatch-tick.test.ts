@@ -713,6 +713,7 @@ describe("tick", () => {
             spend: { usd: 0.3, tokens: 40 },
             split: SPLIT,
             lenses: { errors: 1, api: 0 },
+            citesNotFound: 1,
           },
         }),
       },
@@ -725,6 +726,8 @@ describe("tick", () => {
       spend: { usd: 0.3, tokens: 40 },
       split: SPLIT,
       lenses: { errors: 1, api: 0 },
+      // the findings the cite check noted (#485)
+      citesNotFound: 1,
     });
   });
 
@@ -746,6 +749,11 @@ describe("tick", () => {
     writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: 2 } })}\n`);
     expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, lenses: { errors: 2 } }] });
     writeFileSync(path, `${JSON.stringify({ ...base, lenses: { errors: "two" } })}\n${ping}`);
+    expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    // the cite check's count (#485): kept; one that is not a whole number fails the read
+    writeFileSync(path, `${JSON.stringify({ ...base, citesNotFound: 2 })}\n`);
+    expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, citesNotFound: 2 }] });
+    writeFileSync(path, `${JSON.stringify({ ...base, citesNotFound: -1 })}\n${ping}`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
     // the round's spend per run (#337): kept; a split whose finders are not spends by lens fails the read
     writeFileSync(path, `${JSON.stringify({ ...base, split: SPLIT })}\n`);

@@ -26,6 +26,8 @@ export type FindingCore = {
   readonly grade: Grade;
   readonly finding: string;
   readonly fix: string;
+  // the last line of a cited range "N-M", when the finding gave one; the cite check reads it (#485)
+  readonly lineEnd?: number;
 };
 
 // the core's part of a finder's JSON schema
@@ -58,6 +60,14 @@ function textOf(value: unknown, clean: (text: string) => string): string | undef
 function lineOf(raw: unknown): number | undefined {
   const n = firstLine(get(raw, "line"));
   return Number.isSafeInteger(n) && Number(n) >= 0 ? Number(n) : undefined;
+}
+
+// lineEndOf : the end of a cited range "N-M" when it is past N; undefined for a single line. Pure.
+function lineEndOf(raw: unknown): number | undefined {
+  const line = get(raw, "line");
+  const end = typeof line === "string" ? /^(\d+)-(\d+)$/.exec(line) : null;
+  const [from, to] = end === null ? [0, 0] : [Number(end[1]), Number(end[2])];
+  return to > from ? to : undefined;
 }
 
 // firstLine : a line as given, or the first line of "N" or "N-M" text. Pure.
@@ -96,9 +106,10 @@ export function coreOf(raw: unknown, id: string, clean: (text: string) => string
   const texts = textsOf(raw, clean);
   const line = lineOf(raw);
   const weight = weightOf(raw);
+  const end = lineEndOf(raw);
   return texts === undefined || line === undefined || weight === undefined
     ? undefined
-    : { id, ...texts, line, ...weight };
+    : { id, ...texts, line, ...(end === undefined ? {} : { lineEnd: end }), ...weight };
 }
 
 // ---- the verify pass

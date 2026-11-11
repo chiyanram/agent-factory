@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkCites, citeChecked, citeProblem, lineCount } from "../src/core/cite-check.js";
+import { checkCites, citeChecked, citeProblem, citesNotFound, lineCount } from "../src/core/cite-check.js";
+import { coreOf } from "../src/core/finding.js";
 import { tempDir } from "./temp.js";
 
 type F = {
@@ -43,6 +44,20 @@ describe("citeProblem and citeChecked: pure", () => {
     expect(citeChecked(f({ bucket: "consider", line: 9 }), 3).bucket).toBe("noted");
     expect(citeChecked(f({}), 3)).toEqual(f({}));
     expect(citeChecked(f({ bucket: "dismissed" }), undefined)).toEqual(f({ bucket: "dismissed" }));
+  });
+
+  it('checks a range by its end line, read from the finding\'s "N-M"', () => {
+    expect(citeProblem({ file: "a.ts", line: 2, lineEnd: 3 }, 3)).toBe("");
+    expect(citeProblem({ file: "a.ts", line: 2, lineEnd: 5 }, 3)).toBe(
+      "a.ts:2-5 is past the end of the file (3 lines)",
+    );
+    const raw = { file: "a.ts", rule: null, severity: "warning", grade: "walked", finding: "f", fix: "x" };
+    expect(coreOf({ ...raw, line: "2-5" }, "F1", (t) => t)).toMatchObject({ line: 2, lineEnd: 5 });
+    expect(coreOf({ ...raw, line: "2" }, "F1", (t) => t)).not.toHaveProperty("lineEnd");
+  });
+
+  it("counts the findings noted as cite not found, for the run record", () => {
+    expect(citesNotFound([f({}), f({ why: "cite not found: x" }), f({ why: "cite not found: y" })])).toBe(2);
   });
 
   it("counts a file's lines, with or without a last newline", () => {
@@ -86,5 +101,18 @@ describe("checkCites: at the reviewed commit, through git", () => {
       ["odd", "noted"],
     ]);
     expect(checked[2]?.why).toBe("cite not found: a.ts:5 is past the end of the file (3 lines)");
+  });
+
+  it("checks a file the caller holds the text of against that text, not the commit", async () => {
+    const own = { "spec.md": "# spec\n\n1. one\n" };
+    const checked = await checkCites(
+      { repo, env: process.env, sha },
+      [f({ id: "in", file: "spec.md", line: 3 }), f({ id: "past", file: "spec.md", line: 4 })],
+      own,
+    );
+    expect(checked.map((c) => [c.id, c.bucket])).toEqual([
+      ["in", "act_on"],
+      ["past", "noted"],
+    ]);
   });
 });

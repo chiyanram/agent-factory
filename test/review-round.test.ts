@@ -377,7 +377,7 @@ describe("reviewRound", () => {
       [],
     );
     const out = await reviewRound(setup(forge(log), m));
-    expect(out).toMatchObject({ value: { counts: { act_on: 1, consider: 0, noted: 2 } } });
+    expect(out).toMatchObject({ value: { counts: { act_on: 1, consider: 0, noted: 2 }, citesNotFound: 2 } });
     expect(log.threads).toHaveLength(1);
     const summary = log.posts.at(-1) ?? "";
     expect(summary).toContain(
@@ -912,6 +912,7 @@ describe("reviewStep", () => {
       value: {
         actOn: 1,
         lenses: { baseline: 1 },
+        citesNotFound: 0,
         spend: { usd: 0.2, tokens: 20 },
         // and per run: the finder's by its lens, and the verify pass's (#337)
         split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.1, tokens: 10 } },

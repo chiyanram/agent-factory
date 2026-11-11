@@ -151,6 +151,25 @@ describe("the design review's runs (#236)", () => {
     ]);
   });
 
+  it("checks a cite of the spec or the design against their own text, not the repo (#485)", async () => {
+    const verdicts = {
+      verdicts: ["D1", "D2", "D3"].map((id) => ({ id, bucket: "act_on", why: "it holds" })),
+    };
+    const steps = designSteps({ kind: "ok", value: setup(model([], [verdicts])) });
+    if (steps.designVerify.kind !== "available") throw new Error("unavailable");
+    const findings: readonly DesignFinding[] = [
+      { ...FINDING, id: "D1", file: "spec.md", line: 3 },
+      { ...FINDING, id: "D2", file: "design.md", line: 3 },
+      { ...FINDING, id: "D3", file: "design.md", line: 40 },
+    ];
+    const kept = done(await steps.designVerify.run({ ...input(), findings })).kept;
+    expect(kept.map((k) => [k.id, k.bucket])).toEqual([
+      ["D1", "act_on"],
+      ["D2", "act_on"],
+      ["D3", "noted"],
+    ]);
+  });
+
   it("a spec edited since the pass decided fails the run and runs no model; a bad answer fails it with its spend", async () => {
     const seen: Seen[] = [];
     const steps = designSteps({
