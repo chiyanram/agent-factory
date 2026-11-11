@@ -78,7 +78,12 @@ function watched(fake: FakeBox, seen: string[][]): Box {
   };
 }
 
-function plan(box: Box, file: ProjectFile = PROJECT, egress: EgressStarted = EGRESS): BoxPlan {
+function plan(
+  box: Box,
+  file: ProjectFile = PROJECT,
+  egress: EgressStarted = EGRESS,
+  more: NodeJS.ProcessEnv = {},
+): BoxPlan {
   return {
     kind: "ready",
     project: file,
@@ -90,7 +95,7 @@ function plan(box: Box, file: ProjectFile = PROJECT, egress: EgressStarted = EGR
         return egress;
       },
       repo: p.clone,
-      env: { ...p.env, GITHUB_TOKEN: "host-only" },
+      env: { ...p.env, GITHUB_TOKEN: "host-only", ...more },
       runsDir: join(p.root, "box-runs"),
     },
   };
@@ -129,8 +134,8 @@ function input(
 
 const row = (command: string, criterion = "AC1"): Evidence => ({ criterion, command, result: "ok" });
 
-async function ready(box: Box, evidence: readonly Evidence[], at = head) {
-  const step = readyStep(plan(box), statusForge([]), NO_WAIVER);
+async function ready(box: Box, evidence: readonly Evidence[], at = head, more: NodeJS.ProcessEnv = {}) {
+  const step = readyStep(plan(box, PROJECT, EGRESS, more), statusForge([]), NO_WAIVER);
   return step.kind === "available" ? step.run(input(evidence, at)) : step;
 }
 
@@ -810,11 +815,17 @@ describe("evidence that can prove its criterion (#444)", () => {
         return { kind: "exited", code: 0, stdout, stderr: "" };
       },
     };
-    const out = await ready(box, [
+    const rows = [
       said("git diff --name-only main...HEAD", "svc/Extra.java"),
       said("git status --porcelain", "", "AC-2"),
       said("git rev-parse HEAD", head, "AC-3"),
-    ]);
+    ];
+    // ledger#5 (#62): on a git whose default branch is main, the fresh copy's unborn HEAD is main, and fetching the
+    // default branch into it was refused; the same rows pass there too
+    const mainFirst = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "init.defaultBranch", GIT_CONFIG_VALUE_0: "main" };
+    expect(await ready(box, rows, head, mainFirst)).toMatchObject({ kind: "ok", value: { passed: true } });
+    outputs.length = 0;
+    const out = await ready(box, rows);
     expect(out).toMatchObject({ kind: "ok", value: { passed: true } });
     // the branch's own files, not main's Makefile, which the branch merged in
     expect(outputs[0]?.split("\n")).toContain("svc/Extra.java");
