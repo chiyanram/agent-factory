@@ -45,7 +45,11 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 1. **Intake.** Small and clear: one ticket. Foggy or big: a map and its tickets. Ready: step 2.
 2. **Grill.** Ask every open question at once, in one numbered round: each with 2 to 4 short choices and the one you
    recommend first, worded so "yes" accepts it (ADR-0017 Questions). Restate what is decided. Once the draft PR
-   exists, post the round as one `[coordinator] OPEN: <n> questions` note. Only a real answer closes it: a reply that
+   exists, write the round as a JSON list of `{question, choices, recommended}` (`recommended` is the index, 0 for the
+   first) in `$FACTORY_HOME/specs/<project>/<ticket>/questions.json` and post it with
+   `agent-factory grill <project> <pr> <sha> <file>`: one `[coordinator] OPEN: <n> questions` note with an item per
+   question (#517). Never post a round with `status`: a one-line round holds no question, so it never closes. Only a
+   real answer closes it: a reply that
    names a choice for every question (`1A 2C`, `1: EUR` on its own line, or `accept all`). A reply that answers some
    keeps the rest open; ask once more for those. A note that is itself a question, or a bot's note, answers nothing.
    An answer that adds, drops or changes an acceptance criterion goes into the spec, and the approval goes stale; any

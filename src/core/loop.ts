@@ -17,7 +17,8 @@
 
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { NEEDS_HUMAN, pushOnTop, type Pusher } from "./finish.js";
+import { NEEDS_HUMAN, pushOnTop, questionRound, type Pusher } from "./finish.js";
+import type { Question } from "./report.js";
 import type { Done, Result } from "./forge/api.js";
 import type { Change, Forge } from "./forge/types.js";
 import { hostGit } from "./git.js";
@@ -88,6 +89,9 @@ type Note = {
   readonly title: (text: string) => string;
   readonly what: string;
   readonly verb: string;
+  // the note's fields and items, for a round of questions (grill); none for a one-line note
+  readonly fields?: Post["fields"];
+  readonly items?: Post["items"];
 };
 
 function checkAtHead(input: AtHead, note: Note): string {
@@ -108,7 +112,12 @@ async function postAt(input: AtHead, note: Note, change: Change): Promise<Result
   if (stale !== "") {
     return failed(stale);
   }
-  const post: Post = { seat: note.seat, title: note.title(input.text), fields: [], items: [] };
+  const post: Post = {
+    seat: note.seat,
+    title: note.title(input.text),
+    fields: note.fields ?? [],
+    items: note.items ?? [],
+  };
   const posted = await input.forge.note({ number: input.number, post });
   return posted.kind === "ok"
     ? { kind: "ok", value: `${note.verb} ${at(input.forge, input.number)} at ${change.sha.slice(0, 8)}` }
@@ -132,6 +141,26 @@ export function status(input: AtHead): Promise<Result<string>> {
 
 export function ask(input: AtHead): Promise<Result<string>> {
   return noteAtHead(input, { seat: "writer", title: (t) => `OPEN: ${t}`, what: "a question", verb: "asked" });
+}
+
+// grill : the coordinator's round of questions (#517), one [coordinator] OPEN: N questions note with an item per
+// question in the writer's form (finish.ts questionRound), so it stays open until a member answers each; the same head
+// rule as status
+export function grill(
+  input: Omit<AtHead, "text"> & { readonly questions: readonly Question[] },
+): Promise<Result<string>> {
+  const round = questionRound(input.questions);
+  return noteAtHead(
+    { ...input, text: round.title },
+    {
+      seat: "coordinator",
+      title: (t) => t,
+      what: "a round of questions",
+      verb: `asked ${input.questions.length} question(s) on`,
+      fields: [round.answer],
+      items: round.items,
+    },
+  );
 }
 
 export type Block = Claimed & { readonly reason: string; readonly log: string };

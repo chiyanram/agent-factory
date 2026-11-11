@@ -319,6 +319,20 @@ function counted(n: number): string {
   return n === 1 ? "1 question" : `${n} questions`;
 }
 
+// questionRound : a numbered round of questions as one OPEN note's title, how to answer, and its items, the one form
+// answers.ts reads back, for the writer's round here and the coordinator's (loop.ts grill, #517). Pure.
+export function questionRound(questions: readonly Question[]): {
+  readonly title: string;
+  readonly answer: PostField;
+  readonly items: readonly string[];
+} {
+  return {
+    title: `OPEN: ${counted(questions.length)}`,
+    answer: { label: "answer", value: howToAnswer(questions) },
+    items: questions.map(asking),
+  };
+}
+
 // askPost : the one OPEN note: every question as a numbered round, or with one-at-a-time only the first, saying how
 // many wait. One plain question keeps its old form, the question as the title. Pure.
 function askPost(input: FinishInput, questions: readonly Question[]): Post {
@@ -329,13 +343,8 @@ function askPost(input: FinishInput, questions: readonly Question[]): Post {
   if (posted.length === 1 && only?.kind === "plain") {
     return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...waiting], items: [] };
   }
-  const answer: PostField = { label: "answer", value: howToAnswer(posted) };
-  return {
-    seat: "writer",
-    title: `OPEN: ${counted(posted.length)}`,
-    fields: [...run, answer, ...waiting],
-    items: posted.map(asking),
-  };
+  const round = questionRound(posted);
+  return { seat: "writer", title: round.title, fields: [...run, round.answer, ...waiting], items: round.items };
 }
 
 async function asked(input: FinishInput, questions: readonly Question[]): Promise<Result<Next>> {

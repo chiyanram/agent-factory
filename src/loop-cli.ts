@@ -6,7 +6,8 @@
 // settings are read (core/which-project.ts), so a wrong word prints the usage and nothing else.
 
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { headed } from "./core/dispatch/last-poll.js";
 import type { Result } from "./core/forge/api.js";
 import { forgeHost, openProject } from "./core/forge/index.js";
@@ -15,7 +16,8 @@ import { hostPush } from "./core/push.js";
 import type { PushTarget } from "./core/writer/step.js";
 import type { Forge } from "./core/forge/types.js";
 import { lintEdit } from "./core/lint-edit.js";
-import { ask, block, claim, reconcile, release, status, type AtHead } from "./core/loop.js";
+import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
+import { questionsIn, type Question } from "./core/report.js";
 import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
 import { claudeSessions } from "./core/review/live.js";
 import { runInFolder } from "./core/review/model.js";
@@ -39,6 +41,7 @@ const USAGE: Readonly<Record<string, string>> = {
   release: "release [<project>] <number>",
   status: 'status [<project>] <number> <sha> "<line>"',
   ask: 'ask [<project>] <number> <sha> "<question>"',
+  grill: "grill [<project>] <number> <sha> <questions file>",
   block: 'block [<project>] <number> "<reason>" [<log>]',
   reconcile: "reconcile [<project>]",
   "lint-edit": "lint-edit '<lint command>'",
@@ -120,6 +123,51 @@ function atHead(name: "status" | "ask", positionals: readonly string[]): Parsed 
   return name === "status"
     ? (io) => onForge(name, io, (forge, label) => withLiveness(io, forge, label, status({ forge, number, sha, text })))
     : (io) => onForge(name, io, (forge) => ask({ forge, number, sha, text } satisfies AtHead));
+}
+
+// grillParsed : grill's words: the change, its head, and the questions file
+function grillParsed(positionals: readonly string[]): Parsed {
+  const number = numberOf(positionals[0]);
+  if (number === "bad" || positionals.length !== 3) {
+    return "usage";
+  }
+  const [sha, file] = [word(positionals, 1), word(positionals, 2)];
+  return async (io) => {
+    const questions = await questionsFrom(io.env, file);
+    if (questions.kind === "failed") {
+      io.err(`agent-factory grill: ${questions.reason}\n`);
+      return 2;
+    }
+    return onForge("grill", io, (forge) => grill({ forge, number, sha, questions: questions.value }));
+  };
+}
+
+// questionsFrom : the round's questions, from a file under <home>/specs, the one folder the coordinator writes; a file
+// anywhere else is refused, so grill reads no other file (#517)
+export async function questionsFrom(env: NodeJS.ProcessEnv, file: string): Promise<Result<readonly Question[]>> {
+  const home = homeOf(env);
+  if (home.kind === "failed") {
+    return home;
+  }
+  const specs = join(home.value, "specs");
+  const real = await realpath(resolve(file)).catch(() => "");
+  const root = await realpath(specs).catch(() => "");
+  if (real === "" || root === "" || !real.startsWith(`${root}${sep}`)) {
+    return { kind: "failed", reason: `the questions file must be a file under ${specs}, got ${JSON.stringify(file)}` };
+  }
+  return questionsOfText(await readFile(real, "utf8").catch(() => ""));
+}
+
+// questionsOfText : the questions a file's JSON holds, checked as a report's are. Pure.
+function questionsOfText(text: string): Result<readonly Question[]> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { kind: "failed", reason: "the questions file is not JSON" };
+  }
+  const read = questionsIn(parsed);
+  return read.kind === "ok" ? { kind: "ok", value: read.value } : { kind: "failed", reason: read.problem };
 }
 
 // homeOf : the factory's home, as dispatch reads it; a relative FACTORY_HOME is refused
@@ -221,6 +269,7 @@ export const LOOP_COMMANDS: Readonly<Record<string, (positionals: readonly strin
   release: (p) => claimed("release", p),
   status: (p) => atHead("status", p),
   ask: (p) => atHead("ask", p),
+  grill: grillParsed,
   block: blocked,
   reconcile: reconcileParsed,
 };
@@ -235,6 +284,10 @@ export const LOOP_HELP = `  claim [<project>] <number>   add the claim label to 
                                and a loop is meant to be running; with no loop, that none runs
   ask [<project>] <number> <sha> "<question>"
                                post one [writer] OPEN: note, an open ask until a person answers; the same head rule
+  grill [<project>] <number> <sha> <questions file>
+                               post the coordinator's round: one [coordinator] OPEN: N questions note with an item per
+                               question, open until a member answers each (#517); the file, under <home>/specs, is a JSON
+                               list of {question, choices (2 to 4), recommended (the index)}, 1 to 20; the same head rule
   block [<project>] <number> "<reason>" [<log>]
                                label needs-human, post one [coordinator] blocked: note, then release the claim
   reconcile [<project>]        release each claim with no live run or on a merged change; remove each run's worktree

@@ -1,10 +1,11 @@
 // coordinator — the coordinator's wall as harness settings (#106; ADR-0012 S2). The coordinator talks with the person,
-// reads the factory's state and posts one status line; it holds no forge login of its own, edits only spec drafts,
+// reads the factory's state, posts one status line or its round of questions; it holds no forge login of its own, edits only spec drafts,
 // and never its own settings. The rules are built here, once, for Claude Code (settings.json) and for Copilot CLI
 // (flags), and `agent-factory setup coordinator` writes them where `agent-factory coordinator` starts the session.
 //
-//   allow   the factory's read commands, `agent-factory status`, and `agent-factory request`, which the project's
-//           policy checks, caps and cleans in code (#134)
+//   allow   the factory's read commands, `agent-factory status`, `agent-factory grill` (its numbered round of
+//           questions, #517), and `agent-factory request`, which the project's policy checks, caps and cleans in code
+//           (#134)
 //   ask     `agent-factory confirm` (the prompt shows the exact text of a kept write; the yes sends it), and, Today,
 //           the old loop commands, so none runs without a yes; they become deny once the orchestrator runs every step
 //           (#113)
@@ -43,7 +44,7 @@ export type CoordinatorPlaces = {
 
 // the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
 // that the policy decides in code
-const READS = ["poll", "spec", "approval", "status", "request", "--help", "--version"];
+const READS = ["poll", "spec", "approval", "status", "grill", "request", "--help", "--version"];
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
