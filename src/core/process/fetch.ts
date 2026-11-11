@@ -130,6 +130,24 @@ async function stored(s: {
 }
 
 // changedFiles : what a new version adds, removes and changes, by path, from both versions' file lines. Pure.
+// FOLDER_DEPTH : how many path parts name a folder in a first pin's count (skills/crq, not each references file)
+const FOLDER_DEPTH = 2;
+
+// folderCounts : a first pin's files as one "+ N files in <folder>" line per folder, so a person reads the plugin's
+// shape, not every file; a later pin shows each changed file (changedFiles) (#482, ledger pilot row 12). Pure.
+export function folderCounts(files: readonly string[]): readonly string[] {
+  const counts = new Map<string, number>();
+  for (const line of files) {
+    const path = line.slice(line.indexOf(" ", 2) + 1);
+    const parts = path.split("/");
+    const folder = parts.length > 1 ? parts.slice(0, Math.min(FOLDER_DEPTH, parts.length - 1)).join("/") : ".";
+    counts.set(folder, (counts.get(folder) ?? 0) + 1);
+  }
+  return [...counts]
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([folder, n]) => `+ ${n} ${n === 1 ? "file" : "files"} in ${folder}`);
+}
+
 export function changedFiles(before: readonly string[], after: readonly string[]): readonly string[] {
   const byPath = (lines: readonly string[]): Map<string, string> =>
     new Map(lines.map((l) => [l.slice(l.indexOf(" ", 2) + 1), l.slice(0, l.indexOf(" ", 2))]));
