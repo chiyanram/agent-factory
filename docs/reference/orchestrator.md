@@ -68,9 +68,12 @@ A `[writer] OPEN:` note asks one numbered round, each question with its lettered
 "(no choices: answer in words)" ([`src/core/answers.ts`](../../src/core/answers.ts)). Only a project member's notes after it count, and
 a note that ends with `?` counts for nothing. The round closes once those notes name an answer for every question:
 `1A 2C` or `1A2C` on a line of answers alone, one per line as `1: A` or `1. B` (with words after the letter if they
-like: `1: A, cheaper`), `1: <words>` for a question with no choices, or `accept all` for the recommended choices. A
-whole reply answers only a round of one question with no choices. Prose never reads as a choice: `we ship 2 a day`
-answers nothing. Replies add up, and a later valid answer to a question replaces an earlier one.
+like, after punctuation: `1: A, cheaper`), `1: <words>` for a question with no choices, or `accept all` for the
+recommended choices. A whole reply answers only a round of one question with no choices. Prose never reads as a
+choice: `we ship 2 a day` answers nothing, and neither does `1. a bit risky`, since a letter followed by words is words
+(#517). Replies add up, and a later valid answer to a question replaces an earlier one. A round whose title names a
+number of questions its items do not hold, none included, never closes: `poll` shows it as `malformed_asks=N`, and
+the way on is to delete that note (#517).
 
 The answers come only from the newest `[writer] OPEN:` round; a `[coordinator] OPEN:` note holds the change open but
 gives the implementer nothing. Each answer reaches the next implementer run as a typed field with the question, the

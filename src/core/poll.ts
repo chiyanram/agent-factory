@@ -12,6 +12,7 @@
 //                else no; "undated" when its time does not parse. The dispatcher holds the change while that stop is
 //                newer than the ticket's local approval, so approving again lifts it.
 //   asks         [coordinator] OPEN: and [writer] OPEN: notes with no note from a project member after them (#128)
+//   malformed_asks  shown only when an open ask is malformed: a round whose items do not match its title (#517)
 //   conflict     yes when the change does not merge into its target as it stands, no when it does, unknown while the
 //                git host has not checked it yet (#103)
 //
@@ -23,7 +24,7 @@
 // review comments or review bodies.
 
 import type { Answer } from "./answers.js";
-import { classify, lastAnswers, openAsks, type Note, type Readers } from "./notes.js";
+import { classify, lastAnswers, malformedAsks, openAsks, type Note, type Readers } from "./notes.js";
 import type { Quarantined } from "./process/quarantine.js";
 import type { Result } from "./forge/api.js";
 import type { Changes, Forge, Mergeable, OpenChange, Person, Pipeline } from "./forge/types.js";
@@ -49,6 +50,8 @@ export type OpenLine = {
   readonly needsHuman: boolean;
   readonly stop: Stop;
   readonly asks: number;
+  // how many of the open asks are malformed (#517): they hold the change until a person deletes the note; none when 0
+  readonly malformed?: number;
   // the newest ask's answers once every question is answered (#486); none while it is open or with no ask
   readonly answers?: readonly Answer[];
   readonly mergeable: Mergeable;
@@ -122,6 +125,7 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
     needsHuman: change.labels.includes("needs-human"),
     stop: stop({ comments: change.comments, readers, maintainers }),
     asks: openAsks({ notes: change.comments, readers }),
+    ...malformedField(malformedAsks({ notes: change.comments, readers })),
     ...answersField(lastAnswers({ notes: change.comments, readers })),
     mergeable: change.mergeable,
   };
@@ -167,8 +171,17 @@ export function format(input: { readonly line: PollLine; readonly mark: string }
   return (
     `${mark}${line.number} head=${line.head.slice(0, 8)} draft=${yn(line.draft)} claimed=${yn(line.claimed)}` +
     ` pipeline=${pipelineWord(line.pipeline)} needs_human=${yn(line.needsHuman)} stop=${stopped} asks=${line.asks}` +
-    ` conflict=${CONFLICT_WORD[line.mergeable]}`
+    ` conflict=${CONFLICT_WORD[line.mergeable]}${malformedWord(line.malformed)}`
   );
+}
+
+function malformedField(n: number): { readonly malformed?: number } {
+  return n === 0 ? {} : { malformed: n };
+}
+
+// malformedWord : the malformed asks on poll's line, named so a person knows which note to delete (#517); "" for none
+function malformedWord(n: number | undefined): string {
+  return n === undefined ? "" : ` malformed_asks=${n} (an OPEN round whose items do not match its title: delete it)`;
 }
 
 // poll : the forge's open and merged changes, decided. The factory's login comes from the forge, or with an App from its

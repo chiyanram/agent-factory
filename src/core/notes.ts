@@ -18,7 +18,7 @@
 // Agent commits carry an "Agent: <seat>" trailer, so the history shows which commits an agent made even under the
 // developer's own login. commitKind reads it as git reads trailers, so what it counts is what `git log` shows.
 
-import { askedIn, roundOf, writerAsk, type Answer, type Round } from "./answers.js";
+import { roundIn, roundOf, writerAsk, type Answer, type Round } from "./answers.js";
 import type { Seat } from "./post.js";
 
 export type Author = { readonly name: string };
@@ -110,7 +110,8 @@ function rounds(request: { readonly notes: readonly Note[]; readonly readers: Re
       .slice(i + 1)
       .filter((x) => isMemberReply(x.kind))
       .map((x) => x.note.body);
-    return [{ writer: writerAsk(r.note.body), round: roundOf(askedIn(r.note.body), replies) }];
+    const ask = roundIn(r.note.body);
+    return [{ writer: writerAsk(r.note.body), round: roundOf(ask.asked, replies, ask.malformed) }];
   });
 }
 
@@ -118,6 +119,12 @@ function rounds(request: { readonly notes: readonly Note[]; readonly readers: Re
 // other notes after it, it names a choice for every question the ask holds (#486; answers.ts)
 export function openAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
   return rounds(request).filter((r) => r.round.kind === "open").length;
+}
+
+// malformedAsks : how many asks are malformed (answers.ts roundIn): each holds the change until a person deletes it
+// (#517)
+export function malformedAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
+  return rounds(request).filter((r) => r.round.kind === "open" && r.round.malformed !== undefined).length;
 }
 
 // lastAnswers : the newest writer ask's answers, when it is answered; none while it is open, or with no writer ask at
