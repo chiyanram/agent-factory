@@ -147,6 +147,12 @@ describe("commit trailer", () => {
     expect(commitKind({ message: thin })).toEqual({ kind: "person" });
   });
 
+  it("reads the last paragraph after any number of blank lines, as git does", () => {
+    for (const message of ["fix: x\n\n\nAgent: writer", "fix: x\n\nBody.\n \n\t\n\nAgent: writer\n"]) {
+      expect(commitKind({ message })).toEqual({ kind: "agent", seat: "writer" });
+    }
+  });
+
   it("a folded line continues the trailer above it", () => {
     expect(commitKind({ message: "fix: x\n\nCo-Authored-By: a\n  <a@a>\nAgent: coordinator" })).toEqual({
       kind: "agent",

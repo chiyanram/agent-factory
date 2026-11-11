@@ -111,7 +111,7 @@ Two rules follow from this, decided on 2026-11-10:
 - **Enforced: the implementer reads only what it is given.** A private home per run; on srt your whole home is hidden
   but the folders allowed back ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
 - **Enforced: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
-  `!`, `://` and `www.` are broken with an invisible joiner; Markdown and Jira markup characters are escaped
+  `!`, `GH-` before a digit, `://` and every `www.` are broken with an invisible joiner; Markdown and Jira markup characters are escaped
   (`src/core/post.ts`, #126). The PR body's `.factory/pr.md` goes through its own cleaner (`src/core/pr-body.ts`,
   #335): no raw HTML, no mention, no closing keyword, no link off the project's git host, capped length.
 - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any

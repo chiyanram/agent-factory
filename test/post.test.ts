@@ -21,8 +21,8 @@ const J = "\u2060"; // the word joiner cleanField puts after a trigger character
 // What a forge would act on in posted text. Each check is a pattern of the plain characters the forge needs; a word
 // joiner or a backslash in between breaks it.
 const MENTION = /(^|[^\w])@[A-Za-z0-9_]/; // GitHub, GitLab
-const REFERENCE = /(#|!)\d/; // #12, !12, owner/repo#12: what a closing keyword and a link both need
-const LINK = /(:\/\/|\bwww\.)/; // any scheme, and GitHub's www. autolink
+const REFERENCE = /(#|!|\bGH-)\d/i; // #12, !12, owner/repo#12, GH-12: what a closing keyword and a link both need
+const LINK = /(:\/\/|www\.)/i; // any scheme, and GitHub's www. autolink, which also starts after "_", "*", "~" or "("
 const SPAN_OR_LINK = /(^|[^\\])[`[\]{}|]/; // an unescaped Markdown or Jira link, image, macro or code-span character
 const HTML = /[<>]/;
 
@@ -85,6 +85,8 @@ describe("cleanField", () => {
       "see !42",
       "resolves https://github.com/o/r/issues/1",
       "\\fixes #1",
+      "Fixes GH-12",
+      "see gh-7",
     ]) {
       inert(cleanField(text));
     }
@@ -95,6 +97,8 @@ describe("cleanField", () => {
       "see https://evil.example/x?a=1",
       "ftp://evil.example/x",
       "www.evil.example/p",
+      "_www.evil.example/p",
+      "*WWW.evil.example/p",
       "a@b.example",
       "\\https://evil.example/x",
     ]) {

@@ -10,8 +10,9 @@
 //   - one line: line breaks and runs of white space become one space; control and invisible format characters go
 //   - "\" is escaped first, so no later escape can be undone
 //   - "@" (mentions, e-mail links), "#" and "!" (issue and merge-request references, and so closing keywords; Jira
-//     images) get an invisible word joiner (U+2060) after them, and "://" and "www." (links) one inside, so no forge sees a
-//     mention, a reference or a link
+//     images) get an invisible word joiner (U+2060) after them, "GH-" before a digit (GitHub's other reference form) one
+//     after its hyphen, and "://" and every "www." (links, even after "_") one inside, so no forge sees a mention, a
+//     reference or a link
 //   - HTML is escaped; "[", "]", "{", "}", "|" and "`" get a backslash, so no Markdown or Jira link, image, macro or
 //     code span forms
 //   - a field never starts with "/", and it is capped in length after all of this, with "…" when cut
@@ -86,7 +87,8 @@ export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): 
     .replace(/[[\]{}|`]/g, "\\$&")
     .replace(/[@#!]/g, `$&${JOIN}`)
     .replace(/:\/\//g, `:${JOIN}//`)
-    .replace(/\b(www)\./gi, `$1${JOIN}.`);
+    .replace(/(www)\./gi, `$1${JOIN}.`)
+    .replace(/(gh)-(?=\d)/gi, `$1-${JOIN}`);
   const capped = cut(inert, limit);
   return capped.startsWith("/") ? `\\${capped}` : capped;
 }
