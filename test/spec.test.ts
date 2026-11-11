@@ -83,6 +83,41 @@ describe("checkSpec", () => {
   });
 });
 
+// #494: an optional "## Blocked by" names the tickets whose merge this one waits for
+describe("checkSpec: Blocked by (#494)", () => {
+  const withBlocked = (body: string) => `${GOOD}\n## Blocked by\n\n${body}\n`;
+  const blockedBy = (text: string): readonly string[] | string => {
+    const r = checkSpec(text);
+    return r.kind === "ok" ? r.spec.blockedBy : r.problems.join("\n");
+  };
+
+  it("reads none when the section is absent, empty, a placeholder or none", () => {
+    expect(blockedBy(GOOD)).toEqual([]);
+    expect(blockedBy(withBlocked("none"))).toEqual([]);
+    expect(blockedBy(withBlocked("- <a ticket that must be merged first>"))).toEqual([]);
+  });
+
+  it("reads one ticket per line: a list marker, backticks and a leading # dropped, each once", () => {
+    expect(blockedBy(withBlocked("- PROJ-12\n* `PROJ-13`\n1. #20\n- PROJ-12"))).toEqual(["PROJ-12", "PROJ-13", "20"]);
+  });
+
+  it("refuses a line that is not one ticket, naming it", () => {
+    expect(blockedBy(withBlocked("- PROJ-12 and PROJ-13"))).toContain(
+      `the '## Blocked by' line "PROJ-12 and PROJ-13" is not one ticket: write one per line`,
+    );
+    expect(blockedBy(withBlocked("- ../PROJ-1"))).toContain("is not one ticket");
+  });
+
+  it("the template carries the section, and its placeholder names no ticket", () => {
+    expect(template("PROJ-9")).toContain("## Blocked by");
+    const filled = template("PROJ-9").replace(
+      "<a ticket that must be merged before this one is built, one per line; leave out the section for none>",
+      "<x>",
+    );
+    expect(filled).toContain("## Blocked by\n\n- <x>");
+  });
+});
+
 describe("checkSpec refuses what the human could not see or the template does not say", () => {
   const invalid = (text: string): string => {
     const r = checkSpec(text);
