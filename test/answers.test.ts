@@ -75,7 +75,11 @@ describe("answersIn", () => {
         { question: 2, choice: "B" },
       ],
     });
-    expect(roundOf(words, ["EUR", "thanks, will do"])).toMatchObject({ answers: [{ text: "thanks, will do" }] });
+    // a plain reply answers once: a later "Thanks" never replaces it; a later "1: …" line does
+    expect(roundOf(words, ["EUR", "Thanks"])).toMatchObject({ answers: [{ text: "EUR" }] });
+    expect(roundOf(words, ["EUR", "Thanks", "1: GBP after all"])).toMatchObject({
+      answers: [{ text: "GBP after all" }],
+    });
   });
 });
 

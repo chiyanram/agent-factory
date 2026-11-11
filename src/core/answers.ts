@@ -9,7 +9,8 @@
 //   a plain reply       only when the round asked one question with no choices: the whole reply is its answer
 //
 // Replies add up: "1A" and later "2B" answer a round of two, and a later valid answer to a question replaces an earlier
-// one; a note that answers nothing replaces nothing. A note that is itself a question (it ends with "?") never counts,
+// one; a note that answers nothing replaces nothing. A plain reply answers only once: a later plain reply ("Thanks")
+// never replaces it, and only a later "1: …" line does. A note that is itself a question (it ends with "?") never counts,
 // and only a project member's note is read at all (notes.ts; bots and strangers are not members, and the git host's
 // system notes never reach here). Prose never reads as a choice: "we ship 2 a day" names no answer.
 //
@@ -159,14 +160,21 @@ function acceptAll(asked: readonly Asked[]): readonly Answer[] {
 
 // answersIn : the answers one member's reply gives to a round. Pure.
 export function answersIn(body: string, asked: readonly Asked[]): readonly Answer[] {
+  return replyOf(body, asked).answers;
+}
+
+type Reply = { readonly answers: readonly Answer[]; readonly whole: boolean };
+
+// replyOf : a reply's answers, and whether they are the whole reply read as the one question's answer. Pure.
+function replyOf(body: string, asked: readonly Asked[]): Reply {
   if (isQuestion(body) || body.trim() === "") {
-    return [];
+    return { answers: [], whole: false };
   }
   if (ACCEPT_ALL.test(body)) {
-    return acceptAll(asked);
+    return { answers: acceptAll(asked), whole: false };
   }
   const given = body.split(/\r?\n/).flatMap((line) => lineAnswers(line, asked));
-  return given.length === 0 ? wholeReply(body, asked) : given;
+  return given.length === 0 ? { answers: wholeReply(body, asked), whole: true } : { answers: given, whole: false };
 }
 
 // wholeReply : the whole reply answers a round of one question with no choices; nothing else. Pure.
@@ -181,12 +189,19 @@ export type Round =
   | { readonly kind: "answered"; readonly answers: readonly Answer[] }
   | { readonly kind: "open"; readonly answered: number; readonly count: number };
 
+// addReply : a reply's answers over the earlier ones: each replaces an earlier answer, but a plain reply never does
+function addReply(byQuestion: Map<number, Answer>, reply: Reply): void {
+  for (const answer of reply.answers.filter((a) => !(reply.whole && byQuestion.has(a.question)))) {
+    byQuestion.set(answer.question, answer);
+  }
+}
+
 // roundOf : one round, from the replies after it in time order: a later valid answer to a question replaces an earlier
 // one. Pure.
 export function roundOf(asked: readonly Asked[], replies: readonly string[]): Round {
   const byQuestion = new Map<number, Answer>();
-  for (const answer of replies.flatMap((r) => answersIn(r, asked))) {
-    byQuestion.set(answer.question, answer);
+  for (const reply of replies.map((r) => replyOf(r, asked))) {
+    addReply(byQuestion, reply);
   }
   const answers = [...byQuestion.values()].toSorted((a, b) => a.question - b.question);
   return answers.length === asked.length

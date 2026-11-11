@@ -317,12 +317,12 @@ function answersOn(s: TicketState): readonly Answer[] {
 // after : the writer's next run once the last one ended; "next" when it finished its work
 function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): Action | "next" {
   // the answers ride on every run until one finishes done: a run that asked, or one that was blocked after the answer,
-  // gets them again (#486 review)
+  // gets them again, and a test-first run that ended done hands them to the fix run after it (#486 review)
   if (w.outcome !== "done") {
     return { kind: "writer", task: answered(s, nextTask(s)), why: AGAIN[w.outcome] };
   }
   return w.mode === "test-first"
-    ? { kind: "writer", task: { kind: "fix" }, why: "the failing test is in; now the fix" }
+    ? { kind: "writer", task: answered(s, { kind: "fix" }), why: "the failing test is in; now the fix" }
     : "next";
 }
 

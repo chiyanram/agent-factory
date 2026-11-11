@@ -136,7 +136,7 @@ type Names = { readonly ticket: string; readonly branch: string; readonly head: 
 // the run's own task, in the engine's words, by its mode
 const TASKS: Readonly<Record<RunMode, (n: Names) => string>> = {
   "test-first": (n) =>
-    `This run writes the failing test for the bug in ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md.`,
+    `This run writes the failing test for the bug in ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md. When .factory/task.md is there, it holds the person's answers to your last questions.`,
   fix: (n) =>
     `This run builds ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design. When .factory/task.md is there, it holds the person's answers to your last questions.`,
   rework: (n) =>

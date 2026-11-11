@@ -241,6 +241,21 @@ describe("decide: one row each", () => {
     expect(decide(state({ change, runs: ended("done") }))).not.toMatchObject({ task: { answers } });
   });
 
+  it("a bug-lane test-first run that asked, was answered and ended done hands the answers to the fix run (#486)", () => {
+    const answers = [{ question: 1, choice: "A", text: "", asked: "which store?", chosen: "a file" }];
+    const bug = { kind: "approved", at: APPROVED_AT, lane: "bug", testFirst: true } as const;
+    const testIn = wrote({
+      lastWriter: { kind: "ended", mode: "test-first", head: H, outcome: "done", patch: "t1", evidence: [] },
+      testFirstDone: true,
+    });
+    expect(
+      decide(state({ approval: bug, change: { kind: "open", line: line({ answers }) }, runs: testIn })),
+    ).toMatchObject({
+      kind: "writer",
+      task: { kind: "fix", answers },
+    });
+  });
+
   it("a run that ended with no change open goes to a person, never back to the writer (a closed change)", () => {
     expect(decide(state({ change: { kind: "none" } }))).toMatchObject({
       kind: "needs-human",

@@ -1154,6 +1154,20 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
 });
 
 describe("the writer's words and settings", () => {
+  it("points the test-first and fix runs at the person's answers in .factory/task.md (#486)", async () => {
+    const card = await readCard([], "implementer");
+    if (card.kind !== "ok") throw new Error(card.reason);
+    for (const mode of ["test-first", "fix"] as const) {
+      const text = runPrompt({
+        card: card.value,
+        mode,
+        names: { ticket: "PROJ-1", branch: "factory/PROJ-1", head: "abc", base: "main" },
+        tools: [],
+      });
+      expect(text).toContain("When .factory/task.md is there, it holds the person's answers to your last questions.");
+    }
+  });
+
   it("builds the prompt from the role card: its body, the run's task, the floor, the project's instructions and tools, then the report's schema (#232)", async () => {
     const card = await readCard([], "implementer");
     if (card.kind !== "ok") throw new Error(card.reason);
