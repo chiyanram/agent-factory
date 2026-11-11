@@ -116,7 +116,12 @@ has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the 
 STARTs again or approves the spec again; the newer of the two records starts every count afresh (#227). A stop whose
 reason no longer holds, such as a rework that changed only its evidence rows (the ready check runs them, #444), goes on
 once the label is removed. The build
-begins only on a human's word: a START in the tiny lane, a START and an approval in the others. An approval with no
+begins only on a human's word: a START in the tiny lane, a START and an approval in the others. A spec's `## Blocked by`
+holds the first build (no implementer run yet) until each blocker is merged, read through the git host seam: its
+`factory/<ticket>` change merged, or, for a ticket that is a git host issue, the issue closed as completed (on GitLab,
+which keeps no close reason, only when a merged PR closes or mentions it). A blocker closed with no merge,
+the ticket itself or a cycle in the `Blocked by` sections goes to `needs-human`; the build then starts from the default
+branch, never another ticket's branch (#494). An approval with no
 START waits, since nothing runs without one. In a lane with a design review, the design-reviewer and its verify pass
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
 fails is tried again after the same backoff, three times, then waits for a person (#236), and one that fails for good

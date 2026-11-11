@@ -452,6 +452,68 @@ describe("tick", () => {
     expect((await goAhead({ home, project: "ledger", ticket: "PROJ-1" })).kind).not.toBe("stale");
   });
 
+  // #494: the tick reads each blocker's change through the Forge seam
+  async function blockedBy(blocker: string): Promise<{ runs: string[]; steps: Steps }> {
+    await approved();
+    const path = join(home, "specs", "ledger", "PROJ-1", "spec.md");
+    const text = `${readFileSync(path, "utf8")}\n## Blocked by\n\n- ${blocker}\n`;
+    writeFileSync(path, text);
+    await approve({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      seenHash: specHash(text),
+      by: "ram",
+      at: "2026-11-07T08:30:00Z",
+    });
+    const runs: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => (
+          runs.push(input.ticket),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+        ),
+      },
+    };
+    return { runs, steps };
+  }
+
+  it("AC-2, AC-3, AC-7: holds a first build while its blocker is open, and starts it once the blocker is merged", async () => {
+    const { runs, steps } = await blockedBy("PROJ-0");
+    const changes = { team, open: [], merged: [] };
+    const asked: string[] = [];
+    const at = (state: "opened" | "merged", log: string[]): Forge => ({
+      ...forge(changes, log),
+      branchState: async ({ branch }) => (asked.push(branch), { kind: "ok", value: state }),
+      issueState: async () => {
+        throw new Error("a ticket that is not a number has no issue to read");
+      },
+    });
+    const held: string[] = [];
+    await tick({ ...setup(changes, held, { steps }), forge: at("opened", held) });
+    expect(asked).toEqual(["factory/PROJ-0"]);
+    expect(runs).toEqual([]);
+    expect(held.some((l) => l.includes("blocked by PROJ-0 (open, not merged)"))).toBe(true);
+    await tick({ ...setup(changes, [], { steps }), forge: at("merged", []) });
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("AC-9: a blocker issue a person closed as completed lets the build start; one closed with no merge seen goes to a person", async () => {
+    const { runs, steps } = await blockedBy("#12");
+    const changes = { team, open: [], merged: [] };
+    const at = (issue: "completed" | "closed", log: string[]): Forge => ({
+      ...forge(changes, log),
+      branchState: async () => ({ kind: "ok", value: "none" }),
+      issueState: async ({ number }) => (expect(number).toBe(12), { kind: "ok", value: issue }),
+    });
+    const unseen: string[] = [];
+    await tick({ ...setup(changes, unseen, { steps }), forge: at("closed", unseen) });
+    expect(runs).toEqual([]);
+    expect(unseen.join("\n")).toContain("blocked by 12, closed, no merge seen");
+    await tick({ ...setup(changes, [], { steps }), forge: at("completed", []) });
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
   it("a writer run that stops before a change exists: the record, the log and the ping all say why (#62)", async () => {
     await approved();
     const log: string[] = [];

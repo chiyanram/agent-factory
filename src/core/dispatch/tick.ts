@@ -54,9 +54,12 @@ import {
   summarize,
   type Event,
   type Retried,
+  type Summary,
   type Task,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
+import { blockersView, withIssue, type Blocker, type BlockersView, type BlockerState } from "./blockers.js";
+import type { BranchState } from "../forge/types.js";
 import { designView, dropRepeats, roundsBefore, type DesignView, type EarlierRound, type SpecRead } from "./design.js";
 import { nextStep } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
@@ -448,6 +451,81 @@ async function raisedOf(setup: TickSetup, spec: Spec): Promise<string> {
   return raise.value.kind === "raised" ? raisedWhy(raise.value) : "";
 }
 
+// the most specs the "Blocked by" cycle check reads from one ticket (#494)
+const MOST_BLOCKER_SPECS = 50;
+
+// blockedByOf : a ticket's spec's "Blocked by" tickets; none when its spec cannot be read
+async function blockedByOf(setup: TickSetup, ticket: string): Promise<readonly string[]> {
+  const spec = await currentSpec(ticketAt(setup, ticket));
+  return spec.kind === "spec" ? spec.spec.blockedBy : [];
+}
+
+// specsBehind : the "Blocked by" lists of every ticket behind these, as far as they go, for the cycle check
+async function specsBehind(
+  setup: TickSetup,
+  start: readonly string[],
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  const seen = new Map<string, readonly string[]>();
+  const queue = start.filter(plainName);
+  while (queue.length > 0 && seen.size < MOST_BLOCKER_SPECS) {
+    const next = queue.shift() ?? "";
+    if (!seen.has(next)) {
+      const behind = await blockedByOf(setup, next);
+      seen.set(next, behind);
+      queue.push(...behind.filter(plainName));
+    }
+  }
+  return seen;
+}
+
+// building : whether the ticket's build has begun, or nothing lets it begin: its blockers are then not read
+function building(view: ApprovalView, runs: Summary): boolean {
+  return goAt(view) === "" || runs.lastWriter.kind !== "none";
+}
+
+// blockerState : where a blocker's change stands; one the git host cannot answer for reads as not started, so the
+// ticket waits rather than goes to a person on a passing failure
+async function blockerState(setup: TickSetup, ticket: string): Promise<BlockerState> {
+  const read = await setup.forge.branchState({ branch: `${BRANCH_PREFIX}${ticket}` });
+  const branch = read.kind === "ok" ? read.value : "none";
+  return branch === "merged" || !ISSUE_NUMBER.test(ticket) ? branch : issueBlocker(setup, Number(ticket), branch);
+}
+
+// a ticket that is a git host issue: its number
+const ISSUE_NUMBER = /^[1-9]\d{0,9}$/;
+
+// issueBlocker : a blocker that is a git host issue, by its issue too (#494 AC-9): closed as completed by a person's
+// change on any branch it is merged; an issue the git host cannot answer for leaves the branch's state
+async function issueBlocker(setup: TickSetup, issue: number, branch: BranchState): Promise<BlockerState> {
+  const read = await setup.forge.issueState({ number: issue });
+  return read.kind === "ok" ? withIssue(branch, read.value) : branch;
+}
+
+// blockersOf : where the ticket's blockers stand, read only while its build has not begun (#494): each blocker's
+// change on the git host, through the Forge seam, and every spec behind it for a cycle
+async function blockersOf(setup: TickSetup, ticket: string, view: ApprovalView, runs: Summary): Promise<BlockersView> {
+  const blockedBy = building(view, runs) ? [] : await blockedByOf(setup, ticket);
+  if (blockedBy.length === 0 || blockedBy.includes(ticket)) {
+    return blockersView(ticket, blockedBy, []);
+  }
+  return blockersView(ticket, blockedBy, await blockersRead(setup, blockedBy));
+}
+
+// blockersRead : each ticket behind the blockers with its own blockers, and each direct blocker's change state
+async function blockersRead(setup: TickSetup, blockedBy: readonly string[]): Promise<readonly Blocker[]> {
+  const read: Blocker[] = [];
+  for (const [b, list] of await specsBehind(setup, blockedBy)) {
+    const state = blockedBy.includes(b) ? await blockerState(setup, b) : "none";
+    read.push({ ticket: b, state, blockedBy: list });
+  }
+  return read;
+}
+
+// blockersField : the blockers as a field to spread; none when they hold nothing. Pure.
+function blockersField(blockers: BlockersView): { readonly blockers?: BlockersView } {
+  return blockers.kind === "none" ? {} : { blockers };
+}
+
 // programsField : the pass's allowed evidence programs, as a field to spread: none without a project file (#444)
 function programsField(setup: TickSetup): { readonly programs?: readonly string[] } {
   return setup.readyPrograms === undefined ? {} : { programs: setup.readyPrograms };
@@ -483,6 +561,7 @@ async function stateOf(
   const since = goAt(said.value.view) || "1970-01-01T00:00:00Z";
   const runs = summarize({ events: events.value, since });
   const design = await designOf(setup, ticket, said.value, events.value);
+  const blockers = await blockersOf(setup, ticket, said.value.view, runs);
   const approved = said.value.record;
   return {
     kind: "ok",
@@ -498,6 +577,7 @@ async function stateOf(
         quietMinutes: setup.quietMinutes,
         caps: setup.caps,
         design,
+        ...blockersField(blockers),
         ...programsField(setup),
       },
       approved,
