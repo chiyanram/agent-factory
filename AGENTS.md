@@ -4,7 +4,7 @@ A coordinator AI that talks with the human, and an orchestrator (code) that star
 review runs on a runner for a project's pull requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the code
 does not follow it everywhere yet). The rules those
 runs follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
-People start at `README.md`; `docs/explanation/architecture.md` is the design; `docs/` holds the how-to, reference and
+People start at `README.md`; the principles are `docs/CONSTITUTION.md`; `docs/explanation/architecture.md` is the design; `docs/` holds the how-to, reference and
 explanation pages, and `CONTRIBUTING.md` the rest.
 
 ## Check
@@ -31,6 +31,10 @@ CI runs both on every pull request and on push to `main`.
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
   comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.
+
+Codebase health: each change leaves the modules it touches no worse than it found them. If the change would make one
+worse, say so in the design and propose the refactor as its own ticket. We care about the next change being easy, not
+only this one working.
 
 ## Where things go
 

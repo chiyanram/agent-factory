@@ -9,6 +9,10 @@ Status: accepted 2026-11-06 (operator, map #30: W1, Q1, Q4–Q7, Q11, Q15, gaps 
 Revised 2026-11-06 by the review of this ADR on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682341406), with the
 [factory comparison](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682831580)). The rows below are the revised decisions; each names the review issue that changed it.
 
+The principles this design serves are [the constitution](../CONSTITUTION.md) (P1–P21); this record does not repeat them.
+
+Widened by [ADR-0014](0014-plugin-model.md).
+
 ## Context
 
 The writer runs as the developer's OS user, with that user's logins, and with no sandbox. `start-writer.sh` starts

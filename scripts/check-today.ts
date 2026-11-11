@@ -20,7 +20,7 @@ export const SAFETY_PAGES: readonly string[] = [
 ];
 
 const MARK = "**Today:**";
-const TICKET = /(^|[\s(\[,;:])([\w.-]+\/[\w.-]+)?#\d+\b/;
+const TICKET = /(^|[\s([,;:])([\w.-]+\/[\w.-]+)?#\d+\b/;
 
 export type Note = { readonly file: string; readonly line: number; readonly text: string };
 
@@ -43,14 +43,16 @@ export function notesIn(file: string, text: string): readonly Note[] {
 function noteAt(lines: readonly string[], i: number, from: number): string {
   const line = lines[i] ?? "";
   const rest = line.slice(from + MARK.length);
-  if (line.trimStart().startsWith("|")) {
-    return cut(rest.split("|")[0] ?? "");
-  }
-  const more: string[] = [rest];
-  for (let j = i + 1; j < lines.length && (lines[j] ?? "").trim() !== "" && !(lines[j] ?? "").startsWith("#"); j++) {
-    more.push(lines[j] ?? "");
-  }
-  return cut(more.join(" "));
+  return line.trimStart().startsWith("|")
+    ? cut(rest.split("|")[0] ?? "")
+    : cut([rest, ...paragraphAfter(lines, i)].join(" "));
+}
+
+// paragraphAfter : the lines that go on a paragraph after line i, up to a blank line or a heading. Pure.
+function paragraphAfter(lines: readonly string[], i: number): readonly string[] {
+  const after = lines.slice(i + 1);
+  const end = after.findIndex((l) => l.trim() === "" || l.startsWith("#"));
+  return end < 0 ? after : after.slice(0, end);
 }
 
 // cut : a note's text up to the next note. Pure.

@@ -4,6 +4,8 @@
 
 Status: accepted 2026-10-20 (#18), detailed 2026-10-23 (#22)
 
+Amended by [ADR-0011](0011-crq-pipeline-in-the-factory.md).
+
 ## Context
 
 Review was costly and noisy: the architecture review cost 130–180k tokens a run, about 6 a day; a docs-only change

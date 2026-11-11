@@ -1,7 +1,7 @@
 # Commands
 
 Every `agent-factory` command, grouped by who runs it. The orchestrator decides; the commands act. Each takes one
-command and prints one line. On GitLab, a PR is a merge request, and `!12` stands for `#12`. `agent-factory --help`
+command and prints one line. On GitLab, a PR is a `merge request`, and `!12` stands for `#12`. `agent-factory --help`
 prints the same list; `test/cli-doc.test.ts` fails when a command is missing here.
 
 ## You run these

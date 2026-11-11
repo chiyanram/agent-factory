@@ -5,6 +5,8 @@
 Status: accepted 2026-11-06 (operator, map #30: Q13, Q16, the integration rule, gap 4). Changes the order in
 ADR-0011 D13.
 
+Extended by [ADR-0014](0014-plugin-model.md).
+
 ## Context
 
 No earlier ADR chose bash. The 19 `scripts/*.sh` files grew from glue. ADR-0012 needs several things that strain bash:

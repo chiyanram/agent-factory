@@ -49,10 +49,16 @@ next. The manual steps are in [docs/how-to/](docs/how-to/).
 
 ## Your first ticket
 
+The whole path, from install to a merged PR: [Your first merged PR](docs/how-to/first-merged-pr.md).
+
 1. `agent-factory coordinator [<project>]`: talk the ticket through; the coordinator writes the spec. It reads the
    project's git host and clone from the project file `init` wrote, so it needs no shell exports.
 2. `agent-factory start <project> <ticket>`; above the tiny lane, also `agent-factory approve`.
 3. The orchestrator loop builds, checks and reviews the pull request, then pings you to merge.
+
+## Principles
+
+[The constitution](docs/CONSTITUTION.md): P1–P21, each with why and how it is checked.
 
 ## Status
 

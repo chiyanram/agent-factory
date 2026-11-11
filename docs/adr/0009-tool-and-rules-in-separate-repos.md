@@ -4,6 +4,8 @@
 
 Status: accepted 2026-10-26 (operator, step-0 decision D2)
 
+Amended by [ADR-0010](0010-one-forge-seam-two-adapters.md).
+
 ## Context
 
 The design is approved and map #1 is closed. The coordinator (L3, #23) needs its first code: `poll`, `claim` /

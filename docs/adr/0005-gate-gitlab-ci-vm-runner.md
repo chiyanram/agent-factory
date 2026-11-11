@@ -4,6 +4,8 @@
 
 Status: accepted 2026-10-18 (#4 Q4, Q5a); speed decided 2026-10-22 (#20)
 
+Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md).
+
 ## Context
 
 The full gate took about an hour on the VM, then 1h35m. It had one slot, full rerun only, and no failed-run log

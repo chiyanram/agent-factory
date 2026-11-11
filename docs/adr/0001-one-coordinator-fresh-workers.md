@@ -4,6 +4,8 @@
 
 Status: accepted 2026-10-23 (supersedes the discovery seat of 2026-10-20 and #23 Q1)
 
+Amended by [ADR-0011](0011-crq-pipeline-in-the-factory.md) and [ADR-0012](0012-safety-design-for-unattended-runs.md).
+
 ## Context
 
 The old fleet ran 4 always-on persona agents. They produced 9 of 78 merged MRs and drifted over long sessions

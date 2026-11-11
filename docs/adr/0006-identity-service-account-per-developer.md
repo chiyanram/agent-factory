@@ -4,6 +4,8 @@
 
 Status: accepted 2026-10-20 (#1 "Identity DECIDED", operator 'D')
 
+Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md).
+
 ## Context
 
 3 of 4 old agents posted on the operator's personal token (docs/archive/research/24). Verdicts appeared under the operator's
