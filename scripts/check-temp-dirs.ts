@@ -17,13 +17,20 @@ const CALL = /\btmpdir\s*\(/;
 // the one form a script may use: the real path of the temp folder
 const REAL = /\brealpathSync\(\s*tmpdir\(\s*\)\s*\)/g;
 
+// a "…" or '…' string literal: text in one, such as a test's sample line, calls nothing. A template literal is kept,
+// since its ${…} runs code.
+const QUOTED = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g;
+
+// code : a line with its string literals emptied and the allowed realpathSync(tmpdir()) form taken out
+function code(line: string): string {
+  return line.replace(QUOTED, '""').replace(REAL, "");
+}
+
 // bareCalls : "file:line" for each line of the text that calls tmpdir()
 export function bareCalls(file: string, text: string): readonly string[] {
   return text
     .split("\n")
-    .flatMap((line, i) =>
-      !line.trim().startsWith("//") && CALL.test(line.replace(REAL, "")) ? [`${file}:${i + 1}`] : [],
-    );
+    .flatMap((line, i) => (!line.trim().startsWith("//") && CALL.test(code(line)) ? [`${file}:${i + 1}`] : []));
 }
 
 function tracked(root: string): readonly string[] {

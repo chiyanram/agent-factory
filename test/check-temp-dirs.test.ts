@@ -11,4 +11,14 @@ describe("bareCalls", () => {
     ].join("\n");
     expect(bareCalls("scripts/x.ts", text)).toEqual(["scripts/x.ts:1", "scripts/x.ts:3"]);
   });
+
+  it("skips a call written inside a quoted string, as this test's own samples are, but not one in a template's ${}", () => {
+    const text = [
+      "const sample = 'join(tmpdir(), \"x\")';",
+      'const other = "a \\" tmpdir() b";',
+      "const t = `${tmpdir()}/x`;",
+      'const d = "x" + tmpdir() + "y";',
+    ].join("\n");
+    expect(bareCalls("test/x.ts", text)).toEqual(["test/x.ts:3", "test/x.ts:4"]);
+  });
 });

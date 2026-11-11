@@ -899,6 +899,8 @@ describe("can it get stuck? (#485)", () => {
     line({ pipeline: { kind: "running" } }),
     line({ pipeline: { kind: "none" } }),
     line({ pipeline: { kind: "manual" } }),
+    line({ pipeline: { kind: "skipped" } }),
+    line({ pipeline: { kind: "canceled" } }),
     line({ pipeline: { kind: "unknown", raw: "weird" } }),
     line({ needsHuman: true }),
     line({ mergeable: "conflict" }),

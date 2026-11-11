@@ -49,6 +49,8 @@ export type Seen = {
   readonly init: Ran;
   readonly start: Ran;
   readonly dispatch: Ran;
+  // the branch the demo clone is on: main, as a real project's default branch is, whatever git's own default
+  readonly branch: string;
   // the files init must leave, each with whether it is there
   readonly files: Readonly<Record<string, boolean>>;
 };
@@ -105,6 +107,11 @@ function decided(r: Ran): readonly string[] {
     : [`agent-factory dispatch --dry-run named no decision for ticket 1: ${r.out.trim()}`];
 }
 
+// onMain : the demo clone is on main. Pure.
+function onMain(branch: string): readonly string[] {
+  return branch === "main" ? [] : [`the demo clone is on ${JSON.stringify(branch)}, not main`];
+}
+
 // problems : what the install test found wrong, one line each; none means it passed. Pure.
 export function problems(seen: Seen, version: string): readonly string[] {
   return [
@@ -117,6 +124,7 @@ export function problems(seen: Seen, version: string): readonly string[] {
     ...exitOk("start", seen.start),
     ...exitOk("dispatch --dry-run", seen.dispatch),
     ...decided(seen.dispatch),
+    ...onMain(seen.branch),
   ];
 }
 
@@ -261,6 +269,7 @@ function main(): number {
       init,
       start,
       dispatch: run(bin, ["dispatch", "demo", "--dry-run"], dir, env),
+      branch: execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir, env, encoding: "utf8" }).trim(),
       files: Object.fromEntries(
         ["user.json", "projects/demo.json", "coordinator/.claude/settings.json"].map((f) => [
           f,

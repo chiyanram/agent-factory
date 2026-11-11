@@ -10,6 +10,7 @@ const seen = (over: Partial<Seen> = {}): Seen => ({
   init: ran({ code: 1, out: INIT }),
   start: ran({ out: "started demo/1 by ram at t\n" }),
   dispatch: ran({ out: "1: writer (fix): started; no run yet (dry run)\n" }),
+  branch: "main",
   files: { "user.json": true, "projects/demo.json": true, "coordinator/.claude/settings.json": true },
   ...over,
 });
@@ -39,6 +40,17 @@ describe("the install test's verdict", () => {
     expect(problems(seen({ dispatch: ran({ out: "nothing to do\n" }) }), "0.34.1")).toEqual([
       "agent-factory dispatch --dry-run named no decision for ticket 1: nothing to do",
     ]);
+  });
+
+  it("fails a start that exits 1 with no crash in its output", () => {
+    const refused = ran({ code: 1, err: "agent-factory start: no spec on issue 1\n" });
+    expect(problems(seen({ start: refused }), "0.34.1")).toEqual([
+      "agent-factory start exited 1: agent-factory start: no spec on issue 1",
+    ]);
+  });
+
+  it("fails a demo clone that is not on main", () => {
+    expect(problems(seen({ branch: "master" }), "0.34.1")).toEqual(['the demo clone is on "master", not main']);
   });
 
   it("fails a signal, a spawn error, and a crash, with or without parentheses in its frames", () => {
