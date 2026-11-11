@@ -352,15 +352,20 @@ type BlockedMap = { readonly [V in Exclude<BlockersView, { kind: "none" }> as V[
 
 const BLOCKED: { readonly [K in keyof BlockedMap]: (s: TicketState, b: BlockedMap[K]) => Action } = {
   broken: (_s, b) => ({ kind: "needs-human", why: b.why }),
-  unread: (s, b) =>
-    s.runs.unreadPasses + 1 >= MAX_UNREAD_PASSES
-      ? {
-          kind: "needs-human",
-          why: `the git host did not answer for the ticket's blockers on ${MAX_UNREAD_PASSES} passes in a row: ${s.runs.unreadFirst || b.why}`,
-        }
-      : { kind: "blockers-unread", why: b.why },
+  unread: (s, b) => unreadAs(s, b.why),
   waiting: (s, b) => holdAs(s, waitingWhy(b.on)),
 };
+
+// unreadAs : a pass the git host did not answer for a blocker: counted; on the third in a row a person is told, once
+// per outage (the why names when it began), and the passes after it keep counting quietly until the git host answers
+function unreadAs(s: TicketState, why: string): Action {
+  if (s.runs.unreadPasses + 1 < MAX_UNREAD_PASSES) {
+    return { kind: "blockers-unread", why };
+  }
+  const since = s.runs.unreadSince === "" ? "" : ` since ${s.runs.unreadSince}`;
+  const stop = `the git host did not answer for the ticket's blockers on ${MAX_UNREAD_PASSES} passes in a row${since}: ${s.runs.unreadFirst || why}`;
+  return s.runs.blocked.includes(stop) ? { kind: "blockers-unread", why } : { kind: "needs-human", why: stop };
+}
 
 function blockedAs<K extends keyof BlockedMap>(kind: K, s: TicketState, b: BlockedMap[K]): Action {
   return BLOCKED[kind](s, b);

@@ -122,8 +122,9 @@ holds the first build (no implementer run yet and no change open) until each blo
 which keeps no close reason, only when a merged PR closes or mentions it). A blocker closed with no merge,
 the ticket itself or a cycle in the `Blocked by` sections goes to `needs-human`: with no change to label yet, the pass records the stop and pings the person once. A held ticket is recorded (`held`)
 and pings the person once with what it waits on, and again only when that changes. A pass on which the git host does
-not answer for a blocker waits and is counted (`blockers-unread`); on the third such pass in a row the ticket goes to
-`needs-human` with the first error, and a pass that reads the blockers again starts the count afresh. The build then
+not answer for a blocker waits and is counted (`blockers-unread`); such passes are a poll interval apart. On the third in
+a row the ticket goes to `needs-human` with the first error and when the outage began, told once per outage; the
+passes after it keep counting quietly, and a pass that reads the blockers again starts the count afresh. The build then
 starts from the default branch, never another ticket's branch (#494). An approval with no
 START waits, since nothing runs without one. In a lane with a design review, the design-reviewer and its verify pass
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that

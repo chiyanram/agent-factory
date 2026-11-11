@@ -609,14 +609,44 @@ describe("tick", () => {
     expect(await pass("github: 502")).toContain("did not answer for a blocker");
     expect(await pass("github: 503")).toContain("did not answer for a blocker");
     expect(pings).toEqual([]);
-    const why = "the git host did not answer for the ticket's blockers on 3 passes in a row: PROJ-0: github: 502";
+    const why =
+      "the git host did not answer for the ticket's blockers on 3 passes in a row since 2026-11-07T10:00:00.000Z: PROJ-0: github: 502";
     expect(await pass("github: 504")).toContain(`needs-human: ${why}`);
     expect(pings).toEqual([
       { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `${why}; there is no change yet` },
     ]);
-    expect(await pass("github: 505")).toContain("handed to a person earlier");
+    // the passes after it keep counting quietly, and never say to START again: the ticket has no change
+    const after = await pass("github: 505");
+    expect(after).toContain("did not answer for a blocker");
+    expect(after).not.toContain("START again");
     expect(pings).toHaveLength(1);
     expect(runs).toEqual([]);
+  });
+
+  it("AC-7: a second outage with the same error, after the git host answered, is told again", async () => {
+    const { steps } = await blockedBy("PROJ-0");
+    const pings: Ping[] = [];
+    const pass = async (at: string, answer: "down" | "opened") => {
+      const branchState =
+        answer === "down"
+          ? async () => ({ kind: "failed", reason: "github: 502" }) as const
+          : async () => ({ kind: "ok", value: "opened" }) as const;
+      await tick({
+        ...setup(NO_CHANGES, [], { steps, notify: pinger(pings), now: () => Date.parse(at) }),
+        forge: { ...forge(NO_CHANGES, []), branchState },
+      });
+    };
+    for (const at of ["2026-11-07T10:00:00Z", "2026-11-07T10:05:00Z", "2026-11-07T10:10:00Z"]) {
+      await pass(at, "down");
+    }
+    await pass("2026-11-07T10:15:00Z", "opened");
+    for (const at of ["2026-11-07T11:00:00Z", "2026-11-07T11:05:00Z", "2026-11-07T11:10:00Z"]) {
+      await pass(at, "down");
+    }
+    expect(pings.filter((p) => p.kind === "needs-you").map((p) => (p.kind === "needs-you" ? p.why : ""))).toEqual([
+      expect.stringContaining("since 2026-11-07T10:00:00.000Z"),
+      expect.stringContaining("since 2026-11-07T11:00:00.000Z"),
+    ]);
   });
 
   it("AC-7: a pass that reads the blockers again starts the count afresh", async () => {

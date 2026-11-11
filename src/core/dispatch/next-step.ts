@@ -88,6 +88,22 @@ const STEPS: readonly (readonly [RegExp, NextStep])[] = [
   ],
 ];
 
+// a held ticket's stop when the git host did not answer for its blockers (#494): it has no change to label, and it goes
+// on by itself once the git host answers, so the person's step is to look at the git host, not to START again
+const UNANSWERED = /^the git host did not answer for the ticket's blockers on \d+ passes in a row/;
+const UNANSWERED_STEP: NextStep = {
+  who: "person",
+  does: "checks the git host's login and the tickets the spec is blocked by; the ticket goes on by itself once the git host answers",
+};
+
+// handOverStep : what the person does after a hand-over: look at the git host for an unanswered blocker read, else decide
+// and go on by START or approval
+function handOverStep(why: string): NextStep {
+  return UNANSWERED.test(why)
+    ? UNANSWERED_STEP
+    : { who: "person", does: `decides; to go on, removes needs-human and ${AGAIN}` };
+}
+
 // stepOf : the step a why names, or undefined for one this module does not know
 function stepOf(why: string): NextStep | undefined {
   const plain = why.replace(/^quiet for over \d+ minutes: /, "");
@@ -103,7 +119,7 @@ export function nextStep(action: Action): NextStep | undefined {
     return { who: "factory", does: "removes the claim from the merged change" };
   }
   if (action.kind === "needs-human") {
-    return { who: "person", does: `decides; to go on, removes needs-human and ${AGAIN}` };
+    return handOverStep(action.why);
   }
   return "why" in action ? stepOf(action.why) : undefined;
 }

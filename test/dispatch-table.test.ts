@@ -1038,6 +1038,13 @@ describe("can it get stuck? (#485)", () => {
       does: "whoever claimed it finishes it, or gives it back: agent-factory release <project> <change>",
     });
     expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
+    // a held ticket's stop for an unanswered git host has no change: the person looks at the git host (#494)
+    const unanswered =
+      "the git host did not answer for the ticket's blockers on 3 passes in a row since t: PROJ-0: 502";
+    expect(nextStep({ kind: "needs-human", why: unanswered })).toEqual({
+      who: "person",
+      does: "checks the git host's login and the tickets the spec is blocked by; the ticket goes on by itself once the git host answers",
+    });
   });
 });
 
@@ -1066,6 +1073,13 @@ describe("blocked by (#494)", () => {
       why,
       ping: false,
     });
+  });
+
+  it("a held ticket and one counting unread passes are in flight: the loop goes on, so the count builds", () => {
+    const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
+    expect(inFlight(state({ ...unbuilt, blockers: waiting }))).toBe(true);
+    const unread = { kind: "unread", why: "PROJ-0: github: 502" } as const;
+    expect(inFlight(state({ ...unbuilt, blockers: unread }))).toBe(true);
   });
 
   it("AC-7: an unread blocker is counted, and on the third pass in a row goes to a person with the first error", () => {

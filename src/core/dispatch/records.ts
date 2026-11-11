@@ -959,8 +959,9 @@ export type Summary = {
   // answer for a blocker (#494)
   readonly heldWhy: string;
   readonly unreadPasses: number;
-  // the git host's reason on the first of those passes, so a person reads one stable reason
+  // the git host's reason on the first of those passes, and when it was, so a person reads one stable reason per outage
   readonly unreadFirst: string;
+  readonly unreadSince: string;
   // the time of the newest line, or "" for none
   readonly lastAt: string;
   // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
@@ -988,6 +989,7 @@ export const EMPTY: Summary = {
   heldWhy: "",
   unreadPasses: 0,
   unreadFirst: "",
+  unreadSince: "",
   lastAt: "",
   spent: NO_SPEND,
 };
@@ -1076,11 +1078,12 @@ const STEPS: Steps = {
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
   // a read that held the build again starts the count of passes the git host did not answer afresh
-  held: (s, e) => ({ ...s, heldWhy: e.why, unreadPasses: 0, unreadFirst: "" }),
+  held: (s, e) => ({ ...s, heldWhy: e.why, unreadPasses: 0, unreadFirst: "", unreadSince: "" }),
   "blockers-unread": (s, e) => ({
     ...s,
     unreadPasses: s.unreadPasses + 1,
     unreadFirst: s.unreadFirst === "" ? e.why : s.unreadFirst,
+    unreadSince: s.unreadSince === "" ? e.at : s.unreadSince,
   }),
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice
   shared: (s) => s,
