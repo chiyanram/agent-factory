@@ -24,7 +24,7 @@ What a ticket carries into a build, where it lives, and what is decided next. Th
   when the round kept an Act on CONFLICT. The re-review and its verify pass read `earlier.json`, every earlier round
   and the text the last one read, and the engine drops a repeat of a finding an earlier round settled. After 2 rounds
   the person is told "no further design review (round cap)" and decides. An edit that raises the lane or changes the
-  Planned files is a new review whatever the count. A spec whose Planned files need a heavier lane holds the review
+  Planned files to a pair no round read is a new review past those, at most 2 more. A spec whose Planned files need a heavier lane holds the review
   until the lane is raised, and a `file:line@commit` cite that does not hold stops it at once.
 - **The approval** binds the spec's and the design's hashes. Any edit to either makes it stale, and a stale approval
   stops the work (`src/core/approval.ts`).

@@ -3,6 +3,8 @@ import {
   designView,
   dropRepeats,
   MAX_DESIGN_FAILURES,
+  MAX_DESIGN_ROUNDS,
+  MAX_MOVED_REVIEWS,
   ROUND_CAP,
   roundsBefore,
   type SpecRead,
@@ -215,6 +217,24 @@ describe("the design review converges (#489)", () => {
     // a converged round (no Act on CONFLICT) is reviewed again too when the lane rose
     const calm: Event = { ...round("2026-11-07T09:02:00Z", OLD, consider), ...FEATURE };
     expect(view([calm], "", { ...FEATURE, lane: "one-way door" })).toEqual(run);
+  });
+
+  it("an edit back to Planned files an earlier round read (A → B → A) is no new review, and moved reviews are capped too", () => {
+    const files = (f: string) => ({ lane: "feature", planned: [f] }) as const;
+    const r = (spec: string, time: string, f: string): Event => ({ ...round(time, spec, actOn), ...files(f) });
+    const ab = [r("d".repeat(64), "2026-11-07T08:02:00Z", "a.ts"), r(OLD, "2026-11-07T09:02:00Z", "b.ts")];
+    expect(view(ab, "", files("a.ts"))).toEqual({ kind: "note", spec: S, design: D, why: ROUND_CAP });
+    // a pair no round read is reviewed, past the 2 rounds, MAX_MOVED_REVIEWS times; then the person decides, told once
+    const run = { kind: "run", step: "review", spec: S, design: D };
+    expect(view(ab, "", files("c.ts"))).toEqual(run);
+    const four = [
+      ...ab,
+      r("e".repeat(64), "2026-11-07T09:12:00Z", "c.ts"),
+      r("f".repeat(64), "2026-11-07T09:22:00Z", "d.ts"),
+    ];
+    expect(four).toHaveLength(MAX_DESIGN_ROUNDS + MAX_MOVED_REVIEWS);
+    expect(view(four.slice(0, 3), "", files("d.ts"))).toEqual(run);
+    expect(view(four, "", files("e.ts"))).toEqual({ kind: "note", spec: S, design: D, why: ROUND_CAP });
   });
 
   it("holds the review while the Planned files need a heavier lane: the person is told once, then it waits", () => {

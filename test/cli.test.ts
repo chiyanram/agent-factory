@@ -103,6 +103,14 @@ describe("agent-factory spec", () => {
     expect(run.err).toBe(
       "agent-factory spec: 2 cite(s) not checked: no clone set (FACTORY_REPO); the design review checks them\n",
     );
+    const relative = await cli(["spec", "ledger", "PROJ-1"], {
+      FACTORY_HOME: home,
+      FACTORY_REPO: "clone",
+      PATH: process.env.PATH,
+    });
+    expect(relative.err).toBe(
+      'agent-factory spec: 2 cite(s) not checked: FACTORY_REPO must be an absolute path, got "clone"; the design review checks them\n',
+    );
     writeSpec(SPEC);
     expect((await cli(["spec", "ledger", "PROJ-1"])).err).toBe("");
   });

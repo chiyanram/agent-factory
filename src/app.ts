@@ -446,11 +446,16 @@ async function citesChecked(io: Io, texts: readonly string[]): Promise<readonly 
   }
   const n = specCites(texts.join("\n")).length;
   if (n > 0) {
-    io.err(
-      `agent-factory spec: ${n} cite(s) not checked: no clone set (FACTORY_REPO); the design review checks them\n`,
-    );
+    io.err(`agent-factory spec: ${n} cite(s) not checked: ${noClone(clone)}; the design review checks them\n`);
   }
   return [];
+}
+
+// noClone : why the clone cannot be read: none set, or a path that is not absolute
+function noClone(clone: string): string {
+  return clone === ""
+    ? "no clone set (FACTORY_REPO)"
+    : `FACTORY_REPO must be an absolute path, got ${JSON.stringify(clone)}`;
 }
 
 // designTextOf : the design beside a local spec, or "" when there is none

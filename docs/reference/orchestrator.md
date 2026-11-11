@@ -121,8 +121,9 @@ START waits, since nothing runs without one. In a lane with a design review, the
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
 fails is tried again after the same backoff, three times, then waits for a person (#236), and one that fails for good
 (a `file:line@commit` cite that does not hold) stops at once. The review converges (P15, #489): at new hashes it runs
-again only when the last round kept an Act on CONFLICT, or the edit raised the lane or changed the Planned files (a
-new review whatever the count). The re-review and its verify pass read `earlier.json`: every earlier round's hashes,
+again only when the last round kept an Act on CONFLICT (at most 2 rounds), or the edit raised the lane or changed the
+Planned files to a pair no earlier round read (a new review past those rounds, at most 2 more; an edit back to a pair
+already read is none). The re-review and its verify pass read `earlier.json`: every earlier round's hashes,
 lane, Planned files, findings, kept and dismissed items, and the spec and design text the last round read. The engine
 drops a repeat of a finding an earlier round dismissed or the person answered. After 2 rounds the person is told once,
 in the record (`design-noted`) and a ping, "no further design review (round cap)", and decides. A spec whose Planned

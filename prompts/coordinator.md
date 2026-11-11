@@ -62,9 +62,10 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 4. **Design review and approval.** You do not start a design review: in a lane with one (bug, feature and one-way door
    by default), the orchestrator runs it once the spec is ready (#236), and its kept findings go to the PR, the log and
    a ping. Its findings feed **one grill round**: ask every CONFLICT and OPEN at once and write the answers into the
-   spec; a Consider item the person leaves goes into the design as a default the implementer must report (#489). The
-   edit reviews again only for an Act on CONFLICT or a raised lane or changed Planned files, at most 2 rounds; then
-   the person is told and decides (the reference). A raised lane holds the review: raise it in the spec. When the
+   spec. A Consider item never blocks the approval: one the person leaves goes into the design as a default the
+   implementer must report (#489). Your edit is reviewed again only for an Act on CONFLICT (at most 2 rounds) or for a
+   lane or Planned files no round has read (at most 2 more); past that the person is told once and decides (the
+   reference). A raised lane holds the review: raise it in the spec. When the
    person is ready, run `agent-factory spec <project> <ticket>`, show them the spec and design hashes, and ask them to
    run `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` in their own terminal. An approval given
    before the review's findings does not let the build begin. A tiny ticket needs only the person's

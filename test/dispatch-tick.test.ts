@@ -2069,6 +2069,14 @@ describe("the design review and the cleanup run (#236)", () => {
     ]);
     expect(seen).toEqual([]);
     expect(pings).toHaveLength(1);
+    // the coordinator raises the lane in the spec: the hold is released, and the design review runs
+    writeFileSync(
+      join(home, "specs", "ledger", "PROJ-1", "spec.md"),
+      text.replace("## Lane\n\nfeature", "## Lane\n\none-way door"),
+    );
+    const third = await pass(designSteps(seen), "2026-11-07T09:02:00Z", pings);
+    expect(seen).toHaveLength(1);
+    expect(third.join("\n")).toContain("design review at spec");
   });
 
   it("a tiny-lane ticket skips the design review: its START builds at once", async () => {

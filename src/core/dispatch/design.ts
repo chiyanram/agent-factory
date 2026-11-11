@@ -17,8 +17,8 @@
 // round kept an Act on CONFLICT, and it gets every earlier round's findings and decisions, so it reviews only what
 // changed. Consider items never block. At most MAX_DESIGN_ROUNDS rounds; after that the person decides, with no
 // further review, and is told so once ("no further design review (round cap)"). An edit that raises the lane or changes
-// the Planned files is a new review, not a further round: it runs whatever the count, since the earlier rounds never
-// saw it.
+// the Planned files to a pair no earlier round read is a new review, not a further round: it runs past MAX_DESIGN_ROUNDS,
+// at most MAX_MOVED_REVIEWS times, since the earlier rounds never saw it; an edit back to a pair already read is not.
 //
 // A spec whose Planned files need a heavier lane than its own holds the review (#230, #489): no run reads a spec in the
 // wrong lane, and the person is told once to raise it; the raised spec is new hashes. A failure no retry fixes (a cite
@@ -32,6 +32,9 @@ import { backoffMs, type DesignStep, type Event } from "./records.js";
 export const MAX_DESIGN_FAILURES = 3;
 // the most design review rounds one ticket gets, at different spec or design hashes; then the person decides (#489)
 export const MAX_DESIGN_ROUNDS = 2;
+// the most reviews beyond those for an edit that moved the lane or the Planned files to a pair no round read; then the
+// person decides, told once (#489 review)
+export const MAX_MOVED_REVIEWS = 2;
 // what the person is told when the round cap skips a review
 export const ROUND_CAP = "no further design review (round cap): the person decides on the findings they have";
 
@@ -187,8 +190,25 @@ export type SpecRead = { readonly lane: Lane; readonly planned: readonly string[
 // never counts as moved
 function moved(round: Ended, now: SpecRead): boolean {
   const rose = round.lane !== undefined && above(now.lane, round.lane);
-  const was = round.planned === undefined ? undefined : [...round.planned].toSorted().join("\n");
-  return rose || (was !== undefined && was !== [...now.planned].toSorted().join("\n"));
+  const was = round.planned === undefined ? undefined : filesOf(round.planned);
+  return rose || (was !== undefined && was !== filesOf(now.planned));
+}
+
+function filesOf(planned: readonly string[]): string {
+  return [...planned].toSorted().join("\n");
+}
+
+// seen : whether an earlier round already read this lane and these Planned files: an edit back to them (A → B → A) is
+// no new review (#489 review)
+function seen(earlier: readonly Ended[], now: SpecRead): boolean {
+  return earlier.some(
+    (r) => r.lane === now.lane && r.planned !== undefined && filesOf(r.planned) === filesOf(now.planned),
+  );
+}
+
+// newRead : the edit moved the lane or the Planned files to a pair no earlier round read
+function newRead(earlier: readonly Ended[], last: Ended, now: SpecRead): boolean {
+  return moved(last, now) && !seen(earlier, now);
 }
 
 // noted : whether the person was told already at these hashes
@@ -242,13 +262,23 @@ function reviewAt(input: ViewInput, h: Hashes): DesignView {
 function reviewDue(input: ViewInput, h: Hashes, failures: readonly string[]): DesignView {
   const earlier = earlierRounds(input.events, h);
   const last = earlier.at(-1);
-  if (last === undefined || moved(last, input.read)) {
+  if (last === undefined) {
     return next("review", failures, h, input.now);
   }
-  if (!actOnConflict(last)) {
+  const limit = roundLimit(earlier, last, input.read);
+  if (limit === "none") {
     return afterRound(input.approvedAt, last.at);
   }
-  return earlier.length < MAX_DESIGN_ROUNDS ? next("review", failures, h, input.now) : capped(input, h, last);
+  return earlier.length < limit ? next("review", failures, h, input.now) : capped(input, h, last);
+}
+
+// roundLimit : how many rounds the ticket may have before this edit's review is skipped: more for a lane or Planned
+// files no round read, MAX_DESIGN_ROUNDS for an Act on CONFLICT; "none" when no review is due at all
+function roundLimit(earlier: readonly Ended[], last: Ended, read: SpecRead): number | "none" {
+  if (newRead(earlier, last, read)) {
+    return MAX_DESIGN_ROUNDS + MAX_MOVED_REVIEWS;
+  }
+  return actOnConflict(last) ? MAX_DESIGN_ROUNDS : "none";
 }
 
 // capped : the round cap skipped a review: the person is told once, then decides
