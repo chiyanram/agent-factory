@@ -973,6 +973,17 @@ describe("can it get stuck? (#485)", () => {
       why: "the design review failed 3 times at this spec and design; a person looks",
     },
     { kind: "early", at: "2026-11-07T09:00:00Z" },
+    // #489: a person told once why the review holds or ends, and a review held for a raised lane
+    {
+      kind: "note",
+      spec: "a".repeat(64),
+      design: "none",
+      why: "no further design review (round cap): the person decides",
+    },
+    {
+      kind: "held",
+      why: "the lane is raised from feature to one-way door (db/V2.sql is under a one-way-door path): x",
+    },
   ];
   const opened = approvals.flatMap((approval) =>
     lines.flatMap((l) =>

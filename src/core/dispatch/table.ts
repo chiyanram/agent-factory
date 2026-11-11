@@ -140,6 +140,8 @@ export type Action =
   | { readonly kind: "verify"; readonly head: string }
   // a design review run at the spec's and design's hashes (#236)
   | { readonly kind: "design"; readonly step: DesignStep; readonly spec: string; readonly design: string }
+  // a person told, once, why the design review holds or ends at these hashes: a raised lane, the round cap (#489)
+  | { readonly kind: "design-note"; readonly spec: string; readonly design: string; readonly why: string }
   | { readonly kind: "needs-human"; readonly why: string }
   | { readonly kind: "release"; readonly why: string }
   | { readonly kind: "ping"; readonly head: string }
@@ -213,6 +215,8 @@ const DESIGN: { readonly [K in keyof DesignMap]: (d: DesignMap[K]) => Action | "
   off: () => "next",
   done: () => "next",
   run: (d) => ({ kind: "design", step: d.step, spec: d.spec, design: d.design }),
+  note: (d) => ({ kind: "design-note", spec: d.spec, design: d.design, why: d.why }),
+  held: (d) => ({ kind: "wait", why: d.why }),
   later: (d) => ({ kind: "wait", why: `the ${DESIGN_STEP[d.step]} failed; the next try is at ${d.at}` }),
   stopped: (d) => ({ kind: "wait", why: d.why }),
   early: (d) => ({
@@ -736,8 +740,11 @@ const MACHINE_WAITS: ReadonlySet<string | undefined> = new Set([WAITS.running, W
 // decide does, so the loop and the pass never disagree.
 export function inFlight(state: TicketState): boolean {
   const action = decide(state);
-  return RUNS.has(action.kind) || action.kind === "ping" || (HELD_KINDS.has(action.kind) && carried(first(state)));
+  return RUNS.has(action.kind) || TELLS.has(action.kind) || (HELD_KINDS.has(action.kind) && carried(first(state)));
 }
+
+// the actions that tell a person something, which the loop carries on by itself
+const TELLS: ReadonlySet<Action["kind"]> = new Set(["ping", "design-note"]);
 
 // the actions decide makes of a row it holds back: a wait (a backoff, CI) or the claim given back on a quiet change
 const HELD_KINDS: ReadonlySet<Action["kind"]> = new Set(["wait", "release"]);

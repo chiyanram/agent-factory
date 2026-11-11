@@ -119,7 +119,15 @@ once the label is removed. The build
 begins only on a human's word: a START in the tiny lane, a START and an approval in the others. An approval with no
 START waits, since nothing runs without one. In a lane with a design review, the design-reviewer and its verify pass
 run first, at the spec's and design's hashes, and the build waits for an approval given after them; a design run that
-fails is tried again after the same backoff, three times, then waits for a person (#236). After the implementer's
+fails is tried again after the same backoff, three times, then waits for a person (#236), and one that fails for good
+(a `file:line@commit` cite that does not hold) stops at once. The review converges (P15, #489): at new hashes it runs
+again only when the last round kept an Act on CONFLICT (at most 2 rounds), or the edit raised the lane or changed the
+Planned files to a pair no earlier round read (a new review past those rounds, at most 2 more; an edit back to a pair
+already read is none). The re-review and its verify pass read `earlier.json`: every earlier round's hashes,
+lane, Planned files, findings, kept and dismissed items, and the spec and design text the last round read. The engine
+drops a repeat of a finding an earlier round dismissed or the person answered. After 2 rounds the person is told once,
+in the record (`design-noted`) and a ping, "no further design review (round cap)", and decides. A spec whose Planned
+files need a heavier lane runs no design review: the person is told once to raise the lane, and the ticket waits. After the implementer's
 done run (not a merge run), a cleanup run on the same branch tidies the branch's own lines from the cleanup role card,
 runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body,
 above the implementer's own PR body, `.factory/pr.md`, which the host posts cleaned after each implementer run that

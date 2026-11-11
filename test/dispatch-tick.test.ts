@@ -10,7 +10,16 @@ import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
-import { lock, runHoursEnd, STEPS_TODAY, tick, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
+import {
+  lock,
+  runHoursEnd,
+  STEPS_TODAY,
+  tick,
+  type DesignInput,
+  type Steps,
+  type TickSetup,
+} from "../src/core/dispatch/tick.js";
+import { ROUND_CAP } from "../src/core/dispatch/design.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
 import { goAhead, start } from "../src/core/start.js";
@@ -1919,6 +1928,155 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(await pass(steps, "2026-11-07T09:03:00Z")).toContain(
       `log PROJ-1: design review at spec ${specHash(text.replace("409", "423")).slice(0, 8)}`,
     );
+  });
+
+  // #489 review: the tick hands the re-review, and its verify pass, every earlier round from the records
+  it("a re-review after an Act on round gets the earlier rounds, and so does its verify pass", async () => {
+    const text = spec("feature");
+    await started();
+    const inputs: DesignInput[] = [];
+    const steps = designSteps([]);
+    const keep = (inner: Steps["designReview"]): Steps["designReview"] =>
+      inner.kind === "available"
+        ? { kind: "available", run: async (input) => (inputs.push(input), inner.run(input)) }
+        : inner;
+    const verify = steps.designVerify;
+    const watched: Steps = {
+      ...steps,
+      designReview: keep(steps.designReview),
+      designVerify:
+        verify.kind === "available"
+          ? { kind: "available", run: async (input) => (inputs.push(input), verify.run(input)) }
+          : verify,
+    };
+    await pass(watched, "2026-11-07T09:00:00Z");
+    await pass(watched, "2026-11-07T09:01:00Z");
+    expect(inputs.map((i) => i.earlier)).toEqual([undefined, undefined]);
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", "423"));
+    await pass(watched, "2026-11-07T09:02:00Z");
+    await pass(watched, "2026-11-07T09:03:00Z");
+    const round = {
+      round: 1,
+      spec: specHash(text),
+      design: "none",
+      lane: "feature",
+      planned: [],
+      findings: [finding, { ...finding, id: "D2", verdict: "aligned" }],
+      kept: [{ ...finding, bucket: "act_on", why: "it holds" }],
+      dismissed: [],
+    };
+    expect(inputs.slice(2).map((i) => i.earlier)).toEqual([[round], [round]]);
+  });
+
+  it("a re-review's repeat of a finding the person answered is dropped before it is kept; its Act on CONFLICT stays", async () => {
+    const text = spec("feature");
+    await started();
+    const opened = { ...finding, id: "D2", verdict: "open", decision: "the currency" } as const;
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      designReview: {
+        kind: "available",
+        run: async () => ({ kind: "ok", value: { kind: "done", findings: [finding, opened], card: CARD } }),
+      },
+      designVerify: {
+        kind: "available",
+        run: async (input) => ({
+          kind: "ok",
+          value: {
+            kind: "done",
+            kept: input.findings.map((f) =>
+              Object.assign({}, f, { bucket: f.id === "D1" ? ("act_on" as const) : ("consider" as const), why: "x" }),
+            ),
+            card: CARD,
+          },
+        }),
+      },
+    };
+    await pass(steps, "2026-11-07T09:00:00Z");
+    await pass(steps, "2026-11-07T09:01:00Z");
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", "423"));
+    const again = await pass(steps, "2026-11-07T09:02:00Z");
+    expect(again).toContain("log PROJ-1: design review: dropped 1 finding(s) an earlier round settled");
+    const read = await readRecords(where());
+    const reviews =
+      read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended" && e.step === "review") : [];
+    expect(reviews.map((e) => (e.kind === "design-ended" ? e.findings.map((f) => f.id) : []))).toEqual([
+      ["D1", "D2"],
+      ["D1"],
+    ]);
+  });
+
+  it("a design run that fails for good (a broken cite) stops at once: no backoff, no second try", async () => {
+    spec("feature");
+    await started();
+    let runs = 0;
+    const why = "a cite in the spec or design does not hold, so no design review runs; the coordinator edits it: x";
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      designReview: {
+        kind: "available",
+        run: async () => ((runs += 1), { kind: "ok", value: { kind: "failed", why, final: true, card: CARD } }),
+      },
+    };
+    await pass(steps, "2026-11-07T09:00:00Z");
+    expect(await pass(steps, "2026-11-07T09:30:00Z")).toEqual([`log PROJ-1: wait: ${why}`]);
+    expect(runs).toBe(1);
+  });
+
+  it("at the round cap the person is told once, in the record and a ping, and no third review runs", async () => {
+    const text = spec("feature");
+    await started();
+    const seen: string[] = [];
+    const steps = designSteps(seen);
+    for (const [i, edit] of ["409", "423"].entries()) {
+      writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", edit));
+      await pass(steps, `2026-11-07T09:0${2 * i}:00Z`);
+      await pass(steps, `2026-11-07T09:0${2 * i + 1}:00Z`);
+    }
+    expect(seen.filter((s) => s.startsWith("review"))).toHaveLength(2);
+    // the second round kept an Act on CONFLICT again: the person edits a third time
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", "429"));
+    const pings: Ping[] = [];
+    const after = await pass(steps, "2026-11-07T09:10:00Z", pings);
+    expect(seen.filter((s) => s.startsWith("review"))).toHaveLength(2);
+    expect(after).toContain(`log PROJ-1: design review: ${ROUND_CAP}`);
+    expect(pings).toEqual([
+      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `design review: ${ROUND_CAP}` },
+    ]);
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "design-noted").length : -1).toBe(1);
+    expect(await pass(steps, "2026-11-07T09:11:00Z", pings)).toEqual([
+      "log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only",
+    ]);
+    expect(pings).toHaveLength(1);
+  });
+
+  it("holds the design review while the Planned files need a heavier lane: told once, then it waits", async () => {
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify({ lanes: { oneWayDoor: ["db/**"] } }));
+    const text = spec("feature").replace("## Lane", "## Planned files\n\n- db/V2__renewals.sql\n\n## Lane");
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text);
+    await started();
+    const seen: string[] = [];
+    const pings: Ping[] = [];
+    const first = await pass(designSteps(seen), "2026-11-07T09:00:00Z", pings);
+    expect(seen).toEqual([]);
+    expect(first.join("\n")).toContain("design review: the lane is raised from feature to one-way door");
+    expect(pings).toMatchObject([{ kind: "needs-you", why: expect.stringContaining("the lane is raised") }]);
+    const second = await pass(designSteps(seen), "2026-11-07T09:01:00Z", pings);
+    expect(second).toEqual([
+      expect.stringMatching(/^log PROJ-1: wait: the lane is raised from feature to one-way door/),
+    ]);
+    expect(seen).toEqual([]);
+    expect(pings).toHaveLength(1);
+    // the coordinator raises the lane in the spec: the hold is released, and the design review runs
+    writeFileSync(
+      join(home, "specs", "ledger", "PROJ-1", "spec.md"),
+      text.replace("## Lane\n\nfeature", "## Lane\n\none-way door"),
+    );
+    const third = await pass(designSteps(seen), "2026-11-07T09:02:00Z", pings);
+    expect(seen).toHaveLength(1);
+    expect(third.join("\n")).toContain("design review at spec");
   });
 
   it("a tiny-lane ticket skips the design review: its START builds at once", async () => {

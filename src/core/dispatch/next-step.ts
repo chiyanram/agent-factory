@@ -7,7 +7,15 @@ import type { Action } from "./table.js";
 
 export type NextStep = { readonly who: "factory" | "person"; readonly does: string };
 
-const FACTORY_RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify", "design", "ping"]);
+const FACTORY_RUNS: ReadonlySet<Action["kind"]> = new Set([
+  "writer",
+  "ready",
+  "review",
+  "verify",
+  "design",
+  "ping",
+  "design-note",
+]);
 
 const AGAIN = "STARTs the ticket again (tiny) or approves its spec again: agent-factory start | approve";
 

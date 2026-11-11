@@ -204,7 +204,10 @@ is guidance.
 **How it's checked:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run;
 an Act on finding graded only `cited` settles as Consider; a finding whose `file:line` is not at the reviewed commit is
 noted as "cite not found", never posted. **Today:** with no mutation command set (#495), the assertion check counts
-lines and catches a value check turned into a presence check; any other weakened assertion passes.
+lines and catches a value check turned into a presence check; any other weakened assertion passes. The design review converges: a
+re-review runs only for an Act on CONFLICT or an edit that raises the lane or changes the Planned files, reads every
+earlier round, and stops at 2 rounds with the person told (`test/dispatch-design.test.ts`); the automated code
+review's next round still gets no earlier findings (#489).
 
 ## P16. One home and one way
 

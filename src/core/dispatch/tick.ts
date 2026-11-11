@@ -40,7 +40,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
-import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, type LaneProps } from "../lane.js";
+import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, raisedWhy, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec, type SpecStore } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
@@ -57,7 +57,7 @@ import {
   type Task,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
-import { designView, type DesignView } from "./design.js";
+import { designView, dropRepeats, roundsBefore, type DesignView, type EarlierRound, type SpecRead } from "./design.js";
 import { nextStep } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
@@ -97,11 +97,19 @@ export type { FailedSpent } from "./spend.js";
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 // what a design review's run reads (#236): the spec and design with these hashes, and for the verify pass the
 // design-reviewer's conflicts and opens
-export type DesignInput = { readonly ticket: string; readonly spec: string; readonly design: string };
+// earlier: every earlier round, with its hashes, findings, what the verify pass kept and what it dismissed, for a
+// re-review and its verify pass (#489); none on a first round
+export type DesignInput = {
+  readonly ticket: string;
+  readonly spec: string;
+  readonly design: string;
+  readonly earlier?: readonly EarlierRound[];
+};
 // how a design review's run ended; its card's hash and what it spent are kept either way
+// final: a failure no retry fixes (a cite that does not hold), so the step stops at once (#489)
 export type DesignRan<T> = { readonly card: string; readonly spend?: Spend } & (
   | ({ readonly kind: "done" } & T)
-  | { readonly kind: "failed"; readonly why: string }
+  | { readonly kind: "failed"; readonly why: string; readonly final?: true }
 );
 // what the ready check holds the change to, read on the host (#230): the spec's acceptance criteria, in order (AC-1
 // first), and the project's one-way-door paths
@@ -419,7 +427,25 @@ async function designOf(setup: TickSetup, ticket: string, said: Said, events: re
     return { kind: "off" };
   }
   const approvedAt = said.record === "none" ? "" : said.record.at;
-  return designView({ events, spec: spec.spec.hash, design: spec.design, approvedAt, now: setup.now() });
+  return designView({
+    events,
+    spec: spec.spec.hash,
+    design: spec.design,
+    read: { lane: spec.spec.lane, planned: spec.spec.planned },
+    raised: await raisedOf(setup, spec.spec),
+    approvedAt,
+    now: setup.now(),
+  });
+}
+
+// raisedOf : why the spec's Planned files need a heavier lane, before any design review reads it (#230, #489); "" when
+// they do not. A check that cannot read the project's one-way-door paths holds the review too, and says why.
+async function raisedOf(setup: TickSetup, spec: Spec): Promise<string> {
+  const raise = await plannedCheck({ home: setup.home, project: setup.project, spec });
+  if (raise.kind === "failed") {
+    return `the lane check failed, so no design review runs: ${raise.reason}`;
+  }
+  return raise.value.kind === "raised" ? raisedWhy(raise.value) : "";
 }
 
 // programsField : the pass's allowed evidence programs, as a field to spread: none without a project file (#444)
@@ -651,6 +677,7 @@ const FORGE: Handler<Promise<Done> | "none"> = {
   "needs-human": (setup, state, a) => handOver(setup, state, a.why),
   release: (setup, state, a) => releaseClaim(setup, state, a.why),
   ping: (setup, state, a) => ping(setup, state, a.head),
+  "design-note": (setup, state, a) => designNote(setup, state, a),
   reconcile: (setup, state) => reconcile(setup, state),
   wait: () => "none",
   writer: () => "none",
@@ -999,6 +1026,31 @@ async function failedSpent(
 type DesignAction = Extract<Action, { kind: "design" }>;
 
 // designFindings : the design-reviewer's findings at the action's hashes, which its verify pass checks
+// earlierOf : the ticket's earlier rounds, for a re-review and its verify pass; none on a first round or when the
+// records do not read (the review then runs as a first round)
+async function earlierOf(setup: TickSetup, state: TicketState, a: DesignAction): Promise<readonly EarlierRound[]> {
+  const events = await readRecords(where(setup, state), { warn: setup.log, setAside: true });
+  return events.kind === "ok" ? roundsBefore(events.value, { spec: a.spec, design: a.design }) : [];
+}
+
+function earlierField(rounds: readonly EarlierRound[]): { readonly earlier?: readonly EarlierRound[] } {
+  return rounds.length === 0 ? {} : { earlier: rounds };
+}
+
+type ReviewRan = Result<DesignRan<{ readonly findings: readonly DesignFinding[] }>>;
+
+// lessRepeats : a re-review's findings less those an earlier round settled (design.ts dropRepeats), logged
+function lessRepeats(setup: TickSetup, state: TicketState, ran: ReviewRan, rounds: readonly EarlierRound[]): ReviewRan {
+  if (ran.kind === "failed" || ran.value.kind === "failed" || rounds.length === 0) {
+    return ran;
+  }
+  const left = dropRepeats(ran.value.findings, rounds);
+  if (left.dropped > 0) {
+    setup.log(`${state.ticket}: design review: dropped ${left.dropped} finding(s) an earlier round settled`);
+  }
+  return { kind: "ok", value: { ...ran.value, findings: left.findings } };
+}
+
 async function designFindings(
   setup: TickSetup,
   state: TicketState,
@@ -1031,20 +1083,36 @@ function answerOf(v: {
   return { findings: v.findings ?? [], kept: v.kept ?? [] };
 }
 
+function readField(read: SpecRead | "none"): Partial<SpecRead> {
+  return read === "none" ? {} : { lane: read.lane, planned: read.planned };
+}
+
+function finalField(final: true | undefined): { readonly final?: true } {
+  return final === true ? { final: true } : {};
+}
+
 // designEnded : the run's "design-ended" line, from how it ended; a step that failed with no answer kept no card
 function designEnded(
   setup: TickSetup,
   a: DesignAction,
   ran: Result<DesignRan<{ readonly findings?: readonly DesignFinding[]; readonly kept?: readonly Kept[] }>>,
+  read: SpecRead | "none",
 ): DesignEnded {
-  const base = { at: at(setup), kind: "design-ended", step: a.step, spec: a.spec, design: a.design } as const;
+  const base = {
+    at: at(setup),
+    kind: "design-ended",
+    step: a.step,
+    spec: a.spec,
+    design: a.design,
+    ...readField(read),
+  } as const;
   if (ran.kind === "failed") {
     return { ...base, outcome: "failed", why: ran.reason, findings: [], kept: [] };
   }
   const v = ran.value;
   const extras = { card: v.card, ...(v.spend === undefined ? {} : { spend: v.spend }) };
   return v.kind === "failed"
-    ? { ...base, outcome: "failed", why: v.why, findings: [], kept: [], ...extras }
+    ? { ...base, outcome: "failed", why: v.why, findings: [], kept: [], ...extras, ...finalField(v.final) }
     : { ...base, outcome: "done", why: "", ...answerOf(v), ...extras };
 }
 
@@ -1054,10 +1122,13 @@ async function runDesignStep(
   state: TicketState,
   a: DesignAction,
 ): Promise<Result<DesignRan<{ readonly findings?: readonly DesignFinding[]; readonly kept?: readonly Kept[] }>>> {
-  const input = { ticket: state.ticket, spec: a.spec, design: a.design };
+  const rounds = await earlierOf(setup, state, a);
+  const input = { ticket: state.ticket, spec: a.spec, design: a.design, ...earlierField(rounds) };
   if (a.step === "review") {
     const step = setup.steps.designReview;
-    return step.kind === "available" ? step.run(input) : { kind: "failed", reason: step.reason };
+    return step.kind === "available"
+      ? lessRepeats(setup, state, await step.run(input), rounds)
+      : { kind: "failed", reason: step.reason };
   }
   const step = setup.steps.designVerify;
   if (step.kind === "unavailable") {
@@ -1085,7 +1156,7 @@ async function runDesign(setup: TickSetup, state: TicketState, a: DesignAction):
 
 // designRan : the run, then its "design-ended" line; a finished verify pass goes to the front doors
 async function designRan(setup: TickSetup, state: TicketState, a: DesignAction): Promise<Done> {
-  const ended = designEnded(setup, a, await runDesignStep(setup, state, a));
+  const ended = designEnded(setup, a, await runDesignStep(setup, state, a), await readAt(setup, state, a));
   const kept = await record({ where: where(setup, state), event: ended });
   if (kept.kind === "failed") {
     return kept;
@@ -1095,6 +1166,35 @@ async function designRan(setup: TickSetup, state: TicketState, a: DesignAction):
   }
   return ended.step === "verify" ? designPosted(setup, state, ended) : { kind: "ok" };
 }
+
+// readAt : the spec's lane and Planned files, when the spec still has the action's hashes; kept on its design line so
+// a later edit that moves them is reviewed again (design.ts)
+async function readAt(setup: TickSetup, state: TicketState, a: DesignAction): Promise<SpecRead | "none"> {
+  const current = await currentSpec(ticketAt(setup, state.ticket));
+  return current.kind === "spec" && current.spec.hash === a.spec && current.design === a.design
+    ? { lane: current.spec.lane, planned: current.spec.planned }
+    : "none";
+}
+
+// designNote : the person told once why the design review holds or ends at these hashes (#489): the record first, so
+// the note is never sent twice, then a ping, which only informs
+async function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAction): Promise<Done> {
+  setup.log(`${state.ticket}: design review: ${a.why}`);
+  const kept = await record({
+    where: where(setup, state),
+    event: { at: at(setup), kind: "design-noted", spec: a.spec, design: a.design, why: a.why },
+  });
+  return kept.kind === "ok"
+    ? informed(setup, {
+        kind: "needs-you",
+        ticket: state.ticket,
+        change: number(state),
+        why: `design review: ${a.why}`,
+      })
+    : kept;
+}
+
+type DesignNoteAction = Extract<Action, { kind: "design-note" }>;
 
 // designPost : the verify pass's kept findings, as the note on the ticket's PR. Pure.
 export function designPost(ended: DesignEnded): Post {
@@ -1133,6 +1233,7 @@ const RUN: Handler<Promise<Logged | Unavailable> | "none"> = {
   "needs-human": () => "none",
   release: () => "none",
   ping: () => "none",
+  "design-note": () => "none",
   reconcile: () => "none",
   wait: () => "none",
 };
@@ -1153,6 +1254,7 @@ const DESCRIBE: Describe = {
   verify: (a) => `local verifier at ${a.head.slice(0, 8)}`,
   design: (a) => `${a.step === "review" ? "design review" : "design verify pass"} at spec ${a.spec.slice(0, 8)}`,
   ping: (a) => `ping at ${a.head.slice(0, 8)}`,
+  "design-note": (a) => `design note: ${a.why}`,
   reconcile: () => "reconcile: merged; remove the claim",
 };
 

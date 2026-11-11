@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { designSteps, FLOOR, type DesignSetup } from "../src/core/design/step.js";
+import { AGAIN, designSteps, FLOOR, VERIFY_AGAIN, type DesignSetup } from "../src/core/design/step.js";
+import type { EarlierRound } from "../src/core/dispatch/design.js";
 import type { DesignFinding } from "../src/core/design/findings.js";
 import type { Forge } from "../src/core/forge/types.js";
 import type { Result } from "../src/core/forge/api.js";
@@ -45,16 +46,23 @@ const FINDING = {
   fix: "reuse Main",
 } as const;
 
-type Seen = { readonly run: ModelRun; readonly files: readonly string[]; readonly findings: string };
+type Seen = {
+  readonly run: ModelRun;
+  readonly files: readonly string[];
+  readonly findings: string;
+  readonly earlier: string;
+};
 
 // a model that keeps what each run saw, and answers with `outputs` in turn
 function model(seen: Seen[], outputs: readonly unknown[]): Model {
   return async (run) => {
     const findings = join(run.folder, "findings.json");
+    const earlier = join(run.folder, "earlier.json");
     seen.push({
       run,
       files: readdirSync(run.folder).toSorted(),
       findings: existsSync(findings) ? readFileSync(findings, "utf8") : "",
+      earlier: existsSync(earlier) ? readFileSync(earlier, "utf8") : "",
     });
     const output = outputs[seen.length - 1];
     return { kind: "ok", value: { output, answer: {}, costUsd: 0.25, tokens: 400 } };
@@ -79,6 +87,25 @@ function setup(m: Model): DesignSetup {
 const DESIGN = () => specHash("# Design\n\nOne table per ticket.\n");
 const input = () => ({ ticket: "PROJ-1", spec: specHash(specText()), design: DESIGN() });
 
+// bothRuns : the review and verify runs of available steps, or a test failure
+function bothRuns(steps: ReturnType<typeof designSteps>) {
+  const [review, verify] = [steps.designReview, steps.designVerify];
+  if (review.kind !== "available") throw new Error("unavailable");
+  if (verify.kind !== "available") throw new Error("unavailable");
+  return { review: review.run, verify: verify.run };
+}
+
+function earlierSeen(
+  seen: readonly Seen[],
+  i: number,
+): { rounds: unknown; previous: { spec: string; design: string } } {
+  return JSON.parse(seen[i]?.earlier ?? "{}");
+}
+
+function promptSeen(seen: readonly Seen[], i: number): string {
+  return String(seen[i]?.run.prompt);
+}
+
 describe("the design review's runs (#236)", () => {
   it("the design-reviewer reads the spec, the design and the code at the default branch, read-only, from its card", async () => {
     const seen: Seen[] = [];
@@ -101,6 +128,78 @@ describe("the design review's runs (#236)", () => {
     expect(seen[0]?.run.schema).toContain('"verdict"');
     // the folder is gone after the run
     expect(readdirSync(join(p.root, "design-runs"))).toEqual([]);
+  });
+
+  // #489: a re-review sees every earlier round's findings and decisions, and is told to look only at what changed
+  it("a first round gets no earlier.json and is not told it is a re-review", async () => {
+    const seen: Seen[] = [];
+    const steps = designSteps({ kind: "ok", value: setup(model(seen, [{ findings: [] }])) });
+    if (steps.designReview.kind !== "available") throw new Error("unavailable");
+    done(await steps.designReview.run(input()));
+    expect(seen[0]?.files).not.toContain("earlier.json");
+    expect(String(seen[0]?.run.prompt)).not.toContain(AGAIN);
+  });
+
+  it("a re-review and its verify pass get earlier.json: every round, and the spec and design text the last one read", async () => {
+    const seen: Seen[] = [];
+    const conflict = { ...FINDING, id: "D1" };
+    const steps = designSteps({
+      kind: "ok",
+      value: setup(
+        model(seen, [{ findings: [] }, { findings: [] }, { verdicts: [{ id: "D1", bucket: "act_on", why: "x" }] }]),
+      ),
+    });
+    const { review, verify } = bothRuns(steps);
+    // round 1 keeps the text it read, by its hashes
+    done(await review(input()));
+    const first = input();
+    writeSpec(home, specText().replace("SPEC-INTENT: an order's total", "SPEC-INTENT: an order's net total"));
+    const earlier: readonly EarlierRound[] = [
+      {
+        round: 1,
+        spec: first.spec,
+        design: first.design,
+        lane: "feature",
+        planned: [],
+        findings: [conflict],
+        kept: [{ ...conflict, bucket: "act_on", why: "it holds" }],
+        dismissed: [],
+      },
+    ];
+    const second = {
+      ...input(),
+      spec: specHash(specText().replace("an order's total", "an order's net total")),
+      earlier,
+    };
+    done(await review(second));
+    done(await verify({ ...second, findings: [conflict] }));
+    for (const [i, told] of [
+      [1, AGAIN],
+      [2, VERIFY_AGAIN],
+    ] as const) {
+      const read = earlierSeen(seen, i);
+      expect(read.rounds).toEqual(earlier);
+      expect(read.previous.spec).toContain("SPEC-INTENT: an order's total is the sum");
+      expect(read.previous.design).toBe("# Design\n\nOne table per ticket.\n");
+      expect(promptSeen(seen, i)).toContain(told);
+    }
+  });
+
+  it("a cite in the design that does not hold stops the design-reviewer before any model runs (#489)", async () => {
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), "# Design\n\nsee svc/Main.java:9@0000000\n");
+    const seen: Seen[] = [];
+    const steps = designSteps({ kind: "ok", value: setup(model(seen, [{ findings: [] }])) });
+    if (steps.designReview.kind !== "available") throw new Error("unavailable");
+    const design = specHash("# Design\n\nsee svc/Main.java:9@0000000\n");
+    expect(await steps.designReview.run({ ...input(), design })).toMatchObject({
+      kind: "ok",
+      value: {
+        kind: "failed",
+        final: true,
+        why: expect.stringContaining("svc/Main.java:9@0000000: 0000000 is not a commit"),
+      },
+    });
+    expect(seen).toEqual([]);
   });
 
   it("the verify pass gets findings.json and keeps what it does not dismiss; none to verify runs no model", async () => {
