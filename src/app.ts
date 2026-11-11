@@ -1543,6 +1543,15 @@ const COMMANDS: readonly Command[] = [
   { name: "lint-edit", run: ({ positionals, io }: Args) => lintEditCommand(positionals, io) },
 ];
 
+// COMMAND_NAMES : every command the CLI takes, the ones that read their own options too; test/cli-doc.test.ts checks
+// that docs/reference/cli.md lists each one (#482)
+export const COMMAND_NAMES: readonly string[] = [
+  ...COMMANDS.map((c) => c.name),
+  ...Object.keys(REQUEST_COMMANDS),
+  "eval",
+  "egress",
+];
+
 // ownOptions : request, confirm and project read their own options (--file, --template <file>, a text that is one
 // word), so the main command line never parses their words
 function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefined {

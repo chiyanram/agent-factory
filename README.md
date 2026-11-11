@@ -36,10 +36,10 @@ not a merge bot. Today the runs need a Claude plan; Copilot is #162.
 
 ## Install and set up
 
-You need Node 26 or later, git and the Claude Code CLI. Install a pinned release, then run `init` in your clone:
+You need Node 26 or later, git and the Claude Code CLI. Install the latest release, then run `init` in your clone:
 
 ```bash
-V=0.30.1
+V=$(curl -fsSL https://api.github.com/repos/chiyanram/agent-factory/releases/latest | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).tag_name.slice(1)')
 npm i -g https://github.com/chiyanram/agent-factory/releases/download/v$V/chiyanram-agent-factory-$V.tgz
 cd ~/workspace/<your clone> && agent-factory init     # Enter takes the recommended choices
 ```
@@ -49,10 +49,16 @@ next. The manual steps are in [docs/how-to/](docs/how-to/).
 
 ## Your first ticket
 
+The whole path, from install to a merged PR: [Your first merged PR](docs/how-to/first-merged-pr.md).
+
 1. `agent-factory coordinator [<project>]`: talk the ticket through; the coordinator writes the spec. It reads the
    project's git host and clone from the project file `init` wrote, so it needs no shell exports.
 2. `agent-factory start <project> <ticket>`; above the tiny lane, also `agent-factory approve`.
 3. The orchestrator loop builds, checks and reviews the pull request, then pings you to merge.
+
+## Principles
+
+[The constitution](docs/CONSTITUTION.md): P1–P21, each with why and how it is checked.
 
 ## Status
 

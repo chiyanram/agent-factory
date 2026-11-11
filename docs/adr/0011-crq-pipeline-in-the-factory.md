@@ -4,6 +4,8 @@
 
 Status: accepted 2026-11-06 (operator, chiyanram/skills#210, D1–D17). Amends ADR-0001 and ADR-0004.
 
+Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md) and [ADR-0013](0013-typescript-package-cli-first.md).
+
 ## Context
 
 The rulebook now ships the whole change pipeline as its `crq` skill: lanes, phases, how a review runs, proof of done,

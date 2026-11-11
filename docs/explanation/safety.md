@@ -1,8 +1,9 @@
 # Safety
 
 How the factory keeps an unattended AI run from doing harm, what is still open, and what is decided next. The design
-is [ADR-0012](../adr/0012-safety-design-for-unattended-runs.md). **Enforced** means code stops it today; **Today:**
-marks a place where the code still differs from the design.
+is [ADR-0012](../adr/0012-safety-design-for-unattended-runs.md). **Enforced** means code stops it today; a **Today**
+note marks a place where the code still differs from the design, and names the ticket that closes it
+(`scripts/check-today.ts` checks that it does).
 
 ## The threat model
 
@@ -27,7 +28,7 @@ Two rules follow from this, decided on 2026-11-10:
 
 - **No unattended run holds all three legs** in a way nothing narrows. Where one does today, this page says so.
 - **Prose is not a guardrail.** A rule only in a prompt or a role card is advice. A rule that matters is enforced in
-  code, or it is marked **Today:** here.
+  code, or it is marked with a **Today** note here.
 
 ## The layers
 
@@ -48,7 +49,7 @@ Two rules follow from this, decided on 2026-11-10:
 | egress allow-list | reaching any host not on the list; the git host always refused | Enforced by host name only | `src/core/egress/allowlist.ts` |
 | host push guards | a run changing CI, its own settings or `.factory` | Enforced (#115, #110) | `src/core/ci-files.ts`, `src/core/agent-settings.ts` |
 | hostGit | a repo's own git config running a planted program on the host | Enforced (#87) | `src/core/git.ts` |
-| coordinator deny list | the AI running `approve`, `start`, `waive`, `eval`, `onboard`, `plugin`, `init`, `gh`, `git push` | Enforced as rules; **Today:** not a wall on a laptop | `src/core/coordinator.ts:50-100` |
+| coordinator deny list | the AI running `approve`, `start`, `waive`, `eval`, `onboard`, `plugin`, `init`, `gh`, `git push` | Enforced as rules; **Today:** not a wall on a laptop, an accepted risk while a person reviews every merge; on the VM the coordinator runs as its own user (#493) | `src/core/coordinator.ts:50-100` |
 | posting template | agent text that pings, links, closes or quick-acts | Enforced (#126, #335) | `src/core/post.ts`, `src/core/pr-body.ts` |
 
 ## What is open
@@ -118,4 +119,4 @@ Two rules follow from this, decided on 2026-11-10:
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106).
 - **Where state lives.** **Today:** before the PR opens, a ticket's START, spec, approval and run records are only on
   the machine that ran START, in `$FACTORY_HOME`; after it opens, the branch, the PR and a copy of the approval are on
-  the git host. Copying the approved spec to the ticket at approval is decided, not built.
+  the git host. Copying the approved spec to the ticket at approval is decided, not built (#498).

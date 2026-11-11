@@ -1,9 +1,10 @@
 # Install a pinned version
 
-Install the packed package from the release. Set `V` to the version you want:
+Install the packed package from the latest release. The first line reads the latest version from the git host; to pin
+another one, set `V` to it instead (`V=<version>`):
 
 ```bash
-V=0.30.0
+V=$(curl -fsSL https://api.github.com/repos/chiyanram/agent-factory/releases/latest | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).tag_name.slice(1)')
 npm i -g https://github.com/chiyanram/agent-factory/releases/download/v$V/chiyanram-agent-factory-$V.tgz && agent-factory --version
 ```
 

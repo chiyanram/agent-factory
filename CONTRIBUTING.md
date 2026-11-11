@@ -59,7 +59,7 @@ No bash ships: every component is TypeScript in the package and calls CLIs
 3. Call the git host only through the `Forge` seam in `src/core/forge/`, and git on a project's clone only through
    `hostGit` (`src/core/git.ts`). Read a setting only through `settingOf`.
 4. Print one line on success. Write errors to stderr and exit non-zero.
-5. Add the command to the Scripts table in [docs/reference/cli.md](docs/reference/cli.md), and any new setting to
+5. Add the command to its group in [docs/reference/cli.md](docs/reference/cli.md), and any new setting to
    [Settings](docs/reference/settings.md#settings).
 
 ## Add a check

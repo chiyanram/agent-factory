@@ -4,6 +4,8 @@
 
 Status: accepted 2026-10-18 (#4 Q1), extended 2026-10-20 (#1 "Box 2")
 
+Refined by [ADR-0019](0019-memory-before-the-pr.md).
+
 ## Context
 
 Decisions lived in chat and were written down later (#4 area 2, item 2.5). The old fleet kept state in Discord and in

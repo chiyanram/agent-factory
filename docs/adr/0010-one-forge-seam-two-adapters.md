@@ -4,6 +4,8 @@
 
 Status: accepted 2026-11-04 (operator, #64 Q1–Q3); the bot amended to a GitHub App on 2026-11-05. Amends ADR-0009.
 
+Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md).
+
 ## Context
 
 Every coordinator script called GitLab through `scripts/lib/gitlab.sh`. The laptop pilot (#62) runs on a new GitHub

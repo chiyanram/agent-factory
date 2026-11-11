@@ -25,17 +25,10 @@ anyone. An RCA agent for work comes later, on the same engine.
 
 ## 2. Rules that never change
 
-| # | rule | ADR |
-|---|---|---|
-| P1 | The engine decides every routine step. No model decides what runs next | 0011 D13, 0012 S3 |
-| P2 | Every run is fresh. A run is never resumed | 0001 |
-| P3 | The ticket tracker and the git host are the memory. A restart loses nothing | 0002 |
-| P4 | No model holds a git host login. The host pushes and posts | 0012 S6, S14 |
-| P5 | What judges a change never comes from that change: rules come from the default branch or a pinned plugin, and settings from outside the repo | 0012 S12 |
-| P6 | The AI never approves anything, and zero findings is not a pass | 0012 S10 |
-| P7 | Every loop has a cap and a stop | 0012 S3 |
-| P8 | **Nothing starts unless a human starts it** | new (2026-11-09) |
-| P9 | **Nothing is committed to the product repo by default.** Work: never. Personal and aruvii may opt in, for the spec, the brief and the glossary. A spec PR's empty commit carries no files and is allowed everywhere | new (2026-11-09) |
+The principles, P1–P21, live in [the constitution](../CONSTITUTION.md), each with why and how it is checked. This page
+does not repeat them.
+
+Run one orchestrator loop per project: `dispatch` holds a lock per project and refuses to start a second loop for it.
 
 ## 3. How a ticket goes
 

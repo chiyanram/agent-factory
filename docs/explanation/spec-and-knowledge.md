@@ -2,7 +2,7 @@
 
 What a ticket carries into a build, where it lives, and what is decided next. The settings are in
 [Settings](../reference/settings.md#settings); the commands are `agent-factory spec`, `approve` and `onboard`
-([CLI](../reference/cli.md#scripts)).
+([CLI](../reference/cli.md#commands)).
 
 ## What a ticket carries
 
