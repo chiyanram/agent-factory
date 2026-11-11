@@ -40,7 +40,9 @@ agent-factory init            # the project's name defaults to the clone folder'
    settings, `config check`, and the installed `agent-factory` against the latest release, with the install line when
    a newer one is out (it never fails the run, and says so when the release list cannot be read; `agent-factory setup
    status` shows the same line, #482).
-6. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
+6. **Writes the coordinator's settings**, as `agent-factory setup coordinator` does (#485), so the settings check
+   passes on a new laptop. They hold no secret.
+7. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
    claude` when the token is missing, opening `claude` once in the clone, `agent-factory onboard <project>`,
    `agent-factory onboard accept <project> <brief hash> <glossary hash>`, the spec (in the issue's body with the issue
    store, else the local file), `agent-factory start` and

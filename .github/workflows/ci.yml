@@ -52,6 +52,24 @@ jobs:
       - run: make test
       - run: make build
 
+  # The clean-machine install test (#485): the packed package installed with npm into an empty prefix, then
+  # --version, init --yes and dispatch --dry-run on a fresh home, on Ubuntu and on macOS. release.yml runs this
+  # workflow first, so a failure here blocks a release.
+  install-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - run: node scripts/install-test.ts
+
   # The suite on macOS, with git's own default branch: the pilot hit engine bugs only a real Mac showed (the socket
   # path limit, /var behind a symlink) (#485, was #462). The rules pack check needs no second run here.
   test-macos:

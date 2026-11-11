@@ -58,6 +58,7 @@ import {
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
 import { designView, type DesignView } from "./design.js";
+import { nextStep } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
@@ -528,6 +529,12 @@ function ticketAt(setup: TickSetup, ticket: string): ApprovalWhere {
   };
 }
 
+// nextFields : what the person does next, as the hand-over note's one field (next-step.ts, #485)
+function nextFields(why: string): Post["fields"] {
+  const step = nextStep({ kind: "needs-human", why });
+  return step === undefined ? [] : [{ label: "next", value: `a person ${step.does}` }];
+}
+
 // handOver : needs-human, the claim released (as block does), one note, and a record so the same stop is never posted
 // twice. With no change to label, the pass fails for this ticket, so the operator sees it.
 async function handOver(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
@@ -538,7 +545,7 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
   const steps: readonly (() => Promise<Done>)[] = [
     () => setup.forge.addLabel({ number: n, label: NEEDS_HUMAN }),
     () => setup.forge.removeLabel({ number: n, label: setup.label }),
-    () => say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields: [], items: [] }),
+    () => say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields: nextFields(why), items: [] }),
     () => record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } }),
     () => informed(setup, { kind: "needs-you", ticket: state.ticket, change: n, why }),
   ];

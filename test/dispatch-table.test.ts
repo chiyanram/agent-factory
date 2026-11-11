@@ -18,6 +18,7 @@ import {
   MAX_REVIEW_ROUNDS,
   type TicketState,
 } from "../src/core/dispatch/table.js";
+import { nextStep } from "../src/core/dispatch/next-step.js";
 import type { OpenLine } from "../src/core/poll.js";
 
 const H = "1".repeat(40);
@@ -885,5 +886,102 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     const fresh = state({ runs: summarize({ events: same, since: restarted.at }), approval: restarted, ...cleared });
     expect(decide(fresh)).toMatchObject({ kind: "writer", task: { kind: "fix" } });
     expect(inFlight(fresh)).toBe(true);
+  });
+});
+
+// #485 (was #462) "can it get stuck?": over generated ticket states with an open change, the next decision is a step,
+// a wait the factory carries on by itself (inFlight), or a hand-over that says what the person does: the loop never
+// ends silently while a ticket's PR is open
+describe("can it get stuck? (#485)", () => {
+  const lines: readonly OpenLine[] = [
+    line(),
+    line({ pipeline: { kind: "failed" } }),
+    line({ pipeline: { kind: "running" } }),
+    line({ pipeline: { kind: "none" } }),
+    line({ pipeline: { kind: "manual" } }),
+    line({ pipeline: { kind: "skipped" } }),
+    line({ pipeline: { kind: "canceled" } }),
+    line({ pipeline: { kind: "unknown", raw: "weird" } }),
+    line({ needsHuman: true }),
+    line({ mergeable: "conflict" }),
+    line({ head: "2".repeat(40) }),
+    line({ asks: 1 }),
+    line({ stop: { kind: "stopped", at: "2026-11-07T09:30:00Z" } }),
+    line({ claimed: false }),
+  ];
+  const runs: readonly Summary[] = [
+    EMPTY,
+    wrote(),
+    wrote({ ...readyOk }),
+    wrote({ ...reviewed(0) }),
+    wrote({ ...reviewed(2) }),
+    wrote({ ...reviewed(2, MAX_REVIEW_ROUNDS) }),
+    wrote({ ciRounds: MAX_CI_ROUNDS, ...reviewed(0) }),
+    wrote({
+      readyFailures: MAX_READY_FAILURES,
+      lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: false, why: "x" },
+    }),
+    { ...EMPTY, lastWriter: fixDone },
+    { ...EMPTY, interrupted: { kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" } },
+  ];
+  const approvals: readonly TicketState["approval"][] = [
+    { kind: "approved", at: APPROVED_AT, lane: "feature", testFirst: false },
+    { kind: "started", at: APPROVED_AT, lane: "tiny", testFirst: false },
+    { kind: "stale" },
+    { kind: "missing" },
+    { kind: "unapproved", lane: "feature" },
+    { kind: "unwritten" },
+    { kind: "raised", from: "tiny", to: "feature", why: "a planned file needs it" },
+  ];
+  // the design review's steps, as the table sees them before the build (#236)
+  const designs: readonly TicketState["design"][] = [
+    { kind: "off" },
+    { kind: "run", step: "review", spec: "a".repeat(64), design: "none" },
+    { kind: "later", step: "verify", at: "2026-11-07T11:00:00Z" },
+    {
+      kind: "stopped",
+      step: "review",
+      why: "the design review failed 3 times at this spec and design; a person looks",
+    },
+    { kind: "early", at: "2026-11-07T09:00:00Z" },
+  ];
+  const opened = approvals.flatMap((approval) =>
+    lines.flatMap((l) =>
+      runs.flatMap((r) =>
+        designs.map((design) => state({ approval, change: { kind: "open", line: l }, runs: r, design })),
+      ),
+    ),
+  );
+  // a merged ticket whose START record remains: still claimed, or reconciled already and gone from poll's list
+  const merged = approvals.flatMap((approval) => [
+    state({
+      approval,
+      change: { kind: "merged", line: { kind: "merged", number: 12, branch: "factory/PROJ-1", fork: false } },
+    }),
+    state({ approval, change: { kind: "none" }, runs: wrote() }),
+  ]);
+  const all = [...opened, ...merged];
+
+  it("each state is carried on, or hands the ticket to a person with a named next step", () => {
+    const stuck = all.filter((s) => {
+      const step = nextStep(decide(s));
+      return step === undefined || (!inFlight(s) && step.who === "person" && step.does.trim() === "");
+    });
+    expect(all.length).toBeGreaterThan(2000);
+    expect(stuck.map((s) => [s.approval.kind, s.change.kind, s.design.kind, decide(s)])).toEqual([]);
+  });
+
+  it("names what the person does for a pushed head and a change someone else claimed", () => {
+    expect(nextStep({ kind: "wait", why: "the head is not the writer's: a person pushed; stand off" })).toEqual({
+      who: "person",
+      does: "the person who pushed finishes, then STARTs the ticket again (tiny) or approves its spec again: agent-factory start | approve",
+    });
+    expect(
+      nextStep({ kind: "release", why: "quiet for over 30 minutes: claimed, but not by this dispatcher" }),
+    ).toEqual({
+      who: "person",
+      does: "whoever claimed it finishes it, or gives it back: agent-factory release <project> <change>",
+    });
+    expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
   });
 });

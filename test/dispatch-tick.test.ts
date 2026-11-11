@@ -41,6 +41,9 @@ const SPEC = (lane: string) =>
   ].join("\n");
 
 const H = "1".repeat(40);
+// the next step every hand-over note names (next-step.ts, #485)
+const NEXT =
+  "\n\n- next: a person decides; to go on, removes needs-human and STARTs the ticket again (tiny) or approves its spec again: agent-factory start \\| approve";
 const NO_DESIGN_REVIEW = DEFAULT_LANES.map((l) => ({
   name: l.name,
   approval: l.approval,
@@ -947,7 +950,7 @@ describe("tick", () => {
       `note #12 ${COPY("PROJ-1")}`,
       "label +needs-human #12",
       "label -agent::claimed #12",
-      "note #12 [coordinator] blocked: the writer's run changed nothing",
+      `note #12 [coordinator] blocked: the writer's run changed nothing${NEXT}`,
     ]);
     expect(pings).toEqual([
       { kind: "needs-you", ticket: "PROJ-1", change: 12, why: "the writer's run changed nothing" },
@@ -1364,7 +1367,7 @@ describe("the lane set by code, raise only (#230)", () => {
     await tick(setup(changes, log, { steps }));
     expect(log).toContain("label +needs-human #12");
     expect(log.find((l) => l.startsWith("note #12"))).toBe(
-      `note #12 [coordinator] blocked: the lane is raised from tiny to bug (the ready check read the real diff): ${LONG}`,
+      `note #12 [coordinator] blocked: the lane is raised from tiny to bug (the ready check read the real diff): ${LONG}${NEXT}`,
     );
   });
 });
@@ -1412,7 +1415,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     expect(runs).toEqual([]);
     expect(log).toContain("label +needs-human #12");
     expect(log.find((l) => l.startsWith("note #12 [coordinator] blocked"))).toBe(
-      "note #12 [coordinator] blocked: the ticket spent $2.50 and 300 tokens since its approval, at its cap of $2 (FACTORY_MAX_USD_TICKET)",
+      `note #12 [coordinator] blocked: the ticket spent $2.50 and 300 tokens since its approval, at its cap of $2 (FACTORY_MAX_USD_TICKET)${NEXT}`,
     );
     // handed over once: a person removing the label does not repost it
     const again: string[] = [];
@@ -1542,7 +1545,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
       setup({ team, open: [open()], merged: [] }, log, { steps, caps: caps({ ticket: { usd: 2, tokens: "none" } }) }),
     );
     expect(log.find((l) => l.startsWith("note #12 [coordinator] blocked"))).toBe(
-      "note #12 [coordinator] blocked: the ticket spent $3.00 and 9 tokens since its approval, at its cap of $2 (FACTORY_MAX_USD_TICKET)",
+      `note #12 [coordinator] blocked: the ticket spent $3.00 and 9 tokens since its approval, at its cap of $2 (FACTORY_MAX_USD_TICKET)${NEXT}`,
     );
   });
 

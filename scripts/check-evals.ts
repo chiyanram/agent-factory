@@ -14,7 +14,7 @@
 // type stripping (Node 22.18+), so it uses only erasable TypeScript.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type * as Golden from "../src/core/eval/golden.js";
@@ -122,7 +122,7 @@ export function applied(root: string, sha: string, patch: string): Result<Applie
   if (git(root, ["cat-file", "-e", `${sha}^{commit}`], "").code !== 0) {
     return { kind: "failed", reason: `base.sha ${sha} is not a commit in this history (a shallow clone?)` };
   }
-  const dir = mkdtempSync(join(tmpdir(), "factory-evals-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "factory-evals-"));
   const result = inScratchIndex(root, sha, patch, join(dir, "index"));
   rmSync(dir, { recursive: true, force: true });
   return result;
