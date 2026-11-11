@@ -55,10 +55,13 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    on a personal project: the body of the git host issue whose number is the ticket (#381); an edit to it makes its
    approval stale. **Today:** no write point replaces an issue's body (#486 §4), so draft the spec in the local file
    (`agent-factory spec --template <issue number>` prints the template) and ask the person to paste it into the
-   issue, then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. Done when a
-   stranger with no chat could build the change from the spec alone and `agent-factory spec <project> <ticket>` exits
-   0: run it at the end of this step, before any design review. It stops (exit 2) a spec whose `## Planned files`
-   need a heavier lane than its own, and a cite that does not hold in the project's clone (#489).
+   issue, then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. When the
+   ticket must wait for others to merge first, name them in an optional `## Blocked by` section, one ticket per line
+   (#494). **Today:** the orchestrator does not hold the build on it yet (#494's later slices): until then, START the
+   ticket only after its blockers merge. Done when a stranger with no chat could build the change from the spec alone
+   and `agent-factory spec <project> <ticket>` exits 0: run it at the end of this step, before any design review. It
+   stops (exit 2) a spec whose `## Planned files` need a heavier lane than its own, a `## Blocked by` line that is not
+   one ticket, and a cite that does not hold in the project's clone (#489).
 4. **Design review and approval.** You do not start a design review: in a lane with one (bug, feature and one-way door
    by default), the orchestrator runs it once the spec is ready (#236), and its kept findings go to the PR, the log and
    a ping. Its findings feed **one grill round**: ask every CONFLICT and OPEN at once and write the answers into the

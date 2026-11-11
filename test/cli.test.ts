@@ -115,6 +115,15 @@ describe("agent-factory spec", () => {
     expect((await cli(["spec", "ledger", "PROJ-1"])).err).toBe("");
   });
 
+  it("stops a spec whose Blocked by line is not one ticket, exit 2, naming the line (#494)", async () => {
+    writeSpec(`${SPEC}\n## Blocked by\n\n- PROJ-2, PROJ-3\n`);
+    const run = await cli(["spec", "ledger", "PROJ-1"]);
+    expect(run.code).toBe(2);
+    expect(run.err).toContain(`the '## Blocked by' line "PROJ-2, PROJ-3" is not one ticket`);
+    writeSpec(`${SPEC}\n## Blocked by\n\n- PROJ-2\n- #3\n`);
+    expect((await cli(["spec", "ledger", "PROJ-1"])).code).toBe(0);
+  });
+
   it("says how to start when there is no spec, exit 1", async () => {
     const run = await cli(["spec", "ledger", "PROJ-1"]);
     expect(run.code).toBe(1);
