@@ -137,7 +137,7 @@ function hostBlocked(reason: string): Outcome {
 }
 
 // One checked part of a report. A problem names the part, never its content: the reason is posted on the change.
-type Check<T> = { readonly kind: "ok"; readonly value: T } | { readonly kind: "bad"; readonly problem: string };
+export type Check<T> = { readonly kind: "ok"; readonly value: T } | { readonly kind: "bad"; readonly problem: string };
 
 function ok<T>(value: T): Check<T> {
   return { kind: "ok", value };
@@ -254,6 +254,14 @@ function listOf<T>(
     return bad(`${what} must be a list with at least one entry`);
   }
   return value.length > max ? bad(`${what} has more than ${max} entries`) : all(value.map(each));
+}
+
+// questionsIn : a list of questions, each with its choices and the recommended one, checked as a report's are; a plain
+// string is refused here, since it is read only from an old report (#517: the coordinator's round, loop.ts grill)
+export function questionsIn(value: unknown): Check<readonly Question[]> {
+  return listOf<Question>(value, "questions", MAX_QUESTIONS, (item, i) =>
+    typeof item === "string" ? bad(`question ${i + 1} must be {question, choices, recommended}`) : questionOf(item, i),
+  );
 }
 
 function malformed(problem: string): Outcome {

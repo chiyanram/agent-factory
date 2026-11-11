@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Done, Result } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
 import { lintEdit } from "../src/core/lint-edit.js";
-import { ask, block, claim, reconcile, release, status, type Reconcile } from "../src/core/loop.js";
+import { ask, block, claim, grill, reconcile, release, status, type Reconcile } from "../src/core/loop.js";
+import { openAsks } from "../src/core/notes.js";
+import { LOOP_COMMANDS, questionsFrom } from "../src/loop-cli.js";
+import { tempDir } from "./temp.js";
 import { renderPost } from "../src/core/post.js";
 import type { PushRequest } from "../src/core/push.js";
 import type { PushTarget } from "../src/core/writer/step.js";
@@ -165,6 +168,158 @@ describe("status and ask (#138)", () => {
     await status({ forge: forge(log), number: 12, sha: "aaaa1111", text: "/approve" });
     expect(log[0]).not.toMatch(/\n\//);
     expect(log[0]?.startsWith("note !12 [coordinator] ")).toBe(true);
+  });
+});
+
+// #517 AC-1: the coordinator posts its numbered round through a command it may run, and the round stays open until a
+// member answers every question
+describe("grill (#517)", () => {
+  const QUESTIONS = [
+    { question: "which store?", choices: ["a file", "a table"], recommended: 1 },
+    { question: "which currency?", choices: ["EUR", "USD", "GBP"], recommended: 0 },
+  ] as const;
+  const ASKED = QUESTIONS.map((q) => ({ kind: "choices", ...q }) as const);
+
+  it("AC-1: posts one [coordinator] OPEN: N questions note with an item per question, open until each is answered", async () => {
+    const log: string[] = [];
+    expect(await grill({ forge: forge(log), number: 12, sha: "aaaa1111", questions: ASKED })).toEqual({
+      kind: "ok",
+      value: "asked 2 question(s) on !12 at aaaa1111",
+    });
+    const body = (log[0] ?? "").replace(/^note !12 /, "");
+    expect(body.split("\n")[0]).toBe("[coordinator] OPEN: 2 questions");
+    expect(body).toContain("- 1. which store? A) a file · B) a table (recommended)");
+    expect(body).toContain("- 2. which currency? A) EUR (recommended) · B) USD · C) GBP");
+    const readers = { factory: "ram", members: new Set(["ram", "lee"]) };
+    const at = (i: number) => `2026-11-07T10:0${i}:00Z`;
+    const notes = (...replies: string[]) => [
+      { author: { name: "ram" }, body, at: at(0) },
+      ...replies.map((r, i) => ({ author: { name: "lee" }, body: r, at: at(i + 1) })),
+    ];
+    expect(openAsks({ notes: notes(), readers })).toBe(1);
+    expect(openAsks({ notes: notes("1B"), readers })).toBe(1);
+    expect(openAsks({ notes: notes("1B", "2: A"), readers })).toBe(0);
+  });
+
+  it("refuses a head that moved and posts nothing", async () => {
+    const log: string[] = [];
+    expect(await grill({ forge: forge(log), number: 12, sha: "bbbb2222", questions: ASKED })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("head moved"),
+    });
+    expect(log).toEqual([]);
+  });
+
+  describe("its questions file", () => {
+    let home = "";
+    beforeEach(() => {
+      home = tempDir("factory-grill-");
+      mkdirSync(join(home, "specs", "ledger", "PROJ-1"), { recursive: true });
+    });
+    afterEach(() => rmSync(home, { recursive: true, force: true }));
+    const env = () => ({ FACTORY_HOME: home });
+    const put = (name: string, text: string) => {
+      const path = join(home, "specs", "ledger", "PROJ-1", name);
+      writeFileSync(path, text);
+      return path;
+    };
+
+    it("reads a list of questions from a file under <home>/specs", async () => {
+      const read = await questionsFrom(env(), put("q.json", JSON.stringify(QUESTIONS)));
+      expect(read).toEqual({ kind: "ok", value: ASKED });
+    });
+
+    it("refuses a file outside <home>/specs, one that links out of it, and one that is not there", async () => {
+      const outside = join(home, "q.json");
+      writeFileSync(outside, JSON.stringify(QUESTIONS));
+      const linked = join(home, "specs", "ledger", "PROJ-1", "link.json");
+      symlinkSync(outside, linked);
+      for (const file of [outside, linked, join(home, "specs", "gone.json")]) {
+        expect(await questionsFrom(env(), file)).toMatchObject({
+          kind: "failed",
+          reason: expect.stringContaining("must be a file under"),
+        });
+      }
+    });
+
+    it("refuses what is not a list of questions with 2 to 4 choices and a recommended one", async () => {
+      for (const [text, why] of [
+        ["not json", "not JSON"],
+        ["[]", "at least one entry"],
+        [JSON.stringify(["which store?"]), "must be {question, choices, recommended}"],
+        [JSON.stringify([{ question: "x", choices: ["a"], recommended: 0 }]), "choices must be a list of 2 to 4"],
+        [JSON.stringify([{ question: "x", choices: ["a", "b"], recommended: 2 }]), "recommended must be the index"],
+      ] as const) {
+        expect(await questionsFrom(env(), put("q.json", text))).toMatchObject({
+          kind: "failed",
+          reason: expect.stringContaining(why),
+        });
+      }
+    });
+
+    it("never opens through a link at its end, even one to another file under <home>/specs", async () => {
+      const target = put("q.json", JSON.stringify(QUESTIONS));
+      const link = join(home, "specs", "ledger", "PROJ-1", "same.json");
+      symlinkSync(target, link);
+      expect(await questionsFrom(env(), target)).toMatchObject({ kind: "ok" });
+      expect(await questionsFrom(env(), link)).toMatchObject({ kind: "failed" });
+    });
+
+    it("refuses a hard link to a file elsewhere, a folder, and a file over 64 KB", async () => {
+      const outside = join(home, "q.json");
+      writeFileSync(outside, JSON.stringify(QUESTIONS));
+      const hard = join(home, "specs", "ledger", "PROJ-1", "hard.json");
+      linkSync(outside, hard);
+      expect(await questionsFrom(env(), hard)).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("one link"),
+      });
+      const folder = join(home, "specs", "ledger", "PROJ-1", "dir.json");
+      mkdirSync(folder);
+      expect(await questionsFrom(env(), folder)).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("regular file"),
+      });
+      const big = put(
+        "big.json",
+        JSON.stringify([{ question: "x".repeat(70_000), choices: ["a", "b"], recommended: 0 }]),
+      );
+      expect(await questionsFrom(env(), big)).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("65536 bytes"),
+      });
+    });
+
+    it("refuses a round that checks but would read back damaged once posted: 4 choices of 200 characters", async () => {
+      const long = [
+        { question: "which store?", choices: ["a", "b", "c", "d"].map((c) => c.repeat(200)), recommended: 3 },
+      ];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(long)))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("question 1 would not read back as written once posted"),
+      });
+      // the last choice cut, with every choice and the recommended one still there: only its text tells
+      const cutLast = [{ question: "q".repeat(300), choices: ["a", "b", "c", "d".repeat(190)], recommended: 0 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(cutLast)))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("would not read back"),
+      });
+      // a choice that holds the separator splits it on read-back too
+      const split = [{ question: "which?", choices: ["a · b", "c"], recommended: 0 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(split)))).toMatchObject({ kind: "failed" });
+      // text the template escapes still reads back the same
+      const escaped = [{ question: "is #12 <done>?", choices: ["yes | now", "no"], recommended: 1 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(escaped)))).toMatchObject({ kind: "ok" });
+    });
+
+    it("the command exits 2 naming the problem, and posts nothing, for a file that does not check", async () => {
+      const parsed = LOOP_COMMANDS.grill?.(["12", "aaaa1111", put("q.json", "[]")]);
+      const errs: string[] = [];
+      const io = { env: env(), out: () => undefined, err: (t: string) => void errs.push(t), readStdin: async () => "" };
+      expect(typeof parsed === "function" ? await parsed(io) : parsed).toBe(2);
+      expect(errs.join("")).toContain("agent-factory grill: questions must be a list with at least one entry");
+      expect(LOOP_COMMANDS.grill?.(["12", "aaaa1111"])).toBe("usage");
+    });
   });
 });
 
