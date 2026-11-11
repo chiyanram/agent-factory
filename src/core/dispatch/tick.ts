@@ -715,11 +715,39 @@ function headOf(state: TicketState): string {
   return state.change.kind === "open" ? state.change.line.head : "";
 }
 
+// specHashOf : the hash of the ticket's spec as it is now, or "" when it cannot be read
+async function specHashOf(setup: TickSetup, ticket: string): Promise<string> {
+  const spec = await currentSpec(ticketAt(setup, ticket));
+  return spec.kind === "spec" ? spec.spec.hash : "";
+}
+
+// answeredFirst : the person's answers kept as their own event before the run that receives them, tied to the spec
+// version they answered (#486, P13); nothing for a task with none
+async function answeredFirst(setup: TickSetup, state: TicketState, task: Task): Promise<Done> {
+  const answers = task.kind === "fix" || task.kind === "test-first" ? (task.answers ?? []) : [];
+  if (answers.length === 0) {
+    return { kind: "ok" };
+  }
+  const spec = await specHashOf(setup, state.ticket);
+  return record({ where: where(setup, state), event: { at: at(setup), kind: "answered", spec, answers } });
+}
+
 async function runWriter(setup: TickSetup, state: TicketState, task: Task): Promise<Logged | Unavailable> {
   const step = setup.steps.writer;
   if (step.kind === "unavailable") {
     return step;
   }
+  const kept = await answeredFirst(setup, state, task);
+  return kept.kind === "ok" ? startWriter(setup, state, task, step) : kept;
+}
+
+// startWriter : the writer's start recorded, the claim taken, then the run
+async function startWriter(
+  setup: TickSetup,
+  state: TicketState,
+  task: Task,
+  step: Extract<Steps["writer"], { kind: "available" }>,
+): Promise<Logged> {
   const place = where(setup, state);
   const mode = modeOf(task);
   // the start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to

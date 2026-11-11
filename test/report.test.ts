@@ -95,6 +95,12 @@ describe("decide (#109 done-when)", () => {
 describe("parseReport", () => {
   it("reads the three outcomes", () => {
     expect(parseReport(JSON.stringify(DONE))).toEqual({ kind: "done", evidence: DONE.evidence });
+    // AC-1 of #486: more than five questions are one round, the whole frontier
+    const eight = Array.from({ length: 8 }, (_, i) => ({ ...CURRENCY, question: `Q${i + 1}?` }));
+    expect(parseReport(JSON.stringify({ status: "asked", questions: eight }))).toMatchObject({
+      kind: "asked",
+      questions: expect.arrayContaining([expect.objectContaining({ question: "Q8?" })]),
+    });
     expect(parseReport(JSON.stringify({ status: "asked", questions: [CURRENCY] }))).toEqual({
       kind: "asked",
       questions: [{ kind: "choices", question: "EUR or USD?", choices: ["EUR", "USD"], recommended: 0 }],
@@ -151,7 +157,7 @@ describe("parseReport", () => {
       [{ status: "done", evidence: DONE.evidence, questions: ["x"] }, "1 field(s) the schema does not name for done"],
       [{ status: "asked", questions: ["\u200b"] }, "question 1 must be non-empty"],
       [{ status: "blocked", blocker: "\u0000\u2060 " }, "blocker must be non-empty"],
-      [{ status: "asked", questions: ["a", "b", "c", "d", "e", "f"] }, "more than 5"],
+      [{ status: "asked", questions: Array.from({ length: 21 }, (_, i) => `q${i}`) }, "more than 20"],
       [{ status: "asked", questions: ["  "] }, "question 1 must be non-empty"],
       [{ status: "blocked" }, "blocker must be non-empty"],
       [{ status: "blocked", blocker: "x".repeat(2001) }, "longer than 2000"],
