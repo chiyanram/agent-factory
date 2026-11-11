@@ -56,7 +56,10 @@ approval floor).
 
 The pack's format version is the highest `N` it ships. The engine reads that version and the one before; a pack with
 no schema folder is version 0 and is read by the engine's own checks alone. A newer version is refused with both
-versions named, so an old engine never half-reads a new pack. The finding schema is read; **Today:** the finder runs
+versions named, so an old engine never half-reads a new pack. A pack whose card format allows a role or guardrail ID the
+engine does not know is refused, so a pack never names a guardrail the engine would skip (the engine may know more).
+The engine's finding values (categories, severities, grades) are the pinned pack's: CI fails when they differ. A
+finding's line may be a range, read as its first line, and its rule may be null. The finding schema is read; **Today:** the finder runs
 from the built-in prompt, not its card, so nothing checks a finding against it yet (#438).
 
 This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI

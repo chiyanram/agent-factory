@@ -53,16 +53,30 @@ function textOf(value: unknown, clean: (text: string) => string): string | undef
   return typeof value === "string" ? clean(value) : undefined;
 }
 
+// lineOf : a finding's line: a whole number, or text "N" or "N-M" as the rules pack's finding schema allows; a range is
+// read as its first line, where the thread anchors (#484). Pure.
 function lineOf(raw: unknown): number | undefined {
-  const line = get(raw, "line");
-  return Number.isSafeInteger(line) && Number(line) >= 0 ? Number(line) : undefined;
+  const n = firstLine(get(raw, "line"));
+  return Number.isSafeInteger(n) && Number(n) >= 0 ? Number(n) : undefined;
+}
+
+// firstLine : a line as given, or the first line of "N" or "N-M" text. Pure.
+function firstLine(line: unknown): unknown {
+  const text = typeof line === "string" ? /^(\d+)(-\d+)?$/.exec(line)?.[1] : undefined;
+  return text === undefined ? line : Number(text);
+}
+
+// ruleOf : a finding's rule; a null rule (a logic finding with no rule) is "" (#484). Pure.
+function ruleOf(raw: unknown): unknown {
+  const rule = get(raw, "rule");
+  return rule === null ? "" : rule;
 }
 
 type Texts = Pick<FindingCore, "file" | "rule" | "finding" | "fix">;
 
 function textsOf(raw: unknown, clean: (text: string) => string): Texts | undefined {
   const file = textOf(get(raw, "file"), clean);
-  const rule = textOf(get(raw, "rule"), clean);
+  const rule = textOf(ruleOf(raw), clean);
   const finding = textOf(get(raw, "finding"), clean);
   const fix = textOf(get(raw, "fix"), clean);
   return file === undefined || rule === undefined || finding === undefined || fix === undefined

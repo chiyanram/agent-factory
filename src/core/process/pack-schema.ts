@@ -336,6 +336,39 @@ export async function readPackSchemas(processDir: string): Promise<Result<PackSc
   return { kind: "ok", value: { version, parts } };
 }
 
+// enumsUnder : every value an enum lists anywhere under a schema. Pure.
+function enumsUnder(schema: unknown): readonly unknown[] {
+  if (Array.isArray(schema)) {
+    return schema.flatMap(enumsUnder);
+  }
+  if (!isObject(schema)) {
+    return [];
+  }
+  const own = Array.isArray(schema.enum) ? schema.enum : [];
+  return [...own, ...Object.entries(schema).flatMap(([k, v]) => (k === "enum" ? [] : enumsUnder(v)))];
+}
+
+// unknownToEngine : each role and guardrail ID the pack's card schema allows that this engine does not know, so a pack
+// can never name a guardrail the engine would silently skip (#484). The engine may know more than the pack names. Pure.
+export function unknownToEngine(
+  schemas: PackSchemas,
+  known: { readonly roles: readonly string[]; readonly guardrails: readonly string[] },
+): readonly string[] {
+  const card = schemas.parts.card;
+  const properties = card === undefined ? {} : objectAt(card, "properties");
+  const roles = enumsUnder(properties.role).filter((r) => !known.roles.includes(String(r)));
+  const guardrails = enumsUnder(properties.enforced_guardrails).filter((g) => !known.guardrails.includes(String(g)));
+  return [
+    ...roles.map(
+      (r) => `the rules pack's card format allows the role ${JSON.stringify(r)}, which this engine does not know`,
+    ),
+    ...guardrails.map(
+      (g) =>
+        `the rules pack's card format allows the guardrail ${JSON.stringify(g)}, which this engine does not enforce`,
+    ),
+  ];
+}
+
 // packProblem : why a pack's file breaks the pack's own schema for its part, or "" (none for that part, or it holds).
 // Pure.
 export function packProblem(schemas: PackSchemas, part: PackPart, value: unknown, from: string): string {

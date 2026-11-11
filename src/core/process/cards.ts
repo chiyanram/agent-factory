@@ -30,8 +30,8 @@ import { DESIGN_SCHEMA } from "../design/findings.js";
 import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
-import { allowedGuardrails, GUARDRAIL_FLOOR, isGuardrail, type GuardrailId } from "./guardrails.js";
-import { frontmatterOf, packProblem, readPackSchemas } from "./pack-schema.js";
+import { allowedGuardrails, GUARDRAIL_FLOOR, GUARDRAILS, isGuardrail, type GuardrailId } from "./guardrails.js";
+import { frontmatterOf, packProblem, readPackSchemas, unknownToEngine } from "./pack-schema.js";
 import { findProcess, type PluginDir } from "./read.js";
 
 const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts", "roles");
@@ -345,13 +345,21 @@ async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Re
   return text === undefined ? "none" : packCard(found.value.dir, role, text, `${found.value.plugin.label} (${path})`);
 }
 
+// what the engine knows of a rules pack's cards: the roles it runs from a card, the roles whose card only a person or the
+// coordinator reads, and every guardrail ID it enforces
+export const ENGINE_KNOWS = {
+  roles: [...Object.keys(ROLE_TOOLS), "coordinator", "finder", "retro"],
+  guardrails: Object.keys(GUARDRAILS),
+};
+
 // packCard : a plugin's card, checked against the rules pack's own card format, then by the engine (#484)
 async function packCard(processDir: string, role: Role, text: string, from: string): Promise<Result<Card>> {
   const schemas = await readPackSchemas(processDir);
   if (schemas.kind === "failed") {
     return schemas;
   }
-  const problem = packProblem(schemas.value, "card", frontmatterOf(text), from);
+  const unknown = unknownToEngine(schemas.value, ENGINE_KNOWS);
+  const problem = unknown[0] ?? packProblem(schemas.value, "card", frontmatterOf(text), from);
   return problem === "" ? cardOf(role, text, from) : failed(problem);
 }
 

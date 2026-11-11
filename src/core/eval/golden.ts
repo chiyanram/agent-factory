@@ -5,6 +5,8 @@
 
 export const SEVERITIES = ["blocker", "warning", "nit"] as const;
 // the Martian categories (ADR-0015 R2), with a severity as well (decided on #218, 2026-11-09)
+// the finding categories: the pinned rules pack's finding schema (finding-v1) holds the list, and CI checks this one
+// is the same (test/pack-schema.test.ts, #484)
 export const CATEGORIES = [
   "bug",
   "security",
@@ -12,6 +14,8 @@ export const CATEGORIES = [
   "data",
   "api",
   "perf",
+  "observability",
+  "maintainability",
   "test_gap",
   "doc_defect",
   "style",
@@ -63,7 +67,10 @@ function valueProblems(item: Readonly<Record<string, unknown>>): readonly string
     [Number.isInteger(item.line) && Number(item.line) >= 1, "line is not a whole number from 1"],
     [text(item.issue), "issue is empty"],
     [oneOf(SEVERITIES, item.severity), `severity is not one of ${SEVERITIES.join(", ")}`],
-    [oneOf(CATEGORIES, item.category), `category is not one of ${CATEGORIES.join(", ")}`],
+    [
+      oneOf(CATEGORIES, item.category),
+      `category ${JSON.stringify(item.category)} is not one of ${CATEGORIES.join(", ")}`,
+    ],
   ];
   return checks.filter(([ok]) => !ok).map(([, why]) => why);
 }
@@ -82,14 +89,12 @@ function parsed(raw: string): Result<unknown> {
   }
 }
 
-function asFinding(item: Readonly<Record<string, unknown>>): GoldenFinding {
-  return {
-    file: String(item.file),
-    line: Number(item.line),
-    issue: String(item.issue),
-    severity: oneOf(SEVERITIES, item.severity) ? item.severity : "nit",
-    category: oneOf(CATEGORIES, item.category) ? item.category : "speculative",
-  };
+// asFinding : one checked entry; none when its severity or category is not known, never mapped to another (#484)
+function asFinding(item: Readonly<Record<string, unknown>>): readonly GoldenFinding[] {
+  const { severity, category } = item;
+  return oneOf(SEVERITIES, severity) && oneOf(CATEGORIES, category)
+    ? [{ file: String(item.file), line: Number(item.line), issue: String(item.issue), severity, category }]
+    : [];
 }
 
 // readGolden : golden.json's findings, or every reason it is not well-formed. Pure.
@@ -105,7 +110,7 @@ export function readGolden(raw: string): Result<readonly GoldenFinding[]> {
   const wrong = list.flatMap(findingProblems);
   return wrong.length > 0
     ? { kind: "failed", reason: wrong.join("; ") }
-    : { kind: "ok", value: list.filter(isRecord).map(asFinding) };
+    : { kind: "ok", value: list.filter(isRecord).flatMap(asFinding) };
 }
 
 function cells(line: string): readonly string[] {

@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readCard, ROLE_TOOLS, type Role } from "../src/core/process/cards.js";
+import { ENGINE_KNOWS, readCard, ROLE_TOOLS, type Role } from "../src/core/process/cards.js";
+import { CATEGORIES, readGolden } from "../src/core/eval/golden.js";
+import { GRADES, SEVERITIES } from "../src/core/finding.js";
+import { readFindings } from "../src/core/review/verdicts.js";
 import {
   frontmatterOf,
   PACK_FORMAT,
   PACK_SUPPORTED,
   readPackSchemas,
   unknownKeywords,
+  unknownToEngine,
   validate,
 } from "../src/core/process/pack-schema.js";
 import { prop } from "../src/core/dispatch/records.js";
@@ -160,6 +164,62 @@ describe("the rules pack's format version (#484)", () => {
   });
 });
 
+describe("the pack names only what the engine enforces (#484)", () => {
+  it("a role or guardrail the pack's card format allows must be one the engine knows; it may know more", async () => {
+    const read = await readPackSchemas(pack({ schemas: v1Schemas() }).process);
+    expect(read.kind === "ok" ? unknownToEngine(read.value, ENGINE_KNOWS) : ["unread"]).toEqual([]);
+  });
+
+  it("refuses a card from a pack whose format names a guardrail the engine would skip", async () => {
+    const schemas = { ...v1Schemas() };
+    schemas["card-v1.schema.json"] = (schemas["card-v1.schema.json"] ?? "").replace(
+      '"judge-files-locked"',
+      '"judge-files-locked", "no-ssh"',
+    );
+    const { plugin } = pack({ schemas, cards: { "verify-pass": CARD } });
+    expect(await readCard([plugin], "verify-pass")).toEqual({
+      kind: "failed",
+      reason: `the rules pack's card format allows the guardrail "no-ssh", which this engine does not enforce`,
+    });
+  });
+});
+
+describe("findings as the pack's finding format writes them (#484)", () => {
+  const finding = {
+    id: "F9",
+    file: "src/a.ts",
+    line: "40-44",
+    rule: null,
+    severity: "warning",
+    grade: "walked",
+    finding: "f",
+    fix: "x",
+    axis: "standards",
+    kind: "logic",
+    category: "observability",
+    evidence: "e",
+  };
+
+  it("reads a line range as its first line, a null rule as none, and the pack's newer categories", () => {
+    expect(readFindings({ findings: [finding] }, "logic")).toMatchObject({
+      kind: "ok",
+      value: [{ line: 40, rule: "", category: "observability" }],
+    });
+  });
+
+  it("names an unknown category, never reads it as another", () => {
+    expect(readFindings({ findings: [{ ...finding, category: "vibes" }] }, "logic")).toEqual({
+      kind: "failed",
+      reason: `the find pass gave a finding that is not well formed: the category "vibes" is not one of ${CATEGORIES.join(", ")}`,
+    });
+    const golden = JSON.stringify([{ file: "a", line: 1, issue: "i", severity: "nit", category: "vibes" }]);
+    expect(readGolden(golden)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('category "vibes" is not one of'),
+    });
+  });
+});
+
 describe("the engine reads a pack's files through the pack's own format (#484)", () => {
   it("a card that follows the pack's card schema loads", async () => {
     const { plugin } = pack({ schemas: v1Schemas(), cards: { "verify-pass": CARD } });
@@ -249,4 +309,20 @@ describe("the pinned rules pack reads through the engine (#484)", () => {
     const processes = await Promise.all(plugins.map((p) => readProcess([p])));
     expect(processes.filter((p) => p.kind !== "ok")).toEqual([]);
   });
+
+  it.runIf(PACK !== "")(
+    "the engine's finding values are the pinned pack's: categories, severities, grades",
+    async () => {
+      const found = await findProcess([{ label: "rulebook", dir: join(PACK, "plugins", "rulebook") }]);
+      const read = await readPackSchemas(found.kind === "ok" ? found.value.dir : "");
+      const properties = prop(read.kind === "ok" ? read.value.parts.finding : undefined, "properties");
+      const listed = (field: string): unknown => prop(prop(properties, field), "enum");
+      expect([listed("category"), listed("severity"), listed("grade")]).toEqual([
+        [...CATEGORIES],
+        [...SEVERITIES],
+        [...GRADES],
+      ]);
+      expect(read.kind === "ok" ? unknownToEngine(read.value, ENGINE_KNOWS) : ["unread"]).toEqual([]);
+    },
+  );
 });

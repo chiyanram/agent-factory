@@ -88,6 +88,13 @@ function findingOf(raw: unknown, i: number, lens: string): Finding | undefined {
   return core === undefined || own === undefined ? undefined : { ...core, source: "review", lens, ...own };
 }
 
+// categoryNote : the first category no finding may have, named, so it is never read as another (#484). Pure.
+function categoryNote(list: unknown): string {
+  const all: readonly unknown[] = Array.isArray(list) ? list : [];
+  const bad = all.map((raw) => get(raw, "category")).find((c) => c !== undefined && oneOf(c, CATEGORIES) === undefined);
+  return bad === undefined ? "" : `: the category ${JSON.stringify(bad)} is not one of ${CATEGORIES.join(", ")}`;
+}
+
 // readFindings : one finder run's output, renumbered, each finding stamped with the lens the run was for; one malformed
 // finding fails the run
 export function readFindings(output: unknown, lens: string): Result<readonly Finding[]> {
@@ -96,7 +103,7 @@ export function readFindings(output: unknown, lens: string): Result<readonly Fin
   const good = found.filter((f): f is Finding => f !== undefined);
   return good.length === found.length
     ? { kind: "ok", value: good }
-    : { kind: "failed", reason: "the find pass gave a finding that is not well formed" };
+    : { kind: "failed", reason: `the find pass gave a finding that is not well formed${categoryNote(list)}` };
 }
 
 // sortFindings : every finding in exactly one bucket, settled by its verdict (finding.ts settle)

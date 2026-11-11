@@ -27,10 +27,13 @@ describe("readFindings (#218: a category, and the severity kept)", () => {
 
   it("fails the pass on a finding with no category, or one that is not a Martian category", () => {
     const { category: _, ...none } = RAW;
-    for (const bad of [none, { ...RAW, category: "logic" }]) {
+    for (const [bad, note] of [
+      [none, ""],
+      [{ ...RAW, category: "logic" }, `: the category "logic" is not one of ${CATEGORIES.join(", ")}`],
+    ] as const) {
       expect(readFindings({ findings: [bad] }, "correctness")).toEqual({
         kind: "failed",
-        reason: "the find pass gave a finding that is not well formed",
+        reason: `the find pass gave a finding that is not well formed${note}`,
       });
     }
   });
