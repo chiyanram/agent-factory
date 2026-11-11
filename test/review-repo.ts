@@ -117,7 +117,8 @@ export function project(branch: string = BRANCH): Project {
   write("naïve/AGENTS.md", "x\n");
   write("docs/design/order.md", "DESIGN-EDITED-ON-THE-BRANCH\n");
   const head1 = commitAll("change");
-  write("svc/Main.java", "class Main { int total() { return 2; } }\n");
+  // two lines, so a finding may cite line 2 and pass the cite check (#485)
+  write("svc/Main.java", "class Main { int total() { return 2; } }\n// the sum\n");
   const head2 = commitAll("change2");
   git("push", "-q", "origin", branch);
   git("checkout", "-q", "main");

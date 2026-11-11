@@ -32,6 +32,7 @@ import type { Model, ModelResult } from "../review/model.js";
 import { readVerdicts, VERIFY_SCHEMA } from "../review/verdicts.js";
 import { designPath, NO_DESIGN } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
+import { checkCites } from "../cite-check.js";
 import { DESIGN_SCHEMA, keep, readDesignFindings, type DesignFinding, type Kept } from "./findings.js";
 
 export type DesignSetup = {
@@ -277,7 +278,24 @@ async function verify(
           : verdicts;
       }),
     };
-  });
+  }).then((ran) => citesChecked(setup, ran));
+}
+
+// citesChecked : the kept findings, each file:line checked at the default branch the review read; a cite that is not
+// there is noted as "cite not found", so it neither blocks nor is posted as a finding (#485)
+async function citesChecked(
+  setup: DesignSetup,
+  ran: Awaited<ReturnType<typeof verify>>,
+): Promise<Awaited<ReturnType<typeof verify>>> {
+  if (ran.kind !== "ok" || ran.value.kind !== "done" || ran.value.kept.length === 0) {
+    return ran;
+  }
+  const sha = await git(setup, ["rev-parse", "--verify", "-q", "refs/factory/design-base^{commit}"]);
+  if (sha.kind === "failed") {
+    return ran;
+  }
+  const kept = await checkCites({ repo: setup.repo, env: setup.env, sha: sha.value }, ran.value.kept);
+  return { kind: "ok", value: { ...ran.value, kept } };
 }
 
 // designSteps : the design review's two steps, or why they cannot run here

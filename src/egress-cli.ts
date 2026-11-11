@@ -5,7 +5,9 @@
 import { parseArgs } from "node:util";
 import type { Runner } from "./core/forge/api.js";
 import { MODEL_HOST, PULL_IMAGE, report } from "./core/egress/check.js";
+import { ownGitHostsOf } from "./core/egress/allowlist.js";
 import { checkEgress } from "./core/egress/live.js";
+import { settingOf } from "./core/settings/machine.js";
 import type { PlanRead } from "./core/ready/plan.js";
 
 export const EGRESS_HELP = `  egress check <project> [--port <n>]... [--model-host <host>] [--pull <image>]
@@ -94,6 +96,7 @@ export async function egressCommand(argv: readonly string[], deps: EgressDeps): 
       ...parsed,
       setup: plan.setup,
       allowlist: plan.project.egress.allow,
+      gitHosts: ownGitHostsOf([settingOf(plan.setup.env, "gitHostName")]),
       docker: host.docker,
     });
     if (rows.kind === "failed") {

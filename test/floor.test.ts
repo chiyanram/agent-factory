@@ -90,7 +90,32 @@ describe("the floor guard (#190)", () => {
       "src/test/java/OrderTest.java:3",
       "src/test/java/OrderTest.java:4",
     ]);
-    expect(found[1]?.what).toBe("removes an assertion (2 removed, 1 added in this file)");
+    expect(found[1]?.what).toBe(
+      "removes an assertion (2 removed, 1 added in this file; line count, the weaker check: no mutation command is set (#495))",
+    );
+  });
+
+  // AC-2 of #485: the weakened assertion of the ticket's own example, as many lines as before
+  it("finds an assertion weakened from a value check to a presence check", async () => {
+    p.write(
+      "src/test/java/OrderTest.java",
+      java("    assertThat(total()).isNotNull();\n    assertThat(count()).isEqualTo(2);\n"),
+    );
+    const found = await hits();
+    expect(found.map((h) => `${h.file}:${h.line} ${h.what}`)).toEqual([
+      "src/test/java/OrderTest.java:3 weakens an assertion: a value check became a presence check (line count, the weaker check: no mutation command is set (#495))",
+    ]);
+    expect(forHuman(found)).toBe(true);
+  });
+
+  it("is silent on a value check changed to another value check, and on a presence check added beside the value checks", async () => {
+    p.write(
+      "src/test/java/OrderTest.java",
+      java(
+        "    assertThat(total()).isEqualTo(4);\n    assertThat(count()).isEqualTo(2);\n    assertThat(order()).isNotNull();\n",
+      ),
+    );
+    expect(await hits()).toEqual([]);
   });
 
   it("reads every statement of a Spock then: or expect: block as an assertion, and an and: inside it too", async () => {

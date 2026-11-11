@@ -184,7 +184,8 @@ from its merge base with the default branch, on the host and with git only, and 
 - a skip or focus marker added in a test file (`@Disabled…`, `@Ignore…`, `@Requires({ false })`, `.skip`, `.only`,
   `xit(`, `fit(`, `pytest.mark.skip`, `xfail`, `t.Skip` and the like);
 - more assertion lines removed than added in a test file (`assert…`, `expect(`, `assertThat`, `verify(`, Go's
-  `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting;
+  `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting, or a value check turned
+  into a presence check (`assertEquals(x, 5)` to `assertNotNull(x)`, `toEqual(5)` to `toBeDefined()`);
 - a judge file added, changed, moved or deleted: a build file or dependency manifest, a file the project's `verify`
   command names or its program reads (`Makefile` for `make`, `package.json` for `npm`), jest, vitest or playwright
   config, `junit-platform.properties`, `pytest.ini`, `conftest.py`, and the project's `ready.judgeFiles`.
@@ -199,8 +200,9 @@ check hit sends the implementer back like any failed ready check. A person who a
 `agent-factory waive <project> <ticket> <head>` and removes `needs-human`: the ready check runs again at that head and
 clears it. On a later head the test checks look again only at the files changed since the waiver's head, so a cleared
 file is flagged again only if it changes again. A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
-or the waiver fails the step, so the check is never passed and a person looks. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
-fools it or fails it; and Spock `where:` rows are not counted.
+or the waiver fails the step, so the check is never passed and a person looks. **Today:** with no mutation command set (#495), the guard counts assertions per file and says it is the weaker check,
+so swapping one for another trivial one it does not know, or moving assertions to another file, fools it or fails it;
+and Spock `where:` rows are not counted.
 
 The ready check then reads the lane the real diff needs, the same way (#230; `src/core/ready/lane.ts`): only docs,
 comments or the values of config keys that stay may be tiny; any other change, a moved file among them, needs at least

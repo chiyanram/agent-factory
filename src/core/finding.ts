@@ -181,7 +181,8 @@ function raises(f: FindingCore, v: Verdict): string {
 
 // settle : a finding with its verdict: the verify pass's bucket and why, and the severity and grade it lowered them to.
 // A finding with no verdict is Consider, never dropped. A verdict that raises the severity or the grade is refused: the
-// finding is Consider, with the finder's own severity and grade. Pure.
+// finding is Consider, with the finder's own severity and grade. An Act on finding whose grade is only `cited` settles
+// as Consider: a blocking finding needs proof, a walk-through or a run (P15; rulebook RV7, #485). Pure.
 export function settle<F extends FindingCore>(
   f: F,
   v: Verdict | undefined,
@@ -191,6 +192,13 @@ export function settle<F extends FindingCore>(
   }
   const raised = raises(f, v);
   return raised === ""
-    ? { ...f, severity: v.severity ?? f.severity, grade: v.grade ?? f.grade, bucket: v.bucket, why: v.why }
+    ? proven({ ...f, severity: v.severity ?? f.severity, grade: v.grade ?? f.grade, bucket: v.bucket, why: v.why })
     : { ...f, bucket: "consider", why: `the verify pass raised ${raised}, which it may not; its verdict is refused` };
+}
+
+// proven : a settled finding, Consider rather than Act on when its grade is only cited (P15, RV7, #485). Pure.
+function proven<F extends FindingCore & { readonly bucket: Bucket; readonly why: string }>(f: F): F {
+  return f.bucket === "act_on" && f.grade === "cited"
+    ? { ...f, bucket: "consider", why: `${f.why} (Consider, not Act on: the finding only cites the line)` }
+    : f;
 }

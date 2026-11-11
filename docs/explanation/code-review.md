@@ -39,7 +39,10 @@ findings is not a pass. A human reviews the design and the intent of each change
    | Noted | true, but not this change's to fix: a follow-up |
    | Dismissed | does not hold, with one line why |
 
-6. **Post:** one thread per Act on and Consider at its `file:line`, a script-made status list (protected files, build
+6. **Check the cites** (`src/core/cite-check.ts`, #485): a finding whose `file:line` is not at the reviewed head (no
+   such file, or a line past its end) is noted as "cite not found", so it is never posted as a thread. The design
+   review checks its findings' cites the same way, at the default branch it read.
+7. **Post:** one thread per Act on and Consider at its `file:line`, a script-made status list (protected files, build
    files, new dependencies), then one summary note. After 3 rounds the change goes to a human.
 
 A round with the same patch-id as the last reuses its verdict with no model run. The acted-on rate (`agent-factory

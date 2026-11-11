@@ -360,9 +360,35 @@ describe("reviewRound", () => {
     expect(log.posts.at(-1)).toMatch(new RegExp(`^\\[reviewer\\] round 1 reused · head ${head} · patch-id`));
   });
 
+  // #485: a cite that is not at the reviewed head is noted as "cite not found", never posted as a thread
+  it("notes a finding that cites a missing file or a line past the end, and posts no thread for it (#485)", async () => {
+    const log = fresh();
+    const gone = { ...FINDING, file: "code/svc/Gone.java", finding: "cites a missing file" };
+    const past = { ...FINDING, line: 99, rule: "ERR2", finding: "cites a line past the end" };
+    const m = model(
+      [
+        findAnswer([FINDING, gone, past]),
+        verdicts([
+          { id: "F1", bucket: "act_on", why: "real" },
+          { id: "F2", bucket: "act_on", why: "real" },
+          { id: "F3", bucket: "consider", why: "maybe" },
+        ]),
+      ],
+      [],
+    );
+    const out = await reviewRound(setup(forge(log), m));
+    expect(out).toMatchObject({ value: { counts: { act_on: 1, consider: 0, noted: 2 } } });
+    expect(log.threads).toHaveLength(1);
+    const summary = log.posts.at(-1) ?? "";
+    expect(summary).toContain(
+      "svc/Gone.java:1 ERR1 (bug): cites a missing file (cite not found: svc/Gone.java is not in the reviewed commit)",
+    );
+    expect(summary).toContain("(cite not found: svc/Main.java:99 is past the end of the file (2 lines))");
+  });
+
   it("the next full round rates the last round's Act on and Consider findings: acted on when a commit changed their region (#220)", async () => {
     const log = fresh();
-    const far = { ...FINDING, kind: "logic", axis: "spec", file: "code/docs/design/order.md", line: 40 };
+    const far = { ...FINDING, kind: "logic", axis: "spec", file: "code/docs/design/order.md", line: 1 };
     const first = await reviewRound(
       setup(
         forge(log),
@@ -399,7 +425,7 @@ describe("reviewRound", () => {
               category: "bug",
               bucket: "consider",
               file: "docs/design/order.md",
-              line: 40,
+              line: 1,
               acted: false,
             },
           ],

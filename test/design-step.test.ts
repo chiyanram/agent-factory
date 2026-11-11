@@ -127,6 +127,30 @@ describe("the design review's runs (#236)", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("notes a kept finding whose cite is not on the default branch as cite not found (#485)", async () => {
+    const verdicts = {
+      verdicts: [
+        { id: "D1", bucket: "act_on", why: "it holds" },
+        { id: "D2", bucket: "act_on", why: "it holds" },
+        { id: "D3", bucket: "consider", why: "maybe" },
+      ],
+    };
+    const steps = designSteps({ kind: "ok", value: setup(model([], [verdicts])) });
+    if (steps.designVerify.kind !== "available") throw new Error("unavailable");
+    const findings: readonly DesignFinding[] = [
+      { ...FINDING, id: "D1" },
+      // the branch's file is not on main, and main's Main.java has one line
+      { ...FINDING, id: "D2", file: "sp ace/a.txt" },
+      { ...FINDING, id: "D3", line: 2 },
+    ];
+    const kept = done(await steps.designVerify.run({ ...input(), findings })).kept;
+    expect(kept.map((k) => [k.id, k.bucket, k.why])).toEqual([
+      ["D1", "act_on", "it holds"],
+      ["D2", "noted", "cite not found: sp ace/a.txt is not in the reviewed commit"],
+      ["D3", "noted", "cite not found: svc/Main.java:2 is past the end of the file (1 line)"],
+    ]);
+  });
+
   it("a spec edited since the pass decided fails the run and runs no model; a bad answer fails it with its spend", async () => {
     const seen: Seen[] = [];
     const steps = designSteps({

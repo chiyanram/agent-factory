@@ -139,7 +139,7 @@ async function confirmCommand(argv: readonly string[], io: Io): Promise<number> 
   return said(io, "confirm", await confirm(await requestSetup(io), id, text));
 }
 
-async function templateText(template: string | undefined): Promise<Result<string>> {
+async function templateText(template: string | undefined, env: NodeJS.ProcessEnv): Promise<Result<string>> {
   if (template === undefined) {
     return { kind: "ok", value: initialProject() };
   }
@@ -147,7 +147,7 @@ async function templateText(template: string | undefined): Promise<Result<string
     return { kind: "failed", reason: `a template is named by its absolute path, got ${JSON.stringify(template)}` };
   }
   const text = await attempt(() => readFile(template, "utf8"), `cannot read ${template}`);
-  return text.kind === "ok" ? checkedTemplate(template, text.value) : text;
+  return text.kind === "ok" ? checkedTemplate(template, text.value, env) : text;
 }
 
 function parsedObject(text: string): object | "bad" {
@@ -161,13 +161,13 @@ function parsedObject(text: string): object | "bad" {
 
 // checkedTemplate : a team's template, copied only when its plugin fields and its ready fields read, so the file it
 // becomes never stops a dispatcher pass; the core never reads the template again
-function checkedTemplate(path: string, text: string): Result<string> {
+function checkedTemplate(path: string, text: string, env: NodeJS.ProcessEnv): Result<string> {
   const raw = parsedObject(text);
   if (raw === "bad") {
     return refused(`${path} is not a JSON object`);
   }
   const config = pluginConfigOf(path, raw);
-  const ready = config.kind === "ok" ? readyFieldsOf(path, raw) : config;
+  const ready = config.kind === "ok" ? readyFieldsOf(path, raw, env) : config;
   return ready.kind === "failed" ? ready : { kind: "ok", value: text };
 }
 
@@ -206,7 +206,7 @@ async function projectCommand(argv: readonly string[], io: Io): Promise<number> 
     return 64;
   }
   const text = plainName(words.project)
-    ? await templateText(words.template)
+    ? await templateText(words.template, io.env)
     : refused(`${JSON.stringify(words.project)} is not a plain project name`);
   const done = text.kind === "ok" ? await written(projectPath(io.home, words.project), text.value) : text;
   if (done.kind === "failed") {

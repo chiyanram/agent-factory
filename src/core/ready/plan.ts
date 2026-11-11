@@ -28,7 +28,14 @@ import {
 } from "../box/index.js";
 import { readBoxFile } from "../box/built.js";
 import type { Gate } from "../dispatch/table.js";
-import { DEFAULT_EGRESS_IMAGE, parseAllowlist, upstreamOf, type Started, type Upstream } from "../egress/index.js";
+import {
+  DEFAULT_EGRESS_IMAGE,
+  ownGitHostsOf,
+  parseAllowlist,
+  upstreamOf,
+  type Started,
+  type Upstream,
+} from "../egress/index.js";
 import type { Result } from "../forge/api.js";
 import { readProjectFile, type ProjectFile } from "../project.js";
 import { settingName, settingOf } from "../settings/machine.js";
@@ -66,8 +73,7 @@ type Egress = { readonly upstream: Upstream; readonly image: PinnedImage; readon
 
 // ownGitHost : the project's own git host, such as a company GitLab, which the allowlist refuses too
 function ownGitHost(env: NodeJS.ProcessEnv): readonly string[] {
-  const host = (settingOf(env, "gitHostName") ?? "").trim();
-  return host === "" ? [] : [host];
+  return ownGitHostsOf([settingOf(env, "gitHostName")]);
 }
 
 // egressOf : the settings the project's proxy starts with. Pure.
@@ -197,7 +203,7 @@ async function setupFor(input: PlanInput, project: ProjectFile): Promise<BoxPlan
 
 // boxPlan : the gate and the box plan for one pass over `project`
 export async function boxPlan(input: PlanInput): Promise<PlanRead> {
-  const file = await readProjectFile({ home: input.home, project: input.project });
+  const file = await readProjectFile({ home: input.home, project: input.project, env: input.env });
   if (file.kind !== "ok") {
     return file.kind === "missing"
       ? { kind: "ok", value: { gate: "forge-ci", plan: { kind: "unavailable", reason: file.reason } } }

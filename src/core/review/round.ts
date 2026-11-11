@@ -27,6 +27,7 @@ import { goAhead } from "../start.js";
 import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
+import { checkCites } from "../cite-check.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
@@ -875,7 +876,12 @@ async function review(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
     );
   }
   const result = await passes(ctx, pack);
-  return result.kind === "ok" ? guarded(ctx, () => post(ctx, pack, result.value)) : result;
+  if (result.kind === "failed") {
+    return result;
+  }
+  // a finding whose file:line is not at the reviewed head is noted as "cite not found", never posted (#485)
+  const sorted = await checkCites({ repo: ctx.setup.repo, env: ctx.setup.env, sha: pack.head }, result.value.sorted);
+  return guarded(ctx, () => post(ctx, pack, { ...result.value, sorted }));
 }
 
 // decideRound : what this round does once the pack is built
