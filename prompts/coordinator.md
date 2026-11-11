@@ -252,8 +252,8 @@ that just sit. With no loop it says "no orchestrator loop running". When the las
 in flight (a step not set up, a cap, failed passes) it adds when and why, from `$FACTORY_HOME/runs/<project>/loop-end.json`;
 otherwise it names `agent-factory dispatch <project>` while a change is claimed. A red check is a fail: the factory never
 re-runs it, and red CI sends the implementer back as a CI round. Only a person re-runs a red check, once, or quarantines
-a check in the process plugin's `quarantine.json` (owner, expiry, ticket): a quarantined check still runs and is logged
-each pass, and does not block until it expires (#485).
+a CI job in the project file's `quarantine.checks` (owner, added, expiry at most `quarantine.maxDays` later, ticket): a
+quarantined job still runs, is logged each pass and named in the ping, and does not block until it expires (#485).
 The order is fixed: implementer done → ready check → automated review → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
 The orchestrator loop polls the git host every `FACTORY_POLL_MINUTES` (5) while each ticket in flight waits on CI or a person, and at once after a step it ran itself (#445). Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.

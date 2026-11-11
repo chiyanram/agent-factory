@@ -194,6 +194,7 @@ const POOLS: Readonly<Record<string, readonly unknown[]>> = {
   plugins: [[], ["rulebook@chiyanram"], ["rulebook@chiyanram", "team@acme"]],
   "ready.judgeFiles": [["ci/**"], ["ci/**", "build/**"]],
   "lanes.oneWayDoor": [["db/migrations/**"], ["infra/**"]],
+  "quarantine.maxDays": [3, 7, 14],
   "review.lenses": [[], [{ name: "api", rubric: { file: "docs/review/api.md" } }]],
   "approval.floor": ["tiny"],
   work: [false, true],
@@ -237,7 +238,7 @@ function partnerSet(value: object, key: FileKey): boolean {
 function randomValues(next: () => number): Record<string, unknown> {
   const value: Record<string, unknown> = {};
   const pick = pickOf(next);
-  for (const key of fileKeys().filter((k) => partnerSet(value, k) || next() < 0.45)) {
+  for (const key of fileKeys().filter((k) => k.projectOnly !== true && (partnerSet(value, k) || next() < 0.45))) {
     setAt(value, key.path, pick(poolOf(key)));
   }
   return value;

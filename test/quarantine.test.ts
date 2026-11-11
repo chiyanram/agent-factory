@@ -1,26 +1,45 @@
-// a fail is a fail (#485; #456 decision 3): only a person quarantines a check, with an owner, an expiry and a ticket;
-// a quarantined check still runs and shows, and does not block until its expiry
+// a fail is a fail (#485; #456 decision 3): only a person quarantines a check, in the project's own settings, with an
+// owner, the day it was added, an expiry at most quarantine.maxDays later, and a ticket; a quarantined check still runs
+// and shows, and does not block until it expires
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { heldBy, live, quarantineLine, quarantineOf } from "../src/core/process/quarantine.js";
+import {
+  heldBy,
+  live,
+  quarantineItems,
+  quarantineLine,
+  quarantineOf,
+  readQuarantine,
+} from "../src/core/process/quarantine.js";
 import { readProcess } from "../src/core/process/read.js";
 import { tempDir } from "./temp.js";
 
-const Q = { check: "e2e", owner: "ram", expires: "2026-11-30", ticket: "#512" };
+const Q = { check: "e2e", owner: "ram", added: "2026-11-10", expires: "2026-11-20", ticket: "#512" };
 const NOW = Date.parse("2026-11-11T10:00:00Z");
 
 describe("quarantineOf", () => {
-  it("reads every field, and refuses an entry with no owner, a bad day or no ticket", () => {
-    expect(quarantineOf({ quarantine: [Q] }, "/q.json")).toEqual({ kind: "ok", value: [Q] });
+  it("reads every field, and refuses an entry with no owner, no added day, a bad day or no ticket", () => {
+    expect(quarantineOf([Q], "/q.json")).toEqual({ kind: "ok", value: [Q] });
     for (const bad of [
       { ...Q, owner: "" },
+      { ...Q, added: undefined },
       { ...Q, expires: "next week" },
       { ...Q, ticket: undefined },
     ]) {
-      expect(quarantineOf({ quarantine: [bad] }, "/q.json").kind).toBe("failed");
+      expect(quarantineOf([bad], "/q.json").kind).toBe("failed");
     }
     expect(quarantineOf({}, "/q.json").kind).toBe("failed");
+  });
+
+  it("refuses an expiry more than maxDays after the added day (14 by default), or before it", () => {
+    expect(quarantineOf([{ ...Q, expires: "2026-11-24" }], "/q.json").kind).toBe("ok");
+    expect(quarantineOf([{ ...Q, expires: "2026-11-25" }], "/q.json")).toEqual({
+      kind: "failed",
+      reason: "/q.json: the quarantine of e2e lasts 15 days; quarantine.maxDays allows 14",
+    });
+    expect(quarantineOf([Q], "/q.json", 7).kind).toBe("failed");
+    expect(quarantineOf([{ ...Q, expires: "2026-11-01" }], "/q.json").kind).toBe("failed");
   });
 });
 
@@ -37,31 +56,56 @@ describe("heldBy", () => {
     expect(live({ ...Q, expires: "2026-11-11" }, Date.parse("2026-11-12T00:00:00Z"))).toBe(false);
   });
 
-  it("names the owner, the expiry and the ticket", () => {
+  it("names the owner, the expiry and the ticket in the log and in the ping", () => {
     expect(quarantineLine([Q])).toBe(
-      "red, but quarantined by a person: e2e (owner ram, until 2026-11-30, #512); it does not block",
+      "red, but quarantined by a person: e2e (owner ram, until 2026-11-20, #512); it does not block",
     );
+    expect(quarantineItems([Q])).toEqual(["quarantined: e2e, owner ram, since 2026-11-10, until 2026-11-20, #512"]);
   });
 });
 
-describe("the process plugin's quarantine.json", () => {
-  let dir = "";
+describe("where a quarantine lives: the project's own settings, never the rules pack", () => {
+  let home = "";
   beforeEach(() => {
-    dir = tempDir("factory-quarantine-");
+    home = tempDir("factory-quarantine-");
+    mkdirSync(join(home, "projects"), { recursive: true });
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  const project = (value: object) => writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify(value));
+
+  it("is none with no key, read from the project file, and refused when it is bad or too long", async () => {
+    project({});
+    expect(await readQuarantine({ home, project: "ledger" })).toEqual({ kind: "ok", value: [] });
+    project({ quarantine: { checks: [Q] } });
+    expect(await readQuarantine({ home, project: "ledger" })).toEqual({ kind: "ok", value: [Q] });
+    project({ quarantine: { checks: [Q], maxDays: 3 } });
+    expect((await readQuarantine({ home, project: "ledger" })).kind).toBe("failed");
+  });
+
+  it("a process plugin's quarantine.json is not read", async () => {
+    const dir = join(home, "team");
     const process = join(dir, "skills", "process", "process");
     mkdirSync(process, { recursive: true });
     writeFileSync(join(process, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+    writeFileSync(join(process, "quarantine.json"), JSON.stringify({ quarantine: [Q] }));
+    const read = await readProcess([{ label: "team", dir }]);
+    expect(read.kind === "ok" ? Object.keys(read.value) : read.reason).not.toContain("quarantine");
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+});
 
-  it("is none when the process has no file, read when it has one, and refuses the process when it is bad", async () => {
-    const none = await readProcess([{ label: "team", dir }]);
-    expect(none.kind === "ok" ? none.value.quarantine : none.reason).toEqual([]);
-    const path = join(dir, "skills", "process", "process", "quarantine.json");
-    writeFileSync(path, JSON.stringify({ quarantine: [Q] }));
-    const one = await readProcess([{ label: "team", dir }]);
-    expect(one.kind === "ok" ? one.value.quarantine : one.reason).toEqual([Q]);
-    writeFileSync(path, JSON.stringify({ quarantine: [{ check: "e2e" }] }));
-    expect((await readProcess([{ label: "team", dir }])).kind).toBe("failed");
+describe("only the project file holds a quarantine (#485)", () => {
+  let home = "";
+  beforeEach(() => {
+    home = tempDir("factory-quarantine-user-");
+    mkdirSync(join(home, "projects"), { recursive: true });
+  });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  it("a user file that sets quarantine.checks refuses the read", async () => {
+    writeFileSync(join(home, "projects", "ledger.json"), "{}");
+    writeFileSync(join(home, "user.json"), JSON.stringify({ quarantine: { checks: [Q] } }));
+    const read = await readQuarantine({ home, project: "ledger" });
+    expect(read).toMatchObject({ kind: "failed", reason: expect.stringContaining("quarantine.checks") });
   });
 });

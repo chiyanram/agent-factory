@@ -23,7 +23,7 @@
 // people to see. It never starts anything: the orchestrator decides only from the local records.
 
 import type { PluginHash } from "../process/use.js";
-import { heldBy, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
+import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -354,7 +354,7 @@ async function quarantined(setup: TickSetup, ticket: string, change: ChangeView)
     return change;
   }
   setup.log(`${ticket}: ${quarantineLine(held.shown)}`);
-  return { kind: "open", line: { ...change.line, pipeline: { kind: "success" } } };
+  return { kind: "open", line: { ...change.line, pipeline: { kind: "success" }, quarantined: held.shown } };
 }
 
 function redOpen(change: ChangeView): change is Extract<ChangeView, { kind: "open" }> {
@@ -574,12 +574,22 @@ async function releaseClaim(setup: TickSetup, state: TicketState, why: string): 
     : removed;
 }
 
+// quarantinedAt : the checks a person quarantined that let this head's red gate read as passed; none for a green one
+function quarantinedAt(state: TicketState): readonly Quarantined[] {
+  return state.change.kind === "open" ? (state.change.line.quarantined ?? []) : [];
+}
+
 async function ping(setup: TickSetup, state: TicketState, head: string): Promise<Done> {
+  const held = quarantinedAt(state);
+  // a gate that reads as green only because of a quarantine says so, naming each check and its expiry (#485)
   const said = await say(setup, state, {
     seat: "coordinator",
-    title: `ready for you at ${head.slice(0, 8)}: the gate is green; review and merge`,
+    title:
+      held.length === 0
+        ? `ready for you at ${head.slice(0, 8)}: the gate is green; review and merge`
+        : `ready for you at ${head.slice(0, 8)}: the gate is green but for ${held.length} quarantined check(s); review and merge`,
     fields: [],
-    items: [],
+    items: quarantineItems(held),
   });
   const pinged =
     said.kind === "ok"

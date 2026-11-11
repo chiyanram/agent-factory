@@ -722,13 +722,16 @@ describe("tick", () => {
       ...forge(changes, log),
       failedJobs: async () => ({ kind: "ok", value: [{ name: "e2e-firefox", log: { kind: "none", why: "no log" } }] }),
     });
-    const entry = { check: "e2e-firefox", owner: "ram", expires: "2026-11-30", ticket: "#512" };
+    const entry = { check: "e2e-firefox", owner: "ram", added: "2026-11-06", expires: "2026-11-20", ticket: "#512" };
     const held: string[] = [];
-    await tick({ ...setup(changes, held), forge: red(held), quarantine: [entry], dryRun: true });
+    await tick({ ...setup(changes, held), forge: red(held), quarantine: [entry] });
     expect(held).toContain(
-      "log PROJ-1: red, but quarantined by a person: e2e-firefox (owner ram, until 2026-11-30, #512); it does not block",
+      "log PROJ-1: red, but quarantined by a person: e2e-firefox (owner ram, until 2026-11-20, #512); it does not block",
     );
-    expect(held.some((l) => l.includes("ping"))).toBe(true);
+    // the PR's note says the gate reads green only through the quarantine, naming the check and its expiry
+    const note = held.find((l) => l.startsWith("note #12 [coordinator] ready for you")) ?? "";
+    expect(note).toContain("the gate is green but for 1 quarantined check(s)");
+    expect(note).toContain("- quarantined: e2e-firefox, owner ram, since 2026-11-06, until 2026-11-20, ");
     const expired: string[] = [];
     await tick({
       ...setup(changes, expired),

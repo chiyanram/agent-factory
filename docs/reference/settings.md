@@ -125,14 +125,20 @@ there.
   (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
   each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
   pass. The one plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
-  the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline), the
-  quarantined checks (`quarantine.json`: `{"quarantine": [{"check", "owner", "expires": "YYYY-MM-DD", "ticket"}]}`; a red
-  head whose every failed job is quarantined and unexpired does not block, and each pass logs it; the factory never
-  re-runs a red check, #485) and the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
+  the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
+  the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
   and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
   above tiny stops the pass, and so does a second plugin that holds a process; `config check` names both (#426).
   **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
   only to the next ticket; the records show the change. The review cannot run with no plugin yet (#232).
+- `quarantine.checks` (locked, the project file only) and `quarantine.maxDays` (cap, default 14): the CI jobs a person
+  quarantined, `{"quarantine": {"checks": [{"check": "e2e-firefox", "owner": "ram", "added": "2026-11-11", "expires":
+  "2026-11-25", "ticket": "#512"}], "maxDays": 14}}` (#485). Every field is required, and `expires` may be at most
+  `maxDays` after `added`. A red head whose every failed job is quarantined and unexpired does not block: each pass
+  logs it, and the ping that the gate is green names each check and its expiry. The factory never re-runs a red
+  check. A team or user file, a branch or the rules pack cannot set it. **Today:** an entry names a CI job, as the git
+  host reports its failed jobs; the engine reads no test report, so it cannot quarantine one test inside a job, and a
+  job-wide entry also hides a new real failure in that job until it expires.
 - `work`: `true` marks a work project. Once a layer sets it, no lower layer unsets it, and `specStore` must stay
   `local`.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
