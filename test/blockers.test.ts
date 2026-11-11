@@ -98,3 +98,18 @@ describe("cycleFrom's cost", () => {
     expect(performance.now() - started).toBeLessThan(500);
   });
 });
+
+describe("an unread blocker (#494 AC-7)", () => {
+  it("is unread, naming each with the git host's reason; a broken one still goes to a person first", () => {
+    const read = [
+      { ticket: "A", state: "none", blockedBy: [], unread: "github: 502" },
+      { ticket: "B", state: "opened", blockedBy: [] },
+    ] as const;
+    expect(blockersView("T", ["A", "B"], read)).toEqual({ kind: "unread", why: "A: github: 502" });
+    const closed = [...read, { ticket: "C", state: "closed", blockedBy: [] }] as const;
+    expect(blockersView("T", ["A", "B", "C"], closed)).toEqual({
+      kind: "broken",
+      why: "blocked by C, closed without a merge",
+    });
+  });
+});

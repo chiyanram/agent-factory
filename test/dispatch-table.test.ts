@@ -17,6 +17,7 @@ import {
   MAX_READY_FAILURES,
   MAX_REVIEW_ROUNDS,
   type TicketState,
+  MAX_UNREAD_PASSES,
 } from "../src/core/dispatch/table.js";
 import { nextStep } from "../src/core/dispatch/next-step.js";
 import type { OpenLine } from "../src/core/poll.js";
@@ -1005,10 +1006,13 @@ describe("can it get stuck? (#485)", () => {
     { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] },
     { kind: "waiting", on: [{ ticket: "12", state: "none" }] },
     { kind: "broken", why: "blocked by 12, closed, no merge seen" },
+    { kind: "unread", why: "12: github: 502" },
   ];
   const held = approvals.flatMap((approval) =>
     blockers.flatMap((b) =>
-      [EMPTY, wrote()].map((r) => state({ approval, change: { kind: "none" }, runs: r, blockers: b })),
+      [EMPTY, wrote(), { ...EMPTY, heldWhy: "x" }, { ...EMPTY, unreadPasses: 2, unreadFirst: "y" }].map((r) =>
+        state({ approval, change: { kind: "none" }, runs: r, blockers: b }),
+      ),
     ),
   );
   const all = [...opened, ...merged, ...held];
@@ -1034,6 +1038,13 @@ describe("can it get stuck? (#485)", () => {
       does: "whoever claimed it finishes it, or gives it back: agent-factory release <project> <change>",
     });
     expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
+    // a held ticket's stop for an unanswered git host has no change: the person looks at the git host (#494)
+    const unanswered =
+      "the git host did not answer for the ticket's blockers on 3 passes in a row since t: PROJ-0: 502";
+    expect(nextStep({ kind: "needs-human", why: unanswered })).toEqual({
+      who: "person",
+      does: "checks the git host's login and the tickets the spec is blocked by; the ticket goes on by itself once the git host answers",
+    });
   });
 });
 
@@ -1043,11 +1054,42 @@ describe("blocked by (#494)", () => {
 
   it("AC-2, AC-3: a held ticket waits on its blockers, and starts once the last one merges", () => {
     const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
-    expect(decide(state({ ...unbuilt, blockers: waiting }))).toEqual({
-      kind: "wait",
-      why: "blocked by PROJ-0 (open, not merged): the build starts once each is merged",
-    });
+    const why = "blocked by PROJ-0 (open, not merged): the build starts once each is merged";
+    // the first pass records the hold and tells the person; the next waits without a word
+    expect(decide(state({ ...unbuilt, blockers: waiting }))).toEqual({ kind: "held", why, ping: true });
+    const told = { ...unbuilt, runs: { ...EMPTY, heldWhy: why } };
+    expect(decide(state({ ...told, blockers: waiting }))).toEqual({ kind: "wait", why });
     expect(decide(state({ ...unbuilt, blockers: { kind: "none" } }))).toMatchObject({ kind: "writer" });
+  });
+
+  it("AC-10: a change in what it waits on tells the person again; a hold recorded again after unread passes does not", () => {
+    const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
+    const was = { ...EMPTY, heldWhy: "blocked by PROJ-0 (not started): the build starts once each is merged" };
+    expect(decide(state({ ...unbuilt, runs: was, blockers: waiting }))).toMatchObject({ kind: "held", ping: true });
+    const why = "blocked by PROJ-0 (open, not merged): the build starts once each is merged";
+    const afterUnread = { ...EMPTY, heldWhy: why, unreadPasses: 1, unreadFirst: "x" };
+    expect(decide(state({ ...unbuilt, runs: afterUnread, blockers: waiting }))).toEqual({
+      kind: "held",
+      why,
+      ping: false,
+    });
+  });
+
+  it("a held ticket and one counting unread passes are in flight: the loop goes on, so the count builds", () => {
+    const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
+    expect(inFlight(state({ ...unbuilt, blockers: waiting }))).toBe(true);
+    const unread = { kind: "unread", why: "PROJ-0: github: 502" } as const;
+    expect(inFlight(state({ ...unbuilt, blockers: unread }))).toBe(true);
+  });
+
+  it("AC-7: an unread blocker is counted, and on the third pass in a row goes to a person with the first error", () => {
+    const unread = { kind: "unread", why: "PROJ-0: github: 504" } as const;
+    expect(decide(state({ ...unbuilt, blockers: unread }))).toEqual({ kind: "blockers-unread", why: unread.why });
+    const twice = { ...EMPTY, unreadPasses: MAX_UNREAD_PASSES - 1, unreadFirst: "PROJ-0: github: 502" };
+    expect(decide(state({ ...unbuilt, runs: twice, blockers: unread }))).toEqual({
+      kind: "needs-human",
+      why: "the git host did not answer for the ticket's blockers on 3 passes in a row: PROJ-0: github: 502",
+    });
   });
 
   it("AC-4, AC-5: a blocker closed with no merge, or a cycle, goes to a person", () => {
