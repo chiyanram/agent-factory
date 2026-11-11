@@ -3,6 +3,14 @@
 What agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;
 do not edit it by hand.
 
+## [0.34.1](https://github.com/chiyanram/agent-factory/compare/v0.34.0...v0.34.1) (2026-11-11)
+
+### 🐛 Fixes
+
+* **ready** — the box's git copy fetches the default branch even when it is git's own default · [#62](https://github.com/chiyanram/agent-factory/issues/62) (PR [#461](https://github.com/chiyanram/agent-factory/pull/461))
+
+Install: `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v0.34.1/chiyanram-agent-factory-0.34.1.tgz`
+
 ## [0.34.0](https://github.com/chiyanram/agent-factory/compare/v0.33.1...v0.34.0) (2026-11-11)
 
 ### ✨ Features
