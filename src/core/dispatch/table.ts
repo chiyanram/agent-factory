@@ -369,10 +369,32 @@ function checkedSince(s: TicketState, w: Extract<Summary["lastWriter"], { kind: 
   return r.kind === "ended" && r.head === w.head && !(Date.parse(r.at) < ended);
 }
 
-// evidenceRework : a rework that changed no code, whose rows the ready check judges: it has run them since, or would
-// now run other rows or programs than it last did (#444)
+// notCheckedAt : no ready check has ended at this head in the runs being read: after a new START or approval the runs
+// before it are not read, so a branch that already holds the work has rows no check judged yet (#62). Pure.
+function notCheckedAt(s: TicketState, head: string): boolean {
+  const r = s.runs.lastReady;
+  return r.kind !== "ended" || r.head !== head;
+}
+
+// the writer modes whose run may change no code and still give rows to judge: a rework whose evidence was the problem
+// (#444), and the fix run after a new START on a branch that already holds the work (ledger#5, #62)
+const EVIDENCE_MODES: ReadonlySet<WriterMode> = new Set(["rework", "fix"]);
+
+// evidenceRework : a run that changed no code but gave rows the ready check judges: it has run them since, would now
+// run other rows or programs than it last did (#444), or has not run at this head yet (#62)
 function evidenceRework(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
-  return w.patch === "" && w.mode === "rework" && (checkedSince(s, w) || recheck(s, w.head));
+  return rowsOnly(w) && judges(s, w);
+}
+
+// rowsOnly : a run of a mode that may change no code, which changed none and gave rows. Pure.
+function rowsOnly(w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
+  return w.patch === "" && EVIDENCE_MODES.has(w.mode) && w.evidence.length > 0;
+}
+
+// judges : the ready check judges the run's rows: it has run them, would run other rows or programs, or has not run
+// at this head yet. Pure.
+function judges(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
+  return checkedSince(s, w) || recheck(s, w.head) || notCheckedAt(s, w.head);
 }
 
 // patchChecked : a run whose patch the same-patch check leaves alone: a cleanup that left nothing to tidy commits

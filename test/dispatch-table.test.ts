@@ -846,6 +846,22 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     expect(decide(at([...old, ended(30, "rework", "", GATE)], AFTER))).toEqual({ kind: "ready", head: H });
   });
 
+  // ledger#5 (#62): after a new START the runs before it are not read; the fix run found the work already on the branch,
+  // changed no code and gave new rows, which went to a person as "changed nothing" instead of to the ready check
+  it("a new START → the fix run changes no code but gives rows → the ready check judges them, in flight", () => {
+    const blocked: Event = { at: t(41), kind: "blocked", why: `the ready check failed ${MAX_READY_FAILURES} times` };
+    const quoted = [AC(1, "grep -n 'records each factory ticket' README.md", "3:ledger records each factory ticket")];
+    const events = [...FAILED, ended(30, "rework", "", GATE), blocked, ended(50, "fix", "", quoted)];
+    const restart = { kind: "approved" as const, at: t(45), lane: "tiny" as const, testFirst: false };
+    const fresh = state({ runs: summarize({ events, since: restart.at }), approval: restart, programs: AFTER });
+    expect(decide(fresh)).toEqual({ kind: "ready", head: H });
+    expect(inFlight(fresh)).toBe(true);
+    // a fix run with no rows at all still changed nothing
+    const empty = [...events.slice(0, -1), ended(50, "fix", "", [])];
+    const none = state({ runs: summarize({ events: empty, since: restart.at }), approval: restart, programs: AFTER });
+    expect(decide(none)).toEqual({ kind: "needs-human", why: "the writer's run changed nothing" });
+  });
+
   it("a person clears the hold: with the label gone the ticket goes on; a stop already handed over waits for a new START", () => {
     const blocked: Event = { at: t(31), kind: "blocked", why: "the writer's run changed nothing" };
     // ticket 4 on this release: the rework gave other rows, so the hold no longer applies once the label is gone
