@@ -744,6 +744,24 @@ describe("a writer run that stops says why, even before a change exists (#62)", 
     expect(out.output).toBeUndefined();
   });
 
+  it("a blocked run that committed nothing still records what its result event reported (#483)", async () => {
+    const result = { type: "result", total_cost_usd: 0.14, usage: { input_tokens: 148_000, output_tokens: 70 } };
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: `${JSON.stringify(result)}\n`, stderr: "" }] });
+    const report = { status: "blocked", blocker: "every Bash call fails with EPERM" };
+    const box = writer(fake, { commit: false, report, exit: 0 }, []);
+    const out = valueOf(await run(setup(box, forge(), []), FIX));
+    expect(out).toMatchObject({ outcome: "blocked", patch: "", spend: { usd: 0.14, tokens: 148_070 } });
+  });
+
+  it("a blocked run with no result event records no spend, which usage counts as unknown (#483)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const report = { status: "blocked", blocker: "every Bash call fails with EPERM" };
+    const box = writer(fake, { commit: false, report, exit: 0 }, []);
+    const out = valueOf(await run(setup(box, forge(), []), FIX));
+    expect(out.outcome).toBe("blocked");
+    expect(out).not.toHaveProperty("spend");
+  });
+
   it("a done run carries no why", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const box = writer(fake, { commit: true, report: DONE, exit: 0 }, []);

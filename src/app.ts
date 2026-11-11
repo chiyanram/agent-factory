@@ -1584,7 +1584,7 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
 }
 
 export function runCli(argv: readonly string[], io: Io): Promise<number> {
-  // eval reads its own options (--drafts, --allow-partial)
+  // eval reads its own options (--drafts)
   if (argv[0] === "eval") {
     return evalCommand(argv.slice(1), io);
   }

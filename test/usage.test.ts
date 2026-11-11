@@ -259,7 +259,11 @@ describe("agent-factory usage", () => {
   it("prints the table, names a ticket whose records cannot be read, and exits 1 for it", async () => {
     write("ledger", "PROJ-1", [writerEnded("2026-11-09T09:30:00Z", { usd: 2, tokens: 10 })]);
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
-    writeFileSync(join(home, "runs", "ledger", "PROJ-2.jsonl"), "not a record\n");
+    // a bad middle line (a bad last line is set aside as torn, #483)
+    writeFileSync(
+      join(home, "runs", "ledger", "PROJ-2.jsonl"),
+      `not a record\n${JSON.stringify(writerEnded("2026-11-09T09:40:00Z", { usd: 1, tokens: 1 }))}\n`,
+    );
     const out: string[] = [];
     const err: string[] = [];
     const io = { env: {}, home, now: () => NOW, out: (t: string) => out.push(t), err: (t: string) => err.push(t) };

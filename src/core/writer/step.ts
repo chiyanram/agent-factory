@@ -35,7 +35,7 @@ import { keepText, readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start } from "./clone.js";
 import { readTools, settingsOf, TARGET_REF, toolLines } from "./tools.js";
 import { knownFor, type Known } from "../onboard/known.js";
-import type { Spend } from "../dispatch/spend.js";
+import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js";
 import { writerRun, type Ended } from "./run.js";
 import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
 import { ciText, taskText, verifyText } from "./task.js";
@@ -200,13 +200,30 @@ function nextWhy(ended: Ended, next: Extract<Next, { kind: "needs-human" }>): st
   return whyText(withSaid(next.reason, host && ended.outcome.kind !== "done" ? ended.said : ""));
 }
 
+// spendField : what the run spent, as a field to spread; none when its CLI reported none, which `usage` counts as
+// unmeasured (+N?), never as free (#483). Pure.
+function spendField(spend: Spend | "unmeasured"): { readonly spend?: Spend } {
+  return spend === "unmeasured" ? {} : { spend };
+}
+
+// spentOn : a host step that failed after the run still says what the run spent, so it is recorded (#483). Pure.
+function spentOn(result: Result<WriterOut>, ended: Result<Ended> | FailedSpent): Result<WriterOut> | FailedSpent {
+  if (result.kind === "ok") {
+    return result;
+  }
+  if (ended.kind === "failed") {
+    return ended;
+  }
+  return spentFailure(result.reason, ended.value.spend);
+}
+
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
   const base = {
     head: ended.tip,
     patch: ended.patch,
     hung: ended.ending.kind === "hung",
-    ...(ended.spend === "unmeasured" ? {} : { spend: ended.spend }),
+    ...spendField(ended.spend),
     ...deferredOf(ended.outcome),
   };
   switch (next.kind) {
@@ -396,6 +413,7 @@ async function finished(
         patch: "",
         evidence: [],
         hung: ended.ending.kind === "hung",
+        ...spendField(ended.spend),
         ...whyField(whyOf(outcome, ended.said)),
       },
     };
@@ -525,7 +543,12 @@ function personHome(env: NodeJS.ProcessEnv): string {
   return env.HOME ?? "";
 }
 
-async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work): Promise<Result<WriterOut>> {
+async function inClone(
+  setup: WriterSetup,
+  input: Input,
+  p: Prepared,
+  work: Work,
+): Promise<Result<WriterOut> | FailedSpent> {
   const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
   const settings = settingsOf(tools, personHome(setup.box.env));
   const known = await knownFor({
@@ -572,13 +595,13 @@ async function inClone(setup: WriterSetup, input: Input, p: Prepared, work: Work
     ended.kind === "ok"
       ? await finished(setup, input, p, { clone: clone.value, ended: ended.value, mode: work.mode })
       : ended;
-  const out = await withOutput(setup, input, ended, withStale(withCard(result, work), known));
+  const out = spentOn(await withOutput(setup, input, ended, withStale(withCard(result, work), known)), ended);
   const removed = await removeClone(clone.value.dir);
-  return removed.kind === "ok" ? out : removed;
+  return removed.kind === "ok" ? out : spentOn(removed, ended);
 }
 
 // toKeep : the run's output to keep, for a run the host blocked (#62); none for any other. Pure.
-function toKeep(ended: Result<Ended>): readonly string[] {
+function toKeep(ended: Result<Ended> | FailedSpent): readonly string[] {
   if (ended.kind === "failed") {
     return [];
   }
@@ -591,7 +614,7 @@ function toKeep(ended: Result<Ended>): readonly string[] {
 async function withOutput(
   setup: WriterSetup,
   input: Input,
-  ended: Result<Ended>,
+  ended: Result<Ended> | FailedSpent,
   result: Result<WriterOut>,
 ): Promise<Result<WriterOut>> {
   const lines = toKeep(ended);
@@ -801,7 +824,7 @@ async function planned(setup: WriterSetup, input: Input): Promise<Planned> {
   return draft.kind === "run" ? carded(setup, draft.work) : draft;
 }
 
-async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOut>> {
+async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOut> | FailedSpent> {
   const plan = await planned(setup, input);
   if (plan.kind === "hand-over") {
     return handOver(setup, input, plan.reason);

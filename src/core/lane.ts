@@ -11,12 +11,13 @@
 // needs-human after the ready check. The way on is the same either way: the coordinator raises the spec's lane, which
 // makes any approval stale, and a human approves the raised spec.
 //
-// The engine acts on a lane's properties, never on its name (section 3). Two are read from the project's process: its
+// The engine acts on a lane's properties, never on its name (section 3), with one exception: the approval floor goes
+// by the lane's name, so only tiny may skip the approval, wherever it is listed (#483). Two are read from the project's process: its
 // process plugin's lanes, or the default lanes below (process/read.ts, #232): approval, and how many lenses the
 // automated review runs (#237; review/lenses.ts pickLenses). A lanes file writes the lens count as a person reads it,
 // "1", "~3" or "all, on the strongest model"; a lane that leaves it out keeps the default lane's count. Each lane also
 // says whether its spec and design get a design review before the human's approval (designReview, #236): a
-// design-reviewer run, then a verify pass. The approval floor: every lane above the lowest needs a human's approval, and no settings
+// design-reviewer run, then a verify pass. The approval floor: every lane above tiny needs a human's approval, and no settings
 // layer or process plugin can turn that off. In the settings the floor is "approval.floor", a locked key fixed to tiny
 // (#229; settings/keys.ts). lanesOf is the one door a lanes value from a process plugin comes through; it refuses any
 // value that drops the floor.
@@ -134,9 +135,13 @@ function namedLanes(value: unknown): readonly LaneProps[] | "bad" {
   return named.length === lanes.length && named.length > 0 ? named : "bad";
 }
 
-// floorBreaks : each lane above the lowest that would run with no approval. Pure.
+// the one lane that may run on a START alone; the floor goes by this name, never by where a lane sits in the list
+// (#483), so a lanes file that lists bug first, or leaves tiny out, still cannot drop an approval
+const FLOOR: Lane = "tiny";
+
+// floorBreaks : each lane other than tiny that would run with no approval, wherever it is listed. Pure.
 function floorBreaks(lanes: readonly LaneProps[]): readonly string[] {
-  return lanes.slice(1).flatMap((l) => (l.approval ? [] : [l.name]));
+  return lanes.flatMap((l) => (l.approval || l.name === FLOOR ? [] : [l.name]));
 }
 
 // lanesOf : a lanes value as a process plugin or a settings layer gives it, every lane in order from the lightest with
@@ -153,7 +158,7 @@ export function lanesOf(value: unknown, from: string): Result<readonly LaneProps
   return breaks.length === 0
     ? { kind: "ok", value: named }
     : failed(
-        `${from}: every lane above ${named[0]?.name ?? "the lightest"} needs a human's approval (the approval floor); ${breaks.join(", ")} would run without one`,
+        `${from}: every lane above ${FLOOR} needs a human's approval (the approval floor); ${breaks.join(", ")} would run without one`,
       );
 }
 

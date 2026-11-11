@@ -24,7 +24,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write       # push the release commit and the v<version> tag
-      issues: write         # open an issue when a release fails (semantic-release failComment)
     steps:
       # Ruleset main takes changes only through a pull request; its bypass is the admin role, so the release commit
       # is pushed with the owner's token. The GitHub Actions app cannot bypass a ruleset on a user-owned repo (#350).

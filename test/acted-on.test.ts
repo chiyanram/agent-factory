@@ -197,7 +197,10 @@ describe("acted on, in the run records and usage", () => {
       actOn: 0,
       acted: { since: "1".repeat(40), rows: [{ ...rows[0], acted: "yes" }] },
     });
-    writeFileSync(join(dir, "runs", "ledger", "PROJ-1.jsonl"), `${bad}\n`, { flag: "a" });
+    // followed by a good line: a bad last line is set aside as torn (#483), a bad middle line fails the read
+    writeFileSync(join(dir, "runs", "ledger", "PROJ-1.jsonl"), `${bad}\n${bad.replace(/"yes"/, "true")}\n`, {
+      flag: "a",
+    });
     expect((await readRecords(where)).kind).toBe("failed");
   });
 });

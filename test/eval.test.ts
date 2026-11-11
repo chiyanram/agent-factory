@@ -164,7 +164,7 @@ function words(line: string): readonly string[] {
 }
 
 function settings(over: Partial<EvalSettings> = {}): EvalSettings {
-  return { ...evalSettings({}, { drafts: false, allowPartial: false }), ...over };
+  return { ...evalSettings({}, { drafts: false }), ...over };
 }
 
 async function pass(model: Model, s: EvalSettings = settings()) {
@@ -256,19 +256,18 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     expect(r.proof).toBe(false);
   });
 
-  it("refuses, before any model run, a pass that could spend over $100", async () => {
+  it("starts a pass whose worst case is over $100, and one that spends under the cap is not partial (#483)", async () => {
     const seen: ModelRun[] = [];
     const { out } = await pass(fakeModel({ lines: {}, confidence: 1, cost: 0 }, seen), settings({ runUsd: "20" }));
-    expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("over the $100 cap") });
-    expect(seen).toHaveLength(0);
-    expect(existsSync(join(root, "evals", "reviewer", "results"))).toBe(false);
+    expect(out).toMatchObject({ kind: "ok", value: { partial: false } });
+    expect(seen.length).toBeGreaterThan(0);
   });
 
-  it("with --allow-partial, stops before a round that might not fit under $100 and marks the result partial", async () => {
+  it("stops before a round that might not fit under $100, never spends over it, and marks the result partial (#483)", async () => {
     const seen: ModelRun[] = [];
     const { out } = await pass(
       fakeModel({ lines: { SEEDED: 10 }, confidence: 1, cost: 15 }, seen),
-      settings({ runUsd: "20", allowPartial: true }),
+      settings({ runUsd: "20" }),
     );
     const r = results(out.kind === "ok" ? out.value.path : "");
     expect(out).toMatchObject({ kind: "ok", value: { partial: true, proof: false } });

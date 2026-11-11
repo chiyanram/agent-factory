@@ -22,7 +22,7 @@
 // a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
 // findings or what the verify pass kept, and its spend, whether it finished or failed. design.ts reads them per hashes.
 
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
@@ -664,29 +664,120 @@ function isEvent(e: Event | Bad): e is Event {
   return e !== BAD;
 }
 
-// readRecords : every line of the ticket's file, oldest first; no file is no events. A line that is not an event fails
-// the read, since a count summed past it could let a run go on that should have stopped.
-export async function readRecords(where: Where): Promise<Result<readonly Event[]>> {
+// one line of a record file, and where it starts in the file
+type Line = { readonly text: string; readonly start: number };
+
+// linesOf : the file's non-empty lines with their byte offsets. Pure.
+function linesOf(text: string): readonly Line[] {
+  const lines: Line[] = [];
+  let start = 0;
+  for (const part of text.split("\n")) {
+    if (part.trim() !== "") {
+      lines.push({ text: part, start });
+    }
+    start += Buffer.byteLength(part, "utf8") + 1;
+  }
+  return lines;
+}
+
+// tornPath : the side file a torn last line is moved to, beside the ticket's record; not a .jsonl name, so `usage`
+// never reads it as a ticket. Pure.
+export function tornPath(recordFile: string): string {
+  return `${recordFile}.torn`;
+}
+
+// setAside : move a torn last line to the side file and cut it from the record, so the next line appended starts on a
+// line of its own. The cut is made only while the file is still the size it was read at. This assumes one dispatcher
+// writes a ticket's file at a time (the pass lock, tick.ts): between the size check and the cut, an append from a
+// second process could otherwise be lost. So only the pass that holds the lock asks for the cut (readRecords).
+async function setAside(file: string, size: number, line: Line): Promise<Done> {
+  try {
+    await appendFile(tornPath(file), `${line.text}\n`, { mode: 0o600 });
+    const handle = await open(file, "r+");
+    try {
+      const now = await handle.stat();
+      if (now.size !== size) {
+        return { kind: "failed", reason: `${file} grew while its torn last line was set aside` };
+      }
+      await handle.truncate(line.start);
+      return { kind: "ok" };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return { kind: "failed", reason: `cannot set aside the torn last line of ${file}` };
+  }
+}
+
+// how a reader treats a torn last line: the pass that holds the lock sets it aside; every other reader (usage, a
+// command run by hand) skips it with a warning and writes nothing
+export type ReadOptions = {
+  readonly warn?: (line: string) => void;
+  readonly setAside?: boolean;
+};
+
+// readRecords : every line of the ticket's file, oldest first; no file is no events. A bad line fails the read with
+// its line number, since a count summed past it could let a run go on that should have stopped. The one exception is a
+// torn last line (#483): a write cut short, which leaves the file without its closing newline and the line not JSON.
+// It is read past with a warning, and the run it belonged to reads as one that never ended, so the table counts it as
+// a failed try (or hands it to a person when it may have pushed), as for any run the dispatcher died during. With
+// setAside (only the pass, which holds the lock) it is also moved to <ticket>.jsonl.torn and cut from the record.
+export async function readRecords(where: Where, options: ReadOptions = {}): Promise<Result<readonly Event[]>> {
   const path = recordPath(where);
   if (path.kind === "failed") {
     return path;
   }
-  let text = "";
+  const text = await recordText(path.value);
+  return text.kind === "ok" ? eventsIn(path.value, text.value, options) : text;
+}
+
+// recordText : the record file's text; "" when there is none
+async function recordText(path: string): Promise<Result<string>> {
   try {
-    text = await readFile(path.value, "utf8");
+    return { kind: "ok", value: await readFile(path, "utf8") };
   } catch (error) {
-    return codeOf(error) === "ENOENT"
-      ? { kind: "ok", value: [] }
-      : { kind: "failed", reason: `cannot read ${path.value}` };
+    return codeOf(error) === "ENOENT" ? { kind: "ok", value: "" } : { kind: "failed", reason: `cannot read ${path}` };
   }
-  const events = text
-    .split("\n")
-    .filter((l) => l.trim() !== "")
-    .map(eventOf);
+}
+
+// tornLine : the line at `index` when it is a write cut short: the last line, the file has no closing newline, and the
+// line is not JSON; none for any other bad line. Pure.
+function tornLine(text: string, lines: readonly Line[], index: number): Line | undefined {
+  const line = index === lines.length - 1 && !text.endsWith("\n") ? lines[index] : undefined;
+  return line !== undefined && parseLine(line.text) === undefined ? line : undefined;
+}
+
+function warnOf(options: ReadOptions): (line: string) => void {
+  return options.warn ?? ((line) => process.stderr.write(`${line}\n`));
+}
+
+// tornRead : the events before a torn last line, with a warning; the line set aside when the caller holds the lock
+async function tornRead(path: string, text: string, torn: Line, options: ReadOptions): Promise<Done> {
+  const aside =
+    options.setAside === true ? await setAside(path, Buffer.byteLength(text), torn) : { kind: "ok" as const };
+  const where = options.setAside === true ? `it is moved to ${tornPath(path)}` : "it is skipped";
+  if (aside.kind === "ok") {
+    warnOf(options)(
+      `warning: the last line of ${path} was torn (a write cut short); ${where}, and its run counts as one that never ended`,
+    );
+  }
+  return aside;
+}
+
+// eventsIn : the events of a record file's text; a torn last line read past, any other bad line refused
+async function eventsIn(path: string, text: string, options: ReadOptions): Promise<Result<readonly Event[]>> {
+  const lines = linesOf(text);
+  const events = lines.map((l) => eventOf(l.text));
   const first = events.indexOf(BAD);
-  return first < 0
-    ? { kind: "ok", value: events.filter(isEvent) }
-    : { kind: "failed", reason: `${path.value} line ${first + 1} is not a record; fix or remove it` };
+  if (first < 0) {
+    return { kind: "ok", value: events.filter(isEvent) };
+  }
+  const torn = tornLine(text, lines, first);
+  if (torn === undefined) {
+    return { kind: "failed", reason: `${path} line ${first + 1} is not a record; fix or remove it` };
+  }
+  const read = await tornRead(path, text, torn, options);
+  return read.kind === "ok" ? { kind: "ok", value: events.filter(isEvent) } : read;
 }
 
 export type LastWriter =

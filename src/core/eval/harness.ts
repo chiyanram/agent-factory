@@ -5,8 +5,8 @@
 // written to evals/reviewer/results/<date>-<sha>.json (results.ts).
 //
 // Only cases the operator approved in cases.md run; drafts run only when asked, and the result says so. Every model
-// run, review and judge, goes through the $100 purse (budget.ts): a pass that could spend more is refused unless the
-// operator allows a partial one, and a pass that reaches the cap stops and is marked partial. It runs on the host, as
+// run, review and judge, goes through the $100 purse (budget.ts): a pass whose worst case is over the cap still
+// starts, and stops before any run that would not fit under it, marked partial (#483). It runs on the host, as
 // the production review does, never in CI.
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -55,7 +55,6 @@ export type EvalSettings = {
   readonly judgeModel: string;
   readonly judgePrompt: string;
   readonly drafts: boolean;
-  readonly allowPartial: boolean;
 };
 
 export type EvalInput = {
@@ -76,10 +75,7 @@ export type Written = { readonly path: string; readonly partial: boolean; readon
 
 // evalSettings : the eval's own settings from the environment; a review run with no cap is given one, since an
 // uncapped run could spend anything (budget.ts)
-export function evalSettings(
-  env: NodeJS.ProcessEnv,
-  flags: { readonly drafts: boolean; readonly allowPartial: boolean },
-): EvalSettings {
+export function evalSettings(env: NodeJS.ProcessEnv, flags: { readonly drafts: boolean }): EvalSettings {
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
     judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
@@ -112,20 +108,15 @@ function planOf(list: readonly Case[], s: EvalSettings): Plan {
   };
 }
 
-// afford : the pass's worst case against the cap; over it, refused unless a partial pass is allowed
-function afford(list: readonly Case[], input: EvalInput): Result<number> {
+// afford : says what the pass could spend against the cap. A worst case over the cap is no reason to refuse: the purse
+// stops spending at the cap while the pass runs, and a pass stopped there is partial, never proof (#483)
+function afford(list: readonly Case[], input: EvalInput): void {
   const plan = planOf(list, input.settings);
   const worst = worstCase(plan);
+  const over = worst > CAP_USD ? "; over the cap, so it may stop there with a partial result, never proof" : "";
   input.log(
-    `eval reviewer: ${list.length} case(s) × ${RUNS} runs; at most $${worst.toFixed(2)} (each review run capped at $${input.settings.runUsd}, each judge run at $${input.settings.judgeUsd}), about $${typical(plan).toFixed(2)} at $0.84 a round; cap $${CAP_USD}`,
+    `eval reviewer: ${list.length} case(s) × ${RUNS} runs; at most $${worst.toFixed(2)} (each review run capped at $${input.settings.runUsd}, each judge run at $${input.settings.judgeUsd}), about $${typical(plan).toFixed(2)} at $0.84 a round; cap $${CAP_USD}${over}`,
   );
-  if (worst <= CAP_USD || input.settings.allowPartial) {
-    return { kind: "ok", value: worst };
-  }
-  return {
-    kind: "failed",
-    reason: `the pass could spend $${worst.toFixed(2)}, over the $${CAP_USD} cap; lower FACTORY_MAX_USD or FACTORY_JUDGE_MAX_USD, or pass --allow-partial to stop at the cap with a partial result, never proof`,
-  };
 }
 
 async function git(repo: string, env: NodeJS.ProcessEnv, args: readonly string[]): Promise<string> {
@@ -325,10 +316,7 @@ async function start(input: EvalInput): Promise<Result<Started>> {
   if (chosen.kind === "failed") {
     return chosen;
   }
-  const ok = afford(chosen.value.list, input);
-  if (ok.kind === "failed") {
-    return ok;
-  }
+  afford(chosen.value.list, input);
   const judgeText = await readFile(input.settings.judgePrompt, "utf8").catch(() => "");
   if (judgeText === "") {
     return { kind: "failed", reason: `the judge's instructions are missing: ${input.settings.judgePrompt}` };
