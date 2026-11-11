@@ -39,6 +39,8 @@ function forge(claimed: readonly number[] | "down"): Forge {
     change: notUsed,
     defaultBranch: notUsed,
     branchExists: notUsed,
+    branchState: notUsed,
+    issueState: notUsed,
     issueBody: notUsed,
     openChange: notUsed,
     notes: notUsed,

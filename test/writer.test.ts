@@ -211,6 +211,8 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     change: async () => unused("change"),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
+    branchState: async () => unused("branchState"),
+    issueState: async () => unused("issueState"),
     issueBody: async () => unused("issueBody"),
     addLabel: async ({ number, label }) => {
       log.push(`label ${number} ${label}`);

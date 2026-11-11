@@ -102,6 +102,8 @@ function forge(
     },
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
+    branchState: async () => ({ kind: "ok", value: "none" }),
+    issueState: async () => ({ kind: "ok", value: "open" }),
     issueBody: failed,
     openChange: failed,
     notes: async () => ({ kind: "ok", value: [...notes] }),

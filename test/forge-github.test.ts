@@ -510,6 +510,51 @@ describe("branchExists (#227)", () => {
   });
 });
 
+describe("branchState (#494)", () => {
+  it("is merged when any pull request from the branch merged, else open, else closed, else none", async () => {
+    const f = fake("github", [
+      ok([
+        { state: "closed", merged_at: null },
+        { state: "closed", merged_at: "2026-11-10T10:00:00Z" },
+      ]),
+      ok([{ state: "open", merged_at: null }]),
+      ok([{ state: "closed", merged_at: null }]),
+      ok([]),
+    ]);
+    const forge = github(f.client, project);
+    expect(await forge.branchState({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: "merged" });
+    expect(f.calls[0]?.args.join(" ")).toContain(
+      "repos/chiyanram/ledger/pulls?state=all&head=chiyanram%3Afactory%2FT-1",
+    );
+    expect(await forge.branchState({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: "opened" });
+    expect(await forge.branchState({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: "closed" });
+    expect(await forge.branchState({ branch: "factory/T-1" })).toEqual({ kind: "ok", value: "none" });
+    expect(await forge.branchState({ branch: "../x" })).toMatchObject({ kind: "failed" });
+  });
+});
+
+describe("issueState (#494)", () => {
+  it("is open, completed, or not planned by its state_reason; a pull request's number fails", async () => {
+    const f = fake("github", [
+      ok({ number: 4, state: "open", state_reason: null }),
+      ok({ number: 5, state: "closed", state_reason: "completed" }),
+      ok({ number: 6, state: "closed", state_reason: null }),
+      ok({ number: 7, state: "closed", state_reason: "not_planned" }),
+      ok({ number: 8, state: "closed", pull_request: { url: "u" } }),
+    ]);
+    const forge = github(f.client, project);
+    expect(await forge.issueState({ number: 4 })).toEqual({ kind: "ok", value: "open" });
+    expect(f.calls[0]?.args.join(" ")).toContain("repos/chiyanram/ledger/issues/4");
+    expect(await forge.issueState({ number: 5 })).toEqual({ kind: "ok", value: "completed" });
+    expect(await forge.issueState({ number: 6 })).toEqual({ kind: "ok", value: "completed" });
+    expect(await forge.issueState({ number: 7 })).toEqual({ kind: "ok", value: "not_planned" });
+    expect(await forge.issueState({ number: 8 })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("pull request"),
+    });
+  });
+});
+
 describe("issueBody (#381)", () => {
   it("reads an issue's body, none as empty, and refuses a pull request's number", async () => {
     const f = fake("github", [

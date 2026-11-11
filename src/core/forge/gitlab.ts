@@ -12,6 +12,7 @@ import { graphql, rest, restText, type Client, type Done, type Result } from "./
 import { reader, type Reader } from "./read.js";
 import {
   after,
+  branchStateOf,
   completeAll,
   done,
   logOf,
@@ -456,6 +457,31 @@ export function gitlab(client: Client, project: string): Forge {
         r.list(v, "").some((b) => r.text(b, "name") === input.branch),
       );
       return found.kind === "ok" ? { kind: "ok", value: found.value === true } : found;
+    },
+    // every merge request from this branch of the project itself, in any state: one from a fork has another source
+    // project (#494)
+    async branchState(input) {
+      if (!plainBranch(input.branch)) {
+        return { kind: "failed", reason: `gitlab: not a plain branch name: ${JSON.stringify(input.branch)}` };
+      }
+      const path = `${base}/merge_requests?state=all&source_branch=${encodeURIComponent(input.branch)}&per_page=100`;
+      const found = await get(path, "gitlab merge requests", (v, r) =>
+        branchStateOf(
+          r
+            .list(v, "")
+            .filter((m) => r.at(m, "source_project_id") === r.at(m, "target_project_id"))
+            .map((m) => r.text(m, "state")),
+        ),
+      );
+      return found.kind === "ok" ? { kind: "ok", value: branchStateOf([String(found.value)]) } : found;
+    },
+    // an issue's state: GitLab records no reason for a close, so every closed issue reads as completed (#494)
+    async issueState(input) {
+      const state = await get(`${base}/issues/${input.number}`, "gitlab issue", (v, r) => r.text(v, "state"));
+      if (state.kind === "failed") {
+        return state;
+      }
+      return { kind: "ok", value: state.value === "opened" ? "open" : "completed" };
     },
     // an issue's description; GitLab numbers issues and merge requests apart, so an iid here is always an issue
     async issueBody(input) {

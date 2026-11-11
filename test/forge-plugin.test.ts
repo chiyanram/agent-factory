@@ -71,6 +71,17 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
+  it("carries a branch's state and an issue's state, as the built-in adapter does (#494)", async () => {
+    const { setup, fakes } = await bundled([
+      http("200 OK", [{ state: "closed", merged_at: "2026-11-10T10:00:00Z" }]),
+      http("200 OK", { number: 12, state: "closed", state_reason: "not_planned" }),
+    ]);
+    const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+    expect(await forge.branchState({ branch: "factory/12" })).toEqual({ kind: "ok", value: "merged" });
+    expect(await forge.issueState({ number: 12 })).toEqual({ kind: "ok", value: "not_planned" });
+    await fakes.remove();
+  });
+
   it("carries a status and a line finding, and an answer past 1 MiB, as the built-in adapter does", async () => {
     const big = "x".repeat(2 * 1024 * 1024);
     const comment = { body: big, user: { login: "alice", type: "User" }, created_at: "2026-11-08T00:00:00Z" };
