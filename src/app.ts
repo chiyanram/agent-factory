@@ -45,8 +45,9 @@ import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
 import { writerStep } from "./core/writer/step.js";
 import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
-import { readProcess, type PluginDir } from "./core/process/read.js";
+import { readProcess, type PluginDir, type Process } from "./core/process/read.js";
 import type { LaneProps } from "./core/lane.js";
+import { readQuarantine, type Quarantined } from "./core/process/quarantine.js";
 import { readyPrograms, readyStep, verifyStep, type BoxPlan } from "./core/ready/steps.js";
 import { designSteps } from "./core/design/step.js";
 import { designSetup } from "./core/design/settings.js";
@@ -677,6 +678,7 @@ type Planned = {
   readonly steps: Steps;
   readonly plugins: readonly PluginHash[];
   readonly lanes: readonly LaneProps[];
+  readonly quarantine: readonly Quarantined[];
 };
 
 type Project = { readonly forge: Forge; readonly identity: Identity };
@@ -746,6 +748,21 @@ function egressCli(argv: readonly string[], io: Io): Promise<number> {
   });
 }
 
+// processAndQuarantine : the project's process, and the checks a person quarantined, which come from the project's own
+// settings, never the rules pack (#485)
+async function processAndQuarantine(
+  home: string,
+  project: string,
+  plugins: Parameters<typeof readProcess>[0],
+): Promise<Result<Process & { readonly quarantine: readonly Quarantined[] }>> {
+  const own = await readProcess(plugins);
+  if (own.kind === "failed") {
+    return own;
+  }
+  const quarantine = await readQuarantine({ home, project, now: Date.now() });
+  return quarantine.kind === "ok" ? { kind: "ok", value: { ...own.value, quarantine: quarantine.value } } : quarantine;
+}
+
 // stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
 async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
   const { forge, identity } = opened;
@@ -759,7 +776,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     return used;
   }
   io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
-  const own = await readProcess(used.value.plugins);
+  const own = await processAndQuarantine(home, project, used.value.plugins);
   if (own.kind === "failed") {
     return own;
   }
@@ -798,6 +815,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
       steps,
       plugins: hashesOf(used.value.plugins),
       lanes: own.value.lanes,
+      quarantine: own.value.quarantine,
       ...programsOf(plan),
     },
   };

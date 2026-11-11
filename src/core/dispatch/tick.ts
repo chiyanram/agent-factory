@@ -23,6 +23,7 @@
 // people to see. It never starts anything: the orchestrator decides only from the local records.
 
 import type { PluginHash } from "../process/use.js";
+import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -153,6 +154,7 @@ export type Steps = {
               readonly split?: RoundSpend;
               readonly acted?: Acted;
               readonly lenses?: Readonly<Record<string, number>>;
+              readonly citesNotFound?: number;
             }>
           | FailedSpent
         >;
@@ -207,6 +209,8 @@ export type TickSetup = {
   readonly caps: Caps;
   // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
   readonly specs?: SpecStore;
+  // the checks a person quarantined in the process plugin (#485; process/quarantine.ts); none when absent
+  readonly quarantine?: readonly Quarantined[];
 };
 
 export type Decision = { readonly ticket: string; readonly action: Action };
@@ -339,6 +343,38 @@ function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): Ch
   return only.kind === "open" ? { kind: "open", line: only } : { kind: "merged", line: only };
 }
 
+// quarantined : the change as the table reads it with the quarantine in force (#485): a red head whose every failed
+// job a person quarantined, unexpired, reads as passed, and the pass logs each one so it still shows. A red check is
+// never re-run by the factory; one that is not quarantined goes back to the implementer as a CI round (table.ts).
+async function quarantined(setup: TickSetup, ticket: string, change: ChangeView): Promise<ChangeView> {
+  const list = setup.quarantine ?? [];
+  if (!redOpen(change) || list.length === 0) {
+    return change;
+  }
+  const held = await heldAt(setup, change.line, list);
+  if (held.kind === "blocks") {
+    return change;
+  }
+  setup.log(`${ticket}: ${quarantineLine(held.shown)}`);
+  return { kind: "open", line: { ...change.line, pipeline: { kind: "success" }, quarantined: held.shown } };
+}
+
+function redOpen(change: ChangeView): change is Extract<ChangeView, { kind: "open" }> {
+  return change.kind === "open" && change.line.pipeline.kind === "failed";
+}
+
+// heldAt : what the failed jobs at the head mean with the quarantine in force; jobs the git host cannot name block
+async function heldAt(setup: TickSetup, line: OpenLine, list: readonly Quarantined[]): Promise<Held> {
+  const jobs = await setup.forge.failedJobs({ number: line.number, head: line.head });
+  return jobs.kind === "ok"
+    ? heldBy(
+        jobs.value.map((j) => j.name),
+        list,
+        setup.now(),
+      )
+    : { kind: "blocks" };
+}
+
 // waiverOf : the ticket's waiver of the test checks (#231), as the table sees it
 async function waiverOf(setup: TickSetup, ticket: string): Promise<Result<WaiverView>> {
   const stored = await readWaiver({ home: setup.home, project: setup.project, ticket });
@@ -430,7 +466,7 @@ async function stateOf(
         gate: setup.gate,
         approval: said.value.view,
         waiver: waiver.value,
-        change: changeOf(ticket, lines),
+        change: await quarantined(setup, ticket, changeOf(ticket, lines)),
         runs,
         now: setup.now(),
         quietMinutes: setup.quietMinutes,
@@ -546,12 +582,22 @@ async function releaseClaim(setup: TickSetup, state: TicketState, why: string): 
     : removed;
 }
 
+// quarantinedAt : the checks a person quarantined that let this head's red gate read as passed; none for a green one
+function quarantinedAt(state: TicketState): readonly Quarantined[] {
+  return state.change.kind === "open" ? (state.change.line.quarantined ?? []) : [];
+}
+
 async function ping(setup: TickSetup, state: TicketState, head: string): Promise<Done> {
+  const held = quarantinedAt(state);
+  // a gate that reads as green only because of a quarantine says so, naming each check and its expiry (#485)
   const said = await say(setup, state, {
     seat: "coordinator",
-    title: `ready for you at ${head.slice(0, 8)}: the gate is green; review and merge`,
+    title:
+      held.length === 0
+        ? `ready for you at ${head.slice(0, 8)}: the gate is green; review and merge`
+        : `ready for you at ${head.slice(0, 8)}: the gate is green but for ${held.length} quarantined check(s); review and merge`,
     fields: [],
-    items: [],
+    items: quarantineItems(held),
   });
   const pinged =
     said.kind === "ok"
@@ -875,6 +921,7 @@ function reviewEnded(
     readonly split?: RoundSpend;
     readonly acted?: Acted;
     readonly lenses?: Readonly<Record<string, number>>;
+    readonly citesNotFound?: number;
   },
 ): Promise<Done> {
   return record({
@@ -888,6 +935,7 @@ function reviewEnded(
       ...(value.split === undefined ? {} : { split: value.split }),
       ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
+      ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });

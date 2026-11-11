@@ -29,7 +29,10 @@ import type { Result } from "./forge/api.js";
 import { globRegex } from "./ci-files.js";
 import { prop } from "./dispatch/records.js";
 import { readProjectRaw } from "./project.js";
-import { LANES, type Lane, type Spec } from "./spec.js";
+import { above, type Lane } from "./lane-order.js";
+import { LANES, type Spec } from "./spec.js";
+
+export { above, heavier, raisedWhy } from "./lane-order.js";
 
 // how many lenses a lane's review runs: a count, or every lens on the strongest model
 export type LensCount = number | "all";
@@ -179,20 +182,6 @@ export function needsTestFirst(lane: Lane, lanes: readonly LaneProps[] = DEFAULT
   return lanes.find((l) => l.name === lane)?.testFirst ?? defaultTestFirst(lane);
 }
 
-function rank(lane: Lane): number {
-  return LANES.indexOf(lane);
-}
-
-// above : whether lane a needs more process than lane b. Pure.
-export function above(a: Lane, b: Lane): boolean {
-  return rank(a) > rank(b);
-}
-
-// heavier : the heavier of two lanes: a check only ever raises. Pure.
-export function heavier(a: Lane, b: Lane): Lane {
-  return above(b, a) ? b : a;
-}
-
 // matches : whether a path is one a glob names, from the repo's root. Pure.
 export function matches(path: string, globs: readonly string[]): boolean {
   return globs.some((g) => globRegex(g).test(path) || globRegex(g).test(`/${path}`));
@@ -209,11 +198,6 @@ export function plannedRaise(spec: Spec, oneWayDoor: readonly string[]): Raise {
   return door !== undefined && above("one-way door", spec.lane)
     ? { kind: "raised", from: spec.lane, to: "one-way door", why: `${door} is under a one-way-door path` }
     : { kind: "kept" };
-}
-
-// raisedWhy : what a person reads about a raise that stops the ticket. Pure.
-export function raisedWhy(raise: { readonly from: Lane; readonly to: Lane; readonly why: string }): string {
-  return `the lane is raised from ${raise.from} to ${raise.to} (${raise.why}): the coordinator raises the spec's lane, and a human approves it`;
 }
 
 const ONE_WAY_DOOR_KEY = "lanes.oneWayDoor";

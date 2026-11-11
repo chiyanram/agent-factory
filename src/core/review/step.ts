@@ -33,6 +33,7 @@ type ActOn = Result<{
   readonly actOn: number;
   readonly acted?: Acted;
   readonly lenses?: Readonly<Record<string, number>>;
+  readonly citesNotFound?: number;
 }>;
 type Mappers = { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => ActOn };
 
@@ -41,8 +42,8 @@ const MAP: Mappers = {
     kind: "ok",
     value:
       o.acted === "none"
-        ? { actOn: o.counts.act_on, lenses: o.lenses }
-        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses },
+        ? { actOn: o.counts.act_on, lenses: o.lenses, citesNotFound: o.citesNotFound }
+        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses, citesNotFound: o.citesNotFound },
   }),
   reused: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   already: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),

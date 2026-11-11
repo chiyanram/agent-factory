@@ -2,7 +2,7 @@
 // (missing srt, the wrong version, a platform srt does not sandbox), its timeout and its stop. No srt is needed: the
 // real one is checked on the laptop by test/srt-box-real.test.ts (GUIDE.md "Check the srt runner").
 
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
@@ -10,6 +10,7 @@ import { srtBox } from "../src/core/box/srt.js";
 import {
   CREDENTIAL_PATHS,
   readSrtProbe,
+  RUN_TMP_ROOT,
   tmpTooLong,
   SRT_VERSION,
   srtDomains,
@@ -23,7 +24,9 @@ import { boxContract } from "./box-contract.js";
 import { tempDir } from "./temp.js";
 
 const RUNS = tempDir("srt-runs-");
-const TMPS = tempDir("srt-tmps-");
+// a short root, as production's RUN_TMP_ROOT is: on macOS the OS temp folder is a long /private/var/folders path,
+// which leaves srt no room for its sockets (#485, the macOS job)
+const TMPS = realpathSync(mkdtempSync(join(realpathSync(RUN_TMP_ROOT), "srt-t-")));
 afterAll(() => {
   rmSync(RUNS, { recursive: true, force: true });
   rmSync(TMPS, { recursive: true, force: true });
@@ -88,7 +91,7 @@ function fakeSrt(input: { readonly version?: Exit; readonly command?: Exit; read
   return { calls, run };
 }
 
-function box(fake: { readonly run: Runner }, host: SrtHost = HOST, egress: SrtEgress = EGRESS) {
+function box(fake: { readonly run: Runner }, host: SrtHost = HOST, egress: SrtEgress = EGRESS, tmpRoot = TMPS) {
   let n = 0;
   return srtBox({
     run: fake.run,
@@ -98,7 +101,7 @@ function box(fake: { readonly run: Runner }, host: SrtHost = HOST, egress: SrtEg
     egress,
     caName: "NODE_EXTRA_CA_CERTS",
     runsDir: RUNS,
-    tmpRoot: TMPS,
+    tmpRoot,
     newName: () => `srt-test-${++n}-${Math.random().toString(36).slice(2, 8)}`,
   });
 }
@@ -331,6 +334,14 @@ describe("srt runner: start, run and stop (#114)", () => {
     expect(await runner.stop(started.session)).toEqual({ kind: "ok" });
     expect(existsSync(join(RUNS, started.session.id))).toBe(false);
     expect(existsSync(tmp)).toBe(false);
+  });
+
+  it("refuses to start under a temp root too long for srt's sockets, and leaves no folder there", async () => {
+    const long = join(TMPS, "a".repeat(60), "b".repeat(30));
+    mkdirSync(long, { recursive: true });
+    const started = await box(fakeSrt(), HOST, EGRESS, long).start(SPEC);
+    expect(started).toMatchObject({ kind: "failed", reason: expect.stringContaining("too long for srt's sockets") });
+    expect(readdirSync(long)).toEqual([]);
   });
 
   it("stops a command at its timeout, and reads it as timed out", async () => {

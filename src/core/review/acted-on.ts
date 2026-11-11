@@ -11,7 +11,7 @@
 
 import type { Result } from "../forge/api.js";
 import { hostGit } from "../git.js";
-import { keepText, readKept, type At } from "../kept.js";
+import { keepJson, readKept, type At } from "../kept.js";
 import { CATEGORIES, type Category } from "../eval/golden.js";
 import type { Bucket, Kind, Sorted } from "./verdicts.js";
 
@@ -48,7 +48,7 @@ export function trackedOf(sorted: readonly Sorted[]): readonly Tracked[] {
 
 // keepTracked : the round's Act on and Consider findings, with its head
 export function keepTracked(at: At, sorted: readonly Sorted[]): Promise<Result<string>> {
-  return keepText(at, FINDINGS_FILE, `${JSON.stringify(trackedOf(sorted), null, 2)}\n`);
+  return keepJson(at, FINDINGS_FILE, trackedOf(sorted));
 }
 
 const LENSES: ReadonlySet<unknown> = new Set(["rule", "logic"]);

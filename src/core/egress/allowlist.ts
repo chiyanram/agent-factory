@@ -7,7 +7,8 @@
 //
 // A git host is refused, with every subdomain and any dotted entry that covers it: the runner holds no git host login
 // and needs none, because the host clones, pushes and posts (docs/DESIGN.md "Runners", P4). The public ones always;
-// the project's own, such as a company GitLab, when the caller names it.
+// the project's own, such as a company GitLab, on every list too: every caller names it, as ownGitHosts reads it, and
+// the parameter has no default, so a new caller cannot leave it out (#485).
 
 export type Allowlist =
   | { readonly kind: "ok"; readonly hosts: readonly string[] }
@@ -48,8 +49,8 @@ function gitCheck(gitHosts: readonly string[]): Check {
   };
 }
 
-// parseAllowlist : the entries checked; gitHosts are the git hosts refused besides the public ones
-export function parseAllowlist(entries: readonly string[], gitHosts: readonly string[] = []): Allowlist {
+// parseAllowlist : the entries checked; gitHosts are the project's own git hosts, refused besides the public ones
+export function parseAllowlist(entries: readonly string[], gitHosts: readonly string[]): Allowlist {
   const trimmed = entries.map((e) => e.trim()).filter((e) => e.length > 0);
   if (trimmed.length === 0) {
     return { kind: "refused", reason: "the egress allowlist is empty; a box needs at least its model API" };
@@ -65,4 +66,11 @@ export function parseAllowlist(entries: readonly string[], gitHosts: readonly st
   }
   const unique = [...new Set(trimmed)];
   return { kind: "ok", hosts: unique.filter((h) => !covered(h, unique)).toSorted() };
+}
+
+// ownGitHostsOf : the project's own git host, such as a company GitLab: the gitHostName a settings file sets and the one
+// this machine sets, lower case, with none for a public host (GIT_HOSTS refuses those anyway). Pure.
+export function ownGitHostsOf(names: readonly (string | undefined)[]): readonly string[] {
+  const hosts = names.map((n) => (n ?? "").trim().toLowerCase()).filter((n) => n !== "" && !GIT_HOSTS.includes(n));
+  return [...new Set(hosts)];
 }

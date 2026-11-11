@@ -32,6 +32,7 @@ import type { Model, ModelResult } from "../review/model.js";
 import { readVerdicts, VERIFY_SCHEMA } from "../review/verdicts.js";
 import { designPath, NO_DESIGN } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
+import { checkCites } from "../cite-check.js";
 import { DESIGN_SCHEMA, keep, readDesignFindings, type DesignFinding, type Kept } from "./findings.js";
 
 export type DesignSetup = {
@@ -130,34 +131,52 @@ function partsFor(card: Card, parts: readonly Input[]): Result<ReadonlySet<Input
   return kept.kind === "ok" ? { kind: "ok", value: new Set(kept.value.map((p) => p.file)) } : kept;
 }
 
-// codeIn : the code at the default branch, in the run folder's code/
-async function codeIn(setup: DesignSetup, run: string): Promise<Result<void>> {
-  const sha = await baseSha(setup);
-  const copied =
-    sha.kind === "ok"
-      ? await copyCode({ repo: setup.repo, sha: sha.value, into: join(run, "code"), env: setup.env, prune: "rules" })
-      : sha;
-  return copied.kind === "ok" ? { kind: "ok", value: undefined } : copied;
-}
+// what a run read into its folder: the spec's and design's text, and the default branch's commit the code is from
+type Filled = { readonly spec: string; readonly design: string; readonly sha: string };
 
 // filled : the run folder with the spec, the design and the code at the default branch, less what the card's
-// must_not_see leaves out
+// must_not_see leaves out; what it read is given back, so the cite check reads the same texts and commit (#485)
 async function filled(
   setup: DesignSetup,
   input: DesignInput,
   run: string,
   gets: ReadonlySet<Input["file"]>,
-): Promise<Result<void>> {
+): Promise<Result<Filled>> {
+  const read = await readAll(setup, input);
+  if (read.kind === "failed") {
+    return read;
+  }
+  await written(run, read.value, gets);
+  const copied = gets.has("code")
+    ? await copyCode({ repo: setup.repo, sha: read.value.sha, into: join(run, "code"), env: setup.env, prune: "rules" })
+    : ({ kind: "ok" } as const);
+  return copied.kind === "ok" ? read : copied;
+}
+
+// written : the spec, and the design when the card gets it and there is one, in the run folder
+async function written(run: string, read: Filled, gets: ReadonlySet<Input["file"]>): Promise<void> {
+  await writeFile(join(run, "spec.md"), read.spec, { mode: 0o600 });
+  if (gets.has("design.md") && read.design !== "") {
+    await writeFile(join(run, "design.md"), read.design, { mode: 0o600 });
+  }
+}
+
+// readAll : the spec's and design's text, and the default branch's commit, fetched; either failing fails the run
+async function readAll(setup: DesignSetup, input: DesignInput): Promise<Result<Filled>> {
   const read = await texts(setup, input);
   if (read.kind === "failed") {
     return read;
   }
-  await writeFile(join(run, "spec.md"), read.value.spec, { mode: 0o600 });
-  const design = gets.has("design.md") ? read.value.design : "";
-  if (design !== "") {
-    await writeFile(join(run, "design.md"), design, { mode: 0o600 });
-  }
-  return gets.has("code") ? codeIn(setup, run) : { kind: "ok", value: undefined };
+  const sha = await baseSha(setup);
+  return sha.kind === "ok" ? { kind: "ok", value: { ...read.value, sha: sha.value } } : sha;
+}
+
+// citedIn : the kept findings, each file:line checked at the commit the run read, and a cite of spec.md or design.md
+// against the text it read; a cite that is not there is noted as "cite not found", so it neither blocks nor is posted
+async function citedIn(setup: DesignSetup, read: Filled, kept: readonly Kept[]): Promise<readonly Kept[]> {
+  const own = { "spec.md": read.spec, ...(read.design === "" ? {} : { "design.md": read.design }) };
+  const checked = await checkCites({ repo: setup.repo, env: setup.env, sha: read.sha }, kept, own);
+  return checked.findings;
 }
 
 // inFolder : a fresh run folder for `work`, gone afterwards
@@ -268,14 +287,14 @@ async function verify(
     }
     await writeFile(join(run, "findings.json"), JSON.stringify(input.findings), { mode: 0o600 });
     const ran = await modelRun(setup, card.value, run, VERIFY_SCHEMA, `verify-pass-${input.ticket}`);
+    const verdicts = answered(card.value, ran, (output) => {
+      const read = readVerdicts(output);
+      return read.kind === "ok" ? { kind: "ok", value: { kept: keep(input.findings, read.value) } } : read;
+    });
     return {
       kind: "ok",
-      value: answered(card.value, ran, (output) => {
-        const verdicts = readVerdicts(output);
-        return verdicts.kind === "ok"
-          ? { kind: "ok", value: { kept: keep(input.findings, verdicts.value) } }
-          : verdicts;
-      }),
+      value:
+        verdicts.kind === "done" ? { ...verdicts, kept: await citedIn(setup, ready.value, verdicts.kept) } : verdicts,
     };
   });
 }

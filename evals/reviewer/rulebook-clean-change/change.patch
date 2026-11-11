@@ -57,6 +57,27 @@ index 72dab22..a3d4074 100644
  function names(team: readonly Person[], keep: (p: Person) => boolean): ReadonlySet<string> {
    return new Set(team.filter(keep).map((p) => p.name.toLowerCase()));
  }
+diff --git a/src/core/review/settings.ts b/src/core/review/settings.ts
+index 187148a..148f71e 100644
+--- a/src/core/review/settings.ts
++++ b/src/core/review/settings.ts
+@@ -16,6 +16,7 @@ import { homedir } from "node:os";
+ import { dirname, isAbsolute, join } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import type { Result } from "../forge/api.js";
++import { claimLabel } from "../poll.js";
+ import type { Forge } from "../forge/types.js";
+ import { recordsDirOf } from "../kept.js";
+ import { claudeSessions, type Sessions } from "./live.js";
+@@ -165,7 +166,7 @@ export function reviewSetup(input: {
+     forge: input.forge,
+     number: input.number,
+     factory: input.factory,
+-    label: env.FACTORY_CLAIM_LABEL ?? "agent::claimed",
++    label: claimLabel(env),
+     repo: p.repo,
+     env,
+     rulebook: p.rulebook,
 diff --git a/src/loop-cli.ts b/src/loop-cli.ts
 index 82a7d70..2762942 100644
 --- a/src/loop-cli.ts

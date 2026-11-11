@@ -4,6 +4,7 @@
 // Nothing here throws.
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { scrubbedJson, scrubSecrets } from "./scrub.js";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 import { attempt } from "./review/safe.js";
@@ -25,8 +26,18 @@ export function keptPath(at: At, file: string): string {
   return join(at.recordsDir, String(at.change), at.head, file);
 }
 
-// keepText : one file kept with the head, private to this user
+// keepText : one plain-text file kept with the head, private to this user; a kept file is a record too, so no secret
+// stays in it (P4, #485)
 export async function keepText(at: At, file: string, text: string): Promise<Result<string>> {
+  return keepRaw(at, file, scrubSecrets(text));
+}
+
+// keepJson : one JSON file kept with the head, each string in it scrubbed, so it still reads back (P4, #485)
+export async function keepJson(at: At, file: string, value: unknown): Promise<Result<string>> {
+  return keepRaw(at, file, `${scrubbedJson(value, 2)}\n`);
+}
+
+async function keepRaw(at: At, file: string, text: string): Promise<Result<string>> {
   const path = keptPath(at, file);
   return attempt(async () => {
     await mkdir(join(at.recordsDir, String(at.change), at.head), { recursive: true, mode: 0o700 });

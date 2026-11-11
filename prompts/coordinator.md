@@ -184,7 +184,8 @@ from its merge base with the default branch, on the host and with git only, and 
 - a skip or focus marker added in a test file (`@Disabled…`, `@Ignore…`, `@Requires({ false })`, `.skip`, `.only`,
   `xit(`, `fit(`, `pytest.mark.skip`, `xfail`, `t.Skip` and the like);
 - more assertion lines removed than added in a test file (`assert…`, `expect(`, `assertThat`, `verify(`, Go's
-  `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting;
+  `t.Error` and `t.Fatal`), every statement of a Spock `then:` or `expect:` block counting, or a value check turned
+  into a presence check (`assertEquals(x, 5)` to `assertNotNull(x)`, `toEqual(5)` to `toBeDefined()`);
 - a judge file added, changed, moved or deleted: a build file or dependency manifest, a file the project's `verify`
   command names or its program reads (`Makefile` for `make`, `package.json` for `npm`), jest, vitest or playwright
   config, `junit-platform.properties`, `pytest.ini`, `conftest.py`, and the project's `ready.judgeFiles`.
@@ -199,8 +200,9 @@ check hit sends the implementer back like any failed ready check. A person who a
 `agent-factory waive <project> <ticket> <head>` and removes `needs-human`: the ready check runs again at that head and
 clears it. On a later head the test checks look again only at the files changed since the waiver's head, so a cleared
 file is flagged again only if it changes again. A line only moved or re-indented is not new, and a submodule bump is not read. A guard that cannot read the diff
-or the waiver fails the step, so the check is never passed and a person looks. The guard counts assertions per file, so swapping one for a trivial one, or moving assertions to another file,
-fools it or fails it; and Spock `where:` rows are not counted.
+or the waiver fails the step, so the check is never passed and a person looks. **Today:** with no mutation command set (#495), the guard counts assertions per file and says it is the weaker check,
+so swapping one for another trivial one it does not know, or moving assertions to another file, fools it or fails it;
+and Spock `where:` rows are not counted.
 
 The ready check then reads the lane the real diff needs, the same way (#230; `src/core/ready/lane.ts`): only docs,
 comments or the values of config keys that stay may be tiny; any other change, a moved file among them, needs at least
@@ -250,8 +252,10 @@ meant to be running (its `loop.pid` is there), it is flagged `LATE` when that is
 (`FACTORY_POLL_MINUTES`) ago while any change is claimed: a loop that stopped shows up there, instead of claimed changes
 that just sit. With no loop it says "no orchestrator loop running". When the last loop stopped while a ticket was still
 in flight (a step not set up, a cap, failed passes) it adds when and why, from `$FACTORY_HOME/runs/<project>/loop-end.json`;
-otherwise it names `agent-factory dispatch <project>` while a change is claimed. Flaky jobs are not yet rerun with failure
-signatures (#132): red CI sends the implementer back.
+otherwise it names `agent-factory dispatch <project>` while a change is claimed. A red check is a fail: the factory never
+re-runs it, and red CI sends the implementer back as a CI round. Only a person re-runs a red check, once, or quarantines
+a CI job in the project file's `quarantine.checks` (owner, added, expiry at most `quarantine.maxDays` later, ticket): a
+quarantined job still runs, is logged each pass and named in the ping, and does not block until it expires (#485).
 The order is fixed: implementer done → ready check → automated review → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
 The orchestrator loop polls the git host every `FACTORY_POLL_MINUTES` (5) while each ticket in flight waits on CI or a person, and at once after a step it ran itself (#445). Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
@@ -261,7 +265,7 @@ heavy run (a build, an IT suite or a deploy) per machine.
 | the PR's ticket is approved (`agent-factory approval <project> <ticket>` exits 0), with `asks=0`, `needs_human=no` and no `stop` newer than the approval | `agent-factory dispatch <project>` (`approve` starts it): it claims the change and starts the implementer on a runner; in a lane with `test_first` (bug by default), the test-first run first |
 | a test-first run (a lane with `test_first`, bug by default) ended with a pushed `test:` commit and `asks=0` | the orchestrator loop starts the fix run |
 | the implementer's report is `done` and the host pushed and posted it | the ready check runs its evidence rows at the head on a runner, then `agent-factory review <project> <pr>` |
-| an open Act on thread, or the gate is red, with `needs_human=no` | the orchestrator loop starts a rework run; after 3 rounds, label `needs-human`; a flaky job gets a rerun, not an implementer run |
+| an open Act on thread, or the gate is red, with `needs_human=no` | the orchestrator loop starts a rework run; after 3 rounds, label `needs-human`; a red job is never re-run by the factory: only a job a person quarantined does not block |
 | the evidence fails at the head | the orchestrator loop starts a rework run; after 3 failures, label `needs-human` |
 | the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` on a runner and posts `agent-factory/verify` at the head; it failing sends the implementer back, as red CI does |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
@@ -281,7 +285,7 @@ role prefix; such notes are output, not triggers.
 The human gets: every OPEN design question, every `[writer] OPEN:` question, `needs-human` after 3 rounds, a merge
 conflict an implementer could not merge, a standing rule that contradicts what you see, and anything irreversible. You
 keep the conversation and the open questions. The orchestrator keeps polling, claims, and starting and restarting
-runs. **Today:** a flaky job is not rerun yet (#132), and the triggers it does not run yet stay yours ([Triggers](#triggers)).
+runs. **Today:** the triggers it does not run yet stay yours ([Triggers](#triggers)).
 
 
 # Terms
