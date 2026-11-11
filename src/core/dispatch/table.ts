@@ -333,15 +333,21 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
     : "next";
 }
 
-// blocked : a ticket with no run yet waits until each ticket its spec's "Blocked by" names is merged; a blocker closed
-// with no merge, the ticket itself, or a cycle goes to a person (#494)
+// blocked : a ticket with no run yet and no change open waits until each ticket its spec's "Blocked by" names is
+// merged; a blocker closed with no merge, the ticket itself, or a cycle goes to a person (#494). A new approval or START
+// starts the run counts afresh, so the open change, not the counts, says a build began.
 const blocked: Rule = (s) => {
   const b = s.blockers ?? { kind: "none" };
-  if (s.runs.lastWriter.kind !== "none" || b.kind === "none") {
+  if (begun(s) || b.kind === "none") {
     return "next";
   }
   return b.kind === "broken" ? { kind: "needs-human", why: b.why } : { kind: "wait", why: waitingWhy(b.on) };
 };
+
+// begun : the ticket's build began: a run since the newest approval or START, or its change open
+function begun(s: TicketState): boolean {
+  return s.runs.lastWriter.kind !== "none" || s.change.kind !== "none";
+}
 
 // the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {

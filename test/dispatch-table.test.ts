@@ -1058,5 +1058,11 @@ describe("blocked by (#494)", () => {
   it("AC-6: holds only a ticket whose build has not begun", () => {
     const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
     expect(decide(state({ blockers: waiting })).kind).not.toBe("wait");
+    // a new approval or START counts runs afresh, so no run is counted; the open change still says the build began
+    const opened = { kind: "open", line: line({ claimed: false }) } as const;
+    expect(decide(state({ runs: EMPTY, change: opened, blockers: waiting }))).not.toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("blocked by"),
+    });
   });
 });

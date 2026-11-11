@@ -83,3 +83,18 @@ describe("withIssue (AC-9)", () => {
     });
   });
 });
+
+describe("cycleFrom's cost", () => {
+  it("walks each ticket once: 25 layers of two tickets, each blocked by both below, take no time", () => {
+    const specs = new Map<string, readonly string[]>([["T", ["L0a", "L0b"]]]);
+    for (let i = 0; i < 25; i += 1) {
+      const below = i === 24 ? [] : [`L${i + 1}a`, `L${i + 1}b`];
+      specs.set(`L${i}a`, below);
+      specs.set(`L${i}b`, below);
+    }
+    const started = performance.now();
+    expect(cycleFrom("T", specs)).toEqual([]);
+    // a walk without its visited set takes 2^25 paths here
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});

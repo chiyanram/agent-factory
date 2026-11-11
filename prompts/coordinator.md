@@ -59,8 +59,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    ticket must wait for others to merge first, name them in an optional `## Blocked by` section, one ticket per line
    (#494): the orchestrator holds the ticket's first build until each is merged (or its issue closed as completed),
    then starts from the default branch; a blocker closed with no merge, the ticket itself or a cycle goes to the
-   person. **Today:** a held ticket shows only as a `wait: blocked by …` line in `dispatch` (#487); its one ping and
-   the stop after repeated git host errors are #494's last slice. Done when a stranger with no chat could build the change from the spec alone
+   person, pinged once. **Today:** a ticket that only waits shows as a `wait: blocked by …` line in `dispatch` (#487);
+   its one ping and the stop after repeated git host errors are #494's last slice. Done when a stranger with no chat could build the change from the spec alone
    and `agent-factory spec <project> <ticket>` exits 0: run it at the end of this step, before any design review. It
    stops (exit 2) a spec whose `## Planned files` need a heavier lane than its own, a `## Blocked by` line that is not
    one ticket, and a cite that does not hold in the project's clone (#489).

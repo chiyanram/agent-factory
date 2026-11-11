@@ -45,36 +45,36 @@ export function withIssue(branch: BranchState, issue: IssueState): BlockerState 
   return branch === "merged" || byIssue === "branch" ? branch : byIssue;
 }
 
+type Walk = {
+  readonly ticket: string;
+  readonly specs: ReadonlyMap<string, readonly string[]>;
+  // the tickets already walked to their end without finding the ticket: never walked again, so the walk is linear
+  readonly done: Set<string>;
+};
+
 // cycleFrom : a path of blockers that leads back to the ticket, or none. Pure.
 export function cycleFrom(ticket: string, specs: ReadonlyMap<string, readonly string[]>): readonly string[] {
-  return walk(ticket, specs, [ticket]);
+  return walk({ ticket, specs, done: new Set() }, [ticket]);
 }
 
-// walk : the first path from the end of `path` back to the ticket at its start, or none. Pure.
-function walk(
-  ticket: string,
-  specs: ReadonlyMap<string, readonly string[]>,
-  path: readonly string[],
-): readonly string[] {
-  for (const next of specs.get(path.at(-1) ?? "") ?? []) {
-    const found = stepTo(ticket, specs, path, next);
+// walk : the first path from the end of `path` back to the ticket at its start, or none
+function walk(w: Walk, path: readonly string[]): readonly string[] {
+  const at = path.at(-1) ?? "";
+  for (const next of w.specs.get(at) ?? []) {
+    const found = stepTo(w, path, next);
     if (found.length > 0) {
       return found;
     }
   }
+  w.done.add(at);
   return [];
 }
 
-function stepTo(
-  ticket: string,
-  specs: ReadonlyMap<string, readonly string[]>,
-  path: readonly string[],
-  next: string,
-): readonly string[] {
-  if (next === ticket) {
+function stepTo(w: Walk, path: readonly string[], next: string): readonly string[] {
+  if (next === w.ticket) {
     return [...path, next];
   }
-  return path.includes(next) ? [] : walk(ticket, specs, [...path, next]);
+  return path.includes(next) || w.done.has(next) ? [] : walk(w, [...path, next]);
 }
 
 const STATE_WORDS: Readonly<Record<BlockerState, string>> = {
