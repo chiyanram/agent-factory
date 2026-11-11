@@ -69,6 +69,10 @@ const STEPS: readonly (readonly [RegExp, NextStep])[] = [
     },
   ],
   [
+    /^blocked by .*: the build starts once each is merged$/,
+    { who: "factory", does: "waits for each blocker to merge, then starts the build from the default branch (#494)" },
+  ],
+  [
     /^the lane is raised from /,
     { who: "person", does: "raises the spec's ## Lane with the coordinator, then approves it" },
   ],

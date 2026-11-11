@@ -1000,7 +1000,18 @@ describe("can it get stuck? (#485)", () => {
     }),
     state({ approval, change: { kind: "none" }, runs: wrote() }),
   ]);
-  const all = [...opened, ...merged];
+  // a ticket held by its spec's "Blocked by" (#494), before its build begins
+  const blockers: readonly NonNullable<TicketState["blockers"]>[] = [
+    { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] },
+    { kind: "waiting", on: [{ ticket: "12", state: "none" }] },
+    { kind: "broken", why: "blocked by 12, closed, no merge seen" },
+  ];
+  const held = approvals.flatMap((approval) =>
+    blockers.flatMap((b) =>
+      [EMPTY, wrote()].map((r) => state({ approval, change: { kind: "none" }, runs: r, blockers: b })),
+    ),
+  );
+  const all = [...opened, ...merged, ...held];
 
   it("each state is carried on, or hands the ticket to a person with a named next step", () => {
     const stuck = all.filter((s) => {
@@ -1023,5 +1034,35 @@ describe("can it get stuck? (#485)", () => {
       does: "whoever claimed it finishes it, or gives it back: agent-factory release <project> <change>",
     });
     expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
+  });
+});
+
+// #494: a spec's "Blocked by" holds the build until each blocker is merged
+describe("blocked by (#494)", () => {
+  const unbuilt = { runs: EMPTY, change: { kind: "none" } } as const;
+
+  it("AC-2, AC-3: a held ticket waits on its blockers, and starts once the last one merges", () => {
+    const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
+    expect(decide(state({ ...unbuilt, blockers: waiting }))).toEqual({
+      kind: "wait",
+      why: "blocked by PROJ-0 (open, not merged): the build starts once each is merged",
+    });
+    expect(decide(state({ ...unbuilt, blockers: { kind: "none" } }))).toMatchObject({ kind: "writer" });
+  });
+
+  it("AC-4, AC-5: a blocker closed with no merge, or a cycle, goes to a person", () => {
+    const broken = { kind: "broken", why: "blocked by PROJ-0, closed without a merge" } as const;
+    expect(decide(state({ ...unbuilt, blockers: broken }))).toEqual({ kind: "needs-human", why: broken.why });
+  });
+
+  it("AC-6: holds only a ticket whose build has not begun", () => {
+    const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
+    expect(decide(state({ blockers: waiting })).kind).not.toBe("wait");
+    // a new approval or START counts runs afresh, so no run is counted; the open change still says the build began
+    const opened = { kind: "open", line: line({ claimed: false }) } as const;
+    expect(decide(state({ runs: EMPTY, change: opened, blockers: waiting }))).not.toMatchObject({
+      kind: "wait",
+      why: expect.stringContaining("blocked by"),
+    });
   });
 });

@@ -75,6 +75,7 @@ import type { OpenLine, MergedLine } from "../poll.js";
 import type { Retried, Summary, Task, WriterMode } from "./records.js";
 import type { Caps } from "./caps.js";
 import { ticketCapped } from "./ticket-cap.js";
+import { waitingWhy, type BlockersView } from "./blockers.js";
 import type { DesignView } from "./design.js";
 import type { DesignStep } from "./records.js";
 import type { Answer } from "../answers.js";
@@ -127,6 +128,8 @@ export type TicketState = {
   readonly caps: Caps;
   // where the design review of the current spec and design stands (#236)
   readonly design: DesignView;
+  // where the spec's "Blocked by" tickets stand (#494; blockers.ts); none when it names none
+  readonly blockers?: BlockersView;
   // every program an evidence row may start with this pass (#444; ready/command.ts evidencePrograms); none when the
   // ready check has no project file
   readonly programs?: readonly string[];
@@ -328,6 +331,22 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
   return w.mode === "test-first"
     ? { kind: "writer", task: answered(s, { kind: "fix" }), why: "the failing test is in; now the fix" }
     : "next";
+}
+
+// blocked : a ticket with no run yet and no change open waits until each ticket its spec's "Blocked by" names is
+// merged; a blocker closed with no merge, the ticket itself, or a cycle goes to a person (#494). A new approval or START
+// starts the run counts afresh, so the open change, not the counts, says a build began.
+const blocked: Rule = (s) => {
+  const b = s.blockers ?? { kind: "none" };
+  if (begun(s) || b.kind === "none") {
+    return "next";
+  }
+  return b.kind === "broken" ? { kind: "needs-human", why: b.why } : { kind: "wait", why: waitingWhy(b.on) };
+};
+
+// begun : the ticket's build began: a run since the newest approval or START, or its change open
+function begun(s: TicketState): boolean {
+  return s.runs.lastWriter.kind !== "none" || s.change.kind !== "none";
 }
 
 // the writer's next run, when the last one ended in a way that calls for one
@@ -655,6 +674,7 @@ const RULES: readonly Rule[] = [
   unknownPipeline,
   claimedElsewhere,
   noChange,
+  blocked,
   writerAgain,
   headMoved,
   samePatch,

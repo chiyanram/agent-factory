@@ -452,6 +452,201 @@ describe("tick", () => {
     expect((await goAhead({ home, project: "ledger", ticket: "PROJ-1" })).kind).not.toBe("stale");
   });
 
+  // #494: the tick reads each blocker's change through the Forge seam
+  // blockedBy : PROJ-1 approved and STARTed, its spec blocked by `blockers`, and a writer step that notes each run
+  async function blockedBy(...blockers: readonly string[]): Promise<{ runs: string[]; steps: Steps }> {
+    await approved();
+    const path = join(home, "specs", "ledger", "PROJ-1", "spec.md");
+    const text = `${readFileSync(path, "utf8")}\n## Blocked by\n\n${blockers.map((t) => `- ${t}`).join("\n")}\n`;
+    writeFileSync(path, text);
+    await approve({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      seenHash: specHash(text),
+      by: "ram",
+      at: "2026-11-07T08:30:00Z",
+    });
+    const runs: string[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => (
+          runs.push(input.ticket),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+        ),
+      },
+    };
+    return { runs, steps };
+  }
+
+  // the spec of another ticket, blocked by `blockers`
+  function specOf(ticket: string, ...blockers: readonly string[]): void {
+    mkdirSync(join(home, "specs", "ledger", ticket), { recursive: true });
+    const blocked = blockers.length === 0 ? "" : `\n## Blocked by\n\n${blockers.map((t) => `- ${t}`).join("\n")}\n`;
+    writeFileSync(
+      join(home, "specs", "ledger", ticket, "spec.md"),
+      `${SPEC("feature").replace("PROJ-1", ticket)}${blocked}`,
+    );
+  }
+
+  // the issue store, reading each ticket's spec from the local folder: the project keeps its specs in issues (#381)
+  const ISSUES: TickSetup["specs"] = {
+    kind: "issue",
+    readIssueBody: async (ticket) => {
+      const path = join(home, "specs", "ledger", ticket, "spec.md");
+      return existsSync(path)
+        ? { kind: "found", text: readFileSync(path, "utf8"), where: path }
+        : { kind: "missing", where: path };
+    },
+  };
+
+  const NO_CHANGES = { team, open: [], merged: [] };
+  const never = (what: string) => async (): Promise<never> => {
+    throw new Error(`${what} must not be read`);
+  };
+
+  it("AC-2, AC-3, AC-7: holds a first build while its blocker is open, and starts it once the blocker is merged", async () => {
+    const { runs, steps } = await blockedBy("PROJ-0");
+    const asked: string[] = [];
+    const at = (state: "opened" | "merged", log: string[]): Forge => ({
+      ...forge(NO_CHANGES, log),
+      branchState: async ({ branch }) => (asked.push(branch), { kind: "ok", value: state }),
+      issueState: never("an issue of a project that keeps no specs in issues"),
+    });
+    const held: string[] = [];
+    await tick({ ...setup(NO_CHANGES, held, { steps }), forge: at("opened", held) });
+    expect(asked).toEqual(["factory/PROJ-0"]);
+    expect(runs).toEqual([]);
+    expect(held).toContain(
+      "log PROJ-1: wait: blocked by PROJ-0 (open, not merged): the build starts once each is merged",
+    );
+    await tick({ ...setup(NO_CHANGES, [], { steps }), forge: at("merged", []) });
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("AC-9: an issue closed with no merge seen goes to a person once, recorded and pinged; closed as completed, the build starts", async () => {
+    const { runs, steps } = await blockedBy("#12");
+    const at = (issue: "completed" | "closed", log: string[]): Forge => ({
+      ...forge(NO_CHANGES, log),
+      branchState: async () => ({ kind: "ok", value: "none" }),
+      issueState: async ({ number }) => (expect(number).toBe(12), { kind: "ok", value: issue }),
+    });
+    const pings: Ping[] = [];
+    const first: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, first, { steps, specs: ISSUES, notify: pinger(pings) }),
+      forge: at("closed", first),
+    });
+    expect(runs).toEqual([]);
+    const why = "blocked by 12, closed, no merge seen";
+    expect(pings).toEqual([
+      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `${why}; there is no change yet` },
+    ]);
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "blocked") : []).toMatchObject([{ why }]);
+    expect(first.some((l) => l.includes("failed"))).toBe(false);
+    // the next pass does not hand it over again
+    const again: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, again, { steps, specs: ISSUES, notify: pinger(pings) }),
+      forge: at("closed", again),
+    });
+    expect(pings).toHaveLength(1);
+    expect(again.join("\n")).toContain(`wait: handed to a person earlier: ${why}`);
+    await tick({ ...setup(NO_CHANGES, [], { steps, specs: ISSUES }), forge: at("completed", []) });
+    expect(runs).toEqual(["PROJ-1"]);
+  });
+
+  it("AC-9: a numbered ticket of a project that keeps its specs locally is read by its branch alone", async () => {
+    const { runs, steps } = await blockedBy("12");
+    const held: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, held, { steps }),
+      forge: {
+        ...forge(NO_CHANGES, held),
+        branchState: async () => ({ kind: "ok", value: "opened" }),
+        issueState: never("issueState"),
+      },
+    });
+    expect(runs).toEqual([]);
+    expect(held.join("\n")).toContain("blocked by 12 (open, not merged)");
+  });
+
+  it("AC-7: a git host error on a blocker's branch or issue waits, never goes to a person", async () => {
+    const { runs, steps } = await blockedBy("12");
+    const failed = async () => ({ kind: "failed", reason: "github: 502" }) as const;
+    const branchDown: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, branchDown, { steps }),
+      forge: { ...forge(NO_CHANGES, branchDown), branchState: failed },
+    });
+    expect(branchDown.join("\n")).toContain("wait: blocked by 12 (not started)");
+    const issueDown: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, issueDown, { steps, specs: ISSUES }),
+      forge: {
+        ...forge(NO_CHANGES, issueDown),
+        branchState: async () => ({ kind: "ok", value: "opened" }),
+        issueState: failed,
+      },
+    });
+    expect(issueDown.join("\n")).toContain("wait: blocked by 12 (open, not merged)");
+    expect(runs).toEqual([]);
+  });
+
+  it("reads no blocker while nothing lets the build begin (no START), or once its change is open (AC-6)", async () => {
+    specOf("PROJ-1", "PROJ-0");
+    const text = readFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), "utf8");
+    await approve({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      seenHash: specHash(text),
+      by: "ram",
+      at: "2026-11-07T08:00:00Z",
+    });
+    const quiet = (changes: Changes, log: string[]): Forge => ({
+      ...forge(changes, log),
+      branchState: never("branchState"),
+    });
+    const unstarted: string[] = [];
+    await tick({ ...setup(NO_CHANGES, unstarted), forge: quiet(NO_CHANGES, unstarted) });
+    expect(unstarted.join("\n")).not.toContain("blocked by");
+    // a START, and the change already open from an earlier build: a blocker added since never holds it
+    await approved();
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text);
+    await approve({
+      where: { home, project: "ledger", ticket: "PROJ-1" },
+      seenHash: specHash(text),
+      by: "ram",
+      at: "2026-11-07T09:00:00Z",
+    });
+    const changes = { team, open: [open()], merged: [] };
+    const building: string[] = [];
+    await tick({ ...setup(changes, building), forge: quiet(changes, building) });
+    expect(building.join("\n")).not.toContain("blocked by");
+  });
+
+  it("AC-5: a cycle read through the specs goes to a person; one past the 50 specs read is not seen and the ticket waits", async () => {
+    await blockedBy("A");
+    specOf("A", "B");
+    specOf("B", "PROJ-1");
+    const cyc: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, cyc),
+      forge: { ...forge(NO_CHANGES, cyc), branchState: async () => ({ kind: "ok", value: "opened" }) },
+    });
+    expect(cyc.join("\n")).toContain("form a cycle: PROJ-1 → A → B → PROJ-1");
+    // a chain of 60 tickets back to PROJ-1: the walk stops at 50 specs, so no cycle is found
+    const chain = Array.from({ length: 60 }, (_, i) => `C${i}`);
+    specOf("A", chain[0] ?? "");
+    chain.forEach((t, i) => specOf(t, chain[i + 1] ?? "PROJ-1"));
+    const long: string[] = [];
+    await tick({
+      ...setup(NO_CHANGES, long),
+      forge: { ...forge(NO_CHANGES, long), branchState: async () => ({ kind: "ok", value: "opened" }) },
+    });
+    expect(long.join("\n")).toContain("wait: blocked by A (open, not merged)");
+  });
+
   it("a writer run that stops before a change exists: the record, the log and the ping all say why (#62)", async () => {
     await approved();
     const log: string[] = [];
