@@ -48,7 +48,6 @@ src/core/ready/       the ready check and the local verifier: branch code run on
 src/core/settings/    the settings layers: team, project, user and machine; each key's class; config show/check (#229)
 src/core/plugin/      the connector contract: describe and call, the pinned registry, and the contract test kit (#134)
 src/core/process/     the project's plugin list and its pins (hash-checked each run), its process: lanes and baseline (#232), and role cards (#236)
-contract/             the versioned contract with a rules pack: a JSON schema per part (card, lanes, finding) and the pinned chiyanram/skills commit (#484)
 plugins/              the bundled connectors: github and gitlab serve the git host seam (lib/ built from dist/); discord pings
 prompts/              the automated review's default finder and verify-pass instructions, the eval's judge, and the built-in role cards (roles/)
 evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)

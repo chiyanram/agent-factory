@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rulebook:crq:finding:1",
+  "title": "Finding, version 1",
+  "description": "One entry of the JSON a finder run returns. A line is a number, or text like 12 or 40-44.",
+  "type": "object",
+  "required": ["id", "lens", "axis", "kind", "file", "line", "rule", "category", "severity", "grade", "evidence",
+               "finding", "fix"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "lens": {"type": "string", "minLength": 1},
+    "axis": {"enum": ["standards", "spec"]},
+    "kind": {"enum": ["rule", "logic"]},
+    "file": {"type": "string", "minLength": 1},
+    "line": {"type": ["integer", "string"], "pattern": "^[0-9]+(-[0-9]+)?$"},
+    "rule": {"type": ["string", "null"]},
+    "category": {"type": "string"},
+    "severity": {"type": "string", "minLength": 1},
+    "grade": {"enum": ["cited", "walked", "ran"]},
+    "evidence": {"type": "string", "minLength": 1},
+    "finding": {"type": "string", "minLength": 1},
+    "fix": {"type": "string"}
+  }
+}

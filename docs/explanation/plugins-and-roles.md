@@ -46,21 +46,22 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 The engine starts a run from a card for six roles: implementer, test-first, cleanup, design-reviewer, verify pass and
 onboarder. Every run record carries the card's hash.
 
-## The contract between the engine and a rules pack
+## The rules pack's own format
 
-The card's frontmatter, the lanes file and the finding a finder run returns are one versioned contract
-(`src/core/process/contract.ts`, #484). The package publishes a JSON schema for each part, built from the engine's own
-lists: [`contract/v2/card.schema.json`](../../contract/v2/card.schema.json),
-[`contract/v2/lanes.schema.json`](../../contract/v2/lanes.schema.json) and
-[`contract/v2/finding.schema.json`](../../contract/v2/finding.schema.json). A rules pack's CI checks its files against
-the schemas of the engine version it pins; the lanes schema holds the approval floor too.
+The repos are one-way: the rules pack owns the format of its cards, lanes and findings, and publishes it as JSON
+schemas in its process folder, `process/schema/<part>-v<N>.schema.json` (`card`, `lanes`, `finding`). The engine is
+one user of it (`src/core/process/pack-schema.ts`, #484): before it uses a plugin's role card or lanes file, it checks
+the file against the pack's own schema, then runs its own checks (the role's tools, guardrails and hand-off; the
+approval floor).
 
-The engine reads this version and the one before: a version 1 card (plain-text `enforced_guardrails`, a `next:` field)
-still loads. A change a rules pack must follow is a new version.
+The pack's format version is the highest `N` it ships. The engine reads that version and the one before; a pack with
+no schema folder is version 0 and is read by the engine's own checks alone. A newer version is refused with both
+versions named, so an old engine never half-reads a new pack. The finding schema is read; **Today:** the finder runs
+from the built-in prompt, not its card, so nothing checks a finding against it yet (#438).
 
-This repo pins chiyanram/skills by a full commit in [`contract/rules-pack.json`](../../contract/rules-pack.json). CI
-checks that commit out and loads every role card of it through `cards.ts`, and reads each plugin's process, so a card
-the engine would refuse fails CI here. To move the pin, change the commit in that file in its own pull request.
+This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI
+checks that commit out and reads every plugin's process and every role card the engine runs, so a pack the engine
+cannot read fails CI here. To move the pin, change the commit in that file in its own pull request.
 
 ## What each role returns
 

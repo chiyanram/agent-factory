@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rulebook:crq:lanes:1",
+  "title": "Lanes file, version 1",
+  "description": "process/lanes.json: the four lanes in order. Every lane above tiny keeps approval (the approval floor).",
+  "type": "object",
+  "required": ["lanes"],
+  "properties": {
+    "rules": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "lanes": {
+      "type": "array",
+      "allOf": [
+        {
+          "items": {
+            "type": "object",
+            "required": ["lane", "approval", "starts_on", "design_review", "test_first", "lenses", "retro"],
+            "properties": {
+              "lane": {"type": "string"},
+              "approval": {"type": "boolean"},
+              "starts_on": {"type": "string", "minLength": 1},
+              "design_review": {"type": "boolean"},
+              "test_first": {"type": "boolean"},
+              "lenses": {"type": "string", "minLength": 1},
+              "retro": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "prefixItems": [
+            {"properties": {"lane": {"const": "tiny"}}},
+            {"properties": {"lane": {"const": "bug"}, "approval": {"const": true}}},
+            {"properties": {"lane": {"const": "feature"}, "approval": {"const": true}}},
+            {"properties": {"lane": {"const": "one-way door"}, "approval": {"const": true}}}
+          ],
+          "minItems": 4,
+          "items": false
+        }
+      ]
+    }
+  }
+}

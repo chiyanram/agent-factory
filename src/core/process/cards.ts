@@ -18,8 +18,8 @@
 //                 run returns is read with that schema (report.ts, design/findings.ts, review/verdicts.ts)
 // Every other field (steps, input, rules) is the card's own text: the engine reads no meaning into it. next is dropped:
 // the lanes hold the flow; a card that still has it is read for one release, then refused (#424). Every run record carries the card's hash, so a person can tell which card a run used.
-// The fields are one part of the versioned contract with a rules pack (contract.ts, #484): a card in this version or
-// the one before loads.
+// A plugin's card is also checked against the rules pack's own card schema, when the pack ships one (pack-schema.ts,
+// #484): the pack owns its format, and the engine reads this version and the one before.
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -31,6 +31,7 @@ import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
 import { allowedGuardrails, GUARDRAIL_FLOOR, isGuardrail, type GuardrailId } from "./guardrails.js";
+import { frontmatterOf, packProblem, readPackSchemas } from "./pack-schema.js";
 import { findProcess, type PluginDir } from "./read.js";
 
 const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts", "roles");
@@ -341,7 +342,17 @@ async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Re
   }
   const path = join(found.value.dir, "roles", `${role}.md`);
   const text = await textAt(path);
-  return text === undefined ? "none" : cardOf(role, text, `${found.value.plugin.label} (${path})`);
+  return text === undefined ? "none" : packCard(found.value.dir, role, text, `${found.value.plugin.label} (${path})`);
+}
+
+// packCard : a plugin's card, checked against the rules pack's own card format, then by the engine (#484)
+async function packCard(processDir: string, role: Role, text: string, from: string): Promise<Result<Card>> {
+  const schemas = await readPackSchemas(processDir);
+  if (schemas.kind === "failed") {
+    return schemas;
+  }
+  const problem = packProblem(schemas.value, "card", frontmatterOf(text), from);
+  return problem === "" ? cardOf(role, text, from) : failed(problem);
 }
 
 // readCard : the role's card from the project's process plugin, or the built-in card when none holds one. A card that

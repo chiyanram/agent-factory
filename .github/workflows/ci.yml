@@ -36,12 +36,12 @@ jobs:
         with:
           node-version: 26
       - run: make lint
-      # the rules pack at the commit contract/rules-pack.json pins: test/contract.test.ts loads every role card of it
-      # through the engine, and fails in CI when this checkout is missing (#484)
+      # the rules pack at the commit .github/rules-pack.json pins: test/pack-schema.test.ts reads every process and role
+      # card of it through the engine, and fails in CI when this checkout is missing (#484)
       - name: Fetch the pinned rules pack
         run: |
-          repo=$(node -p "require('./contract/rules-pack.json').repo")
-          commit=$(node -p "require('./contract/rules-pack.json').commit")
+          repo=$(node -p "require('./.github/rules-pack.json').repo")
+          commit=$(node -p "require('./.github/rules-pack.json').commit")
           git init -q "$RUNNER_TEMP/rules-pack"
           git -C "$RUNNER_TEMP/rules-pack" fetch -q --depth 1 "$repo" "$commit"
           git -C "$RUNNER_TEMP/rules-pack" checkout -q FETCH_HEAD
