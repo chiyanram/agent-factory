@@ -22,7 +22,7 @@ import {
   type SpecStore,
 } from "./core/spec.js";
 import { plannedCheck, raisedWhy } from "./core/lane.js";
-import { brokenCites } from "./core/spec-cites.js";
+import { brokenCites, specCites } from "./core/spec-cites.js";
 import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
 import { approvalState, approve } from "./core/approval.js";
 import { start } from "./core/start.js";
@@ -428,16 +428,28 @@ async function specFound(
 
 // beforeDesignReview : what stops a spec before any design review (#489): a planned file that needs a heavier lane
 // than the spec's (#230), and a `file:line@commit` cite in the spec or its design that does not hold in the project's
-// clone; the cites are checked only when the clone is set
+// clone
 async function beforeDesignReview(io: Io, at: SpecWhere, read: Spec, text: string): Promise<readonly string[]> {
   const raise = await plannedCheck({ home: at.home, project: at.project, spec: read });
   const raised =
     raise.kind === "failed" ? [raise.reason] : raise.value.kind === "raised" ? [raisedWhy(raise.value)] : [];
+  return [...raised, ...(await citesChecked(io, [text, await designTextOf(at)]))];
+}
+
+// citesChecked : the cites that do not hold in the project's clone. With cites and no clone set, it says on stderr that
+// they were not checked and stops nothing: the design review checks them again in the clone before any model runs.
+async function citesChecked(io: Io, texts: readonly string[]): Promise<readonly string[]> {
   const clone = settingOf(io.env, "clone") ?? "";
-  const cites = isAbsolute(clone)
-    ? await brokenCites({ repo: clone, env: io.env }, [text, await designTextOf(at)])
-    : [];
-  return [...raised, ...cites];
+  if (isAbsolute(clone)) {
+    return brokenCites({ repo: clone, env: io.env }, texts);
+  }
+  const n = specCites(texts.join("\n")).length;
+  if (n > 0) {
+    io.err(
+      `agent-factory spec: ${n} cite(s) not checked: no clone set (FACTORY_REPO); the design review checks them\n`,
+    );
+  }
+  return [];
 }
 
 // designTextOf : the design beside a local spec, or "" when there is none

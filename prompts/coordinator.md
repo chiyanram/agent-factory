@@ -100,7 +100,9 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    `$FACTORY_HOME/specs/<project>/<ticket>/spec.md` (`agent-factory spec --template <issue number>` prints the
    template) and ask the human to paste it into the issue; then run `agent-factory spec <project> <issue number>`. The
    host opens the draft PR on the implementer's first push (#164). Done when a stranger with no chat access could build
-   the change from the spec alone.
+   the change from the spec alone and `agent-factory spec <project> <ticket>` exits 0: run it at the end of this step,
+   before any design review, since it stops (exit 2) a spec whose `## Planned files` need a heavier lane than its own
+   and a `file:line@commit` cite that does not hold in the project's clone (#489).
 4. **Design review.** Do not start one yourself: in a lane whose lanes entry says `design_review` (bug, feature and
    one-way door by default), the orchestrator's next pass runs it once the spec is ready (#236): a design-reviewer run,
    then a verify pass over its conflicts and opens, both read-only, from their role cards (the process plugin's
@@ -110,10 +112,15 @@ A developer without the fleet runs `/crq` in one session and takes these steps i
    ask the human every CONFLICT and OPEN at once, recommendation first, and write the answers into the spec. A Consider
    item never blocks the approval: one the human leaves unanswered goes into the spec's design as a default the
    implementer may choose and must report as a deviation. The edit reviews again only when the round kept an Act on
-   CONFLICT; the re-review gets every earlier round's findings and decisions and looks only at what changed. After 2
-   rounds there is no further review: the human decides. Cite today's code as `file:line@commit`; `agent-factory spec`
-   and the design review check each cite in the project's clone, and a broken one stops the spec, named. `spec` also
-   stops a spec whose `## Planned files` need a heavier lane than its own. An approval given before the review's
+   CONFLICT; the re-review and its verify pass get `earlier.json` (every earlier round's hashes, findings, kept and
+   dismissed items, and the spec and design text the last round read) and look only at what changed, and the engine
+   drops a repeat of a finding an earlier round settled. After 2 rounds there is no further review: the person is told
+   "no further design review (round cap)" and decides. An edit that raises the lane or changes the Planned files is a
+   new review whatever the count. Cite today's code as `file:line@commit` (`Makefile:3@1a2b3c4` too); `agent-factory
+   spec` and the design review check each cite in the project's clone, and a broken one stops the spec, named, and
+   stops the design review at once until you edit it. With no clone set, `spec` says the cites were not checked. A
+   spec whose Planned files need a heavier lane holds the design review, and the person is pinged once to raise the
+   lane: raise it in the spec. An approval given before the review's
    findings does not let the build begin: the human approves again after them. Done when the human has answered the
    round and approves: run `agent-factory spec <project> <ticket>`,
    show them the spec hash and the design hash (`none` with no `design.md` beside the spec), and ask them to run

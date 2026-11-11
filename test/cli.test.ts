@@ -96,6 +96,17 @@ describe("agent-factory spec", () => {
     expect(cited.err).toContain("src/a.ts:3@0000000: 0000000 is not a commit in the project's clone");
   });
 
+  it("says the cites were not checked when no clone is set, and stops nothing for them (#489)", async () => {
+    writeSpec(SPEC.replace("Do the thing.", "Do the thing; see src/a.ts:3@0000000 and Makefile:1@0000000."));
+    const run = await cli(["spec", "ledger", "PROJ-1"]);
+    expect(run.code).toBe(0);
+    expect(run.err).toBe(
+      "agent-factory spec: 2 cite(s) not checked: no clone set (FACTORY_REPO); the design review checks them\n",
+    );
+    writeSpec(SPEC);
+    expect((await cli(["spec", "ledger", "PROJ-1"])).err).toBe("");
+  });
+
   it("says how to start when there is no spec, exit 1", async () => {
     const run = await cli(["spec", "ledger", "PROJ-1"]);
     expect(run.code).toBe(1);

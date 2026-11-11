@@ -196,6 +196,20 @@ export type Event =
       // the role card's hash; none when the run failed before it read one
       readonly card?: string;
       readonly spend?: Spend;
+      // a failure no retry fixes, such as a cite that does not hold: the step stops at once (#489); absent otherwise
+      readonly final?: true;
+      // the spec's lane and its Planned files when the run read it, so a later edit that raises the lane or changes
+      // the files is reviewed again (#489); absent on older lines
+      readonly lane?: Lane;
+      readonly planned?: readonly string[];
+    }
+  // a person was told why the design review holds or ends at these hashes (a raised lane, the round cap), once (#489)
+  | {
+      readonly at: string;
+      readonly kind: "design-noted";
+      readonly spec: string;
+      readonly design: string;
+      readonly why: string;
     }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
@@ -487,13 +501,44 @@ function designEndedOf(raw: unknown, at: string): Event | Bad {
   const parts = designParts(raw);
   const findings = recordedFindings(prop(raw, "findings"));
   const kept = recordedKept(prop(raw, "kept"));
-  const extras = writerExtras(raw);
+  const extras = designExtras(raw);
   if (parts === BAD || extras === BAD) {
     return BAD;
   }
   return findings === undefined || kept === undefined
     ? BAD
     : { at, kind: "design-ended", ...parts, findings, kept, ...extras };
+}
+
+// designExtras : a design line's optional fields: card and spend, the final mark, the lane and Planned files
+function designExtras(raw: unknown): (ReturnType<typeof writerExtras> & DesignOptional) | Bad {
+  const parts = [writerExtras(raw), finalField(raw), laneField(raw), plannedField(raw)];
+  return parts.some((p) => p === BAD) ? BAD : Object.assign({}, ...parts);
+}
+
+type DesignOptional = { readonly final?: true; readonly lane?: Lane; readonly planned?: readonly string[] };
+
+// plannedField : a design line's Planned files, as a field to spread: none on an older line, BAD when not strings
+function plannedField(raw: unknown): { readonly planned?: readonly string[] } | Bad {
+  const planned = prop(raw, "planned");
+  if (planned === undefined) {
+    return {};
+  }
+  return Array.isArray(planned) && planned.every((f) => typeof f === "string") ? { planned } : BAD;
+}
+
+function designNotedOf(raw: unknown, at: string): Event | Bad {
+  const texts = designTexts(raw);
+  return texts === BAD ? BAD : { at, kind: "design-noted", ...texts };
+}
+
+// finalField : a design line's final mark, as a field to spread: none when absent or false, BAD when not a boolean
+function finalField(raw: unknown): { readonly final?: true } | Bad {
+  const final = prop(raw, "final");
+  if (final !== undefined && typeof final !== "boolean") {
+    return BAD;
+  }
+  return final === true ? { final: true } : {};
 }
 
 // nextTryField : a check line's nextTry, as a field to spread: none on a line that has none (a pass, or older than
@@ -513,8 +558,8 @@ function whyOf(raw: unknown): string | Bad {
   return prop(raw, "why") === undefined ? "" : str(raw, "why");
 }
 
-// laneField : a ready line's lane, as a field to spread: none on a line older than the lane check (#230), BAD when it
-// is there but not a lane
+// laneField : a ready or design line's lane, as a field to spread: none on a line older than the lane check (#230,
+// #489), BAD when it is there but not a lane
 function laneField(raw: unknown): { readonly lane?: Lane } | Bad {
   const lane = prop(raw, "lane");
   if (lane === undefined) {
@@ -630,6 +675,7 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
   "verify-ended": verifyEndedOf,
   spent: spentOf,
   "design-ended": designEndedOf,
+  "design-noted": designNotedOf,
   pinged: (raw, at) => {
     const head = str(raw, "head");
     return head === BAD ? BAD : { at, kind: "pinged", head };
@@ -946,6 +992,8 @@ const STEPS: Steps = {
   spent: (s, e) => ({ ...s, spent: addSpend(s.spent, e.spend) }),
   // a design review's run ends its start; what it spent counts toward the ticket's cap (#236)
   "design-ended": (s, e) => ({ ...s, interrupted: { kind: "none" }, spent: addSpend(s.spent, e.spend ?? NO_SPEND) }),
+  // a note to a person counts nothing; design.ts reads it so the note is sent once
+  "design-noted": (s) => s,
   pinged: (s, e) => ({ ...s, pingedAt: e.head }),
   blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice

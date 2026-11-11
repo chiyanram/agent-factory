@@ -5,9 +5,10 @@
 //
 //   src/core/loop.ts:42@1a2b3c4      one line
 //   src/core/loop.ts:42-50@1a2b3c4   a range, checked by its end line
+//   Makefile:3@1A2B3C4               a file with no extension; the commit in either case
 //
-// The commit is 7 to 40 hex characters. Text that is not in this form is not a cite here. The repo is read only
-// through hostGit.
+// The commit is 7 to 40 hex characters, in either case. A short commit that names more than one object is its own
+// problem: cite more of it. Text that is not in this form is not a cite here. The repo is read only through hostGit.
 
 import { hostGit } from "./git.js";
 
@@ -19,7 +20,7 @@ export type SpecCite = {
   readonly commit: string;
 };
 
-const CITE = /(?<![\w./-])((?:[\w.-]+\/)*[\w.-]+\.[\w]+):(\d+)(?:-(\d+))?@([0-9a-f]{7,40})\b/g;
+const CITE = /(?<![\w./-])((?:[\w.-]+\/)*[\w.-]*\w):(\d+)(?:-(\d+))?@([0-9a-fA-F]{7,40})\b/g;
 
 // specCites : every `file:line@commit` in the text, each once. Pure.
 export function specCites(text: string): readonly SpecCite[] {
@@ -33,7 +34,8 @@ export function specCites(text: string): readonly SpecCite[] {
 // citeOf : one match as a cite: a single line ends where it starts. Pure.
 function citeOf(m: RegExpMatchArray): SpecCite {
   const line = Number(m[2]);
-  return { text: m[0], file: m[1] ?? "", line, end: m[3] === undefined ? line : Number(m[3]), commit: m[4] ?? "" };
+  const commit = (m[4] ?? "").toLowerCase();
+  return { text: m[0], file: m[1] ?? "", line, end: m[3] === undefined ? line : Number(m[3]), commit };
 }
 
 type Repo = { readonly repo: string; readonly env: NodeJS.ProcessEnv };
@@ -51,10 +53,19 @@ function lines(text: string): number {
 async function citeBroken(at: Repo, c: SpecCite): Promise<string> {
   const commit = await git(at, ["rev-parse", "--verify", "-q", `${c.commit}^{commit}`]);
   if (commit === undefined) {
-    return `${c.text}: ${c.commit} is not a commit in the project's clone (fetch it, or cite one that is)`;
+    return notACommit(at, c);
   }
   const text = await fileAt(at, commit.trim(), c.file);
   return text === undefined ? `${c.text}: ${c.file} is not in ${c.commit}` : linesBroken(c, lines(text));
+}
+
+// notACommit : why a cite's commit does not resolve: a short one that names more than one object, or none at all
+async function notACommit(at: Repo, c: SpecCite): Promise<string> {
+  const named = await git(at, ["rev-parse", `--disambiguate=${c.commit}`]);
+  const many = (named ?? "").split("\n").filter((l) => l.trim() !== "").length > 1;
+  return many
+    ? `${c.text}: ${c.commit} names more than one object in the project's clone; cite more of the commit`
+    : `${c.text}: ${c.commit} is not a commit in the project's clone (fetch it, or cite one that is)`;
 }
 
 // fileAt : a file's text at a commit, undefined when it is not there or its path is not a plain path
