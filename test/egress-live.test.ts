@@ -57,6 +57,7 @@ describe("checkEgress", () => {
     const calls: Call[] = [];
     const rows = await checkEgress({
       setup,
+      gitHosts: [],
       allowlist: ["api.anthropic.com", ".docker.io"],
       docker: docker(calls),
       ports: [],
@@ -87,6 +88,7 @@ describe("checkEgress", () => {
         env: {},
         runsDir: join(dir, "runs"),
       },
+      gitHosts: [],
       allowlist: ["api.anthropic.com"],
       docker: docker([]),
       ports: [],

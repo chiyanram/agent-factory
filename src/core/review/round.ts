@@ -27,6 +27,8 @@ import { goAhead } from "../start.js";
 import { BRANCH_PREFIX } from "../dispatch/tick.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
+import { checkCites } from "../cite-check.js";
+import { scrubbedJson } from "../scrub.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
@@ -117,6 +119,8 @@ export type Outcome =
       readonly acted: Acted | "none";
       // per lens that ran, its verified findings no other lens reported (#237)
       readonly lenses: Readonly<Record<string, number>>;
+      // the findings the cite check noted as "cite not found" (#485)
+      readonly citesNotFound: number;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -355,7 +359,8 @@ async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/-$/, "")}.jsonl`,
       ),
-      `${JSON.stringify(answer)}\n`,
+      // what a pass answered is kept as a record: every string scrubbed (P4, #485)
+      `${scrubbedJson(answer)}\n`,
       { mode: 0o600 },
     );
   }, "cannot keep the pass's answer");
@@ -819,7 +824,11 @@ function lensesLine(lenses: Readonly<Record<string, number>>): string {
     .join(" · ");
 }
 
-async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outcome>> {
+async function post(
+  ctx: Ctx,
+  pack: Pack,
+  result: Reviewed & { readonly citesNotFound: number },
+): Promise<Result<Outcome>> {
   const box = await boxFor(ctx, pack);
   if (box.kind === "failed") {
     return box;
@@ -863,6 +872,7 @@ async function post(ctx: Ctx, pack: Pack, result: Reviewed): Promise<Result<Outc
           tokens: result.spent.find + result.spent.verify,
           acted,
           lenses: result.lenses,
+          citesNotFound: result.citesNotFound,
         },
       }
     : summary;
@@ -875,7 +885,14 @@ async function review(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
     );
   }
   const result = await passes(ctx, pack);
-  return result.kind === "ok" ? guarded(ctx, () => post(ctx, pack, result.value)) : result;
+  if (result.kind === "failed") {
+    return result;
+  }
+  // a finding whose file:line is not at the reviewed head is noted as "cite not found", never posted (#485)
+  const cited = await checkCites({ repo: ctx.setup.repo, env: ctx.setup.env, sha: pack.head }, result.value.sorted);
+  return guarded(ctx, () =>
+    post(ctx, pack, { ...result.value, sorted: cited.findings, citesNotFound: cited.notFound }),
+  );
 }
 
 // decideRound : what this round does once the pack is built

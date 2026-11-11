@@ -29,6 +29,7 @@ import { settingName, settingOf } from "../settings/machine.js";
 import type { MachineId } from "../settings/keys.js";
 import type { Spend } from "./spend.js";
 import { HOURS_HINT, hoursOf, type RunHours } from "./hours.js";
+import { reached, spentLine } from "./ticket-cap.js";
 import { periodsAt, totalOf, WINDOW_HOURS, type Spent } from "./usage.js";
 
 // a cap left unset is no cap
@@ -157,26 +158,8 @@ export function capsOf(env: NodeJS.ProcessEnv): Result<Caps> {
   return runs.kind === "ok" ? { kind: "ok", value: capsFrom(limits, runs.value) } : runs;
 }
 
-function reached(spent: number, limit: Limit): boolean {
-  return limit !== "none" && spent >= limit;
-}
-
-// spentLine : a spend as a person reads it. Pure.
-export function spentLine(spend: Spend): string {
-  return `$${spend.usd.toFixed(2)} and ${spend.tokens} tokens`;
-}
-
-// ticketCapped : why the ticket is at its cap, with what it spent since its START or approval; "" while it is under
-// both. Pure.
-export function ticketCapped(spent: Spend, caps: Caps): string {
-  const { usd, tokens } = caps.ticket;
-  const over = reached(spent.usd, usd)
-    ? `$${String(usd)} (${settingName("caps.usdPerTicket")})`
-    : reached(spent.tokens, tokens)
-      ? `${String(tokens)} tokens (${settingName("caps.tokensPerTicket")})`
-      : "";
-  return over === "" ? "" : `the ticket spent ${spentLine(spent)} since its approval, at its cap of ${over}`;
-}
+// reached, spentLine and ticketCapped live in ticket-cap.ts, which the decision table reads: it reaches no disk (P1)
+export { spentLine, ticketCapped } from "./ticket-cap.js";
 
 // Stop : whether a new run may start in this project now; a stop names why, the period its one notice is for, which
 // cap it is (the day's or the window's), and the first time (ms) a run may start again

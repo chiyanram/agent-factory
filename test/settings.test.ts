@@ -145,7 +145,7 @@ describe("settings golden: no team file and no user file resolve to today's valu
     const path = writeProject(fileText);
     const raw = Object(parsedOrUndefined(fileText));
     // what the readers made of the file before the layers
-    expect(await readProjectFile({ home, project: "ledger" })).toEqual(readyFieldsOf(path, raw));
+    expect(await readProjectFile({ home, project: "ledger" })).toEqual(readyFieldsOf(path, raw, process.env));
     expect(await readPluginConfig({ home, project: "ledger" })).toEqual(pluginConfigOf(path, raw));
     expect(await readProjectRaw({ home, project: "ledger" }, "")).toEqual({ kind: "ok", path, value: raw });
     // and every file key's resolved value is the file's own, or the reader's default
@@ -194,6 +194,11 @@ const POOLS: Readonly<Record<string, readonly unknown[]>> = {
   plugins: [[], ["rulebook@chiyanram"], ["rulebook@chiyanram", "team@acme"]],
   "ready.judgeFiles": [["ci/**"], ["ci/**", "build/**"]],
   "lanes.oneWayDoor": [["db/migrations/**"], ["infra/**"]],
+  "quarantine.checks": [
+    [],
+    [{ check: "e2e", owner: "ram", added: "2026-11-10", expires: "2026-11-20", ticket: "#512" }],
+  ],
+  "quarantine.maxDays": [3, 7, 14],
   "review.lenses": [[], [{ name: "api", rubric: { file: "docs/review/api.md" } }]],
   "approval.floor": ["tiny"],
   work: [false, true],
@@ -234,10 +239,13 @@ function partnerSet(value: object, key: FileKey): boolean {
   return key.id.endsWith(".cap") && atPath(value, [...key.path.slice(0, -1), "mode"]).found;
 }
 
-function randomValues(next: () => number): Record<string, unknown> {
+// randomValues : random values for one layer's file keys; a project-only key goes in the project layer alone, since a
+// team or user file that sets it is refused by design (#369, #485)
+function randomValues(next: () => number, name: FileLayer["name"]): Record<string, unknown> {
   const value: Record<string, unknown> = {};
   const pick = pickOf(next);
-  for (const key of fileKeys().filter((k) => partnerSet(value, k) || next() < 0.45)) {
+  const allowed = (k: FileKey): boolean => k.projectOnly !== true || name === "project";
+  for (const key of fileKeys().filter((k) => allowed(k) && (partnerSet(value, k) || next() < 0.45))) {
     setAt(value, key.path, pick(poolOf(key)));
   }
   return value;
@@ -255,7 +263,7 @@ function randomModes(next: () => number): Record<string, string> {
 }
 
 function randomLayer(name: FileLayer["name"], next: () => number): FileLayer {
-  const value = randomValues(next);
+  const value = randomValues(next, name);
   const all = name === "team" ? { ...value, modes: randomModes(next) } : value;
   return { name, file: `/${name}.json`, value: all, lines: keyLines(text(all)) };
 }

@@ -70,11 +70,11 @@
 // The ticket's cap (#131; caps.ts) holds over every run: a ticket whose runs since the approval spent its cap goes to
 // needs-human, with the spend shown, instead of starting another.
 
-import { above, raisedWhy } from "../lane.js";
-import type { Lane } from "../spec.js";
+import { above, raisedWhy, type Lane } from "../lane-order.js";
 import type { OpenLine, MergedLine } from "../poll.js";
 import type { Retried, Summary, Task, WriterMode } from "./records.js";
-import { ticketCapped, type Caps } from "./caps.js";
+import type { Caps } from "./caps.js";
+import { ticketCapped } from "./ticket-cap.js";
 import type { DesignView } from "./design.js";
 import type { DesignStep } from "./records.js";
 import type { Answer } from "../answers.js";
@@ -225,8 +225,13 @@ function designAs<K extends keyof DesignMap>(kind: K, d: DesignMap[K]): Action |
   return DESIGN[kind](d);
 }
 
-// designReview : the design review before the approval (#236); "next" when none is due or it is done
-const designReview: Rule = (s) => designAs(s.design.kind, s.design);
+// the approvals that carry a person's START: only these may start a design run (P8)
+const STARTED: ReadonlySet<ApprovalView["kind"]> = new Set(["approved", "started", "unapproved", "raised", "stale"]);
+
+// designReview : the design review before the approval (#236); "next" when none is due or it is done. design.ts gives
+// none without a START; the table holds it too, so no reader's slip starts a run nobody started (P8, #485)
+const designReview: Rule = (s) =>
+  s.design.kind === "run" && !STARTED.has(s.approval.kind) ? "next" : designAs(s.design.kind, s.design);
 
 const approval: Rule = (s) => {
   const why = heldWhy(s.approval);

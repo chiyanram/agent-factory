@@ -338,3 +338,45 @@ describe("trustedPath and plan", () => {
     expect(keys).toContain("core.hookspath");
   });
 });
+
+// AC-6 of #485: a hostile global git config (another default branch, aliases, a hooks path, fetch.prune, a diff prefix,
+// colour) changes no result the engine reads through hostGit
+describe("hostGit is hermetic against the operator's global config (#485)", () => {
+  const diffOf = async (): Promise<string> =>
+    ok(await hostGit(request(["diff", "HEAD~1", "HEAD"]))) +
+    ok(await hostGit(request(["log", "-1", "--format=%H %s"]))) +
+    ok(await hostGit(request(["show", "--stat", "HEAD"])));
+
+  it("gives the same diff, log and refs with a hostile global config as with none", async () => {
+    writeFileSync(join(repo, "a b.txt"), "one\ntwo\n");
+    git(["add", "."]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "two"]);
+    git(["push", "-q", "origin", "HEAD:refs/heads/main", "HEAD:refs/heads/gone"]);
+    git(["fetch", "-q", "origin"]);
+    const plain = await diffOf();
+    writeFileSync(
+      join(base, "global.gitconfig"),
+      [
+        "[init]\n\tdefaultBranch = trunk",
+        "[alias]\n\tdiff = log",
+        `[core]\n\thooksPath = ${base}`,
+        "[fetch]\n\tprune = true",
+        "[diff]\n\tnoprefix = true\n\tmnemonicPrefix = true\n\tcontext = 9",
+        "[color]\n\tui = always",
+        "[log]\n\tshowSignature = true",
+        "",
+      ].join("\n"),
+    );
+    expect(await diffOf()).toBe(plain);
+    // a branch deleted on the remote is kept by a fetch: fetch.prune is off for every engine call
+    execFileSync("git", ["--git-dir", join(base, "origin.git"), "branch", "-q", "-D", "gone"], { env });
+    ok(await hostGit(request(["fetch", "-q", "origin"])));
+    expect(git(["branch", "-r"])).toContain("origin/gone");
+    // a repo the engine starts is on main, whatever the operator's default branch
+    const fresh = join(base, "fresh");
+    ok(await hostGit({ args: ["init", "-q", fresh], repo: { kind: "none" }, env, stdin: { kind: "none" } }));
+    expect(execFileSync("git", ["-C", fresh, "symbolic-ref", "HEAD"], { env, encoding: "utf8" }).trim()).toBe(
+      "refs/heads/main",
+    );
+  });
+});

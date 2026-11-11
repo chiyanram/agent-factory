@@ -23,7 +23,8 @@ import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 import { codeOf, prop } from "./dispatch/records.js";
 import { plainName } from "./spec.js";
-import { parseAllowlist } from "./egress/allowlist.js";
+import { ownGitHostsOf, parseAllowlist } from "./egress/allowlist.js";
+import { settingOf } from "./settings/machine.js";
 import { TEST_FILES } from "./ready/floor.js";
 import { READY_MINUTES } from "./settings/keys.js";
 import { layered, refusals } from "./settings/layers.js";
@@ -137,7 +138,13 @@ function allowOf(egress: unknown): readonly string[] | "bad" {
   return Array.isArray(allow) && allow.every(word) ? allow.filter(word) : "bad";
 }
 
-function egressOf(path: string, raw: unknown): Result<ProjectFile["egress"]> {
+// gitHostsOf : the project's own git host, refused on its allowlist: the gitHostName its settings set, or this machine's
+function gitHostsOf(raw: unknown, env: NodeJS.ProcessEnv): readonly string[] {
+  const own = prop(raw, "gitHostName");
+  return ownGitHostsOf([typeof own === "string" ? own : undefined, settingOf(env, "gitHostName")]);
+}
+
+function egressOf(path: string, raw: unknown, env: NodeJS.ProcessEnv): Result<ProjectFile["egress"]> {
   const egress = prop(raw, "egress");
   if (egress === undefined) {
     return { kind: "ok", value: { allow: [] } };
@@ -146,7 +153,7 @@ function egressOf(path: string, raw: unknown): Result<ProjectFile["egress"]> {
   if (allow === "bad") {
     return failed(path, `"egress.allow" must list host names, such as ["api.anthropic.com"]`);
   }
-  const list = parseAllowlist(allow);
+  const list = parseAllowlist(allow, gitHostsOf(raw, env));
   return list.kind === "ok"
     ? { kind: "ok", value: { allow: list.hosts } }
     : failed(path, `"egress.allow": ${list.reason}`);
@@ -259,7 +266,7 @@ function isObject(value: unknown): value is object {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function fields(path: string, raw: object): Result<ProjectFile> {
+function fields(path: string, raw: object, env: NodeJS.ProcessEnv): Result<ProjectFile> {
   const gate = gateOf(path, raw);
   if (gate.kind === "failed") {
     return gate;
@@ -268,7 +275,7 @@ function fields(path: string, raw: object): Result<ProjectFile> {
   if (ready.kind === "failed") {
     return ready;
   }
-  const egress = egressOf(path, raw);
+  const egress = egressOf(path, raw, env);
   return egress.kind === "ok"
     ? { kind: "ok", value: { gate: gate.value, ready: ready.value, egress: egress.value } }
     : egress;
@@ -277,9 +284,10 @@ function fields(path: string, raw: object): Result<ProjectFile> {
 export async function readProjectFile(input: {
   readonly home: string;
   readonly project: string;
+  readonly env?: NodeJS.ProcessEnv;
 }): Promise<ProjectRead> {
   const raw = await readProjectRaw(input, NO_GATE);
-  return raw.kind === "ok" ? readyFieldsOf(raw.path, raw.value) : raw;
+  return raw.kind === "ok" ? readyFieldsOf(raw.path, raw.value, input.env ?? process.env) : raw;
 }
 
 const NO_GATE = "write gate, verify and ready.programs before the ready check or the verifier runs";
@@ -287,9 +295,10 @@ const READY_KEYS = ["gate", "verify", "ready", "egress"];
 
 // readyFieldsOf : the ready check's fields of one project file's JSON. A file with none of them, such as one that
 // `project init` wrote for the plugin fields alone, reads as no ready settings, the same as no file; once any is there,
-// each is checked, so a typo never turns a local gate into forge CI.
-export function readyFieldsOf(path: string, raw: object): ProjectRead {
+// each is checked, so a typo never turns a local gate into forge CI. env names this machine's own git host, which the
+// egress allowlist refuses besides any the file names (#485).
+export function readyFieldsOf(path: string, raw: object, env: NodeJS.ProcessEnv): ProjectRead {
   return READY_KEYS.some((k) => Object.hasOwn(raw, k))
-    ? fields(path, raw)
+    ? fields(path, raw, env)
     : { kind: "missing", reason: `${path}: no gate yet; ${NO_GATE}` };
 }

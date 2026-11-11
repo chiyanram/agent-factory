@@ -26,6 +26,8 @@ export type FindingCore = {
   readonly grade: Grade;
   readonly finding: string;
   readonly fix: string;
+  // the last line of a cited range "N-M", when the finding gave one; the cite check reads it (#485)
+  readonly lineEnd?: number;
 };
 
 // the core's part of a finder's JSON schema
@@ -33,7 +35,8 @@ export const CORE_REQUIRED = ["id", "file", "line", "rule", "severity", "grade",
 export const CORE_PROPERTIES = {
   id: { type: "string" },
   file: { type: "string" },
-  line: { type: "integer" },
+  // a whole number, or text "N" or "N-M", as the rules pack's finding format allows (#484, #485)
+  line: { anyOf: [{ type: "integer" }, { type: "string", pattern: "^[0-9]+(-[0-9]+)?$" }] },
   rule: { type: "string" },
   severity: { enum: SEVERITIES },
   grade: { enum: GRADES },
@@ -58,6 +61,15 @@ function textOf(value: unknown, clean: (text: string) => string): string | undef
 function lineOf(raw: unknown): number | undefined {
   const n = firstLine(get(raw, "line"));
   return Number.isSafeInteger(n) && Number(n) >= 0 ? Number(n) : undefined;
+}
+
+// lineEndOf : the end of a cited range "N-M" when it is not N; undefined for a single line. A reversed range keeps its
+// end below N, so the cite check notes it as malformed rather than reading it as N alone. Pure.
+function lineEndOf(raw: unknown): number | undefined {
+  const line = get(raw, "line");
+  const end = typeof line === "string" ? /^(\d+)-(\d+)$/.exec(line) : null;
+  const [from, to] = end === null ? [0, 0] : [Number(end[1]), Number(end[2])];
+  return to === from ? undefined : to;
 }
 
 // firstLine : a line as given, or the first line of "N" or "N-M" text. Pure.
@@ -96,9 +108,10 @@ export function coreOf(raw: unknown, id: string, clean: (text: string) => string
   const texts = textsOf(raw, clean);
   const line = lineOf(raw);
   const weight = weightOf(raw);
+  const end = lineEndOf(raw);
   return texts === undefined || line === undefined || weight === undefined
     ? undefined
-    : { id, ...texts, line, ...weight };
+    : { id, ...texts, line, ...(end === undefined ? {} : { lineEnd: end }), ...weight };
 }
 
 // ---- the verify pass
@@ -181,7 +194,8 @@ function raises(f: FindingCore, v: Verdict): string {
 
 // settle : a finding with its verdict: the verify pass's bucket and why, and the severity and grade it lowered them to.
 // A finding with no verdict is Consider, never dropped. A verdict that raises the severity or the grade is refused: the
-// finding is Consider, with the finder's own severity and grade. Pure.
+// finding is Consider, with the finder's own severity and grade. An Act on finding whose grade is only `cited` settles
+// as Consider: a blocking finding needs proof, a walk-through or a run (P15; rulebook RV7, #485). Pure.
 export function settle<F extends FindingCore>(
   f: F,
   v: Verdict | undefined,
@@ -191,6 +205,13 @@ export function settle<F extends FindingCore>(
   }
   const raised = raises(f, v);
   return raised === ""
-    ? { ...f, severity: v.severity ?? f.severity, grade: v.grade ?? f.grade, bucket: v.bucket, why: v.why }
+    ? proven({ ...f, severity: v.severity ?? f.severity, grade: v.grade ?? f.grade, bucket: v.bucket, why: v.why })
     : { ...f, bucket: "consider", why: `the verify pass raised ${raised}, which it may not; its verdict is refused` };
+}
+
+// proven : a settled finding, Consider rather than Act on when its grade is only cited (P15, RV7, #485). Pure.
+function proven<F extends FindingCore & { readonly bucket: Bucket; readonly why: string }>(f: F): F {
+  return f.bucket === "act_on" && f.grade === "cited"
+    ? { ...f, bucket: "consider", why: `${f.why} (Consider, not Act on: the finding only cites the line)` }
+    : f;
 }

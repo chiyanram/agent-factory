@@ -75,7 +75,7 @@ A retro runs only when a person starts it (P12, #488); you never start one on yo
 The person gets: every OPEN design question, every `[writer] OPEN:` round, every `needs-human`, a merge conflict the
 implementer could not merge, a rule that contradicts what you see, and anything irreversible. A red check is a fail:
 the factory never re-runs it on its own, and it goes back to the implementer as a CI round; only a person re-runs a
-red check, once, or quarantines a test (#485).
+red check, once, or quarantines a CI job in the project file's `quarantine.checks` (#485; the reference).
 
 # Terms
 

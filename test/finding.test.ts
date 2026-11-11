@@ -64,6 +64,28 @@ describe("the verify pass sets the final severity and grade, lower only (ADR-001
     }
   });
 
+  // AC-3 of #485 (P15: a blocking finding needs proof; rulebook RV7)
+  it("settles an Act on finding graded only cited as Consider, whether the finder or the verify pass graded it", () => {
+    const why = "it holds (Consider, not Act on: the finding only cites the line)";
+    const cited = { ...CORE, grade: "cited" } as const;
+    expect(settle(cited, { id: "F1", bucket: "act_on", why: "it holds" })).toEqual({
+      ...cited,
+      bucket: "consider",
+      why,
+    });
+    expect(settle(CORE, { id: "F1", bucket: "act_on", why: "it holds", grade: "cited" })).toEqual({
+      ...cited,
+      bucket: "consider",
+      why,
+    });
+  });
+
+  it("keeps an Act on finding that was walked through or run, and a cited one in any other bucket", () => {
+    expect(settle({ ...CORE, grade: "ran" }, { id: "F1", bucket: "act_on", why: "w" }).bucket).toBe("act_on");
+    expect(settle(CORE, { id: "F1", bucket: "act_on", why: "w" }).bucket).toBe("act_on");
+    expect(settle({ ...CORE, grade: "cited" }, { id: "F1", bucket: "noted", why: "w" }).bucket).toBe("noted");
+  });
+
   it("refuses it in the design review too", () => {
     const f: DesignFinding = { ...CORE, id: "D1", source: "design", decision: "one table", verdict: "conflict" };
     const [kept] = keep([f], [{ id: "D1", bucket: "act_on", why: "it holds", grade: "ran" }]);

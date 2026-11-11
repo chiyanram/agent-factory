@@ -29,6 +29,7 @@ import type { Done, Result } from "../forge/api.js";
 import type { Answer } from "../answers.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
+import { scrubbedJson } from "../scrub.js";
 import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 import { isActedRow, type Acted } from "../review/acted-on.js";
@@ -169,6 +170,8 @@ export type Event =
       readonly acted?: Acted;
       // per lens that ran, its verified findings no other lens reported (#237); none when the round ran no lens
       readonly lenses?: Readonly<Record<string, number>>;
+      // the findings the cite check noted as "cite not found" (#485); none on an older line
+      readonly citesNotFound?: number;
     }
   // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
   // or failed (#235)
@@ -227,7 +230,9 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   }
   try {
     await mkdir(dirname(path.value), { recursive: true, mode: 0o700 });
-    await appendFile(path.value, `${JSON.stringify(input.event)}\n`, { mode: 0o600 });
+    // every string the line keeps is scrubbed: no record holds a secret, whatever a run or a person wrote (P4, #485)
+    const line = scrubbedJson(input.event);
+    await appendFile(path.value, `${line}\n`, { mode: 0o600 });
     return { kind: "ok" };
   } catch {
     return { kind: "failed", reason: `cannot write ${path.value}` };
@@ -617,10 +622,26 @@ function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, 
     : BAD;
 }
 
+// citesField : a review line's count of findings whose cite was not found (#485), as a field to spread
+function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
+  const n = prop(raw, "citesNotFound");
+  if (n === undefined) {
+    return {};
+  }
+  return Number.isSafeInteger(n) && Number(n) >= 0 ? { citesNotFound: Number(n) } : BAD;
+}
+
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
-  const extras = [nextTryField(raw), spendField(raw), splitField(raw), actedField(raw), lensesField(raw)];
+  const extras = [
+    nextTryField(raw),
+    spendField(raw),
+    splitField(raw),
+    actedField(raw),
+    lensesField(raw),
+    citesField(raw),
+  ];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
   return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
     ? BAD
