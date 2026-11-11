@@ -186,6 +186,9 @@ async function withHistory(job: BoxJob, code: string, base: string): Promise<Res
         "fetch",
         "-q",
         "--no-tags",
+        // the fresh repository's unborn HEAD names git's default branch, which may be the project's own (main on a
+        // recent git, or init.defaultBranch): fetching into it is refused unless allowed; HEAD is set right after (#62)
+        "--update-head-ok",
         job.setup.repo,
         `+refs/factory/mr-${job.number}:${branch}`,
         `+${BASE_REF}:refs/heads/${base}`,
