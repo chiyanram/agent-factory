@@ -6,7 +6,9 @@
 // settings are read (core/which-project.ts), so a wrong word prints the usage and nothing else.
 
 import { homedir } from "node:os";
-import { readFile, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import type { Stats } from "node:fs";
+import { open, realpath, stat, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { headed } from "./core/dispatch/last-poll.js";
 import type { Result } from "./core/forge/api.js";
@@ -18,6 +20,7 @@ import type { Forge } from "./core/forge/types.js";
 import { lintEdit } from "./core/lint-edit.js";
 import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
 import { questionsIn, type Question } from "./core/report.js";
+import { roundReadsBack } from "./core/finish.js";
 import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
 import { claudeSessions } from "./core/review/live.js";
 import { runInFolder } from "./core/review/model.js";
@@ -150,12 +153,64 @@ export async function questionsFrom(env: NodeJS.ProcessEnv, file: string): Promi
     return home;
   }
   const specs = join(home.value, "specs");
-  const real = await realpath(resolve(file)).catch(() => "");
-  const root = await realpath(specs).catch(() => "");
-  if (real === "" || root === "" || !real.startsWith(`${root}${sep}`)) {
-    return { kind: "failed", reason: `the questions file must be a file under ${specs}, got ${JSON.stringify(file)}` };
+  const read = await readUnder(resolve(file), specs);
+  return read.kind === "ok" ? questionsOfText(read.value) : read;
+}
+
+// the most bytes a questions file may hold: 20 questions with their choices fit in far less
+export const MOST_QUESTIONS_BYTES = 64 * 1024;
+
+// readUnder : a file's text, opened once: never through a link at its end (O_NOFOLLOW), a regular file with one link
+// (a hard link to a file elsewhere is refused) and at most MOST_QUESTIONS_BYTES, whose real path is under `root` and
+// is the very file opened; read from that handle, so nothing can be swapped in between
+async function readUnder(path: string, root: string): Promise<Result<string>> {
+  const refused = {
+    kind: "failed",
+    reason: `the questions file must be a file under ${root}, got ${JSON.stringify(path)}`,
+  } as const;
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => undefined);
+  if (handle === undefined) {
+    return refused;
   }
-  return questionsOfText(await readFile(real, "utf8").catch(() => ""));
+  try {
+    const shape = await fileShape(handle, path, root);
+    return shape === "" ? { kind: "ok", value: await handle.readFile("utf8") } : { kind: "failed", reason: shape };
+  } finally {
+    await handle.close();
+  }
+}
+
+// fileShape : "" when the opened file is a regular file with one link, small enough, at a real path under `root`;
+// else why it is refused
+async function fileShape(handle: FileHandle, path: string, root: string): Promise<string> {
+  const st = await handle.stat();
+  if (!plainSmallFile(st)) {
+    return `the questions file must be a regular file with one link and at most ${MOST_QUESTIONS_BYTES} bytes, got ${JSON.stringify(path)}`;
+  }
+  return (await sameFileUnder(st, path, root))
+    ? ""
+    : `the questions file must be a file under ${root}, got ${JSON.stringify(path)}`;
+}
+
+// plainSmallFile : a regular file with one link (no hard link to a file elsewhere) and at most MOST_QUESTIONS_BYTES
+function plainSmallFile(st: Stats): boolean {
+  return st.isFile() && st.nlink === 1 && st.size <= MOST_QUESTIONS_BYTES;
+}
+
+// sameFileUnder : whether the path's real path is under the root's and is the very file the handle opened, so nothing
+// was swapped in between
+async function sameFileUnder(st: Stats, path: string, root: string): Promise<boolean> {
+  const [real, base] = await Promise.all([realpath(path).catch(() => ""), realpath(root).catch(() => "")]);
+  if (!under(real, base)) {
+    return false;
+  }
+  const at = await stat(real).catch(() => undefined);
+  return at !== undefined && at.ino === st.ino && at.dev === st.dev;
+}
+
+// under : whether a real path is inside a real folder; neither may be "" (a path that did not resolve). Pure.
+function under(real: string, base: string): boolean {
+  return real !== "" && base !== "" && real.startsWith(`${base}${sep}`);
 }
 
 // questionsOfText : the questions a file's JSON holds, checked as a report's are. Pure.
@@ -167,7 +222,12 @@ function questionsOfText(text: string): Result<readonly Question[]> {
     return { kind: "failed", reason: "the questions file is not JSON" };
   }
   const read = questionsIn(parsed);
-  return read.kind === "ok" ? { kind: "ok", value: read.value } : { kind: "failed", reason: read.problem };
+  if (read.kind === "bad") {
+    return { kind: "failed", reason: read.problem };
+  }
+  // a question that checks can still post damaged: refuse the file rather than post a round no reply can close (#517)
+  const back = roundReadsBack(read.value);
+  return back === "" ? { kind: "ok", value: read.value } : { kind: "failed", reason: back };
 }
 
 // homeOf : the factory's home, as dispatch reads it; a relative FACTORY_HOME is refused

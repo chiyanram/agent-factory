@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Done, Result } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
@@ -255,6 +255,61 @@ describe("grill (#517)", () => {
           reason: expect.stringContaining(why),
         });
       }
+    });
+
+    it("never opens through a link at its end, even one to another file under <home>/specs", async () => {
+      const target = put("q.json", JSON.stringify(QUESTIONS));
+      const link = join(home, "specs", "ledger", "PROJ-1", "same.json");
+      symlinkSync(target, link);
+      expect(await questionsFrom(env(), target)).toMatchObject({ kind: "ok" });
+      expect(await questionsFrom(env(), link)).toMatchObject({ kind: "failed" });
+    });
+
+    it("refuses a hard link to a file elsewhere, a folder, and a file over 64 KB", async () => {
+      const outside = join(home, "q.json");
+      writeFileSync(outside, JSON.stringify(QUESTIONS));
+      const hard = join(home, "specs", "ledger", "PROJ-1", "hard.json");
+      linkSync(outside, hard);
+      expect(await questionsFrom(env(), hard)).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("one link"),
+      });
+      const folder = join(home, "specs", "ledger", "PROJ-1", "dir.json");
+      mkdirSync(folder);
+      expect(await questionsFrom(env(), folder)).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("regular file"),
+      });
+      const big = put(
+        "big.json",
+        JSON.stringify([{ question: "x".repeat(70_000), choices: ["a", "b"], recommended: 0 }]),
+      );
+      expect(await questionsFrom(env(), big)).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("65536 bytes"),
+      });
+    });
+
+    it("refuses a round that checks but would read back damaged once posted: 4 choices of 200 characters", async () => {
+      const long = [
+        { question: "which store?", choices: ["a", "b", "c", "d"].map((c) => c.repeat(200)), recommended: 3 },
+      ];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(long)))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("question 1 would not read back as written once posted"),
+      });
+      // the last choice cut, with every choice and the recommended one still there: only its text tells
+      const cutLast = [{ question: "q".repeat(300), choices: ["a", "b", "c", "d".repeat(190)], recommended: 0 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(cutLast)))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("would not read back"),
+      });
+      // a choice that holds the separator splits it on read-back too
+      const split = [{ question: "which?", choices: ["a · b", "c"], recommended: 0 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(split)))).toMatchObject({ kind: "failed" });
+      // text the template escapes still reads back the same
+      const escaped = [{ question: "is #12 <done>?", choices: ["yes | now", "no"], recommended: 1 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(escaped)))).toMatchObject({ kind: "ok" });
     });
 
     it("the command exits 2 naming the problem, and posts nothing, for a file that does not check", async () => {

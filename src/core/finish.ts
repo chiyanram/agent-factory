@@ -26,7 +26,8 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
 import { agentTrailer, commitKind } from "./notes.js";
-import type { Post, PostField, Seat } from "./post.js";
+import { cleanField, DEFAULT_FIELD_LIMIT, renderPost, type Post, type PostField, type Seat } from "./post.js";
+import { roundIn, type Asked } from "./answers.js";
 import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
 import type { Questions } from "./settings/variables.js";
@@ -331,6 +332,41 @@ export function questionRound(questions: readonly Question[]): {
     answer: { label: "answer", value: howToAnswer(questions) },
     items: questions.map(asking),
   };
+}
+
+// roundReadsBack : "" when the round, once rendered, reads back as written: the same questions, choices and recommended
+// one. renderPost cuts each item at its limit, and a " · " or " A) " inside a text splits it, so a question that
+// checks can still post damaged; the problem, naming the question, otherwise (#517). Pure.
+export function roundReadsBack(questions: readonly Question[]): string {
+  const round = questionRound(questions);
+  const text = renderPost({ seat: "coordinator", title: round.title, fields: [round.answer], items: round.items });
+  if (text.kind === "refused") {
+    return text.reason;
+  }
+  const back = roundIn(text.text);
+  const bad = questions.findIndex((q, i) => !readsBack(q, back.asked[i]));
+  return back.malformed === "" && bad < 0
+    ? ""
+    : `question ${bad + 1} would not read back as written once posted: each question with its choices is cut at ${DEFAULT_FIELD_LIMIT} characters, and " · " or " A) " inside a text splits it; shorten or reword it`;
+}
+
+// readsBack : whether one question read back from the posted round is the one written. Pure.
+function readsBack(q: Question, back: Asked | undefined): boolean {
+  return back !== undefined && q.kind === "choices" && sameWords(back.text, q.question) && sameChoices(q, back);
+}
+
+// sameWords : whether a text read back is the text written, as the template made it inert
+function sameWords(back: string, written: string): boolean {
+  return back === cleanField(written, Number.POSITIVE_INFINITY);
+}
+
+// sameChoices : whether a question's choices and recommended one read back as written
+function sameChoices(q: Extract<Question, { kind: "choices" }>, back: Asked): boolean {
+  return (
+    back.recommended === q.recommended &&
+    back.choices.length === q.choices.length &&
+    back.choices.every((c, j) => sameWords(c, q.choices[j] ?? ""))
+  );
 }
 
 // askPost : the one OPEN note: every question as a numbered round, or with one-at-a-time only the first, saying how
