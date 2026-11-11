@@ -17,29 +17,39 @@ import { tempDir } from "./temp.js";
 
 const Q = { check: "e2e", owner: "ram", added: "2026-11-10", expires: "2026-11-20", ticket: "#512" };
 const NOW = Date.parse("2026-11-11T10:00:00Z");
+const AT = { now: NOW };
 
 describe("quarantineOf", () => {
   it("reads every field, and refuses an entry with no owner, no added day, a bad day or no ticket", () => {
-    expect(quarantineOf([Q], "/q.json")).toEqual({ kind: "ok", value: [Q] });
+    expect(quarantineOf([Q], "/q.json", AT)).toEqual({ kind: "ok", value: [Q] });
     for (const bad of [
       { ...Q, owner: "" },
       { ...Q, added: undefined },
       { ...Q, expires: "next week" },
       { ...Q, ticket: undefined },
     ]) {
-      expect(quarantineOf([bad], "/q.json").kind).toBe("failed");
+      expect(quarantineOf([bad], "/q.json", AT).kind).toBe("failed");
     }
-    expect(quarantineOf({}, "/q.json").kind).toBe("failed");
+    expect(quarantineOf({}, "/q.json", AT).kind).toBe("failed");
+  });
+
+  // #507 review: a future added day would otherwise hold the check far past the cap from today
+  it("refuses an entry added on a day still to come, and takes one added today", () => {
+    expect(quarantineOf([{ ...Q, added: "2027-06-01", expires: "2027-06-15" }], "/q.json", AT)).toEqual({
+      kind: "failed",
+      reason: "/q.json: the quarantine of e2e is added on 2027-06-01, a day still to come",
+    });
+    expect(quarantineOf([{ ...Q, added: "2026-11-11", expires: "2026-11-20" }], "/q.json", AT).kind).toBe("ok");
   });
 
   it("refuses an expiry more than maxDays after the added day (14 by default), or before it", () => {
-    expect(quarantineOf([{ ...Q, expires: "2026-11-24" }], "/q.json").kind).toBe("ok");
-    expect(quarantineOf([{ ...Q, expires: "2026-11-25" }], "/q.json")).toEqual({
+    expect(quarantineOf([{ ...Q, expires: "2026-11-24" }], "/q.json", AT).kind).toBe("ok");
+    expect(quarantineOf([{ ...Q, expires: "2026-11-25" }], "/q.json", AT)).toEqual({
       kind: "failed",
       reason: "/q.json: the quarantine of e2e lasts 15 days; quarantine.maxDays allows 14",
     });
-    expect(quarantineOf([Q], "/q.json", 7).kind).toBe("failed");
-    expect(quarantineOf([{ ...Q, expires: "2026-11-01" }], "/q.json").kind).toBe("failed");
+    expect(quarantineOf([Q], "/q.json", { maxDays: 7, now: NOW }).kind).toBe("failed");
+    expect(quarantineOf([{ ...Q, expires: "2026-11-01" }], "/q.json", AT).kind).toBe("failed");
   });
 });
 
@@ -76,11 +86,11 @@ describe("where a quarantine lives: the project's own settings, never the rules 
 
   it("is none with no key, read from the project file, and refused when it is bad or too long", async () => {
     project({});
-    expect(await readQuarantine({ home, project: "ledger" })).toEqual({ kind: "ok", value: [] });
+    expect(await readQuarantine({ home, project: "ledger", now: NOW })).toEqual({ kind: "ok", value: [] });
     project({ quarantine: { checks: [Q] } });
-    expect(await readQuarantine({ home, project: "ledger" })).toEqual({ kind: "ok", value: [Q] });
+    expect(await readQuarantine({ home, project: "ledger", now: NOW })).toEqual({ kind: "ok", value: [Q] });
     project({ quarantine: { checks: [Q], maxDays: 3 } });
-    expect((await readQuarantine({ home, project: "ledger" })).kind).toBe("failed");
+    expect((await readQuarantine({ home, project: "ledger", now: NOW })).kind).toBe("failed");
   });
 
   it("a process plugin's quarantine.json is not read", async () => {
@@ -105,7 +115,7 @@ describe("only the project file holds a quarantine (#485)", () => {
   it("a user file that sets quarantine.checks refuses the read", async () => {
     writeFileSync(join(home, "projects", "ledger.json"), "{}");
     writeFileSync(join(home, "user.json"), JSON.stringify({ quarantine: { checks: [Q] } }));
-    const read = await readQuarantine({ home, project: "ledger" });
+    const read = await readQuarantine({ home, project: "ledger", now: NOW });
     expect(read).toMatchObject({ kind: "failed", reason: expect.stringContaining("quarantine.checks") });
   });
 });

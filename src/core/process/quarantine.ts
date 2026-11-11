@@ -60,8 +60,12 @@ function entryOf(raw: unknown): Quarantined | undefined {
   return Object.values(q).every((v) => v !== "") ? q : undefined;
 }
 
-// tooLong : why an entry lasts longer than the cap allows, or ends before it began; "" when it does not. Pure.
-function tooLong(q: Quarantined, maxDays: number): string {
+// tooLong : why an entry lasts longer than the cap allows, ends before it began, or begins after today (UTC), which
+// would hold the check far past the cap from now; "" when none of these. Pure.
+function tooLong(q: Quarantined, maxDays: number, now: number): string {
+  if (Date.parse(q.added) > now) {
+    return `the quarantine of ${q.check} is added on ${q.added}, a day still to come`;
+  }
   const days = (Date.parse(q.expires) - Date.parse(q.added)) / DAY_MS;
   if (days < 0) {
     return `the quarantine of ${q.check} expires before it was added`;
@@ -74,8 +78,9 @@ function tooLong(q: Quarantined, maxDays: number): string {
 export function quarantineOf(
   list: unknown,
   path: string,
-  maxDays: number = QUARANTINE_DAYS,
+  at: { readonly maxDays?: number; readonly now: number },
 ): Result<readonly Quarantined[]> {
+  const maxDays = at.maxDays ?? QUARANTINE_DAYS;
   const read = Array.isArray(list) ? list.map(entryOf) : [undefined];
   const good = read.filter((q): q is Quarantined => q !== undefined);
   if (good.length !== read.length) {
@@ -84,7 +89,7 @@ export function quarantineOf(
       reason: `${path}: "quarantine.checks" must list {"check", "owner", "added": "YYYY-MM-DD", "expires": "YYYY-MM-DD", "ticket"}, each set`,
     };
   }
-  const long = good.map((q) => tooLong(q, maxDays)).filter((w) => w !== "");
+  const long = good.map((q) => tooLong(q, maxDays, at.now)).filter((w) => w !== "");
   return long.length === 0 ? { kind: "ok", value: good } : { kind: "failed", reason: `${path}: ${long.join("; ")}` };
 }
 
@@ -97,6 +102,8 @@ function maxDaysOf(value: unknown): number {
 export async function readQuarantine(input: {
   readonly home: string;
   readonly project: string;
+  // the time now, milliseconds since the epoch: an entry added on a later day is refused
+  readonly now: number;
 }): Promise<Result<readonly Quarantined[]>> {
   const raw = await readProjectRaw(input, "no quarantine");
   if (raw.kind !== "ok") {
@@ -106,7 +113,7 @@ export async function readQuarantine(input: {
   const checks = prop(q, "checks");
   return checks === undefined
     ? { kind: "ok", value: [] }
-    : quarantineOf(checks, raw.path, maxDaysOf(prop(q, "maxDays")));
+    : quarantineOf(checks, raw.path, { maxDays: maxDaysOf(prop(q, "maxDays")), now: input.now });
 }
 
 // live : whether an entry still holds at this time: through the end of its expiry day, UTC

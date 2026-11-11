@@ -748,7 +748,6 @@ function egressCli(argv: readonly string[], io: Io): Promise<number> {
   });
 }
 
-// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
 // processAndQuarantine : the project's process, and the checks a person quarantined, which come from the project's own
 // settings, never the rules pack (#485)
 async function processAndQuarantine(
@@ -760,10 +759,11 @@ async function processAndQuarantine(
   if (own.kind === "failed") {
     return own;
   }
-  const quarantine = await readQuarantine({ home, project });
+  const quarantine = await readQuarantine({ home, project, now: Date.now() });
   return quarantine.kind === "ok" ? { kind: "ok", value: { ...own.value, quarantine: quarantine.value } } : quarantine;
 }
 
+// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
 async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
   const { forge, identity } = opened;
   const planned = await hostBoxPlan(io, home, project);
@@ -780,7 +780,6 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   if (own.kind === "failed") {
     return own;
   }
-  const quarantine = { value: own.value.quarantine };
   const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   const writer = await writerSetup({
     env: io.env,
@@ -816,7 +815,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
       steps,
       plugins: hashesOf(used.value.plugins),
       lanes: own.value.lanes,
-      quarantine: quarantine.value,
+      quarantine: own.value.quarantine,
       ...programsOf(plan),
     },
   };
