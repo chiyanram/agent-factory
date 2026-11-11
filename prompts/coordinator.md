@@ -55,8 +55,10 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    on a personal project: the body of the git host issue whose number is the ticket (#381); an edit to it makes its
    approval stale. **Today:** no write point replaces an issue's body (#486 §4), so draft the spec in the local file
    (`agent-factory spec --template <issue number>` prints the template) and ask the person to paste it into the
-   issue, then run `agent-factory spec <project> <issue number>`. Done when a stranger with no chat could build the
-   change from the spec alone.
+   issue, then run `agent-factory spec <project> <issue number>`. When the ticket must wait for others to merge first,
+   name them in an optional `## Blocked by` section, one ticket per line (#494); `agent-factory spec` checks its form.
+   **Today:** the orchestrator does not hold the build on it yet (#494's later slices): until then, START the ticket
+   only after its blockers merge. Done when a stranger with no chat could build the change from the spec alone.
 4. **Design review and approval.** You do not start a design review: in a lane with one (bug, feature and one-way door
    by default), the orchestrator runs it once the spec is ready (#236), and its kept findings go to the PR, the log and
    a ping. Fix the spec or design for each CONFLICT and bring every OPEN to the person; an edit reviews again. When the

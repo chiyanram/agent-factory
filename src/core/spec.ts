@@ -30,6 +30,8 @@ export type Spec = {
   // the files the change plans to touch, from the optional "## Planned files": the engine checks the lane against them
   // before the build (lane.ts, #230)
   readonly planned: readonly string[];
+  // the tickets whose merge this one waits for, from the optional "## Blocked by": one ticket per line (#494)
+  readonly blockedBy: readonly string[];
   // the normalised text, and its hash: what an approval records and what the PR body carries
   readonly text: string;
   readonly hash: string;
@@ -88,6 +90,10 @@ export function template(ticket: string): string {
     "## Planned files",
     "",
     "- <a path the change will touch, one per line>",
+    "",
+    "## Blocked by",
+    "",
+    "- <a ticket that must be merged before this one is built, one per line; leave out the section for none>",
     "",
   ].join("\n");
 }
@@ -202,7 +208,30 @@ type Fields = {
   readonly design: string;
   readonly lane: string;
   readonly planned: readonly string[];
+  readonly blocked: readonly BlockedLine[];
 };
+
+// one line of "## Blocked by": the ticket it names, or the line that names none
+type BlockedLine =
+  | { readonly kind: "ticket"; readonly ticket: string }
+  | { readonly kind: "bad"; readonly line: string };
+
+// blockedOf : one ticket per line: a list marker, backticks and a leading "#" dropped; a placeholder left out (#494)
+function blockedOf(body: string): readonly BlockedLine[] {
+  return body
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+        .replaceAll("`", "")
+        .trim(),
+    )
+    .filter((line) => real(line) && !line.startsWith("<") && line.toLowerCase() !== "none")
+    .map((line) => {
+      const ticket = line.replace(/^#/, "");
+      return plainName(ticket) ? { kind: "ticket", ticket } : { kind: "bad", line };
+    });
+}
 
 // plannedOf : one path per line, a list marker and backticks dropped, placeholders left out
 function plannedOf(body: string): readonly string[] {
@@ -226,6 +255,7 @@ function fields(p: Parsed): Fields {
     design: at("design"),
     lane: at("lane").toLowerCase(),
     planned: plannedOf(at("planned files")),
+    blocked: blockedOf(at("blocked by")),
   };
 }
 
@@ -241,6 +271,11 @@ function templateProblems(f: Fields, duplicates: readonly string[]): readonly st
       ? []
       : [`missing a '## Lane' section: one of ${LANES.join(", ")}`]),
     ...duplicates.map((d) => `the '## ${d}' section appears more than once`),
+    ...f.blocked.flatMap((b) =>
+      b.kind === "bad"
+        ? [`the '## Blocked by' line ${JSON.stringify(b.line)} is not one ticket: write one per line`]
+        : [],
+    ),
   ];
 }
 
@@ -261,6 +296,7 @@ export function checkSpec(raw: string): SpecCheck {
           design: f.design,
           lane: f.lane as Lane,
           planned: f.planned,
+          blockedBy: [...new Set(f.blocked.flatMap((b) => (b.kind === "ticket" ? [b.ticket] : [])))],
           text,
           hash: specHash(text),
         },
