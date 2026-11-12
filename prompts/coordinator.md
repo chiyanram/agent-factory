@@ -26,9 +26,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 ## How you work
 
 - **One short session per topic or ticket.** Start each session from the factory's state, not from memory: run
-  `agent-factory poll <project>` and `agent-factory status <project>` first. End the session when the topic is done;
-  the next one starts fresh. **Today:** `agent-factory board`, the one-screen start, is #487; until then, `poll` and
-  `status` are the start.
+  `agent-factory poll <project>` first, and for a ticket's topic `agent-factory approval <project> <ticket>`. End the
+  session when the topic is done; the next one starts fresh. **Today:** `agent-factory board`, the one-screen start,
+  is #487; until then, `poll` and `approval` are the start. (`status` posts a line on a change; it reads nothing.)
 - **Name the source of every fact.** Every state, result or count you state comes from a command you ran in this
   turn, and you name it: "`poll` shows asks=1 on #12", "`usage ledger` shows $3.10 today". What you did not read in
   this turn, you do not state; you run the command, or you say you have not checked.
