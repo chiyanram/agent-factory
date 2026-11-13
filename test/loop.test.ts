@@ -64,6 +64,7 @@ function forge(
     branchState: async () => ({ kind: "ok", value: "none" }),
     issueState: async () => ({ kind: "ok", value: "open" }),
     issueBody: notUsed,
+    setIssueBody: notUsed,
     landed: notUsed,
     addLabel: ({ number, label }) => write(`+${label} !${number}`),
     removeLabel: ({ number, label }) => write(`-${label} !${number}`),

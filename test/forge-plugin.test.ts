@@ -92,6 +92,29 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
+  it("carries an issue's new body byte for byte, and refuses a pull request, as the built-in adapter does (#542)", async () => {
+    const text = "# 12: a title\r\n\n@alice's `/close` $(y)\n";
+    const { setup, fakes } = await bundled([
+      http("200 OK", { number: 12, body: "old" }),
+      http("200 OK", { number: 12 }),
+      http("200 OK", { number: 13, pull_request: { url: "u" } }),
+    ]);
+    const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+    expect(await forge.setIssueBody({ number: 12, text })).toEqual({ kind: "ok" });
+    expect(await forge.setIssueBody({ number: 13, text })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("#13 is a pull request, not an issue"),
+    });
+    const calls = await fakes.calls();
+    expect(calls.map((c) => c.argv.slice(0, 5))).toEqual([
+      ["api", "--include", "repos/chiyanram/ledger/issues/12", "-X", "GET"],
+      ["api", "--include", "repos/chiyanram/ledger/issues/12", "-X", "PATCH"],
+      ["api", "--include", "repos/chiyanram/ledger/issues/13", "-X", "GET"],
+    ]);
+    expect(JSON.parse(calls[1]?.stdin ?? "{}")).toEqual({ body: text });
+    await fakes.remove();
+  });
+
   it("carries a GitLab issue closed with no merge seen through the bundled gitlab plugin (#494)", async () => {
     expect(existsSync(join(BUNDLED, "gitlab", "lib")), "run npm run build first").toBe(true);
     const fakes = await makeFakes(

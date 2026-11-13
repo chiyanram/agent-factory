@@ -288,6 +288,29 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
+  // setIssueBody : the issue's body replaced (#542). The issues endpoint also edits a pull request's body, so the
+  // number is read first and a pull request is refused before anything is written
+  async function setIssueBody(input: { readonly number: number; readonly text: string }): Promise<Done> {
+    const pull = await getJson(
+      `${repo}/issues/${input.number}`,
+      "github issue",
+      (v, r) => !r.absent(v, "pull_request"),
+    );
+    if (pull.kind === "failed") {
+      return pull;
+    }
+    if (pull.value) {
+      return { kind: "failed", reason: `github: #${input.number} is a pull request, not an issue` };
+    }
+    return done(
+      await rest(client, {
+        path: `${repo}/issues/${input.number}`,
+        method: "PATCH",
+        body: { kind: "json", value: { body: input.text } },
+      }),
+    );
+  }
+
   async function team(): Promise<Result<readonly Person[]>> {
     return pages((cursor) =>
       query(
@@ -530,6 +553,7 @@ export function github(client: Client, project: GithubProject): Forge {
     },
     note,
     setBody,
+    setIssueBody,
     async notes(input) {
       return pages(async (cursor): Promise<Result<Page<Note>>> => {
         const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;

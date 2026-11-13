@@ -595,3 +595,28 @@ describe("issueBody (#381)", () => {
     expect(await forge.issueBody({ number: 7 })).toMatchObject({ kind: "failed" });
   });
 });
+
+describe("setIssueBody (#542)", () => {
+  it("replaces an issue's body byte for byte, and refuses a pull request's number before writing", async () => {
+    const text = "# 4: a title\r\n\n@alice's `x` $(y) \\ é\n";
+    const f = fake("github", [
+      ok({ number: 4, body: "old" }),
+      ok({ number: 4, body: text }),
+      ok({ number: 6, body: "x", pull_request: { url: "u" } }),
+      { status: 404, body: { message: "Not Found" } },
+    ]);
+    const forge = github(f.client, project);
+    expect(await forge.setIssueBody({ number: 4, text })).toEqual({ kind: "ok" });
+    expect(f.calls.map((c) => [c.args[2], c.args[4]])).toEqual([
+      ["repos/chiyanram/ledger/issues/4", "GET"],
+      ["repos/chiyanram/ledger/issues/4", "PATCH"],
+    ]);
+    expect(JSON.parse(f.calls[1]?.stdin ?? "")).toEqual({ body: text });
+    expect(await forge.setIssueBody({ number: 6, text })).toEqual({
+      kind: "failed",
+      reason: "github: #6 is a pull request, not an issue",
+    });
+    expect(await forge.setIssueBody({ number: 7, text })).toMatchObject({ kind: "failed" });
+    expect(f.calls.filter((c) => c.args[4] === "PATCH").length).toBe(1);
+  });
+});

@@ -119,6 +119,12 @@ const RUN: Readonly<Record<ForgeOp, Run>> = {
       (r, v) => ({ number: r.int(v, "number"), post: bodyPostOf(r, r.at(v, "post")) }),
       async (x) => done(await f.setBody(x)),
     ),
+  setIssueBody: (f, i) =>
+    withInput(
+      i,
+      (r, v) => ({ number: r.int(v, "number"), text: r.text(v, "text") }),
+      async (x) => done(await f.setIssueBody(x)),
+    ),
   lineFinding: (f, i) =>
     withInput(
       i,

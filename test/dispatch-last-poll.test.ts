@@ -43,6 +43,7 @@ function forge(claimed: readonly number[] | "down"): Forge {
     branchState: notUsed,
     issueState: notUsed,
     issueBody: notUsed,
+    setIssueBody: notUsed,
     openChange: notUsed,
     notes: notUsed,
     lineFinding: notUsed,

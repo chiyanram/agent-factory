@@ -565,3 +565,15 @@ describe("issueBody (#381)", () => {
     expect(await forge.issueBody({ number: 3 })).toEqual({ kind: "ok", value: "" });
   });
 });
+
+describe("setIssueBody (#542)", () => {
+  it("replaces an issue's description byte for byte; a refusal is a failure", async () => {
+    const text = "# 2: a title\r\n\n@alice's `x` $(y) \\ é\n";
+    const f = fake("gitlab", [ok({ iid: 2, description: text }), { status: 403, body: { message: "403 Forbidden" } }]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.setIssueBody({ number: 2, text })).toEqual({ kind: "ok" });
+    expect([f.calls[0]?.args[2], f.calls[0]?.args[4]]).toEqual([`${base}/issues/2`, "PUT"]);
+    expect(JSON.parse(f.calls[0]?.stdin ?? "")).toEqual({ description: text });
+    expect(await forge.setIssueBody({ number: 3, text })).toMatchObject({ kind: "failed" });
+  });
+});
