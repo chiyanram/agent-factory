@@ -144,6 +144,15 @@ describe("the tickets section of usage (#487)", () => {
     ]);
   });
 
+  it("keeps a ticket active this month when an older begun line is appended after a newer one", () => {
+    // a newer run line, then the backfilled START with its record's own, older time
+    const events = [writer("2026-11-13T08:00:00Z", "fix", "done"), begun("2026-10-20T08:00:00Z")];
+    const late = tallyOf({ project: "ledger", ticket: "PROJ-2" }, events, COST);
+    expect(late.last).toBe("2026-11-13T08:00:00Z");
+    const lines = ticketLines({ tallies: [late], from: Date.parse("2026-11-01T00:00:00Z"), zone: UTC });
+    expect(lines.some((l) => l.startsWith("  ledger PROJ-2:"))).toBe(true);
+  });
+
   it("leaves out a ticket with no line since the start of the month, and prints nothing when none is left", () => {
     expect(ticketLines({ tallies: [tally], from: Date.parse("2026-12-01T00:00:00Z"), zone: UTC })).toEqual([]);
   });

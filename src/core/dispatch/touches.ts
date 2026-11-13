@@ -25,7 +25,7 @@ export type Touch = { readonly kind: TouchKind; readonly at: string; readonly wa
 export type TicketTally = {
   readonly project: string;
   readonly ticket: string;
-  // the time of the ticket's newest record line
+  // the newest time across the ticket's record lines
   readonly last: string;
   readonly touches: readonly Touch[];
   readonly waitingMs: number;
@@ -116,6 +116,12 @@ function reworkRounds(events: readonly Event[]): number {
   return events.filter((e) => e.kind === "writer-ended" && e.mode === "rework").length;
 }
 
+// newest : the newest time across a ticket's lines, "" for none. Not the file's last line: a begun or approved line
+// carries its record's own, earlier time (#487). Pure.
+function newest(events: readonly Event[]): string {
+  return events.reduce((max, e) => (e.at > max ? e.at : max), "");
+}
+
 // tallyOf : a ticket's touches, waits and rework rounds from its events, with its cost. Pure.
 export function tallyOf(
   where: { readonly project: string; readonly ticket: string },
@@ -125,7 +131,7 @@ export function tallyOf(
   const touches = touchesOf(events);
   return {
     ...where,
-    last: events.at(-1)?.at ?? "",
+    last: newest(events),
     touches,
     waitingMs: touches.reduce((sum, t) => sum + t.waitedMs, 0),
     reworkRounds: reworkRounds(events),
