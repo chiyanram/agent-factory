@@ -232,8 +232,8 @@ describe("request: an allow write goes out at once, cleaned, within the cap (#13
       ["forge.write", draft({ text: "x" }), "dispatcher's"],
       ["context.read", draft({ text: "x" }), "not a write"],
       ["shell", draft({ text: "x" }), "not an extension point"],
-      // Today: spec.body has a policy, and no request sends it until #542 slice 4c
-      ["spec.body", draft({ text: "x" }), "no request sends it yet"],
+      // a spec change is the spec file itself, sent by spec-body.ts, never a draft of a post (#542)
+      ["spec.body", draft({ text: "x" }), "is sent from the spec file"],
       ["tracker.comment", draft({ text: "x" }), "denies tracker.comment"],
     ];
     for (const [capability, text, reason] of cases) {
@@ -384,7 +384,7 @@ describe("request and confirm: a confirm write waits for the person (#134; ADR-0
     });
     expect(await confirm(setup(), "ledger/PROJ-1/spec.body/0123456789ab", "t")).toMatchObject({
       kind: "failed",
-      reason: expect.stringContaining("no request sends it yet"),
+      reason: expect.stringContaining("is sent from the spec file"),
     });
     expect(sentRequests()).toHaveLength(0);
   });

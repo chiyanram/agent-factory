@@ -59,9 +59,12 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    on a personal project: the body of the git host issue whose number is the ticket (#381); an edit to it makes its
    approval stale. To change a spec in either store, read its text first with
    `agent-factory spec <project> <ticket> --show`, which prints it as stored whether or not it passes the checks
-   (#542); never fetch it with a shell or write it from memory. **Today:** no write point replaces an issue's body
-   (#542), so draft the spec in the local file (`agent-factory spec --template <issue number>` prints the template)
-   and ask the person to paste it into the issue, then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. When the
+   (#542); never fetch it with a shell or write it from memory. With `issue`, write the new body to
+   `$FACTORY_HOME/specs/<project>/<issue number>/spec.md` (`agent-factory spec --template <issue number>` prints an
+   empty one), run `agent-factory request spec.body --file $FACTORY_HOME/specs/<project>/<issue number>/spec.md`, and
+   run the confirm command it prints, exactly as printed: the person's yes in its prompt sends the whole body to the
+   issue (#542). It refuses a line outside code that starts with `/` or mentions an `@name`: put those in backticks.
+   Never ask the person to paste a spec. Then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. When the
    ticket must wait for others to merge first, name them in an optional `## Blocked by` section, one ticket per line
    (#494): the orchestrator holds the ticket's first build until each is merged (or its issue closed as completed),
    then starts from the default branch; a blocker closed with no merge, the ticket itself or a cycle goes to the
