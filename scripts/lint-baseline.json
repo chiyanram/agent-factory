@@ -1,5 +1,4 @@
 {
-  "src/app.ts typescript(no-unsafe-type-assertion)": 1,
   "src/core/app-token.ts eslint(complexity)": 4,
   "src/core/app-token.ts typescript(no-non-null-assertion)": 5,
   "src/core/app-token.ts typescript(no-unnecessary-type-assertion)": 4,

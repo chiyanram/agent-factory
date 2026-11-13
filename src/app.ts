@@ -2,7 +2,7 @@
 // can run every command. src/cli.ts only binds it to the process (#101). A UI replaces only these two files.
 
 import { parseArgs } from "node:util";
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
@@ -27,8 +27,7 @@ import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
 import { approvalState, approve } from "./core/approval.js";
 import { start } from "./core/start.js";
 import { readWaiver, waive } from "./core/waiver.js";
-import { hostGit } from "./core/git.js";
-import type { Runner as CliRunner, Result } from "./core/forge/api.js";
+import type { Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type BoxChoice, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
 import { locatePrograms } from "./core/box/srt-programs.js";
@@ -75,7 +74,7 @@ import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
 import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
 import type { CoordinatorPlaces } from "./core/coordinator.js";
-import { checkWall, installCoordinator, startCoordinator, type Interactive } from "./coordinator-cli.js";
+import { checkWall, installCoordinator, startCoordinator } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
@@ -90,6 +89,20 @@ import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
 import { onboardSetup } from "./core/onboard/settings.js";
 import { versionCheck } from "./core/init/latest.js";
 import { capsOf, type Caps } from "./core/dispatch/caps.js";
+import {
+  BUNDLED_DISCORD,
+  factoryHome,
+  type Io,
+  PKG,
+  placesOf,
+  projectRun,
+  resolvedRun,
+  tokenStore,
+  version,
+  whoApproves,
+} from "./cli-common.js";
+
+export type { Io } from "./cli-common.js";
 
 const HELP = `usage: agent-factory <command>
 
@@ -186,52 +199,6 @@ type Args = {
   readonly positionals: readonly string[];
   readonly io: Io;
 };
-
-export type Io = {
-  readonly env: NodeJS.ProcessEnv;
-  readonly out: (text: string) => void;
-  readonly err: (text: string) => void;
-  // a pasted secret, never shown: echo off on a terminal (src/core/token/prompt.ts)
-  readonly readSecret: (prompt: string) => Promise<string>;
-  // all of stdin, for the lint-edit hook
-  readonly readStdin: () => Promise<string>;
-  // one line the person types at a terminal, for init's questions (#369); none off a terminal
-  readonly readLine?: (prompt: string) => Promise<string>;
-  // the latest release's version, for init and setup status (#482); none in a test, so no test reaches the network
-  readonly latestRelease?: () => Promise<Result<string>>;
-  // the machine setup stores tokens on; a test passes linux and its own uid, so it never touches a Keychain
-  readonly system: {
-    readonly platform: NodeJS.Platform;
-    readonly uid: number;
-    readonly gid: number;
-    readonly run: CliRunner;
-    // a program on this terminal, for the coordinator's session
-    readonly interactive: Interactive;
-    // this command line, run again in the background with these words, its output appended to log; it outlives this
-    // command and gives its pid (the orchestrator loop, #305). A test passes a fake that starts nothing.
-    readonly background: (call: { readonly args: readonly string[]; readonly log: string }) => Promise<Result<number>>;
-  };
-};
-
-type Home = { readonly kind: "home"; readonly path: string } | { readonly kind: "refused"; readonly reason: string };
-
-// factoryHome : where specs and approvals live. An empty or relative FACTORY_HOME is refused, never read as the
-// current folder, which the coordinator may be able to write.
-function factoryHome(env: NodeJS.ProcessEnv): Home {
-  const set = env.FACTORY_HOME;
-  if (set === undefined) {
-    return { kind: "home", path: join(homedir(), ".factory") };
-  }
-  return isAbsolute(set)
-    ? { kind: "home", path: set }
-    : { kind: "refused", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(set)}` };
-}
-
-function version(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")) as { version: string };
-  return pkg.version;
-}
 
 // usage : the spend table (#131), with the project's settings layers resolved when it names one
 function usage({ positionals, io }: Args): Promise<number> {
@@ -511,19 +478,6 @@ async function designTextOf(at: SpecWhere): Promise<string> {
   return path.kind === "path" ? readFile(path.path, "utf8").catch(() => "") : "";
 }
 
-// whoApproves : the OS user and, when set, the operator's own git user.name. A record, not proof: the harness prompt is
-// the gate.
-async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
-  const name = await hostGit({
-    args: ["config", "--get", "user.name"],
-    repo: { kind: "none" },
-    env,
-    stdin: { kind: "none" },
-  });
-  const gitName = name.kind === "ok" ? name.stdout.trim() : "";
-  return gitName.length > 0 ? `${userInfo().username} (${gitName})` : userInfo().username;
-}
-
 // branchOnHost : whether factory/<ticket> is already on the git host, through the project's forge seam
 async function branchOnHost(io: Io, home: string, project: string, ticket: string): Promise<Result<boolean>> {
   const opened = await openProjectForge(
@@ -785,18 +739,6 @@ type Planned = {
 
 type Project = { readonly forge: Forge; readonly identity: Identity };
 
-// tokenStore : where the box's model login is kept (#136), as a result
-function tokenStore(io: Io, home: string): Result<TokenStore> {
-  const opened = openStore({
-    platform: io.system.platform,
-    home,
-    owner: { uid: io.system.uid },
-    run: io.system.run,
-    env: io.env,
-  });
-  return opened.kind === "store" ? { kind: "ok", value: opened.store } : { kind: "failed", reason: opened.reason };
-}
-
 // hostBoxPlan : the project's box plan on this host: the vm box and the project's egress proxy, through its docker, or
 // the srt runner with its own proxy (#114)
 function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
@@ -1030,50 +972,6 @@ async function dispatchReady(io: Io): Promise<DispatchSettings> {
   return wall.kind === "failed" && !("kind" in settings)
     ? { kind: "refused", reason: `refused: ${wall.reason}` }
     : settings;
-}
-
-// resolvedRun : the run with the project's settings layers resolved once on this host (#254): its modules read the
-// resolved values, and the warnings (an unknown key) are printed; a layer that loosens a safety key refuses it
-async function resolvedRun(
-  name: string,
-  project: string | undefined,
-  io: Io,
-  run: (resolved: Io) => Promise<number>,
-): Promise<number> {
-  const home = factoryHome(io.env);
-  const settings =
-    home.kind === "home"
-      ? await runSettings({ home: home.path, project, env: io.env })
-      : { kind: "failed" as const, reason: home.reason };
-  if (settings.kind === "failed") {
-    io.err(`agent-factory ${name}: ${settings.reason}\n`);
-    return 1;
-  }
-  for (const warning of settings.value.warnings) {
-    io.err(`agent-factory ${name}: warning: ${warning}\n`);
-  }
-  return run({ ...io, env: settings.value.env });
-}
-
-// projectRun : resolvedRun for a command that may name no project (#382): the project it names, the coordinator's, the
-// variables alone when FACTORY_PROJECT is exported, or the one in the factory home (core/which-project.ts)
-async function projectRun(
-  name: string,
-  project: string | undefined,
-  io: Io,
-  form: string,
-  run: (resolved: Io) => Promise<number>,
-): Promise<number> {
-  const home = factoryHome(io.env);
-  const chosen =
-    home.kind === "home"
-      ? await chosenProject({ home: home.path, project, env: io.env, usage: form })
-      : { kind: "failed" as const, reason: home.reason };
-  if (chosen.kind === "failed") {
-    io.err(`agent-factory ${name}: ${chosen.reason}\n`);
-    return 1;
-  }
-  return resolvedRun(name, chosen.value, io, run);
 }
 
 // loopWords : a forge command's words checked, with its project word, if any, taken off first
@@ -1446,21 +1344,6 @@ async function boxCommand({ positionals, io }: Args): Promise<number> {
   return 0;
 }
 
-// placesOf : where the coordinator's rules point: this package, the factory home, the factory user's home
-function placesOf(io: Io): Result<CoordinatorPlaces> {
-  const home = factoryHome(io.env);
-  const bot = io.env.FACTORY_BOT_HOME ?? "/home/factory";
-  if (home.kind === "refused") {
-    return { kind: "failed", reason: home.reason };
-  }
-  return isAbsolute(bot)
-    ? {
-        kind: "ok",
-        value: { pkg: join(dirname(fileURLToPath(import.meta.url)), ".."), factoryHome: home.path, botHome: bot },
-      }
-    : { kind: "failed", reason: `FACTORY_BOT_HOME must be an absolute path, got ${JSON.stringify(bot)}` };
-}
-
 async function setupCoordinator({ io }: { readonly io: Io }): Promise<number> {
   const places = placesOf(io);
   const dir = places.kind === "ok" ? await installCoordinator(places.value) : places;
@@ -1489,10 +1372,6 @@ function coordinatorArgs(positionals: readonly string[]): CoordinatorArgs {
   const runner = last === "copilot" ? "copilot" : "claude";
   return rest.length > 1 || !rest.every(plainName) ? "bad" : { project: rest[0], runner };
 }
-
-// the package's own folder, and its bundled discord plugin: the only plugin the Discord webhook is ever handed to (#119)
-const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BUNDLED_DISCORD = join(PKG, "plugins", "discord", "plugin");
 
 // plugin : register, update, test and list plugins (#134)
 async function pluginCli({ positionals, io }: Args): Promise<number> {
