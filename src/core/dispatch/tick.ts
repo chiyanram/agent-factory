@@ -14,7 +14,7 @@
 // A lock file keeps two passes from running at once (a pass by hand while the orchestrator loop runs, a run of an
 // hour). No cron or launchd job runs a pass: a human's command starts the orchestrator loop (orchestrator-loop.ts), and
 // it ends by itself when no ticket is in flight (#305). Each pass that polled writes its last-poll time (last-poll.ts),
-// so `status` shows a loop that stopped.
+// so `status` shows a loop that stopped. Each pass first deletes the project's traces older than 30 days (trace.ts, #487).
 //
 // The ticket list (#227) is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
 // the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
@@ -38,6 +38,7 @@ import { NEEDS_HUMAN } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
+import { pruneTraces } from "./trace.js";
 import type { Notify, Ping } from "../notify.js";
 import type { Post } from "../post.js";
 import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, raisedWhy, type LaneProps } from "../lane.js";
@@ -1713,6 +1714,15 @@ async function polled(setup: TickSetup): Promise<void> {
 }
 
 // tick : one locked pass
+// pruned : the project's traces older than TRACE_DAYS deleted, at the start of each pass (#487); one that cannot be
+// deleted is logged, and the pass goes on
+async function pruned(setup: TickSetup): Promise<void> {
+  const gone = await pruneTraces({ home: setup.home, project: setup.project, now: setup.now() });
+  for (const problem of gone.problems) {
+    setup.log(problem);
+  }
+}
+
 export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
   if (!plainName(setup.project)) {
     return { kind: "failed", reason: `the project must be a plain name, got ${JSON.stringify(setup.project)}` };
@@ -1722,6 +1732,7 @@ export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
     return { kind: "failed", reason: held.reason };
   }
   try {
+    await pruned(setup);
     const decided = await decideAll(setup);
     if (decided.kind === "failed") {
       return decided;
