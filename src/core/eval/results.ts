@@ -8,6 +8,7 @@ import type { ActOn } from "../review/act-on.js";
 import type { Case } from "./cases.js";
 import { CATEGORIES, SEVERITIES, type Row } from "./golden.js";
 import type { SeedResult } from "./judge.js";
+import type { Aim } from "./bar.js";
 
 export type RunRecord = {
   readonly run: number;
@@ -41,6 +42,8 @@ export type Pass = {
   readonly spent: number;
   readonly stopped: string;
   readonly drafts: boolean;
+  // what the change the pass proves aims at (ADR-0021); none for a pass that proves no change, such as a baseline
+  readonly aim: Aim | "none";
   readonly skipped: readonly Row[];
   readonly cases: readonly CaseRecord[];
 };
@@ -145,6 +148,7 @@ export function document(p: Pass): Record<string, unknown> {
     cap_usd: p.cap,
     cost_usd: Math.round(p.spent * 10_000) / 10_000,
     runs_per_case: p.runs,
+    aim: p.aim === "none" ? null : p.aim,
     inputs: p.inputs,
     cases: { ran, skipped: p.skipped.map((r) => ({ case: r.name, status: r.status })) },
     recall_at_act_on: recall(p.cases),

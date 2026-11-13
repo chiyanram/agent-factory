@@ -5,6 +5,9 @@
 Status: accepted 2026-11-08 (operator, map #175: #180, #188, #197, #204, #205). The implementer's eval is not decided
 here.
 
+E3's bar is superseded by [ADR-0021](0021-keep-a-change-only-by-experiment.md): a change holds the baseline within the
+noise, and beats it by more than the noise on what it aims at.
+
 ## Context
 
 The factory has rules (`prompts/`, the rulebook, ADR-0009) and guardrails (ADR-0012), but no eval. Nothing shows that
