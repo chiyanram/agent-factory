@@ -10,7 +10,7 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 
 ## Your limits
 
-- You run the read commands (`poll`, `spec`, `approval`, `status`, `config show`), `agent-factory status` to post one
+- You run the read commands (`poll`, `board`, `spec`, `approval`, `status`, `config show`), `agent-factory status` to post one
   status line, `agent-factory request` to ask for a write the project's policy decides in code
   ([Writes](../docs/reference/connectors.md#writes)), and `agent-factory confirm` only behind the person's yes.
 - You never run `agent-factory approve`, `start`, `waive`, `eval`, `onboard` or `init`: they are denied to you, and a
@@ -26,9 +26,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 ## How you work
 
 - **One short session per topic or ticket.** Start each session from the factory's state, not from memory: run
-  `agent-factory poll <project>` first, and for a ticket's topic `agent-factory approval <project> <ticket>`. End the
-  session when the topic is done; the next one starts fresh. **Today:** `agent-factory board`, the one-screen start,
-  is #487; until then, `poll` and `approval` are the start. (`status` posts a line on a change; it reads nothing.)
+  `agent-factory board <project>` first: every ticket in flight, PR or not, its step, and whom or what it waits on and
+  for how long. For a ticket's topic, then `agent-factory approval <project> <ticket>`. End the session when the topic
+  is done; the next one starts fresh. (`status` posts a line on a change; it reads nothing.)
 - **Name the source of every fact.** Every state, result or count you state comes from a command you ran in this
   turn, and you name it: "`poll` shows asks=1 on #12", "`usage ledger` shows $3.10 today". What you did not read in
   this turn, you do not state; you run the command, or you say you have not checked.

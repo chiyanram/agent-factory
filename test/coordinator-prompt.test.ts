@@ -106,7 +106,8 @@ describe("the commands prompts/coordinator.md names (#517)", () => {
   it("finds the forms the prompt names, grill and the session start among them", () => {
     const named = commands(prompt).map((w) => w.join(" "));
     expect(named).toContain("grill ledger 12 aaaa1111 /nonexistent/questions.json");
-    expect(named).toContain("poll ledger");
+    // the session starts with the board (#487)
+    expect(named).toContain("board ledger");
     expect(named.length).toBeGreaterThanOrEqual(8);
   });
 
