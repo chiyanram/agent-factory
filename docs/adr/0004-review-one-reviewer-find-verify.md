@@ -75,6 +75,7 @@ report the same `file:line` and rule are merged in code before the verify pass: 
 lower ID. Each lens's unique verified findings go in the round's summary, beside the head's pass answers and in the
 run record's `review-ended` line.
 
-**Today:** the find and verify instructions are still the engine's `prompts/review-*.md`, not the role cards: they
-cannot change until the eval baseline exists (#216, `scripts/check-eval-proof.ts`), so a finder learns its lens from
-the pack and its grade and evidence from the JSON schema. The floor is sent with every pass from #302.
+**Today:** the find and verify instructions are still the engine's `prompts/review-*.md`, not the role cards: a change
+to them needs an eval pass that proves it ([ADR-0021](0021-keep-a-change-only-by-experiment.md),
+`scripts/check-eval-proof.ts`), so a finder learns its lens from the pack and its grade and evidence from the JSON
+schema. The floor is sent with every pass from #302.
