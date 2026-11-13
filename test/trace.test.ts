@@ -62,6 +62,13 @@ describe("a trace is written as the run prints (#487)", () => {
     expect(traceLine("not json {")).toBe("not json {");
   });
 
+  it("escapes every control character a terminal acts on in a text line, but the tab; a JSON line is escaped already", () => {
+    const esc = String.fromCharCode(0x1b);
+    const line = `${esc}[2J${esc}]0;title${String.fromCharCode(7)} csi${String.fromCharCode(0x9b)}A del${String.fromCharCode(0x7f)}\tend`;
+    expect(traceLine(line)).toBe("\\u001b[2J\\u001b]0;title\\u0007 csi\\u009bA del\\u007f\tend");
+    expect(traceLine(JSON.stringify({ text: `${esc}[2J` }))).toBe('{"text":"\\u001b[2J"}');
+  });
+
   it("stops at the cap, and its last line says it was cut", async () => {
     const line = `{"n":"${"x".repeat(40)}"}`;
     const out = await kept([`${line}\n${line}\n${line}\n`], 100);
@@ -144,6 +151,38 @@ describe("a ticket's traces are listed and read (#487)", () => {
         { name: "writer-2026-11-13T06-07-15-123Z.jsonl", at: "2026-11-13T06:07:15.123Z", kind: "writer", bytes: 8 },
       ],
     });
+  });
+
+  it("names the record line of a review round, a design run and a failed run too (#487)", async () => {
+    mkdirSync(dir(), { recursive: true });
+    const name = (kind: "finder" | "design-review" | "writer", min: number) =>
+      traceName({ kind, ...(kind === "finder" ? { lens: "errors" } : {}), at: AT + min * 60_000 });
+    const [finder, design, writer] = [name("finder", 1), name("design-review", 2), name("writer", 3)];
+    for (const f of [finder, design, writer]) writeFileSync(join(dir(), f), "{}\n");
+    const spend = { usd: 0.1, tokens: 1 };
+    const events = [
+      { at: "2026-11-13T07:00:00Z", kind: "review-ended", head: "h", actOn: 2, spend, traces: [finder] },
+      {
+        at: "2026-11-13T07:01:00Z",
+        kind: "design-ended",
+        step: "review",
+        spec: "s",
+        design: "d",
+        outcome: "done",
+        why: "",
+        findings: [],
+        kept: [],
+        trace: design,
+      },
+      { at: "2026-11-13T07:02:00Z", kind: "spent", phase: "writer", head: "h", spend, traces: [writer] },
+    ] as const;
+    for (const event of events) expect((await record({ where: where(), event })).kind).toBe("ok");
+    const listed = await listTraces(where());
+    expect(listed.kind === "ok" ? listed.value.map((t) => [t.name, t.line]) : listed).toEqual([
+      [writer, "spent writer"],
+      [design, "design-ended review done"],
+      [finder, "review-ended"],
+    ]);
   });
 
   it("lists none for a ticket with no folder yet", async () => {

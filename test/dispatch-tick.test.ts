@@ -2167,6 +2167,7 @@ describe("the design review and the cleanup run (#236)", () => {
               findings: [finding, { ...finding, id: "D2", verdict: "aligned" }],
               card: CARD,
               spend: { usd: 0.4, tokens: 500 },
+              trace: "design-review-2026-11-07T09-00-00-000Z.jsonl",
             },
           };
         },
@@ -2227,12 +2228,12 @@ describe("the design review and the cleanup run (#236)", () => {
         why: `the design review is in, 1 finding(s) kept at spec ${specHash(text).slice(0, 8)}: read them, then approve`,
       },
     ]);
-    // each run record carries the card's hash and what it spent
+    // each run record carries the card's hash, what it spent and its trace (#487)
     const read = await readRecords(where());
     const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
-    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd])).toEqual([
-      ["review", "done", CARD, 0.4],
-      ["verify", "done", CARD, 0.2],
+    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd, e.trace])).toEqual([
+      ["review", "done", CARD, 0.4, "design-review-2026-11-07T09-00-00-000Z.jsonl"],
+      ["verify", "done", CARD, 0.2, undefined],
     ]);
     // the build waits for the human's approval, and runs nothing more
     const third = await pass(steps, "2026-11-07T09:02:00Z");

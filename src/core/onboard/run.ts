@@ -21,6 +21,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { record } from "../dispatch/records.js";
 import { spendOf, type Spend } from "../dispatch/spend.js";
+import { keepTrace } from "../dispatch/trace.js";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
@@ -164,7 +165,8 @@ function rulesText(musts: readonly Must[]): string {
   ].join("\n");
 }
 
-type Ran = { readonly answer: Result<Answer>; readonly spend: Spend };
+// trace: the run's trace, kept beside onboarder.jsonl (dispatch/trace.ts, #487); none when it kept none
+type Ran = { readonly answer: Result<Answer>; readonly spend: Spend; readonly trace?: string };
 
 // asked : the model run in its folder, and what it spent, finished or failed
 async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<Ran> {
@@ -178,10 +180,24 @@ async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<R
     // the card's tools, narrowed to the read-only ones the model seam gives (#232)
     tools: card.tools,
   });
+  const trace = await traced(setup, ran.kind === "ok" ? ran.value.stream : ran.stream);
   if (ran.kind === "failed") {
-    return { answer: failed(`the onboarder's run failed: ${ran.reason}`), spend: spendOf(ran.answer) };
+    return { answer: failed(`the onboarder's run failed: ${ran.reason}`), spend: spendOf(ran.answer), ...trace };
   }
-  return { answer: readAnswer(ran.value.output), spend: { usd: ran.value.costUsd, tokens: ran.value.tokens } };
+  return {
+    answer: readAnswer(ran.value.output),
+    spend: { usd: ran.value.costUsd, tokens: ran.value.tokens },
+    ...trace,
+  };
+}
+
+// traced : the run's stream kept as its trace in <home>/runs/<project>/onboarder/, as a field to spread; none when it
+// streamed nothing or the trace could not be kept (#487)
+async function traced(setup: OnboardSetup, stream: string | undefined): Promise<{ readonly trace?: string }> {
+  const where = { home: setup.home, project: setup.project, ticket: ONBOARDER_RECORD };
+  const kept =
+    stream === undefined ? undefined : await keepTrace({ ...where, kind: "onboard", at: setup.now() }, stream);
+  return kept?.kind === "ok" ? { trace: kept.value.name } : {};
 }
 
 // inFolder : a fresh run folder with the code and the commands, gone afterwards
@@ -218,10 +234,12 @@ async function inFolder(
 }
 
 // spent : the run's spend, in the project's run records; one that cannot be written fails the command after staging
-async function spent(setup: OnboardSetup, base: Base, spend: Spend): Promise<Result<void>> {
+async function spent(setup: OnboardSetup, base: Base, ran: Ran): Promise<Result<void>> {
+  const at = new Date(setup.now()).toISOString();
+  const traces = ran.trace === undefined ? {} : { traces: [ran.trace] };
   const done = await record({
     where: { home: setup.home, project: setup.project, ticket: ONBOARDER_RECORD },
-    event: { at: new Date(setup.now()).toISOString(), kind: "spent", phase: "onboard", head: base.sha, spend },
+    event: { at, kind: "spent", phase: "onboard", head: base.sha, spend: ran.spend, ...traces },
   });
   return done.kind === "ok" ? { kind: "ok", value: undefined } : done;
 }
@@ -272,7 +290,7 @@ async function onBase(setup: OnboardSetup, base: Base, card: Card): Promise<Resu
   if (ran.kind === "failed") {
     return ran;
   }
-  const kept = await spent(setup, base, ran.value.spend);
+  const kept = await spent(setup, base, ran.value);
   if (kept.kind === "failed") {
     return kept;
   }

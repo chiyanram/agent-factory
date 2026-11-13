@@ -455,6 +455,23 @@ describe("the project's MUSTs and the cite check (#383)", () => {
     expect(staged("brief.md")).toContain("The overdue query compares due_on");
   });
 
+  it("keeps the run's stream as its trace beside onboarder.jsonl, named on its spent line (#487)", async () => {
+    const stream = '{"type":"assistant"}\n{"type":"result"}\n';
+    const streaming: Model = async (run) => {
+      const ran = await model([])(run);
+      return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, stream } } : ran;
+    };
+    expect(await onboard(setup(streaming))).toMatchObject({ kind: "ok" });
+    const read = await readRecords({ home: r.home, project: "ledger", ticket: "onboarder" });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: [{ kind: "spent", traces: [expect.stringMatching(/^onboard-/)] }],
+    });
+    const [name = ""] = readdirSync(join(r.home, "runs", "ledger", "onboarder"));
+    expect(read).toMatchObject({ value: [{ traces: [name] }] });
+    expect(readFileSync(join(r.home, "runs", "ledger", "onboarder", name), "utf8")).toBe(stream);
+  });
+
   it("refused only when the engine dropped every model line, and nothing is staged; the spend is still recorded", async () => {
     const answer = { stack: [ABSENCE_CLAIM], modules: [], gotchas: [], terms: [] };
     const out = await onboard(setup(model([], answer)));

@@ -12,7 +12,7 @@ import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { scrubbedJson, scrubSecrets } from "../scrub.js";
 import { plainName } from "../spec.js";
-import { codeOf, readRecords, recordPath, type Event, type Where } from "./records.js";
+import { codeOf, prop, readRecords, recordPath, type Event, type Where } from "./records.js";
 
 export type TraceKind = "writer" | "finder" | "verify" | "design-review" | "design-verify" | "onboard";
 // a plain file name in the ticket's folder, never a path
@@ -69,8 +69,22 @@ export function traceLine(line: string): string {
   try {
     return scrubbedJson(JSON.parse(line) as unknown);
   } catch {
-    return scrubSecrets(line);
+    return inert(scrubSecrets(line));
   }
+}
+
+// control : whether a character is one a terminal acts on: a C0 or C1 control character but the tab, or DEL (ESC starts
+// CSI and OSC sequences). Pure.
+function control(code: number): boolean {
+  return code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f));
+}
+
+// inert : a text line with each control character escaped as \u00XX, so printing a trace moves no cursor and sets no
+// title; a JSON line needs none, since serializing escapes them. Pure.
+function inert(text: string): string {
+  return Array.from(text, (c) =>
+    control(c.charCodeAt(0)) ? `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}` : c,
+  ).join("");
 }
 
 // ticketDir : the ticket's folder beside its record file
@@ -186,8 +200,25 @@ export async function keepTrace(at: TraceAt, stdout: string): Promise<Result<Tra
 
 // lineOf : the record line that names a trace, in a few words, as a field to spread; none when no line names it. Pure.
 function lineOf(events: readonly Event[], name: TraceName): { readonly line?: string } {
-  const e = events.find((x) => x.kind === "writer-ended" && x.trace === name);
-  return e?.kind === "writer-ended" ? { line: `writer-ended ${e.mode} ${e.outcome}` } : {};
+  const e = events.find((x) => traceNames(x).includes(name));
+  return e === undefined ? {} : { line: wordsOf(e) };
+}
+
+// traceNames : the traces a record line names: a run's trace, or a round's or a failed run's traces. Pure.
+function traceNames(e: Event): readonly string[] {
+  const one = prop(e, "trace");
+  const many = prop(e, "traces");
+  const list: readonly unknown[] = Array.isArray(many) ? many : [];
+  return [...(typeof one === "string" ? [one] : []), ...list.filter((n): n is string => typeof n === "string")];
+}
+
+// the fields that say, after a line's kind, what the run was and how it ended
+const WORD_FIELDS = ["mode", "step", "phase", "outcome"] as const;
+
+// wordsOf : a record line in a few words: its kind, then what the run was and how it ended. Pure.
+function wordsOf(e: Event): string {
+  const words = WORD_FIELDS.map((f) => prop(e, f)).filter((v): v is string => typeof v === "string");
+  return [e.kind, ...words].join(" ");
 }
 
 // listedOf : one file of the ticket's folder as the list shows it; none for a file that is not a trace

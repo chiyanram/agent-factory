@@ -54,9 +54,11 @@ held. Each orchestrator pass first deletes the project's traces older than 30 da
 Each pass of an automated review round streams too (`--output-format stream-json --verbose`), and its answer is the
 stream's last result event. Each finder keeps its stream as `finder-<lens>-<time>.jsonl` and each verify pass as
 `verify-<time>.jsonl`, in the same folder, named in the round's `review-ended` line, or its `spent` line when a pass
-failed, as `traces` (`src/core/review/step.ts`). **Today:** the design-review and onboarder runs stream the same way
-but keep no trace yet, and `agent-factory trace` names only a `writer-ended` line's trace; both follow in #487's next
-slice.
+failed, as `traces` (`src/core/review/step.ts`). A design review's two runs keep theirs as `design-review-<time>.jsonl`
+and `design-verify-<time>.jsonl`, named as `trace` on their `design-ended` line; the onboarder's goes in
+`$FACTORY_HOME/runs/<project>/onboarder/`, named in its `spent` line's `traces`. `agent-factory trace` names whichever
+line names a trace. A line of a trace that is not JSON has every terminal control character but the tab escaped as
+`\u00XX`, so printing it moves no cursor; a JSON line is escaped already.
 The caps then hold before each run, never during one (`src/core/dispatch/caps.ts`): per run, `FACTORY_MAX_USD` is
 the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
 and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice
