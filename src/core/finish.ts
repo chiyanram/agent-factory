@@ -9,7 +9,10 @@
 //            retry after a failure never posts a question twice); next: wait for a person. By default the note is one
 //            numbered round: every question, its lettered choices with the recommended one marked, and how to answer
 //            ("1A 2B", or "accept all"). With the project's questions setting at one-at-a-time it holds only the first;
-//            the next run, after the answer, asks again whatever is still open (#320).
+//            the next run, after the answer, asks again whatever is still open (#320). The note is first rendered and
+//            read back as answers.ts reads it; a question it would not hold as written (cut at the field limit, or
+//            split by a " · " or " A) " in its text) is never posted as OPEN: the run ends blocked instead, with the
+//            questions as written listed in the blocked note (#522)
 //   blocked  label needs-human first, so nothing hands the change out again; push the work in progress, but only on top
 //            of the branch (a run stopped in a rebase never rewrites it); post the reason, in the writer's seat when
 //            the writer said it; next: a person
@@ -26,7 +29,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { hostGit } from "./git.js";
 import { agentTrailer, commitKind } from "./notes.js";
-import { cleanField, DEFAULT_FIELD_LIMIT, renderPost, type Post, type PostField, type Seat } from "./post.js";
+import { cleanField, DEFAULT_FIELD_LIMIT, flatText, renderPost, type Post, type PostField, type Seat } from "./post.js";
 import { roundIn, type Asked } from "./answers.js";
 import { noAgentSettings } from "./agent-settings.js";
 import { noCiFiles, type CiSetup } from "./ci-files.js";
@@ -233,11 +236,17 @@ function runItems(ending: Ending): readonly string[] {
   return ending.kind === "stalled" ? ending.last : [];
 }
 
-async function post(input: FinishInput, post: Post): Promise<Done> {
-  return input.forge.note({ number: input.change, post });
+async function post(input: FinishInput, note: Post): Promise<Done> {
+  return input.forge.note({ number: input.change, post: note });
 }
 
-type Block = { readonly reason: string; readonly by: "writer" | "host"; readonly pushFirst: boolean };
+// items: what the blocked note lists before the run's last lines, such as the questions a round could not post
+type Block = {
+  readonly reason: string;
+  readonly by: "writer" | "host";
+  readonly pushFirst: boolean;
+  readonly items?: readonly string[];
+};
 
 async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> {
   const label = await input.forge.addLabel({ number: input.change, label: NEEDS_HUMAN });
@@ -251,7 +260,7 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
     seat: block.by === "writer" ? "writer" : "coordinator",
     title: `blocked: ${why}`,
     fields: runFields(input.ending),
-    items: runItems(input.ending),
+    items: [...(block.items ?? []), ...runItems(input.ending)],
   });
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
 }
@@ -334,12 +343,12 @@ export function questionRound(questions: readonly Question[]): {
   };
 }
 
-// roundReadsBack : "" when the round, once rendered, reads back as written: the same questions, choices and recommended
-// one. renderPost cuts each item at its limit, and a " · " or " A) " inside a text splits it, so a question that
-// checks can still post damaged; the problem, naming the question, otherwise (#517). Pure.
-export function roundReadsBack(questions: readonly Question[]): string {
-  const round = questionRound(questions);
-  const text = renderPost({ seat: "coordinator", title: round.title, fields: [round.answer], items: round.items });
+// readsBackAs : "" when the post, once rendered, reads back as the questions it holds, as written: the same questions,
+// choices and recommended one, or a plain question's same words. renderPost cuts each item and the title at its limit,
+// and a " · " or " A) " inside a text splits it, so a question that checks can still post damaged; the problem, naming
+// the question, otherwise. The one check for the coordinator's grill (#517) and the writer's round (#522). Pure.
+export function readsBackAs(note: Post, questions: readonly Question[]): string {
+  const text = renderPost(note);
   if (text.kind === "refused") {
     return text.reason;
   }
@@ -350,14 +359,19 @@ export function roundReadsBack(questions: readonly Question[]): string {
     : `question ${bad + 1} would not read back as written once posted: each question with its choices is cut at ${DEFAULT_FIELD_LIMIT} characters, and " · " or " A) " inside a text splits it; shorten or reword it`;
 }
 
-// readsBack : whether one question read back from the posted round is the one written. Pure.
+// readsBack : whether one question read back from the posted round is the one written: the same words, and the same
+// choices and recommended one, or none for a plain question. Pure.
 function readsBack(q: Question, back: Asked | undefined): boolean {
-  return back !== undefined && q.kind === "choices" && sameWords(back.text, q.question) && sameChoices(q, back);
+  if (back === undefined || !sameWords(back.text, q.question)) {
+    return false;
+  }
+  return q.kind === "choices" ? sameChoices(q, back) : back.choices.length === 0 && back.recommended === -1;
 }
 
-// sameWords : whether a text read back is the text written, as the template made it inert
+// sameWords : whether a text read back is the text written, as the template made it inert in the middle of a line: the
+// template escapes a "/" only at a line's start, and a posted question never starts one (#522)
 function sameWords(back: string, written: string): boolean {
-  return back === cleanField(written, Number.POSITIVE_INFINITY);
+  return back === cleanField(`x${flatText(written)}`, Number.POSITIVE_INFINITY).slice(1);
 }
 
 // sameChoices : whether a question's choices and recommended one read back as written
@@ -371,20 +385,27 @@ function sameChoices(q: Extract<Question, { kind: "choices" }>, back: Asked): bo
 
 // askPost : the one OPEN note: every question as a numbered round, or with one-at-a-time only the first, saying how
 // many wait. One plain question keeps its old form, the question as the title. Pure.
-function askPost(input: FinishInput, questions: readonly Question[]): Post {
-  const posted = input.questions === "one-at-a-time" ? questions.slice(0, 1) : questions;
+function askPost(input: FinishInput, posted: readonly Question[], waiting: number): Post {
   const run = runFields(input.ending);
-  const waiting = waitingFields(questions.length - posted.length);
+  const next = waitingFields(waiting);
   const [only] = posted;
   if (posted.length === 1 && only?.kind === "plain") {
-    return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...waiting], items: [] };
+    return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...next], items: [] };
   }
   const round = questionRound(posted);
-  return { seat: "writer", title: round.title, fields: [...run, round.answer, ...waiting], items: round.items };
+  return { seat: "writer", title: round.title, fields: [...run, round.answer, ...next], items: round.items };
 }
 
+// asked : post the questions as one OPEN note; a note that would not read back as written is never posted: the run is
+// blocked instead, naming the question, with the questions as written listed (#522)
 async function asked(input: FinishInput, questions: readonly Question[]): Promise<Result<Next>> {
-  const said = await post(input, askPost(input, questions));
+  const posted = input.questions === "one-at-a-time" ? questions.slice(0, 1) : questions;
+  const ask = askPost(input, posted, questions.length - posted.length);
+  const back = readsBackAs(ask, posted);
+  if (back !== "") {
+    return blocked(input, { reason: back, by: "host", pushFirst: false, items: posted.map(asking) });
+  }
+  const said = await post(input, ask);
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }
 

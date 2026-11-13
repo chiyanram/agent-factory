@@ -11,7 +11,10 @@ A run ends with a report (#109, [`src/core/report.ts`](../../src/core/report.ts)
 and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to twenty `questions`
 (`MOST_QUESTIONS`), or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
 `done` → push, post the evidence, run the ready check; `asked` → push, post the questions in one `[writer] OPEN:`
-note, wait (the answers that close it, and how the next run receives them, are under [Answers](#answers)); `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
+note, wait (the answers that close it, and how the next run receives them, are under [Answers](#answers)). A note that
+would not read back as written (a question cut at 500 characters, or split by a ` · ` or ` A) ` in its text) is never
+posted as `OPEN:`: the change gets `needs-human` and one `[coordinator] blocked:` note naming the question, with the
+questions as written listed (#522); `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
 `blocked: <reason>` (with the implementer's prefix when the implementer said it). A missing, unreadable or malformed
 report, any other field, a non-zero exit, a timeout, a cap or a failed runner is `blocked` with the reason; a reason
 never quotes the report. The host decides from the report only after the runner has stopped, never through a
