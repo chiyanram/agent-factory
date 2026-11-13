@@ -6,9 +6,7 @@
 //   the gate   CI, a backoff before a retry, the tickets its spec is blocked by, or a quiet claim given back
 //   a run      a step the factory starts itself: a run, a ping or a note
 // Since when is the ticket's newest record line, else its approval; times are UTC here, and the text view shows them in
-// the reader's zone. Pure.
-//
-// **Today:** no command prints it yet; `agent-factory board` follows in #487's slice 5c.
+// the reader's zone. Pure. `agent-factory board` prints it (board-cli.ts).
 
 import { nextStep } from "./next-step.js";
 import type { Event } from "./records.js";

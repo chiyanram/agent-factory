@@ -47,7 +47,7 @@ import {
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
 import { STEPS_TODAY, type Steps } from "./core/dispatch/steps.js";
 import { inertText } from "./core/dispatch/trace.js";
-import { runHoursEnd, tick, type TickSetup } from "./core/dispatch/tick.js";
+import { decideAll, runHoursEnd, tick, type TickSetup } from "./core/dispatch/tick.js";
 import { loopFile, loopRunning, orchestratorLoop } from "./core/dispatch/orchestrator-loop.js";
 import type { Gate } from "./core/dispatch/table.js";
 import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
@@ -82,6 +82,7 @@ import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
+import { BOARD_HELP, boardCommand, boardPass } from "./board-cli.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
 import type { Probes } from "./core/init/checks.js";
 import { which } from "./core/box/srt-programs.js";
@@ -145,7 +146,7 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${USAGE_HELP}${TRACE_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${TRACE_HELP}${BOARD_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
@@ -1092,6 +1093,50 @@ function loopCommand(name: string, { positionals, io }: Args): Promise<number> {
     : projectRun(name, words.project, io, projectForm(name), (resolved) => Promise.resolve(parsed(resolved)));
 }
 
+const BOARD_FORM = "agent-factory board [<project>] [--json]";
+
+// boardNamed : a chosen project, or the usage when none was chosen. Pure.
+function boardNamed(chosen: Result<string | undefined>): Result<string> {
+  if (chosen.kind === "failed") {
+    return chosen;
+  }
+  return chosen.value === undefined
+    ? { kind: "failed", reason: `usage: ${BOARD_FORM}` }
+    : { kind: "ok", value: chosen.value };
+}
+
+// boardProject : the project the board is for: the one named, or the one chosen as projectRun chooses (#382)
+async function boardProject(io: Io, positionals: readonly string[]): Promise<Result<string>> {
+  const home = factoryHome(io.env);
+  if (home.kind !== "home" || positionals.length > 1) {
+    return { kind: "failed", reason: home.kind === "home" ? `usage: ${BOARD_FORM}` : home.reason };
+  }
+  return boardNamed(await chosenProject({ home: home.path, project: positionals[0], env: io.env, usage: BOARD_FORM }));
+}
+
+// board : every ticket in flight, read-only (#487 AC-5)
+async function boardCli({ positionals, json, io }: Args): Promise<number> {
+  const project = await boardProject(io, positionals);
+  if (project.kind === "failed") {
+    io.err(`agent-factory board: ${project.reason}\n`);
+    return 1;
+  }
+  return resolvedRun("board", project.value, io, (resolved) => boardOn(project.value, json, resolved));
+}
+
+// boardOn : the pass's setup made read-only (boardPass), decided with nothing acted on
+async function boardOn(project: string, json: boolean, io: Io): Promise<number> {
+  const settings = dispatchSettings(io.env);
+  const setup = "kind" in settings ? settings : await setupNow(project, true, io, settings);
+  if ("kind" in settings || setup.kind !== "ok") {
+    io.err(`agent-factory board: ${"reason" in setup ? setup.reason : "cannot read the project"}\n`);
+    return 1;
+  }
+  const pass = boardPass(setup.value, io.err);
+  const decided = () => decideAll(pass);
+  return boardCommand(project, json, { ...io, home: settings.home, now: Date.now, mark: pass.forge.mark, decided });
+}
+
 // dispatch : the orchestrator loop (#305), or with --once one pass (#103). A human's command starts it; no cron or
 // launchd job does. A lock keeps passes apart, and another keeps a second loop out. A dry run is one pass: it acts on
 // nothing, so a loop of them would never end.
@@ -1663,6 +1708,7 @@ const COMMANDS: readonly Command[] = [
   { name: "review", run: reviewCommand },
   { name: "usage", run: usage },
   { name: "trace", run: trace },
+  { name: "board", run: boardCli },
   { name: "onboard", run: onboardCli },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
