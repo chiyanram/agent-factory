@@ -131,7 +131,8 @@ the runs a pass may start, hold in each pass. A laptop that sleeps stops the loo
 on from the records. It never opens a ticket: the ticket list is the START and approval records and the
 `factory/<ticket>` changes. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
-ended goes to a person. A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that
+ended goes to a person. START and approval are each one file a new one replaces, so a pass records each one once as a
+`begun` or `approved` line, at the record's own time, keeping it for the ticket's touches (`usage`, #487). A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: to go on, the human

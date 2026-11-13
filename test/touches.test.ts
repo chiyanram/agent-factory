@@ -16,6 +16,20 @@ const writer = (at: string, mode: "fix" | "rework", outcome: "done" | "asked" | 
   hung: false,
 });
 const answered = (at: string): Event => ({ at, kind: "answered", spec: "", answers: [] });
+const begun = (at: string, by = "ram"): Event => ({ at, kind: "begun", by, via: "terminal" });
+const approved = (at: string, by = "ram"): Event => ({ at, kind: "approved", by, via: "terminal", spec: "h" });
+const blocked = (at: string): Event => ({ at, kind: "blocked", why: "needs a person" });
+const designVerify = (at: string): Event => ({
+  at,
+  kind: "design-ended",
+  step: "verify",
+  spec: "s",
+  design: "d",
+  outcome: "done",
+  why: "",
+  findings: [],
+  kept: [],
+});
 const COST = { spend: { usd: 1.5, tokens: 300 }, unmeasured: 1 };
 
 describe("a ticket's touches (#487)", () => {
@@ -32,6 +46,60 @@ describe("a ticket's touches (#487)", () => {
     expect(touchesOf(events)).toEqual([
       { kind: "answer", at: "2026-11-13T10:05:00Z", waitedMs: 125 * 60_000 },
       { kind: "answer", at: "2026-11-13T11:30:00Z", waitedMs: 30 * 60_000 },
+    ]);
+  });
+
+  it("an approval waits from the later of START and the design verify pass, and carries who approved (Q4 A)", () => {
+    const events = [
+      begun("2026-11-13T08:00:00Z"),
+      designVerify("2026-11-13T09:00:00Z"),
+      approved("2026-11-13T10:00:00Z", "mo"),
+    ];
+    expect(touchesOf(events)).toEqual([{ kind: "approve", at: "2026-11-13T10:00:00Z", by: "mo", waitedMs: 3_600_000 }]);
+  });
+
+  it("an approval waits from START when there is no design verify pass", () => {
+    const events = [begun("2026-11-13T08:00:00Z"), approved("2026-11-13T09:30:00Z")];
+    expect(touchesOf(events)).toEqual([
+      { kind: "approve", at: "2026-11-13T09:30:00Z", by: "ram", waitedMs: 90 * 60_000 },
+    ]);
+  });
+
+  it("a START alone is no touch", () => {
+    expect(touchesOf([begun("2026-11-13T08:00:00Z")])).toEqual([]);
+  });
+
+  it("a START or approval after a hand-over is a rescue, waiting from the blocked line; the hand-over then closes", () => {
+    const events = [
+      approved("2026-11-13T08:00:00Z"),
+      blocked("2026-11-13T09:00:00Z"),
+      begun("2026-11-13T11:00:00Z", "mo"),
+      blocked("2026-11-13T12:00:00Z"),
+      approved("2026-11-13T12:30:00Z", "mo"),
+    ];
+    expect(touchesOf(events)).toEqual([
+      { kind: "approve", at: "2026-11-13T08:00:00Z", by: "ram", waitedMs: 0 },
+      { kind: "rescue", at: "2026-11-13T11:00:00Z", by: "mo", waitedMs: 2 * 3_600_000 },
+      { kind: "rescue", at: "2026-11-13T12:30:00Z", by: "mo", waitedMs: 30 * 60_000 },
+    ]);
+  });
+
+  it("a rescue waits from the first blocked line when several open before it", () => {
+    const events = [
+      blocked("2026-11-13T08:00:00Z"),
+      blocked("2026-11-13T09:00:00Z"),
+      begun("2026-11-13T10:00:00Z", "mo"),
+    ];
+    expect(touchesOf(events)).toEqual([
+      { kind: "rescue", at: "2026-11-13T10:00:00Z", by: "mo", waitedMs: 2 * 3_600_000 },
+    ]);
+  });
+
+  it("reads the lines in time order, not file order, so a later-written begun line still sorts first", () => {
+    // the begun line is appended after the approval line, but its at is earlier
+    const events = [approved("2026-11-13T10:00:00Z"), begun("2026-11-13T08:00:00Z")];
+    expect(touchesOf(events)).toEqual([
+      { kind: "approve", at: "2026-11-13T10:00:00Z", by: "ram", waitedMs: 2 * 3_600_000 },
     ]);
   });
 
