@@ -1,0 +1,275 @@
+diff --git a/docs/reference/orchestrator.md b/docs/reference/orchestrator.md
+index 46c73fd..749ebf7 100644
+--- a/docs/reference/orchestrator.md
++++ b/docs/reference/orchestrator.md
+@@ -11,7 +11,10 @@ A run ends with a report (#109, [`src/core/report.ts`](../../src/core/report.ts)
+ and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to twenty `questions`
+ (`MOST_QUESTIONS`), or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
+ `done` → push, post the evidence, run the ready check; `asked` → push, post the questions in one `[writer] OPEN:`
+-note, wait (the answers that close it, and how the next run receives them, are under [Answers](#answers)); `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
++note, wait (the answers that close it, and how the next run receives them, are under [Answers](#answers)). A note that
++would not read back as written (a question cut at 500 characters, or split by a ` · ` or ` A) ` in its text) is never
++posted as `OPEN:`: the change gets `needs-human` and one `[coordinator] blocked:` note naming the question, with the
++questions as written listed (#522); `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
+ `blocked: <reason>` (with the implementer's prefix when the implementer said it). A missing, unreadable or malformed
+ report, any other field, a non-zero exit, a timeout, a cap or a failed runner is `blocked` with the reason; a reason
+ never quotes the report. The host decides from the report only after the runner has stopped, never through a
+diff --git a/scripts/lint-baseline.json b/scripts/lint-baseline.json
+index 9284f9d..f79bff8 100644
+--- a/scripts/lint-baseline.json
++++ b/scripts/lint-baseline.json
+@@ -5,7 +5,6 @@
+   "src/core/app-token.ts typescript(no-unnecessary-type-assertion)": 4,
+   "src/core/app-token.ts typescript(no-unsafe-type-assertion)": 3,
+   "src/core/finish.ts eslint(complexity)": 1,
+-  "src/core/finish.ts eslint(no-shadow)": 1,
+   "src/core/forge/api.ts eslint(complexity)": 3,
+   "src/core/forge/api.ts typescript(no-unsafe-type-assertion)": 2,
+   "src/core/forge/gitlab.ts eslint(no-shadow)": 2,
+diff --git a/src/core/finish.ts b/src/core/finish.ts
+index eed287e..1ce5d40 100644
+--- a/src/core/finish.ts
++++ b/src/core/finish.ts
+@@ -9,7 +9,10 @@
+ //            retry after a failure never posts a question twice); next: wait for a person. By default the note is one
+ //            numbered round: every question, its lettered choices with the recommended one marked, and how to answer
+ //            ("1A 2B", or "accept all"). With the project's questions setting at one-at-a-time it holds only the first;
+-//            the next run, after the answer, asks again whatever is still open (#320).
++//            the next run, after the answer, asks again whatever is still open (#320). The note is first rendered and
++//            read back as answers.ts reads it; a question it would not hold as written (cut at the field limit, or
++//            split by a " · " or " A) " in its text) is never posted as OPEN: the run ends blocked instead, with the
++//            questions as written listed in the blocked note (#522)
+ //   blocked  label needs-human first, so nothing hands the change out again; push the work in progress, but only on top
+ //            of the branch (a run stopped in a rebase never rewrites it); post the reason, in the writer's seat when
+ //            the writer said it; next: a person
+@@ -26,7 +29,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
+ import { dirname, join } from "node:path";
+ import { hostGit } from "./git.js";
+ import { agentTrailer, commitKind } from "./notes.js";
+-import { cleanField, DEFAULT_FIELD_LIMIT, renderPost, type Post, type PostField, type Seat } from "./post.js";
++import { cleanField, DEFAULT_FIELD_LIMIT, flatText, renderPost, type Post, type PostField, type Seat } from "./post.js";
+ import { roundIn, type Asked } from "./answers.js";
+ import { noAgentSettings } from "./agent-settings.js";
+ import { noCiFiles, type CiSetup } from "./ci-files.js";
+@@ -233,11 +236,17 @@ function runItems(ending: Ending): readonly string[] {
+   return ending.kind === "stalled" ? ending.last : [];
+ }
+ 
+-async function post(input: FinishInput, post: Post): Promise<Done> {
+-  return input.forge.note({ number: input.change, post });
++async function post(input: FinishInput, note: Post): Promise<Done> {
++  return input.forge.note({ number: input.change, post: note });
+ }
+ 
+-type Block = { readonly reason: string; readonly by: "writer" | "host"; readonly pushFirst: boolean };
++// items: what the blocked note lists before the run's last lines, such as the questions a round could not post
++type Block = {
++  readonly reason: string;
++  readonly by: "writer" | "host";
++  readonly pushFirst: boolean;
++  readonly items?: readonly string[];
++};
+ 
+ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> {
+   const label = await input.forge.addLabel({ number: input.change, label: NEEDS_HUMAN });
+@@ -251,7 +260,7 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>>
+     seat: block.by === "writer" ? "writer" : "coordinator",
+     title: `blocked: ${why}`,
+     fields: runFields(input.ending),
+-    items: runItems(input.ending),
++    items: [...(block.items ?? []), ...runItems(input.ending)],
+   });
+   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
+ }
+@@ -334,12 +343,12 @@ export function questionRound(questions: readonly Question[]): {
+   };
+ }
+ 
+-// roundReadsBack : "" when the round, once rendered, reads back as written: the same questions, choices and recommended
+-// one. renderPost cuts each item at its limit, and a " · " or " A) " inside a text splits it, so a question that
+-// checks can still post damaged; the problem, naming the question, otherwise (#517). Pure.
+-export function roundReadsBack(questions: readonly Question[]): string {
+-  const round = questionRound(questions);
+-  const text = renderPost({ seat: "coordinator", title: round.title, fields: [round.answer], items: round.items });
++// readsBackAs : "" when the post, once rendered, reads back as the questions it holds, as written: the same questions,
++// choices and recommended one, or a plain question's same words. renderPost cuts each item and the title at its limit,
++// and a " · " or " A) " inside a text splits it, so a question that checks can still post damaged; the problem, naming
++// the question, otherwise. The one check for the coordinator's grill (#517) and the writer's round (#522). Pure.
++export function readsBackAs(note: Post, questions: readonly Question[]): string {
++  const text = renderPost(note);
+   if (text.kind === "refused") {
+     return text.reason;
+   }
+@@ -350,14 +359,19 @@ export function roundReadsBack(questions: readonly Question[]): string {
+     : `question ${bad + 1} would not read back as written once posted: each question with its choices is cut at ${DEFAULT_FIELD_LIMIT} characters, and " · " or " A) " inside a text splits it; shorten or reword it`;
+ }
+ 
+-// readsBack : whether one question read back from the posted round is the one written. Pure.
++// readsBack : whether one question read back from the posted round is the one written: the same words, and the same
++// choices and recommended one, or none for a plain question. Pure.
+ function readsBack(q: Question, back: Asked | undefined): boolean {
+-  return back !== undefined && q.kind === "choices" && sameWords(back.text, q.question) && sameChoices(q, back);
++  if (back === undefined || !sameWords(back.text, q.question)) {
++    return false;
++  }
++  return q.kind === "choices" ? sameChoices(q, back) : back.choices.length === 0 && back.recommended === -1;
+ }
+ 
+-// sameWords : whether a text read back is the text written, as the template made it inert
++// sameWords : whether a text read back is the text written, as the template made it inert in the middle of a line: the
++// template escapes a "/" only at a line's start, and a posted question never starts one (#522)
+ function sameWords(back: string, written: string): boolean {
+-  return back === cleanField(written, Number.POSITIVE_INFINITY);
++  return back === cleanField(`x${flatText(written)}`, Number.POSITIVE_INFINITY).slice(1);
+ }
+ 
+ // sameChoices : whether a question's choices and recommended one read back as written
+@@ -371,20 +385,27 @@ function sameChoices(q: Extract<Question, { kind: "choices" }>, back: Asked): bo
+ 
+ // askPost : the one OPEN note: every question as a numbered round, or with one-at-a-time only the first, saying how
+ // many wait. One plain question keeps its old form, the question as the title. Pure.
+-function askPost(input: FinishInput, questions: readonly Question[]): Post {
+-  const posted = input.questions === "one-at-a-time" ? questions.slice(0, 1) : questions;
++function askPost(input: FinishInput, posted: readonly Question[], waiting: number): Post {
+   const run = runFields(input.ending);
+-  const waiting = waitingFields(questions.length - posted.length);
++  const next = waitingFields(waiting);
+   const [only] = posted;
+   if (posted.length === 1 && only?.kind === "plain") {
+-    return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...waiting], items: [] };
++    return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...next], items: [] };
+   }
+   const round = questionRound(posted);
+-  return { seat: "writer", title: round.title, fields: [...run, round.answer, ...waiting], items: round.items };
++  return { seat: "writer", title: round.title, fields: [...run, round.answer, ...next], items: round.items };
+ }
+ 
++// asked : post the questions as one OPEN note; a note that would not read back as written is never posted: the run is
++// blocked instead, naming the question, with the questions as written listed (#522)
+ async function asked(input: FinishInput, questions: readonly Question[]): Promise<Result<Next>> {
+-  const said = await post(input, askPost(input, questions));
++  const posted = input.questions === "one-at-a-time" ? questions.slice(0, 1) : questions;
++  const ask = askPost(input, posted, questions.length - posted.length);
++  const back = readsBackAs(ask, posted);
++  if (back !== "") {
++    return blocked(input, { reason: back, by: "host", pushFirst: false, items: posted.map(asking) });
++  }
++  const said = await post(input, ask);
+   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
+ }
+ 
+diff --git a/src/loop-cli.ts b/src/loop-cli.ts
+index 6dc15ef..4eb05d1 100644
+--- a/src/loop-cli.ts
++++ b/src/loop-cli.ts
+@@ -20,7 +20,7 @@ import type { Forge } from "./core/forge/types.js";
+ import { lintEdit } from "./core/lint-edit.js";
+ import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
+ import { questionsIn, type Question } from "./core/report.js";
+-import { roundReadsBack } from "./core/finish.js";
++import { questionRound, readsBackAs } from "./core/finish.js";
+ import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
+ import { claudeSessions } from "./core/review/live.js";
+ import { runInFolder } from "./core/review/model.js";
+@@ -226,7 +226,9 @@ function questionsOfText(text: string): Result<readonly Question[]> {
+     return { kind: "failed", reason: read.problem };
+   }
+   // a question that checks can still post damaged: refuse the file rather than post a round no reply can close (#517)
+-  const back = roundReadsBack(read.value);
++  const round = questionRound(read.value);
++  const note = { seat: "coordinator", title: round.title, fields: [round.answer], items: round.items } as const;
++  const back = readsBackAs(note, read.value);
+   return back === "" ? { kind: "ok", value: read.value } : { kind: "failed", reason: back };
+ }
+ 
+diff --git a/test/finish.test.ts b/test/finish.test.ts
+index 5057ebf..64106f5 100644
+--- a/test/finish.test.ts
++++ b/test/finish.test.ts
+@@ -189,6 +189,70 @@ describe("finishRun", () => {
+     ]);
+   });
+ 
++  describe("asked: a round that would not read back as written is never posted as OPEN (#522)", () => {
++    const WHY =
++      'would not read back as written once posted: each question with its choices is cut at 500 characters, and " · " or " A) " inside a text splits it; shorten or reword it';
++
++    async function ask(questions: readonly Question[], one = false): Promise<{ next: unknown; log: Log }> {
++      const log: Log = [];
++      const next = await finishRun({
++        outcome: { kind: "asked", questions },
++        ending: CLEAN,
++        change: 12,
++        forge: forge(log),
++        push: push(),
++        pusher: pusher(log),
++        ...(one ? { questions: "one-at-a-time" as const } : {}),
++      });
++      return { next, log };
++    }
++
++    // the log of a round blocked at question n: pushed, labelled, then one blocked note listing the questions
++    function blockedAt(n: number, items: readonly string[]): Log {
++      return [
++        "push bbbb guards=3",
++        `label ${NEEDS_HUMAN}`,
++        [`note [coordinator] blocked: question ${n} ${WHY}`, "", ...items.map((i) => `- ${i}`)].join("\n"),
++      ];
++    }
++
++    it("a question over 500 characters: blocked, naming it, with the questions as written, cut by the template", async () => {
++      const long: Question = { kind: "choices", question: "q".repeat(520), choices: ["a", "b"], recommended: 0 };
++      const { next, log } = await ask([CURRENCY, long]);
++      expect(next).toEqual({ kind: "ok", value: { kind: "needs-human", reason: `question 2 ${WHY}` } });
++      expect(log).toEqual(blockedAt(2, ["1. EUR or USD? A) EUR (recommended) · B) USD", `2. ${"q".repeat(496)}…`]));
++    });
++
++    it('a " · " in a choice, or a " A) " in a question, splits it: blocked', async () => {
++      const dot: Question = { kind: "choices", question: "Which?", choices: ["a · b", "c"], recommended: 0 };
++      expect((await ask([dot])).log).toEqual(blockedAt(1, ["1. Which? A) a · b (recommended) · B) c"]));
++      const letter: Question = { kind: "choices", question: "Plan A) or B)?", choices: ["A", "B"], recommended: 1 };
++      expect((await ask([CURRENCY, letter])).log).toEqual(
++        blockedAt(2, ["1. EUR or USD? A) EUR (recommended) · B) USD", "2. Plan A) or B)? A) A · B) B (recommended)"]),
++      );
++    });
++
++    it("a long single plain question, posted as the title, is cut: blocked", async () => {
++      const { next, log } = await ask([plain("w".repeat(600))]);
++      expect(next).toMatchObject({ kind: "ok", value: { kind: "needs-human" } });
++      expect(log).toEqual(blockedAt(1, [`1. ${"w".repeat(496)}…`]));
++    });
++
++    it("a plain question in a round, and one that the template escapes, read back and are posted", async () => {
++      const { next, log } = await ask([plain("Which region, A) or B)? · #12"), CURRENCY]);
++      expect(next).toEqual({ kind: "ok", value: { kind: "wait-for-answer", head: B } });
++      expect(log.at(-1)).toMatch(/^note \[writer\] OPEN: 2 questions/);
++    });
++
++    it("one-at-a-time checks only the question it posts", async () => {
++      const long: Question = { kind: "choices", question: "q".repeat(520), choices: ["a", "b"], recommended: 0 };
++      const later = await ask([CURRENCY, long], true);
++      expect(later.next).toEqual({ kind: "ok", value: { kind: "wait-for-answer", head: B } });
++      expect(later.log.at(-1)).toMatch(/^note \[writer\] OPEN: 1 question\n/);
++      expect((await ask([long, CURRENCY], true)).log).toEqual(blockedAt(1, [`1. ${"q".repeat(496)}…`]));
++    });
++  });
++
+   it("blocked: labels needs-human first, then pushes the work in progress on top of the branch only, then posts the reason", async () => {
+     const log: Log = [];
+     const next = await finishRun({
+diff --git a/test/loop.test.ts b/test/loop.test.ts
+index aec0f2c..6660781 100644
+--- a/test/loop.test.ts
++++ b/test/loop.test.ts
+@@ -312,6 +312,11 @@ describe("grill (#517)", () => {
+       expect(await questionsFrom(env(), put("q.json", JSON.stringify(escaped)))).toMatchObject({ kind: "ok" });
+     });
+ 
++    it("takes a question and a choice that start with a slash: they read back as written (#522)", async () => {
++      const slash = [{ question: "/merge or wait?", choices: ["/merge", "wait"], recommended: 1 }];
++      expect(await questionsFrom(env(), put("q.json", JSON.stringify(slash)))).toMatchObject({ kind: "ok" });
++    });
++
+     it("the command exits 2 naming the problem, and posts nothing, for a file that does not check", async () => {
+       const parsed = LOOP_COMMANDS.grill?.(["12", "aaaa1111", put("q.json", "[]")]);
+       const errs: string[] = [];
