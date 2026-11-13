@@ -137,6 +137,8 @@ export type Steps = {
       // why a run that is not done stopped, and the file that keeps the end of its output (#62)
       readonly why?: string;
       readonly output?: string;
+      // the run's trace, a plain file name in the ticket's folder (trace.ts, #487)
+      readonly trace?: string;
     },
     // a writer step that fails after the run still says what the run spent (#483)
     FailedSpent
@@ -1125,6 +1127,11 @@ function splitIn(ran: { readonly split?: RoundSpend }): { readonly split?: Round
   return ran.split === undefined ? {} : { split: ran.split };
 }
 
+// tracesIn : a failed run's traces, as a field to spread; none when it has none (#487). Pure.
+function tracesIn(ran: { readonly traces?: readonly string[] }): { readonly traces?: readonly string[] } {
+  return ran.traces === undefined ? {} : { traces: ran.traces };
+}
+
 // failedSpent : a writer run or a review that failed leaves its start alone, so a person looks; what it spent is still
 // recorded, as a spent line, so the caps and usage count it (#131, #483)
 async function failedSpent(
@@ -1138,7 +1145,7 @@ async function failedSpent(
   if (spend.usd > 0 || spend.tokens > 0) {
     const kept = await record({
       where: where(setup, state),
-      event: { at: at(setup), kind: "spent", phase, head, spend, ...splitIn(ran) },
+      event: { at: at(setup), kind: "spent", phase, head, spend, ...splitIn(ran), ...tracesIn(ran) },
     });
     if (kept.kind === "failed") {
       setup.log(`${state.ticket}: the failed ${phase} run's spend was not recorded: ${kept.reason}`);

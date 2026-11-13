@@ -20,6 +20,8 @@
 //     printed one is unmeasured
 //   6 what the run said last and the end of its output (#62): the result event's text, or its stderr's last line, and
 //     up to OUTPUT_LINES lines of its stdout and stderr, so a run the host blocks can say why (step.ts keeps them)
+//   7 its whole stdout, line by line, to the run's trace as it comes (dispatch/trace.ts, #487); step.ts opens and
+//     closes it
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { Argv } from "../project.js";
@@ -49,6 +51,7 @@ import {
   type Spend,
   type Stream,
 } from "../dispatch/spend.js";
+import type { TraceSink } from "../dispatch/trace.js";
 
 export type Claude = {
   // "" for no cap (FACTORY_MAX_USD)
@@ -88,6 +91,8 @@ export type WriterRun = {
   readonly editScope: readonly string[];
   readonly completion: Completion;
   readonly stallMs: number;
+  // where the run's whole output goes as it comes, scrubbed (dispatch/trace.ts, #487)
+  readonly trace: TraceSink;
 };
 
 export type Ended = {
@@ -105,6 +110,8 @@ export type Ended = {
   readonly said: string;
   // the end of what the run printed (#62): its stdout's last lines, then its stderr's; raw, as said
   readonly output: readonly string[];
+  // the run's trace, once step.ts has closed it (#487); none when none was kept
+  readonly trace?: string;
 };
 
 // only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
@@ -294,13 +301,15 @@ async function inBox(run: WriterRun): Promise<InBox> {
       argv: claudeArgv(run.claude, run.settings, run.plugins, run.tools, session.value.place),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
-      // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it
+      // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it;
+      // the whole output goes to the run's trace as it comes (#487)
       keep: "tail",
       watch: (chunk) => {
         heard.at = Date.now();
         heard.tail = tailOf(heard.tail, chunk);
         heard.kept = tailUpTo(heard.kept, chunk, OUTPUT_LINES);
         heard.stream = streamOf(heard.stream, chunk);
+        run.trace.write(chunk);
       },
     },
   });

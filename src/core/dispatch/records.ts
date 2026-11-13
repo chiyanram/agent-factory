@@ -18,6 +18,9 @@
 // split{finders, verify}: each finder's spend by its lens and the verify pass's, which sum to its spend (#337); an
 // older line has none.
 //
+// A writer "ended" line names the run's trace, a plain file name in <ticket>/ (trace.ts, #487); a "spent" line names
+// the failed run's traces. An older line has none.
+//
 // A design review (#236) runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
 // a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
 // findings or what the verify pass kept, and its spend, whether it finished or failed. design.ts reads them per hashes.
@@ -130,6 +133,8 @@ export type Event =
       readonly why?: string;
       // the file under <home>/runs/<project>/<ticket>/ that keeps the end of a host-blocked run's output (#62)
       readonly output?: string;
+      // the run's trace, a plain file name in the ticket's folder (trace.ts, #487); none on an older line
+      readonly trace?: string;
     }
   // why: the first row that failed, "" when it passed
   | {
@@ -183,6 +188,8 @@ export type Event =
       readonly spend: Spend;
       // a review round's spend per run (#337); none on another phase's line or an older one
       readonly split?: RoundSpend;
+      // the failed run's traces, plain file names in the ticket's folder (trace.ts, #487); none on an older line
+      readonly traces?: readonly string[];
     }
   // one run of a design review (#236), at the spec and design hashes it read
   | {
@@ -411,11 +418,27 @@ function spentOf(raw: unknown, at: string): Event | Bad {
   const phase = oneOf(raw, "phase", PHASES);
   const head = str(raw, "head");
   const spend = spendIn(prop(raw, "spend"));
-  const split = splitField(raw);
   if (phase === BAD || head === BAD) {
     return BAD;
   }
-  return spend === BAD || split === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...split };
+  const extras = spentExtras(raw);
+  return spend === BAD || extras === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...extras };
+}
+
+// spentExtras : a spent line's optional split and traces, as fields to spread, or BAD
+function spentExtras(raw: unknown): Pick<Extract<Event, { kind: "spent" }>, "split" | "traces"> | Bad {
+  const split = splitField(raw);
+  const traces = tracesField(raw);
+  return split === BAD || traces === BAD ? BAD : { ...split, ...traces };
+}
+
+// tracesField : a line's traces, as a field to spread: none on a line that has none (#487)
+function tracesField(raw: unknown): { readonly traces?: readonly string[] } | Bad {
+  const traces = prop(raw, "traces");
+  if (traces === undefined) {
+    return {};
+  }
+  return Array.isArray(traces) && traces.every((t) => typeof t === "string") ? { traces } : BAD;
 }
 
 // cardField : a line's role card hash, as a field to spread: none on a line that has none (#236)
@@ -451,20 +474,31 @@ function textOf(raw: unknown, name: string): string | undefined | Bad {
   return value === undefined || typeof value === "string" ? value : BAD;
 }
 
-// whyFields : a writer line's why and output file, as fields to spread: none on a line that has none (#62)
-function whyFields(raw: unknown): { readonly why?: string; readonly output?: string } | Bad {
+// whyFields : a writer line's why, output file and trace, as fields to spread: none on a line that has none (#62,
+// #487)
+function whyFields(raw: unknown): { readonly why?: string; readonly output?: string; readonly trace?: string } | Bad {
   const why = textOf(raw, "why");
   const output = textOf(raw, "output");
-  if (why === BAD || output === BAD) {
-    return BAD;
-  }
-  return { ...(why === undefined ? {} : { why }), ...(output === undefined ? {} : { output }) };
+  const trace = textOf(raw, "trace");
+  return why === BAD || output === BAD || trace === BAD
+    ? BAD
+    : { ...(why === undefined ? {} : { why }), ...outputAndTrace(output, trace) };
+}
+
+// outputAndTrace : a writer line's output file and trace, as fields to spread: none for one it has not. Pure.
+function outputAndTrace(
+  output: string | undefined,
+  trace: string | undefined,
+): { readonly output?: string; readonly trace?: string } {
+  return { ...(output === undefined ? {} : { output }), ...(trace === undefined ? {} : { trace }) };
 }
 
 // notesFields : a writer line's stale cites, why and output file, as fields to spread, or BAD
 function notesFields(
   raw: unknown,
-): { readonly stale?: readonly string[]; readonly why?: string; readonly output?: string } | Bad {
+):
+  | { readonly stale?: readonly string[]; readonly why?: string; readonly output?: string; readonly trace?: string }
+  | Bad {
   const stale = staleField(raw);
   const why = whyFields(raw);
   return stale === BAD || why === BAD ? BAD : { ...stale, ...why };
@@ -474,7 +508,9 @@ function notesFields(
 // fields to spread, or BAD
 function writerExtras(
   raw: unknown,
-): Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred" | "stale" | "why" | "output"> | Bad {
+):
+  | Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred" | "stale" | "why" | "output" | "trace">
+  | Bad {
   const spend = spendField(raw);
   const card = cardField(raw);
   const deferred = deferredField(raw);

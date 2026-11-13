@@ -36,6 +36,7 @@ import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start } from ".
 import { readTools, settingsOf, TARGET_REF, toolLines } from "./tools.js";
 import { knownFor, type Known } from "../onboard/known.js";
 import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js";
+import { NO_TRACE, openTrace, type TraceKept, type TraceSink } from "../dispatch/trace.js";
 import { writerRun, type Ended } from "./run.js";
 import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
 import { ciText, taskText, verifyText } from "./task.js";
@@ -108,6 +109,8 @@ export type WriterOut = {
   readonly why?: string;
   // the file that keeps the end of a host-blocked run's output (why.ts keepOutput, #62)
   readonly output?: string;
+  // the run's trace, a plain file name in the ticket's folder (dispatch/trace.ts, #487); none when none was kept
+  readonly trace?: string;
 };
 
 // the project's own instructions: claude loads none of the branch's files (--setting-sources user, #110), so the writer
@@ -207,6 +210,11 @@ function spendField(spend: Spend | "unmeasured"): { readonly spend?: Spend } {
   return spend === "unmeasured" ? {} : { spend };
 }
 
+// traceField : the run's trace, as a field to spread; none when none was kept (#487). Pure.
+function traceField(trace: string | undefined): { readonly trace?: string } {
+  return trace === undefined ? {} : { trace };
+}
+
 // spentOn : a host step that failed after the run still says what the run spent, so it is recorded (#483). Pure.
 function spentOn(result: Result<WriterOut>, ended: Result<Ended> | FailedSpent): Result<WriterOut> | FailedSpent {
   if (result.kind === "ok") {
@@ -215,7 +223,8 @@ function spentOn(result: Result<WriterOut>, ended: Result<Ended> | FailedSpent):
   if (ended.kind === "failed") {
     return ended;
   }
-  return spentFailure(result.reason, ended.value.spend);
+  const failed = spentFailure(result.reason, ended.value.spend);
+  return ended.value.trace === undefined ? failed : { ...failed, traces: [ended.value.trace] };
 }
 
 // outOf : what the dispatcher records, from what the host did with the run. Pure.
@@ -226,6 +235,7 @@ export function outOf(ended: Ended, next: Next): WriterOut {
     hung: ended.ending.kind === "hung",
     ...spendField(ended.spend),
     ...deferredOf(ended.outcome),
+    ...traceField(ended.trace),
   };
   switch (next.kind) {
     case "ready-check":
@@ -416,6 +426,7 @@ async function finished(
         hung: ended.ending.kind === "hung",
         ...spendField(ended.spend),
         ...whyField(whyOf(outcome, ended.said)),
+        ...traceField(ended.trace),
       },
     };
   }
@@ -578,7 +589,9 @@ async function inClone(
     tools: [...knowledgeLines(known), ...toolLines(tools)],
     ...programsOf(setup),
   });
-  const ended = await writerRun({
+  const trace = await writerTrace(setup, input);
+  const ran = await writerRun({
+    trace,
     setup: setup.box,
     clone: clone.value,
     prompt,
@@ -592,6 +605,7 @@ async function inClone(
     completion: setup.settings.completion,
     stallMs: setup.settings.stallMs,
   });
+  const ended = withTrace(ran, await trace.close());
   const result =
     ended.kind === "ok"
       ? await finished(setup, input, p, { clone: clone.value, ended: ended.value, mode: work.mode })
@@ -599,6 +613,24 @@ async function inClone(
   const out = spentOn(await withOutput(setup, input, ended, withStale(withCard(result, work), known)), ended);
   const removed = await removeClone(clone.value.dir);
   return removed.kind === "ok" ? out : spentOn(removed, ended);
+}
+
+// writerTrace : the run's trace, opened in the ticket's folder; one that cannot be opened keeps nothing (#487)
+async function writerTrace(setup: WriterSetup, input: Input): Promise<TraceSink> {
+  const at = { home: setup.home, project: setup.project, ticket: input.ticket };
+  const opened = await openTrace({ ...at, kind: "writer", at: Date.now() });
+  return opened.kind === "ok" ? opened.value : NO_TRACE;
+}
+
+// withTrace : the run's end with its trace named, when one was kept (#487); a trace that could not be kept leaves the
+// end as it was, and its record line names none. Pure.
+function withTrace(ended: Result<Ended> | FailedSpent, kept: Result<TraceKept>): Result<Ended> | FailedSpent {
+  if (kept.kind === "failed") {
+    return ended;
+  }
+  return ended.kind === "ok"
+    ? { kind: "ok", value: { ...ended.value, trace: kept.value.name } }
+    : { ...ended, traces: [kept.value.name] };
 }
 
 // toKeep : the run's output to keep, for a run the host blocked (#62); none for any other. Pure.
