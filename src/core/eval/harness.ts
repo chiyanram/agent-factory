@@ -20,6 +20,7 @@ import { readKept } from "../kept.js";
 import type { Model } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
 import { JUDGE_MODEL } from "../review/pinned.js";
+import type { Aim } from "./bar.js";
 import { MAX_FINDERS, reviewSetup } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
@@ -55,6 +56,8 @@ export type EvalSettings = {
   readonly judgeModel: string;
   readonly judgePrompt: string;
   readonly drafts: boolean;
+  // what the change this pass proves aims at (ADR-0021), recorded in the results file; none for a baseline
+  readonly aim: Aim | "none";
 };
 
 export type EvalInput = {
@@ -75,7 +78,10 @@ export type Written = { readonly path: string; readonly partial: boolean; readon
 
 // evalSettings : the eval's own settings from the environment; a review run with no cap is given one, since an
 // uncapped run could spend anything (budget.ts)
-export function evalSettings(env: NodeJS.ProcessEnv, flags: { readonly drafts: boolean }): EvalSettings {
+export function evalSettings(
+  env: NodeJS.ProcessEnv,
+  flags: { readonly drafts: boolean; readonly aim: Aim | "none" },
+): EvalSettings {
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
     judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
@@ -363,6 +369,7 @@ async function pass(ctx: Ctx, list: readonly Case[], skipped: readonly Row[]): P
     spent: ctx.purse.spent(),
     stopped: ctx.purse.stopped(),
     drafts: ctx.settings.drafts,
+    aim: ctx.settings.aim,
     skipped: [
       ...skipped,
       ...list.slice(records.length).map((c) => ({ name: c.name, kind: c.kind, status: "not run: the cap" })),

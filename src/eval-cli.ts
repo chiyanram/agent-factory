@@ -7,18 +7,21 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Result } from "./core/forge/api.js";
+import { AIMS, type Aim } from "./core/eval/bar.js";
 import { evalReviewer, evalSettings, type EvalInput, type EvalSettings, type Written } from "./core/eval/harness.js";
 import { claudeModel, runInFolder } from "./core/review/model.js";
 import { claudeEnv, unpinnedModel } from "./core/review/settings.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
-export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts]
+export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--aim quality|cost]
                                the automated review's eval (ADR-0015): each case the operator approved in
                                evals/reviewer/cases.md, 3 runs of the real review round on a throwaway clone, Act on
                                findings matched with the seeds by place and judge; writes
                                evals/reviewer/results/<date>-<sha>.json. <repo> is this repository's checkout (default
                                .). --drafts runs draft cases too (never proof). It stops before it spends over $100 and
-                               marks that result partial, never proof. Host
+                               marks that result partial, never proof. --aim says what the change it proves aims
+                               at, as the proof check needs (ADR-0021): quality, recall above the baseline's plus
+                               the noise; cost, a cheaper pass. Leave it out for a baseline. Host
                                only: refused in CI. A human runs it; the coordinator's settings deny it. Exit 0 written, 3 written but partial, 1 refused
 `;
 
@@ -31,6 +34,7 @@ export type EvalIo = {
 type Parsed = {
   readonly root: string;
   readonly drafts: boolean;
+  readonly aim: Aim | "none";
 };
 
 function parsed(argv: readonly string[]): Parsed | "usage" {
@@ -38,13 +42,24 @@ function parsed(argv: readonly string[]): Parsed | "usage" {
     const { values, positionals } = parseArgs({
       args: [...argv],
       allowPositionals: true,
-      options: { drafts: { type: "boolean" } },
+      options: { drafts: { type: "boolean" }, aim: { type: "string" } },
     });
-    const [what, root = ".", ...rest] = positionals;
-    return what === "reviewer" && rest.length === 0 ? { root: resolve(root), drafts: values.drafts === true } : "usage";
+    const aim = aimOf(values.aim);
+    return aim === "bad" ? "usage" : reviewerOf(positionals, values.drafts === true, aim);
   } catch {
     return "usage";
   }
+}
+
+// reviewerOf : `reviewer [<repo>]` with its flags, or usage for any other words
+function reviewerOf(positionals: readonly string[], drafts: boolean, aim: Aim | "none"): Parsed | "usage" {
+  const [what, root = ".", ...rest] = positionals;
+  return what === "reviewer" && rest.length === 0 ? { root: resolve(root), drafts, aim } : "usage";
+}
+
+// aimOf : the --aim value; none when it is not given, bad when it is not an aim
+function aimOf(value: string | undefined): Aim | "none" | "bad" {
+  return value === undefined ? "none" : (AIMS.find((a) => a === value) ?? "bad");
 }
 
 const DOLLARS = /^\d+(\.\d+)?$/;
@@ -136,7 +151,7 @@ function note(w: Written): string {
 export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<number> {
   const p = parsed(argv);
   if (p === "usage") {
-    io.err(`usage: agent-factory eval reviewer [<repo>] [--drafts]\n`);
+    io.err(`usage: agent-factory eval reviewer [<repo>] [--drafts] [--aim quality|cost]\n`);
     return 64;
   }
   const refused = refusal(io.env);
@@ -144,5 +159,5 @@ export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<
     io.err(`agent-factory eval: ${refused}\n`);
     return 1;
   }
-  return run(p, evalSettings(io.env, { drafts: p.drafts }), io);
+  return run(p, evalSettings(io.env, { drafts: p.drafts, aim: p.aim }), io);
 }

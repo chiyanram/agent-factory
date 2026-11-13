@@ -88,6 +88,7 @@ Exit 0 when the results file is written, 3 when it is written but partial, 1 whe
 | `partial`, `partial_why` | stopped at the cap, a case that could not be set up, or a run that failed |
 | `drafts_included`, `proof` | `proof` is true only with no draft and not partial |
 | `cap_usd`, `cost_usd` | the cap and what the pass spent, failed runs included |
+| `aim` | what the change the pass proves aims at, `quality` or `cost` (`--aim`, [ADR-0021](../../docs/adr/0021-keep-a-change-only-by-experiment.md)); `null` for a baseline |
 | `inputs` | the find, rule, logic and judge models; the git blob SHA of each prompt; the rulebook checkout's commit |
 | `cases` | the cases run, and the ones skipped (draft, or not run because of the cap) |
 | `recall_at_act_on` | seeds matched in Act on over seeds × runs: overall, `by_category` and `by_severity` |
