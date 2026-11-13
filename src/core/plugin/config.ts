@@ -9,8 +9,8 @@
 // "plugins" was the old name of "connectors" (#232). A "plugins" that holds a map is still read as the connectors for
 // one release, and the settings layers warn about it; a "plugins" list is the plugins a project installs.
 //
-// A policy names only the writes the coordinator may request: tracker.comment, tracker.create and notify. forge.write
-// is the dispatcher's and has no policy here. A cap counts the writes since the ticket's latest approval (writes.ts).
+// A policy names only the writes the coordinator may request: tracker.comment, tracker.create, notify and spec.body,
+// whose mode is confirm or deny, never allow (policy.ts, #542). forge.write is the dispatcher's and has no policy here. A cap counts the writes since the ticket's latest approval (writes.ts).
 // What the file leaves out keeps the defaults (policy.ts); a field that is there but not valid is refused.
 
 import type { Result } from "../forge/api.js";
@@ -21,14 +21,27 @@ import { isPoint, PLUGIN_NAME, type ExtensionPoint } from "./contract.js";
 import {
   DEFAULT_POLICY,
   MAX_CAP,
+  modesOf,
   POLICY_POINTS,
+  POST_POINTS,
   type Mode,
   type Policy,
   type PolicyPoint,
+  type PostPoint,
   type Rule,
 } from "./policy.js";
 
-export { DEFAULT_POLICY, MAX_CAP, POLICY_POINTS, type Mode, type Policy, type PolicyPoint, type Rule };
+export {
+  DEFAULT_POLICY,
+  MAX_CAP,
+  POLICY_POINTS,
+  POST_POINTS,
+  type Mode,
+  type Policy,
+  type PolicyPoint,
+  type PostPoint,
+  type Rule,
+};
 
 export type PluginConfig = {
   // the connector that serves each extension point, from "connectors" (or the old "plugins" map)
@@ -42,6 +55,11 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
 
 export function isPolicyPoint(value: unknown): value is PolicyPoint {
   return typeof value === "string" && POLICY_POINTS.some((p) => p === value);
+}
+
+// isPostPoint : a write whose text is a post.ts template, sent through a connector (request.ts)
+export function isPostPoint(value: unknown): value is PostPoint {
+  return typeof value === "string" && POST_POINTS.some((p) => p === value);
 }
 
 function isMap(value: unknown): value is object {
@@ -85,16 +103,16 @@ function connectorMap(
     : { kind: "ok", value: new Map(pairs.filter((p): p is readonly [ExtensionPoint, string] => p !== BAD)) };
 }
 
-function modeOf(value: unknown): Mode | Bad {
-  return value === "allow" || value === "confirm" || value === "deny" ? value : BAD;
+function modeOf(point: PolicyPoint, value: unknown): Mode | Bad {
+  return modesOf(point).find((m) => m === value) ?? BAD;
 }
 
 function capOf(value: unknown): number | Bad {
   return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= MAX_CAP ? Number(value) : BAD;
 }
 
-function ruleOf(value: unknown): Rule | Bad {
-  const mode = modeOf(prop(value, "mode"));
+function ruleOf(point: PolicyPoint, value: unknown): Rule | Bad {
+  const mode = modeOf(point, prop(value, "mode"));
   const cap = capOf(prop(value, "cap"));
   return isMap(value) && Object.keys(value).length === 2 && mode !== BAD && cap !== BAD ? { mode, cap } : BAD;
 }
@@ -106,9 +124,10 @@ function entryOf(path: string, [point, value]: readonly [string, unknown]): Resu
   if (!isPolicyPoint(point)) {
     return failed(`${path}: "policy" names ${JSON.stringify(point)}; only ${POLICY_POINTS.join(", ")} have a policy`);
   }
-  const rule = ruleOf(value);
+  const rule = ruleOf(point, value);
+  const modes = modesOf(point).map((m) => JSON.stringify(m));
   return rule === BAD
-    ? failed(`${path}: "policy.${point}" must be {"mode": "allow" | "confirm" | "deny", "cap": 1 to ${MAX_CAP}}`)
+    ? failed(`${path}: "policy.${point}" must be {"mode": ${modes.join(" | ")}, "cap": 1 to ${MAX_CAP}}`)
     : { kind: "ok", value: [point, rule] };
 }
 

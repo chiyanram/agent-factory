@@ -144,9 +144,11 @@ there.
 - `repoCommits`: `true` lets the factory commit the spec, the brief and the glossary to the product repo (P9 in
   [docs/DESIGN.md](../DESIGN.md)). It is off by default, and refused when `work` is `true`. **Today:** nothing
   commits them yet; the setting is only checked.
-- `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create` and `notify`, a `mode`
-  (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](connectors.md#writes)). What it leaves out keeps the default:
-  `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3. A `forge.write` policy is refused.
+- `policy`: per write the coordinator may request, `tracker.comment`, `tracker.create`, `notify` and `spec.body`, a
+  `mode` (`allow`, `confirm` or `deny`) and a `cap` from 1 to 20 ([Writes](connectors.md#writes)). What it leaves out
+  keeps the default: `tracker.comment` allow 5, `tracker.create` confirm 1, `notify` allow 3, `spec.body` confirm 10.
+  `spec.body`, a spec change sent as the issue's new body (#542), is `confirm` or `deny` only: `allow` is refused in
+  every layer, since it replaces what the person approves. A `forge.write` policy is refused.
 - With no file, the gate is git host CI and neither the ready check nor the verifier runs, and no write goes out. A file
   with none of `gate`, `verify`, `ready` and `egress`, such as the one `project init` writes, is read the same way
   for those. Once one of them is there, a file that is not valid stops `dispatch` with the reason, so a typo never

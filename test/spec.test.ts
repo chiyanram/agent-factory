@@ -3,7 +3,9 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   checkSpec,
+  MAX_BODY,
   normalise,
+  postableSpec,
   prBlock,
   readSpec,
   specHash,
@@ -309,5 +311,31 @@ describe("the project's spec store (#381)", () => {
     expect(await read("PROJ-1")).toMatchObject({ kind: "refused", reason: expect.stringContaining("issue number") });
     expect(await read("02")).toMatchObject({ kind: "refused" });
     expect(opened.n).toBe(1);
+  });
+});
+
+describe("postableSpec (#542)", () => {
+  const BODY = "# 6: a title\r\n\n## Intent\n\nSee #12 and mail a@b.example; `@types/node` and `/close` in code.\n";
+
+  it("passes a body whose characters show, with CRLF line ends, references, mail addresses and code", () => {
+    expect(postableSpec(BODY)).toEqual([]);
+    expect(postableSpec(`${BODY}\n\`\`\`\n/close\n@alice\n\`\`\`\n`)).toEqual([]);
+  });
+
+  it("names each line that would run a GitLab quick action or notify a person, outside code", () => {
+    expect(postableSpec(`${BODY}/close\n  /assign me\nask (@alice) and @bob.\n`)).toEqual([
+      'line 6 starts with "/", which GitLab may run as a quick action: put it in backticks',
+      'line 7 starts with "/", which GitLab may run as a quick action: put it in backticks',
+      "line 8 mentions @alice, whom the git host would notify: put it in backticks",
+    ]);
+  });
+
+  it("refuses a lone carriage return, a hidden character, a text not in NFC, and a body past the git host's limit", () => {
+    expect(postableSpec(`${BODY}a\rb\n`)).toEqual([expect.stringContaining("do not show")]);
+    expect(postableSpec(`${BODY}\u200b\n`)).toEqual([expect.stringContaining("do not show")]);
+    expect(postableSpec(`${BODY}e\u0301\n`)).toEqual([expect.stringContaining("NFC")]);
+    expect(postableSpec(`${BODY}${"x".repeat(MAX_BODY)}`)).toEqual([
+      expect.stringContaining(`a git host keeps at most ${MAX_BODY}`),
+    ]);
   });
 });

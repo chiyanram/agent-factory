@@ -13,7 +13,7 @@
 // variable, the lowest layer (#254); a module reads its resolved value only through machine.ts, never the variable
 // (test/settings-read.test.ts fails on a direct read).
 
-import { DEFAULT_POLICY, MAX_CAP, MODES, POLICY_POINTS } from "../plugin/policy.js";
+import { DEFAULT_POLICY, MAX_CAP, modesOf, POLICY_POINTS } from "../plugin/policy.js";
 import { checkPluginList } from "../process/plugins.js";
 import { TEST_FILES } from "../ready/floor.js";
 import { checkLenses } from "../review/lens-list.js";
@@ -82,8 +82,8 @@ function policyKeys(point: (typeof POLICY_POINTS)[number]): readonly FileKey[] {
       where: "file",
       path: ["policy", point, "mode"],
       class: "ladder",
-      ladder: MODES,
-      check: oneOf(MODES),
+      ladder: modesOf(point),
+      check: oneOf(modesOf(point)),
       fallback: DEFAULT_POLICY[point].mode,
       about: `whether the coordinator may request ${point} (ADR-0014 P5)`,
     },
