@@ -72,7 +72,7 @@ describe("usage sums", () => {
       spent("2026-11-09T11:30:00Z", 0, { project: "atlas", spend: "unmeasured" }),
     ];
     const lines = usageLines({ runs, now: NOW, windowHours: 5 });
-    expect(lines[0]).toBe("usage at 2026-11-09T12:00:00.000Z: days and months in UTC, the window is the last 5 h");
+    expect(lines[0]).toBe("usage at 2026-11-09 12:00 UTC: days and months in UTC, the window is the last 5 h");
     expect(lines.slice(1, -2)).toEqual([
       "          kind         today               window              month",
       "all       implementer  $3.00 3000 tok +1?  $1.00 1000 tok +1?  $7.00 7000 tok +1?",
@@ -270,6 +270,36 @@ describe("agent-factory usage", () => {
     expect(await usageCommand(["ledger"], io)).toBe(1);
     expect(out.join("")).toContain("  PROJ-1  implementer  $2.00 10 tok  $2.00 10 tok  $2.00 10 tok");
     expect(err.join("")).toContain("PROJ-2.jsonl line 1 is not a record");
+  });
+
+  it("shows each ticket's touches, waits, rework rounds and cost, in the reader's zone (#487)", async () => {
+    write("ledger", "PROJ-1", [
+      { ...writerEnded("2026-11-09T08:00:00Z", { usd: 2, tokens: 10 }), outcome: "asked" },
+      { at: "2026-11-09T09:30:00Z", kind: "answered", spec: "", answers: [] },
+      writerEnded("2026-11-09T10:00:00Z", undefined, "rework"),
+    ]);
+    const out: string[] = [];
+    const io = {
+      env: { TZ: "Asia/Tokyo" },
+      home,
+      now: () => NOW,
+      out: (t: string) => out.push(t),
+      err: () => undefined,
+    };
+    expect(await usageCommand(["ledger"], io)).toBe(0);
+    const text = out.join("");
+    expect(text).toContain("usage at 2026-11-09 21:00 Asia/Tokyo: days and months in Asia/Tokyo");
+    expect(text).toContain("  ledger PROJ-1: cost $2.00 10 tok +1? · rework rounds 1 · touches 1 · waiting 1h 30m\n");
+    expect(text).toContain("    answer at 2026-11-09 18:30 Asia/Tokyo, waited 1h 30m\n");
+  });
+
+  it("starts today and the month at the reader's midnight", () => {
+    // 21:00 in Tokyo on the 9th
+    expect(periodsAt(NOW, 5, { name: "Asia/Tokyo" })).toEqual({
+      day: Date.parse("2026-11-08T15:00:00Z"),
+      window: Date.parse("2026-11-09T07:00:00Z"),
+      month: Date.parse("2026-10-31T15:00:00Z"),
+    });
   });
 
   it("reads the window from window.hours, and refuses a bad one or a bad project name", async () => {

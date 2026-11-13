@@ -1,7 +1,7 @@
 // usage — what the runs spent, from the run records (#131; ADR-0012 S16): today, the current window and the month, per
 // project and per ticket, and per run kind (#337). Only the orchestrator's runs write records, so a review or eval run
 // by hand is not in it.
-// Days and months are UTC; the window is the last window.hours hours (default 5), the length of a subscription's usage
+// Days and months are the reader's (zone.ts; records stay UTC, #487); the window is the last window.hours hours (default 5), the length of a subscription's usage
 // window. A run whose record has no spend is counted apart as unmeasured, never as free.
 
 import { readdir } from "node:fs/promises";
@@ -11,6 +11,8 @@ import type { Result } from "../forge/api.js";
 import { readRecords, type DesignStep, type Event, type Phase, type WriterMode } from "./records.js";
 import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
+import { tallyOf, type TicketTally } from "./touches.js";
+import { dayStart, monthStart, shownAt, UTC, type Zone } from "../zone.js";
 
 // what a run was, in the glossary's role names (#337), as far as its record tells: an automated review's round line
 // splits its spend into each finder's, by lens, and the verify pass's; an older round line that has no split is one
@@ -60,6 +62,8 @@ export type ActedSeen = { readonly project: string; readonly at: string; readonl
 export type Spends = {
   readonly runs: readonly Spent[];
   readonly acted: readonly ActedSeen[];
+  // each ticket's touches, waits, rework rounds and cost (touches.ts, #487)
+  readonly tallies: readonly TicketTally[];
   readonly problems: readonly string[];
 };
 
@@ -149,7 +153,7 @@ function splitRuns(split: RoundSpend, where: Pick<Spent, "project" | "ticket" | 
   ];
 }
 
-type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[] };
+type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[]; readonly tally: TicketTally };
 
 // ticketSpends : every measured or unmeasured run of one ticket, and its acted-on rows, or why its records cannot be
 // read
@@ -158,13 +162,15 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
   if (events.kind === "failed") {
     return events;
   }
+  const runs = events.value.filter(spending).flatMap((e) => spentOf(e, project, ticket));
   return {
     kind: "ok",
     value: {
-      runs: events.value.filter(spending).flatMap((e) => spentOf(e, project, ticket)),
+      runs,
       acted: events.value.flatMap((e) =>
         e.kind === "review-ended" && e.acted !== undefined ? [{ project, at: e.at, rows: e.acted.rows }] : [],
       ),
+      tally: tallyOf({ project, ticket }, events.value, totalOf(runs, 0)),
     },
   };
 }
@@ -174,6 +180,7 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
 export async function readSpends(input: { readonly home: string; readonly project?: string }): Promise<Spends> {
   const runs: Spent[] = [];
   const acted: ActedSeen[] = [];
+  const tallies: TicketTally[] = [];
   const problems: string[] = [];
   for (const project of await projectsOf(input.home, input.project)) {
     for (const ticket of await names(join(input.home, "runs", project), ".jsonl")) {
@@ -181,25 +188,21 @@ export async function readSpends(input: { readonly home: string; readonly projec
       if (read.kind === "ok") {
         runs.push(...read.value.runs);
         acted.push(...read.value.acted);
+        tallies.push(read.value.tally);
       } else {
         problems.push(read.reason);
       }
     }
   }
-  return { runs, acted, problems };
+  return { runs, acted, tallies, problems };
 }
 
 // Periods : the start of today, of the current window and of the month, in ms since the epoch
 export type Periods = { readonly day: number; readonly window: number; readonly month: number };
 
-// periodsAt : the periods at now (ms), UTC. Pure.
-export function periodsAt(now: number, windowHours: number): Periods {
-  const d = new Date(now);
-  return {
-    day: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
-    window: now - windowHours * 3_600_000,
-    month: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1),
-  };
+// periodsAt : the periods at now (ms), the day and month the reader's (zone.ts, #487). Pure.
+export function periodsAt(now: number, windowHours: number, zone: Zone = UTC): Periods {
+  return { day: dayStart(now, zone), window: now - windowHours * 3_600_000, month: monthStart(now, zone) };
 }
 
 // Total : the measured spend and the unmeasured runs of a set of runs
@@ -270,8 +273,10 @@ export function usageLines(input: {
   readonly runs: readonly Spent[];
   readonly now: number;
   readonly windowHours: number;
+  readonly zone?: Zone;
 }): readonly string[] {
-  const p = periodsAt(input.now, input.windowHours);
+  const zone = input.zone ?? UTC;
+  const p = periodsAt(input.now, input.windowHours, zone);
   // the window can reach back into the month before
   const month = input.runs.filter((r) => Date.parse(r.at) >= Math.min(p.month, p.window));
   const table: (readonly string[])[] = [["", "kind", "today", "window", "month"], ...groupRows("all", month, p)];
@@ -290,7 +295,7 @@ export function usageLines(input: {
     }
   }
   return [
-    `usage at ${new Date(input.now).toISOString()}: days and months in UTC, the window is the last ${input.windowHours} h`,
+    `usage at ${shownAt(new Date(input.now).toISOString(), zone)}: days and months in ${zone.name}, the window is the last ${input.windowHours} h`,
     ...aligned(table),
     "+N? is N runs with no spend reported (stopped before their result): not in the sums",
     "automated review is an older round's finder runs and verify pass, recorded before their spend was split (#337)",
@@ -304,8 +309,12 @@ function rateText(name: string, r: Rate): string {
 // actedLines : the automated review's acted-on rate this month, all and per project, per lens, category and bucket
 // (#220).
 // Pure.
-export function actedLines(input: { readonly acted: readonly ActedSeen[]; readonly now: number }): readonly string[] {
-  const month = periodsAt(input.now, 1).month;
+export function actedLines(input: {
+  readonly acted: readonly ActedSeen[];
+  readonly now: number;
+  readonly zone?: Zone;
+}): readonly string[] {
+  const month = periodsAt(input.now, 1, input.zone).month;
   const seen = input.acted.filter((a) => Date.parse(a.at) >= month);
   if (seen.length === 0) {
     return [];
