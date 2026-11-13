@@ -3,8 +3,10 @@
 //   named-back   an ADR whose status says it amends, refines, supersedes, replaces, extends, widens or changes the
 //                order in an earlier one must be named in that earlier ADR's header (the text before its first "## "
 //                heading), so a reader of the old decision finds the new one
-//   in-place     an ADR that is on the default branch keeps its decision: below its header, only lines that hold a
-//                **Today:** note may change. Anything else is a new ADR (FACTORY_BASE_REF, else
+//   in-place     an ADR that is on the default branch keeps its decision: below its header, only its **Today:** notes
+//                may change. A note runs from its marker to the end of its paragraph (a blank line, a heading, a table
+//                row, a list item or a code fence ends it), or in a table row to the end of its cell; the text before
+//                the marker stays frozen (#605). Anything else is a new ADR (FACTORY_BASE_REF, else
 //                origin/<GITHUB_BASE_REF>, else origin/main, at the merge base, as check-musts reads it)
 //
 //   node scripts/check-adrs.ts [ROOT]     (make lint)
@@ -54,9 +56,49 @@ export function namedBack(adrs: readonly Adr[]): readonly string[] {
   );
 }
 
-// kept : a body's lines that carry its decision: every line but those with a **Today:** note. Pure.
+const MARK = "**Today:**";
+
+// ends : a line that ends a running note, and is itself frozen: a blank line, a table row, a heading, a list item or
+// a code fence. Pure.
+function ends(line: string): boolean {
+  return /^\s*$|^\s*\||^#|^\s*([-*]|\d+\.)\s|^\s*```/.test(line);
+}
+
+// cellEnd : where the table cell that starts at `from` ends: its next "|" that no backslash escapes, or the line's
+// end. Pure.
+function cellEnd(line: string, from: number): number {
+  const at = line.slice(from).search(/(?<!\\)\|/);
+  return at < 0 ? line.length : from + at;
+}
+
+// cutNote : the frozen text of a line that holds a note, the note cut out: the text before its marker, and in a table
+// row the cells after its own. runs: whether the note goes on to the next line, as a plain line's does. Pure.
+function cutNote(line: string): { readonly frozen: string; readonly runs: boolean } {
+  const at = line.indexOf(MARK);
+  const before = line.slice(0, at);
+  if (!line.trimStart().startsWith("|")) {
+    return { frozen: before.trimEnd(), runs: true };
+  }
+  return { frozen: `${before.trimEnd()} ${line.slice(cellEnd(line, at)).trimStart()}`, runs: false };
+}
+
+// kept : a body's frozen text, the text that carries its decision: every line, each **Today:** note cut out from its
+// marker to the end of its paragraph, or of its cell in a table row (#605). Blank lines and trailing spaces carry no
+// decision, so a note removed with its paragraph leaves the rest the same. Pure.
 function kept(body: string): readonly string[] {
-  return body.split("\n").filter((l) => !l.includes("**Today:**"));
+  const out: string[] = [];
+  let running = false;
+  for (const line of body.split("\n")) {
+    running = running && !ends(line);
+    if (line.includes(MARK)) {
+      const cut = cutNote(line);
+      out.push(cut.frozen);
+      running = cut.runs;
+    } else if (!running) {
+      out.push(line.trimEnd());
+    }
+  }
+  return out.filter((l) => l !== "");
 }
 
 // inPlace : why an ADR's body changed from the default branch's, or "" when only its header or Today notes did. Pure.
