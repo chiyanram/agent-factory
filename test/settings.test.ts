@@ -206,7 +206,7 @@ const POOLS: Readonly<Record<string, readonly unknown[]>> = {
 };
 
 function poolOf(key: FileKey): readonly unknown[] {
-  const policy = key.class === "ladder" ? MODES : [1, 3, 5, 20];
+  const policy = key.class === "ladder" ? (key.ladder ?? MODES) : [1, 3, 5, 20];
   return key.id.startsWith("policy.") ? policy : (POOLS[key.id] ?? []);
 }
 
@@ -387,6 +387,16 @@ describe("resolve: each class (#229)", () => {
     expect(errors(down)[0]).toContain(
       'policy.notify.mode: the project layer (/project.json:4) "allow" is looser than "confirm"',
     );
+  });
+
+  it("a spec.body mode is confirm or deny, never allow, in any layer (#542)", () => {
+    const team = layer("team", { policy: { "spec.body": { mode: "allow", cap: 3 } } });
+    const r = resolved([team]);
+    expect(valueOf(r, "policy.spec.body.mode")?.value).toBe("confirm");
+    expect(errors(r).join("\n")).toContain("policy.spec.body.mode");
+    const deny = resolved([layer("team", { policy: { "spec.body": { mode: "deny", cap: 3 } } })]);
+    expect(valueOf(deny, "policy.spec.body.mode")?.value).toBe("deny");
+    expect(errors(deny)).toEqual([]);
   });
 
   it("allow-list: the team's entries stay; a lower layer adds only where the team marks it open", () => {

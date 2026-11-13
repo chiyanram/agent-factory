@@ -279,6 +279,55 @@ function templateProblems(f: Fields, duplicates: readonly string[]): readonly st
   ];
 }
 
+// the most a git host keeps in an issue's body: GitHub's limit, in characters; GitLab keeps more
+export const MAX_BODY = 65_536;
+
+// a line GitLab may run as a quick action (/close, /assign …), and a mention both hosts notify, outside code
+const QUICK_ACTION = /^\s*\/[A-Za-z]/;
+const MENTION = /(?:^|[^\w`@./-])@([A-Za-z0-9][\w.-]*)/;
+
+// unfenced : each line outside a code fence, with its number; an inline code span is left out of it
+function unfenced(text: string): readonly { readonly n: number; readonly text: string }[] {
+  let fence = "";
+  return text.split("\n").flatMap((line, i) => {
+    const inside = fence !== "";
+    fence = fenceAfter(fence, line);
+    return inside || fence !== "" ? [] : [{ n: i + 1, text: line.replace(/`[^`]*`/g, "") }];
+  });
+}
+
+// fenceAfter : the code fence open after this line: its opener, or "" outside one
+function fenceAfter(fence: string, line: string): string {
+  if (fence !== "") {
+    return line.trim().startsWith(fence) ? "" : fence;
+  }
+  return /^\s*(`{3,}|~{3,})/.exec(line)?.[1] ?? "";
+}
+
+function lineProblems(line: { readonly n: number; readonly text: string }): readonly string[] {
+  const mention = MENTION.exec(line.text)?.[1];
+  return [
+    ...(QUICK_ACTION.test(line.text)
+      ? [`line ${line.n} starts with "/", which GitLab may run as a quick action: put it in backticks`]
+      : []),
+    ...(mention === undefined
+      ? []
+      : [`line ${line.n} mentions @${mention}, whom the git host would notify: put it in backticks`]),
+  ];
+}
+
+// postableSpec : why this text may not be sent as an issue's new body (#542); none when it may. Its characters must
+// all show, as checkSpec's must (a \r\n line end is the one carriage return allowed), it must fit the git host, and
+// no line outside code may run a GitLab quick action or notify a person. Whether it follows the template is not
+// asked: a draft may be sent before it passes `spec`. Pure.
+export function postableSpec(text: string): readonly string[] {
+  return [
+    ...(text.length > MAX_BODY ? [`the body is ${text.length} characters; a git host keeps at most ${MAX_BODY}`] : []),
+    ...hiddenProblems(text.replaceAll("\r\n", "\n")),
+    ...unfenced(text.replaceAll("\r\n", "\n")).flatMap(lineProblems),
+  ];
+}
+
 // checkSpec : the spec, or every way it breaks the rules above.
 export function checkSpec(raw: string): SpecCheck {
   const text = normalise(raw);

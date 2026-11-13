@@ -21,7 +21,7 @@ import { approvalState } from "../approval.js";
 import { prop } from "../dispatch/records.js";
 import { cleanField, renderPost, type Post } from "../post.js";
 import { plainName, type SpecStore } from "../spec.js";
-import { isPolicyPoint, readPluginConfig, type PolicyPoint, type Rule } from "./config.js";
+import { isPolicyPoint, isPostPoint, readPluginConfig, type PostPoint, type Rule } from "./config.js";
 import { isPoint } from "./contract.js";
 import { callPlugin, registered, type Setup } from "./registry.js";
 import { dropPending, keepPending, parseId, readPending, type Id, type Pending } from "./pending.js";
@@ -55,9 +55,13 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
 }
 
 // pointOf : the capability a request names, when it is one the coordinator may request
-export function pointOf(capability: string): Result<PolicyPoint> {
-  if (isPolicyPoint(capability)) {
+export function pointOf(capability: string): Result<PostPoint> {
+  if (isPostPoint(capability)) {
     return { kind: "ok", value: capability };
+  }
+  // Today: spec.body has its policy, but no request sends it yet (#542 slice 4c)
+  if (isPolicyPoint(capability)) {
+    return failed(`${capability} has a policy, but no request sends it yet (#542)`);
   }
   if (capability === "forge.write") {
     return failed("forge.write is the dispatcher's; the coordinator never writes to the forge");
@@ -70,7 +74,7 @@ export function pointOf(capability: string): Result<PolicyPoint> {
 }
 
 // the fields each draft may hold; title is tracker.create's own
-const FIELDS: Readonly<Record<PolicyPoint, readonly string[]>> = {
+const FIELDS: Readonly<Record<PostPoint, readonly string[]>> = {
   "tracker.comment": ["project", "ticket", "text", "items"],
   "tracker.create": ["project", "ticket", "title", "text", "items"],
   notify: ["project", "ticket", "text"],
@@ -87,7 +91,7 @@ function itemsOf(value: unknown): readonly string[] | "bad" {
   return Array.isArray(value) && value.length <= MAX_ITEMS && value.every(words) ? value.filter(words) : "bad";
 }
 
-function shapeOf(capability: PolicyPoint, raw: unknown): Result<object> {
+function shapeOf(capability: PostPoint, raw: unknown): Result<object> {
   const known = FIELDS[capability];
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return failed("the draft is not one JSON object");
@@ -107,14 +111,14 @@ function whereOf(raw: object): Result<Pick<Draft, "project" | "ticket">> {
 }
 
 // titleOf : tracker.create's title; the other writes have none
-function titleOf(capability: PolicyPoint, value: unknown): Result<string> {
+function titleOf(capability: PostPoint, value: unknown): Result<string> {
   if (capability !== "tracker.create") {
     return { kind: "ok", value: "" };
   }
   return words(value) ? { kind: "ok", value } : failed('a tracker.create draft needs a "title"');
 }
 
-function bodyOf(capability: PolicyPoint, raw: object): Result<Pick<Draft, "text" | "items" | "title">> {
+function bodyOf(capability: PostPoint, raw: object): Result<Pick<Draft, "text" | "items" | "title">> {
   const text = prop(raw, "text");
   const items = itemsOf(prop(raw, "items"));
   if (!words(text) || items === "bad") {
@@ -124,7 +128,7 @@ function bodyOf(capability: PolicyPoint, raw: object): Result<Pick<Draft, "text"
   return title.kind === "ok" ? { kind: "ok", value: { text, items, title: title.value } } : title;
 }
 
-function fieldsOf(capability: PolicyPoint, raw: object): Result<Draft> {
+function fieldsOf(capability: PostPoint, raw: object): Result<Draft> {
   const where = whereOf(raw);
   if (where.kind === "failed") {
     return where;
@@ -142,7 +146,7 @@ function parsed(text: string): unknown {
 }
 
 // draftOf : the draft's text, checked against the capability's schema
-export function draftOf(capability: PolicyPoint, text: string): Result<Draft> {
+export function draftOf(capability: PostPoint, text: string): Result<Draft> {
   const shape = shapeOf(capability, parsed(text));
   return shape.kind === "ok" ? fieldsOf(capability, shape.value) : shape;
 }
@@ -155,7 +159,7 @@ function posted(post: Post, op: string, input: (text: string) => Readonly<Record
 }
 
 // each write's text is a post.ts template: a seat line, then the cleaned fields
-const BUILD: Readonly<Record<PolicyPoint, (d: Draft) => Result<Built>>> = {
+const BUILD: Readonly<Record<PostPoint, (d: Draft) => Result<Built>>> = {
   "tracker.comment": (d) =>
     posted({ seat: "coordinator", title: d.text, fields: [], items: d.items }, "comment", (text) => ({
       ticket: d.ticket,
@@ -180,14 +184,14 @@ const BUILD: Readonly<Record<PolicyPoint, (d: Draft) => Result<Built>>> = {
     ),
 };
 
-export function built(capability: PolicyPoint, draft: Draft): Result<Built> {
+export function built(capability: PostPoint, draft: Draft): Result<Built> {
   return BUILD[capability](draft);
 }
 
 // what one write needs: where it goes, the plugin, the approval it counts against and the rule that holds
 type Plan = {
   readonly where: Where;
-  readonly capability: PolicyPoint;
+  readonly capability: PostPoint;
   readonly plugin: string;
   readonly approval: string;
   readonly approvedAt: string;
@@ -210,7 +214,7 @@ async function approvalOf(
   }
 }
 
-async function ruleOf(where: Where, capability: PolicyPoint): Promise<Result<Pick<Plan, "plugin" | "rule">>> {
+async function ruleOf(where: Where, capability: PostPoint): Promise<Result<Pick<Plan, "plugin" | "rule">>> {
   const config = await readPluginConfig(where);
   if (config.kind === "failed") {
     return config;
@@ -225,7 +229,7 @@ async function ruleOf(where: Where, capability: PolicyPoint): Promise<Result<Pic
     : { kind: "ok", value: { plugin, rule } };
 }
 
-async function declared(home: string, plugin: string, capability: PolicyPoint): Promise<Done> {
+async function declared(home: string, plugin: string, capability: PostPoint): Promise<Done> {
   const entry = await registered(home, plugin);
   if (entry.kind === "failed") {
     return entry;
@@ -255,7 +259,7 @@ async function approvalAt(
 }
 
 // planOf : the write's plan, after the approval, the policy and the plugin's declared writes are each checked
-async function planOf(setup: RequestSetup, capability: PolicyPoint, draft: Draft): Promise<Result<Plan>> {
+async function planOf(setup: RequestSetup, capability: PostPoint, draft: Draft): Promise<Result<Plan>> {
   const home = setup.home;
   const where = { home, project: draft.project, ticket: draft.ticket };
   const approval = await approvalAt(setup, where);
@@ -348,7 +352,7 @@ export function quoted(text: string): string {
 }
 
 // the draft as its capability's schema holds it, so confirm reads it back with the same check
-const STORED: Readonly<Record<PolicyPoint, (d: Draft) => object>> = {
+const STORED: Readonly<Record<PostPoint, (d: Draft) => object>> = {
   "tracker.comment": (d) => ({ project: d.project, ticket: d.ticket, text: d.text, items: d.items }),
   "tracker.create": (d) => ({ project: d.project, ticket: d.ticket, title: d.title, text: d.text, items: d.items }),
   notify: (d) => ({ project: d.project, ticket: d.ticket, text: d.text }),
@@ -390,7 +394,7 @@ function nothing(): Promise<Done> {
 // planned : the plan, and the write built from the draft
 async function planned(
   setup: RequestSetup,
-  capability: PolicyPoint,
+  capability: PostPoint,
   draft: Draft,
 ): Promise<Result<readonly [Plan, Built]>> {
   const plan = await planOf(setup, capability, draft);
@@ -401,7 +405,7 @@ async function planned(
   return write.kind === "ok" ? { kind: "ok", value: [plan.value, write.value] } : write;
 }
 
-async function requested(setup: RequestSetup, capability: PolicyPoint, draft: Draft): Promise<Requested> {
+async function requested(setup: RequestSetup, capability: PostPoint, draft: Draft): Promise<Requested> {
   const both = await planned(setup, capability, draft);
   if (both.kind === "failed") {
     return both;
@@ -451,7 +455,7 @@ function sameAsPending(id: Id, [plan, write]: readonly [Plan, Built], pending: P
 
 async function confirmedLocked(
   setup: RequestSetup,
-  id: Id,
+  id: Id & { readonly capability: PostPoint },
   given: { readonly id: string; readonly text: string },
 ): Promise<Confirmed> {
   const pending = await readPending(id, given.id);
@@ -474,7 +478,13 @@ export async function confirm(setup: RequestSetup, id: string, text: string): Pr
   if (parsedId.kind === "failed") {
     return parsedId;
   }
+  const capability = pointOf(parsedId.value.capability);
+  if (capability.kind === "failed") {
+    return capability;
+  }
   return unwrapped(
-    await onTicket(parsedId.value.where, () => okOf(confirmedLocked(setup, parsedId.value, { id, text }))),
+    await onTicket(parsedId.value.where, () =>
+      okOf(confirmedLocked(setup, { ...parsedId.value, capability: capability.value }, { id, text })),
+    ),
   );
 }

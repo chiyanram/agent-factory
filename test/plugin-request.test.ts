@@ -125,6 +125,18 @@ describe("the project file's plugin fields (#134; ADR-0014 P3, P5)", () => {
       "tracker.comment": { mode: "allow", cap: 5 },
       "tracker.create": { mode: "confirm", cap: 1 },
       notify: { mode: "allow", cap: 3 },
+      "spec.body": { mode: "confirm", cap: 10 },
+    });
+  });
+
+  it("reads a spec.body policy of confirm or deny, and refuses allow: a spec body goes out only on a yes (#542)", () => {
+    expect(pluginConfigOf("/p.json", { policy: { "spec.body": { mode: "deny", cap: 2 } } })).toMatchObject({
+      kind: "ok",
+      value: { policy: { "spec.body": { mode: "deny", cap: 2 } } },
+    });
+    expect(pluginConfigOf("/p.json", { policy: { "spec.body": { mode: "allow", cap: 2 } } })).toEqual({
+      kind: "failed",
+      reason: '/p.json: "policy.spec.body" must be {"mode": "confirm" | "deny", "cap": 1 to 20}',
     });
   });
 
@@ -220,6 +232,8 @@ describe("request: an allow write goes out at once, cleaned, within the cap (#13
       ["forge.write", draft({ text: "x" }), "dispatcher's"],
       ["context.read", draft({ text: "x" }), "not a write"],
       ["shell", draft({ text: "x" }), "not an extension point"],
+      // Today: spec.body has a policy, and no request sends it until #542 slice 4c
+      ["spec.body", draft({ text: "x" }), "no request sends it yet"],
       ["tracker.comment", draft({ text: "x" }), "denies tracker.comment"],
     ];
     for (const [capability, text, reason] of cases) {
@@ -367,6 +381,10 @@ describe("request and confirm: a confirm write waits for the person (#134; ADR-0
     expect(await confirm(setup(), "../../x", "t")).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("not a request id"),
+    });
+    expect(await confirm(setup(), "ledger/PROJ-1/spec.body/0123456789ab", "t")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("no request sends it yet"),
     });
     expect(sentRequests()).toHaveLength(0);
   });

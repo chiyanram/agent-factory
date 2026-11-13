@@ -127,6 +127,9 @@ failure. `forge.write` is the orchestrator's alone, and no Jira status, assignee
   but a command its Bash rules do not name could still change them; they move to the `factory` OS user with the
   approvals (ADR-0012 S2).
 - No tracker or chat connector is bundled yet, so a write needs a connector you add yourself.
+- `spec.body`, a spec change in the issue store sent as the issue's new body, has its policy (`confirm` or `deny`,
+  default `confirm` 10; [settings](settings.md)), but `request` and `confirm` refuse it until #542 builds it, so you
+  still paste a spec into the issue by hand.
 - Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
   `pending/` until you remove it.
 
