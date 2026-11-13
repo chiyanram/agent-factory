@@ -1,0 +1,102 @@
+diff --git a/docs/explanation/safety.md b/docs/explanation/safety.md
+index a5b0def..ca54a04 100644
+--- a/docs/explanation/safety.md
++++ b/docs/explanation/safety.md
+@@ -111,7 +111,7 @@ Two rules follow from this, decided on 2026-11-10:
+ - **Enforced: the implementer reads only what it is given.** A private home per run; on srt your whole home is hidden
+   but the folders allowed back ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531)).
+ - **Enforced: posted agent text cannot act.** The host posts only templated text: no line starts with `/`; `@`, `#`,
+-  `!`, `://` and `www.` are broken with an invisible joiner; Markdown and Jira markup characters are escaped
++  `!`, `GH-` before a digit, `://` and every `www.` are broken with an invisible joiner; Markdown and Jira markup characters are escaped
+   (`src/core/post.ts`, #126). The PR body's `.factory/pr.md` goes through its own cleaner (`src/core/pr-body.ts`,
+   #335): no raw HTML, no mention, no closing keyword, no link off the project's git host, capped length.
+ - **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
+diff --git a/src/core/notes.ts b/src/core/notes.ts
+index cdbb984..a03783f 100644
+--- a/src/core/notes.ts
++++ b/src/core/notes.ts
+@@ -135,7 +135,7 @@ function trailerBlock(message: string): readonly Trailer[] {
+   const paragraphs = message
+     .replace(/\r\n?/g, "\n")
+     .trim()
+-    .split(/\n[ \t]*\n/);
++    .split(/\n(?:[ \t]*\n)+/);
+   if (paragraphs.length < 2) {
+     return [];
+   }
+diff --git a/src/core/post.ts b/src/core/post.ts
+index fa56dc1..b11597d 100644
+--- a/src/core/post.ts
++++ b/src/core/post.ts
+@@ -10,8 +10,9 @@
+ //   - one line: line breaks and runs of white space become one space; control and invisible format characters go
+ //   - "\" is escaped first, so no later escape can be undone
+ //   - "@" (mentions, e-mail links), "#" and "!" (issue and merge-request references, and so closing keywords; Jira
+-//     images) get an invisible word joiner (U+2060) after them, and "://" and "www." (links) one inside, so no forge sees a
+-//     mention, a reference or a link
++//     images) get an invisible word joiner (U+2060) after them, "GH-" before a digit (GitHub's other reference form) one
++//     after its hyphen, and "://" and every "www." (links, even after "_") one inside, so no forge sees a mention, a
++//     reference or a link
+ //   - HTML is escaped; "[", "]", "{", "}", "|" and "`" get a backslash, so no Markdown or Jira link, image, macro or
+ //     code span forms
+ //   - a field never starts with "/", and it is capped in length after all of this, with "…" when cut
+@@ -86,7 +87,8 @@ export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT):
+     .replace(/[[\]{}|`]/g, "\\$&")
+     .replace(/[@#!]/g, `$&${JOIN}`)
+     .replace(/:\/\//g, `:${JOIN}//`)
+-    .replace(/\b(www)\./gi, `$1${JOIN}.`);
++    .replace(/(www)\./gi, `$1${JOIN}.`)
++    .replace(/(gh)-(?=\d)/gi, `$1-${JOIN}`);
+   const capped = cut(inert, limit);
+   return capped.startsWith("/") ? `\\${capped}` : capped;
+ }
+diff --git a/test/notes.test.ts b/test/notes.test.ts
+index 3681efa..9274d07 100644
+--- a/test/notes.test.ts
++++ b/test/notes.test.ts
+@@ -147,6 +147,12 @@ describe("commit trailer", () => {
+     expect(commitKind({ message: thin })).toEqual({ kind: "person" });
+   });
+ 
++  it("reads the last paragraph after any number of blank lines, as git does", () => {
++    for (const message of ["fix: x\n\n\nAgent: writer", "fix: x\n\nBody.\n \n\t\n\nAgent: writer\n"]) {
++      expect(commitKind({ message })).toEqual({ kind: "agent", seat: "writer" });
++    }
++  });
++
+   it("a folded line continues the trailer above it", () => {
+     expect(commitKind({ message: "fix: x\n\nCo-Authored-By: a\n  <a@a>\nAgent: coordinator" })).toEqual({
+       kind: "agent",
+diff --git a/test/post.test.ts b/test/post.test.ts
+index 93c8f58..eb3ed58 100644
+--- a/test/post.test.ts
++++ b/test/post.test.ts
+@@ -21,8 +21,8 @@ const J = "\u2060"; // the word joiner cleanField puts after a trigger character
+ // What a forge would act on in posted text. Each check is a pattern of the plain characters the forge needs; a word
+ // joiner or a backslash in between breaks it.
+ const MENTION = /(^|[^\w])@[A-Za-z0-9_]/; // GitHub, GitLab
+-const REFERENCE = /(#|!)\d/; // #12, !12, owner/repo#12: what a closing keyword and a link both need
+-const LINK = /(:\/\/|\bwww\.)/; // any scheme, and GitHub's www. autolink
++const REFERENCE = /(#|!|\bGH-)\d/i; // #12, !12, owner/repo#12, GH-12: what a closing keyword and a link both need
++const LINK = /(:\/\/|www\.)/i; // any scheme, and GitHub's www. autolink, which also starts after "_", "*", "~" or "("
+ const SPAN_OR_LINK = /(^|[^\\])[`[\]{}|]/; // an unescaped Markdown or Jira link, image, macro or code-span character
+ const HTML = /[<>]/;
+ 
+@@ -85,6 +85,8 @@ describe("cleanField", () => {
+       "see !42",
+       "resolves https://github.com/o/r/issues/1",
+       "\\fixes #1",
++      "Fixes GH-12",
++      "see gh-7",
+     ]) {
+       inert(cleanField(text));
+     }
+@@ -95,6 +97,8 @@ describe("cleanField", () => {
+       "see https://evil.example/x?a=1",
+       "ftp://evil.example/x",
+       "www.evil.example/p",
++      "_www.evil.example/p",
++      "*WWW.evil.example/p",
+       "a@b.example",
+       "\\https://evil.example/x",
+     ]) {
