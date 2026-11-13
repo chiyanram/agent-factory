@@ -4,8 +4,9 @@
 //
 //   deny      refused
 //   allow     performed at once, within the cap
-//   confirm   kept in <home>/pending/<hex>.json; request prints `agent-factory confirm <id> '<the text>'`, which the
-//             coordinator runs behind the harness ask prompt, so the person sees the exact text before it goes out
+//   confirm   kept in <home>/pending/<hex>.json (pending.ts); request prints `agent-factory confirm <id> '<the text>'`,
+//             which the coordinator runs behind the harness ask prompt, so the person sees the exact text before it goes
+//             out
 //
 // confirm performs only when the text it is given is the pending text, byte for byte, leaving out the invisible word
 // joiners (U+2060) that cleanField puts after "@", "#" and "!": no person can see them, so none can check them. The
@@ -15,24 +16,21 @@
 // again. Nothing here throws.
 
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { Done, Result } from "../forge/api.js";
 import { approvalState } from "../approval.js";
 import { prop } from "../dispatch/records.js";
 import { cleanField, renderPost, type Post } from "../post.js";
-import { attempt } from "../review/safe.js";
 import { plainName, type SpecStore } from "../spec.js";
 import { isPolicyPoint, readPluginConfig, type PolicyPoint, type Rule } from "./config.js";
 import { isPoint } from "./contract.js";
 import { callPlugin, registered, type Setup } from "./registry.js";
+import { dropPending, keepPending, parseId, readPending, type Id, type Pending } from "./pending.js";
 import { appendLine, approvalKey, counted, onTicket, readLog, type Where } from "./writes.js";
 
 // a write answers { kind: "done", url? } when it went out; any other kind is a failure
 export const DONE = "done";
 const MAX_ITEMS = 20;
 const JOINER = /\u2060/g;
-const HEX = /^[0-9a-f]{12}$/;
 
 export type Draft = {
   readonly project: string;
@@ -344,19 +342,6 @@ async function sent(
     : failed(`${plan.capability} on ${plan.where.project}/${plan.where.ticket} failed (it still counts): ${detail}`);
 }
 
-// the pending store: one file per request, named by its hex
-type Pending = {
-  readonly id: string;
-  readonly plugin: string;
-  readonly approval: string;
-  readonly draft: unknown;
-  readonly text: string;
-};
-
-function pendingFile(home: string, hex: string): string {
-  return join(home, "pending", `${hex}.json`);
-}
-
 // quoted : one shell word, in single quotes, that the shell passes through byte for byte
 export function quoted(text: string): string {
   return `'${text.replace(/'/g, "'\\''")}'`;
@@ -380,7 +365,6 @@ async function kept(plan: Plan, draft: Draft, write: Built): Promise<Requested> 
   }
   const hex = randomBytes(6).toString("hex");
   const id = idOf(plan, hex);
-  const file = pendingFile(plan.where.home, hex);
   const record: Pending = {
     id,
     plugin: plan.plugin,
@@ -388,13 +372,7 @@ async function kept(plan: Plan, draft: Draft, write: Built): Promise<Requested> 
     draft: STORED[plan.capability](draft),
     text: write.text,
   };
-  const saved = await attempt(async () => {
-    await mkdir(join(plan.where.home, "pending"), { recursive: true, mode: 0o700 });
-    await writeFile(file, `${JSON.stringify({ version: 1, ...record, at: now() }, null, 2)}\n`, {
-      flag: "wx",
-      mode: 0o600,
-    });
-  }, `cannot write ${file}`);
+  const saved = await keepPending(plan.where.home, hex, record, now());
   return saved.kind === "ok"
     ? { kind: "pending", id, text: write.text, command: `agent-factory confirm ${id} ${quoted(shown(write.text))}` }
     : saved;
@@ -452,51 +430,6 @@ export async function request(setup: RequestSetup, capability: string, draftText
   return draft.kind === "ok" ? requested(setup, point.value, draft.value) : draft;
 }
 
-type Id = { readonly where: Where; readonly capability: PolicyPoint; readonly hex: string };
-
-// parseId : <project>/<ticket>/<capability>/<12 hex>, as request printed it
-function parseId(home: string, id: string): Result<Id> {
-  const parts = id.split("/");
-  const [project, ticket, capability, hex] = four(parts);
-  return parts.length === 4 && [project, ticket].every(plainName) && HEX.test(hex) && isPolicyPoint(capability)
-    ? { kind: "ok", value: { where: { home, project, ticket }, capability, hex } }
-    : failed(`${JSON.stringify(id)} is not a request id; give the id request printed`);
-}
-
-function four(parts: readonly string[]): readonly [string, string, string, string] {
-  return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? "", parts[3] ?? ""];
-}
-
-function pendingOf(raw: unknown): Pending | "bad" {
-  const [id, plugin, approval, text] = ["id", "plugin", "approval", "text"].map((k) => prop(raw, k));
-  const strings = [id, plugin, approval, text].every((v) => typeof v === "string");
-  return strings && prop(raw, "version") === 1
-    ? {
-        id: String(id),
-        plugin: String(plugin),
-        approval: String(approval),
-        draft: prop(raw, "draft"),
-        text: String(text),
-      }
-    : "bad";
-}
-
-async function readPending(id: Id, given: string): Promise<Result<Pending>> {
-  const file = pendingFile(id.where.home, id.hex);
-  const text = await attempt(
-    () => readFile(file, "utf8"),
-    `no pending request ${given}; it went out, or was never made`,
-  );
-  if (text.kind === "failed") {
-    return text;
-  }
-  const pending = pendingOf(parsed(text.value));
-  if (pending === "bad") {
-    return failed(`${file} is not a pending request`);
-  }
-  return pending.id === given ? { kind: "ok", value: pending } : failed(`${file} is not the request ${given}`);
-}
-
 // sameAsPending : the plan and the write made again now, and the pending request they must match
 function sameAsPending(id: Id, [plan, write]: readonly [Plan, Built], pending: Pending, given: string): Done {
   const checks: readonly (readonly [boolean, string])[] = [
@@ -531,7 +464,7 @@ async function confirmedLocked(
     return both;
   }
   const same = sameAsPending(id, both.value, pending.value, given.text);
-  const remove = () => attempt(() => rm(pendingFile(setup.home, id.hex)), "cannot remove the pending request");
+  const remove = () => dropPending(setup.home, id.hex);
   return same.kind === "ok" ? perform(setup, ...both.value, remove) : same;
 }
 
