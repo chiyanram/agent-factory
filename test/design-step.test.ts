@@ -6,7 +6,7 @@ import type { EarlierRound } from "../src/core/dispatch/design.js";
 import type { DesignFinding } from "../src/core/design/findings.js";
 import type { Forge } from "../src/core/forge/types.js";
 import type { Result } from "../src/core/forge/api.js";
-import type { DesignRan } from "../src/core/dispatch/tick.js";
+import type { DesignRan } from "../src/core/dispatch/steps.js";
 import type { Model, ModelRun } from "../src/core/review/model.js";
 import { specHash } from "../src/core/spec.js";
 import { project, specText, writeSpec, type Project } from "./review-repo.js";

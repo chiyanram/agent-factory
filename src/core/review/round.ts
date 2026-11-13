@@ -24,7 +24,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/pro
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
 import { goAhead } from "../start.js";
-import { BRANCH_PREFIX } from "../dispatch/tick.js";
+import { BRANCH_PREFIX } from "../dispatch/steps.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Change, Forge } from "../forge/types.js";
 import { checkCites } from "../cite-check.js";

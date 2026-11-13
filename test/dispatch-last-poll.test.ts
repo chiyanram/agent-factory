@@ -10,7 +10,8 @@ import {
   writeLastPoll,
   type LastPoll,
 } from "../src/core/dispatch/last-poll.js";
-import { STEPS_TODAY, tick, type TickSetup } from "../src/core/dispatch/tick.js";
+import { STEPS_TODAY } from "../src/core/dispatch/steps.js";
+import { tick, type TickSetup } from "../src/core/dispatch/tick.js";
 import type { Forge } from "../src/core/forge/types.js";
 import { NO_NOTIFY } from "../src/core/notify.js";
 import { tempDir } from "./temp.js";

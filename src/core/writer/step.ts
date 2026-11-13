@@ -21,7 +21,7 @@ import { goAhead, type GoAhead } from "../start.js";
 import type { LaneProps } from "../lane.js";
 import type { BoxToken } from "../token/rules.js";
 import type { Task } from "../dispatch/records.js";
-import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/tick.js";
+import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/steps.js";
 import { fastForwardOnly, finishFirst, finishRun, seatOnEvery, type Next, type Pusher } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge, ForgeName } from "../forge/types.js";

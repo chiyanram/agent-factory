@@ -25,7 +25,7 @@
 import type { Result } from "../forge/api.js";
 import { keepText, recordsDirOf, tailOf } from "../kept.js";
 import type { Forge, StatusState } from "../forge/types.js";
-import type { ReadyFacts, RunInput, Steps } from "../dispatch/tick.js";
+import type { ReadyFacts, RunInput, Steps } from "../dispatch/steps.js";
 import type { Argv, ProjectFile } from "../project.js";
 import type { Evidence } from "../report.js";
 import { commandArgv, evidencePrograms, GIT_PROGRAM } from "./command.js";

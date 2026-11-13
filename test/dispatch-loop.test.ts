@@ -15,7 +15,8 @@ import {
   orchestratorLoop,
   pace,
 } from "../src/core/dispatch/orchestrator-loop.js";
-import { lock, STEPS_TODAY, type Steps, type TickSetup } from "../src/core/dispatch/tick.js";
+import { STEPS_TODAY, type Steps } from "../src/core/dispatch/steps.js";
+import { lock, type TickSetup } from "../src/core/dispatch/tick.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import type { Call, Runner } from "../src/core/forge/api.js";
 import { github } from "../src/core/forge/github.js";

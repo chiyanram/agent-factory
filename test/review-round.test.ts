@@ -18,7 +18,7 @@ import {
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
 import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RoundPart } from "../src/core/dispatch/spend.js";
-import type { RunInput } from "../src/core/dispatch/tick.js";
+import type { RunInput } from "../src/core/dispatch/steps.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
 
 let p: Project;

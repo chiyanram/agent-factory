@@ -12,7 +12,7 @@
 import type { PluginDir } from "../process/read.js";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
-import type { Steps } from "../dispatch/tick.js";
+import type { Steps } from "../dispatch/steps.js";
 import type { Sessions } from "./live.js";
 import type { Model, ModelResult } from "./model.js";
 import type { Acted } from "./acted-on.js";

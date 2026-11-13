@@ -20,7 +20,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { currentSpec } from "../approval.js";
-import type { DesignInput, DesignRan, Steps } from "../dispatch/tick.js";
+import type { DesignInput, DesignRan, Steps } from "../dispatch/steps.js";
 import type { EarlierRound } from "../dispatch/design.js";
 import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";

@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import type { Box, PinnedImage, Ran } from "../src/core/box/types.js";
 import type { Started as EgressStarted } from "../src/core/egress/start.js";
 import type { SrtEgress } from "../src/core/box/srt-plan.js";
-import type { ReadyFacts, RunInput } from "../src/core/dispatch/tick.js";
+import type { ReadyFacts, RunInput } from "../src/core/dispatch/steps.js";
 import type { CommitStatus, Forge } from "../src/core/forge/types.js";
 import type { ProjectFile } from "../src/core/project.js";
 import type { Evidence } from "../src/core/report.js";

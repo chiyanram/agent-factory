@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { start as startTicket } from "../src/core/start.js";
 import type { Box, BoxSpec, Command, Ran } from "../src/core/box/types.js";
-import type { RunInput } from "../src/core/dispatch/tick.js";
+import type { RunInput } from "../src/core/dispatch/steps.js";
 import type { Task } from "../src/core/dispatch/records.js";
 import { keepText, recordsDirOf } from "../src/core/kept.js";
 import { commandArgv } from "../src/core/ready/command.js";
