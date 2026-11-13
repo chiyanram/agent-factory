@@ -120,16 +120,37 @@ Each write is logged in `$FACTORY_HOME/writes/<project>/<ticket>.jsonl` before i
 ticket's writes run one at a time behind `<ticket>.lock`, which holds its process ID, so a lock left by a process
 that was killed is taken over. Cleaning drops every control and invisible format character (bidi controls and
 isolates, tag characters, the soft hyphen, variation selectors), so what the prompt shows is what is sent. A connector answers a write with `{"kind": "done", "url": "…"}`; any other kind is a
-failure. `forge.write` is the orchestrator's alone, and no Jira status, assignee or field change has a capability.
+failure. `forge.write` is the orchestrator's, but for `spec.body` below, and no Jira status, assignee or field change
+has a capability.
+
+### A spec change in the issue store
+
+With `"specStore": "issue"` the spec is the issue's body, and the coordinator changes it through a kept write, so you
+never paste a spec by hand (#542; `src/core/plugin/spec-body.ts`):
+
+1. It reads the body with `agent-factory spec <project> <issue> --show`, writes it to
+   `$FACTORY_HOME/specs/<project>/<issue>/spec.md`, and edits it there.
+2. It runs `agent-factory request spec.body --file $FACTORY_HOME/specs/<project>/<issue>/spec.md`. Nothing goes out:
+   the request is kept (exit 3), since `spec.body`'s policy is `confirm` or `deny`, never `allow`
+   ([settings](settings.md)). It prints `agent-factory confirm <project>/<issue>/spec.body/<id> '<the whole new body>'`.
+3. The coordinator runs that; the harness prompt shows you the whole new body, and your yes sets the issue's body to
+   it, byte for byte, through the project's git host connector.
+
+It is refused, and nothing is sent, unless the project keeps its specs in the issue store, the ticket is the issue
+number, the file is that `spec.md`, the cap has room, and the body may be posted: every character shows (a `\r\n` line
+end is the one carriage return allowed), it holds at most 65,536 characters, and no line outside code starts with `/`
+(GitLab may run it as a quick action) or mentions an `@name` (the git host would notify them); put those in backticks.
+It needs no approval, since a spec mostly changes before one: the cap counts the changes since the latest approval, or
+since none. At `confirm` the text must be the kept text, and the issue's body must still be the one `request` saw, so
+a person's edit in between is never written over. A change to an approved ticket's spec makes its approval stale, and
+`confirm` says so.
+
 **Today:**
 
 - The pending requests and the write log belong to your own user, so the coordinator's settings deny editing them,
   but a command its Bash rules do not name could still change them; they move to the `factory` OS user with the
   approvals (ADR-0012 S2).
 - No tracker or chat connector is bundled yet, so a write needs a connector you add yourself.
-- `spec.body`, a spec change in the issue store sent as the issue's new body, has its policy (`confirm` or `deny`,
-  default `confirm` 10; [settings](settings.md)), but `request` and `confirm` refuse it until #542 builds it, so you
-  still paste a spec into the issue by hand.
 - Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
   `pending/` until you remove it.
 

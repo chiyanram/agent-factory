@@ -66,9 +66,11 @@ export function pointOf(capability: string): Result<PostPoint> {
   if (isPostPoint(capability)) {
     return { kind: "ok", value: capability };
   }
-  // Today: spec.body has its policy, but no request sends it yet (#542 slice 4c)
+  // spec.body is a whole spec file, not a draft of a post: spec-body.ts reads and sends it
   if (isPolicyPoint(capability)) {
-    return failed(`${capability} has a policy, but no request sends it yet (#542)`);
+    return failed(
+      `${capability} is sent from the spec file: request ${capability} --file <home>/specs/<p>/<t>/spec.md`,
+    );
   }
   if (capability === "forge.write") {
     return failed("forge.write is the dispatcher's; the coordinator never writes to the forge");
