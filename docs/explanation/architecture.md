@@ -221,4 +221,4 @@ so work and personal logins never mix.
 
 **Audit.** Every action in the run records names the agent's role, the human who started the ticket, and the run id.
 Each run keeps its whole output as a trace beside the ticket's records for 30 days, scrubbed, named on its record
-line (#487). **Today:** only implementer runs keep one, and nothing deletes it yet.
+line (#487). **Today:** only implementer runs keep one.

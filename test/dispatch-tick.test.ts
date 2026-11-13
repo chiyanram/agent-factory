@@ -1,6 +1,6 @@
 import { NO_NOTIFY, type Notify, type Ping } from "../src/core/notify.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, tornPath, type Event } from "../src/core/dispatch/records.js";
@@ -10,6 +10,7 @@ import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
+import { traceName } from "../src/core/dispatch/trace.js";
 import {
   lock,
   runHoursEnd,
@@ -840,6 +841,17 @@ describe("tick", () => {
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "spent", traces: [trace] }] });
+  });
+
+  it("each pass first deletes the project's traces older than 30 days (#487)", async () => {
+    const dir = join(home, "runs", "ledger", "PROJ-1");
+    mkdirSync(dir, { recursive: true });
+    const old = traceName({ kind: "writer", at: Date.parse("2026-11-07T10:00:00Z") - 31 * 24 * 60 * 60_000 });
+    const young = traceName({ kind: "writer", at: Date.parse("2026-11-07T10:00:00Z") - 24 * 60 * 60_000 });
+    writeFileSync(join(dir, old), "{}\n");
+    writeFileSync(join(dir, young), "{}\n");
+    await tick(setup({ team, open: [], merged: [] }, []));
+    expect(readdirSync(dir)).toEqual([young]);
   });
 
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
