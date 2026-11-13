@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addedOf, outcomeLines, outcomeOf, verdict, type Commit } from "../src/core/outcome.js";
+import { addedOf, fetchDefault, outcomeLines, outcomeOf, verdict, type Commit } from "../src/core/outcome.js";
 import { usageCommand } from "../src/usage-cli.js";
 import { tempDir } from "./temp.js";
 
@@ -123,6 +123,20 @@ describe("the outcome of a merge (#487 AC-3)", () => {
     expect(git(clone(), ["for-each-ref", "refs/factory"])).toBe("");
   });
 
+  it("reads from the ref already fetched when told it is: no second fetch, so a gone origin does not matter", async () => {
+    const sha = merge();
+    expect(await fetchDefault({ repo: clone(), env })).toBe("");
+    git(clone(), ["remote", "set-url", "origin", join(root, "gone.git")]);
+    const out = await outcomeOf({
+      repo: clone(),
+      env,
+      merged: { at: new Date(MERGED).toISOString(), sha },
+      now: MERGED + 20 * DAY,
+      fetched: true,
+    });
+    expect(out).toEqual({ kind: "clean", final: false, touched: [] });
+  });
+
   it("is unknown, with the reason, when the merge's commit is not on the default branch", async () => {
     merge();
     expect(await read("1".repeat(40), 15)).toMatchObject({
@@ -152,6 +166,41 @@ describe("agent-factory usage <project> shows a merged ticket's outcome (#487 AC
     const text = out.join("");
     expect(text).toContain("    outcome: clean at 2 weeks\n");
     expect(text).toContain(`      touched by ${feature.slice(0, 8)} feat: renew now\n`);
+  });
+
+  // usage over two merged tickets, with git's trace written to a file; the lines it printed
+  async function twoMerged(env2: NodeJS.ProcessEnv): Promise<{ readonly text: string; readonly trace: string }> {
+    const first = merge();
+    const second = commit("other.ts", "x\n", "feat: other (#13)", 1);
+    const home = join(root, "factory");
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    const line = (sha: string, n: number) =>
+      JSON.stringify({ at: new Date(MERGED).toISOString(), kind: "merged", number: n, sha, by: "mo" });
+    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `${line(first, 12)}\n`);
+    writeFileSync(join(home, "runs", "ledger", "PROJ-2.jsonl"), `${line(second, 13)}\n`);
+    const trace = join(root, "trace.txt");
+    const out: string[] = [];
+    const io = {
+      env: { ...env2, GIT_TRACE: trace },
+      home,
+      now: () => MERGED + 20 * DAY,
+      out: (t: string) => out.push(t),
+      err: () => undefined,
+    };
+    expect(await usageCommand(["ledger"], io)).toBe(0);
+    return { text: out.join(""), trace: existsSync(trace) ? readFileSync(trace, "utf8") : "" };
+  }
+
+  it("fetches the default branch once for every merged ticket of the run", async () => {
+    const { text, trace } = await twoMerged({ ...env, FACTORY_REPO: clone() });
+    expect(text.match(/ {4}outcome: clean at 2 weeks\n/g)).toHaveLength(2);
+    expect(trace.match(/built-in: git fetch /g)).toHaveLength(1);
+  });
+
+  it("shows each merged ticket's outcome as unknown, with the reason, when the one fetch fails", async () => {
+    git(clone(), ["remote", "set-url", "origin", join(root, "gone.git")]);
+    const { text } = await twoMerged({ ...env, FACTORY_REPO: clone() });
+    expect(text.match(/ {4}outcome: unknown: git fetch/g)).toHaveLength(2);
   });
 });
 

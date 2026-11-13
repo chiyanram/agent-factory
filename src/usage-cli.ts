@@ -6,7 +6,7 @@
 import { plainName } from "./core/spec.js";
 import { actedLines, periodsAt, readSpends, usageLines, WINDOW_HOURS, type Spends } from "./core/dispatch/usage.js";
 import { tallyKey, ticketLines } from "./core/dispatch/touches.js";
-import { outcomeOf, type MergeOutcome } from "./core/outcome.js";
+import { fetchDefault, outcomeOf, type MergeOutcome } from "./core/outcome.js";
 import { readerZone } from "./core/zone.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
@@ -46,13 +46,22 @@ async function outcomes(
   project: string | undefined,
 ): Promise<ReadonlyMap<string, MergeOutcome>> {
   const repo = settingOf(io.env, "clone") ?? "";
-  const merged = spends.tallies.filter((t) => t.merged !== undefined && t.project === project);
+  const merged =
+    repo === ""
+      ? []
+      : spends.tallies.flatMap((t) => (t.merged !== undefined && t.project === project ? [{ t, m: t.merged }] : []));
+  // one fetch for every merged ticket of the run
+  const why = merged.length === 0 ? "" : await fetchDefault({ repo, env: io.env });
   const read = new Map<string, MergeOutcome>();
-  for (const t of repo === "" ? [] : merged) {
-    const m = t.merged ?? { at: "", sha: "" };
-    read.set(tallyKey(t), await outcomeOf({ repo, env: io.env, merged: m, now: io.now() }));
+  for (const { t, m } of merged) {
+    read.set(tallyKey(t), await outcomeFor({ repo, env: io.env, merged: m, now: io.now() }, why));
   }
   return read;
+}
+
+// outcomeFor : one merge's outcome after the run's one fetch, or unknown with why the fetch failed
+function outcomeFor(input: Parameters<typeof outcomeOf>[0], why: string): Promise<MergeOutcome> {
+  return why === "" ? outcomeOf({ ...input, fetched: true }) : Promise.resolve({ kind: "unknown", why });
 }
 
 // printed : the table on stdout and each problem on stderr; 1 when there was one
