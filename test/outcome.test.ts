@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addedOf, outcomeOf, verdict, type Commit } from "../src/core/outcome.js";
+import { addedOf, outcomeLines, outcomeOf, verdict, type Commit } from "../src/core/outcome.js";
+import { usageCommand } from "../src/usage-cli.js";
 import { tempDir } from "./temp.js";
 
 // What became of a merged ticket's change, from the project's clone: watched to 2 weeks, then clean, reverted or fixed
@@ -131,6 +132,29 @@ describe("the outcome of a merge (#487 AC-3)", () => {
   });
 });
 
+describe("agent-factory usage <project> shows a merged ticket's outcome (#487 AC-3)", () => {
+  it("reads it from the project's clone, with the merge the records hold", async () => {
+    const sha = merge();
+    const feature = commit("loan.ts", "a\nb\nrenew now\nrefuse\nc\n", "feat: renew now", 5);
+    const home = join(root, "factory");
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    const line = { at: new Date(MERGED).toISOString(), kind: "merged", number: 12, sha, by: "mo" };
+    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `${JSON.stringify(line)}\n`);
+    const out: string[] = [];
+    const io = {
+      env: { ...env, FACTORY_REPO: clone() },
+      home,
+      now: () => MERGED + 20 * DAY,
+      out: (t: string) => out.push(t),
+      err: () => undefined,
+    };
+    expect(await usageCommand(["ledger"], io)).toBe(0);
+    const text = out.join("");
+    expect(text).toContain("    outcome: clean at 2 weeks\n");
+    expect(text).toContain(`      touched by ${feature.slice(0, 8)} feat: renew now\n`);
+  });
+});
+
 describe("the outcome's parts (#487)", () => {
   it("reads the lines each file gained from git diff -U0; a deleted file and a pure deletion gain none", () => {
     const diff = [
@@ -146,6 +170,21 @@ describe("the outcome's parts (#487)", () => {
       { file: "loan.ts", from: 3, count: 2 },
       { file: "loan.ts", from: 9, count: 1 },
     ]);
+  });
+
+  it("reads each outcome as a line, and lists every touching commit but the one that decided it", () => {
+    const c = (sha: string, subject: string): Commit => ({ sha: sha.repeat(40), subject, at: "" });
+    const [fix, feat] = [c("a", "fix: y"), c("b", "feat: z")];
+    expect(outcomeLines({ kind: "watching", day: 3, touched: [] })).toEqual(["    outcome: watching, day 3 of 14"]);
+    expect(outcomeLines({ kind: "clean", final: true, touched: [] })).toEqual(["    outcome: clean, final at 30 days"]);
+    expect(outcomeLines({ kind: "reverted", by: c("r", "Revert x"), final: true })).toEqual([
+      "    outcome: reverted by rrrrrrrr Revert x, final",
+    ]);
+    expect(outcomeLines({ kind: "fixed", by: fix, final: false, touched: [feat, fix] })).toEqual([
+      "    outcome: fixed on the same lines by aaaaaaaa fix: y",
+      "      touched by bbbbbbbb feat: z",
+    ]);
+    expect(outcomeLines({ kind: "unknown", why: "no clone" })).toEqual(["    outcome: unknown: no clone"]);
   });
 
   it("counts only a fix or a revert subject against the outcome; a revert of the merge wins over a fix", () => {

@@ -168,6 +168,22 @@ describe("the tickets section of usage (#487)", () => {
     expect(lines.some((l) => l.startsWith("  ledger PROJ-2:"))).toBe(true);
   });
 
+  it("shows a merged ticket's outcome and the commits that touched its lines, or how to read it (#487 AC-3)", () => {
+    const shipped = tallyOf({ project: "ledger", ticket: "PROJ-1" }, [merged("2026-11-02T12:00:00Z")], COST);
+    const from = Date.parse("2026-11-01T00:00:00Z");
+    const feature = { sha: "b".repeat(40), subject: "feat: renew now", at: "" };
+    const outcomes = new Map([["ledger PROJ-1", { kind: "clean" as const, final: false, touched: [feature] }]]);
+    expect(ticketLines({ tallies: [shipped], from, zone: UTC, outcomes }).slice(-2)).toEqual([
+      "    outcome: clean at 2 weeks",
+      "      touched by bbbbbbbb feat: renew now",
+    ]);
+    expect(ticketLines({ tallies: [shipped], from, zone: UTC }).at(-1)).toBe(
+      "    outcome: read with agent-factory usage ledger, with the project's clone set",
+    );
+    // a ticket not merged has no outcome line
+    expect(ticketLines({ tallies: [tally], from, zone: UTC }).some((l) => l.includes("outcome"))).toBe(false);
+  });
+
   it("leaves out a ticket with no line since the start of the month, and prints nothing when none is left", () => {
     expect(ticketLines({ tallies: [tally], from: Date.parse("2026-12-01T00:00:00Z"), zone: UTC })).toEqual([]);
   });
