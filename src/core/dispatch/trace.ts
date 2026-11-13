@@ -174,6 +174,16 @@ export async function openTrace(at: TraceAt, max: number = TRACE_MAX_BYTES): Pro
     : { kind: "failed", reason: `cannot make ${dir.value}` };
 }
 
+// keepTrace : a run's whole output, printed already, kept as its trace at once: a model run's stream (#487)
+export async function keepTrace(at: TraceAt, stdout: string): Promise<Result<TraceKept>> {
+  const opened = await openTrace(at);
+  if (opened.kind === "failed") {
+    return opened;
+  }
+  opened.value.write(stdout);
+  return opened.value.close();
+}
+
 // lineOf : the record line that names a trace, in a few words, as a field to spread; none when no line names it. Pure.
 function lineOf(events: readonly Event[], name: TraceName): { readonly line?: string } {
   const e = events.find((x) => x.kind === "writer-ended" && x.trace === name);

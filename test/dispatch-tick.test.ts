@@ -1171,6 +1171,7 @@ describe("tick", () => {
             split: SPLIT,
             lenses: { errors: 1, api: 0 },
             citesNotFound: 1,
+            traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
           },
         }),
       },
@@ -1185,6 +1186,8 @@ describe("tick", () => {
       lenses: { errors: 1, api: 0 },
       // the findings the cite check noted (#485)
       citesNotFound: 1,
+      // each pass's trace (#487)
+      traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
     });
   });
 

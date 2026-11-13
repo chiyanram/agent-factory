@@ -169,6 +169,8 @@ export type Steps = {
               readonly acted?: Acted;
               readonly lenses?: Readonly<Record<string, number>>;
               readonly citesNotFound?: number;
+              // each pass's trace, plain file names in the ticket's folder (trace.ts, #487)
+              readonly traces?: readonly string[];
             }>
           | FailedSpent
         >;
@@ -1104,6 +1106,7 @@ function reviewEnded(
     readonly acted?: Acted;
     readonly lenses?: Readonly<Record<string, number>>;
     readonly citesNotFound?: number;
+    readonly traces?: readonly string[];
   },
 ): Promise<Done> {
   return record({
@@ -1118,6 +1121,7 @@ function reviewEnded(
       ...(value.acted === undefined ? {} : { acted: value.acted }),
       ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
       ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
+      ...tracesIn(value),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });

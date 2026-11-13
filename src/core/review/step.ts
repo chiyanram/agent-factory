@@ -6,6 +6,8 @@
 //                             and names each lens's unique verified findings (#237)
 //   no-progress               needs-human is on the change, which the table reads first next pass
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
+// Each pass's stream is kept as its trace beside the ticket's records (dispatch/trace.ts, #487), and the round's line
+// names them.
 
 import type { PluginDir } from "../process/read.js";
 import type { Result } from "../forge/api.js";
@@ -16,6 +18,8 @@ import type { Model, ModelResult } from "./model.js";
 import type { Acted } from "./acted-on.js";
 import { lensSetupOf, roundLenses } from "./finders.js";
 import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
+import type { Where } from "../dispatch/records.js";
+import { keepTrace, type TraceAt } from "../dispatch/trace.js";
 import { paths, reviewSetup } from "./settings.js";
 import {
   addRoundSpend,
@@ -23,6 +27,7 @@ import {
   NO_ROUND_SPEND,
   NO_SPEND,
   spendOf,
+  type RoundPart,
   type RoundSpend,
   type Spend,
 } from "../dispatch/spend.js";
@@ -77,6 +82,44 @@ function metered(model: Model, meter: Meter): Model {
   };
 }
 
+// Traced : where the round's traces go, and the name of each kept so far (#487)
+type Traced = { readonly where: Where; readonly names: string[]; last: number };
+
+// traceAt : where one pass's trace goes: a finder's by its lens, a verify pass's; each a later time than the last, so
+// two passes that end in the same millisecond never share a name. None for a run that names no part.
+function traceAt(into: Traced, part: RoundPart | undefined): TraceAt | undefined {
+  if (part === undefined) {
+    return undefined;
+  }
+  into.last = Math.max(Date.now(), into.last + 1);
+  const kind = part.kind === "finder" ? { kind: "finder" as const, lens: part.lens } : { kind: "verify" as const };
+  return { ...into.where, ...kind, at: into.last };
+}
+
+// keptFor : one pass's stream kept as its trace, and named; a run that streamed nothing or names no part keeps none
+async function keptFor(into: Traced, part: RoundPart | undefined, stream: string | undefined): Promise<void> {
+  const at = traceAt(into, part);
+  const kept = stream === undefined || at === undefined ? undefined : await keepTrace(at, stream);
+  if (kept?.kind === "ok") {
+    into.names.push(kept.value.name);
+  }
+}
+
+// traced : the model, with each pass's stream kept as its trace and named; a trace that cannot be kept loses the trace,
+// never the pass
+function traced(model: Model, into: Traced): Model {
+  return async (run) => {
+    const ran: ModelResult = await model(run);
+    await keptFor(into, run.part, ran.kind === "ok" ? ran.value.stream : ran.stream);
+    return ran;
+  };
+}
+
+// tracesOf : the round's traces, as a field to spread; none when it kept none. Pure.
+function tracesOf(into: Traced): { readonly traces?: readonly string[] } {
+  return into.names.length === 0 ? {} : { traces: [...into.names] };
+}
+
 // worstCase : the most a round spends with this many finders, each run at the per-run cap ("" for none): the finders
 // and the verify passes; "unbounded" with no per-run cap. Pure.
 export function worstCase(finders: number, maxUsd: string): number | "unbounded" {
@@ -125,11 +168,11 @@ export function reviewStep(input: {
       }
       const setup = reviewSetup({ ...input, number: run.change.line.number, paths: p.value });
       const meter: Meter = { spend: NO_SPEND, split: NO_ROUND_SPEND };
-      const round = await reviewRound({ ...setup, model: metered(setup.model, meter) });
+      const into: Traced = { where: { home, project: input.project, ticket: run.ticket }, names: [], last: 0 };
+      const round = await reviewRound({ ...setup, model: traced(metered(setup.model, meter), into) });
       const mapped = round.kind === "ok" ? actOnOf(round.value) : round;
-      return mapped.kind === "ok"
-        ? { kind: "ok", value: { ...mapped.value, spend: meter.spend, ...splitOf(meter) } }
-        : { ...mapped, spend: meter.spend, ...splitOf(meter) };
+      const spent = { spend: meter.spend, ...splitOf(meter), ...tracesOf(into) };
+      return mapped.kind === "ok" ? { kind: "ok", value: { ...mapped.value, ...spent } } : { ...mapped, ...spent };
     },
   };
 }

@@ -337,7 +337,10 @@ let out;
 if (schema.includes("confidence")) out = { same: true, confidence: 0.9, why: "same" };
 else if (schema.includes("verdicts")) out = { verdicts: JSON.parse(readFileSync("findings.json", "utf8")).map((f) => ({ id: f.id, bucket: "act_on", why: "real" })) };
 else out = { findings: pack.includes("SEEDED") ? [${JSON.stringify(finding("src/a.ts", 10))}] : [] };
-process.stdout.write(JSON.stringify({ is_error: false, structured_output: out, total_cost_usd: 0.01, usage: { input_tokens: 1 } }));
+// stream-json, as the real CLI prints it (#487): an event, the result, then a summary after it
+process.stdout.write(JSON.stringify({ type: "system", subtype: "init" }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "result", is_error: false, structured_output: out, total_cost_usd: 0.01, usage: { input_tokens: 1 } }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "system", subtype: "task_summary" }) + "\\n");
 `,
     );
     chmodSync(bin, 0o755);
