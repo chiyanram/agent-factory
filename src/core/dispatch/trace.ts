@@ -3,16 +3,16 @@
 // with scrubbedJson, so it still reads back, and any other text with scrubSecrets. A trace stops growing at
 // TRACE_MAX_BYTES, and its last line then says it was cut. The record line of the run names its trace by its plain file
 // name, never a path: <home>/runs/<project>/<ticket>/<kind>[-<lens>]-<time>.jsonl. A trace older than TRACE_DAYS, by
-// the time in its name, is deleted at the start of each orchestrator pass. Traces are local and private to this user,
-// as the records are. Nothing here throws.
+// the time in its name, is deleted at the start of each orchestrator pass and by `agent-factory trace`. Traces are
+// local and private to this user, as the records are. Nothing here throws.
 
 import { createWriteStream, type WriteStream } from "node:fs";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { scrubbedJson, scrubSecrets } from "../scrub.js";
 import { plainName } from "../spec.js";
-import { codeOf, recordPath, type Where } from "./records.js";
+import { codeOf, readRecords, recordPath, type Event, type Where } from "./records.js";
 
 export type TraceKind = "writer" | "finder" | "verify" | "design-review" | "design-verify" | "onboard";
 // a plain file name in the ticket's folder, never a path
@@ -20,6 +20,14 @@ export type TraceName = string;
 export type TraceAt = Where & { readonly kind: TraceKind; readonly lens?: string; readonly at: number };
 export type TraceKept = { readonly name: TraceName; readonly bytes: number; readonly cut: boolean };
 export type TraceSink = { write(chunk: string): void; close(): Promise<Result<TraceKept>> };
+export type TraceListed = {
+  readonly name: TraceName;
+  readonly at: string;
+  readonly kind: TraceKind;
+  readonly bytes: number;
+  // the record line that names the trace, in a few words; none when no line names it
+  readonly line?: string;
+};
 
 export const TRACE_DAYS = 30;
 export const TRACE_MAX_BYTES = 50 * 1024 * 1024;
@@ -166,9 +174,61 @@ export async function openTrace(at: TraceAt, max: number = TRACE_MAX_BYTES): Pro
     : { kind: "failed", reason: `cannot make ${dir.value}` };
 }
 
+// lineOf : the record line that names a trace, in a few words, as a field to spread; none when no line names it. Pure.
+function lineOf(events: readonly Event[], name: TraceName): { readonly line?: string } {
+  const e = events.find((x) => x.kind === "writer-ended" && x.trace === name);
+  return e?.kind === "writer-ended" ? { line: `writer-ended ${e.mode} ${e.outcome}` } : {};
+}
+
+// listedOf : one file of the ticket's folder as the list shows it; none for a file that is not a trace
+async function listedOf(dir: string, name: string, events: readonly Event[]): Promise<readonly TraceListed[]> {
+  const parts = nameParts(name);
+  const size = parts === undefined ? undefined : await stat(join(dir, name)).catch(() => undefined);
+  return parts === undefined || size === undefined
+    ? []
+    : [{ name, ...parts, bytes: size.size, ...lineOf(events, name) }];
+}
+
+// listTraces : the ticket's traces, newest first, each with the record line that names it
+export async function listTraces(where: Where): Promise<Result<readonly TraceListed[]>> {
+  const dir = ticketDir(where);
+  if (dir.kind === "failed") {
+    return dir;
+  }
+  const names = await readdir(dir.value).catch(() => [] as string[]);
+  const events = await readRecords(where, { warn: () => undefined });
+  const read = events.kind === "ok" ? events.value : [];
+  const listed = (await Promise.all(names.map((n) => listedOf(dir.value, n, read)))).flat();
+  return { kind: "ok", value: listed.toSorted((a, b) => b.at.localeCompare(a.at)) };
+}
+
 // old : whether a trace's time is past TRACE_DAYS at now. Pure.
 function old(at: string, now: number): boolean {
   return now - Date.parse(at) > TRACE_DAYS * DAY_MS;
+}
+
+// readTrace : one trace's text; "deleted" when its time is past TRACE_DAYS and the file is gone
+export async function readTrace(
+  where: Where,
+  name: string,
+  now: number,
+): Promise<Result<string> | { readonly kind: "deleted" }> {
+  const parts = nameParts(name);
+  const dir = ticketDir(where);
+  if (parts === undefined || dir.kind === "failed") {
+    return { kind: "failed", reason: `${JSON.stringify(name)} is not a trace's name` };
+  }
+  return readFile(join(dir.value, name), "utf8").then(
+    (value) => ({ kind: "ok", value }),
+    (e: unknown) => unread(name, codeOf(e), old(parts.at, now)),
+  );
+}
+
+// unread : why a trace was not read: deleted when it is gone and past TRACE_DAYS, else the error. Pure.
+function unread(name: string, code: string, past: boolean): Result<string> | { readonly kind: "deleted" } {
+  return code === "ENOENT" && past
+    ? { kind: "deleted" }
+    : { kind: "failed", reason: `cannot read the trace ${name}: ${code || "error"}` };
 }
 
 // prunedIn : one folder's traces past TRACE_DAYS deleted; each that could not be deleted, by its path

@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { record } from "../src/core/dispatch/records.js";
 import {
+  listTraces,
   openTrace,
   pruneTraces,
+  readTrace,
   traceLine,
   traceName,
   TRACE_DAYS,
@@ -100,6 +103,65 @@ describe("a trace is written as the run prints (#487)", () => {
 
   it("refuses a ticket that is not a plain name", async () => {
     expect((await openTrace({ ...where(), ticket: "../x", kind: "writer", at: AT })).kind).toBe("failed");
+  });
+});
+
+describe("a ticket's traces are listed and read (#487)", () => {
+  it("lists them newest first, with kind, size and the record line that names each", async () => {
+    await kept(['{"a":1}\n']);
+    const later = await openTrace({ ...where(), kind: "writer", at: AT + 60_000 });
+    if (later.kind !== "ok") throw new Error(later.reason);
+    later.value.write('{"b":2}\n');
+    const closed = await later.value.close();
+    if (closed.kind !== "ok") throw new Error(closed.reason);
+    const done = await record({
+      where: where(),
+      event: {
+        at: "2026-11-13T06:09:00.000Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: "h",
+        outcome: "blocked",
+        patch: "",
+        evidence: [],
+        hung: false,
+        trace: closed.value.name,
+      },
+    });
+    expect(done.kind).toBe("ok");
+    writeFileSync(join(dir(), "writer-2026-11-13T06-00-00-000Z.log"), "kept output, not a trace\n");
+    const listed = await listTraces(where());
+    expect(listed).toEqual({
+      kind: "ok",
+      value: [
+        {
+          name: "writer-2026-11-13T06-08-15-123Z.jsonl",
+          at: "2026-11-13T06:08:15.123Z",
+          kind: "writer",
+          bytes: 8,
+          line: "writer-ended fix blocked",
+        },
+        { name: "writer-2026-11-13T06-07-15-123Z.jsonl", at: "2026-11-13T06:07:15.123Z", kind: "writer", bytes: 8 },
+      ],
+    });
+  });
+
+  it("lists none for a ticket with no folder yet", async () => {
+    expect(await listTraces(where())).toEqual({ kind: "ok", value: [] });
+  });
+
+  it("reads one by its name; a name past 30 days that is gone was deleted; any other name is refused", async () => {
+    await kept(['{"a":1}\n']);
+    const name = traceName({ kind: "writer", at: AT });
+    expect(await readTrace(where(), name, AT)).toEqual({ kind: "ok", value: '{"a":1}\n' });
+    const old = traceName({ kind: "finder", lens: "security", at: AT - (TRACE_DAYS + 1) * DAY });
+    expect(await readTrace(where(), old, AT)).toEqual({ kind: "deleted" });
+    const recent = traceName({ kind: "writer", at: AT - DAY });
+    expect((await readTrace(where(), recent, AT)).kind).toBe("failed");
+    expect(await readTrace(where(), "../../secrets.jsonl", AT)).toEqual({
+      kind: "failed",
+      reason: '"../../secrets.jsonl" is not a trace\'s name',
+    });
   });
 });
 

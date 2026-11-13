@@ -1713,7 +1713,6 @@ async function polled(setup: TickSetup): Promise<void> {
   }
 }
 
-// tick : one locked pass
 // pruned : the project's traces older than TRACE_DAYS deleted, at the start of each pass (#487); one that cannot be
 // deleted is logged, and the pass goes on
 async function pruned(setup: TickSetup): Promise<void> {
@@ -1723,6 +1722,7 @@ async function pruned(setup: TickSetup): Promise<void> {
   }
 }
 
+// tick : one locked pass
 export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
   if (!plainName(setup.project)) {
     return { kind: "failed", reason: `the project must be a plain name, got ${JSON.stringify(setup.project)}` };
