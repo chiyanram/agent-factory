@@ -40,6 +40,17 @@ Codebase health: each change leaves the modules it touches no worse than it foun
 worse, say so in the design and propose the refactor as its own ticket. We care about the next change being easy, not
 only this one working.
 
+## Garden health
+
+Agents optimise whatever you measure, so these rules guard the measures (`npx repo-gardener`).
+
+- Split a file only along its responsibilities, never only to make it shorter, because otherwise the fixes move to
+  the new files.
+- Delete a test only when it mirrors the implementation or checks a thing no code path can do, never to improve a
+  number.
+- Fix share and rework are what count. If a cleanup does not reduce them on the files it touched
+  (`gardener compare`), say so; do not claim it helped.
+
 ## Where things go
 
 The module headers say what each folder under `src/core/` does. What they do not say:
