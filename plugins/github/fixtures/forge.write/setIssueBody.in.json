@@ -1,0 +1,8 @@
+{
+  "op": "setIssueBody",
+  "input": {
+    "project": "chiyanram/ledger",
+    "number": 4,
+    "text": "# 4: a title\n\n## Intent\n\n@alice's `/close` and #12 stay as written\n"
+  }
+}

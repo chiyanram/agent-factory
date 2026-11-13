@@ -133,6 +133,10 @@ export type Forge = {
   // an issue's state (#494: a blocker closed as completed, by a person's change on any branch, counts as merged); a pull
   // or merge request is not an issue, so its number fails
   issueState(input: { readonly number: number }): Promise<Result<IssueState>>;
+  // an issue's body replaced by this text, byte for byte (#542: a spec change in the issue store, sent only on the
+  // person's yes at confirm); a pull or merge request is not an issue, so its number fails and nothing is written. The
+  // caller checks the text: the adapters send it as it is
+  setIssueBody(input: { readonly number: number; readonly text: string }): Promise<Done>;
   // fails unless the forge kept the label
   addLabel(input: { readonly number: number; readonly label: string }): Promise<Done>;
   // succeeds when the label is gone afterwards, even if someone removed it first

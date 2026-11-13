@@ -45,6 +45,7 @@ export function evalForge(change: Change, login: string): Forge {
     landed: () => unused("landed"),
     issueState: () => unused("issueState"),
     issueBody: () => unused("issueBody"),
+    setIssueBody: () => unused("setIssueBody"),
     addLabel: ok,
     removeLabel: ok,
     note: async ({ post }) => {

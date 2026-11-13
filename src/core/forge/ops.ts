@@ -26,6 +26,7 @@ export const FORGE_OPS = {
   removeLabel: "forge.write",
   note: "forge.write",
   setBody: "forge.write",
+  setIssueBody: "forge.write",
   lineFinding: "forge.write",
   status: "forge.write",
   openChange: "forge.write",

@@ -1,0 +1,8 @@
+{
+  "op": "setIssueBody",
+  "input": {
+    "project": "aruvii/agent-platform",
+    "number": 2,
+    "text": "# 2: a title\n\n## Intent\n\n@alice's `/close` and #12 stay as written\n"
+  }
+}

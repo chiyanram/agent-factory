@@ -567,6 +567,17 @@ export function gitlab(client: Client, project: string): Forge {
     },
     note,
     setBody,
+    // an issue's description replaced (#542); GitLab numbers issues and merge requests apart, so an iid here is
+    // always an issue
+    async setIssueBody(input) {
+      return done(
+        await rest(client, {
+          path: `${base}/issues/${input.number}`,
+          method: "PUT",
+          body: { kind: "json", value: { description: input.text } },
+        }),
+      );
+    },
     // every comment, oldest first, every page: an MR with many notes must not push the reviewer's rounds out of view
     async notes(input) {
       return pages(async (cursor): Promise<Result<Page<Note>>> => {
