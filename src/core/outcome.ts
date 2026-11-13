@@ -179,22 +179,40 @@ export function outcomeLines(o: MergeOutcome): readonly string[] {
 }
 
 // tipAt : the default branch, fetched, at its last commit before the end of the watch
-async function tipAt(read: Read, end: number): Promise<{ ok: true; out: string } | { ok: false; why: string }> {
+// fetchDefault : the default branch fetched into FETCHED, once per read of any number of merges; why it failed, or ""
+export async function fetchDefault(read: Read): Promise<string> {
   const fetched = await git(read, ["fetch", "-q", "--no-tags", "origin", `+HEAD:${FETCHED}`]);
-  if (!fetched.ok) {
-    return fetched;
-  }
+  return fetched.ok ? "" : fetched.why;
+}
+
+// tipBefore : the fetched default branch's last commit before the end of the watch
+async function tipBefore(read: Read, end: number): Promise<{ ok: true; out: string } | { ok: false; why: string }> {
   const tip = await git(read, ["rev-list", "-1", `--before=${new Date(end).toISOString()}`, FETCHED]);
   return tip.ok ? { ok: true, out: tip.out.trim() } : tip;
 }
 
-// outcomeOf : what became of a merge, read from the project's clone at now (ms)
+// tipAt : the default branch's tip for the watch, fetched first unless the caller already fetched it
+async function tipAt(
+  read: Read,
+  end: number,
+  fetched: boolean,
+): Promise<{ ok: true; out: string } | { ok: false; why: string }> {
+  const why = fetched ? "" : await fetchDefault(read);
+  return why === "" ? tipBefore(read, end) : { ok: false, why };
+}
+
+// outcomeOf : what became of a merge, read from the project's clone at now (ms); fetched: the caller has already run
+// fetchDefault for this read, so many merges cost one fetch
 export async function outcomeOf(
-  input: Read & { readonly merged: { readonly at: string; readonly sha: string }; readonly now: number },
+  input: Read & {
+    readonly merged: { readonly at: string; readonly sha: string };
+    readonly now: number;
+    readonly fetched?: true;
+  },
 ): Promise<MergeOutcome> {
   const at = Date.parse(input.merged.at);
   const day = Math.floor((input.now - at) / DAY_MS);
-  const tip = await tipAt(input, Math.min(input.now, at + WATCH_DAYS * DAY_MS));
+  const tip = await tipAt(input, Math.min(input.now, at + WATCH_DAYS * DAY_MS), input.fetched === true);
   if (!tip.ok) {
     return { kind: "unknown", why: tip.why };
   }
