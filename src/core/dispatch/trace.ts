@@ -87,6 +87,17 @@ function inert(text: string): string {
   ).join("");
 }
 
+// inertText : a whole text as a terminal may print it (#542: `spec --show`): each control character escaped as in a
+// trace line, but the tab, the newline, and a carriage return that ends a line before its newline; a lone carriage
+// return would rewrite the line on screen, so it is escaped. Pure.
+export function inertText(text: string): string {
+  const keep = (i: number): boolean => text[i] === "\n" || (text[i] === "\r" && text[i + 1] === "\n");
+  return text
+    .split("")
+    .map((c, i) => (keep(i) ? c : inert(c)))
+    .join("");
+}
+
 // ticketDir : the ticket's folder beside its record file
 function ticketDir(where: Where): Result<string> {
   const path = recordPath(where);

@@ -133,6 +133,9 @@ describe("agent-factory spec", () => {
     expect(await cli(["spec", "ledger", "PROJ-1", "--show"])).toMatchObject({ code: 0, out: SPEC });
     expect((await cli(["spec", "ledger", "PROJ-2", "--show"])).code).toBe(1);
     expect((await cli(["spec", "--template", "--show", "PROJ-1"])).code).toBe(64);
+    // a control character a terminal acts on is escaped; the line ends stay as they are (#542)
+    writeSpec(`${SPEC}\u001b[2J a\rb\r\n`);
+    expect((await cli(["spec", "ledger", "PROJ-1", "--show"])).out).toBe(`${SPEC}\\u001b[2J a\\u000db\r\n`);
   });
 
   it("says how to start when there is no spec, exit 1", async () => {

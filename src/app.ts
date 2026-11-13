@@ -46,6 +46,7 @@ import {
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
 import { STEPS_TODAY, type Steps } from "./core/dispatch/steps.js";
+import { inertText } from "./core/dispatch/trace.js";
 import { runHoursEnd, tick, type TickSetup } from "./core/dispatch/tick.js";
 import { loopFile, loopRunning, orchestratorLoop } from "./core/dispatch/orchestrator-loop.js";
 import type { Gate } from "./core/dispatch/table.js";
@@ -397,9 +398,11 @@ function specRead(
   return show ? Promise.resolve(specShown(io, read.text)) : specFound(io, at, read);
 }
 
-// specShown : the spec's text, byte for byte as the store holds it; no check runs, so a spec that fails one still shows
+// specShown : the spec's text as the store holds it; no check runs, so a spec that fails one still shows. A control
+// character a terminal acts on is escaped (inertText), so the text cannot move the cursor or set a title; a spec that
+// holds one fails `spec` anyway
 function specShown(io: Io, text: string): number {
-  io.out(text);
+  io.out(inertText(text));
   return 0;
 }
 

@@ -7,6 +7,7 @@ import {
   openTrace,
   pruneTraces,
   readTrace,
+  inertText,
   traceLine,
   traceName,
   TRACE_DAYS,
@@ -67,6 +68,13 @@ describe("a trace is written as the run prints (#487)", () => {
     const line = `${esc}[2J${esc}]0;title${String.fromCharCode(7)} csi${String.fromCharCode(0x9b)}A del${String.fromCharCode(0x7f)}\tend`;
     expect(traceLine(line)).toBe("\\u001b[2J\\u001b]0;title\\u0007 csi\\u009bA del\\u007f\tend");
     expect(traceLine(JSON.stringify({ text: `${esc}[2J` }))).toBe('{"text":"\\u001b[2J"}');
+  });
+
+  it("inertText keeps the tab, the newline and a \\r\\n line end, and escapes a lone \\r and every other control (#542)", () => {
+    const esc = String.fromCharCode(0x1b);
+    const text = `# 2: a title\r\n\n${esc}]0;title${String.fromCharCode(7)}\tx\rover\r\nend\r`;
+    expect(inertText(text)).toBe("# 2: a title\r\n\n\\u001b]0;title\\u0007\tx\\u000dover\r\nend\\u000d");
+    expect(inertText("plain \u00e9 \u{1F600}\n")).toBe("plain \u00e9 \u{1F600}\n");
   });
 
   it("stops at the cap, and its last line says it was cut", async () => {
