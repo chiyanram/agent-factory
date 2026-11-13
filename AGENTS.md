@@ -16,6 +16,10 @@ make test   # build, then the vitest suite; no network, glab, gh or claude neede
 
 CI runs both on every pull request and on push to `main`.
 
+`make test` skips the rules-pack check unless `FACTORY_RULES_PACK` names a checkout of the commit pinned in
+`.github/rules-pack.json`; CI sets it. Before you change how a role card or a process is read, fetch that commit and
+set the variable as `.github/workflows/ci.yml` does, because a local run is otherwise green where CI fails.
+
 ## MUSTs
 
 - Call the git host only through the `Forge` seam in `src/core/forge/`, added to both adapters, because a direct
