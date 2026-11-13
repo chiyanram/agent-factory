@@ -129,11 +129,14 @@ line does not beat it. Only a pass over the baseline's own cases can aim at cost
 better.
 
 With no `baseline.json`, or one with fewer than two runs to measure the noise by, a reviewer-input change is refused.
-`src/core/review/pinned.ts` landed before the first baseline (#213) and is to become a reviewer input with it (#216);
-the check does not read it as one yet. The rulebook's pin is the project's plugin pin, kept in the factory home, not here (#232), so
-`inputs.rulebook` is not checked yet.
+**Today:** `src/core/review/pinned.ts` is not a reviewer input, so a change to the review's models needs no eval pass
+(#611).
+
+**Today:** `inputs.rulebook` is not checked: the rulebook's pin is the project's plugin pin, kept in the factory home,
+not here, and #611 decides whether the check reads it.
 
 **A change to `baseline.json`** needs the operator's approval: the pull request label `eval-baseline-approved`, which
 CI reads from the pull request event. Only the operator adds it; an agent never does. A local run has no event, so it
-refuses a baseline change. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits, whose noise can be measured
-(two or more runs, each holding the same seeds), and that was run with no `--aim`, since a baseline proves no change.
+refuses a baseline change. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits,
+whose noise can be measured (two or more runs, each holding the same seeds), and that was run with no `--aim`, since a
+baseline proves no change.
