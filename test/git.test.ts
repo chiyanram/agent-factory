@@ -178,7 +178,8 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     mkdirSync(join(repo, "bin"));
     writeFileSync(join(repo, "bin/ssh"), readFileSync(plant("ssh")));
     chmodSync(join(repo, "bin/ssh"), 0o755);
-    git(["remote", "set-url", "origin", "ssh://git@example.invalid/x.git"]);
+    // a loopback port nothing listens on: refused at once, with no name to look up (a .invalid lookup hangs on macOS, #527)
+    git(["remote", "set-url", "origin", "ssh://git@127.0.0.1:1/x.git"]);
     await hostGit(
       request(["fetch", "-q", "origin"], { env: { ...env, PATH: `bin:${join(repo, "bin")}:${env.PATH ?? ""}` } }),
     );
