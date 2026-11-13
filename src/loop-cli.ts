@@ -20,7 +20,7 @@ import type { Forge } from "./core/forge/types.js";
 import { lintEdit } from "./core/lint-edit.js";
 import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
 import { questionsIn, type Question } from "./core/report.js";
-import { roundReadsBack } from "./core/finish.js";
+import { questionRound, readsBackAs } from "./core/finish.js";
 import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
 import { claudeSessions } from "./core/review/live.js";
 import { runInFolder } from "./core/review/model.js";
@@ -226,7 +226,9 @@ function questionsOfText(text: string): Result<readonly Question[]> {
     return { kind: "failed", reason: read.problem };
   }
   // a question that checks can still post damaged: refuse the file rather than post a round no reply can close (#517)
-  const back = roundReadsBack(read.value);
+  const round = questionRound(read.value);
+  const note = { seat: "coordinator", title: round.title, fields: [round.answer], items: round.items } as const;
+  const back = readsBackAs(note, read.value);
   return back === "" ? { kind: "ok", value: read.value } : { kind: "failed", reason: back };
 }
 

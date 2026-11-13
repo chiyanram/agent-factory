@@ -5,7 +5,6 @@
   "src/core/app-token.ts typescript(no-unnecessary-type-assertion)": 4,
   "src/core/app-token.ts typescript(no-unsafe-type-assertion)": 3,
   "src/core/finish.ts eslint(complexity)": 1,
-  "src/core/finish.ts eslint(no-shadow)": 1,
   "src/core/forge/api.ts eslint(complexity)": 3,
   "src/core/forge/api.ts typescript(no-unsafe-type-assertion)": 2,
   "src/core/forge/gitlab.ts eslint(no-shadow)": 2,

@@ -189,6 +189,70 @@ describe("finishRun", () => {
     ]);
   });
 
+  describe("asked: a round that would not read back as written is never posted as OPEN (#522)", () => {
+    const WHY =
+      'would not read back as written once posted: each question with its choices is cut at 500 characters, and " · " or " A) " inside a text splits it; shorten or reword it';
+
+    async function ask(questions: readonly Question[], one = false): Promise<{ next: unknown; log: Log }> {
+      const log: Log = [];
+      const next = await finishRun({
+        outcome: { kind: "asked", questions },
+        ending: CLEAN,
+        change: 12,
+        forge: forge(log),
+        push: push(),
+        pusher: pusher(log),
+        ...(one ? { questions: "one-at-a-time" as const } : {}),
+      });
+      return { next, log };
+    }
+
+    // the log of a round blocked at question n: pushed, labelled, then one blocked note listing the questions
+    function blockedAt(n: number, items: readonly string[]): Log {
+      return [
+        "push bbbb guards=3",
+        `label ${NEEDS_HUMAN}`,
+        [`note [coordinator] blocked: question ${n} ${WHY}`, "", ...items.map((i) => `- ${i}`)].join("\n"),
+      ];
+    }
+
+    it("a question over 500 characters: blocked, naming it, with the questions as written, cut by the template", async () => {
+      const long: Question = { kind: "choices", question: "q".repeat(520), choices: ["a", "b"], recommended: 0 };
+      const { next, log } = await ask([CURRENCY, long]);
+      expect(next).toEqual({ kind: "ok", value: { kind: "needs-human", reason: `question 2 ${WHY}` } });
+      expect(log).toEqual(blockedAt(2, ["1. EUR or USD? A) EUR (recommended) · B) USD", `2. ${"q".repeat(496)}…`]));
+    });
+
+    it('a " · " in a choice, or a " A) " in a question, splits it: blocked', async () => {
+      const dot: Question = { kind: "choices", question: "Which?", choices: ["a · b", "c"], recommended: 0 };
+      expect((await ask([dot])).log).toEqual(blockedAt(1, ["1. Which? A) a · b (recommended) · B) c"]));
+      const letter: Question = { kind: "choices", question: "Plan A) or B)?", choices: ["A", "B"], recommended: 1 };
+      expect((await ask([CURRENCY, letter])).log).toEqual(
+        blockedAt(2, ["1. EUR or USD? A) EUR (recommended) · B) USD", "2. Plan A) or B)? A) A · B) B (recommended)"]),
+      );
+    });
+
+    it("a long single plain question, posted as the title, is cut: blocked", async () => {
+      const { next, log } = await ask([plain("w".repeat(600))]);
+      expect(next).toMatchObject({ kind: "ok", value: { kind: "needs-human" } });
+      expect(log).toEqual(blockedAt(1, [`1. ${"w".repeat(496)}…`]));
+    });
+
+    it("a plain question in a round, and one that the template escapes, read back and are posted", async () => {
+      const { next, log } = await ask([plain("Which region, A) or B)? · #12"), CURRENCY]);
+      expect(next).toEqual({ kind: "ok", value: { kind: "wait-for-answer", head: B } });
+      expect(log.at(-1)).toMatch(/^note \[writer\] OPEN: 2 questions/);
+    });
+
+    it("one-at-a-time checks only the question it posts", async () => {
+      const long: Question = { kind: "choices", question: "q".repeat(520), choices: ["a", "b"], recommended: 0 };
+      const later = await ask([CURRENCY, long], true);
+      expect(later.next).toEqual({ kind: "ok", value: { kind: "wait-for-answer", head: B } });
+      expect(later.log.at(-1)).toMatch(/^note \[writer\] OPEN: 1 question\n/);
+      expect((await ask([long, CURRENCY], true)).log).toEqual(blockedAt(1, [`1. ${"q".repeat(496)}…`]));
+    });
+  });
+
   it("blocked: labels needs-human first, then pushes the work in progress on top of the branch only, then posts the reason", async () => {
     const log: Log = [];
     const next = await finishRun({

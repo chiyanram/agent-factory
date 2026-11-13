@@ -312,6 +312,11 @@ describe("grill (#517)", () => {
       expect(await questionsFrom(env(), put("q.json", JSON.stringify(escaped)))).toMatchObject({ kind: "ok" });
     });
 
+    it("takes a question and a choice that start with a slash: they read back as written (#522)", async () => {
+      const slash = [{ question: "/merge or wait?", choices: ["/merge", "wait"], recommended: 1 }];
+      expect(await questionsFrom(env(), put("q.json", JSON.stringify(slash)))).toMatchObject({ kind: "ok" });
+    });
+
     it("the command exits 2 naming the problem, and posts nothing, for a file that does not check", async () => {
       const parsed = LOOP_COMMANDS.grill?.(["12", "aaaa1111", put("q.json", "[]")]);
       const errs: string[] = [];
