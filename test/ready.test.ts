@@ -280,6 +280,7 @@ function statusForge(posted: CommitStatus[], noted: Post[] = []): Forge {
     mark: "#",
     me: notUsed,
     change: notUsed,
+    landed: notUsed,
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
     branchState: async () => ({ kind: "ok", value: "none" }),

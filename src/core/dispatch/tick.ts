@@ -796,7 +796,29 @@ function writerSaid(state: TicketState, value: WriterValue): string {
 
 async function reconcile(setup: TickSetup, state: TicketState): Promise<Done> {
   const n = number(state);
-  return n === "none" ? { kind: "ok" } : setup.forge.removeLabel({ number: n, label: setup.label });
+  if (n === "none") {
+    return { kind: "ok" };
+  }
+  await mergedLine(setup, state, n);
+  return setup.forge.removeLabel({ number: n, label: setup.label });
+}
+
+// mergedLine : the change's merge recorded once, as the git host has it (#487: the merge touch and the outcome). A merge
+// the git host cannot answer for is logged and costs only that touch: the claim still comes off.
+async function mergedLine(setup: TickSetup, state: TicketState, n: number): Promise<void> {
+  const place = where(setup, state);
+  const events = await readRecords(place, { warn: () => undefined });
+  if (events.kind === "failed" || events.value.some((e) => e.kind === "merged" && e.number === n)) {
+    return;
+  }
+  const merged = await setup.forge.landed({ number: n });
+  const kept =
+    merged.kind === "ok"
+      ? await record({ where: place, event: { kind: "merged", number: n, ...merged.value } })
+      : merged;
+  if (kept.kind === "failed") {
+    setup.log(`${state.ticket}: the merge was not recorded: ${kept.reason}`);
+  }
 }
 
 // the actions that only touch the forge; "none" for a run or a wait

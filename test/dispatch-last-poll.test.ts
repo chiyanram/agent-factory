@@ -37,6 +37,7 @@ function forge(claimed: readonly number[] | "down"): Forge {
     mark: "#",
     me: async () => ({ kind: "ok", value: "ram" }),
     change: notUsed,
+    landed: notUsed,
     defaultBranch: notUsed,
     branchExists: notUsed,
     branchState: notUsed,

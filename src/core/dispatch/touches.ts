@@ -9,10 +9,9 @@
 //   answer    from the writer run that asked, to the answers line; the answers name no one, so it has no by
 //   rescue    from a hand-over (a blocked line) to the next START or approval; an approval that ends a hand-over is
 //             one touch, a rescue
+//   merge     from the gate-green ping before it to the git host's merged-at, by who merged
 // START and approval lines carry their records' own times and are written when a pass first reads them, so they are
 // read in time order, not file order.
-//
-// **Today:** the merge touch follows in #487's slice 3c (the merged line).
 
 import type { Event } from "./records.js";
 import type { Total } from "./usage.js";
@@ -54,16 +53,17 @@ function answerTouches(events: readonly Event[]): readonly Touch[] {
   return events.reduce<Asking>(answerStep, { touches: [] }).touches;
 }
 
-// Heard : the human touches so far, the open hand-over, and when the newest START and design verify pass were; "" for
-// none
+// Heard : the human touches so far, the open hand-over, and when the newest START, design verify pass and gate-green
+// ping were; "" for none
 type Heard = {
   readonly touches: readonly Touch[];
   readonly blocked: string;
   readonly begun: string;
   readonly verified: string;
+  readonly pinged: string;
 };
 
-const NOTHING_HEARD: Heard = { touches: [], blocked: "", begun: "", verified: "" };
+const NOTHING_HEARD: Heard = { touches: [], blocked: "", begun: "", verified: "", pinged: "" };
 
 // waited : the ms from a time, or "" for none, to another. Pure.
 function waited(from: string, to: string): number {
@@ -88,17 +88,30 @@ function actedOn(state: Heard, e: Extract<Event, { kind: "begun" | "approved" }>
   };
 }
 
-// marked : the open hand-over or design verify a line sets, as a field to spread; nothing on another line. Pure.
-function marked(state: Heard, e: Event): Partial<Heard> {
-  if (e.kind === "blocked") {
-    return { blocked: state.blocked || e.at };
-  }
-  return e.kind === "design-ended" && e.step === "verify" ? { verified: e.at } : {};
+// MARKS : what a line marks: an open hand-over, a design verify pass's end, a gate-green ping
+const MARKS: Partial<Record<Event["kind"], (state: Heard, e: Event) => Partial<Heard>>> = {
+  blocked: (state, e) => ({ blocked: state.blocked || e.at }),
+  "design-ended": (_, e) => (e.kind === "design-ended" && e.step === "verify" ? { verified: e.at } : {}),
+  pinged: (_, e) => ({ pinged: e.at }),
+};
+
+// mergedOn : the merge, waiting from the gate-green ping before it, by who merged. Pure.
+function mergedOn(state: Heard, e: Extract<Event, { kind: "merged" }>): Heard {
+  const merge: Touch = {
+    kind: "merge",
+    at: e.at,
+    waitedMs: waited(state.pinged, e.at),
+    ...(e.by === "" ? {} : { by: e.by }),
+  };
+  return { ...state, touches: [...state.touches, merge] };
 }
 
 // heardStep : one more line, in time order. Pure.
 function heardStep(state: Heard, e: Event): Heard {
-  return e.kind === "begun" || e.kind === "approved" ? actedOn(state, e) : { ...state, ...marked(state, e) };
+  if (e.kind === "begun" || e.kind === "approved") {
+    return actedOn(state, e);
+  }
+  return e.kind === "merged" ? mergedOn(state, e) : { ...state, ...MARKS[e.kind]?.(state, e) };
 }
 
 // heardTouches : each approval and rescue, from the lines in time order. Pure.

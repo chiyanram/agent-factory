@@ -40,6 +40,7 @@ import type {
   Level,
   Mergeable,
   IssueState,
+  Landed,
   MergedChange,
   OpenChange,
   Person,
@@ -215,6 +216,26 @@ export function gitlab(client: Client, project: string): Forge {
         start: r.text(v, "diff_refs.start_sha"),
         head: r.text(v, "diff_refs.head_sha"),
       },
+    });
+  }
+
+  // landedOf : when, as which commit and by whom a merge request was merged: the merge commit, else the squash commit,
+  // else the head itself when it was fast-forwarded onto the target
+  async function landedOf(input: { readonly number: number }): Promise<Result<Landed>> {
+    const answer = await rest(client, { path: `${base}/merge_requests/${input.number}`, method: "GET", body: none });
+    if (answer.kind === "failed") {
+      return answer;
+    }
+    const r = reader(`gitlab merge request ${input.number}`);
+    const v = answer.value;
+    if (r.text(v, "state") !== "merged") {
+      return { kind: "failed", reason: `gitlab: !${input.number} is not merged` };
+    }
+    const commit = ["merge_commit_sha", "squash_commit_sha", "sha"].find((k) => !r.absent(v, k)) ?? "sha";
+    return r.done({
+      at: r.text(v, "merged_at"),
+      sha: r.text(v, commit),
+      by: r.absent(v, "merge_user") ? "" : r.text(v, "merge_user.username"),
     });
   }
 
@@ -456,6 +477,7 @@ export function gitlab(client: Client, project: string): Forge {
       return login.kind === "ok" ? { kind: "ok", value: String(login.value) } : login;
     },
     change,
+    landed: landedOf,
     failedJobs,
     // ci_config_path: empty for .gitlab-ci.yml; "path@group/project" or a URL for a file kept outside this repository
     async ciConfig() {

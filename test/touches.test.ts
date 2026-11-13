@@ -19,6 +19,8 @@ const answered = (at: string): Event => ({ at, kind: "answered", spec: "", answe
 const begun = (at: string, by = "ram"): Event => ({ at, kind: "begun", by, via: "terminal" });
 const approved = (at: string, by = "ram"): Event => ({ at, kind: "approved", by, via: "terminal", spec: "h" });
 const blocked = (at: string): Event => ({ at, kind: "blocked", why: "needs a person" });
+const pinged = (at: string): Event => ({ at, kind: "pinged", head: "h" });
+const merged = (at: string, by = "mo"): Event => ({ at, kind: "merged", number: 12, sha: "a".repeat(40), by });
 const designVerify = (at: string): Event => ({
   at,
   kind: "design-ended",
@@ -92,6 +94,19 @@ describe("a ticket's touches (#487)", () => {
     ];
     expect(touchesOf(events)).toEqual([
       { kind: "rescue", at: "2026-11-13T10:00:00Z", by: "mo", waitedMs: 2 * 3_600_000 },
+    ]);
+  });
+
+  it("a merge waits from the newest gate-green ping before it, by who merged (Q4 A)", () => {
+    const events = [pinged("2026-11-13T08:00:00Z"), pinged("2026-11-13T09:00:00Z"), merged("2026-11-13T12:00:00Z")];
+    expect(touchesOf(events)).toEqual([
+      { kind: "merge", at: "2026-11-13T12:00:00Z", by: "mo", waitedMs: 3 * 3_600_000 },
+    ]);
+  });
+
+  it("a merge with no ping before it waited nothing, and one the git host names no merger for has no by", () => {
+    expect(touchesOf([merged("2026-11-13T12:00:00Z", "")])).toEqual([
+      { kind: "merge", at: "2026-11-13T12:00:00Z", waitedMs: 0 },
     ]);
   });
 

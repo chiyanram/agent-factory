@@ -89,6 +89,7 @@ function forge(now: () => Changes | "down"): Forge {
     mark: "#",
     me: async () => ({ kind: "ok", value: "ram" }),
     change: notUsed,
+    landed: notUsed,
     defaultBranch: notUsed,
     branchExists: async () => ({ kind: "ok", value: false }),
     branchState: async () => ({ kind: "ok", value: "none" }),
@@ -624,8 +625,9 @@ describe("the orchestrator loop and the git host's rate limit (#62)", () => {
     // pass 2 did nothing: its login and the 3 lists, each one call; before #62 it read them twice, with the login
     const pass2 = host.calls.slice(first, second);
     expect(pass2.map((c) => c.args[2])).toEqual(["user", "graphql", "graphql", "graphql"]);
-    // no pass of this one-ticket project makes more than 8 calls
-    expect(host.calls.length - second).toBeLessThanOrEqual(8);
+    // no pass of this one-ticket project makes more than 9 calls: the pass that reconciles the merge reads it once
+    // (Forge.landed, #487) before the claim comes off; a pass that did nothing still makes 4, above
+    expect(host.calls.length - second).toBeLessThanOrEqual(9);
   });
 
   it("a pass that meets the limit makes one call, and the next pass waits until the reset, with no retry storm", async () => {

@@ -113,6 +113,7 @@ function forge(changes: Changes, log: string[]): Forge {
     mark: "#",
     me: async () => ({ kind: "ok", value: "ram" }),
     change: notUsed,
+    landed: notUsed,
     defaultBranch: notUsed,
     branchExists: async () => ({ kind: "ok", value: false }),
     branchState: async () => ({ kind: "ok", value: "none" }),
@@ -1141,6 +1142,29 @@ describe("tick", () => {
     expect(again.filter((l) => l.startsWith("note #14"))).toEqual([]);
     // pinged once, as the note
     expect(pings).toHaveLength(1);
+  });
+
+  it("a merged change's merge is recorded once, as the git host has it, before the claim comes off (#487)", async () => {
+    const changes = { team, open: [], merged: [{ number: 9, branch: "factory/PROJ-9", fork: false }] };
+    const value = { at: "2026-11-07T09:30:00Z", sha: "a".repeat(40), by: "mo" };
+    const log: string[] = [];
+    const answering = (): Forge => ({ ...forge(changes, log), landed: async () => ({ kind: "ok", value }) });
+    await tick(setup(changes, log, { forge: answering() }));
+    expect(log).toContain("label -agent::claimed #9");
+    // the claim was still on, so the next pass reconciles again: the merge is not recorded twice
+    await tick(setup(changes, log, { forge: answering() }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-9" });
+    expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "merged") : read).toEqual([
+      { kind: "merged", number: 9, ...value },
+    ]);
+  });
+
+  it("a merge the git host cannot answer for is logged, and the claim still comes off (#487)", async () => {
+    const changes = { team, open: [], merged: [{ number: 9, branch: "factory/PROJ-9", fork: false }] };
+    const log: string[] = [];
+    await tick(setup(changes, log));
+    expect(log).toContain("label -agent::claimed #9");
+    expect(log).toContain("log PROJ-9: the merge was not recorded: not used in these tests");
   });
 
   // #485 (#456 decision 3): a red check is a fail, never re-run by the factory; only a person quarantines one

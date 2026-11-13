@@ -209,6 +209,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     mark: "#",
     me: async () => unused("me"),
     change: async () => unused("change"),
+    landed: async () => unused("landed"),
     defaultBranch: async () => ({ kind: "ok", value: "main" }),
     branchExists: async () => ({ kind: "ok", value: false }),
     branchState: async () => unused("branchState"),

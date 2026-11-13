@@ -244,7 +244,16 @@ export type Event =
   // are files a new one replaces, so these lines keep each of them for the ticket's touches (touches.ts, #487)
   | { readonly at: string; readonly kind: "begun"; readonly by: string; readonly via: Via }
   // a person's approval of the spec with this hash, at the approval record's own time, recorded the same way (#487)
-  | { readonly at: string; readonly kind: "approved"; readonly by: string; readonly via: Via; readonly spec: string };
+  | { readonly at: string; readonly kind: "approved"; readonly by: string; readonly via: Via; readonly spec: string }
+  // the ticket's change was merged, at the git host's merged-at, as this commit, by this person; recorded once, when
+  // the pass reconciles it (#487)
+  | {
+      readonly at: string;
+      readonly kind: "merged";
+      readonly number: number;
+      readonly sha: string;
+      readonly by: string;
+    };
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 
@@ -810,6 +819,14 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const via = prop(raw, "via");
     return by === BAD || !isVia(via) ? BAD : { at, kind: "begun", by, via };
   },
+  merged: (raw, at) => {
+    const n = prop(raw, "number");
+    const sha = str(raw, "sha");
+    const by = str(raw, "by");
+    return sha === BAD || by === BAD || !Number.isSafeInteger(n)
+      ? BAD
+      : { at, kind: "merged", number: Number(n), sha, by };
+  },
   approved: (raw, at) => {
     const by = str(raw, "by");
     const via = prop(raw, "via");
@@ -1148,6 +1165,7 @@ const STEPS: Steps = {
   answered: (s) => s,
   begun: (s) => s,
   approved: (s) => s,
+  merged: (s) => s,
 };
 
 function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {

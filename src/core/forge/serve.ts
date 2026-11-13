@@ -69,6 +69,7 @@ type Run = (forge: Forge, input: unknown) => Promise<Answer>;
 const RUN: Readonly<Record<ForgeOp, Run>> = {
   me: async (f) => value(await f.me()),
   change: (f, i) => withInput(i, numberOf, async (x) => value(await f.change(x))),
+  landed: (f, i) => withInput(i, numberOf, async (x) => value(await f.landed(x))),
   defaultBranch: async (f) => value(await f.defaultBranch()),
   branchExists: (f, i) =>
     withInput(
