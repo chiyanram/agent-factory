@@ -93,6 +93,8 @@ const HELP = `usage: agent-factory <command>
 commands:
   poll                         one line of facts per open change, read from the forge
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
+  spec <project> <ticket> --show
+                               print the ticket's spec text as stored, whether or not it passes the checks (#542)
   spec --template <ticket>     print an empty spec to fill in
   start <project> <ticket> [--yes] [--no-loop]
                                a human's START: open the ticket (in the tiny lane it also lets the build begin); asks
@@ -170,6 +172,8 @@ settings:
 type Args = {
   readonly json: boolean;
   readonly template: boolean;
+  // spec: print the spec's text instead of checking it (#542)
+  readonly show: boolean;
   readonly once: boolean;
   readonly dryRun: boolean;
   readonly yes: boolean;
@@ -328,9 +332,14 @@ async function pollResolved({ json, io }: Args): Promise<number> {
 }
 
 // spec : one line "spec <project>/<ticket> <hash> <path>" for a spec that follows the template (exit 0); its problems
-// (exit 2); or why it cannot be read (exit 1). The hash is what `approve` (#104) asks the human to confirm.
-async function spec({ template: wantTemplate, positionals, io }: Args): Promise<number> {
-  return wantTemplate ? specTemplate(positionals, io) : specOf(positionals, io);
+// (exit 2); or why it cannot be read (exit 1). The hash is what `approve` (#104) asks the human to confirm. With
+// --show, the spec's text as stored, checked or not, so the coordinator can edit a spec that does not pass yet (#542).
+async function spec({ template: wantTemplate, show, positionals, io }: Args): Promise<number> {
+  if (wantTemplate && show) {
+    io.err("usage: agent-factory spec <project> <ticket> --show, or agent-factory spec --template <ticket>\n");
+    return 64;
+  }
+  return wantTemplate ? specTemplate(positionals, io) : specOf(positionals, io, show);
 }
 
 function specTemplate(positionals: readonly string[], io: Io): Promise<number> {
@@ -343,10 +352,10 @@ function specTemplate(positionals: readonly string[], io: Io): Promise<number> {
   return Promise.resolve(0);
 }
 
-async function specOf(positionals: readonly string[], io: Io): Promise<number> {
+async function specOf(positionals: readonly string[], io: Io, show: boolean): Promise<number> {
   const [project, ticket] = positionals;
   if (project === undefined || ticket === undefined) {
-    io.err("usage: agent-factory spec <project> <ticket>\n");
+    io.err("usage: agent-factory spec <project> <ticket> [--show]\n");
     return 64;
   }
   if (!plainName(project) || !plainName(ticket)) {
@@ -355,10 +364,10 @@ async function specOf(positionals: readonly string[], io: Io): Promise<number> {
     );
     return 1;
   }
-  return resolvedRun("spec", project, io, (resolved) => specResolved(resolved, project, ticket));
+  return resolvedRun("spec", project, io, (resolved) => specResolved(resolved, project, ticket, show));
 }
 
-async function specResolved(io: Io, project: string, ticket: string): Promise<number> {
+async function specResolved(io: Io, project: string, ticket: string, show: boolean): Promise<number> {
   const at = specsAt(io, project, ticket);
   if (at.kind === "refused") {
     io.err(`agent-factory spec: ${at.reason}\n`);
@@ -373,8 +382,24 @@ async function specResolved(io: Io, project: string, ticket: string): Promise<nu
       io.err(`agent-factory spec: no spec at ${read.where}; ${startOne(at.where.store, ticket)}\n`);
       return 1;
     case "found":
-      return specFound(io, at.where, read);
+      return specRead(io, at.where, read, show);
   }
+}
+
+// specRead : a spec that was found: its text with --show, else its checks and hashes
+function specRead(
+  io: Io,
+  at: SpecWhere,
+  read: { readonly text: string; readonly where: string },
+  show: boolean,
+): Promise<number> {
+  return show ? Promise.resolve(specShown(io, read.text)) : specFound(io, at, read);
+}
+
+// specShown : the spec's text, byte for byte as the store holds it; no check runs, so a spec that fails one still shows
+function specShown(io: Io, text: string): number {
+  io.out(text);
+  return 0;
 }
 
 function startOne(store: SpecStore, ticket: string): string {
@@ -1701,6 +1726,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       once: { type: "boolean" },
       "dry-run": { type: "boolean" },
       template: { type: "boolean" },
+      show: { type: "boolean" },
       yes: { type: "boolean" },
       "no-loop": { type: "boolean" },
       repo: { type: "string" },
@@ -1718,6 +1744,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
   return command.run({
     json: values.json === true,
     template: values.template === true,
+    show: values.show === true,
     once: values.once === true,
     dryRun: values["dry-run"] === true,
     yes: values.yes === true,
