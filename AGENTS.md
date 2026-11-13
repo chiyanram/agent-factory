@@ -35,6 +35,10 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
   comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.
+- Take each build ticket through grilling, spec, design, the operator's approval of both on the ticket, then build,
+  automated code review and a PR from `.github/pull_request_template.md`; split work too big for one PR into child
+  tickets before the build, because the operator approves the shape before code exists, not after (#557 is the
+  worked example).
 
 Codebase health: each change leaves the modules it touches no worse than it found them. If the change would make one
 worse, say so in the design and propose the refactor as its own ticket. We care about the next change being easy, not
