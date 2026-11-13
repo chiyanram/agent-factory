@@ -4,8 +4,15 @@
 // are touches and waits, counted from the records, not effort: a person may have spent a minute of a day's wait.
 // Rework rounds are the writer's runs sent back by a failed ready check or the review's Act on (mode rework).
 //
-// **Today:** only the answer touch is recorded; the approve and rescue touches follow in #487's slice 3b (the begun and
-// approved lines), and the merge touch in 3c (the merged line).
+// The touches and when each wait starts (#487 Q4):
+//   approve   from the later of the ticket's START and its design verify pass's end, to the approval
+//   answer    from the writer run that asked, to the answers line; the answers name no one, so it has no by
+//   rescue    from a hand-over (a blocked line) to the next START or approval; an approval that ends a hand-over is
+//             one touch, a rescue
+// START and approval lines carry their records' own times and are written when a pass first reads them, so they are
+// read in time order, not file order.
+//
+// **Today:** the merge touch follows in #487's slice 3c (the merged line).
 
 import type { Event } from "./records.js";
 import type { Total } from "./usage.js";
@@ -18,7 +25,7 @@ export type Touch = { readonly kind: TouchKind; readonly at: string; readonly wa
 export type TicketTally = {
   readonly project: string;
   readonly ticket: string;
-  // the time of the ticket's newest record line
+  // the newest time across the ticket's record lines
   readonly last: string;
   readonly touches: readonly Touch[];
   readonly waitingMs: number;
@@ -47,14 +54,72 @@ function answerTouches(events: readonly Event[]): readonly Touch[] {
   return events.reduce<Asking>(answerStep, { touches: [] }).touches;
 }
 
+// Heard : the human touches so far, the open hand-over, and when the newest START and design verify pass were; "" for
+// none
+type Heard = {
+  readonly touches: readonly Touch[];
+  readonly blocked: string;
+  readonly begun: string;
+  readonly verified: string;
+};
+
+const NOTHING_HEARD: Heard = { touches: [], blocked: "", begun: "", verified: "" };
+
+// waited : the ms from a time, or "" for none, to another. Pure.
+function waited(from: string, to: string): number {
+  return from === "" ? 0 : Math.max(0, Date.parse(to) - Date.parse(from));
+}
+
+// actedOn : a START or approval: a rescue when a hand-over is open, else an approval's own touch; a START with none
+// open is no touch. Pure.
+function actedOn(state: Heard, e: Extract<Event, { kind: "begun" | "approved" }>): Heard {
+  const next = { ...state, begun: e.kind === "begun" ? e.at : state.begun, blocked: "" };
+  if (state.blocked !== "") {
+    const rescue: Touch = { kind: "rescue", at: e.at, by: e.by, waitedMs: waited(state.blocked, e.at) };
+    return { ...next, touches: [...state.touches, rescue] };
+  }
+  if (e.kind === "begun") {
+    return next;
+  }
+  const from = state.begun > state.verified ? state.begun : state.verified;
+  return {
+    ...next,
+    touches: [...state.touches, { kind: "approve", at: e.at, by: e.by, waitedMs: waited(from, e.at) }],
+  };
+}
+
+// marked : the open hand-over or design verify a line sets, as a field to spread; nothing on another line. Pure.
+function marked(state: Heard, e: Event): Partial<Heard> {
+  if (e.kind === "blocked") {
+    return { blocked: state.blocked || e.at };
+  }
+  return e.kind === "design-ended" && e.step === "verify" ? { verified: e.at } : {};
+}
+
+// heardStep : one more line, in time order. Pure.
+function heardStep(state: Heard, e: Event): Heard {
+  return e.kind === "begun" || e.kind === "approved" ? actedOn(state, e) : { ...state, ...marked(state, e) };
+}
+
+// heardTouches : each approval and rescue, from the lines in time order. Pure.
+function heardTouches(events: readonly Event[]): readonly Touch[] {
+  return events.toSorted((a, b) => a.at.localeCompare(b.at)).reduce<Heard>(heardStep, NOTHING_HEARD).touches;
+}
+
 // touchesOf : every touch of a ticket, oldest first. Pure.
 export function touchesOf(events: readonly Event[]): readonly Touch[] {
-  return answerTouches(events).toSorted((a, b) => a.at.localeCompare(b.at));
+  return [...answerTouches(events), ...heardTouches(events)].toSorted((a, b) => a.at.localeCompare(b.at));
 }
 
 // reworkRounds : the writer runs sent back to rework. Pure.
 function reworkRounds(events: readonly Event[]): number {
   return events.filter((e) => e.kind === "writer-ended" && e.mode === "rework").length;
+}
+
+// newest : the newest time across a ticket's lines, "" for none. Not the file's last line: a begun or approved line
+// carries its record's own, earlier time (#487). Pure.
+function newest(events: readonly Event[]): string {
+  return events.reduce((max, e) => (e.at > max ? e.at : max), "");
 }
 
 // tallyOf : a ticket's touches, waits and rework rounds from its events, with its cost. Pure.
@@ -66,7 +131,7 @@ export function tallyOf(
   const touches = touchesOf(events);
   return {
     ...where,
-    last: events.at(-1)?.at ?? "",
+    last: newest(events),
     touches,
     waitingMs: touches.reduce((sum, t) => sum + t.waitedMs, 0),
     reworkRounds: reworkRounds(events),

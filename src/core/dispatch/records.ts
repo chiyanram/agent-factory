@@ -30,6 +30,7 @@ import { dirname, join } from "node:path";
 import { LANES, plainName, type Lane } from "../spec.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Answer } from "../answers.js";
+import { isVia, type Via } from "../human-record.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
 import { scrubbedJson } from "../scrub.js";
@@ -238,7 +239,12 @@ export type Event =
   | { readonly at: string; readonly kind: "shared"; readonly approval: string }
   // a person's answers to the writer's questions, as their own event, tied to the spec version they answered (#486,
   // P13): the spec's hash, or "" when the ticket's lane needs no approval record
-  | { readonly at: string; readonly kind: "answered"; readonly spec: string; readonly answers: readonly Answer[] };
+  | { readonly at: string; readonly kind: "answered"; readonly spec: string; readonly answers: readonly Answer[] }
+  // a person's START, at the START record's own time, recorded once by the first pass that reads it: START and approval
+  // are files a new one replaces, so these lines keep each of them for the ticket's touches (touches.ts, #487)
+  | { readonly at: string; readonly kind: "begun"; readonly by: string; readonly via: Via }
+  // a person's approval of the spec with this hash, at the approval record's own time, recorded the same way (#487)
+  | { readonly at: string; readonly kind: "approved"; readonly by: string; readonly via: Via; readonly spec: string };
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 
@@ -799,6 +805,17 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     return approval === BAD ? BAD : { at, kind: "shared", approval };
   },
   answered: answeredOf,
+  begun: (raw, at) => {
+    const by = str(raw, "by");
+    const via = prop(raw, "via");
+    return by === BAD || !isVia(via) ? BAD : { at, kind: "begun", by, via };
+  },
+  approved: (raw, at) => {
+    const by = str(raw, "by");
+    const via = prop(raw, "via");
+    const spec = str(raw, "spec");
+    return by === BAD || spec === BAD || !isVia(via) ? BAD : { at, kind: "approved", by, via, spec };
+  },
 };
 
 function parseLine(line: string): unknown {
@@ -1129,6 +1146,8 @@ const STEPS: Steps = {
   // the copy counts nothing; tick reads it from every line, so a later START never posts it twice
   shared: (s) => s,
   answered: (s) => s,
+  begun: (s) => s,
+  approved: (s) => s,
 };
 
 function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {

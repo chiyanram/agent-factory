@@ -1448,6 +1448,42 @@ async function share(setup: TickSetup, d: Read): Promise<void> {
   }
 }
 
+// heardLines : the ticket's START and approval, each as a begun or approved line at its own time, when the records do
+// not hold it yet (#487): a new START or approval replaces its file, so the lines keep each one for the touches. Pure.
+export function heardLines(
+  events: readonly Event[],
+  started: StartRecord | "none",
+  approved: ApprovalRecord | "none",
+): readonly Event[] {
+  const has = (kind: "begun" | "approved", time: string) => events.some((e) => e.kind === kind && e.at === time);
+  const begun: readonly Event[] =
+    started === "none" || has("begun", started.at)
+      ? []
+      : [{ at: started.at, kind: "begun", by: started.by, via: started.via }];
+  const ok: readonly Event[] =
+    approved === "none" || has("approved", approved.at)
+      ? []
+      : [{ at: approved.at, kind: "approved", by: approved.by, via: approved.via, spec: approved.spec_hash }];
+  return [...begun, ...ok];
+}
+
+// heard : the ticket's START and approval recorded once each (heardLines). Records that cannot be read write nothing,
+// so no line is written twice; a line that cannot be written is printed, and the next pass writes it.
+async function heard(setup: TickSetup, d: Read): Promise<void> {
+  const place = where(setup, d.state);
+  const events = await readRecords(place, { warn: () => undefined });
+  const started = await startOf(setup, d.state.ticket);
+  if (events.kind === "failed" || started.kind === "failed") {
+    return;
+  }
+  for (const event of heardLines(events.value, started.value, d.approved)) {
+    const kept = await record({ where: place, event });
+    if (kept.kind === "failed") {
+      setup.log(`${d.state.ticket}: the ${event.kind} line was not written: ${kept.reason}`);
+    }
+  }
+}
+
 // forgePass : every forge-only action, on fresh decisions; what is left is a run or a wait
 async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran[]): Promise<readonly Later[]> {
   const later: Later[] = [];
@@ -1462,6 +1498,7 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
       continue;
     }
     setup.log(`${d.state.ticket}: ${describe(d.action)}`);
+    await heard(setup, d);
     await share(setup, d);
     const done = await forgeAction(setup, d.state, d.action);
     if (done === "none") {

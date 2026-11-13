@@ -342,7 +342,9 @@ describe("tick", () => {
       "log PROJ-1: writer (fix): approved; no run yet",
       "log PROJ-1: unavailable: the writer's box is not built yet (#113)",
     ]);
-    expect(await readRecords({ home, project: "ledger", ticket: "PROJ-1" })).toEqual({ kind: "ok", value: [] });
+    // no run line: only the person's START and approval, kept once each (#487)
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual(["begun", "approved"]);
   });
 
   it("an available writer: claims the change, records the start and the end with its spend; one run per pass", async () => {
@@ -380,7 +382,14 @@ describe("tick", () => {
     expect(log).toContain("label +agent::claimed #12");
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     // the approval's shared copy goes on the PR first, once (#227)
-    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toEqual(["shared", "started", "writer-ended"]);
+    // the person's START and approval are kept first, once each (#487)
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : []).toEqual([
+      "begun",
+      "approved",
+      "shared",
+      "started",
+      "writer-ended",
+    ]);
     // every run records its tokens and cost (#131)
     expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ spend: { usd: 0.5, tokens: 900 } });
   });
@@ -443,6 +452,8 @@ describe("tick", () => {
     expect(events.map((e) => e.kind)).toEqual([
       "started",
       "writer-ended",
+      "begun",
+      "approved",
       "shared",
       "answered",
       "started",
@@ -810,6 +821,8 @@ describe("tick", () => {
     expect(read).toMatchObject({
       kind: "ok",
       value: [
+        { kind: "begun" },
+        { kind: "approved" },
         { kind: "started", phase: "writer" },
         { kind: "spent", phase: "writer", spend: { usd: 0.3, tokens: 900 } },
       ],
@@ -827,7 +840,10 @@ describe("tick", () => {
     const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async () => ({ kind: "ok", value }) } };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
-    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "writer-ended", trace }] });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: [{ kind: "begun" }, { kind: "approved" }, { kind: "started" }, { kind: "writer-ended", trace }],
+    });
   });
 
   it("a writer step that fails after the run names the run's trace on its spent line (#487)", async () => {
@@ -840,7 +856,28 @@ describe("tick", () => {
     };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
-    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "spent", traces: [trace] }] });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: [{ kind: "begun" }, { kind: "approved" }, { kind: "started" }, { kind: "spent", traces: [trace] }],
+    });
+  });
+
+  it("records the person's START and approval once each, at their own times, and not again on a later pass (#487)", async () => {
+    await approved();
+    await tick(setup({ team, open: [], merged: [] }, []));
+    const kinds = async () => {
+      const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+      return read.kind === "ok" ? read.value : [];
+    };
+    const first = await kinds();
+    expect(first.filter((e) => e.kind === "begun" || e.kind === "approved")).toEqual([
+      { at: "2026-11-07T07:00:00Z", kind: "begun", by: "ram", via: "terminal" },
+      { at: "2026-11-07T08:00:00Z", kind: "approved", by: "ram", via: "terminal", spec: specHash(SPEC("feature")) },
+    ]);
+    await tick(setup({ team, open: [], merged: [] }, []));
+    const second = await kinds();
+    expect(second.filter((e) => e.kind === "begun")).toHaveLength(1);
+    expect(second.filter((e) => e.kind === "approved")).toHaveLength(1);
   });
 
   it("each pass first deletes the project's traces older than 30 days (#487)", async () => {
