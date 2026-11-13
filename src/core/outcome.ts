@@ -13,7 +13,9 @@
 // a fetch that fails writes nothing. A clone, fetch or commit the reader cannot use is an unknown outcome with the
 // reason, never a guess. Nothing here throws.
 //
-// **Today:** `usage` does not show it yet; #487's slice 4b adds that.
+// A known limit: the commit that changed a line is taken as the first commit after the one the line was last seen in,
+// on the ancestry path to the tip. On a linear default branch of squash merges, as the factory's projects use, that is
+// exact; on a history with merge commits it may name a merge rather than the commit that changed the line.
 
 import { hostGit, type GitResult } from "./git.js";
 
@@ -150,6 +152,30 @@ export function verdict(input: {
   return input.day < OUTCOME_DAYS
     ? { kind: "watching", day: input.day, touched: input.touched }
     : { kind: "clean", final, touched: input.touched };
+}
+
+const short = (c: Commit): string => `${c.sha.slice(0, 8)} ${c.subject}`;
+
+// each outcome by its kind, so a head per kind is typed without an assertion (as tick.ts DESCRIBE does)
+type OutcomeMap = { readonly [O in MergeOutcome as O["kind"]]: O };
+
+// HEADS : how each outcome reads after "outcome:"
+const HEADS: { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => string } = {
+  watching: (o) => `watching, day ${o.day} of ${OUTCOME_DAYS}`,
+  clean: (o) => (o.final ? `clean, final at ${WATCH_DAYS} days` : `clean at ${OUTCOME_DAYS / 7} weeks`),
+  reverted: (o) => `reverted by ${short(o.by)}${o.final ? ", final" : ""}`,
+  fixed: (o) => `fixed on the same lines by ${short(o.by)}${o.final ? ", final" : ""}`,
+  unknown: (o) => `unknown: ${o.why}`,
+};
+
+function headAs<K extends keyof OutcomeMap>(kind: K, o: OutcomeMap[K]): string {
+  return HEADS[kind](o);
+}
+
+// outcomeLines : a merged ticket's outcome as usage shows it, then each later commit that touched its lines. Pure.
+export function outcomeLines(o: MergeOutcome): readonly string[] {
+  const touched = "touched" in o ? o.touched.filter((c) => !("by" in o) || c.sha !== o.by.sha) : [];
+  return [`    outcome: ${headAs(o.kind, o)}`, ...touched.map((c) => `      touched by ${short(c)}`)];
 }
 
 // tipAt : the default branch, fetched, at its last commit before the end of the watch

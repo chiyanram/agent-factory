@@ -5,7 +5,8 @@
 
 import { plainName } from "./core/spec.js";
 import { actedLines, periodsAt, readSpends, usageLines, WINDOW_HOURS, type Spends } from "./core/dispatch/usage.js";
-import { ticketLines } from "./core/dispatch/touches.js";
+import { tallyKey, ticketLines } from "./core/dispatch/touches.js";
+import { outcomeOf, type MergeOutcome } from "./core/outcome.js";
 import { readerZone } from "./core/zone.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
@@ -37,14 +38,31 @@ function projectArg(positionals: readonly string[]): { readonly project?: string
   return positionals.length === 1 && plainName(project) ? { project } : "bad";
 }
 
+// outcomes : each merged ticket's outcome, read from the project's clone (outcome.ts, #487); none when no project is
+// named or its clone is not set, since only then is the clone known
+async function outcomes(
+  io: UsageIo,
+  spends: Spends,
+  project: string | undefined,
+): Promise<ReadonlyMap<string, MergeOutcome>> {
+  const repo = settingOf(io.env, "clone") ?? "";
+  const merged = spends.tallies.filter((t) => t.merged !== undefined && t.project === project);
+  const read = new Map<string, MergeOutcome>();
+  for (const t of repo === "" ? [] : merged) {
+    const m = t.merged ?? { at: "", sha: "" };
+    read.set(tallyKey(t), await outcomeOf({ repo, env: io.env, merged: m, now: io.now() }));
+  }
+  return read;
+}
+
 // printed : the table on stdout and each problem on stderr; 1 when there was one
-function printed(io: UsageIo, spends: Spends, hours: number): number {
+function printed(io: UsageIo, spends: Spends, hours: number, read: ReadonlyMap<string, MergeOutcome>): number {
   const zone = readerZone(io.env);
   const now = io.now();
   const lines = [
     ...usageLines({ runs: spends.runs, now, windowHours: hours, zone }),
     ...actedLines({ acted: spends.acted, now, zone }),
-    ...ticketLines({ tallies: spends.tallies, from: periodsAt(now, hours, zone).month, zone }),
+    ...ticketLines({ tallies: spends.tallies, from: periodsAt(now, hours, zone).month, zone, outcomes: read }),
   ];
   for (const line of lines) {
     io.out(`${line}\n`);
@@ -67,5 +85,6 @@ export async function usageCommand(positionals: readonly string[], io: UsageIo):
     io.err(`agent-factory usage: ${settingName("window.hours")} must be a whole number of hours from 1 to 24\n`);
     return 1;
   }
-  return printed(io, await readSpends({ home: io.home, ...which }), hours);
+  const spends = await readSpends({ home: io.home, ...which });
+  return printed(io, spends, hours, await outcomes(io, spends, which.project));
 }

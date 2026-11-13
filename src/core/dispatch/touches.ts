@@ -16,6 +16,7 @@
 import type { Event } from "./records.js";
 import type { Total } from "./usage.js";
 import { shownAt, shownFor, type Zone } from "../zone.js";
+import { outcomeLines, type MergeOutcome } from "../outcome.js";
 
 export type TouchKind = "approve" | "answer" | "rescue" | "merge";
 // by: who acted, when the records say; none when they do not
@@ -30,6 +31,8 @@ export type TicketTally = {
   readonly waitingMs: number;
   readonly reworkRounds: number;
   readonly cost: Total;
+  // the ticket's merge, when the records hold one: its outcome is read from it (outcome.ts, #487)
+  readonly merged?: Extract<Event, { kind: "merged" }>;
 };
 
 // Asking : the answer touches so far, and the time of the ask still open, if any
@@ -142,8 +145,10 @@ export function tallyOf(
   cost: Total,
 ): TicketTally {
   const touches = touchesOf(events);
+  const merged = events.findLast((e) => e.kind === "merged");
   return {
     ...where,
+    ...(merged?.kind === "merged" ? { merged } : {}),
     last: newest(events),
     touches,
     waitingMs: touches.reduce((sum, t) => sum + t.waitedMs, 0),
@@ -167,19 +172,42 @@ function blockLine(t: TicketTally): string {
   return `  ${t.project} ${t.ticket}: cost ${costText(t.cost)} · ${counts}`;
 }
 
+// tallyKey : a ticket's key in the outcomes. Pure.
+export function tallyKey(t: Pick<TicketTally, "project" | "ticket">): string {
+  return `${t.project} ${t.ticket}`;
+}
+
+// mergedLines : a merged ticket's outcome, or how to read it; nothing for a ticket not merged. Pure.
+function mergedLines(t: TicketTally, outcome: MergeOutcome | undefined): readonly string[] {
+  if (t.merged === undefined) {
+    return [];
+  }
+  return outcome === undefined
+    ? [`    outcome: read with agent-factory usage ${t.project}, with the project's clone set`]
+    : outcomeLines(outcome);
+}
+
 // ticketLines : one block per ticket with a record line since from (ms): its cost, rework rounds, touches and waiting,
 // then each touch. Pure.
 export function ticketLines(input: {
   readonly tallies: readonly TicketTally[];
   readonly from: number;
   readonly zone: Zone;
+  // each merged ticket's outcome, by tallyKey; a merged ticket with none says how to read it
+  readonly outcomes?: ReadonlyMap<string, MergeOutcome>;
 }): readonly string[] {
+  const outcomes = input.outcomes ?? new Map<string, MergeOutcome>();
   const shown = input.tallies.filter((t) => Date.parse(t.last) >= input.from);
   if (shown.length === 0) {
     return [];
   }
   return [
     "tickets this month: touches are a person's acts the ticket waited on (approve, answer, rescue, merge), counted from the records; waiting is how long they waited, not effort",
-    ...shown.flatMap((t) => [blockLine(t)].concat(t.touches.map((touch) => touchLine(touch, input.zone)))),
+    ...shown.flatMap((t) =>
+      [blockLine(t)].concat(
+        t.touches.map((touch) => touchLine(touch, input.zone)),
+        mergedLines(t, outcomes.get(tallyKey(t))),
+      ),
+    ),
   ];
 }
