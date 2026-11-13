@@ -21,7 +21,7 @@ import { approvalState } from "../approval.js";
 import { prop } from "../dispatch/records.js";
 import { cleanField, renderPost, type Post } from "../post.js";
 import { plainName, type SpecStore } from "../spec.js";
-import { isPolicyPoint, isPostPoint, readPluginConfig, type PostPoint, type Rule } from "./config.js";
+import { isPolicyPoint, isPostPoint, readPluginConfig, type PolicyPoint, type PostPoint, type Rule } from "./config.js";
 import { isPoint } from "./contract.js";
 import { callPlugin, registered, type Setup } from "./registry.js";
 import { dropPending, keepPending, parseId, readPending, type Id, type Pending } from "./pending.js";
@@ -44,7 +44,14 @@ export type Draft = {
 export type Built = { readonly op: string; readonly input: Readonly<Record<string, unknown>>; readonly text: string };
 
 export type Requested =
-  | { readonly kind: "done"; readonly count: number; readonly cap: number; readonly url: string }
+  | {
+      readonly kind: "done";
+      readonly count: number;
+      readonly cap: number;
+      readonly url: string;
+      // what the person must know after it went out (spec-body.ts: the approval is now stale)
+      readonly note?: string;
+    }
   | { readonly kind: "pending"; readonly id: string; readonly command: string; readonly text: string }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -189,9 +196,9 @@ export function built(capability: PostPoint, draft: Draft): Result<Built> {
 }
 
 // what one write needs: where it goes, the plugin, the approval it counts against and the rule that holds
-type Plan = {
+export type Plan<P extends PolicyPoint = PostPoint> = {
   readonly where: Where;
-  readonly capability: PostPoint;
+  readonly capability: P;
   readonly plugin: string;
   readonly approval: string;
   readonly approvedAt: string;
@@ -279,7 +286,8 @@ async function planOf(setup: RequestSetup, capability: PostPoint, draft: Draft):
     : writes;
 }
 
-async function room(plan: Plan): Promise<Result<number>> {
+// room : the writes of the plan's capability since its approval, while the cap has room for one more
+export async function room(plan: Plan<PolicyPoint>): Promise<Result<number>> {
   const log = await readLog(plan.where);
   if (log.kind === "failed") {
     return log;
@@ -296,7 +304,7 @@ function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-function now(): string {
+export function now(): string {
   return new Date().toISOString();
 }
 
@@ -310,9 +318,25 @@ function answerOf(result: Awaited<ReturnType<typeof callPlugin>>): Result<string
   return kind === DONE ? { kind: "ok", value: url } : failed(`the plugin answered ${kind}${why}`);
 }
 
+// a write's call: the url it went out at ("" when none), or why it failed
+export type Sender = () => Promise<Result<string>>;
+
+// pluginSender : the call of the plugin the plan names, with the built op and input
+function pluginSender(setup: Setup, plan: Plan, write: Built): Sender {
+  return async () =>
+    answerOf(
+      await callPlugin(setup, { plugin: plan.plugin, capability: plan.capability, op: write.op, input: write.input }),
+    );
+}
+
 // perform : one write, under the ticket's lock: a place under the cap, the reserved line, `before` (confirm removes
 // its pending file there, so it cannot go out twice), the call, and its outcome line
-async function perform(setup: Setup, plan: Plan, write: Built, before: () => Promise<Done>): Promise<Confirmed> {
+export async function perform(
+  plan: Plan<PolicyPoint>,
+  text: string,
+  send: Sender,
+  before: () => Promise<Done>,
+): Promise<Confirmed> {
   const n = await room(plan);
   if (n.kind === "failed") {
     return n;
@@ -324,21 +348,18 @@ async function perform(setup: Setup, plan: Plan, write: Built, before: () => Pro
     capability: plan.capability,
     approval: plan.approval,
     at: now(),
-    sha256: sha256(write.text),
+    sha256: sha256(text),
   });
   const ready = reserved.kind === "ok" ? await before() : reserved;
-  return ready.kind === "ok" ? sent(setup, plan, write, { id, count: n.value + 1 }) : ready;
+  return ready.kind === "ok" ? sent(plan, send, { id, count: n.value + 1 }) : ready;
 }
 
 async function sent(
-  setup: Setup,
-  plan: Plan,
-  write: Built,
+  plan: Plan<PolicyPoint>,
+  send: Sender,
   at: { readonly id: string; readonly count: number },
 ): Promise<Confirmed> {
-  const answer = answerOf(
-    await callPlugin(setup, { plugin: plan.plugin, capability: plan.capability, op: write.op, input: write.input }),
-  );
+  const answer = await send();
   const detail = answer.kind === "ok" ? answer.value : answer.reason;
   await appendLine(plan.where, { kind: answer.kind === "ok" ? "done" : "failed", id: at.id, at: now(), detail });
   return answer.kind === "ok"
@@ -411,7 +432,10 @@ async function requested(setup: RequestSetup, capability: PostPoint, draft: Draf
     return both;
   }
   const [plan, write] = both.value;
-  const run = () => (plan.rule.mode === "allow" ? perform(setup, plan, write, nothing) : kept(plan, draft, write));
+  const run = () =>
+    plan.rule.mode === "allow"
+      ? perform(plan, write.text, pluginSender(setup, plan, write), nothing)
+      : kept(plan, draft, write);
   return unwrapped(await onTicket(plan.where, () => okOf(run())));
 }
 
@@ -469,7 +493,8 @@ async function confirmedLocked(
   }
   const same = sameAsPending(id, both.value, pending.value, given.text);
   const remove = () => dropPending(setup.home, id.hex);
-  return same.kind === "ok" ? perform(setup, ...both.value, remove) : same;
+  const [plan, write] = both.value;
+  return same.kind === "ok" ? perform(plan, write.text, pluginSender(setup, plan, write), remove) : same;
 }
 
 // confirm : the pending request with that id, performed, when the text given is its text

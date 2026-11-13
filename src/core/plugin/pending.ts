@@ -23,6 +23,8 @@ export type Pending = {
   readonly approval: string;
   readonly draft: unknown;
   readonly text: string;
+  // spec.body: the sha256 of the issue's body when the request was kept, so confirm never writes over a later edit
+  readonly base?: string;
 };
 
 // a request id, read back: where the write goes, its capability and the hex that names its file
@@ -66,16 +68,26 @@ function four(parts: readonly string[]): readonly [string, string, string, strin
   return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? "", parts[3] ?? ""];
 }
 
+// baseOf : a spec.body request's base, none for any other request
+function baseOf(value: unknown): { readonly base?: string } | "bad" {
+  if (value === undefined) {
+    return {};
+  }
+  return typeof value === "string" ? { base: value } : "bad";
+}
+
 function pendingOf(raw: unknown): Pending | "bad" {
   const [id, plugin, approval, text] = ["id", "plugin", "approval", "text"].map((k) => prop(raw, k));
+  const base = baseOf(prop(raw, "base"));
   const strings = [id, plugin, approval, text].every((v) => typeof v === "string");
-  return strings && prop(raw, "version") === 1
+  return strings && prop(raw, "version") === 1 && base !== "bad"
     ? {
         id: String(id),
         plugin: String(plugin),
         approval: String(approval),
         draft: prop(raw, "draft"),
         text: String(text),
+        ...base,
       }
     : "bad";
 }
