@@ -216,6 +216,8 @@ export type Event =
       // the files is reviewed again (#489); absent on older lines
       readonly lane?: Lane;
       readonly planned?: readonly string[];
+      // the run's trace, a plain file name in the ticket's folder (trace.ts, #487); none on an older line
+      readonly trace?: string;
     }
   // a person was told why the design review holds or ends at these hashes (a raised lane, the round cap), once (#489)
   | {

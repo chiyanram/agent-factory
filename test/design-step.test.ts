@@ -130,6 +130,34 @@ describe("the design review's runs (#236)", () => {
     expect(readdirSync(join(p.root, "design-runs"))).toEqual([]);
   });
 
+  it("each run keeps its stream as its trace in the ticket's folder, named on its result, a failed run's too (#487)", async () => {
+    const stream = '{"type":"assistant"}\n{"type":"result"}\n';
+    const streaming: Model = async (run) => {
+      const ran = await model([], [{ findings: [FINDING] }])(run);
+      return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, stream } } : ran;
+    };
+    const steps = designSteps({ kind: "ok", value: setup(streaming) });
+    if (steps.designReview.kind !== "available") throw new Error("unavailable");
+    const out = await steps.designReview.run(input());
+    const trace = out.kind === "ok" ? out.value.trace : undefined;
+    expect(trace).toMatch(/^design-review-.*\.jsonl$/);
+    expect(readFileSync(join(home, "runs", "ledger", "PROJ-1", trace ?? ""), "utf8")).toBe(stream);
+    const failing: Model = async () => ({ kind: "failed", reason: "error_max_budget_usd", answer: {}, stream });
+    const failed = designSteps({ kind: "ok", value: setup(failing) });
+    if (failed.designReview.kind !== "available") throw new Error("unavailable");
+    expect(await failed.designReview.run(input())).toMatchObject({
+      kind: "ok",
+      value: { kind: "failed", trace: expect.stringMatching(/^design-review-/) },
+    });
+  });
+
+  it("a model that streams nothing keeps no trace", async () => {
+    const steps = designSteps({ kind: "ok", value: setup(model([], [{ findings: [] }])) });
+    if (steps.designReview.kind !== "available") throw new Error("unavailable");
+    const out = await steps.designReview.run(input());
+    expect(out.kind === "ok" ? out.value : out).not.toHaveProperty("trace");
+  });
+
   // #489: a re-review sees every earlier round's findings and decisions, and is told to look only at what changed
   it("a first round gets no earlier.json and is not told it is a re-review", async () => {
     const seen: Seen[] = [];

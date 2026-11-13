@@ -26,6 +26,7 @@ import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import { spendOf, type Spend } from "../dispatch/spend.js";
+import { keepTrace } from "../dispatch/trace.js";
 import { inputsOf, readCard, type Card, type Part, type Role } from "../process/cards.js";
 import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
@@ -267,13 +268,43 @@ async function inFolder<T>(setup: DesignSetup, work: (run: string) => Promise<Ra
   }
 }
 
+// Traced : a model run's result, and its trace when one was kept (#487)
+type Traced = { readonly ran: ModelResult; readonly trace?: string };
+
+// modelRun : one model run, its stream kept as its trace in the ticket's folder (#487); a trace that cannot be kept
+// loses the trace, never the run
 async function modelRun(
+  setup: DesignSetup,
+  card: Card,
+  run: string,
+  call: { readonly schema: string; readonly ticket: string; readonly kind: "design-review" | "design-verify" },
+  again = "",
+): Promise<Traced> {
+  const name = call.kind === "design-review" ? `design-reviewer-${call.ticket}` : `verify-pass-${call.ticket}`;
+  const ran = await modelCall(setup, card, run, call.schema, name, again);
+  return { ran, ...(await tracedRun(setup, call, ran.kind === "ok" ? ran.value.stream : ran.stream)) };
+}
+
+// tracedRun : a run's stream kept as its trace, as a field to spread; none when it streamed nothing or the trace could
+// not be kept (#487)
+async function tracedRun(
+  setup: DesignSetup,
+  call: { readonly ticket: string; readonly kind: "design-review" | "design-verify" },
+  stream: string | undefined,
+): Promise<{ readonly trace?: string }> {
+  const where = { home: setup.home, project: setup.project, ticket: call.ticket };
+  const kept =
+    stream === undefined ? undefined : await keepTrace({ ...where, kind: call.kind, at: Date.now() }, stream);
+  return kept?.kind === "ok" ? { trace: kept.value.name } : {};
+}
+
+async function modelCall(
   setup: DesignSetup,
   card: Card,
   run: string,
   schema: string,
   name: string,
-  again = "",
+  again: string,
 ): Promise<ModelResult> {
   return setup.model({
     folder: run,
@@ -294,10 +325,16 @@ function spent(ran: ModelResult): Spend | undefined {
   return ran.answer === undefined ? undefined : spendOf(ran.answer);
 }
 
-// answered : a model run's answer read by `read`, as the step's outcome; a run that failed keeps its card and spend
-function answered<T>(card: Card, ran: ModelResult, read: (output: unknown) => Result<T>): DesignRan<T> {
+// answered : a model run's answer read by `read`, as the step's outcome; a run that failed keeps its card, spend and
+// trace
+function answered<T>(card: Card, traced: Traced, read: (output: unknown) => Result<T>): DesignRan<T> {
+  const { ran } = traced;
   const spend = spent(ran);
-  const base = { card: card.sha256, ...(spend === undefined ? {} : { spend }) };
+  const base = {
+    card: card.sha256,
+    ...(spend === undefined ? {} : { spend }),
+    ...(traced.trace === undefined ? {} : { trace: traced.trace }),
+  };
   if (ran.kind === "failed") {
     return { ...base, kind: "failed", why: `the model run failed: ${ran.reason}` };
   }
@@ -351,7 +388,8 @@ async function review(
     }
     await keepSnapshot(setup, input, ready.value);
     const again = (await writeEarlier(setup, input, run)) ? AGAIN : "";
-    const ran = await modelRun(setup, card.value, run, DESIGN_SCHEMA, `design-reviewer-${input.ticket}`, again);
+    const call = { schema: DESIGN_SCHEMA, ticket: input.ticket, kind: "design-review" } as const;
+    const ran = await modelRun(setup, card.value, run, call, again);
     return {
       kind: "ok",
       value: answered(card.value, ran, (output) => {
@@ -382,7 +420,8 @@ async function verify(
     }
     await writeFile(join(run, "findings.json"), JSON.stringify(input.findings), { mode: 0o600 });
     const again = (await writeEarlier(setup, input, run)) ? VERIFY_AGAIN : "";
-    const ran = await modelRun(setup, card.value, run, VERIFY_SCHEMA, `verify-pass-${input.ticket}`, again);
+    const call = { schema: VERIFY_SCHEMA, ticket: input.ticket, kind: "design-verify" } as const;
+    const ran = await modelRun(setup, card.value, run, call, again);
     const verdicts = answered(card.value, ran, (output) => {
       const read = readVerdicts(output);
       return read.kind === "ok" ? { kind: "ok", value: { kept: keep(input.findings, read.value) } } : read;

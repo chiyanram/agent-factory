@@ -111,7 +111,8 @@ export type DesignInput = {
 };
 // how a design review's run ended; its card's hash and what it spent are kept either way
 // final: a failure no retry fixes (a cite that does not hold), so the step stops at once (#489)
-export type DesignRan<T> = { readonly card: string; readonly spend?: Spend } & (
+// trace: the run's trace, a plain file name in the ticket's folder (trace.ts, #487); none when it kept none
+export type DesignRan<T> = { readonly card: string; readonly spend?: Spend; readonly trace?: string } & (
   | ({ readonly kind: "done" } & T)
   | { readonly kind: "failed"; readonly why: string; readonly final?: true }
 );
@@ -1246,7 +1247,11 @@ function designEnded(
     return { ...base, outcome: "failed", why: ran.reason, findings: [], kept: [] };
   }
   const v = ran.value;
-  const extras = { card: v.card, ...(v.spend === undefined ? {} : { spend: v.spend }) };
+  const extras = {
+    card: v.card,
+    ...(v.spend === undefined ? {} : { spend: v.spend }),
+    ...(v.trace === undefined ? {} : { trace: v.trace }),
+  };
   return v.kind === "failed"
     ? { ...base, outcome: "failed", why: v.why, findings: [], kept: [], ...extras, ...finalField(v.final) }
     : { ...base, outcome: "done", why: "", ...answerOf(v), ...extras };
