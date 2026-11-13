@@ -42,6 +42,10 @@ jobs:
         run: |
           repo=$(node -p "require('./.github/rules-pack.json').repo")
           commit=$(node -p "require('./.github/rules-pack.json').commit")
+          tag=$(node -p "require('./.github/rules-pack.json').tag")
+          # the tag the sessions load (.claude/settings.json) still points at the pinned commit (#580)
+          test "$(git ls-remote "$repo" "refs/tags/$tag" "refs/tags/$tag^{}" | tail -1 | cut -f1)" = "$commit" || \
+            { echo "rules-pack tag $tag does not point at $commit"; exit 1; }
           git init -q "$RUNNER_TEMP/rules-pack"
           git -C "$RUNNER_TEMP/rules-pack" fetch -q --depth 1 "$repo" "$commit"
           git -C "$RUNNER_TEMP/rules-pack" checkout -q FETCH_HEAD
@@ -87,6 +91,10 @@ jobs:
         run: |
           repo=$(node -p "require('./.github/rules-pack.json').repo")
           commit=$(node -p "require('./.github/rules-pack.json').commit")
+          tag=$(node -p "require('./.github/rules-pack.json').tag")
+          # the tag the sessions load (.claude/settings.json) still points at the pinned commit (#580)
+          test "$(git ls-remote "$repo" "refs/tags/$tag" "refs/tags/$tag^{}" | tail -1 | cut -f1)" = "$commit" || \
+            { echo "rules-pack tag $tag does not point at $commit"; exit 1; }
           git init -q "$RUNNER_TEMP/rules-pack"
           git -C "$RUNNER_TEMP/rules-pack" fetch -q --depth 1 "$repo" "$commit"
           git -C "$RUNNER_TEMP/rules-pack" checkout -q FETCH_HEAD
