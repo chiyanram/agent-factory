@@ -7,10 +7,13 @@
 //   <plugin>/skills/<skill>/process/schema/lanes-v<N>.schema.json     the lanes file
 //   <plugin>/skills/<skill>/process/schema/finding-v<N>.schema.json   one finding of a finder run's answer
 //
-// The pack's format version is the highest N it ships. The engine reads this version and the one before (PACK_SUPPORTED),
-// as the plugin protocol does (plugin/contract.ts); a pack with no schema folder is version 0, from before the pack
-// published its format, and is read by the engine's own checks alone. A newer version is refused, naming both, so an
-// old engine never half-reads a new pack.
+// Each part has its own format version: the N in its file name. For each part the engine uses the highest version it
+// reads (PACK_SUPPORTED: this version and the one before, as the plugin protocol does, plugin/contract.ts). When a part
+// is at no version the engine reads, the whole pack is refused, naming that part and both versions. A newer version beside a readable one is
+// left for the engine that reads it, as the pack's contract says: a new version is a new file beside the old one
+// (skills docs/DESIGN.md). A pack with no schema folder, from before the pack published its format, has no parts and is
+// read by the engine's own checks alone. Lanes v1 checks lanes.json; a later version's data file is named by the
+// ticket that reads it.
 //
 // The checker knows the keywords the pack's schemas use (draft 2020-12): type, enum, const, pattern, minLength,
 // minItems, items (a schema or false), prefixItems, required, properties, additionalProperties (false), allOf and anyOf.
@@ -27,7 +30,8 @@ export const PACK_SUPPORTED: readonly number[] = [PACK_FORMAT, PACK_FORMAT - 1];
 export type PackPart = "card" | "lanes" | "finding";
 export type Schema = boolean | { readonly [key: string]: unknown };
 export type PackSchemas = {
-  readonly version: number;
+  // each part's version in use: the highest this engine reads among those the pack ships for it
+  readonly versions: Readonly<Partial<Record<PackPart, number>>>;
   readonly parts: Readonly<Partial<Record<PackPart, Schema>>>;
 };
 
@@ -280,13 +284,26 @@ function schemaFileOf(file: string): readonly SchemaFile[] {
   return isPart(part) ? [{ part, version: Number(m?.[2]), file }] : [];
 }
 
-// versionsIn : each part's schema files in the pack's schema folder, by version. Pure.
-function versionsIn(files: readonly string[]): ReadonlyMap<number, readonly SchemaFile[]> {
-  const found = new Map<number, SchemaFile[]>();
+// versionsIn : the schema files in the pack's schema folder, by part. Pure.
+function versionsIn(files: readonly string[]): ReadonlyMap<PackPart, readonly SchemaFile[]> {
+  const found = new Map<PackPart, SchemaFile[]>();
   for (const entry of files.flatMap(schemaFileOf)) {
-    found.set(entry.version, [...(found.get(entry.version) ?? []), entry]);
+    found.set(entry.part, [...(found.get(entry.part) ?? []), entry]);
   }
   return found;
+}
+
+// inUse : the part's schema file this engine uses, the highest version it reads, or why none. Pure.
+function inUse(dir: string, part: PackPart, shipped: readonly SchemaFile[]): Result<SchemaFile> {
+  const newestFirst = shipped.toSorted((a, b) => b.version - a.version);
+  const use = newestFirst.find((f) => PACK_SUPPORTED.includes(f.version));
+  if (use !== undefined) {
+    return { kind: "ok", value: use };
+  }
+  const newest = newestFirst[0]?.version;
+  return failed(
+    `${dir}: the rules pack's ${part} format is version ${newest}; this engine reads versions ${PACK_SUPPORTED.join(" and ")}. Update agent-factory, or pin an older rules pack`,
+  );
 }
 
 const NOT_JSON = Symbol("not JSON");
@@ -314,26 +331,28 @@ async function schemaAt(path: string): Promise<Result<Schema>> {
   return unknown.length === 0 ? { kind: "ok", value: parsed } : failed(`${path}: ${unknown.join("; ")}`);
 }
 
-// readPackSchemas : the pack's format from its process folder: the highest version it ships, and each part's schema at
-// that version; version 0, with none, when it has no schema folder. A version this engine does not read is refused.
+// readPackSchemas : the pack's format from its process folder: each part's schema at the highest version this engine
+// reads among those the pack ships; no parts when it has no schema folder. A part shipped only at versions this engine
+// does not read refuses the whole pack.
 export async function readPackSchemas(processDir: string): Promise<Result<PackSchemas>> {
   const dir = join(processDir, "schema");
-  const versions = versionsIn(await readdir(dir).catch((): string[] => []));
-  const version = Math.max(0, ...versions.keys());
-  if (!PACK_SUPPORTED.includes(version)) {
-    return failed(
-      `${dir}: the rules pack's format is version ${version}; this engine reads versions ${PACK_SUPPORTED.join(" and ")}. Update agent-factory, or pin an older rules pack`,
-    );
-  }
+  const versions: Partial<Record<PackPart, number>> = {};
   const parts: Partial<Record<PackPart, Schema>> = {};
-  for (const { part, file } of versions.get(version) ?? []) {
-    const schema = await schemaAt(join(dir, file));
+  // sorted, so the part a refusal names does not depend on the file system's order
+  const files = (await readdir(dir).catch((): string[] => [])).toSorted();
+  for (const [part, shipped] of versionsIn(files)) {
+    const use = inUse(dir, part, shipped);
+    if (use.kind === "failed") {
+      return use;
+    }
+    const schema = await schemaAt(join(dir, use.value.file));
     if (schema.kind === "failed") {
       return schema;
     }
+    versions[part] = use.value.version;
     parts[part] = schema.value;
   }
-  return { kind: "ok", value: { version, parts } };
+  return { kind: "ok", value: { versions, parts } };
 }
 
 // enumsUnder : every value an enum lists anywhere under a schema. Pure.
@@ -376,5 +395,5 @@ export function packProblem(schemas: PackSchemas, part: PackPart, value: unknown
   const found = schema === undefined ? [] : validate(value, schema);
   return found.length === 0
     ? ""
-    : `${from}: does not follow the rules pack's ${part} format (version ${schemas.version}): ${found.join("; ")}`;
+    : `${from}: does not follow the rules pack's ${part} format (version ${schemas.versions[part]}): ${found.join("; ")}`;
 }

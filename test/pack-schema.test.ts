@@ -130,23 +130,78 @@ describe("the rules pack's format version (#484)", () => {
     expect(PACK_SUPPORTED).toEqual([PACK_FORMAT, PACK_FORMAT - 1]);
   });
 
-  it("a pack with no schema folder is version 0, read by the engine's own checks alone", async () => {
+  it("a pack with no schema folder has no parts and no versions, read by the engine's own checks alone (#600)", async () => {
     const { process } = pack({});
-    expect(await readPackSchemas(process)).toEqual({ kind: "ok", value: { version: 0, parts: {} } });
+    expect(await readPackSchemas(process)).toEqual({ kind: "ok", value: { versions: {}, parts: {} } });
   });
 
-  it("a pack's version is the highest it ships", async () => {
+  it("a pack at version 1 only reads each part at version 1 (#600)", async () => {
     const { process } = pack({ schemas: v1Schemas() });
     const read = await readPackSchemas(process);
-    expect(read).toMatchObject({ kind: "ok", value: { version: 1 } });
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 1, finding: 1, lanes: 1 } } });
     expect(Object.keys(read.kind === "ok" ? read.value.parts : {}).toSorted()).toEqual(["card", "finding", "lanes"]);
   });
 
-  it("refuses a newer version than it reads, naming both, so an old engine never half-reads a new pack", async () => {
+  it("a newer version of one part beside a version it reads leaves every part read and checked at the version it reads (#600)", async () => {
+    // lanes-v2 sits beside lanes-v1, as skills 935d5ae ships it; the rulebook lanes.json would break this v2
+    const schemas: Readonly<Record<string, string>> = { ...v1Schemas(), "lanes-v2.schema.json": '{"type": "string"}' };
+    const { plugin, process } = pack({ schemas, cards: { "verify-pass": CARD } });
+    const read = await readPackSchemas(process);
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 1, finding: 1, lanes: 1 } } });
+    const parts = read.kind === "ok" ? read.value.parts : {};
+    expect(Object.keys(parts).toSorted()).toEqual(["card", "finding", "lanes"]);
+    expect(parts.lanes).toEqual(JSON.parse(schemas["lanes-v1.schema.json"] ?? ""));
+    expect(await readProcess([plugin])).toMatchObject({ kind: "ok" });
+    expect(await readCard([plugin], "verify-pass")).toMatchObject({ kind: "ok", value: { role: "verify-pass" } });
+    // no part's check is skipped: a card that breaks card-v1 is still refused through this pack
+    const bad = CARD.replace("rules: [RV1, RV7]\n", "rules: [RV1, RV7]\nowner: me\n");
+    rmSync(join(root, "rulebook"), { recursive: true });
+    const withBad = pack({ schemas, cards: { "verify-pass": bad } });
+    expect(await readCard([withBad.plugin], "verify-pass")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        `does not follow the rules pack's card format (version 1): the top level: "owner"`,
+      ),
+    });
+  });
+
+  it("reads a part at version 0 when that is the only version it ships, beside another part at version 1 (#600)", async () => {
+    const finding = '{"type": "object"}';
+    const { process } = pack({
+      schemas: { "card-v1.schema.json": v1Schemas()["card-v1.schema.json"] ?? "", "finding-v0.schema.json": finding },
+    });
+    const read = await readPackSchemas(process);
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 1, finding: 0 } } });
+    expect(read.kind === "ok" ? read.value.parts.finding : undefined).toEqual(JSON.parse(finding));
+  });
+
+  it("uses the highest version it reads when a part ships two of them (#600)", async () => {
+    const card = v1Schemas()["card-v1.schema.json"] ?? "";
+    const { process } = pack({ schemas: { "card-v0.schema.json": "true", "card-v1.schema.json": card } });
+    const read = await readPackSchemas(process);
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 1 } } });
+    expect(read.kind === "ok" ? read.value.parts.card : undefined).toEqual(JSON.parse(card));
+  });
+
+  it("names the version of the part whose check fails, when parts are at different versions (#600)", async () => {
+    const loose = LANES.replace(/("lane": "bug",\s*"approval": )true/, "$1false");
+    const lanes = v1Schemas()["lanes-v1.schema.json"] ?? "";
+    const card = v1Schemas()["card-v1.schema.json"] ?? "";
+    const { plugin } = pack({
+      schemas: { "card-v1.schema.json": card, "lanes-v0.schema.json": lanes },
+      lanes: loose,
+    });
+    expect(await readProcess([plugin])).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("does not follow the rules pack's lanes format (version 0)"),
+    });
+  });
+
+  it("refuses a part whose versions are all newer than it reads, naming the part and both versions (#600)", async () => {
     const { process } = pack({ schemas: { "card-v2.schema.json": "{}" } });
     expect(await readPackSchemas(process)).toEqual({
       kind: "failed",
-      reason: `${join(process, "schema")}: the rules pack's format is version 2; this engine reads versions 1 and 0. Update agent-factory, or pin an older rules pack`,
+      reason: `${join(process, "schema")}: the rules pack's card format is version 2; this engine reads versions 1 and 0. Update agent-factory, or pin an older rules pack`,
     });
   });
 
