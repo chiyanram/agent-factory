@@ -488,7 +488,8 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const told = forge();
     const began = Date.now();
     const out = await run(setup(hanging(fake, { commit: true, report: DONE, exit: 0 }, []), told, []), FIX);
-    expect(Date.now() - began).toBeLessThan(5000);
+    // under the stall time, so it ended by the rule under test, not the stall; no fixed bound a slow runner overruns (#527)
+    expect(Date.now() - began).toBeLessThan(STALL_MS);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", evidence: DONE.evidence, hung: true } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
     expect(told.log.at(-1)).toMatch(/note 41 \[writer\] done at/);
@@ -544,7 +545,8 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const s = setup(silent, forge(), []);
     const began = Date.now();
     const out = await run({ ...s, settings: { ...s.settings, timeoutSeconds: 0 } }, FIX);
-    expect(Date.now() - began).toBeLessThan(5000);
+    // under the stall time, so it ended by the rule under test, not the stall; no fixed bound a slow runner overruns (#527)
+    expect(Date.now() - began).toBeLessThan(STALL_MS);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
   });
@@ -630,7 +632,8 @@ describe("the stall stop (#228)", () => {
     const began = Date.now();
     const out = await run({ ...s, settings: { ...s.settings, stallMs: STALL } }, FIX);
     expect(Date.now() - began).toBeGreaterThanOrEqual(STALL);
-    expect(Date.now() - began).toBeLessThan(5000);
+    // under the stall time, so it ended by the rule under test, not the stall; no fixed bound a slow runner overruns (#527)
+    expect(Date.now() - began).toBeLessThan(STALL_MS);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
     expect(told.log).toContain("label 41 needs-human");
