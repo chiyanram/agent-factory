@@ -161,6 +161,8 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory poll ledger --json",
       'agent-factory status ledger 12 aaaa1111 "writer started"',
       "agent-factory spec ledger PROJ-1",
+      // the spec's text, to edit it (#542)
+      "agent-factory spec ledger 6 --show",
       "agent-factory approval ledger PROJ-1",
       'agent-factory status 12 aaaa1111 "writer started"',
       // its round of questions (#517)
@@ -212,6 +214,8 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
   it("denies raw forge and network clients, git push, a second interpreter or shell, sudo and the App's token", () => {
     for (const command of [
       "gh api repos/o/r",
+      // the spec is read through agent-factory spec --show, never the git host CLI (#542)
+      "gh issue view 6 --json body",
       "gh",
       "timeout 5 gh api x",
       "echo hi && gh api x",

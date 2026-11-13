@@ -57,9 +57,11 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 3. **Write the contract.** Write the spec where the project's `specStore` keeps it (`agent-factory config show
    <project>`). `local`, the default and the rule at work: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`. `issue`,
    on a personal project: the body of the git host issue whose number is the ticket (#381); an edit to it makes its
-   approval stale. **Today:** no write point replaces an issue's body (#486 §4), so draft the spec in the local file
-   (`agent-factory spec --template <issue number>` prints the template) and ask the person to paste it into the
-   issue, then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. When the
+   approval stale. To change a spec in either store, read its text first with
+   `agent-factory spec <project> <ticket> --show`, which prints it as stored whether or not it passes the checks
+   (#542); never fetch it with a shell or write it from memory. **Today:** no write point replaces an issue's body
+   (#542), so draft the spec in the local file (`agent-factory spec --template <issue number>` prints the template)
+   and ask the person to paste it into the issue, then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. When the
    ticket must wait for others to merge first, name them in an optional `## Blocked by` section, one ticket per line
    (#494): the orchestrator holds the ticket's first build until each is merged (or its issue closed as completed),
    then starts from the default branch; a blocker closed with no merge, the ticket itself or a cycle goes to the

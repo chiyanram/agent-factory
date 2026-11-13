@@ -124,6 +124,17 @@ describe("agent-factory spec", () => {
     expect((await cli(["spec", "ledger", "PROJ-1"])).code).toBe(0);
   });
 
+  // #542: the coordinator edits a spec it can read, whether or not it passes the checks
+  it("--show prints the spec's text as stored, exit 0, even when it fails the checks; none is exit 1", async () => {
+    const failing = SPEC.replace("1. It works.", "TBD");
+    writeSpec(failing);
+    expect(await cli(["spec", "ledger", "PROJ-1", "--show"])).toMatchObject({ code: 0, out: failing, err: "" });
+    writeSpec(SPEC);
+    expect(await cli(["spec", "ledger", "PROJ-1", "--show"])).toMatchObject({ code: 0, out: SPEC });
+    expect((await cli(["spec", "ledger", "PROJ-2", "--show"])).code).toBe(1);
+    expect((await cli(["spec", "--template", "--show", "PROJ-1"])).code).toBe(64);
+  });
+
   it("says how to start when there is no spec, exit 1", async () => {
     const run = await cli(["spec", "ledger", "PROJ-1"]);
     expect(run.code).toBe(1);
@@ -434,6 +445,18 @@ describe("the issue spec store (#381)", () => {
     expect(await cli(["spec", "ledger", "PROJ-1"], env())).toMatchObject({
       code: 1,
       err: expect.stringContaining("the ticket is the issue number"),
+    });
+  });
+
+  it("--show prints the issue's body as it is, exit 0, even when it fails the checks (#542)", async () => {
+    project();
+    const failing = ISSUE.replace("1. It works.", "TBD").replaceAll("\n", "\r\n");
+    issue(failing);
+    expect(await cli(["spec", "ledger", "2", "--show"], env())).toMatchObject({ code: 0, out: failing, err: "" });
+    issue(null);
+    expect(await cli(["spec", "ledger", "2", "--show"], env())).toMatchObject({
+      code: 1,
+      err: expect.stringContaining("no spec at issue #2 of a/ledger"),
     });
   });
 
