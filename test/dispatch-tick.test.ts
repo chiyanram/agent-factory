@@ -11,15 +11,8 @@ import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
 import { traceName } from "../src/core/dispatch/trace.js";
-import {
-  lock,
-  runHoursEnd,
-  STEPS_TODAY,
-  tick,
-  type DesignInput,
-  type Steps,
-  type TickSetup,
-} from "../src/core/dispatch/tick.js";
+import { STEPS_TODAY, type DesignInput, type Steps } from "../src/core/dispatch/steps.js";
+import { lock, runHoursEnd, tick, type TickSetup } from "../src/core/dispatch/tick.js";
 import { ROUND_CAP } from "../src/core/dispatch/design.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";

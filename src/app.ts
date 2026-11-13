@@ -45,7 +45,8 @@ import {
   type TokenStore,
 } from "./core/token/index.js";
 import { mint, readAppConfig, realHttp } from "./core/app-token.js";
-import { runHoursEnd, STEPS_TODAY, tick, type Steps, type TickSetup } from "./core/dispatch/tick.js";
+import { STEPS_TODAY, type Steps } from "./core/dispatch/steps.js";
+import { runHoursEnd, tick, type TickSetup } from "./core/dispatch/tick.js";
 import { loopFile, loopRunning, orchestratorLoop } from "./core/dispatch/orchestrator-loop.js";
 import type { Gate } from "./core/dispatch/table.js";
 import { DEFAULT_POLL_MINUTES } from "./core/dispatch/last-poll.js";
