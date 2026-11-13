@@ -819,6 +819,29 @@ describe("tick", () => {
     expect(summary.spent).toEqual({ usd: 0.3, tokens: 900 });
   });
 
+  it("a writer run's end names its trace, and the record reads it back (#487)", async () => {
+    await approved();
+    const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
+    const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, trace };
+    const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async () => ({ kind: "ok", value }) } };
+    await tick(setup({ team, open: [], merged: [] }, [], { steps }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "writer-ended", trace }] });
+  });
+
+  it("a writer step that fails after the run names the run's trace on its spent line (#487)", async () => {
+    await approved();
+    const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
+    const failed = { kind: "failed" as const, reason: "the push failed", spend: { usd: 0.3, tokens: 9 } };
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: { kind: "available", run: async () => ({ ...failed, traces: [trace] }) },
+    };
+    await tick(setup({ team, open: [], merged: [] }, [], { steps }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "spent", traces: [trace] }] });
+  });
+
   it("a writer step that fails leaves its start: the next pass hands the ticket to a person", async () => {
     await approved();
     const steps: Steps = {

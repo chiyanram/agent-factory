@@ -776,6 +776,73 @@ describe("a writer run that stops says why, even before a change exists (#62)", 
   });
 });
 
+describe("a writer run keeps its whole output as its trace (#487)", () => {
+  const traces = () => {
+    const dir = join(home, "runs", "ledger", "PROJ-1");
+    return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
+  };
+
+  it("names the trace on the run's end, and keeps every line of its stream, scrubbed", async () => {
+    const said = { type: "assistant", text: `the key is ${fakeToken("sk-ant-")}oat01-AAAAbbbbCCCCdddd` };
+    const stdout = `${JSON.stringify({ type: "system", subtype: "init" })}\n${JSON.stringify(said)}\n{"type":"result"}\n`;
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
+    const out = valueOf(await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX));
+    expect(out.trace).toMatch(/^writer-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z\.jsonl$/);
+    expect(traces()).toEqual([out.trace]);
+    const lines = readFileSync(join(home, "runs", "ledger", "PROJ-1", out.trace ?? ""), "utf8")
+      .trim()
+      .split("\n");
+    expect(lines.map((l) => JSON.parse(l) as unknown)).toEqual([
+      { type: "system", subtype: "init" },
+      { type: "assistant", text: "the key is [scrubbed]" },
+      { type: "result" },
+    ]);
+  });
+
+  it("names the trace of a blocked run that committed nothing", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: '{"type":"system"}\n', stderr: "" }] });
+    const report = { status: "blocked", blocker: "the spec names no endpoint to change" };
+    const out = valueOf(await run(setup(writer(fake, { commit: false, report, exit: 0 }, []), forge(), []), FIX));
+    expect(out).toMatchObject({ outcome: "blocked", trace: traces()[0] });
+  });
+
+  it("names the trace of a run whose host step failed after it, beside what it spent (#483)", async () => {
+    const stdout = '{"type":"result","total_cost_usd":0.2,"usage":{"input_tokens":5}}\n';
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []);
+    const out = await run({ ...s, pusher: async () => ({ kind: "failed", reason: "the push failed" }) }, FIX);
+    expect(out).toMatchObject({ kind: "failed", spend: { usd: 0.2, tokens: 5 }, traces: traces() });
+    expect(traces()).toHaveLength(1);
+  });
+
+  it("names the trace of a run whose commits cannot be read, beside what it spent", async () => {
+    const stdout = '{"type":"result","total_cost_usd":0.2,"usage":{"input_tokens":5}}\n';
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
+    const base = writer(fake, { commit: true, report: DONE, exit: 0 }, []);
+    // the run leaves a clone git cannot read
+    const box: Box = {
+      ...base,
+      run: async (call) => {
+        const ran = await base.run(call);
+        rmSync(join(started(fake).worktree, ".git"), { recursive: true, force: true });
+        return ran;
+      },
+    };
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(out).toMatchObject({ kind: "failed", spend: { usd: 0.2, tokens: 5 }, traces: traces() });
+    expect(traces()).toHaveLength(1);
+  });
+
+  it("keeps no trace, and names none, for a run whose box never started", async () => {
+    const fake = fakeBox({ runs: [] });
+    const box: Box = { ...fake.box, start: async () => ({ kind: "failed", reason: "no container runtime" }) };
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(out.kind === "ok" ? out.value : out).not.toHaveProperty("trace");
+    expect(out).not.toHaveProperty("traces");
+    expect(traces()).toEqual([]);
+  });
+});
+
 describe("why.ts: the reason a person reads, made safe (#62)", () => {
   it("scrubs what looks like a token or a key, and keeps the words around it", () => {
     const text = [

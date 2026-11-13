@@ -43,6 +43,13 @@ yet, and the ping says it too. A run the host blocked also keeps the last 40 lin
 `$FACTORY_HOME/runs/<project>/<ticket>/writer-<time>.log`, named as `output` in the record and the log line. Every
 reason and kept line has what looks like a token or key scrubbed (`src/core/writer/why.ts`). To read why a run
 stopped, read that record line and that file; on a PR, the run's note says the same.
+Every implementer run also keeps its whole stream-json output as its trace (#487), written as it comes, one line at a
+time, each scrubbed: `$FACTORY_HOME/runs/<project>/<ticket>/writer-<time>.jsonl`, private to you. Its `writer-ended`
+record names it as `trace`; a run that failed after it spent names it in its `spent` line's `traces`. A trace stops
+at 50 MB, and its last line then says it was cut. A run that printed nothing, such as one whose runner never started,
+keeps none (`src/core/dispatch/trace.ts`). **Today:** only implementer runs keep a trace, read as a file, and
+nothing deletes one yet; the `agent-factory trace` command and the 30-day deletion, then the traces of the review,
+design-review and onboarder runs, follow in #487's next slices.
 The caps then hold before each run, never during one (`src/core/dispatch/caps.ts`): per run, `FACTORY_MAX_USD` is
 the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
 and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice

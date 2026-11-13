@@ -23,6 +23,8 @@ export type FailedSpent = {
   readonly spend?: Spend;
   // a review round's spend per run (#337)
   readonly split?: RoundSpend;
+  // the run's traces, plain file names in the ticket's folder (dispatch/trace.ts, #487)
+  readonly traces?: readonly string[];
 };
 
 // spentFailure : a failure that keeps what the run spent, when it reported any. Pure.
