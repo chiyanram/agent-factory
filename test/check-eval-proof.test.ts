@@ -29,18 +29,33 @@ const MODELS = {
   judge: "claude-sonnet-5-5",
 };
 
-// a results document as agent-factory eval reviewer writes it (src/core/eval/results.ts), cut to what the check reads
-function pass(over: Record<string, unknown> = {}, recall = 0.8, hits = 0): Record<string, unknown> {
+// a results document as agent-factory eval reviewer writes it (src/core/eval/results.ts), cut to what the check reads:
+// `found` of 10 seed-runs, aimed at quality
+function pass(over: Record<string, unknown> = {}, found = 8, hits = 0): Record<string, unknown> {
   return {
     version: 1,
     head: HEAD,
     partial: false,
     proof: true,
+    aim: "quality",
+    cost_usd: 8,
     inputs: { head: HEAD, models: MODELS, prompts: SHAS, rulebook: "unknown" },
-    recall_at_act_on: { overall: { found: 8, of: 10, recall } },
+    recall_at_act_on: { overall: { found, of: 10, recall: found / 10 } },
     clean_floor: { hits, findings: [] },
     ...over,
   };
+}
+
+// a baseline of two runs over one case of 5 seeds, matching 2 and 3 at $4 and $5: recall 5/10, its noise one seed of 5
+// (so a quality change needs more than 7/10, and holds down to 3/10) and $2 a pass
+function baseline(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const run = (n: number, matched: number, usd: number) => ({
+    run: n,
+    cost_usd: usd,
+    seeds: Array.from({ length: 5 }, (_, k) => ({ seed: k, matched: k < matched })),
+  });
+  const perCase = [{ case: "c", kind: "seeded", seeds: 5, runs: [run(1, 2, 4), run(2, 3, 5)] }];
+  return pass({ aim: null, cost_usd: 9, per_case: perCase, ...over }, 5);
 }
 
 const RESULT = "evals/reviewer/results/2026-11-09-aaaaaaaaaaaa.json";
@@ -50,7 +65,7 @@ function facts(over: Partial<Facts> = {}): Facts {
     changed: ["prompts/review-find.md", RESULT],
     added: [RESULT],
     results: new Map([[RESULT, JSON.stringify(pass())]]),
-    baseline: JSON.stringify(pass({}, 0.75)),
+    baseline: JSON.stringify(baseline()),
     prompts: SHAS,
     models: MODELS,
     onBranch: (sha) => sha === HEAD,
@@ -90,7 +105,7 @@ describe("proofProblems", () => {
     ]);
   });
 
-  it("names each way a results file fails: partial, drafts, clean floor, recall, prompt SHAs, models, head", () => {
+  it("names each way a results file fails: partial, drafts, clean floor, prompt SHAs, models, head, hold, aim", () => {
     const bad = pass(
       {
         partial: true,
@@ -98,7 +113,7 @@ describe("proofProblems", () => {
         head: "b".repeat(40),
         inputs: { prompts: { ...SHAS, judge: "9".repeat(40) }, models: { ...MODELS, logic: "opus" } },
       },
-      0.5,
+      2,
       2,
     );
     const why = proofProblems(facts({ results: new Map([[RESULT, JSON.stringify(bad)]]) })).map((w) =>
@@ -111,8 +126,46 @@ describe("proofProblems", () => {
       `inputs.prompts.judge is ${"9".repeat(40)}, not prompts/eval-judge.md as changed (${"3".repeat(40)})`,
       "inputs.models.logic is opus, not the pin in src/core/review/pinned.ts (claude-opus-5-5)",
       `head ${"b".repeat(40)} is not a commit on this branch`,
-      "recall@act_on 0.5 is below the baseline's 0.75",
+      "recall@act_on 2/10 is below the baseline's 5/10 by more than the noise 1/5 (ADR-0021)",
+      "it aims at quality, and recall@act_on 2/10 is not above the baseline's 5/10 plus the noise 1/5 (ADR-0021)",
     ]);
+  });
+
+  it("keeps a change only past the noise on what it aims at, and holding the rest (ADR-0021)", () => {
+    const why = (doc: Record<string, unknown>) =>
+      proofProblems(facts({ results: new Map([[RESULT, JSON.stringify(doc)]]) })).map((w) =>
+        w.replace(`a reviewer input changed (prompts/review-find.md): ${RESULT}: `, ""),
+      );
+    expect(why(pass({}, 7))).toEqual([
+      "it aims at quality, and recall@act_on 7/10 is not above the baseline's 5/10 plus the noise 1/5 (ADR-0021)",
+    ]);
+    expect(why(pass({ aim: "cost", cost_usd: 6.9 }, 3))).toEqual([]);
+    expect(why(pass({ aim: "cost", cost_usd: 7 }, 3))).toEqual([
+      "it aims at cost, and $7 is not below the baseline's $9 less the noise $2 (ADR-0021)",
+    ]);
+    expect(why(pass({ aim: undefined }))).toEqual([
+      "it says no aim: run agent-factory eval reviewer with --aim quality or --aim cost (ADR-0021)",
+    ]);
+  });
+
+  it("refuses a results file in which a case or a run errored, naming each; the same file without it passes (N11)", () => {
+    // an errored round on a clean case reports no finding: it would read as a clean floor kept by a reviewer that never
+    // ran. The flags say proof and not partial, as a hand-edited or stale file could
+    const runs = (error: string) => [
+      { run: 1, outcome: "posted", error: "", act_on: [], seeds: [] },
+      { run: 2, outcome: "failed", error, act_on: [], seeds: [] },
+    ];
+    const clean = (error: string) => ({ case: "clean-one", kind: "clean", seeds: 0, error: "", runs: runs(error) });
+    const doc = (error: string, caseError = "") =>
+      JSON.stringify(pass({ per_case: [{ ...clean(error), error: caseError }] }));
+    const why = (text: string) => proofProblems(facts({ results: new Map([[RESULT, text]]) }));
+    expect(why(doc("the review round failed"))).toEqual([
+      `a reviewer input changed (prompts/review-find.md): ${RESULT}: case clean-one run 2 has an error: the review round failed; an errored run proves nothing (ADR-0021 N11)`,
+    ]);
+    expect(why(doc("", "cannot set up the clone"))).toEqual([
+      `a reviewer input changed (prompts/review-find.md): ${RESULT}: case clean-one has an error: cannot set up the clone; an errored run proves nothing (ADR-0021 N11)`,
+    ]);
+    expect(why(doc(""))).toEqual([]);
   });
 
   it("passes when one of several added results files proves the change", () => {
@@ -124,9 +177,12 @@ describe("proofProblems", () => {
     expect(proofProblems(facts({ added: [other, RESULT], results }))).toEqual([]);
   });
 
-  it("refuses a baseline with no recall", () => {
+  it("refuses a baseline with no recall, or none of the repeat runs the noise is measured by", () => {
     expect(proofProblems(facts({ baseline: "{}" }))).toEqual([
-      `a reviewer input changed (prompts/review-find.md), and ${BASELINE} has no recall_at_act_on.overall.recall`,
+      `a reviewer input changed (prompts/review-find.md), and ${BASELINE} has no recall_at_act_on.overall found and of`,
+    ]);
+    expect(proofProblems(facts({ baseline: JSON.stringify(pass({}, 5)) }))).toEqual([
+      `a reviewer input changed (prompts/review-find.md), and ${BASELINE} has no per_case of two or more runs, each holding the same seeds, to measure the noise by (ADR-0021)`,
     ]);
   });
 });
@@ -148,10 +204,19 @@ describe("baselineProblems", () => {
     expect(baselineProblems(facts({ changed, labels: [LABEL] }))).toEqual([]);
   });
 
-  it("needs the new baseline to be a proof pass with a clean floor", () => {
-    expect(passProblems(pass({ proof: false }, 0.9, 1))).toHaveLength(2);
-    expect(baselineProblems(facts({ changed, labels: [LABEL], baseline: JSON.stringify(pass({}, 0.9, 1)) }))).toEqual([
+  it("needs the new baseline to be a proof pass with a clean floor, a noise to measure and no aim (ADR-0021)", () => {
+    expect(passProblems(pass({ proof: false }, 9, 1))).toHaveLength(2);
+    const approved = (doc: Record<string, unknown>) =>
+      baselineProblems(facts({ changed, labels: [LABEL], baseline: JSON.stringify(doc) }));
+    expect(approved(baseline())).toEqual([]);
+    expect(approved(baseline({ clean_floor: { hits: 1, findings: [] } }))).toEqual([
       `${BASELINE} changed: it has 1 clean-floor hit(s); the floor is 0`,
+    ]);
+    expect(approved(pass({ aim: null }, 9))).toEqual([
+      `${BASELINE} changed: it has no per_case of two or more runs, each holding the same seeds, to measure the noise by (ADR-0021)`,
+    ]);
+    expect(approved(baseline({ aim: "quality" }))).toEqual([
+      `${BASELINE} changed: it says an aim; a baseline proves no change, so run it with no --aim`,
     ]);
   });
 });
@@ -223,7 +288,7 @@ describe("check-eval-proof, the script", () => {
       out: expect.stringContaining(`there is no ${BASELINE} yet (#216)`),
     });
 
-    put(BASELINE, `${JSON.stringify(pass({}, 0.7))}\n`);
+    put(BASELINE, `${JSON.stringify(baseline())}\n`);
     const blob = (p: string) => git("hash-object", p);
     const prompts = {
       find: blob("prompts/review-find.md"),
@@ -233,7 +298,7 @@ describe("check-eval-proof, the script", () => {
     const head = git("rev-parse", "HEAD");
     put(
       RESULT,
-      `${JSON.stringify(pass({ head, inputs: { head, prompts, models: { ...MODELS, find: "sonnet" } } }, 0.7))}\n`,
+      `${JSON.stringify(pass({ head, inputs: { head, prompts, models: { ...MODELS, find: "sonnet" } } }))}\n`,
     );
     git("add", "-A");
     commit("an eval pass run with an alias");
@@ -244,7 +309,7 @@ describe("check-eval-proof, the script", () => {
       code: 1,
       out: expect.stringContaining("inputs.models.find is sonnet, not the pin in src/core/review/pinned.ts"),
     });
-    put(RESULT, `${JSON.stringify(pass({ head, inputs: { head, prompts, models: MODELS } }, 0.7))}\n`);
+    put(RESULT, `${JSON.stringify(pass({ head, inputs: { head, prompts, models: MODELS } }))}\n`);
     git("add", "-A");
     commit("the eval pass, and a baseline");
     expect(run(dir, env)).toMatchObject({ code: 1, out: expect.stringContaining(`${BASELINE} changed`) });

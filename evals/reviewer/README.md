@@ -105,17 +105,35 @@ needs no model and no token.
 `results/<date>-<sha>.json` that proves it:
 
 - `"partial": false` and `"proof": true` (no draft case);
+- no case and no run has an `error`, each one named: an errored run on a clean case reports no finding, and would read
+  as a clean floor kept ([ADR-0021](../../docs/adr/0021-keep-a-change-only-by-experiment.md) N11);
 - `inputs.prompts` holds the git blob SHA of each prompt as the change leaves it, `inputs.models` holds the full
   model ids `src/core/review/pinned.ts` pins (a pass run with another id is no proof), and `head` is a commit on the
   branch: run the pass at the change, then commit its results file;
-- `recall_at_act_on.overall.recall` is not below `baseline.json`'s;
-- `clean_floor.hits` is 0.
+- `clean_floor.hits` is 0;
+- it holds the baseline and beats it on what it aims at, by more than the noise
+  ([ADR-0021](../../docs/adr/0021-keep-a-change-only-by-experiment.md)).
 
-Until there is a `baseline.json` (#216), a reviewer-input change is refused: there is nothing to prove it against.
-`src/core/review/pinned.ts` becomes a reviewer input itself with the first baseline (#216): it landed before one
-existed (#213). The rulebook's pin is the project's plugin pin, kept in the factory home, not here (#232), so
+**The bar** (`src/core/eval/bar.ts`). The noise is read from `baseline.json`'s own repeat runs (`per_case`): the most
+seeds one run matched less the fewest, never under one seed; and for cost, the spread of one run's cost times the runs.
+On today's baseline that is 1 of 24 seeds and $3.0222 a pass.
+
+- **Hold**, for every change: `recall_at_act_on.overall` found/of is not below the baseline's less the noise (today at
+  least 47 of 72).
+- **Aim**, which the pass records from `agent-factory eval reviewer --aim quality` or `--aim cost`: quality is recall
+  above the baseline's plus the noise (today at least 54 of 72); cost is a pass that costs less than the baseline's
+  less the noise (today under $38.2159). A pass with no aim proves no change.
+
+Recall is compared in counts and cost in whole hundredths of a cent, not as rounded floats, so a pass exactly on the
+line does not beat it. Only a pass over the baseline's own cases can aim at cost: fewer cases cost less without being
+better.
+
+With no `baseline.json`, or one with fewer than two runs to measure the noise by, a reviewer-input change is refused.
+`src/core/review/pinned.ts` landed before the first baseline (#213) and is to become a reviewer input with it (#216);
+the check does not read it as one yet. The rulebook's pin is the project's plugin pin, kept in the factory home, not here (#232), so
 `inputs.rulebook` is not checked yet.
 
 **A change to `baseline.json`** needs the operator's approval: the pull request label `eval-baseline-approved`, which
 CI reads from the pull request event. Only the operator adds it; an agent never does. A local run has no event, so it
-refuses a baseline change. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits.
+refuses a baseline change. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits, whose noise can be measured
+(two or more runs, each holding the same seeds), and that was run with no `--aim`, since a baseline proves no change.
