@@ -1330,7 +1330,8 @@ function describeAs<K extends ActionKind>(kind: K, action: ActionMap[K]): string
   return DESCRIBE[kind](action);
 }
 
-function describe(action: Action): string {
+// describe : an action in a few words, as the pass logs it and `board` shows it (#487)
+export function describe(action: Action): string {
   return describeAs(action.kind, action);
 }
 
