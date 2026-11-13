@@ -770,7 +770,7 @@ describe("every module reads the resolved settings (#254)", () => {
 
   it("the eval judge's spend cap and model are settings keys: a cap, and a preference", () => {
     const team = layer("team", { eval: { judgeUsdPerRun: 0.2, judgeModel: "claude-opus-5-5" } });
-    const flags = { drafts: false };
+    const flags = { drafts: false, aim: "none" as const };
     expect(evalSettings(runEnv({}, withEnv([team], {})), flags)).toMatchObject({
       judgeUsd: "0.2",
       judgeModel: "claude-opus-5-5",

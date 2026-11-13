@@ -164,7 +164,7 @@ function words(line: string): readonly string[] {
 }
 
 function settings(over: Partial<EvalSettings> = {}): EvalSettings {
-  return { ...evalSettings({}, { drafts: false }), ...over };
+  return { ...evalSettings({}, { drafts: false, aim: "none" }), ...over };
 }
 
 async function pass(model: Model, s: EvalSettings = settings()) {
@@ -212,6 +212,8 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     expect(r.cases.skipped).toEqual([{ case: "draft-one", status: "draft" }]);
     expect(r.partial).toBe(false);
     expect(r.proof).toBe(true);
+    // a pass run with no --aim proves no change, such as a baseline (ADR-0021)
+    expect(r.aim).toBeNull();
     expect(r.inputs.head).toBe(head);
     expect(r.inputs.prompts.find).toBe(
       blobSha(readFileSync(join(import.meta.dirname, "..", "prompts", "review-find.md"))),
@@ -249,8 +251,12 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     const none = await pass(fakeModel({ lines: {}, confidence: 1, cost: 0 }, seen));
     expect(none.out).toMatchObject({ kind: "failed", reason: expect.stringContaining("approves a case") });
     expect(seen).toHaveLength(0);
-    const drafts = await pass(fakeModel({ lines: {}, confidence: 1, cost: 0 }, seen), settings({ drafts: true }));
+    const drafts = await pass(
+      fakeModel({ lines: {}, confidence: 1, cost: 0 }, seen),
+      settings({ drafts: true, aim: "cost" }),
+    );
     const r = results(drafts.out.kind === "ok" ? drafts.out.value.path : "");
+    expect(r.aim).toBe("cost");
     expect(r.cases.ran).toEqual(["seeded-one", "clean-one", "draft-one"]);
     expect(r.drafts_included).toBe(true);
     expect(r.proof).toBe(false);
@@ -320,6 +326,9 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     const usage = io(full, ["eval", "writer"]);
     expect(await usage.run()).toBe(64);
     expect(usage.err()).toContain("usage: agent-factory eval reviewer");
+    const aim = io(full, ["eval", "reviewer", ".", "--aim", "speed"]);
+    expect(await aim.run()).toBe(64);
+    expect(aim.err()).toContain("[--aim quality|cost]");
   });
 
   it("runs end to end through a fake agent CLI, which is called with a budget per run", async () => {
@@ -346,7 +355,7 @@ process.stdout.write(JSON.stringify({ type: "system", subtype: "task_summary" })
     chmodSync(bin, 0o755);
     let out = "";
     let err = "";
-    const code = await runCli(["eval", "reviewer", root], {
+    const code = await runCli(["eval", "reviewer", root, "--aim", "quality"], {
       env: { ...env, FACTORY_RULEBOOK: RULEBOOK, FACTORY_CLAUDE: bin },
       out: (t) => (out += t),
       err: (t) => (err += t),
@@ -365,6 +374,7 @@ process.stdout.write(JSON.stringify({ type: "system", subtype: "task_summary" })
     const r = results(out.trim());
     expect(r.recall_at_act_on.overall.recall).toBe(1);
     expect(r.clean_floor.hits).toBe(0);
+    expect(r.aim).toBe("quality");
     const argv = readFileSync(calls, "utf8").trim().split("\n").map(words);
     expect(argv.every((a) => a.includes("--max-budget-usd") && a.includes("--restricted"))).toBe(true);
     expect(argv.some((a) => a[a.indexOf("--max-budget-usd") + 1] === "0.50")).toBe(true);
