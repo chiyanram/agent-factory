@@ -50,8 +50,13 @@ at 50 MB, and its last line then says it was cut. A run that printed nothing, su
 keeps none. A line still being printed that is past the room left cuts the trace at once, and nothing after a cut is
 held. Each orchestrator pass first deletes the project's traces older than 30 days, by the time in the name, as
 `agent-factory trace` does. `agent-factory trace <project> <ticket>` lists them; with a trace's name it prints it
-(`src/core/dispatch/trace.ts`). **Today:** only implementer runs keep a trace; the review, design-review and onboarder
-runs follow in #487's next slice.
+(`src/core/dispatch/trace.ts`).
+Each pass of an automated review round streams too (`--output-format stream-json --verbose`), and its answer is the
+stream's last result event. Each finder keeps its stream as `finder-<lens>-<time>.jsonl` and each verify pass as
+`verify-<time>.jsonl`, in the same folder, named in the round's `review-ended` line, or its `spent` line when a pass
+failed, as `traces` (`src/core/review/step.ts`). **Today:** the design-review and onboarder runs stream the same way
+but keep no trace yet, and `agent-factory trace` names only a `writer-ended` line's trace; both follow in #487's next
+slice.
 The caps then hold before each run, never during one (`src/core/dispatch/caps.ts`): per run, `FACTORY_MAX_USD` is
 the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
 and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice

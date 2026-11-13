@@ -177,6 +177,8 @@ export type Event =
       readonly lenses?: Readonly<Record<string, number>>;
       // the findings the cite check noted as "cite not found" (#485); none on an older line
       readonly citesNotFound?: number;
+      // each pass's trace, plain file names in the ticket's folder (trace.ts, #487); none on an older line
+      readonly traces?: readonly string[];
     }
   // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
   // or failed (#235)
@@ -726,6 +728,7 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     actedField(raw),
     lensesField(raw),
     citesField(raw),
+    tracesField(raw),
   ];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
   return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)

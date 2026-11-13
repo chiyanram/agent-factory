@@ -5,12 +5,16 @@
 //   --tools Read,Grep,Glob  and nothing else; a role card may narrow them (process/cards.ts), never widen them
 //   --max-budget-usd        FACTORY_MAX_USD, when set (ADR-0011 D14)
 //   --json-schema           the answer is structured output, checked by the CLI
+//   --output-format stream-json --verbose
+//                           one JSON event a line: the tool calls, then the result event with the answer; the whole
+//                           stream is the run's trace (#487), and the answer is the last result event, since a summary
+//                           event can follow it
 // Never resumed, never continued: every pass is a new session. A test passes its own Model.
 
 import { execFile } from "node:child_process";
 import type { Exit } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
-import { spendOf, type RoundPart } from "../dispatch/spend.js";
+import { NO_STREAM, spendOf, streamOf, type RoundPart } from "../dispatch/spend.js";
 
 export type ModelRun = {
   // the folder the run reads: ./pack.md, ./code/, and for verify ./findings.json
@@ -32,16 +36,19 @@ const READ_ONLY = ["Read", "Grep", "Glob"];
 
 export type ModelAnswer = {
   readonly output: unknown;
-  // the CLI's whole answer, kept with the head for the retro (ADR-0011 D16)
+  // the CLI's whole answer, its result event, kept with the head for the retro (ADR-0011 D16)
   readonly answer: unknown;
   readonly costUsd: number;
   readonly tokens: number;
+  // the run's whole stream-json output, raw, for its trace (#487); the trace scrubs it. None from a model that streams
+  // nothing, such as a test's
+  readonly stream?: string;
 };
 
 // A failed run still gives back what the CLI answered, so a pass that failed for its budget is kept and counted.
 export type ModelResult =
   | { readonly kind: "ok"; readonly value: ModelAnswer }
-  | { readonly kind: "failed"; readonly reason: string; readonly answer: unknown };
+  | { readonly kind: "failed"; readonly reason: string; readonly answer: unknown; readonly stream?: string };
 
 export type Model = (run: ModelRun) => Promise<ModelResult>;
 
@@ -59,19 +66,12 @@ export function claudeArgs(run: ModelRun): readonly string[] {
     READ_ONLY.filter((t) => run.tools === undefined || run.tools.includes(t)).join(","),
     ...cap,
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--json-schema",
     run.schema,
     run.prompt,
   ];
-}
-
-function parse(text: string): unknown {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
 }
 
 function failure(answer: unknown, stderr: string): string {
@@ -85,14 +85,16 @@ export function readAnswer(input: {
   readonly stdout: string;
   readonly stderr: string;
 }): ModelResult {
-  const answer = parse(input.stdout);
+  // the last result event of the stream; a stream with none, or output that is no stream, has no answer
+  const answer = streamOf(NO_STREAM, `${input.stdout}\n`).result;
   const output = prop(answer, "structured_output");
+  const stream = input.stdout;
   const ok = input.code === 0 && prop(answer, "is_error") === false && output !== undefined;
   if (!ok) {
-    return { kind: "failed", reason: failure(answer, input.stderr), answer };
+    return { kind: "failed", reason: failure(answer, input.stderr), answer, stream };
   }
   const spent = spendOf(answer);
-  return { kind: "ok", value: { output, answer, costUsd: spent.usd, tokens: spent.tokens } };
+  return { kind: "ok", value: { output, answer, costUsd: spent.usd, tokens: spent.tokens, stream } };
 }
 
 // One CLI call in a folder: claude's file tools are held to the folder it starts in.
@@ -118,9 +120,10 @@ function startFailure(error: { readonly code?: unknown } | null, bin: string): s
   return error !== null && typeof error.code === "string" ? `cannot start ${bin}: ${error.code}\n` : "";
 }
 
+// runInFolder : one call, its stdin closed at once: the CLI waits 3 s for input on an open stdin (#487)
 export const runInFolder: FolderRunner = (call) =>
   new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       call.bin,
       [...call.args],
       { cwd: call.cwd, env: call.env, maxBuffer: 64 * 1024 * 1024 },
@@ -128,6 +131,7 @@ export const runInFolder: FolderRunner = (call) =>
         resolve({ code: exitCode(error), stdout, stderr: startFailure(error, call.bin) || stderr });
       },
     );
+    child.stdin?.end();
   });
 
 // claudeModel : the real model run, through the claude CLI

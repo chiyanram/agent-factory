@@ -7,7 +7,14 @@ import type { Done } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
 import type { Note } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
-import { claudeArgs, readAnswer, type Model, type ModelResult, type ModelRun } from "../src/core/review/model.js";
+import {
+  claudeArgs,
+  readAnswer,
+  runInFolder,
+  type Model,
+  type ModelResult,
+  type ModelRun,
+} from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
 import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RoundPart } from "../src/core/dispatch/spend.js";
@@ -743,38 +750,51 @@ describe("pass records", () => {
   });
 
   it("readAnswer gives back the CLI's answer on a failure, and never throws on one that is not JSON", () => {
-    expect(
-      readAnswer({
-        code: 1,
-        stdout: JSON.stringify({ is_error: true, subtype: "error_max_turns", usage: { input_tokens: 5 } }),
-        stderr: "",
-      }),
-    ).toMatchObject({ kind: "failed", reason: "error_max_turns", answer: { usage: { input_tokens: 5 } } });
+    const failed = JSON.stringify({
+      type: "result",
+      is_error: true,
+      subtype: "error_max_turns",
+      usage: { input_tokens: 5 },
+    });
+    expect(readAnswer({ code: 1, stdout: `${failed}\n`, stderr: "" })).toMatchObject({
+      kind: "failed",
+      reason: "error_max_turns",
+      answer: { usage: { input_tokens: 5 } },
+      stream: `${failed}\n`,
+    });
     expect(readAnswer({ code: 0, stdout: "<html>", stderr: "boom" })).toMatchObject({ kind: "failed", reason: "boom" });
-    expect(
-      readAnswer({
-        code: 0,
-        stdout: JSON.stringify({
-          is_error: false,
-          structured_output: { findings: [] },
-          total_cost_usd: 0.2,
-          usage: { input_tokens: 3, output_tokens: 4 },
-        }),
-        stderr: "",
-      }),
-    ).toEqual({
+  });
+
+  it("readAnswer reads the answer from the last result event of the stream, with every event kept for the trace (#487)", () => {
+    const result = {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      structured_output: { findings: [] },
+      total_cost_usd: 0.2,
+      usage: { input_tokens: 3, output_tokens: 4 },
+    };
+    // a tool call before the result, and a summary event after it, as the CLI prints them
+    const stdout = [
+      { type: "system", subtype: "init" },
+      { type: "assistant", message: { content: [{ type: "tool_use", name: "Read" }] } },
+      result,
+      { type: "system", subtype: "task_summary" },
+    ]
+      .map((e) => JSON.stringify(e))
+      .join("\n");
+    expect(readAnswer({ code: 0, stdout: `${stdout}\n`, stderr: "" })).toEqual({
       kind: "ok",
-      value: {
-        output: { findings: [] },
-        answer: {
-          is_error: false,
-          structured_output: { findings: [] },
-          total_cost_usd: 0.2,
-          usage: { input_tokens: 3, output_tokens: 4 },
-        },
-        costUsd: 0.2,
-        tokens: 7,
-      },
+      value: { output: { findings: [] }, answer: result, costUsd: 0.2, tokens: 7, stream: `${stdout}\n` },
+    });
+  });
+
+  it("readAnswer fails on a stream with no result event, as on no answer at all", () => {
+    const stdout = `${JSON.stringify({ type: "system", subtype: "init" })}\n`;
+    expect(readAnswer({ code: 0, stdout, stderr: "killed" })).toMatchObject({
+      kind: "failed",
+      reason: "killed",
+      stream: stdout,
     });
   });
 });
@@ -860,7 +880,8 @@ describe("claudeArgs", () => {
       "--max-budget-usd",
       "2",
       "--output-format",
-      "json",
+      "stream-json",
+      "--verbose",
       "--json-schema",
       "{}",
       "P",
@@ -870,6 +891,12 @@ describe("claudeArgs", () => {
       "--max-budget-usd",
     );
   });
+
+  it("runs the CLI with its stdin closed, so it never waits for input (#487)", async () => {
+    // cat reads its stdin to the end: with stdin left open it would never exit
+    const ran = await runInFolder({ bin: "cat", args: [], env: { PATH: process.env.PATH }, cwd: p.root });
+    expect(ran).toEqual({ code: 0, stdout: "", stderr: "" });
+  }, 3000);
 
   it("gives a role card's run the card's tools, which can narrow Read, Grep and Glob, never widen them (#232)", () => {
     const run = { folder: "/x", model: "opus", schema: "{}", prompt: "P", name: "n", maxUsd: "" };
@@ -988,6 +1015,134 @@ describe("reviewStep", () => {
       // the failed verify pass's spend is its own (#337)
       split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.7, tokens: 30 } },
     });
+  });
+});
+
+describe("the review step keeps each pass's stream as its trace (#487)", () => {
+  // a token prefix, joined at run time, so no secret scanner reads this file as holding a token
+  const token = `${["sk-ant-"].join("")}oat01-AAAAbbbbCCCCdddd`;
+  // the fake model's answers, each with the stream a real run prints: a tool call holding a token, then the result
+  const streaming =
+    (m: Model): Model =>
+    async (run) => {
+      const ran = await m(run);
+      const stream = `${JSON.stringify({ type: "assistant", text: `read ${token}` })}\n${JSON.stringify({ type: "result" })}\n`;
+      return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, stream } } : { ...ran, stream };
+    };
+  const dir = () => join(home(), "runs", "ledger", "PROJ-12");
+  const env = () => ({ ...p.env, FACTORY_REPO: p.clone, FACTORY_HOME: home() });
+  const plugins = [{ label: "rulebook", dir: RULEBOOK }];
+  const none = async () => ({ kind: "ok" as const, value: [] });
+  const input = (): RunInput => ({
+    ticket: "PROJ-12",
+    head: p.head2,
+    change: {
+      kind: "open",
+      line: {
+        kind: "open",
+        number: 12,
+        branch: "factory/PROJ-12",
+        fork: false,
+        lastNoteAt: "",
+        head: p.head2,
+        draft: true,
+        claimed: true,
+        pipeline: { kind: "none" },
+        needsHuman: false,
+        stop: { kind: "none" },
+        asks: 0,
+        mergeable: "clean",
+      },
+    },
+  });
+
+  it("names a trace per pass, a finder's by its lens and the verify pass's, each scrubbed, in the ticket's folder", async () => {
+    const m = model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "x" }])], []);
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: streaming(m),
+      sessions: none,
+    });
+    const out = step.kind === "available" ? await step.run(input()) : step;
+    const traces = out.kind === "ok" ? (out.value.traces ?? []) : [];
+    expect(traces).toEqual([
+      expect.stringMatching(/^finder-baseline-.*\.jsonl$/),
+      expect.stringMatching(/^verify-.*\.jsonl$/),
+    ]);
+    expect(readdirSync(dir()).toSorted()).toEqual([...traces].toSorted());
+    const text = readFileSync(join(dir(), traces[0] ?? ""), "utf8");
+    expect(text).toContain("read [scrubbed]");
+    expect(text).not.toContain(token);
+  });
+
+  it("names both verify passes, rule and logic, apart, even when they end in the same millisecond", async () => {
+    const logic = { ...FINDING, kind: "logic", axis: "spec", rule: "correctness", finding: "AC1 not met", line: 2 };
+    const m = model([findAnswer([FINDING, logic]), verdicts([]), verdicts([])], []);
+    const now = Date.now;
+    Date.now = () => 1_700_000_000_000;
+    try {
+      const step = reviewStep({
+        env: env(),
+        forge: forge(fresh()),
+        factory: "ram",
+        project: "ledger",
+        plugins,
+        model: streaming(m),
+        sessions: none,
+      });
+      const out = step.kind === "available" ? await step.run(input()) : step;
+      const traces = out.kind === "ok" ? (out.value.traces ?? []) : [];
+      expect(traces.filter((t) => t.startsWith("verify-"))).toHaveLength(2);
+      expect(new Set(traces).size).toBe(3);
+    } finally {
+      Date.now = now;
+    }
+  });
+
+  it("a round whose pass fails still names the traces it kept, the failed pass's too", async () => {
+    const found = model([findAnswer([FINDING])], []);
+    let calls = 0;
+    const failing: Model = async (run) => {
+      calls += 1;
+      return calls === 1
+        ? found(run)
+        : { kind: "failed", reason: "error_max_budget_usd", answer: { total_cost_usd: 0.7 } };
+    };
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: streaming(failing),
+      sessions: none,
+    });
+    const out = step.kind === "available" ? await step.run(input()) : step;
+    expect(out).toMatchObject({
+      kind: "failed",
+      traces: [expect.stringMatching(/^finder-/), expect.stringMatching(/^verify-/)],
+    });
+  });
+
+  it("keeps no trace from a model that streams nothing", async () => {
+    const m = model([findAnswer([]), verdicts([])], []);
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: m,
+      sessions: none,
+    });
+    const out = step.kind === "available" ? await step.run(input()) : step;
+    expect(out).toMatchObject({ kind: "ok" });
+    expect(out.kind === "ok" ? out.value : out).not.toHaveProperty("traces");
+    expect(existsSync(dir())).toBe(false);
   });
 });
 
