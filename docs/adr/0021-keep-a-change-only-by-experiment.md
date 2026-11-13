@@ -33,8 +33,7 @@ ADR-0015 E3 set a simpler bar: recall not below the baseline, and no clean-floor
 | N11 | **An errored run proves nothing.** A results file in which any case or any run has an error is refused, each one named: a run that errored on a clean case reports no finding, and would read as a clean floor kept by a reviewer that never ran. The harness already marks such a pass partial; N11 also refuses a file whose flags say otherwise. | #488 (operator, 2026-11-13) |
 
 `scripts/check-eval-proof.ts` checks N2–N7 and N11 on every PR that changes a reviewer input, and N10 on every PR that
-changes the baseline. The bar itself is `src/core/eval/bar.ts`, which the script loads. **Today:** the pass records its
-aim, but the check still applies ADR-0015 E3's bar; N2–N7, N10 and N11 are checked from #488's next slice.
+changes the baseline. The bar itself is `src/core/eval/bar.ts`, which the script loads.
 
 ## Considered
 

@@ -158,7 +158,9 @@ merge, and a revert or a fix to the same lines up to 30 days updates it (#487).
 **Kind:** guidance.
 **Why:** an unmeasured tweak can make things worse without anyone seeing; a change that only lowers cost must still be
 allowed.
-**How it's checked:** review only.
+**How it's checked:** for a change to a reviewer input, `scripts/check-eval-proof.ts` checks the two-part bar and the
+noise of [ADR-0021](adr/0021-keep-a-change-only-by-experiment.md); every other change, by review. **Today:** the
+held-out cases a change was not tuned on are not built (ADR-0021 N8, #599).
 
 ## P12. Learn at the source
 
