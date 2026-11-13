@@ -34,6 +34,7 @@ import type {
   IssueState,
   Level,
   Mergeable,
+  Landed,
   MergedChange,
   OpenChange,
   Person,
@@ -234,6 +235,25 @@ export function github(client: Client, project: GithubProject): Forge {
     });
   }
 
+  // landedOf : when, as which commit and by whom a pull request was merged; merge_commit_sha is the merge, squash or
+  // rebased commit on the base branch
+  async function landedOf(input: { readonly number: number }): Promise<Result<Landed>> {
+    const answer = await rest(client, { path: `${repo}/pulls/${input.number}`, method: "GET", body: { kind: "none" } });
+    if (answer.kind === "failed") {
+      return answer;
+    }
+    const r = reader(`github pull request ${input.number}`);
+    const v = answer.value;
+    if (!r.bool(v, "merged")) {
+      return { kind: "failed", reason: `github: #${input.number} is not merged` };
+    }
+    return r.done({
+      at: r.text(v, "merged_at"),
+      sha: r.text(v, "merge_commit_sha"),
+      by: r.absent(v, "merged_by") ? "" : r.text(v, "merged_by.login"),
+    });
+  }
+
   async function note(input: {
     readonly number: number;
     readonly post: Parameters<Forge["note"]>[0]["post"];
@@ -400,6 +420,7 @@ export function github(client: Client, project: GithubProject): Forge {
       return r.done(r.text(answer.value, "login"));
     },
     change,
+    landed: landedOf,
     failedJobs,
     // GitHub runs .github/workflows only, which the guard always covers
     async ciConfig() {

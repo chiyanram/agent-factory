@@ -112,6 +112,7 @@ function forge(
     branchState: async () => ({ kind: "ok", value: "none" }),
     issueState: async () => ({ kind: "ok", value: "open" }),
     issueBody: failed,
+    landed: failed,
     openChange: failed,
     notes: async () => ({ kind: "ok", value: [...notes] }),
     setBody: async () => ({ kind: "failed", reason: "the review does not set a body" }),

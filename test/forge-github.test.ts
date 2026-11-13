@@ -510,6 +510,27 @@ describe("branchExists (#227)", () => {
   });
 });
 
+describe("landed (#487)", () => {
+  it("is when, as which commit and by whom a pull request was merged; one not merged fails", async () => {
+    const f = fake("github", [
+      ok({
+        merged: true,
+        merged_at: "2026-11-13T09:00:00Z",
+        merge_commit_sha: "a".repeat(40),
+        merged_by: { login: "mo" },
+      }),
+      ok({ merged: false, merged_at: null, merge_commit_sha: null, merged_by: null }),
+    ]);
+    const forge = github(f.client, project);
+    expect(await forge.landed({ number: 12 })).toEqual({
+      kind: "ok",
+      value: { at: "2026-11-13T09:00:00Z", sha: "a".repeat(40), by: "mo" },
+    });
+    expect(f.calls[0]?.args.join(" ")).toContain("repos/chiyanram/ledger/pulls/12");
+    expect(await forge.landed({ number: 13 })).toEqual({ kind: "failed", reason: "github: #13 is not merged" });
+  });
+});
+
 describe("branchState (#494)", () => {
   it("is merged when any pull request from the branch merged, else open, else closed, else none", async () => {
     const f = fake("github", [

@@ -71,6 +71,9 @@ export type Changes = {
 };
 
 export type MergedChange = { readonly number: number; readonly branch: string; readonly fork: boolean };
+// A change that landed on its target, as the git host recorded it (#487): when, the commit it landed as (the merge,
+// squash or fast-forwarded head commit), and who landed it
+export type Landed = { readonly at: string; readonly sha: string; readonly by: string };
 
 export type LineFinding = { readonly file: string; readonly line: number };
 
@@ -115,6 +118,9 @@ export type Forge = {
   // the login the CLI acts as: the factory's own identity on this project
   me(): Promise<Result<string>>;
   change(input: { readonly number: number }): Promise<Result<Change>>;
+  // when, as which commit and by whom a change landed on its target, a read (#487: a ticket's merge touch and its
+  // outcome); a change that has not landed fails. Named so: the seam has no operation named for merging (P6)
+  landed(input: { readonly number: number }): Promise<Result<Landed>>;
   defaultBranch(): Promise<Result<string>>;
   // whether this branch is on the git host, in the repository itself (#227: a START asks first when factory/<ticket> is)
   branchExists(input: { readonly branch: string }): Promise<Result<boolean>>;

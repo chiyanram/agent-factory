@@ -82,6 +82,16 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
+  it("carries a change's merge, as the built-in adapter does (#487)", async () => {
+    const at = "2026-11-13T09:00:00Z";
+    const { setup, fakes } = await bundled([
+      http("200 OK", { merged: true, merged_at: at, merge_commit_sha: "a".repeat(40), merged_by: { login: "mo" } }),
+    ]);
+    const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+    expect(await forge.landed({ number: 12 })).toEqual({ kind: "ok", value: { at, sha: "a".repeat(40), by: "mo" } });
+    await fakes.remove();
+  });
+
   it("carries a GitLab issue closed with no merge seen through the bundled gitlab plugin (#494)", async () => {
     expect(existsSync(join(BUNDLED, "gitlab", "lib")), "run npm run build first").toBe(true);
     const fakes = await makeFakes(

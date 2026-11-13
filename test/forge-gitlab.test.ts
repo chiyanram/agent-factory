@@ -499,6 +499,46 @@ describe("issueState (#494)", () => {
   });
 });
 
+describe("landed (#487)", () => {
+  it("is the merge commit, else the squash commit, else the fast-forwarded head, with the merger; one not merged fails", async () => {
+    const at = "2026-11-13T09:00:00Z";
+    const user = { merge_user: { username: "mo" } };
+    const f = fake("gitlab", [
+      ok({
+        state: "merged",
+        merged_at: at,
+        merge_commit_sha: "a".repeat(40),
+        squash_commit_sha: null,
+        sha: "c".repeat(40),
+        ...user,
+      }),
+      ok({
+        state: "merged",
+        merged_at: at,
+        merge_commit_sha: null,
+        squash_commit_sha: "b".repeat(40),
+        sha: "c".repeat(40),
+        ...user,
+      }),
+      ok({
+        state: "merged",
+        merged_at: at,
+        merge_commit_sha: null,
+        squash_commit_sha: null,
+        sha: "c".repeat(40),
+        merge_user: null,
+      }),
+      ok({ state: "opened", merged_at: null }),
+    ]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.landed({ number: 7 })).toEqual({ kind: "ok", value: { at, sha: "a".repeat(40), by: "mo" } });
+    expect(f.calls[0]?.args.join(" ")).toContain("/merge_requests/7");
+    expect(await forge.landed({ number: 7 })).toEqual({ kind: "ok", value: { at, sha: "b".repeat(40), by: "mo" } });
+    expect(await forge.landed({ number: 7 })).toEqual({ kind: "ok", value: { at, sha: "c".repeat(40), by: "" } });
+    expect(await forge.landed({ number: 8 })).toEqual({ kind: "failed", reason: "gitlab: !8 is not merged" });
+  });
+});
+
 describe("branchState (#494)", () => {
   it("reads the project's own merge requests from the branch, in any state; a fork's is left out", async () => {
     const own = { source_project_id: 1, target_project_id: 1 };

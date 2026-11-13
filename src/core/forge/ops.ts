@@ -11,6 +11,7 @@
 export const FORGE_OPS = {
   me: "forge.read",
   change: "forge.read",
+  landed: "forge.read",
   defaultBranch: "forge.read",
   branchExists: "forge.read",
   branchState: "forge.read",

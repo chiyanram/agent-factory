@@ -14,7 +14,7 @@ import { changeOf, changesOf, ciConfigOf, failedJobsOf, notesOf, numbersOf } fro
 import { markOf } from "./target.js";
 import type { BodyPost } from "../post.js";
 import { cleanBody } from "../pr-body.js";
-import type { BranchState, Change, Changes, CiConfig, FailedJob, Forge, ForgeName } from "./types.js";
+import type { BranchState, Change, Changes, CiConfig, FailedJob, Forge, ForgeName, Landed } from "./types.js";
 
 export type PluginTarget = {
   readonly setup: Setup;
@@ -104,6 +104,11 @@ export function cleanedBody(post: BodyPost): BodyPost {
     : { ...post, prBody: { ...post.prBody, markdown: cleanBody(post.prBody.markdown, { host: post.prBody.host }) } };
 }
 
+// landedOf : a plugin's answer to landed: when, as which commit and by whom (#487)
+function landedOf(r: Reader, v: unknown): Landed {
+  return { at: r.text(v, "at"), sha: r.text(v, "sha"), by: r.text(v, "by") };
+}
+
 // branchStateRead : a plugin's answer to branchState, one of the four states or a failed read
 function branchStateRead(r: Reader, v: unknown): BranchState {
   return r.word(v, "", ["none", "merged", "opened", "closed"]);
@@ -116,6 +121,7 @@ export function pluginForge(target: PluginTarget): Forge {
     mark: markOf(target.forge),
     me: () => read(target, "me", {}, text),
     change: (i): Promise<Result<Change>> => read(target, "change", i, changeOf),
+    landed: (i): Promise<Result<Landed>> => read(target, "landed", i, landedOf),
     defaultBranch: () => read(target, "defaultBranch", {}, text),
     branchExists: (i) => read(target, "branchExists", i, (r, v) => r.bool(v, "")),
     branchState: (i) => read(target, "branchState", i, branchStateRead),
