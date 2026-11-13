@@ -64,7 +64,15 @@ from the built-in prompt, not its card, so nothing checks a finding against it y
 
 This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI
 checks that commit out and reads every plugin's process and every role card the engine runs, so a pack the engine
-cannot read fails CI here. To move the pin, change the commit in that file in its own pull request.
+cannot read fails CI here.
+
+The sessions working on this repo load the same pack: [`.claude/settings.json`](../../.claude/settings.json) declares the
+chiyanram marketplace at the release tag that file names (`tag`), and enables the rulebook and toolbox plugins (#580).
+Claude Code pins a marketplace by tag, not by commit, so the pin is a release tag and its commit. `make lint`
+(`scripts/check-plugin-pin.ts`) fails when the two files name a different tag, and CI fails when the tag no longer
+points at the pinned commit. To move the pin, change the tag in both files and the commit in `rules-pack.json`, in its
+own pull request. The plugins load only once the folder is trusted. **Today:** whether a cloud session loads plugins
+declared this way is not confirmed.
 
 ## What each role returns
 
