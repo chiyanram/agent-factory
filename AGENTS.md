@@ -42,28 +42,15 @@ only this one working.
 
 ## Where things go
 
-```text
-scripts/              the lint checks and the release helpers, in TypeScript and Node; no bash
-src/core/forge/       the git host seam: one Forge interface, a GitHub and a GitLab adapter over gh api and glab api
-src/core/egress/      the egress proxy: the allowlist, the Squid config, and the --internal network the runner joins (#130)
-src/core/box/         the runner seam: one Box interface; FACTORY_BOX picks the kind, openBox refuses a runner that does not work
-images/factory-box/   the base image of every vm runner: git, Docker (run under Sysbox), Node and the pinned agent CLIs (#113)
-src/core/dispatch/    the orchestrator: the decision table, the per-ticket run records, one locked pass, and the loop (#305)
-src/core/review/      the automated review: the context pack, one round (finders, verify pass, post), and the status list
-src/core/design/      the design review's two read-only runs before the approval: design-reviewer, then verify pass (#236)
-src/core/onboard/     the onboarder: a project's brief and glossary, staged in the project home for a human, read by every run (#235)
-src/core/ready/       the ready check and the local verifier: branch code run on a fresh runner, never on the host (#91)
-src/core/settings/    the settings layers: team, project, user and machine; each key's class; config show/check (#229)
-src/core/plugin/      the connector contract: describe and call, the pinned registry, and the contract test kit (#134)
-src/core/process/     the project's plugin list and its pins (hash-checked each run), its process: lanes and baseline (#232), and role cards (#236)
-plugins/              the bundled connectors: github and gitlab serve the git host seam (lib/ built from dist/); discord pings
-prompts/              the automated review's default finder and verify-pass instructions, the eval's judge, and the built-in role cards (roles/)
-evals/reviewer/       the automated review's golden set: base.sha, change.patch, golden.json per case (ADR-0015)
-src/core/eval/        agent-factory eval reviewer: the harness, the judge, the $100 cap and the results file (#215)
-test/                 the vitest suite; tests/fixtures/ holds planted input for the checks
-docs/adr/             decision records
-docs/agents/          ticket tracker, triage labels, domain-doc conventions
-```
+The module headers say what each folder under `src/core/` does. What they do not say:
+
+- `plugins/*/lib/` is built from `dist/`: never edit it by hand.
+- `prompts/roles/` holds the built-in role cards; a card in the project's rules pack wins over them
+  (`src/core/process/cards.ts`).
+- `src/core/ready/` runs branch code on a fresh runner, never on the host.
+- `test/` holds one vitest file per module; `tests/fixtures/` holds planted input for the lint checks.
+- `evals/reviewer/` is the automated review's golden set; changing a review input needs an eval pass
+  (`check-eval-proof`).
 
 ## Pointers
 
