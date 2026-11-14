@@ -12,6 +12,7 @@ import {
   isActedRow,
   keepTracked,
   REGION,
+  foundOf,
   trackedOf,
   type Tracked,
 } from "../src/core/review/acted-on.js";
@@ -72,14 +73,20 @@ describe("acted on, the parts", () => {
   it("tracks Act on and Consider findings only, by the finder that found them", () => {
     const all = [
       sorted({ id: "F1" }),
-      sorted({ id: "F2", bucket: "consider", kind: "logic", category: "test_gap" }),
+      sorted({ id: "F2", bucket: "consider", kind: "logic", category: "test_gap", rule: "" }),
       sorted({ id: "F3", bucket: "noted" }),
       sorted({ id: "F4", bucket: "dismissed" }),
     ];
+    // each row carries its rule ID, "logic" for a logic finding with no rule (#488)
     expect(trackedOf(all)).toEqual([
-      { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 10 },
-      { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 10 },
+      { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 10, rule: "R1" },
+      { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 10, rule: "logic" },
     ]);
+    // and the round's findings, every bucket, are counted per rule ID and bucket for the timeline (#488)
+    expect(foundOf([...all, sorted({ id: "F5" })])).toEqual({
+      R1: { act_on: 2, noted: 1, dismissed: 1 },
+      logic: { consider: 1 },
+    });
   });
 
   it("reads the earlier head's changed spans from git diff -U0; an insertion touches the line after it", () => {
@@ -160,8 +167,17 @@ describe("acted on, the parts", () => {
     expect(await actedSince(input)).toEqual({
       since,
       rows: [
-        { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 3, acted: true },
-        { id: "F2", lens: "rule", category: "bug", bucket: "consider", file: "a.ts", line: 25, acted: false },
+        { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 3, rule: "R1", acted: true },
+        {
+          id: "F2",
+          lens: "rule",
+          category: "bug",
+          bucket: "consider",
+          file: "a.ts",
+          line: 25,
+          rule: "R1",
+          acted: false,
+        },
       ],
     });
     expect(await actedSince({ ...input, head: "f".repeat(40) })).toBe("none");

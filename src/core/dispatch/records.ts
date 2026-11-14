@@ -36,7 +36,10 @@ import type { PluginHash } from "../process/use.js";
 import { scrubbedJson } from "../scrub.js";
 import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
-import { isActedRow, type Acted } from "../review/acted-on.js";
+import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js";
+import { BUCKETS } from "../finding.js";
+import type { Rescue } from "./timeline.js";
+import type { RunKind } from "./usage.js";
 
 // "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
@@ -178,6 +181,8 @@ export type Event =
       readonly lenses?: Readonly<Record<string, number>>;
       // the findings the cite check noted as "cite not found" (#485); none on an older line
       readonly citesNotFound?: number;
+      // every finding of the round, per rule ID and bucket (#488); none on a reused round or an older line
+      readonly found?: FoundByRule;
       // each pass's trace, plain file names in the ticket's folder (trace.ts, #487); none on an older line
       readonly traces?: readonly string[];
     }
@@ -253,6 +258,19 @@ export type Event =
       readonly number: number;
       readonly sha: string;
       readonly by: string;
+    }
+  // the merge's timeline (timeline.ts, #488): written once, after the merged line, from the ticket's own lines
+  | {
+      readonly at: string;
+      readonly kind: "timeline";
+      readonly number: number;
+      readonly rounds: number;
+      readonly found: FoundByRule;
+      // per rule ID: how many of the rated findings a later commit acted on, of how many
+      readonly acted: Readonly<Record<string, { readonly acted: number; readonly of: number }>>;
+      readonly spend: Readonly<Partial<Record<RunKind, Spend>>>;
+      readonly unmeasured: number;
+      readonly rescues: readonly Rescue[];
     };
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
@@ -735,6 +753,118 @@ function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
   return Number.isSafeInteger(n) && Number(n) >= 0 ? { citesNotFound: Number(n) } : BAD;
 }
 
+const FOUND_BUCKETS: ReadonlySet<string> = new Set(BUCKETS);
+
+// isCount : a whole number of zero or more. Pure.
+function isCount(n: unknown): boolean {
+  return Number.isSafeInteger(n) && Number(n) >= 0;
+}
+
+// isBucketCounts : one rule's counts per bucket. Pure.
+function isBucketCounts(value: unknown): boolean {
+  const entries = entriesOf(value);
+  return entries.length > 0 && entries.every(([bucket, n]) => FOUND_BUCKETS.has(bucket) && isCount(n));
+}
+
+// foundField : a review line's findings per rule ID and bucket (#488), as a field to spread; none on an older line
+function foundField(raw: unknown): { readonly found?: FoundByRule } | Bad {
+  const found = prop(raw, "found");
+  if (found === undefined) {
+    return {};
+  }
+  const entries = entriesOf(found);
+  return typeof found === "object" && found !== null && entries.every(([, per]) => isBucketCounts(per))
+    ? {
+        found: Object.fromEntries(
+          entries.map(([rule, per]) => [rule, Object.fromEntries(entriesOf(per).map(([b, n]) => [b, Number(n)]))]),
+        ),
+      }
+    : BAD;
+}
+
+// isActedCounts : one rule's acted-on count, of how many. Pure.
+function isActedCounts(value: unknown): boolean {
+  const [acted, of] = [prop(value, "acted"), prop(value, "of")];
+  return isCount(acted) && isCount(of) && Number(acted) <= Number(of);
+}
+
+// recordOf : an object whose every value `read` accepts, as a plain record, or BAD. Pure.
+function recordOf<T>(value: unknown, read: (v: unknown) => T | Bad): Readonly<Record<string, T>> | Bad {
+  if (!isPlain(value)) {
+    return BAD;
+  }
+  const out: Record<string, T> = {};
+  for (const [k, v] of entriesOf(value)) {
+    const got = read(v);
+    if (got === BAD) {
+      return BAD;
+    }
+    out[k] = got;
+  }
+  return out;
+}
+
+// isPlain : an object, not an array or null. Pure.
+function isPlain(value: unknown): value is object {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// byField : an optional by, as a field to spread, or BAD when it is there and not a string. Pure.
+function byField(raw: unknown): { readonly by?: string } | Bad {
+  const by = prop(raw, "by");
+  if (by === undefined) {
+    return {};
+  }
+  return typeof by === "string" ? { by } : BAD;
+}
+
+// rescueOf : one rescue of a timeline line, or BAD. Pure.
+function rescueOf(raw: unknown): Rescue | Bad {
+  const at = str(raw, "at");
+  const why = str(raw, "why");
+  const by = byField(raw);
+  const waitedMs = prop(raw, "waitedMs");
+  if (at === BAD || why === BAD || by === BAD) {
+    return BAD;
+  }
+  return isCount(waitedMs) ? { at, why, waitedMs: Number(waitedMs), ...by } : BAD;
+}
+
+// actedCountsOf : one rule's acted-on counts, or BAD. Pure.
+function actedCountsOf(v: unknown): { readonly acted: number; readonly of: number } | Bad {
+  return isActedCounts(v) ? { acted: Number(prop(v, "acted")), of: Number(prop(v, "of")) } : BAD;
+}
+
+// rescuesOf : a timeline line's rescues, or BAD. Pure.
+function rescuesOf(raw: unknown): readonly Rescue[] | Bad {
+  const rescues = prop(raw, "rescues");
+  const read = Array.isArray(rescues) ? rescues.map(rescueOf) : [BAD];
+  return read.every((r): r is Rescue => r !== BAD) ? read : BAD;
+}
+
+// countsIn : a timeline line's two whole counts, or BAD. Pure.
+function countsIn(raw: unknown): { readonly rounds: number; readonly unmeasured: number } | Bad {
+  const [rounds, unmeasured] = [prop(raw, "rounds"), prop(raw, "unmeasured")];
+  return isCount(rounds) && isCount(unmeasured) ? { rounds: Number(rounds), unmeasured: Number(unmeasured) } : BAD;
+}
+
+// timelineParts : a timeline line's counts, or BAD when one is not as written. Pure.
+function timelineParts(raw: unknown): Omit<Extract<Event, { kind: "timeline" }>, "at" | "kind" | "number"> | Bad {
+  const found = isPlain(prop(raw, "found")) ? foundField(raw) : BAD;
+  const parts = [
+    found === BAD ? BAD : { found: found.found ?? {} },
+    countsIn(raw),
+    ...(
+      [
+        ["acted", recordOf(prop(raw, "acted"), actedCountsOf)],
+        ["spend", recordOf(prop(raw, "spend"), spendIn)],
+        ["rescues", rescuesOf(raw)],
+      ] as const
+    ).map(([name, v]) => (v === BAD ? BAD : { [name]: v })),
+  ];
+  return parts.includes(BAD) ? BAD : Object.assign({}, ...parts);
+}
+
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const actOn = prop(raw, "actOn");
@@ -745,6 +875,7 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     actedField(raw),
     lensesField(raw),
     citesField(raw),
+    foundField(raw),
     tracesField(raw),
   ];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
@@ -826,6 +957,11 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     return sha === BAD || by === BAD || !Number.isSafeInteger(n)
       ? BAD
       : { at, kind: "merged", number: Number(n), sha, by };
+  },
+  timeline: (raw, at) => {
+    const n = prop(raw, "number");
+    const parts = timelineParts(raw);
+    return parts === BAD || !Number.isSafeInteger(n) ? BAD : { at, kind: "timeline", number: Number(n), ...parts };
   },
   approved: (raw, at) => {
     const by = str(raw, "by");
@@ -1166,6 +1302,7 @@ const STEPS: Steps = {
   begun: (s) => s,
   approved: (s) => s,
   merged: (s) => s,
+  timeline: (s) => s,
 };
 
 function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {

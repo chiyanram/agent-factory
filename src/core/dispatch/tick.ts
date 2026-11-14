@@ -57,8 +57,10 @@ import {
   type Retried,
   type Summary,
   type Task,
+  type Where,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
+import { timelineOf } from "./timeline.js";
 import { blockersView, withIssue, type Blocker, type BlockersView, type BlockerState } from "./blockers.js";
 import type { BranchState } from "../forge/types.js";
 import { designView, dropRepeats, roundsBefore, type DesignView, type EarlierRound, type SpecRead } from "./design.js";
@@ -66,7 +68,7 @@ import { nextStep } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
-import type { Acted } from "../review/acted-on.js";
+import type { Acted, FoundByRule } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
@@ -694,22 +696,42 @@ async function reconcile(setup: TickSetup, state: TicketState): Promise<Done> {
   return setup.forge.removeLabel({ number: n, label: setup.label });
 }
 
-// mergedLine : the change's merge recorded once, as the git host has it (#487: the merge touch and the outcome). A merge
-// the git host cannot answer for is logged and costs only that touch: the claim still comes off.
+// mergedLine : the change's merge recorded once, as the git host has it (#487: the merge touch and the outcome), then
+// its timeline line once, from the ticket's lines, with no model (timeline.ts, #488). A merge the git host cannot answer
+// for is logged and costs only those lines: the claim still comes off.
 async function mergedLine(setup: TickSetup, state: TicketState, n: number): Promise<void> {
   const place = where(setup, state);
   const events = await readRecords(place, { warn: () => undefined });
-  if (events.kind === "failed" || events.value.some((e) => e.kind === "merged" && e.number === n)) {
+  if (events.kind === "failed") {
     return;
   }
-  const merged = await setup.forge.landed({ number: n });
+  const merged = await mergeOf(setup, place, events.value, n);
   const kept =
-    merged.kind === "ok"
-      ? await record({ where: place, event: { kind: "merged", number: n, ...merged.value } })
+    merged.kind === "ok" && !events.value.some((e) => e.kind === "timeline" && e.number === n)
+      ? await record({ where: place, event: timelineOf(events.value, merged.value) })
       : merged;
   if (kept.kind === "failed") {
     setup.log(`${state.ticket}: the merge was not recorded: ${kept.reason}`);
   }
+}
+
+// mergeOf : the change's merged line: the one its records hold, or the git host's, recorded now
+async function mergeOf(
+  setup: TickSetup,
+  place: Where,
+  events: readonly Event[],
+  n: number,
+): Promise<Result<{ readonly number: number; readonly at: string }>> {
+  const held = events.find((e) => e.kind === "merged" && e.number === n);
+  if (held !== undefined) {
+    return { kind: "ok", value: { number: n, at: held.at } };
+  }
+  const landed = await setup.forge.landed({ number: n });
+  if (landed.kind === "failed") {
+    return landed;
+  }
+  const kept = await record({ where: place, event: { kind: "merged", number: n, ...landed.value } });
+  return kept.kind === "ok" ? { kind: "ok", value: { number: n, at: landed.value.at } } : kept;
 }
 
 // the actions that only touch the forge; "none" for a run or a wait
@@ -1020,6 +1042,7 @@ function reviewEnded(
     readonly acted?: Acted;
     readonly lenses?: Readonly<Record<string, number>>;
     readonly citesNotFound?: number;
+    readonly found?: FoundByRule;
     readonly traces?: readonly string[];
   },
 ): Promise<Done> {
@@ -1031,14 +1054,24 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
-      ...(value.split === undefined ? {} : { split: value.split }),
-      ...(value.acted === undefined ? {} : { acted: value.acted }),
-      ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
-      ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
+      ...splitIn(value),
+      ...roundFields(value),
       ...tracesIn(value),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });
+}
+
+// roundFields : a posted round's ratings, unique findings per lens, cites not found and findings per rule, as fields to
+// spread; none of those a round does not have (#220, #237, #485, #488). Pure.
+function roundFields(value: {
+  readonly acted?: Acted;
+  readonly lenses?: Readonly<Record<string, number>>;
+  readonly citesNotFound?: number;
+  readonly found?: FoundByRule;
+}): Partial<Pick<Extract<Event, { kind: "review-ended" }>, "acted" | "lenses" | "citesNotFound" | "found">> {
+  const fields = { acted: value.acted, lenses: value.lenses, citesNotFound: value.citesNotFound, found: value.found };
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
 }
 
 // splitIn : a round's spend per run, as a field to spread; none when it has none (#337). Pure.

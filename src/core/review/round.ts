@@ -32,7 +32,7 @@ import { scrubbedJson } from "../scrub.js";
 import { hostGit } from "../git.js";
 import type { Post } from "../post.js";
 import { keepActOn } from "./act-on.js";
-import { actedSince, keepTracked, type Acted } from "./acted-on.js";
+import { actedSince, foundOf, keepTracked, type Acted, type FoundByRule } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
 import { prop } from "../dispatch/records.js";
@@ -121,6 +121,8 @@ export type Outcome =
       readonly lenses: Readonly<Record<string, number>>;
       // the findings the cite check noted as "cite not found" (#485)
       readonly citesNotFound: number;
+      // every finding of the round, per rule ID and bucket (#488)
+      readonly found: FoundByRule;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -873,6 +875,7 @@ async function post(
           acted,
           lenses: result.lenses,
           citesNotFound: result.citesNotFound,
+          found: foundOf(result.sorted),
         },
       }
     : summary;

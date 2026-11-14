@@ -15,7 +15,7 @@ import type { Forge } from "../forge/types.js";
 import type { Steps } from "../dispatch/steps.js";
 import type { Sessions } from "./live.js";
 import type { Model, ModelResult } from "./model.js";
-import type { Acted } from "./acted-on.js";
+import type { Acted, FoundByRule } from "./acted-on.js";
 import { lensSetupOf, roundLenses } from "./finders.js";
 import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
 import type { Where } from "../dispatch/records.js";
@@ -39,6 +39,7 @@ type ActOn = Result<{
   readonly acted?: Acted;
   readonly lenses?: Readonly<Record<string, number>>;
   readonly citesNotFound?: number;
+  readonly found?: FoundByRule;
 }>;
 type Mappers = { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => ActOn };
 
@@ -47,8 +48,8 @@ const MAP: Mappers = {
     kind: "ok",
     value:
       o.acted === "none"
-        ? { actOn: o.counts.act_on, lenses: o.lenses, citesNotFound: o.citesNotFound }
-        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses, citesNotFound: o.citesNotFound },
+        ? { actOn: o.counts.act_on, lenses: o.lenses, citesNotFound: o.citesNotFound, found: o.found }
+        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses, citesNotFound: o.citesNotFound, found: o.found },
   }),
   reused: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   already: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),

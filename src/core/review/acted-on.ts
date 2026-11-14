@@ -31,6 +31,8 @@ export type Tracked = {
   readonly bucket: Bucket;
   readonly file: string;
   readonly line: number;
+  // the finding's rule ID, "logic" for a logic finding with no rule (#488); none on a row kept before it was recorded
+  readonly rule?: string;
 };
 
 // one tracked finding, and whether a later commit changed its region
@@ -39,11 +41,38 @@ export type ActedRow = Tracked & { readonly acted: boolean };
 // the rows of the round before, from its head
 export type Acted = { readonly since: string; readonly rows: readonly ActedRow[] };
 
+// ruleIdOf : a finding's rule ID, "logic" for a logic finding with no rule (#484, #488). Pure.
+export function ruleIdOf(f: Pick<Sorted, "rule">): string {
+  return f.rule === "" ? "logic" : f.rule;
+}
+
 // trackedOf : the round's Act on and Consider findings. Pure.
 export function trackedOf(sorted: readonly Sorted[]): readonly Tracked[] {
   return sorted
     .filter((f) => ASKED.includes(f.bucket))
-    .map((f) => ({ id: f.id, lens: f.kind, category: f.category, bucket: f.bucket, file: f.file, line: f.line }));
+    .map((f) => ({
+      id: f.id,
+      lens: f.kind,
+      category: f.category,
+      bucket: f.bucket,
+      file: f.file,
+      line: f.line,
+      rule: ruleIdOf(f),
+    }));
+}
+
+// a round's findings counted per rule ID and bucket (#488), for the timeline line
+export type FoundByRule = Readonly<Record<string, Readonly<Partial<Record<Bucket, number>>>>>;
+
+// foundOf : every finding of a round, in every bucket, counted per rule ID and bucket. Pure.
+export function foundOf(sorted: readonly Sorted[]): FoundByRule {
+  const out: Record<string, Partial<Record<Bucket, number>>> = {};
+  for (const f of sorted) {
+    const rule = ruleIdOf(f);
+    const per = out[rule] ?? {};
+    out[rule] = { ...per, [f.bucket]: (per[f.bucket] ?? 0) + 1 };
+  }
+  return out;
 }
 
 // keepTracked : the round's Act on and Consider findings, with its head
@@ -52,6 +81,8 @@ export function keepTracked(at: At, sorted: readonly Sorted[]): Promise<Result<s
 }
 
 const LENSES: ReadonlySet<unknown> = new Set(["rule", "logic"]);
+// a row's rule ID is optional: a row kept before #488 has none
+const RULE_TYPES: ReadonlySet<string> = new Set(["undefined", "string"]);
 const BUCKETS: ReadonlySet<unknown> = new Set(ASKED);
 const KNOWN: ReadonlySet<unknown> = new Set(CATEGORIES);
 
@@ -59,10 +90,14 @@ function fieldsOf(raw: unknown): Record<string, unknown> {
   return typeof raw === "object" && raw !== null ? { ...raw } : {};
 }
 
+// hasWords : a row's id and file are text, and its rule ID, when it has one. Pure.
+function hasWords(r: Record<string, unknown>): boolean {
+  return [r.id, r.file].every((v) => typeof v === "string") && RULE_TYPES.has(typeof r.rule);
+}
+
 function isTracked(raw: unknown): raw is Tracked {
   const r = fieldsOf(raw);
-  const words = [r.id, r.file].every((v) => typeof v === "string");
-  return words && LENSES.has(r.lens) && KNOWN.has(r.category) && BUCKETS.has(r.bucket) && isLine(r.line);
+  return hasWords(r) && LENSES.has(r.lens) && KNOWN.has(r.category) && BUCKETS.has(r.bucket) && isLine(r.line);
 }
 
 // isActedRow : one row as the run records hold it. Pure.

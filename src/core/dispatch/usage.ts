@@ -155,6 +155,11 @@ function splitRuns(split: RoundSpend, where: Pick<Spent, "project" | "ticket" | 
 
 type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[]; readonly tally: TicketTally };
 
+// runsOf : every measured or unmeasured run in a ticket's lines. Pure.
+export function runsOf(events: readonly Event[], where: Pick<Spent, "project" | "ticket">): readonly Spent[] {
+  return events.filter(spending).flatMap((e) => spentOf(e, where.project, where.ticket));
+}
+
 // ticketSpends : every measured or unmeasured run of one ticket, and its acted-on rows, or why its records cannot be
 // read
 async function ticketSpends(home: string, project: string, ticket: string): Promise<Result<Read>> {
@@ -162,7 +167,7 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
   if (events.kind === "failed") {
     return events;
   }
-  const runs = events.value.filter(spending).flatMap((e) => spentOf(e, project, ticket));
+  const runs = runsOf(events.value, { project, ticket });
   return {
     kind: "ok",
     value: {
