@@ -343,7 +343,7 @@ async function packCards(plugin: PluginDir): Promise<readonly { readonly at: str
   return Promise.all(
     files.map(async (f) => {
       const role = f.replace(/\.md$/, "");
-      // a card the engine never runs (coordinator, finder, retro) is the pack's own business
+      // a card the engine never runs (coordinator, finder) is the pack's own business
       const read = isRole(role) ? await readCard([plugin], role) : ({ kind: "ok" } as const);
       return { at: `${plugin.label}/${f}`, result: read.kind === "ok" ? "ok" : read.reason };
     }),

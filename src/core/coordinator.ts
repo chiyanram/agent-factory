@@ -44,7 +44,7 @@ export type CoordinatorPlaces = {
 
 // the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
 // that the policy decides in code
-// (retro is the listing only, #488; its --draft spends on a model run and is denied, Q10 A)
+// (retro is its listing; its --draft spends on a model run and is in HUMAN_ONLY, #488 Q10 A)
 const READS = ["poll", "board", "spec", "approval", "status", "grill", "request", "retro", "--help", "--version"];
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
@@ -58,6 +58,9 @@ export const HUMAN_ONLY = [
   "agent-factory waive",
   "agent-factory eval",
   "agent-factory onboard",
+  // the retro's drafts spend on a model run; its listing is a read (#488 Q10 A)
+  "agent-factory retro * --draft",
+  "agent-factory retro --draft",
 ];
 
 const DENY_BASH = [

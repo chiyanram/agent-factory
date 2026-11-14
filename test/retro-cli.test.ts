@@ -60,7 +60,9 @@ async function run(args: readonly string[], outcomes: Readonly<Record<string, Me
       ),
     );
   };
-  const code = await retroCommand(args, { home, outcomes: stub, out: (t) => (out += t), err: (t) => (err += t) });
+  const draft = () => Promise.resolve({ kind: "failed" as const, reason: "no draft in this test" });
+  const io = { home, outcomes: stub, draft, out: (t: string) => (out += t), err: (t: string) => (err += t) };
+  const code = await retroCommand(args, io);
   return { code, out, err, asked };
 }
 
@@ -133,11 +135,11 @@ describe("agent-factory retro", () => {
     expect(r.err).toContain("14.jsonl line 1 is not a record");
   });
 
-  it("refuses a bad command line with 64, --draft included until it is built", async () => {
-    for (const args of [[], ["loans", "extra"], ["../x"], ["loans", "--draft"]]) {
+  it("refuses a bad command line with 64", async () => {
+    for (const args of [[], ["loans", "extra"], ["../x"], ["--draft"]]) {
       const r = await run(args);
       expect(r.code).toBe(64);
-      expect(r.err).toBe("usage: agent-factory retro <project> [--json]\n");
+      expect(r.err).toBe("usage: agent-factory retro <project> [--json] [--draft]\n");
     }
   });
 

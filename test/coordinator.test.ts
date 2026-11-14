@@ -200,6 +200,10 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory spec ledger PROJ-1 && agent-factory start ledger PROJ-1 --yes",
       "agent-factory eval reviewer",
       "agent-factory eval reviewer . --drafts",
+      // the retro's drafts spend on a model run, though its listing is a read (#488 Q10 A)
+      "agent-factory retro ledger --draft",
+      "agent-factory retro ledger --json --draft",
+      "agent-factory retro --draft ledger",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
     }
