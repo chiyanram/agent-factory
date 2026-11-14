@@ -18,7 +18,7 @@ const writer = (at: string, mode: "fix" | "rework", outcome: "done" | "asked" | 
 const answered = (at: string): Event => ({ at, kind: "answered", spec: "", answers: [] });
 const begun = (at: string, by = "ram"): Event => ({ at, kind: "begun", by, via: "terminal" });
 const approved = (at: string, by = "ram"): Event => ({ at, kind: "approved", by, via: "terminal", spec: "h" });
-const blocked = (at: string): Event => ({ at, kind: "blocked", why: "needs a person" });
+const blocked = (at: string, why = "needs a person"): Event => ({ at, kind: "blocked", why });
 const pinged = (at: string): Event => ({ at, kind: "pinged", head: "h" });
 const merged = (at: string, by = "mo"): Event => ({ at, kind: "merged", number: 12, sha: "a".repeat(40), by });
 const designVerify = (at: string): Event => ({
@@ -81,19 +81,19 @@ describe("a ticket's touches (#487)", () => {
     ];
     expect(touchesOf(events)).toEqual([
       { kind: "approve", at: "2026-11-13T08:00:00Z", by: "ram", waitedMs: 0 },
-      { kind: "rescue", at: "2026-11-13T11:00:00Z", by: "mo", waitedMs: 2 * 3_600_000 },
-      { kind: "rescue", at: "2026-11-13T12:30:00Z", by: "mo", waitedMs: 30 * 60_000 },
+      { kind: "rescue", at: "2026-11-13T11:00:00Z", by: "mo", waitedMs: 2 * 3_600_000, why: "needs a person" },
+      { kind: "rescue", at: "2026-11-13T12:30:00Z", by: "mo", waitedMs: 30 * 60_000, why: "needs a person" },
     ]);
   });
 
-  it("a rescue waits from the first blocked line when several open before it", () => {
+  it("a rescue waits from the first blocked line when several open before it, and carries that line's why (#488)", () => {
     const events = [
-      blocked("2026-11-13T08:00:00Z"),
-      blocked("2026-11-13T09:00:00Z"),
+      blocked("2026-11-13T08:00:00Z", "the writer asked"),
+      blocked("2026-11-13T09:00:00Z", "the claim went quiet"),
       begun("2026-11-13T10:00:00Z", "mo"),
     ];
     expect(touchesOf(events)).toEqual([
-      { kind: "rescue", at: "2026-11-13T10:00:00Z", by: "mo", waitedMs: 2 * 3_600_000 },
+      { kind: "rescue", at: "2026-11-13T10:00:00Z", by: "mo", waitedMs: 2 * 3_600_000, why: "the writer asked" },
     ]);
   });
 

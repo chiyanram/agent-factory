@@ -8,7 +8,8 @@
 //   approve   from the later of the ticket's START and its design verify pass's end, to the approval
 //   answer    from the writer run that asked, to the answers line; the answers name no one, so it has no by
 //   rescue    from a hand-over (a blocked line) to the next START or approval; an approval that ends a hand-over is
-//             one touch, a rescue
+//             one touch, a rescue. It keeps the why of the blocked line its wait runs from, the first of the hand-over
+//             (#488)
 //   merge     from the gate-green ping before it to the git host's merged-at, by who merged
 // START and approval lines carry their records' own times and are written when a pass first reads them, so they are
 // read in time order, not file order.
@@ -19,8 +20,14 @@ import { shownAt, shownFor, type Zone } from "../zone.js";
 import { outcomeLines, type MergeOutcome } from "../outcome.js";
 
 export type TouchKind = "approve" | "answer" | "rescue" | "merge";
-// by: who acted, when the records say; none when they do not
-export type Touch = { readonly kind: TouchKind; readonly at: string; readonly waitedMs: number; readonly by?: string };
+// by: who acted, when the records say; none when they do not. why: a rescue's hand-over, as its blocked line gave it
+export type Touch = {
+  readonly kind: TouchKind;
+  readonly at: string;
+  readonly waitedMs: number;
+  readonly by?: string;
+  readonly why?: string;
+};
 
 export type TicketTally = {
   readonly project: string;
@@ -61,12 +68,14 @@ function answerTouches(events: readonly Event[]): readonly Touch[] {
 type Heard = {
   readonly touches: readonly Touch[];
   readonly blocked: string;
+  // the open hand-over's why: its first blocked line's, the line its wait runs from
+  readonly why: string;
   readonly begun: string;
   readonly verified: string;
   readonly pinged: string;
 };
 
-const NOTHING_HEARD: Heard = { touches: [], blocked: "", begun: "", verified: "", pinged: "" };
+const NOTHING_HEARD: Heard = { touches: [], blocked: "", why: "", begun: "", verified: "", pinged: "" };
 
 // waited : the ms from a time, or "" for none, to another. Pure.
 function waited(from: string, to: string): number {
@@ -78,7 +87,8 @@ function waited(from: string, to: string): number {
 function actedOn(state: Heard, e: Extract<Event, { kind: "begun" | "approved" }>): Heard {
   const next = { ...state, begun: e.kind === "begun" ? e.at : state.begun, blocked: "" };
   if (state.blocked !== "") {
-    const rescue: Touch = { kind: "rescue", at: e.at, by: e.by, waitedMs: waited(state.blocked, e.at) };
+    const waitedMs = waited(state.blocked, e.at);
+    const rescue: Touch = { kind: "rescue", at: e.at, by: e.by, waitedMs, why: state.why };
     return { ...next, touches: [...state.touches, rescue] };
   }
   if (e.kind === "begun") {
@@ -93,7 +103,8 @@ function actedOn(state: Heard, e: Extract<Event, { kind: "begun" | "approved" }>
 
 // MARKS : what a line marks: an open hand-over, a design verify pass's end, a gate-green ping
 const MARKS: Partial<Record<Event["kind"], (state: Heard, e: Event) => Partial<Heard>>> = {
-  blocked: (state, e) => ({ blocked: state.blocked || e.at }),
+  blocked: (state, e) =>
+    state.blocked === "" && e.kind === "blocked" ? { blocked: e.at, why: e.why } : { blocked: state.blocked || e.at },
   "design-ended": (_, e) => (e.kind === "design-ended" && e.step === "verify" ? { verified: e.at } : {}),
   pinged: (_, e) => ({ pinged: e.at }),
 };
