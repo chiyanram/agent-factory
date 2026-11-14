@@ -20,6 +20,9 @@ with no one watching. A human then merges it.
   - the approval floor;
   - "a human merges".
 
+[The factory stack](factory-stack.md) places these parts on a common map of a software factory, and names what is
+still missing.
+
 Rollout order: a small personal project (the ledger, #62), aruvii, the operator's work laptop, work colleagues, then
 anyone. An RCA agent for work comes later, on the same engine.
 
