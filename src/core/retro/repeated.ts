@@ -8,8 +8,8 @@
 // Each failure names its tickets and the record lines it cites. Pure.
 //
 // **Today:** a timeline's acted-on counts are per rule ID over Act on and Consider together, so a rule counts when it
-// was found in Act on and some finding of that rule was acted on. A rescue is a hand-over only, so the one rescue kind
-// is "hand-over" (#614).
+// was found in Act on and some finding of that rule was acted on (#625). A rescue is a hand-over only, so the one
+// rescue kind is "hand-over" (#614).
 
 import { OUTCOME_DAYS, type MergeOutcome } from "../outcome.js";
 import { UNRECORDED, type Timeline } from "../dispatch/timeline.js";
