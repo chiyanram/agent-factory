@@ -9,7 +9,7 @@
 //   W3  lint suppressions, summed over the touched files, went up
 //   W4  mocked modules or call assertions went up in a touched test file (mock-heavy tests restate the code)
 //
-// A leaf with no runtime imports, so a script can load it on Node's type stripping. Pure. Design: #573.
+// A leaf with no runtime imports, so scripts/garden-pr.ts loads it on Node's type stripping. Pure. Design: #573.
 
 // one file's numbers at one commit, as gardener counts them
 export type FileNumbers = {
