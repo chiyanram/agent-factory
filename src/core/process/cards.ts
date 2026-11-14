@@ -30,6 +30,7 @@ import { DESIGN_SCHEMA } from "../design/findings.js";
 import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
+import { LESSON_SCHEMA } from "../retro/lesson.js";
 import { allowedGuardrails, GUARDRAIL_FLOOR, GUARDRAILS, isGuardrail, type GuardrailId } from "./guardrails.js";
 import { frontmatterOf, packProblem, readPackSchemas, unknownToEngine } from "./pack-schema.js";
 import { findProcess, type PluginDir } from "./read.js";
@@ -49,6 +50,8 @@ export const ROLE_TOOLS = {
   // its Bash is the build tool's help and task list only: the engine lists the commands itself and hands the run the
   // list, so the run gets the read-only tools alone (#235; onboard/run.ts)
   onboarder: [...READS, "Bash"],
+  // the retro's lesson drafts, started only by a person (#488; retro/draft.ts)
+  retro: READS,
 } as const;
 
 export type Role = keyof typeof ROLE_TOOLS;
@@ -61,6 +64,7 @@ export const MUST_NOT_SEE: Readonly<Record<Role, readonly string[]>> = {
   "design-reviewer": ["the coordinator's conversation with the human"],
   "verify-pass": ["the implementer's report", "the coordinator's conversation with the human"],
   onboarder: [],
+  retro: [],
 };
 
 // fieldsOf : every property name a JSON schema names, at any depth. Pure.
@@ -88,6 +92,7 @@ export const HAND_OFF: Readonly<Record<Role, readonly string[]>> = {
   "design-reviewer": fieldsOf(DESIGN_SCHEMA),
   "verify-pass": fieldsOf(VERIFY_SCHEMA),
   onboarder: fieldsOf(ANSWER_SCHEMA),
+  retro: fieldsOf(LESSON_SCHEMA),
 };
 
 export type Card = {
@@ -348,7 +353,7 @@ async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Re
 // what the engine knows of a rules pack's cards: the roles it runs from a card, the roles whose card only a person or the
 // coordinator reads, and every guardrail ID it enforces
 export const ENGINE_KNOWS = {
-  roles: [...Object.keys(ROLE_TOOLS), "coordinator", "finder", "retro"],
+  roles: [...Object.keys(ROLE_TOOLS), "coordinator", "finder"],
   guardrails: Object.keys(GUARDRAILS),
 };
 

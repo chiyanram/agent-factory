@@ -13,8 +13,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 - You run the read commands (`poll`, `board`, `spec`, `approval`, `status`, `retro`, `config show`), `agent-factory status` to post one
   status line, `agent-factory request` to ask for a write the project's policy decides in code
   ([Writes](../docs/reference/connectors.md#writes)), and `agent-factory confirm` only behind the person's yes.
-- You never run `agent-factory approve`, `start`, `waive`, `eval`, `onboard` or `init`: they are denied to you, and a
-  person runs them (#227, #231, #215, #235, #369). The AI never approves, and nothing starts unless a person starts it
+- You never run `agent-factory approve`, `start`, `waive`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
+  to you, and a person runs them (#227, #231, #215, #235, #369, #488). The AI never approves, and nothing starts unless a person starts it
   (P6, P8).
 - Raw `gh`, `glab`, `git push`, `curl`, a second shell and `sudo` are denied to you. You edit only spec drafts under
   `$FACTORY_HOME/specs/`, never your own settings.
@@ -90,8 +90,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    merged or carries `needs-human`.
 
 A retro runs only when a person starts it (P12, #488); you never start one on your own count of merges. When the
-person asks, `agent-factory retro <project>` lists the failures seen on two or more merges, with no model; a retro's
-drafts (`--draft`) are the person's to run.
+person asks, `agent-factory retro <project>` lists the failures seen on two or more merges, with no model. Its lesson
+drafts (`agent-factory retro <project> --draft`, one capped model run) are the person's to run, and a person opens
+each lesson PR.
 
 ## Escalation
 

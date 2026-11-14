@@ -81,7 +81,7 @@ import { settingName, settingOf } from "./core/settings/machine.js";
 import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
-import { cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.js";
+import { cardDraft, cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.js";
 import { BOARD_HELP, boardCommand, boardPass } from "./board-cli.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
 import { enginePackPin } from "./core/process/pins.js";
@@ -189,6 +189,8 @@ settings:
 
 type Args = {
   readonly json: boolean;
+  // retro: the lesson drafts, one model run (#488)
+  readonly draft: boolean;
   readonly template: boolean;
   // spec: print the spec's text instead of checking it (#542)
   readonly show: boolean;
@@ -229,17 +231,22 @@ function trace({ positionals, io }: Args): Promise<number> {
 }
 
 // retro : the failures seen on two or more merges (#488), with the project's settings layers resolved
-function retro({ positionals, json, io }: Args): Promise<number> {
+function retro({ positionals, json, draft, io }: Args): Promise<number> {
   const [project] = positionals;
-  // parseArgs read --json; retroCommand reads it from its own words
-  const words = json ? [...positionals, "--json"] : positionals;
+  // the flags parseArgs read, back on the command line retroCommand reads
+  const words = [...positionals, ...(json ? ["--json"] : []), ...(draft ? ["--draft"] : [])];
   return resolvedRun("retro", project, io, (resolved) => {
     const home = factoryHome(resolved.env);
     if (home.kind === "refused") {
       io.err(`agent-factory retro: ${home.reason}\n`);
       return Promise.resolve(1);
     }
-    return retroCommand(words, { ...resolved, home: home.path, outcomes: cloneOutcomes(resolved.env, Date.now) });
+    return retroCommand(words, {
+      ...resolved,
+      home: home.path,
+      outcomes: cloneOutcomes(resolved.env, Date.now),
+      draft: cardDraft(home.path, resolved.env),
+    });
   });
 }
 
@@ -1671,6 +1678,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       help: { type: "boolean" },
       version: { type: "boolean" },
       json: { type: "boolean" },
+      draft: { type: "boolean" },
       once: { type: "boolean" },
       "dry-run": { type: "boolean" },
       template: { type: "boolean" },
@@ -1691,6 +1699,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
   }
   return command.run({
     json: values.json === true,
+    draft: values.draft === true,
     template: values.template === true,
     show: values.show === true,
     once: values.once === true,

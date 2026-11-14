@@ -1575,7 +1575,7 @@ describe("the writer step: role cards from the process plugin (#232)", () => {
 });
 
 // the roles a ticket's flow runs from cards
-type Flow = Exclude<Role, "onboarder">;
+type Flow = Exclude<Role, "onboarder" | "retro">;
 
 describe("a full run on each process: no plugin, the rulebook plugin, a team plugin (#232)", () => {
   const FIXTURES = join(import.meta.dirname, "..", "tests", "fixtures", "process");

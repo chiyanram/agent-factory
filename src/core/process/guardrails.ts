@@ -29,6 +29,7 @@ export const GUARDRAIL_FLOOR: Readonly<Record<Role, readonly GuardrailId[]>> = {
   "verify-pass": ["read-only"],
   // its card may ask for the build tool's help through Bash (cards.ts ROLE_TOOLS), so read-only is not its floor
   onboarder: [],
+  retro: ["read-only"],
 };
 
 // the roles whose runs edit the clone
