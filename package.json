@@ -37,6 +37,7 @@
     "conventional-changelog-conventionalcommits": "9.3.1",
     "oxlint": "1.92.0",
     "oxlint-tsgolint": "7.0.2006",
+    "repo-gardener": "0.1.2",
     "semantic-release": "25.0.9",
     "typescript": "7.0.2",
     "vitest": "4.1.12"

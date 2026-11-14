@@ -1,4 +1,4 @@
-.PHONY: help lint test build
+.PHONY: help lint test build garden
 
 help: ## list the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-6s %s\n", $$1, $$2}'
@@ -28,3 +28,10 @@ test: node_modules/.package-lock.json ## build, then run the vitest suite
 
 build: node_modules/.package-lock.json ## compile the TypeScript package to dist/
 	@npm run --silent build
+
+# gardener reads this repository's own git history, as check-links does, never a project's clone. No --transcripts
+# (it reads the agent logs on this machine) and no --github: a person adds those by hand.
+garden: node_modules/.package-lock.json ## print the code's health: gardener snapshot, hotspots of the last 60 days, and the last 7 days' outcomes
+	@npx --no-install gardener snapshot
+	@npx --no-install gardener hotspots --days 60 --limit 10
+	@npx --no-install gardener window --days 7
