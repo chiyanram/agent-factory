@@ -9,41 +9,13 @@ import { join } from "node:path";
 import { plainName } from "../spec.js";
 import type { Result } from "../forge/api.js";
 import { readRecords, type DesignStep, type Event, type Phase, type WriterMode } from "./records.js";
-import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
+import { addSpend, NO_SPEND, RUN_KINDS, type RoundSpend, type RunKind, type Spend } from "./spend.js";
 import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 import { tallyOf, type TicketTally } from "./touches.js";
 import { dayStart, monthStart, shownAt, UTC, type Zone } from "../zone.js";
 
-// what a run was, in the glossary's role names (#337), as far as its record tells: an automated review's round line
-// splits its spend into each finder's, by lens, and the verify pass's; an older round line that has no split is one
-// "automated review". A design review records each of its two runs, the design-reviewer's and the verify pass's. A
-// spent line from the ready check or the local verifier, which run no model, is never written; it is named for what it
-// is all the same.
-export type RunKind =
-  | "design-reviewer"
-  | "test-first"
-  | "implementer"
-  | "cleanup"
-  | "finder"
-  | "verify pass"
-  | "onboarder"
-  | "automated review"
-  | "ready check"
-  | "local verifier";
-
-// the order the kinds are shown in: the glossary's order of the roles, then the older round lines
-export const RUN_KINDS: readonly RunKind[] = [
-  "design-reviewer",
-  "test-first",
-  "implementer",
-  "cleanup",
-  "finder",
-  "verify pass",
-  "onboarder",
-  "automated review",
-  "ready check",
-  "local verifier",
-];
+// RunKind and RUN_KINDS live in spend.ts, a leaf the records parser can import with no cycle (#488)
+export { RUN_KINDS, type RunKind };
 
 // one model run's record: the writer's, a review round's or a design review run's end, or what a failed run spent
 export type Spent = {
