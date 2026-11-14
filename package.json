@@ -12,6 +12,7 @@
     "agent-factory": "dist/cli.js"
   },
   "files": [
+    ".github/rules-pack.json",
     "dist",
     "docs",
     "images",

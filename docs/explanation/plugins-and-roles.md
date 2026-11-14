@@ -67,7 +67,8 @@ from the built-in prompt, not its card, so nothing checks a finding against it y
 
 This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI
 checks that commit out and reads every plugin's process and every role card the engine runs, so a pack the engine
-cannot read fails CI here.
+cannot read fails CI here. The npm package ships the file, and `agent-factory init` pins each `chiyanram` plugin at
+that commit, not at the skills `HEAD`, so a new user gets the pack CI tested (#607).
 
 The sessions working on this repo load the same pack: [`.claude/settings.json`](../../.claude/settings.json) declares the
 chiyanram marketplace at the release tag that file names (`tag`), and enables the rulebook and toolbox plugins (#580).

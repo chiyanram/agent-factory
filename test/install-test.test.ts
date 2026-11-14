@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { failedChecks, problems, type Ran, type Seen } from "../scripts/install-test.js";
 
+const PIN = "7285d8a0b15862068915b0b6fe66335d9b0c0ade";
 const ran = (over: Partial<Ran> = {}): Ran => ({ code: 0, signal: null, error: "", out: "", err: "", ...over });
 const INIT =
   "Checks:\n  ✓ srt 0.0.82, the pinned version\n  ✗ claude token: none on record\n      fix: claude setup-token\n";
@@ -12,6 +13,7 @@ const seen = (over: Partial<Seen> = {}): Seen => ({
   dispatch: ran({ out: "1: writer (fix): started; no run yet (dry run)\n" }),
   branch: "main",
   files: { "user.json": true, "projects/demo.json": true, "coordinator/.claude/settings.json": true },
+  pin: { written: PIN, engine: PIN },
   ...over,
 });
 
@@ -46,6 +48,19 @@ describe("the install test's verdict", () => {
     const refused = ran({ code: 1, err: "agent-factory start: no spec on issue 1\n" });
     expect(problems(seen({ start: refused }), "0.34.1")).toEqual([
       "agent-factory start exited 1: agent-factory start: no spec on issue 1",
+    ]);
+  });
+
+  it("fails a pin of rulebook@chiyanram that is not the engine's rules-pack pin, or none at all (#607)", () => {
+    const head = "b".repeat(40);
+    expect(problems(seen({ pin: { written: head, engine: PIN } }), "0.34.1")).toEqual([
+      `init pinned rulebook@chiyanram at ${head}, not the engine's rules-pack pin ${PIN}`,
+    ]);
+    expect(problems(seen({ pin: { written: "", engine: PIN } }), "0.34.1")).toEqual([
+      `init pinned rulebook@chiyanram at nothing, not the engine's rules-pack pin ${PIN}`,
+    ]);
+    expect(problems(seen({ pin: { written: PIN, engine: "" } }), "0.34.1")).toEqual([
+      "the engine's rules-pack pin (.github/rules-pack.json) has no commit",
     ]);
   });
 

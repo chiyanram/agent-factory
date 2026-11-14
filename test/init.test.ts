@@ -9,7 +9,9 @@ import { detect, hostOf, parseRemote, projectName, toolsOf } from "../src/core/i
 import { answersOf, type Question } from "../src/core/init/round.js";
 import { projectPath, runSettings } from "../src/core/project.js";
 import { layered, refusals } from "../src/core/settings/layers.js";
-import { initCommand, type InitIo } from "../src/init-cli.js";
+import type { Result } from "../src/core/forge/api.js";
+import { enginePackPin, type PackPin } from "../src/core/process/pins.js";
+import { initCommand, KNOWN_MARKETS, type InitIo } from "../src/init-cli.js";
 import { commitMarket, GIT_ENV, LANES } from "./market.js";
 import { tempDir } from "./temp.js";
 
@@ -55,18 +57,43 @@ function ledger(): string {
   return clone("ledger", LEDGER, "https://github.com/chiyanram/ledger.git");
 }
 
-// a marketplace origin holding the rulebook plugin, which init clones into the factory home
+const RULEBOOK = {
+  "plugins/rulebook/.claude-plugin/plugin.json": '{"name": "rulebook"}',
+  "plugins/rulebook/skills/crq/process/lanes.json": LANES,
+};
+
+// a marketplace origin holding the rulebook plugin, which init clones into the factory home; its first commit is the
+// one the engine's rules-pack pin names in these tests
 let marketDir = "";
+let pinnedCommit = "";
 function market(): string {
   if (marketDir.startsWith(root) && root !== "") {
     return marketDir;
   }
   marketDir = join(root, "origin");
-  commitMarket(root, {
-    "plugins/rulebook/.claude-plugin/plugin.json": '{"name": "rulebook"}',
-    "plugins/rulebook/skills/crq/process/lanes.json": LANES,
-  });
+  pinnedCommit = commitMarket(root, RULEBOOK);
   return join(root, "origin");
+}
+
+// a team's own marketplace, cloned from <root>/team/origin, with one plugin, teamrules; its commit
+function teamMarket(note: string): string {
+  return commitMarket(join(root, "team"), {
+    ".claude-plugin/marketplace.json": JSON.stringify({
+      name: "team",
+      plugins: [{ name: "teamrules", source: "./plugins/teamrules", version: "1.0.0" }],
+    }),
+    "plugins/teamrules/.claude-plugin/plugin.json": '{"name": "teamrules"}',
+    "plugins/teamrules/NOTE.md": note,
+  });
+}
+
+function enginePin(commit: string): Result<PackPin> {
+  return { kind: "ok", value: { repo: market(), commit, tag: "rulebook--v2.0.0" } };
+}
+
+// pinOr : the engine's pin a test gives, else the pin at the marketplace's first commit
+function pinOr(given: Result<PackPin> | undefined): Result<PackPin> {
+  return given ?? enginePin(pinnedCommit);
 }
 
 const USER_HOME = "/home/dev";
@@ -109,6 +136,8 @@ async function init(
     readonly probes?: Partial<Probes>;
     readonly project?: string;
     readonly setupCoordinator?: InitIo["setupCoordinator"];
+    readonly enginePin?: Result<PackPin>;
+    readonly markets?: Readonly<Record<string, string>>;
   } = {},
 ): Promise<Ran> {
   let out = "";
@@ -129,7 +158,8 @@ async function init(
           },
         }),
     probes: probes(opts.probes),
-    markets: { chiyanram: market() },
+    markets: { chiyanram: market(), ...opts.markets },
+    enginePin: pinOr(opts.enginePin),
     ...(opts.setupCoordinator === undefined ? {} : { setupCoordinator: opts.setupCoordinator }),
   };
   const code = await initCommand({ project: opts.project, dir, yes: opts.yes === true }, io);
@@ -515,6 +545,70 @@ describe("the project's identity in the settings layers (#369)", () => {
     expect(refusals(await layered({ home, env: {}, project: project({ gitHostProject: "ledger" }) }))).toContain(
       "gitHostProject in",
     );
+  });
+});
+
+describe("init pins chiyanram's plugins at the engine's rules-pack pin (#607)", () => {
+  const pins = (): unknown => json(join(home, "projects", "ledger.plugins.json"));
+
+  it("AC-1: pins rulebook@chiyanram at the pin's commit, never at the marketplace's newer HEAD", async () => {
+    token("2027-11-01T00:00:00Z");
+    market();
+    const head = commitMarket(root, { "plugins/rulebook/NEW.md": "newer than the pin" });
+    expect(head).not.toBe(pinnedCommit);
+    const ran = await init(ledger(), { yes: true });
+    expect(ran.code).toBe(0);
+    expect(pins()).toHaveProperty(["rulebook@chiyanram", "commit"], pinnedCommit);
+  });
+
+  it("AC-1: fetches the pin's commit when the marketplace's clone in the home does not have it yet", async () => {
+    token("2027-11-01T00:00:00Z");
+    execFileSync("git", ["clone", "-q", market(), join(home, "marketplaces", "chiyanram")], { env: GIT_ENV });
+    const later = commitMarket(root, { "plugins/rulebook/NEW.md": "after the clone" });
+    commitMarket(root, { "plugins/rulebook/NEW.md": "newer than the pin" });
+    const ran = await init(ledger(), { yes: true, enginePin: enginePin(later) });
+    expect(ran.code).toBe(0);
+    expect(pins()).toHaveProperty(["rulebook@chiyanram", "commit"], later);
+  });
+
+  it("AC-2: pins a plugin from another marketplace at its HEAD, as before", async () => {
+    token("2027-11-01T00:00:00Z");
+    market();
+    teamMarket("first");
+    const teamHead = teamMarket("the team's newest");
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(projectPath(home, "ledger"), JSON.stringify({ plugins: ["rulebook@chiyanram", "teamrules@team"] }));
+    const ran = await init(ledger(), { yes: true, markets: { team: join(root, "team", "origin") } });
+    expect(ran.code).toBe(0);
+    expect(pins()).toHaveProperty(["rulebook@chiyanram", "commit"], pinnedCommit);
+    expect(pins()).toHaveProperty(["teamrules@team", "commit"], teamHead);
+  });
+
+  it("AC-1b: the printed fix names the engine's commit, so a no never points at HEAD", async () => {
+    token("2027-11-01T00:00:00Z");
+    const ran = await init(ledger(), { replies: ["", "n"] });
+    expect(ran.out).toContain(`fix: agent-factory plugin update ledger rulebook@chiyanram ${pinnedCommit}`);
+  });
+
+  it("a bad pin file fails only chiyanram's pin, with the reason; a team pack still pins", async () => {
+    token("2027-11-01T00:00:00Z");
+    const teamHead = teamMarket("first");
+    mkdirSync(join(home, "projects"), { recursive: true });
+    writeFileSync(projectPath(home, "ledger"), JSON.stringify({ plugins: ["rulebook@chiyanram", "teamrules@team"] }));
+    const ran = await init(ledger(), {
+      yes: true,
+      markets: { team: join(root, "team", "origin") },
+      enginePin: { kind: "failed", reason: "/pkg/.github/rules-pack.json: must hold a full commit" },
+    });
+    expect(ran.code).toBe(1);
+    expect(ran.out).toContain("✗ plugin rulebook@chiyanram: /pkg/.github/rules-pack.json: must hold a full commit");
+    expect(pins()).not.toHaveProperty(["rulebook@chiyanram"]);
+    expect(pins()).toHaveProperty(["teamrules@team", "commit"], teamHead);
+  });
+
+  it("the marketplace init clones for chiyanram is the repo the engine's pin names", async () => {
+    const pin = await enginePackPin(join(import.meta.dirname, ".."));
+    expect(pin).toMatchObject({ kind: "ok", value: { repo: KNOWN_MARKETS.chiyanram } });
   });
 });
 

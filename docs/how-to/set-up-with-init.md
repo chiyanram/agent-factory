@@ -29,8 +29,14 @@ agent-factory init            # the project's name defaults to the clone folder'
    exits 3. A list key only grows. It runs `config check` on the result first, and writes nothing when that fails.
 4. **Pins each plugin** through `agent-factory plugin update` after it says what that does and you say yes: it clones
    the marketplace to `$FACTORY_HOME/marketplaces/<marketplace>` through hostGit when it is not there
-   (`https://github.com/chiyanram/skills` for `chiyanram`). A first pin shows a count of files per folder
-   (`+ 12 files in skills/crq`), not every file; a later update shows each file it adds, removes or changes (#482).
+   (`https://github.com/chiyanram/skills` for `chiyanram`). A plugin from `chiyanram` is pinned at the commit this
+   engine is tested with, the one its `.github/rules-pack.json` names (it ships in the package), never at the skills
+   `HEAD`; the fix it prints names that commit too. A plugin from any other marketplace is pinned at its `HEAD` (#607).
+   A first pin shows a count of files per folder (`+ 12 files in skills/crq`), not every file; a later update shows
+   each file it adds, removes or changes (#482).
+   `agent-factory plugin update <project> <name@marketplace>` later moves a pin to the marketplace's `HEAD`; to go
+   back to the tested pack, name the engine's commit:
+   `agent-factory plugin update <project> rulebook@chiyanram <the commit in .github/rules-pack.json>`.
 5. **Checks each piece** and prints ✓ or ✗ with the fix: `srt` at the pinned version (the exact install command, with
    `--omit=optional`), the `claude` CLI, `agent-factory` and `srt` under the active Node (after a Node upgrade they
    are gone; it prints the reinstall commands), the model token's days left (read from its expiry record in

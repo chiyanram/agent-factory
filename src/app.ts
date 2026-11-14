@@ -83,6 +83,7 @@ import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
 import { BOARD_HELP, boardCommand, boardPass } from "./board-cli.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
+import { enginePackPin } from "./core/process/pins.js";
 import type { Probes } from "./core/init/checks.js";
 import { which } from "./core/box/srt-programs.js";
 import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
@@ -1472,6 +1473,7 @@ async function initCli({ positionals, yes, repo, io }: Args): Promise<number> {
       ...(io.readLine === undefined ? {} : { readLine: io.readLine }),
       probes: initProbes(io, home.path),
       markets: KNOWN_MARKETS,
+      enginePin: await enginePackPin(PKG),
       setupCoordinator: async () => {
         const places = placesOf(io);
         return places.kind === "ok" ? installCoordinator(places.value) : places;

@@ -37,12 +37,22 @@ export async function targetCommit(
   given: string | undefined,
 ): Promise<Result<string>> {
   if (given !== undefined) {
-    return commitOf(env, dir, given, given);
+    const held = await commitOf(env, dir, given, given);
+    return held.kind === "ok" || !COMMIT.test(given) ? held : fetchedCommit(env, dir, given);
   }
   const fetched = await git(env, dir, ["fetch", "-q", "origin", "HEAD"]);
   return fetched.kind === "ok"
     ? commitOf(env, dir, "FETCH_HEAD", "the fetched HEAD")
     : failed(`cannot fetch the marketplace in ${dir}: ${gitWhy(fetched)}`);
+}
+
+// fetchedCommit : a full commit the clone does not hold yet, fetched from its origin (#607); only a full commit
+// reaches here, so no word is read as a ref or an option
+async function fetchedCommit(env: NodeJS.ProcessEnv, dir: string, commit: string): Promise<Result<string>> {
+  const fetched = await git(env, dir, ["fetch", "-q", "--end-of-options", "origin", commit]);
+  return fetched.kind === "ok"
+    ? commitOf(env, dir, commit, commit)
+    : failed(`cannot fetch ${commit} into the marketplace in ${dir}: ${gitWhy(fetched)}`);
 }
 
 async function commitOf(env: NodeJS.ProcessEnv, dir: string, rev: string, named: string): Promise<Result<string>> {
