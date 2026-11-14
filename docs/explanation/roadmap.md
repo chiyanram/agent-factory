@@ -51,7 +51,9 @@ ADR-0006 (a service account per developer) is already replaced by 0012 S14.
 | 3 | **ledger pilot**, with project setup by the onboarder | #235 #62 (with #158, #130 on the VM) | the targets in section 6 |
 | 3b | **release 1.0** | #240 | the pilot passed; the docs match what 1.0 does |
 | 4 | aruvii, after 1.0: agent-platform changes made locally and tested, then pushed and moved to the Contabo VM; tiny and docs tickets first, then bug, then feature. It adopts the crq plugin (#40); the Verifier stays as its gate (#234), and the cutover retires only the old fleet (#44) | #233 #234 #237 #35 #38 #40 #42 #43 #44; #41 (backup gate, optional); the automated review changes of ADR-0015 #218–#221 | the same targets |
+| 4b | SDLC context: owners, deploys and incidents read through the `context.read` extension point, which aruvii needs ([the factory stack](factory-stack.md)) | its own ticket when it comes up | the coordinator and the review read a project's owners and deploys |
 | 5 | work laptop | #162 #114 #198 | the same targets on the small laptop; specs never in git |
+| 5b | more than one line: a security line and an incident line beside ticket to PR ([the factory stack](factory-stack.md)) | its own ticket when it comes up | a second line runs on the same engine with the same brakes |
 | 6 | colleagues | Jira approval · spec PR · team template | the same targets with 2–3 colleagues |
 | later | web app (#120) · signed approvals on laptops · scheduled extra tasks · the RCA agent | — | — |
 
