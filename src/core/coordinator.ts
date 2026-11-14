@@ -44,7 +44,8 @@ export type CoordinatorPlaces = {
 
 // the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
 // that the policy decides in code
-const READS = ["poll", "board", "spec", "approval", "status", "grill", "request", "--help", "--version"];
+// (retro is the listing only, #488; its --draft spends on a model run and is denied, Q10 A)
+const READS = ["poll", "board", "spec", "approval", "status", "grill", "request", "retro", "--help", "--version"];
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 
