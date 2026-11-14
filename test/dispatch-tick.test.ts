@@ -1151,6 +1151,42 @@ describe("tick", () => {
     expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "merged") : read).toEqual([
       { kind: "merged", number: 9, ...value },
     ]);
+    // and its timeline line once, at the merged-at, from the ticket's lines, with no model run (#488 AC-1): this pass
+    // runs no step at all
+    expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "timeline") : read).toEqual([
+      {
+        at: value.at,
+        kind: "timeline",
+        number: 9,
+        rounds: 0,
+        found: {},
+        acted: {},
+        spend: {},
+        unmeasured: 0,
+        rescues: [],
+      },
+    ]);
+  });
+
+  it("a merge recorded before its timeline line was gets the line on the next pass, and only once (#488)", async () => {
+    const changes = { team, open: [], merged: [{ number: 9, branch: "factory/PROJ-9", fork: false }] };
+    const where = { home, project: "ledger", ticket: "PROJ-9" };
+    await record({
+      where,
+      event: { at: "2026-11-07T08:00:00Z", kind: "review-ended", head: H, actOn: 1, found: { CR1: { act_on: 1 } } },
+    });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:30:00Z", kind: "merged", number: 9, sha: "a".repeat(40), by: "mo" },
+    });
+    // the git host is not asked again: the merged line the records hold is the merge
+    await tick(setup(changes, []));
+    await tick(setup(changes, []));
+    const read = await readRecords(where);
+    const timelines = read.kind === "ok" ? read.value.filter((e) => e.kind === "timeline") : read;
+    expect(timelines).toMatchObject([
+      { at: "2026-11-07T09:30:00Z", number: 9, rounds: 1, found: { CR1: { act_on: 1 } } },
+    ]);
   });
 
   it("a merge the git host cannot answer for is logged, and the claim still comes off (#487)", async () => {

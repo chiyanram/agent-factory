@@ -16,7 +16,7 @@ that changes a rule is started and accepted by a human.
 
 | step | today | decided, not built |
 |---|---|---|
-| ① signal | run records per ticket; `agent-factory usage` (spend per run kind, acted-on rate per lens, category and bucket) | a **timeline record**, one line per merge, written by the engine: rounds, findings with their rule ID and bucket, acted-on per rule ID, tokens per run kind, rescues (needs-human, waivers, human pushes) |
+| ① signal | run records per ticket; `agent-factory usage` (spend per run kind, acted-on rate per lens, category and bucket); a **timeline line** per merge, written by the engine with no model: rounds, findings per rule ID and bucket, acted-on per rule ID, spend per run kind, rescues (hand-overs a person took back) | rescues from waivers and a person's own pushes, which the run records do not hold yet (#614) |
 | ② retro | the coordinator's step 6, about one merge in ten; the rulebook's retro rules RT1–RT7 | code that reads the retro's JSON actions (the coordinator posts them since #425), so ① and ③ need no model |
 | ③ lesson | a rule change with the ticket as its origin (RT3) | one lesson is one skills PR with three parts: the rule at its strongest level (RT6), a new golden case or role-eval scenario built from the failure, and a review-by date |
 | ④ eval gate | `scripts/check-eval-proof.ts`: a change to the review prompts must carry a results file that holds the baseline within the noise and beats it by more than the noise on what it aims at, quality or cost ([ADR-0021](../adr/0021-keep-a-change-only-by-experiment.md)) | the gate also covers plugin pins; a held-out slice of cases the lesson author never sees runs only at the gate; a lesson PR may not change the judge or the existing cases |
