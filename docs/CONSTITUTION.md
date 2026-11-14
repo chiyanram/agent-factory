@@ -170,7 +170,8 @@ held-out cases a change was not tuned on are not built (ADR-0021 N8, #599).
 **Kind:** guidance.
 **Why:** the same review comment forever is a failure of the factory, not of the run. A mistake counts as repeated
 after two sightings; how a lesson is found and fixed lives in the rules pack's retro reference.
-**How it's checked:** review only.
+**How it's checked:** a reconciled merge writes its timeline line once, with no model run
+(`test/dispatch-tick.test.ts`, `test/timeline.test.ts`); the rest by review.
 
 ## P13. Typed hand-offs, people included
 

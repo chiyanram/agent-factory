@@ -135,7 +135,16 @@ ended goes to a person. START and approval are each one file a new one replaces,
 `begun` or `approved` line, at the record's own time, keeping it for the ticket's touches (`usage`, #487). When a
 pass reconciles a merged change, it first records the merge once as a `merged` line: the git host's merged-at, the
 commit it landed as and who merged it (`Forge.landed`). A merge the git host cannot answer for is logged, and the claim
-still comes off. A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that
+still comes off.
+
+After the `merged` line, the pass writes the merge's `timeline` line once, from the ticket's own lines and with no
+model (`src/core/dispatch/timeline.ts`, #488): the review rounds that ran, every finding per rule ID and bucket,
+acted-on per rule ID, what each run kind spent, and each rescue (a hand-over a person took back, with its why).
+
+**Today:** a waiver or a person's own push is not a rescue in the run records yet, so the timeline does not count it
+(#614).
+
+A ticket's change is the one on `factory/<ticket>` in this repository; a fork's branch of that
 name is ignored, and two changes on it go to a person. Two rules hold over every row: a wait on a claimed change that
 has been quiet (no record, no comment) for `FACTORY_QUIET_MINUTES` releases the claim; and a stop that went to a person
 (`needs-human`, the claim released, one note) is not posted again when the label is removed: to go on, the human
