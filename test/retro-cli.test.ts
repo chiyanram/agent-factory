@@ -5,6 +5,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event } from "../src/core/dispatch/records.js";
 import type { MergeOutcome } from "../src/core/outcome.js";
+import { runCli, type Io } from "../src/app.js";
 import { cloneOutcomes, retroCommand, type Merged, type Outcomes } from "../src/retro-cli.js";
 import { tempDir } from "./temp.js";
 
@@ -143,5 +144,29 @@ describe("agent-factory retro", () => {
   it("reads every outcome as unknown when the project's clone is not set", async () => {
     const read = await cloneOutcomes({}, () => 0)([{ ticket: "12", at: AT, sha: "1".repeat(40) }]);
     expect(read.get("12")).toEqual({ kind: "unknown", why: "the project's clone is not set" });
+  });
+});
+
+describe("agent-factory retro from the command line", () => {
+  it("prints JSON with --json: the command line's own flags reach it (#488)", async () => {
+    plant("12", [merged(12), timeline(12, "A")]);
+    const lines: string[] = [];
+    const cli: Io = {
+      env: { FACTORY_HOME: home },
+      out: (t) => lines.push(t),
+      err: () => undefined,
+      readSecret: async () => "",
+      readStdin: async () => "",
+      system: {
+        platform: "linux",
+        uid: 501,
+        gid: 20,
+        run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
+        interactive: async () => 1,
+        background: async () => ({ kind: "failed", reason: "no background in this test" }),
+      },
+    };
+    expect(await runCli(["retro", "loans", "--json"], cli)).toBe(0);
+    expect(JSON.parse(lines.join(""))).toMatchObject({ project: "loans", merged: 1, failures: [] });
   });
 });
