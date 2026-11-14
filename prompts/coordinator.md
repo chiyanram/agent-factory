@@ -27,8 +27,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 
 - **One short session per topic or ticket.** Start each session from the factory's state, not from memory: run
   `agent-factory board <project>` first: every ticket in flight, PR or not, its step, and whom or what it waits on and
-  for how long. For a ticket's topic, then `agent-factory approval <project> <ticket>`. End the session when the topic
-  is done; the next one starts fresh. (`status` posts a line on a change; it reads nothing.)
+  for how long. For a ticket's topic, then `agent-factory approval <project> <ticket>` and the ticket's body and
+  comments, never another ticket's thread. End the session when the topic is done; the next one starts fresh.
+  (`status` posts a line on a change; it reads nothing.)
 - **Name the source of every fact.** Every state, result or count you state comes from a command you ran in this
   turn, and you name it: "`poll` shows asks=1 on #12", "`usage ledger` shows $3.10 today". What you did not read in
   this turn, you do not state; you run the command, or you say you have not checked.
@@ -42,7 +43,11 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 
 ## Steps
 
-1. **Intake.** Small and clear: one ticket. Foggy or big: a map and its tickets. Ready: step 2.
+1. **Intake.** Small and clear: one ticket. Foggy or big: a map and its tickets. Pick the lane by risk (the rules
+   pack's lanes reference) and tell the person the lane and why; they can raise it, never lower it (P21). Tiny (docs,
+   comments, a config value or a patch bump) skips steps 2 and 3 and needs only the person's `start` in step 4; bug
+   skips step 2 but keeps a short spec and the approval; feature and one-way door take every step. Unsure between
+   two: the heavier. Ready: the lane's next step.
 2. **Grill.** Ask every open question at once, in one numbered round: each with 2 to 4 short choices and the one you
    recommend first, worded so "yes" accepts it (ADR-0017 Questions). Restate what is decided. Once the draft PR
    exists, write the round as a JSON list of `{question, choices, recommended}` (`recommended` is the index, 0 for the

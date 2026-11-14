@@ -35,10 +35,24 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
   comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.
-- Take each build ticket through grilling, spec, design, the operator's approval of both on the ticket, then build,
-  automated code review and a PR from `.github/pull_request_template.md`; split work too big for one PR into child
-  tickets before the build, because the operator approves the shape before code exists, not after (#557 is the
-  worked example).
+- Pick each build ticket's lane by its risk, as the rules pack's lanes reference does: tiny (docs, comments, a config
+  value or a patch bump) skips grilling, spec, design and approval; bug skips grilling, writes a short spec and a
+  failing test first, gets the operator's approval, and has a design only when an interface or more than one module
+  changes; feature and one-way door take the full flow of grilling, spec, design and the operator's approval of both
+  on the ticket, and a one-way door lists each irreversible step for a yes. Every lane ends in build, automated code
+  review and a PR from `.github/pull_request_template.md`. The coordinator says the lane and why when it picks up a
+  ticket, and the operator can raise it, never lower it; split work too big for one PR into child tickets before the
+  build, because brakes scale with risk and no lane lowers the approval floor (P21), and the operator approves the
+  shape before code exists, not after (#557 is the worked example).
+- Run one fresh session per ticket, starting from `agent-factory board` and the ticket's body and comments, never
+  from another ticket's thread, because a long session re-reads its whole thread on every turn (#615).
+- Cut a step from a lane only on measured numbers, the cost per run kind on #488's timeline line, read after about
+  15 tickets, because a few tickets' impressions are not a measure.
+- Bring in a new check, role, lens or outside skill manual first: a manual skill, then measured, then automatic in
+  shadow, then visible, and a person decides each step up (P11, #621), because a step made automatic before anyone
+  used it by hand cannot be judged and is hard to take back.
+- Land a step the rules pack must follow in the engine first, then in the pack as a new format version (P18), then
+  move the pin, because an engine that cannot run a pack's step refuses the pack and blocks the pin.
 
 Codebase health: each change leaves the modules it touches no worse than it found them. If the change would make one
 worse, say so in the design and propose the refactor as its own ticket. We care about the next change being easy, not

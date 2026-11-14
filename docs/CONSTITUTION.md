@@ -162,6 +162,17 @@ allowed.
 noise of [ADR-0021](adr/0021-keep-a-change-only-by-experiment.md); every other change, by review. **Today:** the
 held-out cases a change was not tuned on are not built (ADR-0021 N8, #599).
 
+**A new step climbs, manual first (#621):** a new check, role, lens or outside skill starts manual (a typed-only
+toolbox skill or a checklist a person runs) and moves up when real use catches something; then measured (still
+manual, each use recorded against a keep rule written before the trial) until the keep rule passes on about 15–20
+tickets; then automatic in shadow (the engine runs it, records the results and shows nobody) until its findings match
+what people later found; then automatic and visible in the lanes that pay for it. A person decides each step up. A
+step the engine runs lands in the engine first, then in the rules pack as a new format version (P18), then the pin
+moves.
+**Why:** a new check that went straight into the automatic flow (skills #375, the breaker) had never been used by
+hand, and the engine could not run it, so the pin stalled.
+**How it's checked:** by review: the PR that adds a step or moves it up names its rung and the person's yes.
+
 ## P12. Learn at the source
 
 > For every merge the engine writes a timeline record, with no model. A retro runs only when a person starts it. Each
