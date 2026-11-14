@@ -229,15 +229,17 @@ function trace({ positionals, io }: Args): Promise<number> {
 }
 
 // retro : the failures seen on two or more merges (#488), with the project's settings layers resolved
-function retro({ positionals, io }: Args): Promise<number> {
+function retro({ positionals, json, io }: Args): Promise<number> {
   const [project] = positionals;
+  // parseArgs read --json; retroCommand reads it from its own words
+  const words = json ? [...positionals, "--json"] : positionals;
   return resolvedRun("retro", project, io, (resolved) => {
     const home = factoryHome(resolved.env);
     if (home.kind === "refused") {
       io.err(`agent-factory retro: ${home.reason}\n`);
       return Promise.resolve(1);
     }
-    return retroCommand(positionals, { ...resolved, home: home.path, outcomes: cloneOutcomes(resolved.env, Date.now) });
+    return retroCommand(words, { ...resolved, home: home.path, outcomes: cloneOutcomes(resolved.env, Date.now) });
   });
 }
 
