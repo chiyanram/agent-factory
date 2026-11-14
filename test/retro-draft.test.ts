@@ -77,7 +77,11 @@ function stub(lessons: readonly unknown[]): { model: Model; runs: ModelRun[]; se
   const model: Model = (run) => {
     runs.push(run);
     seen.push(readdirSync(run.folder, { recursive: true }).map(String).toSorted());
-    return Promise.resolve({ kind: "ok", value: { output: { lessons }, answer: {}, costUsd: 1.25, tokens: 10 } });
+    const stream = `${JSON.stringify({ type: "result", key: `sk-ant-api03-${"a".repeat(40)}` })}\n`;
+    return Promise.resolve({
+      kind: "ok",
+      value: { output: { lessons }, answer: {}, costUsd: 1.25, tokens: 10, stream },
+    });
   };
   return { model, runs, seen };
 }
@@ -105,10 +109,15 @@ describe("retro --draft", () => {
   it("runs the retro card once over a stage of the failures' records, traces and the pack, and writes the drafts", async () => {
     const s = stub([LESSON]);
     const made = await draftRetro(setup(s.model), [FAILURE]);
+    const day = join(home, "retro", "loans", "2026-11-14");
     expect(made).toEqual({
       kind: "ok",
-      value: { dirs: [join(home, "retro", "loans", "2026-11-14", "1")], usd: 1.25 },
+      value: { dirs: [join(day, "1")], usd: 1.25, trace: join(day, "retro-2026-11-14T10-00-00-000Z.jsonl") },
     });
+    // the run's trace is kept beside the drafts, scrubbed (P10)
+    const trace = readFileSync(join(day, "retro-2026-11-14T10-00-00-000Z.jsonl"), "utf8");
+    expect(trace).toContain('"type":"result"');
+    expect(trace).not.toContain("sk-ant-api03");
     const run = onlyRun(s.runs);
     expect(run.folder.startsWith(join(home, "retro-runs", "loans-"))).toBe(true);
     expect(run.tools).toEqual(["Read", "Grep", "Glob"]);
@@ -152,10 +161,14 @@ describe("retro --draft", () => {
 
   it("writes nothing for a case path that climbs out, and runs no model when there is no failure", async () => {
     const bad = { ...LESSON, case: { name: "x", files: [{ path: "../../escape.md", text: "x" }] } };
-    expect(await draftRetro(setup(stub([bad]).model), [FAILURE])).toMatchObject({ kind: "failed" });
-    expect(existsSync(join(home, "retro"))).toBe(false);
+    expect(await draftRetro(setup(stub([bad]).model), [FAILURE])).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("trace: "),
+    });
+    // only the run's trace is kept: no draft
+    expect(readdirSync(join(home, "retro", "loans", "2026-11-14"))).toEqual(["retro-2026-11-14T10-00-00-000Z.jsonl"]);
     const none = stub([LESSON]);
-    expect(await draftRetro(setup(none.model), [])).toEqual({ kind: "ok", value: { dirs: [], usd: 0 } });
+    expect(await draftRetro(setup(none.model), [])).toEqual({ kind: "ok", value: { dirs: [], usd: 0, trace: "" } });
     expect(none.runs).toHaveLength(0);
   });
 

@@ -14,7 +14,7 @@ import { scrubbedJson, scrubSecrets } from "../scrub.js";
 import { plainName } from "../spec.js";
 import { codeOf, prop, readRecords, recordPath, type Event, type Where } from "./records.js";
 
-export type TraceKind = "writer" | "finder" | "verify" | "design-review" | "design-verify" | "onboard";
+export type TraceKind = "writer" | "finder" | "verify" | "design-review" | "design-verify" | "onboard" | "retro";
 // a plain file name in the ticket's folder, never a path
 export type TraceName = string;
 export type TraceAt = Where & { readonly kind: TraceKind; readonly lens?: string; readonly at: number };
@@ -39,7 +39,15 @@ export const NO_TRACE: TraceSink = {
   close: async () => ({ kind: "failed", reason: "no trace was opened" }),
 };
 
-const KINDS: readonly TraceKind[] = ["writer", "finder", "verify", "design-review", "design-verify", "onboard"];
+const KINDS: readonly TraceKind[] = [
+  "writer",
+  "finder",
+  "verify",
+  "design-review",
+  "design-verify",
+  "onboard",
+  "retro",
+];
 // <kind>[-<lens>]-<YYYY-MM-DDTHH-MM-SS-mmmZ>.jsonl: the kind, a lens of plain words, and the time
 const NAME = new RegExp(
   `^(${KINDS.join("|")})(?:-([a-z0-9][a-z0-9-]*))?-(\\d{4}-\\d\\d-\\d\\dT\\d\\d-\\d\\d-\\d\\d-\\d{3}Z)\\.jsonl$`,
@@ -190,13 +198,33 @@ export async function openTrace(at: TraceAt, max: number = TRACE_MAX_BYTES): Pro
   if (dir.kind === "failed") {
     return dir;
   }
-  const made = await mkdir(dir.value, { recursive: true, mode: 0o700 }).then(
+  return openIn(dir.value, at, max);
+}
+
+// openIn : a new trace file in a folder
+async function openIn(dir: string, at: Pick<TraceAt, "kind" | "lens" | "at">, max: number): Promise<Result<TraceSink>> {
+  const made = await mkdir(dir, { recursive: true, mode: 0o700 }).then(
     () => true,
     () => false,
   );
   return made
-    ? { kind: "ok", value: sinkOf(join(dir.value, traceName(at)), max) }
-    : { kind: "failed", reason: `cannot make ${dir.value}` };
+    ? { kind: "ok", value: sinkOf(join(dir, traceName(at)), max) }
+    : { kind: "failed", reason: `cannot make ${dir}` };
+}
+
+// keepTraceIn : a run's whole output kept as its trace in a folder of its own, scrubbed and capped as every trace is:
+// the retro's run, whose trace sits beside its drafts (#488)
+export async function keepTraceIn(
+  dir: string,
+  at: Pick<TraceAt, "kind" | "at">,
+  stdout: string,
+): Promise<Result<TraceKept>> {
+  const opened = await openIn(dir, at, TRACE_MAX_BYTES);
+  if (opened.kind === "failed") {
+    return opened;
+  }
+  opened.value.write(stdout);
+  return opened.value.close();
 }
 
 // keepTrace : a run's whole output, printed already, kept as its trace at once: a model run's stream (#487)
@@ -284,7 +312,7 @@ function unread(name: string, code: string, past: boolean): Result<string> | { r
 }
 
 // prunedIn : one folder's traces past TRACE_DAYS deleted; each that could not be deleted, by its path
-async function prunedIn(dir: string, now: number): Promise<{ deleted: number; problems: string[] }> {
+export async function prunedIn(dir: string, now: number): Promise<{ deleted: number; problems: string[] }> {
   const names = await readdir(dir).catch(() => [] as string[]);
   const due = names.filter((n) => {
     const parts = nameParts(n);

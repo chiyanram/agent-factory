@@ -7,14 +7,17 @@
 //           no git host token or FACTORY_* (review/settings.ts claudeEnv), and no skip-permissions flag (model.ts)
 //   drafts  <home>/retro/<project>/<date>/<n>/lesson.md, rules.patch and case/: written by code from the run's JSON.
 //           Nothing pushes: a person opens the lesson PR on the rules repo.
+//   trace   the run's whole output, scrubbed and capped as every trace is (dispatch/trace.ts, P10), kept beside the
+//           drafts as <home>/retro/<project>/<date>/retro-<time>.jsonl, failed run or not; deleted after TRACE_DAYS
 
 import { cp, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { codeOf } from "../dispatch/records.js";
+import { keepTraceIn, prunedIn } from "../dispatch/trace.js";
 import type { Result } from "../forge/api.js";
 import { readCard } from "../process/cards.js";
 import { findProcess, type PluginDir } from "../process/read.js";
-import type { Model } from "../review/model.js";
+import type { Model, ModelResult } from "../review/model.js";
 import { lessonsOf, LESSON_SCHEMA, type Lesson } from "./lesson.js";
 import type { Failure } from "./repeated.js";
 
@@ -30,7 +33,8 @@ export type DraftSetup = {
   readonly now: () => number;
 };
 
-export type Drafted = { readonly dirs: readonly string[]; readonly usd: number };
+// the drafts' folders, what the run spent, and its trace's path ("" when none was kept)
+export type Drafted = { readonly dirs: readonly string[]; readonly usd: number; readonly trace: string };
 
 const ENGINE_WORDS = `The folder you are in is the retro's stage. failures.json lists the repeated failures the engine found, each
 with its kind, key, tickets and the record lines it cites. records/<ticket>.jsonl holds each ticket's run records,
@@ -98,15 +102,31 @@ export function lessonText(lesson: Lesson, failures: readonly Failure[]): string
   ].join("\n");
 }
 
+// dayDir : today's folder of the project's drafts. Pure.
+const dayDir = (setup: DraftSetup): string =>
+  join(setup.home, "retro", setup.project, new Date(setup.now()).toISOString().slice(0, 10));
+
+// keptTrace : the run's output kept beside the drafts, after the project's retro traces past TRACE_DAYS are deleted;
+// its path, or "" when the run printed nothing or it could not be written
+async function keptTrace(setup: DraftSetup, stream: string | undefined): Promise<string> {
+  const root = join(setup.home, "retro", setup.project);
+  for (const day of await readdir(root).catch(() => [] as string[])) {
+    await prunedIn(join(root, day), setup.now());
+  }
+  const kept =
+    stream === undefined ? undefined : await keepTraceIn(dayDir(setup), { kind: "retro", at: setup.now() }, stream);
+  return kept?.kind === "ok" ? join(dayDir(setup), kept.value.name) : "";
+}
+
 // writeDrafts : each lesson under <home>/retro/<project>/<date>/<n>/, numbered after the ones already there that day
 export async function writeDrafts(
   setup: DraftSetup,
   lessons: readonly Lesson[],
   failures: readonly Failure[],
 ): Promise<readonly string[]> {
-  const day = join(setup.home, "retro", setup.project, new Date(setup.now()).toISOString().slice(0, 10));
+  const day = dayDir(setup);
   await mkdir(day, { recursive: true });
-  const first = (await readdir(day)).length + 1;
+  const first = (await readdir(day)).filter((n) => /^\d+$/.test(n)).length + 1;
   const dirs: string[] = [];
   for (const [i, lesson] of lessons.entries()) {
     const dir = join(day, String(first + i));
@@ -120,6 +140,30 @@ export async function writeDrafts(
     dirs.push(dir);
   }
   return dirs;
+}
+
+// lessonsFrom : the run's lessons and what it spent, or why there are none. Pure.
+function lessonsFrom(ran: ModelResult): Result<{ readonly lessons: readonly Lesson[]; readonly usd: number }> {
+  if (ran.kind === "failed") {
+    return { kind: "failed", reason: `the retro run failed: ${ran.reason}` };
+  }
+  const read = lessonsOf(ran.value.output);
+  return read.kind === "ok" ? { kind: "ok", value: { lessons: read.value, usd: ran.value.costUsd } } : read;
+}
+
+const streamOf = (ran: ModelResult): string | undefined => (ran.kind === "ok" ? ran.value.stream : ran.stream);
+
+// draftsOf : the run's trace kept, then its lessons written as drafts, or why there are none (naming the trace)
+async function draftsOf(setup: DraftSetup, ran: ModelResult, failures: readonly Failure[]): Promise<Result<Drafted>> {
+  const trace = await keptTrace(setup, streamOf(ran));
+  const read = lessonsFrom(ran);
+  if (read.kind === "failed") {
+    return { kind: "failed", reason: trace === "" ? read.reason : `${read.reason} (trace: ${trace})` };
+  }
+  return {
+    kind: "ok",
+    value: { dirs: await writeDrafts(setup, read.value.lessons, failures), usd: read.value.usd, trace },
+  };
 }
 
 // ranOn : the one run over the stage, then the drafts; the stage is removed after
@@ -139,13 +183,7 @@ async function ranOn(setup: DraftSetup, failures: readonly Failure[], skillDir: 
       maxUsd: RETRO_USD,
       tools: card.value.tools,
     });
-    if (ran.kind === "failed") {
-      return { kind: "failed", reason: `the retro run failed: ${ran.reason}` };
-    }
-    const lessons = lessonsOf(ran.value.output);
-    return lessons.kind === "failed"
-      ? lessons
-      : { kind: "ok", value: { dirs: await writeDrafts(setup, lessons.value, failures), usd: ran.value.costUsd } };
+    return await draftsOf(setup, ran, failures);
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
@@ -154,7 +192,7 @@ async function ranOn(setup: DraftSetup, failures: readonly Failure[], skillDir: 
 // draftRetro : the lesson drafts for these failures; no failure runs no model
 export async function draftRetro(setup: DraftSetup, failures: readonly Failure[]): Promise<Result<Drafted>> {
   if (failures.length === 0) {
-    return { kind: "ok", value: { dirs: [], usd: 0 } };
+    return { kind: "ok", value: { dirs: [], usd: 0, trace: "" } };
   }
   const found = await findProcess(setup.plugins);
   if (found.kind === "none") {

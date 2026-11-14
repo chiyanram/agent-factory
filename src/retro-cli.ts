@@ -189,7 +189,8 @@ async function drafted(io: RetroIo, project: string, failures: readonly Failure[
   }
   const dirs = made.value.dirs.map((d) => `draft: ${d}`);
   const lines = dirs.length === 0 ? ["no failure to draft a lesson for; no model ran"] : dirs;
-  io.out(`${[...lines, `spent $${made.value.usd.toFixed(2)}`].join("\n")}\n`);
+  const trace = made.value.trace === "" ? [] : [`trace: ${made.value.trace}`];
+  io.out(`${[...lines, `spent $${made.value.usd.toFixed(2)}`, ...trace].join("\n")}\n`);
   return 0;
 }
 
