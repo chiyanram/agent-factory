@@ -1,7 +1,7 @@
-.PHONY: help lint test build garden
+.PHONY: help lint test build garden garden-pr
 
 help: ## list the targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-6s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
 
 node_modules/.package-lock.json: package.json package-lock.json
 	@npm ci --no-audit --no-fund --ignore-scripts
@@ -36,3 +36,8 @@ garden: node_modules/.package-lock.json ## print the code's health: gardener sna
 	@npx --no-install gardener snapshot
 	@npx --no-install gardener hotspots --days 60 --limit 10
 	@npx --no-install gardener window --days 7
+
+BASE ?= origin/main
+HEAD ?= HEAD
+garden-pr: node_modules/.package-lock.json ## print the module numbers a change moves, merge base against head, and which got worse (BASE=origin/main HEAD=HEAD)
+	@node scripts/garden-pr.ts --base $(BASE) --head $(HEAD)
