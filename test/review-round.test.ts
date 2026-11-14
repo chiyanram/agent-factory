@@ -968,6 +968,8 @@ describe("reviewStep", () => {
         actOn: 1,
         lenses: { baseline: 1 },
         citesNotFound: 0,
+        // every finding of the round, per rule ID and bucket, for the timeline line (#488)
+        found: { ERR1: { act_on: 1 } },
         spend: { usd: 0.2, tokens: 20 },
         // and per run: the finder's by its lens, and the verify pass's (#337)
         split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.1, tokens: 10 } },

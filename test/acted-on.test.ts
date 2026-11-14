@@ -12,6 +12,7 @@ import {
   isActedRow,
   keepTracked,
   REGION,
+  foundOf,
   trackedOf,
   type Tracked,
 } from "../src/core/review/acted-on.js";
@@ -72,14 +73,20 @@ describe("acted on, the parts", () => {
   it("tracks Act on and Consider findings only, by the finder that found them", () => {
     const all = [
       sorted({ id: "F1" }),
-      sorted({ id: "F2", bucket: "consider", kind: "logic", category: "test_gap" }),
+      sorted({ id: "F2", bucket: "consider", kind: "logic", category: "test_gap", rule: "" }),
       sorted({ id: "F3", bucket: "noted" }),
       sorted({ id: "F4", bucket: "dismissed" }),
     ];
+    // each row carries its rule ID, "logic" for a logic finding with no rule (#488)
     expect(trackedOf(all)).toEqual([
-      { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 10 },
-      { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 10 },
+      { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 10, rule: "R1" },
+      { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 10, rule: "logic" },
     ]);
+    // and the round's findings, every bucket, are counted per rule ID and bucket for the timeline (#488)
+    expect(foundOf([...all, sorted({ id: "F5" })])).toEqual({
+      R1: { act_on: 2, noted: 1, dismissed: 1 },
+      logic: { consider: 1 },
+    });
   });
 
   it("reads the earlier head's changed spans from git diff -U0; an insertion touches the line after it", () => {
@@ -160,8 +167,17 @@ describe("acted on, the parts", () => {
     expect(await actedSince(input)).toEqual({
       since,
       rows: [
-        { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 3, acted: true },
-        { id: "F2", lens: "rule", category: "bug", bucket: "consider", file: "a.ts", line: 25, acted: false },
+        { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 3, rule: "R1", acted: true },
+        {
+          id: "F2",
+          lens: "rule",
+          category: "bug",
+          bucket: "consider",
+          file: "a.ts",
+          line: 25,
+          rule: "R1",
+          acted: false,
+        },
       ],
     });
     expect(await actedSince({ ...input, head: "f".repeat(40) })).toBe("none");
@@ -203,4 +219,27 @@ describe("acted on, in the run records and usage", () => {
     });
     expect((await readRecords(where)).kind).toBe("failed");
   });
+
+  it.each([
+    ["a list", [{ act_on: 1 }]],
+    ["a bucket that is not one", { CR1: { later: 1 } }],
+    ["a count that is not whole", { CR1: { act_on: 1.5 } }],
+    ["a rule with no counts", { CR1: {} }],
+  ])(
+    "keeps a round's findings per rule ID and bucket on its line, and refuses found as %s (#488)",
+    async (_why, found) => {
+      const where = { home: dir, project: "ledger", ticket: "PROJ-2" };
+      const kept = { CR1: { act_on: 2, noted: 1 }, logic: { consider: 1 } };
+      await record({
+        where,
+        event: { at: "2026-11-09T10:00:00Z", kind: "review-ended", head: "2".repeat(40), actOn: 2, found: kept },
+      });
+      expect(await readRecords(where)).toMatchObject({ kind: "ok", value: [{ kind: "review-ended", found: kept }] });
+      const line = { at: "2026-11-09T11:00:00Z", kind: "review-ended", head: "3".repeat(40), actOn: 0, found };
+      writeFileSync(join(dir, "runs", "ledger", "PROJ-2.jsonl"), `${JSON.stringify(line)}\n${JSON.stringify(line)}\n`, {
+        flag: "a",
+      });
+      expect((await readRecords(where)).kind).toBe("failed");
+    },
+  );
 });

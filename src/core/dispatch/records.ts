@@ -36,7 +36,8 @@ import type { PluginHash } from "../process/use.js";
 import { scrubbedJson } from "../scrub.js";
 import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
-import { isActedRow, type Acted } from "../review/acted-on.js";
+import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js";
+import { BUCKETS } from "../finding.js";
 
 // "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
@@ -178,6 +179,8 @@ export type Event =
       readonly lenses?: Readonly<Record<string, number>>;
       // the findings the cite check noted as "cite not found" (#485); none on an older line
       readonly citesNotFound?: number;
+      // every finding of the round, per rule ID and bucket (#488); none on a reused round or an older line
+      readonly found?: FoundByRule;
       // each pass's trace, plain file names in the ticket's folder (trace.ts, #487); none on an older line
       readonly traces?: readonly string[];
     }
@@ -412,13 +415,7 @@ function spendIn(value: unknown): Spend | Bad {
 
 // findersIn : each finder's spend by its lens, or BAD when it is not an object of spends
 function findersIn(raw: unknown): Readonly<Record<string, Spend>> | Bad {
-  const isMap = typeof raw === "object" && raw !== null && !Array.isArray(raw);
-  const entries = entriesOf(raw);
-  const finders = entries.flatMap(([lens, s]) => {
-    const spend = spendIn(s);
-    return spend === BAD ? [] : [[lens, spend] as const];
-  });
-  return isMap && finders.length === entries.length ? Object.fromEntries(finders) : BAD;
+  return recordOf(raw, spendIn);
 }
 
 // splitField : a review round's spend per run (#337), as a field to spread: none on a line that has none
@@ -732,7 +729,57 @@ function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
   if (n === undefined) {
     return {};
   }
-  return Number.isSafeInteger(n) && Number(n) >= 0 ? { citesNotFound: Number(n) } : BAD;
+  return isCount(n) ? { citesNotFound: Number(n) } : BAD;
+}
+
+const FOUND_BUCKETS: ReadonlySet<string> = new Set(BUCKETS);
+
+// isCount : a whole number of zero or more. Pure.
+function isCount(n: unknown): boolean {
+  return Number.isSafeInteger(n) && Number(n) >= 0;
+}
+
+// isBucketCounts : one rule's counts per bucket. Pure.
+function isBucketCounts(value: unknown): boolean {
+  const entries = entriesOf(value);
+  return entries.length > 0 && entries.every(([bucket, n]) => FOUND_BUCKETS.has(bucket) && isCount(n));
+}
+
+// foundField : a review line's findings per rule ID and bucket (#488), as a field to spread; none on an older line
+function foundField(raw: unknown): { readonly found?: FoundByRule } | Bad {
+  const found = prop(raw, "found");
+  if (found === undefined) {
+    return {};
+  }
+  const entries = entriesOf(found);
+  return isPlain(found) && entries.every(([, per]) => isBucketCounts(per))
+    ? {
+        found: Object.fromEntries(
+          entries.map(([rule, per]) => [rule, Object.fromEntries(entriesOf(per).map(([b, n]) => [b, Number(n)]))]),
+        ),
+      }
+    : BAD;
+}
+
+// recordOf : an object whose every value `read` accepts, as a plain record, or BAD. Pure.
+function recordOf<T>(value: unknown, read: (v: unknown) => T | Bad): Readonly<Record<string, T>> | Bad {
+  if (!isPlain(value)) {
+    return BAD;
+  }
+  const out: Record<string, T> = {};
+  for (const [k, v] of entriesOf(value)) {
+    const got = read(v);
+    if (got === BAD) {
+      return BAD;
+    }
+    out[k] = got;
+  }
+  return out;
+}
+
+// isPlain : an object, not an array or null. Pure.
+function isPlain(value: unknown): value is object {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function reviewEndedOf(raw: unknown, at: string): Event | Bad {
@@ -745,6 +792,7 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     actedField(raw),
     lensesField(raw),
     citesField(raw),
+    foundField(raw),
     tracesField(raw),
   ];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));

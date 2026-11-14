@@ -66,7 +66,7 @@ import { nextStep } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
-import type { Acted } from "../review/acted-on.js";
+import type { Acted, FoundByRule } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
@@ -1020,6 +1020,7 @@ function reviewEnded(
     readonly acted?: Acted;
     readonly lenses?: Readonly<Record<string, number>>;
     readonly citesNotFound?: number;
+    readonly found?: FoundByRule;
     readonly traces?: readonly string[];
   },
 ): Promise<Done> {
@@ -1031,14 +1032,37 @@ function reviewEnded(
       head,
       actOn: value.actOn,
       spend: value.spend,
-      ...(value.split === undefined ? {} : { split: value.split }),
-      ...(value.acted === undefined ? {} : { acted: value.acted }),
-      ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
-      ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
+      ...splitIn(value),
+      ...ratings(value),
+      ...counts(value),
       ...tracesIn(value),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });
+}
+
+// ratings : a posted round's acted-on rows and unique findings per lens, as fields to spread; none it does not have
+// (#220, #237). Pure.
+function ratings(value: { readonly acted?: Acted; readonly lenses?: Readonly<Record<string, number>> }): {
+  readonly acted?: Acted;
+  readonly lenses?: Readonly<Record<string, number>>;
+} {
+  return {
+    ...(value.acted === undefined ? {} : { acted: value.acted }),
+    ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
+  };
+}
+
+// counts : a posted round's cites not found and findings per rule ID, as fields to spread; none it does not have
+// (#485, #488). Pure.
+function counts(value: { readonly citesNotFound?: number; readonly found?: FoundByRule }): {
+  readonly citesNotFound?: number;
+  readonly found?: FoundByRule;
+} {
+  return {
+    ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
+    ...(value.found === undefined ? {} : { found: value.found }),
+  };
 }
 
 // splitIn : a round's spend per run, as a field to spread; none when it has none (#337). Pure.

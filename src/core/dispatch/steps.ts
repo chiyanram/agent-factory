@@ -3,7 +3,7 @@
 // (writer/step.ts, ready/steps.ts, review/step.ts, design/step.ts) and import this file, not the pass. The contract
 // still names a few of the pass's types (ChangeView, Task, EarlierRound), so a change to those reaches the steps too.
 
-import type { Acted } from "../review/acted-on.js";
+import type { Acted, FoundByRule } from "../review/acted-on.js";
 import type { DesignFinding, Kept } from "../design/findings.js";
 import type { Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
@@ -94,6 +94,8 @@ export type Steps = {
               readonly acted?: Acted;
               readonly lenses?: Readonly<Record<string, number>>;
               readonly citesNotFound?: number;
+              // every finding of the round, per rule ID and bucket (#488)
+              readonly found?: FoundByRule;
               // each pass's trace, plain file names in the ticket's folder (trace.ts, #487)
               readonly traces?: readonly string[];
             }>
