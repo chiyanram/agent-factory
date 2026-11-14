@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   changedFiles,
@@ -56,6 +56,27 @@ describe("fetching a plugin version (#232)", () => {
       commit.kind === "ok" ? await fetchPlugin({ home, env: GIT_ENV, ref: other, commit: commit.value }) : commit;
     expect(got).toMatchObject({ kind: "failed", reason: expect.stringContaining("lists no plugin other") });
     expect(await targetCommit(GIT_ENV, join(home, "none"), undefined)).toMatchObject({ kind: "failed" });
+  });
+
+  it("fetches a full commit the clone lacks from origin; a short commit or a word is never fetched (#607)", async () => {
+    setUpMarket(home);
+    const market = marketplaceDir(home, "chiyanram");
+    // a commit made on origin after the clone: the clone does not have it yet
+    const later = commitMarket(home, { "plugins/rulebook/NEW.md": "x" });
+    // never fetched: the refusal is commitOf's, never a failed fetch, and an option word runs no program
+    const short = await targetCommit(GIT_ENV, market, later.slice(0, 12));
+    expect(short).toMatchObject({ kind: "failed", reason: expect.not.stringContaining("cannot fetch") });
+    const planted = join(home, "planted");
+    const option = await targetCommit(GIT_ENV, market, `--upload-pack=touch ${planted}`);
+    expect(option).toMatchObject({ kind: "failed", reason: expect.not.stringContaining("cannot fetch") });
+    expect(existsSync(planted)).toBe(false);
+    expect(await targetCommit(GIT_ENV, market, later)).toEqual({ kind: "ok", value: later });
+    expect((await fetched(later)).commit).toBe(later);
+    // a full commit origin does not have either: refused, with the reason
+    expect(await targetCommit(GIT_ENV, market, "b".repeat(40))).toEqual({
+      kind: "failed",
+      reason: expect.stringContaining(`cannot fetch ${"b".repeat(40)}`),
+    });
   });
 
   it("the marketplace entry must name a folder inside the marketplace; changes are listed by path", () => {

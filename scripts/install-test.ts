@@ -15,7 +15,8 @@
 //   3. agent-factory start demo 1 --no-loop     a person's START on issue 1, whose body is the spec
 //   4. agent-factory dispatch demo --dry-run    reaches the decision table, exits 0 and names a decision for ticket 1
 // A signal, a spawn error, a stack trace or an uncaught error fails it; so does any non-zero exit of start or the dry
-// run, and any failed init check but the model login.
+// run, any failed init check but the model login, and a pin of rulebook@chiyanram at any commit but the one
+// .github/rules-pack.json names (#607).
 //
 // Runs on Node's type stripping (Node 22.18+), so it uses only erasable TypeScript.
 
@@ -53,6 +54,8 @@ export type Seen = {
   readonly branch: string;
   // the files init must leave, each with whether it is there
   readonly files: Readonly<Record<string, boolean>>;
+  // the commit init pinned rulebook@chiyanram at, and the commit .github/rules-pack.json names; "" when there is none
+  readonly pin: { readonly written: string; readonly engine: string };
 };
 
 // the checks init may fail on a clean machine: the logins a person makes after install, never the install itself
@@ -112,6 +115,18 @@ function onMain(branch: string): readonly string[] {
   return branch === "main" ? [] : [`the demo clone is on ${JSON.stringify(branch)}, not main`];
 }
 
+// pinProblems : init pinned rulebook@chiyanram at the engine's rules-pack pin, never at skills HEAD (#607). Pure.
+function pinProblems(pin: Seen["pin"]): readonly string[] {
+  if (pin.engine === "") {
+    return ["the engine's rules-pack pin (.github/rules-pack.json) has no commit"];
+  }
+  return pin.written === pin.engine
+    ? []
+    : [
+        `init pinned rulebook@chiyanram at ${pin.written === "" ? "nothing" : pin.written}, not the engine's rules-pack pin ${pin.engine}`,
+      ];
+}
+
 // problems : what the install test found wrong, one line each; none means it passed. Pure.
 export function problems(seen: Seen, version: string): readonly string[] {
   return [
@@ -125,6 +140,7 @@ export function problems(seen: Seen, version: string): readonly string[] {
     ...exitOk("dispatch --dry-run", seen.dispatch),
     ...decided(seen.dispatch),
     ...onMain(seen.branch),
+    ...pinProblems(seen.pin),
   ];
 }
 
@@ -247,6 +263,21 @@ function clone(root: string, env: NodeJS.ProcessEnv): string {
   return dir;
 }
 
+// field : a string at this path of a JSON file, or "" when the file, the path or the string is not there
+function field(path: string, keys: readonly string[]): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  } catch {
+    return "";
+  }
+  const value = keys.reduce<unknown>(
+    (v, k) => (typeof v === "object" && v !== null ? Reflect.get(v, k) : undefined),
+    parsed,
+  );
+  return typeof value === "string" ? value : "";
+}
+
 function srtVersionOf(repo: string): string {
   const text = readFileSync(join(repo, "src", "core", "box", "srt-plan.ts"), "utf8");
   return /export const SRT_VERSION = "([^"]+)"/.exec(text)?.[1] ?? "";
@@ -276,6 +307,10 @@ function main(): number {
           existsSync(join(factory, f)),
         ]),
       ),
+      pin: {
+        written: field(join(factory, "projects", "demo.plugins.json"), ["rulebook@chiyanram", "commit"]),
+        engine: field(join(repo, ".github", "rules-pack.json"), ["commit"]),
+      },
     };
     for (const [name, r] of Object.entries({ init: seen.init, start: seen.start, dispatch: seen.dispatch })) {
       process.stdout.write(`--- ${name} (exit ${String(r.code)})\n${r.out}${r.err}\n`);

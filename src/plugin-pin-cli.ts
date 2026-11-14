@@ -1,8 +1,8 @@
 // plugin-pin-cli — `agent-factory plugin update <project> <name@marketplace> [<commit>]` (#232; docs/DESIGN.md section 5
-// "Plugins": updating is deliberate). It fetches the marketplace's clone (or takes the given commit), copies the
-// plugin into the store by its hash, shows what changes against the pin, then runs config check and reads the process
-// of the project's plugins with the new version in. Only when both pass does it move the pin. The eval set is not run
-// here: `agent-factory eval reviewer` runs it, and spends money.
+// "Plugins": updating is deliberate). It fetches the marketplace's clone (or takes the given commit, and fetches a full
+// commit the clone lacks, #607), copies the plugin into the store by its hash, shows what changes against the pin,
+// then runs config check and reads the process of the project's plugins with the new version in. Only when both pass
+// does it move the pin. The eval set is not run here: `agent-factory eval reviewer` runs it, and spends money.
 
 import { access } from "node:fs/promises";
 import type { Result } from "./core/forge/api.js";

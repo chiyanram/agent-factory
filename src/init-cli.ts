@@ -23,7 +23,7 @@ import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { readKnowledge } from "./core/onboard/home.js";
 import { initialProject } from "./core/plugin/config.js";
-import { marketplaceDir, readPins } from "./core/process/pins.js";
+import { marketplaceDir, readPins, type PackPin } from "./core/process/pins.js";
 import { pluginListOf, refText, type PluginRef } from "./core/process/plugins.js";
 import { projectPath } from "./core/project.js";
 import { userPath } from "./core/settings/layers.js";
@@ -61,6 +61,9 @@ export type InitIo = {
   readonly probes: Probes;
   // each marketplace init knows, by its name: where to clone it from when it is not in the factory home yet
   readonly markets: Readonly<Record<string, string>>;
+  // the engine's rules-pack pin (.github/rules-pack.json in the package): the commit init pins chiyanram's plugins at
+  // (#607); when it failed, only their pin fails, with the reason
+  readonly enginePin: Result<PackPin>;
   // writes the coordinator's settings and instructions (agent-factory setup coordinator), so setup is three commands:
   // install, init, start (#485); none in a test that leaves it out
   readonly setupCoordinator?: () => Promise<Result<string>>;
@@ -337,29 +340,56 @@ async function pinnedAt(io: InitIo, name: string, word: string): Promise<string>
   return pin === undefined ? "" : pin.commit.slice(0, 12);
 }
 
+// ENGINE_MARKET : the marketplace whose plugins init pins at the engine's rules-pack pin, never at its HEAD (#607)
+const ENGINE_MARKET = "chiyanram";
+
+// pinCommit : the commit init pins this plugin at: the engine's pin for chiyanram, none (its HEAD) for another
+// marketplace; failed when chiyanram's pin cannot be read
+function pinCommit(io: InitIo, ref: PluginRef): Result<string | undefined> {
+  if (ref.marketplace !== ENGINE_MARKET) {
+    return { kind: "ok", value: undefined };
+  }
+  return io.enginePin.kind === "ok" ? { kind: "ok", value: io.enginePin.value.commit } : io.enginePin;
+}
+
+// updateLine : the plugin update command that pins this plugin, at the commit when one is given. Pure.
+function updateLine(name: string, word: string, commit: string | undefined): string {
+  return `agent-factory plugin update ${name} ${word}${commit === undefined ? "" : ` ${commit}`}`;
+}
+
 async function pinOne(io: InitIo, name: string, ref: PluginRef, yes: boolean): Promise<Check> {
   const word = refText(ref);
   const commit = await pinnedAt(io, name, word);
   if (commit !== "") {
     return { ok: true, line: `plugin ${word} pinned at ${commit}`, fix: "" };
   }
-  const how = `agent-factory plugin update ${name} ${word}`;
+  const target = pinCommit(io, ref);
+  if (target.kind === "failed") {
+    return { ok: false, line: `plugin ${word}: ${target.reason}`, fix: "reinstall agent-factory" };
+  }
+  const how = updateLine(name, word, target.value);
   const from = io.markets[ref.marketplace] ?? ref.marketplace;
   io.out(
     `\nPin ${word}: clone ${from} to ${marketplaceDir(io.home, ref.marketplace)} if it is not there, then ${how}: it copies the plugin by its hash, shows its files, runs config check, then pins it.\n`,
   );
   return (await yesNo(io, yes, "Pin it now? [Y/n] ", true))
-    ? pinNow(io, name, ref, how)
+    ? pinNow(io, name, ref, target.value, how)
     : { ok: false, line: `plugin ${word}: not pinned`, fix: how };
 }
 
-async function pinNow(io: InitIo, name: string, ref: PluginRef, how: string): Promise<Check> {
+async function pinNow(
+  io: InitIo,
+  name: string,
+  ref: PluginRef,
+  commit: string | undefined,
+  how: string,
+): Promise<Check> {
   const word = refText(ref);
   const market = await cloneMarket(io, ref);
   if (market.kind === "failed") {
     return { ok: false, line: `plugin ${word}: ${market.reason}`, fix: how };
   }
-  const code = await pinUpdate(io, name, word, undefined);
+  const code = await pinUpdate(io, name, word, commit);
   return code === 0
     ? { ok: true, line: `plugin ${word} pinned`, fix: "" }
     : { ok: false, line: `plugin ${word}: plugin update failed (above)`, fix: how };

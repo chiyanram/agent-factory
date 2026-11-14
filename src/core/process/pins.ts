@@ -125,6 +125,23 @@ export async function readPins(home: string, project: string): Promise<Result<Pi
     : failed(`${path}: must map each name@marketplace to {"commit", "version", "sha256"}`);
 }
 
+// ---- the engine's rules-pack pin (#607)
+
+// the chiyanram/skills commit this engine is tested with (CI's rules-pack check); init pins chiyanram's plugins at it
+export type PackPin = { readonly repo: string; readonly commit: string; readonly tag: string };
+
+// enginePackPin : <pkg>/.github/rules-pack.json, which the npm package ships; refused when missing or bad, never HEAD
+export async function enginePackPin(pkgDir: string): Promise<Result<PackPin>> {
+  const path = join(pkgDir, ".github", "rules-pack.json");
+  const raw = parsedJson(await readFile(path, "utf8").catch(() => ""));
+  const repo = matching(prop(raw, "repo"), /./);
+  const commit = matching(prop(raw, "commit"), COMMIT);
+  const tag = matching(prop(raw, "tag"), /./);
+  return repo === undefined || commit === undefined || tag === undefined
+    ? failed(`${path}: must hold {"repo", "commit" (a full commit), "tag"}`)
+    : { kind: "ok", value: { repo, commit, tag } };
+}
+
 export async function writePins(home: string, project: string, pins: Pins): Promise<Result<string>> {
   const path = pinsPath(home, project);
   const temp = `${path}.${process.pid}.tmp`;

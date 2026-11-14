@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { appendFileSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pinnedPlugins, pinsPath, readPins, storeDir, treeHash, writePins } from "../src/core/process/pins.js";
+import {
+  enginePackPin,
+  pinnedPlugins,
+  pinsPath,
+  readPins,
+  storeDir,
+  treeHash,
+  writePins,
+} from "../src/core/process/pins.js";
 import { projectPath } from "../src/core/project.js";
 import { tempDir } from "./temp.js";
 
@@ -96,5 +104,37 @@ describe("plugin pins (#232)", () => {
       expect((await readPins(home, "ledger")).kind).toBe("failed");
     }
     expect(pinsPath(home, "ledger")).toBe(join(home, "projects", "ledger.plugins.json"));
+  });
+});
+
+describe("the engine's rules-pack pin (#607)", () => {
+  const PACK = {
+    repo: "https://github.com/chiyanram/skills",
+    commit: "7285d8a0b15862068915b0b6fe66335d9b0c0ade",
+    tag: "rulebook--v2.0.0",
+  };
+  function pinFile(text: string): void {
+    mkdirSync(join(home, ".github"), { recursive: true });
+    writeFileSync(join(home, ".github", "rules-pack.json"), text);
+  }
+
+  it("reads the repo, the full commit and the tag from <pkg>/.github/rules-pack.json", async () => {
+    pinFile(JSON.stringify(PACK));
+    expect(await enginePackPin(home)).toEqual({ kind: "ok", value: PACK });
+  });
+
+  it("refuses a missing file, a file that is not JSON, a short or named commit, and a missing repo or tag", async () => {
+    const path = join(home, ".github", "rules-pack.json");
+    expect(await enginePackPin(home)).toEqual({ kind: "failed", reason: expect.stringContaining(path) });
+    for (const bad of [
+      "not json",
+      JSON.stringify({ ...PACK, commit: "7285d8a" }),
+      JSON.stringify({ ...PACK, commit: "HEAD" }),
+      JSON.stringify({ commit: PACK.commit, tag: PACK.tag }),
+      JSON.stringify({ repo: PACK.repo, commit: PACK.commit }),
+    ]) {
+      pinFile(bad);
+      expect(await enginePackPin(home)).toEqual({ kind: "failed", reason: expect.stringContaining(path) });
+    }
   });
 });
