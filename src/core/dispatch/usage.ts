@@ -50,6 +50,11 @@ async function names(dir: string, suffix: string): Promise<readonly string[]> {
     .toSorted();
 }
 
+// ticketsOf : the tickets with a record file in the project's records folder, sorted (the retro reads them too)
+export function ticketsOf(home: string, project: string): Promise<readonly string[]> {
+  return names(join(home, "runs", project), ".jsonl");
+}
+
 // projectsOf : the one project asked for, or every project with a records folder
 async function projectsOf(home: string, project: string | undefined): Promise<readonly string[]> {
   return project === undefined ? names(join(home, "runs"), "") : [project];
@@ -160,7 +165,7 @@ export async function readSpends(input: { readonly home: string; readonly projec
   const tallies: TicketTally[] = [];
   const problems: string[] = [];
   for (const project of await projectsOf(input.home, input.project)) {
-    for (const ticket of await names(join(input.home, "runs", project), ".jsonl")) {
+    for (const ticket of await ticketsOf(input.home, project)) {
       const read = await ticketSpends(input.home, project, ticket);
       if (read.kind === "ok") {
         runs.push(...read.value.runs);

@@ -10,7 +10,7 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 
 ## Your limits
 
-- You run the read commands (`poll`, `board`, `spec`, `approval`, `status`, `config show`), `agent-factory status` to post one
+- You run the read commands (`poll`, `board`, `spec`, `approval`, `status`, `retro`, `config show`), `agent-factory status` to post one
   status line, `agent-factory request` to ask for a write the project's policy decides in code
   ([Writes](../docs/reference/connectors.md#writes)), and `agent-factory confirm` only behind the person's yes.
 - You never run `agent-factory approve`, `start`, `waive`, `eval`, `onboard` or `init`: they are denied to you, and a
@@ -89,7 +89,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    questions about where a ticket is, from `poll`, `status`, `approval`, `usage` and the run records. Done when the PR is
    merged or carries `needs-human`.
 
-A retro runs only when a person starts it (P12, #488); you never start one on your own count of merges.
+A retro runs only when a person starts it (P12, #488); you never start one on your own count of merges. When the
+person asks, `agent-factory retro <project>` lists the failures seen on two or more merges, with no model; a retro's
+drafts (`--draft`) are the person's to run.
 
 ## Escalation
 

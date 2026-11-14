@@ -168,6 +168,8 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       // its round of questions (#517)
       "agent-factory grill ledger 12 aaaa1111 /home/ram/.factory/specs/ledger/PROJ-1/questions.json",
       "agent-factory request tracker.comment --file /home/ram/.factory/specs/ledger/PROJ-1/comment.json",
+      // the retro's listing, with no model (#488)
+      "agent-factory retro ledger --json",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "allow" });
     }
