@@ -1055,23 +1055,36 @@ function reviewEnded(
       actOn: value.actOn,
       spend: value.spend,
       ...splitIn(value),
-      ...roundFields(value),
+      ...ratings(value),
+      ...counts(value),
       ...tracesIn(value),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });
 }
 
-// roundFields : a posted round's ratings, unique findings per lens, cites not found and findings per rule, as fields to
-// spread; none of those a round does not have (#220, #237, #485, #488). Pure.
-function roundFields(value: {
+// ratings : a posted round's acted-on rows and unique findings per lens, as fields to spread; none it does not have
+// (#220, #237). Pure.
+function ratings(value: { readonly acted?: Acted; readonly lenses?: Readonly<Record<string, number>> }): {
   readonly acted?: Acted;
   readonly lenses?: Readonly<Record<string, number>>;
+} {
+  return {
+    ...(value.acted === undefined ? {} : { acted: value.acted }),
+    ...(value.lenses === undefined ? {} : { lenses: value.lenses }),
+  };
+}
+
+// counts : a posted round's cites not found and findings per rule ID, as fields to spread; none it does not have
+// (#485, #488). Pure.
+function counts(value: { readonly citesNotFound?: number; readonly found?: FoundByRule }): {
   readonly citesNotFound?: number;
   readonly found?: FoundByRule;
-}): Partial<Pick<Extract<Event, { kind: "review-ended" }>, "acted" | "lenses" | "citesNotFound" | "found">> {
-  const fields = { acted: value.acted, lenses: value.lenses, citesNotFound: value.citesNotFound, found: value.found };
-  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+} {
+  return {
+    ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
+    ...(value.found === undefined ? {} : { found: value.found }),
+  };
 }
 
 // splitIn : a round's spend per run, as a field to spread; none when it has none (#337). Pure.

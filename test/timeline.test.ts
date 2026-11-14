@@ -51,7 +51,11 @@ const EVENTS: readonly Event[] = [
     evidence: [],
     hung: false,
   },
+  // a round reused at the same patch writes a line, and is not a round that ran
+  { at: "2026-11-13T10:05:00Z", kind: "review-ended", head: H, actOn: 0, spend: { usd: 0, tokens: 0 } },
   { at: "2026-11-13T10:10:00Z", kind: "blocked", why: "the writer asked for a person" },
+  // a second hand-over line while the first is open: the wait and the why stay the first's
+  { at: "2026-11-13T10:20:00Z", kind: "blocked", why: "the claim went quiet" },
   { at: "2026-11-13T11:10:00Z", kind: "begun", by: "mo", via: "terminal" },
   {
     at: "2026-11-13T11:30:00Z",
@@ -130,6 +134,13 @@ describe("a timeline line in the run records (#488)", () => {
     expect(read.kind === "ok" ? read.value : read).toEqual([line]);
   });
 
+  it("refuses a review-ended line whose found is a list, not counts per rule ID", async () => {
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    const line = { at: "2026-11-13T09:30:00Z", kind: "review-ended", head: H, actOn: 0, found: [{ act_on: 1 }] };
+    appendFileSync(join(home, "runs", "ledger", "PROJ-9.jsonl"), `${JSON.stringify(line)}\n`);
+    expect((await readRecords(where())).kind).toBe("failed");
+  });
+
   it.each([
     ["a count that is not whole", { rounds: 1.5 }],
     ["acted above of", { acted: { CR1: { acted: 3, of: 2 } } }],
@@ -138,6 +149,8 @@ describe("a timeline line in the run records (#488)", () => {
     ["a rescue whose wait is not a count", { rescues: [{ at: "2026-11-13T11:10:00Z", waitedMs: "1h", why: "w" }] }],
     ["a spend that is not one", { spend: { implementer: { usd: -1, tokens: 0 } } }],
     ["no found at all", { found: undefined }],
+    ["found as a list", { found: [] }],
+    ["a spend under a key that is not a run kind", { spend: { bogus: { usd: 1, tokens: 1 } } }],
   ])("refuses a line with %s", async (_why, over) => {
     const line = { ...timelineOf([], { number: 9, at: "2026-11-13T12:00:00Z" }), ...over };
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });

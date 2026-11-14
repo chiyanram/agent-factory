@@ -34,12 +34,11 @@ import { isVia, type Via } from "../human-record.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
 import { scrubbedJson } from "../scrub.js";
-import { addSpend, NO_SPEND, type RoundSpend, type Spend } from "./spend.js";
+import { addSpend, NO_SPEND, RUN_KINDS, type RoundSpend, type RunKind, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js";
 import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
-import type { RunKind } from "./usage.js";
 
 // "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
@@ -430,13 +429,7 @@ function spendIn(value: unknown): Spend | Bad {
 
 // findersIn : each finder's spend by its lens, or BAD when it is not an object of spends
 function findersIn(raw: unknown): Readonly<Record<string, Spend>> | Bad {
-  const isMap = typeof raw === "object" && raw !== null && !Array.isArray(raw);
-  const entries = entriesOf(raw);
-  const finders = entries.flatMap(([lens, s]) => {
-    const spend = spendIn(s);
-    return spend === BAD ? [] : [[lens, spend] as const];
-  });
-  return isMap && finders.length === entries.length ? Object.fromEntries(finders) : BAD;
+  return recordOf(raw, spendIn);
 }
 
 // splitField : a review round's spend per run (#337), as a field to spread: none on a line that has none
@@ -750,7 +743,7 @@ function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
   if (n === undefined) {
     return {};
   }
-  return Number.isSafeInteger(n) && Number(n) >= 0 ? { citesNotFound: Number(n) } : BAD;
+  return isCount(n) ? { citesNotFound: Number(n) } : BAD;
 }
 
 const FOUND_BUCKETS: ReadonlySet<string> = new Set(BUCKETS);
@@ -773,7 +766,7 @@ function foundField(raw: unknown): { readonly found?: FoundByRule } | Bad {
     return {};
   }
   const entries = entriesOf(found);
-  return typeof found === "object" && found !== null && entries.every(([, per]) => isBucketCounts(per))
+  return isPlain(found) && entries.every(([, per]) => isBucketCounts(per))
     ? {
         found: Object.fromEntries(
           entries.map(([rule, per]) => [rule, Object.fromEntries(entriesOf(per).map(([b, n]) => [b, Number(n)]))]),
@@ -842,6 +835,12 @@ function rescuesOf(raw: unknown): readonly Rescue[] | Bad {
   return read.every((r): r is Rescue => r !== BAD) ? read : BAD;
 }
 
+// spendByKind : a timeline line's spend per run kind, or BAD when a key is not a run kind or a spend is not one. Pure.
+function spendByKind(raw: unknown): Readonly<Partial<Record<RunKind, Spend>>> | Bad {
+  const spend = recordOf(prop(raw, "spend"), spendIn);
+  return spend !== BAD && Object.keys(spend).every((k) => RUN_KINDS.some((kind) => kind === k)) ? spend : BAD;
+}
+
 // countsIn : a timeline line's two whole counts, or BAD. Pure.
 function countsIn(raw: unknown): { readonly rounds: number; readonly unmeasured: number } | Bad {
   const [rounds, unmeasured] = [prop(raw, "rounds"), prop(raw, "unmeasured")];
@@ -857,7 +856,7 @@ function timelineParts(raw: unknown): Omit<Extract<Event, { kind: "timeline" }>,
     ...(
       [
         ["acted", recordOf(prop(raw, "acted"), actedCountsOf)],
-        ["spend", recordOf(prop(raw, "spend"), spendIn)],
+        ["spend", spendByKind(raw)],
         ["rescues", rescuesOf(raw)],
       ] as const
     ).map(([name, v]) => (v === BAD ? BAD : { [name]: v })),

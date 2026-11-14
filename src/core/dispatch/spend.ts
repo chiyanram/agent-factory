@@ -15,6 +15,37 @@ export type Spend = { readonly usd: number; readonly tokens: number };
 
 export const NO_SPEND: Spend = { usd: 0, tokens: 0 };
 
+// RunKind : what a run was, in the glossary's role names (#337), as far as its record tells: an automated review's round line
+// splits its spend into each finder's, by lens, and the verify pass's; an older round line that has no split is one
+// "automated review". A design review records each of its two runs, the design-reviewer's and the verify pass's. A
+// spent line from the ready check or the local verifier, which run no model, is never written; it is named for what it
+// is all the same.
+export type RunKind =
+  | "design-reviewer"
+  | "test-first"
+  | "implementer"
+  | "cleanup"
+  | "finder"
+  | "verify pass"
+  | "onboarder"
+  | "automated review"
+  | "ready check"
+  | "local verifier";
+
+// the order the kinds are shown in: the glossary's order of the roles, then the older round lines
+export const RUN_KINDS: readonly RunKind[] = [
+  "design-reviewer",
+  "test-first",
+  "implementer",
+  "cleanup",
+  "finder",
+  "verify pass",
+  "onboarder",
+  "automated review",
+  "ready check",
+  "local verifier",
+];
+
 // a run that failed after it spent: its spend is still recorded, as a "spent" line (#131, #483); none when the run
 // reported none
 export type FailedSpent = {

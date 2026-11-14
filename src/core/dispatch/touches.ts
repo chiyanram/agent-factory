@@ -19,8 +19,14 @@ import { shownAt, shownFor, type Zone } from "../zone.js";
 import { outcomeLines, type MergeOutcome } from "../outcome.js";
 
 export type TouchKind = "approve" | "answer" | "rescue" | "merge";
-// by: who acted, when the records say; none when they do not
-export type Touch = { readonly kind: TouchKind; readonly at: string; readonly waitedMs: number; readonly by?: string };
+// by: who acted, when the records say; none when they do not. why: a rescue's hand-over, as its blocked line gave it
+export type Touch = {
+  readonly kind: TouchKind;
+  readonly at: string;
+  readonly waitedMs: number;
+  readonly by?: string;
+  readonly why?: string;
+};
 
 export type TicketTally = {
   readonly project: string;
@@ -61,12 +67,14 @@ function answerTouches(events: readonly Event[]): readonly Touch[] {
 type Heard = {
   readonly touches: readonly Touch[];
   readonly blocked: string;
+  // the open hand-over's why: its first blocked line's, the line its wait runs from
+  readonly why: string;
   readonly begun: string;
   readonly verified: string;
   readonly pinged: string;
 };
 
-const NOTHING_HEARD: Heard = { touches: [], blocked: "", begun: "", verified: "", pinged: "" };
+const NOTHING_HEARD: Heard = { touches: [], blocked: "", why: "", begun: "", verified: "", pinged: "" };
 
 // waited : the ms from a time, or "" for none, to another. Pure.
 function waited(from: string, to: string): number {
@@ -76,9 +84,10 @@ function waited(from: string, to: string): number {
 // actedOn : a START or approval: a rescue when a hand-over is open, else an approval's own touch; a START with none
 // open is no touch. Pure.
 function actedOn(state: Heard, e: Extract<Event, { kind: "begun" | "approved" }>): Heard {
-  const next = { ...state, begun: e.kind === "begun" ? e.at : state.begun, blocked: "" };
+  const next = { ...state, begun: e.kind === "begun" ? e.at : state.begun, blocked: "", why: "" };
   if (state.blocked !== "") {
-    const rescue: Touch = { kind: "rescue", at: e.at, by: e.by, waitedMs: waited(state.blocked, e.at) };
+    const waitedMs = waited(state.blocked, e.at);
+    const rescue: Touch = { kind: "rescue", at: e.at, by: e.by, waitedMs, why: state.why };
     return { ...next, touches: [...state.touches, rescue] };
   }
   if (e.kind === "begun") {
@@ -93,7 +102,8 @@ function actedOn(state: Heard, e: Extract<Event, { kind: "begun" | "approved" }>
 
 // MARKS : what a line marks: an open hand-over, a design verify pass's end, a gate-green ping
 const MARKS: Partial<Record<Event["kind"], (state: Heard, e: Event) => Partial<Heard>>> = {
-  blocked: (state, e) => ({ blocked: state.blocked || e.at }),
+  blocked: (state, e) =>
+    state.blocked === "" && e.kind === "blocked" ? { blocked: e.at, why: e.why } : { blocked: state.blocked || e.at },
   "design-ended": (_, e) => (e.kind === "design-ended" && e.step === "verify" ? { verified: e.at } : {}),
   pinged: (_, e) => ({ pinged: e.at }),
 };

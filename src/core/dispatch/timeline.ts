@@ -4,7 +4,8 @@
 // as the merged line, #487), and written once. The retro reads it (#488). Pure.
 //
 // What each part counts:
-//   rounds     the review-ended lines
+//   rounds     the review rounds that ran: a review-ended line with its findings or its lenses; a reused round, or one
+//              a restart found already posted, writes a line too, and is not a round
 //   found      every finding of each round, per rule ID and bucket (review-ended found); a round written before #488
 //              has none
 //   acted      each round's rating of the round before: of its Act on and Consider findings, how many a later commit
@@ -18,9 +19,9 @@
 import type { FoundByRule } from "../review/acted-on.js";
 import { BUCKETS, type Bucket } from "../finding.js";
 import type { Event } from "./records.js";
-import { addSpend, type Spend } from "./spend.js";
+import { RUN_KINDS, type RunKind, type Spend } from "./spend.js";
 import { touchesOf, type Touch } from "./touches.js";
-import { runsOf, type RunKind } from "./usage.js";
+import { runsOf, totalOf } from "./usage.js";
 
 // a row kept before rows carried their rule ID
 export const UNRECORDED = "unrecorded";
@@ -62,30 +63,22 @@ function actedSum(events: readonly Event[]): Timeline["acted"] {
   return out;
 }
 
-// spendSum : what each run kind spent, and how many runs were not measured. Pure.
+// spendSum : what each run kind spent, and how many runs were not measured (usage.ts totalOf). Pure.
 function spendSum(events: readonly Event[]): Pick<Timeline, "spend" | "unmeasured"> {
+  const runs = runsOf(events, { project: "", ticket: "" });
   const spend: Partial<Record<RunKind, Spend>> = {};
-  let unmeasured = 0;
-  for (const run of runsOf(events, { project: "", ticket: "" })) {
-    if (run.spend === "unmeasured") {
-      unmeasured += 1;
-    } else {
-      spend[run.kind] = addSpend(spend[run.kind] ?? { usd: 0, tokens: 0 }, run.spend);
+  for (const kind of RUN_KINDS) {
+    const measured = runs.filter((r) => r.kind === kind && r.spend !== "unmeasured");
+    if (measured.length > 0) {
+      spend[kind] = totalOf(measured, Number.NEGATIVE_INFINITY).spend;
     }
   }
-  return { spend, unmeasured };
+  return { spend, unmeasured: totalOf(runs, Number.NEGATIVE_INFINITY).unmeasured };
 }
 
-// whyBefore : the why of the newest hand-over at or before a time. Pure.
-function whyBefore(events: readonly Event[], at: string): string {
-  const handOvers = events.filter((e) => e.kind === "blocked" && e.at <= at);
-  const newest = handOvers.toSorted((a, b) => b.at.localeCompare(a.at))[0];
-  return newest?.kind === "blocked" ? newest.why : "";
-}
-
-// rescueFrom : one rescue touch, with its hand-over's why. Pure.
-function rescueFrom(t: Touch, events: readonly Event[]): Rescue {
-  const rescue = { at: t.at, waitedMs: t.waitedMs, why: whyBefore(events, t.at) };
+// rescueFrom : one rescue touch, with its hand-over's why (touches.ts). Pure.
+function rescueFrom(t: Touch): Rescue {
+  const rescue = { at: t.at, waitedMs: t.waitedMs, why: t.why ?? "" };
   return t.by === undefined ? rescue : { ...rescue, by: t.by };
 }
 
@@ -93,7 +86,12 @@ function rescueFrom(t: Touch, events: readonly Event[]): Rescue {
 function rescuesOf(events: readonly Event[]): readonly Rescue[] {
   return touchesOf(events)
     .filter((t) => t.kind === "rescue")
-    .map((t) => rescueFrom(t, events));
+    .map(rescueFrom);
+}
+
+// ran : a review-ended line of a round that ran: one with its findings, or its lenses before #488. Pure.
+function ran(e: Event): boolean {
+  return e.kind === "review-ended" && (e.found !== undefined || e.lenses !== undefined);
 }
 
 // timelineOf : a merged ticket's timeline line, from its run records. Pure.
@@ -105,7 +103,7 @@ export function timelineOf(
     at: merged.at,
     kind: "timeline",
     number: merged.number,
-    rounds: events.filter((e) => e.kind === "review-ended").length,
+    rounds: events.filter(ran).length,
     found: foundSum(events),
     acted: actedSum(events),
     ...spendSum(events),
