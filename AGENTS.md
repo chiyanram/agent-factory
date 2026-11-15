@@ -46,7 +46,8 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   `git push --force-with-lease`, because the lease refuses to overwrite a push you have not fetched. Never force-push
   without a lease, onto another person's branch, or onto `main`.
 - Fill in every line of `.github/pull_request_template.md` and leave no `<placeholder>`, because the squash merge
-  makes the PR title the commit subject and the description its body on `main`, where neither can be edited.
+  makes the PR title the commit subject and the description its body on `main`, where neither can be edited. The
+  `pr-body` workflow (`scripts/check-pr-body.ts`) fails a ready PR with a missing line, a placeholder or an unticked item.
 - Pick each build ticket's lane by its risk, as the rules pack's lanes reference does: tiny (docs, comments, a config
   value or a patch bump) skips grilling, spec, design and approval; bug skips grilling, writes a short spec and a
   failing test first, gets the operator's approval, and has a design only when an interface or more than one module
