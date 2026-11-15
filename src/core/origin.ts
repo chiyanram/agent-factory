@@ -1,4 +1,4 @@
-// origin — the project's clone is the project's repo: its `origin` names the git host and project the settings name.
+// origin — the project's clone is the project's repo: its `origin` (the URL it fetches from) names the git host and project the settings name.
 // A clone whose origin points elsewhere (another repo, a fork) would build from or push to the wrong place with no
 // warning, so `config check` and each orchestrator pass stop on a mismatch and name both URLs. Host and path compare
 // without letter case, as both git hosts route them; a `.git` suffix and the URL form (https, ssh, scp) do not count.
@@ -12,7 +12,7 @@ import { settingOf } from "./settings/machine.js";
 
 // expectedRepo : the project's repo as host/project, from the settings; "" when the project is not set
 function expectedRepo(env: NodeJS.ProcessEnv): Result<string> {
-  const project = settingOf(env, "gitHostProject") ?? "";
+  const project = (settingOf(env, "gitHostProject") ?? "").replace(/\.git$/i, "");
   if (project === "") {
     return { kind: "ok", value: "" };
   }
@@ -31,11 +31,17 @@ async function originUrl(clone: string, env: NodeJS.ProcessEnv): Promise<Result<
   if (got.kind === "ok") {
     return { kind: "ok", value: got.stdout.trim() };
   }
-  return { kind: "failed", reason: got.kind === "refused" ? got.reason : "it has no origin remote" };
+  return { kind: "failed", reason: got.kind === "refused" ? got.reason : notRead(got.stderr) };
+}
+
+// notRead : why git could not read the origin: none set, or the clone itself (no folder, not a git repo). Pure.
+function notRead(stderr: string): string {
+  const line = stderr.trim().split("\n")[0] ?? "";
+  return /no such remote/i.test(line) ? "it has no origin remote" : `cannot read its origin: ${line}`;
 }
 
 // mismatch : why the origin URL is not the expected host/project, or "" when it is. Pure.
-export function mismatch(url: string, expected: string): string {
+function mismatch(url: string, expected: string): string {
   const remote = parseRemote(url);
   if (remote === "bad") {
     return `origin ${JSON.stringify(url)} is not a git host URL`;

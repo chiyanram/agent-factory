@@ -236,9 +236,9 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   refused, never a quiet switch to another git host (#369). `poll` and the loop commands (`claim`, `release`,
   `status`, `ask`, `block`, `reconcile`) read them from the project file too, so the coordinator needs no export
   (#382; [Scripts](cli.md)).
-- With `clone` and `gitHostProject` both set, the clone's `origin` must be `gitHost`'s host and `gitHostProject`,
-  letter case and a `.git` suffix aside, because a clone repointed at another repo or a fork would build from it and
-  push to it unseen. `config check` and each `dispatch` pass stop on another repo, a fork or no origin, and name the
-  clone, its origin and the project.
+- With `clone` and `gitHostProject` both set, the URL the clone fetches `origin` from must be `gitHost`'s host and
+  `gitHostProject`, letter case and a `.git` suffix aside, because a clone repointed at another repo or a fork would
+  build from it unseen. `config check` and each `dispatch` pass stop on another repo, a fork or no origin, and name
+  the clone, its origin and the project. Where the clone pushes is checked at each push (`src/core/push.ts`).
 - Every module reads a machine key through `src/core/settings/machine.ts`, never its variable;
   `test/settings-read.test.ts` fails on a direct read.

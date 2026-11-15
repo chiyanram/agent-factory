@@ -5,7 +5,7 @@
 //   config show    every key: its value, the layer and `file:line` it came from, its class, and the team's mode
 //   config check   the layers resolved and the project file's readers run on the result, and the pinned plugins looked
 //                  at for a second process (#426): exit 0, or 1 with each error
-//                  It also checks that the clone's origin is the project's repo (core/origin.ts).
+//                  (a clone whose origin is not the project's repo is one of those errors: core/origin.ts)
 //   team update    the resolved values at the team's new commit against the pinned one, a check, then the pin moved
 
 import { readFile, rename, writeFile } from "node:fs/promises";

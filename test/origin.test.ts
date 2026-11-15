@@ -77,7 +77,19 @@ describe("originProblem (#640)", () => {
   it("refuses a clone with no origin, naming the clone", async () => {
     const why = await originProblem(envFor(planted(undefined)));
     expect(why).toContain(dir);
-    expect(why).toContain("origin");
+    expect(why).toContain("no origin remote");
+  });
+
+  it("says the clone cannot be read, not that it lacks an origin, when the folder is no git repo", async () => {
+    const why = await originProblem(envFor(dir));
+    expect(why).toContain(dir);
+    expect(why).toContain("cannot read its origin");
+    expect(why).not.toContain("no origin remote");
+  });
+
+  it("matches a gitHostProject written with a .git suffix", async () => {
+    const clone = planted("https://github.com/chiyanram/ledger");
+    expect(await originProblem(envFor(clone, { FACTORY_PROJECT: "chiyanram/ledger.git" }))).toBe("");
   });
 
   it("runs a pass's setup only once the clone is the project's repo", async () => {
