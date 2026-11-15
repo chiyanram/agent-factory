@@ -44,7 +44,8 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 | `input`, `steps`, `rules` | reads no meaning | text the model reads. `next` is dropped, because the lanes hold the flow. **Today:** a card that still has it is read for one release |
 
 The engine starts a run from a card for six roles: implementer, test-first, cleanup, design-reviewer, verify pass and
-onboarder. Every run record carries the card's hash.
+onboarder. Every run record carries the card's hash. **Today:** no orchestrator rule starts a cleanup run; a person
+runs cleanup by hand.
 
 ## The rules pack's own format
 

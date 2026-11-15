@@ -404,7 +404,7 @@ function ledgerSteps(runs: string[], ready: () => boolean = () => true): Steps {
 }
 
 describe("the orchestrator loop never sleeps after a step it ran itself (#445)", () => {
-  it("runs the ledger's writer, cleanup, ready check and review with no sleep, then sleeps on CI", async () => {
+  it("runs the ledger's writer, ready check and review with no sleep and no cleanup run, then sleeps on CI", async () => {
     await approved();
     const runs: string[] = [];
     let merged = false;
@@ -421,8 +421,7 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
       },
     );
     expect(await loop.run()).toMatchObject({ kind: "ok", value: { failedActions: false } });
-    expect(runs.slice(-2)).toEqual(["ready", "review"]);
-    expect(runs[0]).toMatch(/^writer /);
+    expect(runs).toEqual(["writer fix", "ready", "review"]);
     // one sleep only: after the review, when the ticket waits on CI, outside the factory
     expect(loop.slept).toEqual([7 * 60_000]);
     expect(loop.lines.filter((l) => l === "in flight: PROJ-1; next pass now")).toHaveLength(runs.length);

@@ -172,11 +172,11 @@ lane, Planned files, findings, kept and dismissed items, and the spec and design
 drops a repeat of a finding an earlier round dismissed or the person answered. After 2 rounds the person is told once,
 in the record (`design-noted`) and a ping, "no further design review (round cap)", and decides. A spec whose Planned
 files need a heavier lane runs no design review: the person is told once to raise the lane, and the ticket waits. After the implementer's
-done run (not a merge run), a cleanup run on the same branch tidies the branch's own lines from the cleanup role card,
-runs the evidence rows again, and lists what would change behaviour as `deferred`, which the host puts in the PR body,
-above the implementer's own PR body, `.factory/pr.md`, which the host posts cleaned after each implementer run that
-ended done (#335);
-the ready check then runs the cleanup's evidence rows. Each approval also gets one shared copy on the ticket's PR, posted by the project's identity ("approved by … via …, spec …, design …"); it is for
+done run, the ready check runs that run's evidence rows, and the host posts the implementer's own PR body,
+`.factory/pr.md`, cleaned after each implementer run that ended done. The orchestrator starts no cleanup run: a
+person runs cleanup by hand. A cleanup run in an older ledger still reads, and the same-patch check leaves it alone.
+Each approval also gets one shared copy on the ticket's PR, posted by the project's identity
+(`approved by … via …, spec …, design …`); it is for
 people to see and starts nothing. The pass refuses to start while the coordinator's settings are missing or looser than
 its wall (#105). A failed ready check, a review with Act on findings and a failed local verifier
 each record when the implementer may try again (`nextTry`, #228): 10 s after the step's first failure, doubling each time,

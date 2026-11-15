@@ -42,7 +42,7 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
                    ▼
               human approval  ─────────────────────────────────────── (bug, feature, one-way door; tiny needs START only)
                    ▼
-              test-first (bug lane) ──▶ implementer ──▶ cleanup         each a fresh run on a runner
+              test-first (bug lane) ──▶ implementer                    each a fresh run on a runner
                    ▼                       │ first finish: the host pushes and opens the draft PR
               ready check: every evidence row re-run · every AC has a row · test checks S1-S4 · lane from the real diff
                    ▼
@@ -142,7 +142,7 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
 and the engine ships a small default one.
 - **The approval floor:** a lanes file can make a lane stricter, never drop the approval for any lane above tiny.
 - **The roles:** coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro and
-  onboarder.
+  onboarder. **Today:** the engine starts no cleanup run; a person runs cleanup by hand.
 - **A role card's frontmatter**: the engine enforces `role`, `tools` (with an `Edit(…)` path scope), `must_not_see`,
   `hand_off` and `enforced_guardrails` (IDs from a closed list); `input`, `steps` and `rules` are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
 

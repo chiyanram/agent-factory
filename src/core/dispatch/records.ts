@@ -48,7 +48,8 @@ export type DesignStep = "review" | "verify";
 // never rebases (#103: every push is --force-with-lease against the head the host saw, push.ts, so a merge goes out
 // as a fast-forward and a person's push in between is never overwritten; the name predates that decision and stays,
 // so older lines still read)
-// "cleanup" is the cleanup run after the implementer's done run (#236): the same branch, its own role card
+// "cleanup" is the cleanup run after the implementer's done run: the same branch, its own role card. **Today:** no
+// dispatcher rule starts one; an older ledger's cleanup lines still read
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase" | "cleanup";
 
 // what one writer run is for, and so what the host hands the writer (#171). The record keeps only its mode.
@@ -67,7 +68,7 @@ export type Task =
   // the change does not merge into the default branch at this head: merge the default branch in (#103)
   | { readonly kind: "conflict"; readonly head: string }
   // the implementer's run ended done at this head: the cleanup run tidies the branch's own lines, and runs its evidence
-  // rows again (#236)
+  // rows again
   | { readonly kind: "cleanup"; readonly head: string; readonly evidence: readonly Evidence[] };
 
 const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {

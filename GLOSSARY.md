@@ -180,7 +180,7 @@ _Avoid_: writer
 approval; a verify pass checks its findings.
 
 **Cleanup**: the run that tidies the branch's own lines without changing behaviour; what would change behaviour goes
-in `deferred`.
+in `deferred`. **Today:** the engine starts no cleanup run; a person runs cleanup by hand.
 
 **Retro**: the engine writes a timeline record for every merge, with no model. A full retro run, which traces each
 rescue to a rule, check or step, is an extra task a human starts.
