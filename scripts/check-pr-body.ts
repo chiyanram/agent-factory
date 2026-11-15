@@ -6,8 +6,12 @@
 //   line         a "Breaking change:", "Rollback:" or "Where to look:" line is missing or has no answer
 //   placeholder  a <placeholder> of .github/pull_request_template.md is still in the description
 //   unticked     a checklist item is not ticked: answer its line, then tick it
+//   breaking     "Breaking change: yes", a "BREAKING CHANGE:" footer and a "!" after the title's scope disagree:
+//                semantic-release reads only the footer and the "!", so a yes without them ships as a minor release
 //
-//   gh pr view <N> --json body -q .body | node scripts/check-pr-body.ts [ROOT]     (the pr-body workflow)
+//   gh pr view <N> --json body -q .body | PR_TITLE="<title>" node scripts/check-pr-body.ts [ROOT]     (pr-body)
+//
+// Without PR_TITLE the title's "!" is not checked.
 //
 // The same rule as chiyanram/skills' scripts/pr_body.py. Runs on Node's type stripping (Node 22.18+), so it uses only
 // erasable TypeScript.
@@ -20,15 +24,48 @@ export const TEMPLATE = ".github/pull_request_template.md";
 const LABELS: readonly string[] = ["Breaking change:", "Rollback:", "Where to look:"];
 const PLACEHOLDER = /<[^<>\n]+>/g;
 const UNTICKED = /^\s*[-*] \[ \]/;
+const SAYS_YES = /^Breaking change:\s*yes\b/i;
+const FOOTER = /^BREAKING CHANGE: \S/;
+const BANG = /^[a-z]+\([^)]*\)!: /;
 
 // placeholders : each <placeholder> the template holds, once
 export function placeholders(template: string): readonly string[] {
   return [...new Set(template.match(PLACEHOLDER) ?? [])];
 }
 
-export function problems(body: string, template: string): readonly string[] {
+export function problems(body: string, template: string, title = ""): readonly string[] {
   const lines = body.replaceAll("\r\n", "\n").split("\n");
-  return [...why(lines), ...answered(lines), ...left(body, template), ...unticked(lines)];
+  return [...why(lines), ...answered(lines), ...left(body, template), ...unticked(lines), ...breaking(lines, title)];
+}
+
+// breaking : the three marks of a breaking change agree; the title's "!" only when a title is given
+function breaking(lines: readonly string[], title: string): readonly string[] {
+  const yes = lines.some((l) => SAYS_YES.test(l));
+  return [
+    ...footerAgrees(
+      yes,
+      lines.some((l) => FOOTER.test(l)),
+    ),
+    ...(title === "" ? [] : titleAgrees(yes, title)),
+  ];
+}
+
+function footerAgrees(yes: boolean, footer: boolean): readonly string[] {
+  if (yes === footer) {
+    return [];
+  }
+  return yes
+    ? ['the "Breaking change:" line says yes: add a "BREAKING CHANGE: " footer, what breaks and what to do']
+    : ['there is a "BREAKING CHANGE:" footer: the "Breaking change:" line must say yes'];
+}
+
+function titleAgrees(yes: boolean, title: string): readonly string[] {
+  if (yes === BANG.test(title)) {
+    return [];
+  }
+  return yes
+    ? ['the "Breaking change:" line says yes: add "!" after the title\'s scope']
+    : ['the title has "!" after its scope: the "Breaking change:" line must say yes'];
 }
 
 function why(lines: readonly string[]): readonly string[] {
@@ -58,7 +95,8 @@ function unticked(lines: readonly string[]): readonly string[] {
 
 if (process.argv[1] === import.meta.filename) {
   const root = process.argv[2] ?? ".";
-  const found = problems(readFileSync(0, "utf8"), readFileSync(join(root, TEMPLATE), "utf8"));
+  const title = process.env.PR_TITLE ?? "";
+  const found = problems(readFileSync(0, "utf8"), readFileSync(join(root, TEMPLATE), "utf8"), title);
   for (const p of found) {
     console.error(`::error::${p}`);
   }

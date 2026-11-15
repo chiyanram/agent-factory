@@ -1,6 +1,6 @@
 Why: <the reason for this change, in one sentence>. Spec: #<the approved spec; in the tiny lane, the ticket>
 
-Breaking change: <no; or yes, and what callers must change>
+Breaking change: <no; or yes, and what callers must change. A yes also takes "!" after the title's scope and a "BREAKING CHANGE:" footer above the Closes line>
 Rollback: <revert this PR; no data changes. Or how to switch it off>
 Where to look: <one to three places where a mistake would cost most>
 

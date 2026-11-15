@@ -61,6 +61,35 @@ describe("check-pr-body", () => {
     ]);
   });
 
+  it("passes a breaking change that carries all three marks", () => {
+    const body = FILLED.replace("Breaking change: no", "Breaking change: yes, the config key moved").replace(
+      "Closes #56",
+      "BREAKING CHANGE: rename approve.at to approve.since\nCloses #56",
+    );
+    expect(problems(body, template, "feat(approve)!: count from the spec's change (#56)")).toEqual([]);
+  });
+
+  it("fails a breaking change whose line, footer and title disagree", () => {
+    const yes = FILLED.replace("Breaking change: no", "Breaking change: Yes, the config key moved");
+    expect(problems(yes, template, "feat(approve): count from the spec's change (#56)")).toEqual([
+      'the "Breaking change:" line says yes: add a "BREAKING CHANGE: " footer, what breaks and what to do',
+      'the "Breaking change:" line says yes: add "!" after the title\'s scope',
+    ]);
+    const footer = FILLED.replace("Closes #56", "BREAKING CHANGE: rename approve.at\nCloses #56");
+    expect(problems(footer, template, "feat(approve)!: count from the spec's change (#56)")).toEqual([
+      'there is a "BREAKING CHANGE:" footer: the "Breaking change:" line must say yes',
+      'the title has "!" after its scope: the "Breaking change:" line must say yes',
+    ]);
+  });
+
+  it("checks the title's mark only when a title is given", () => {
+    const body = FILLED.replace("Breaking change: no", "Breaking change: yes, the key moved").replace(
+      "Closes #56",
+      "BREAKING CHANGE: rename approve.at\nCloses #56",
+    );
+    expect(problems(body, template)).toEqual([]);
+  });
+
   it("allows angle brackets the template does not hold, such as a type or an HTML tag", () => {
     expect(problems(`${FILLED}\n\n<details>Result<string></details>`, template)).toEqual([]);
   });

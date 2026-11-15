@@ -22,4 +22,5 @@ jobs:
       - name: Description follows the template
         env:
           BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: printf '%s' "$BODY" | node scripts/check-pr-body.ts
