@@ -7,7 +7,7 @@ coordinator's view of it is in [the orchestrator reference](../reference/orchest
 ## The path
 
 ```text
- START (+ approval) ──▶ orchestrator loop ──▶ test-first (bug lane*) ──▶ implementer ──▶ cleanup
+ START (+ approval) ──▶ orchestrator loop ──▶ test-first (bug lane*) ──▶ implementer
                         a human's command starts it;                     │ first push: the host opens the draft PR
                         it ends when nothing is in flight                ▼
                                             ready check ──▶ automated review ──▶ gate ──▶ ping ──▶ human merges
@@ -23,7 +23,7 @@ with `test_first`; the engine reads that property, never the lane's name (#417).
 | lane | tiny, bug, feature or one-way door; checked on the spec's planned files before the build and on the real diff after; only ever raised | yes (`src/core/ready/lane.ts`) |
 | test-first | in a lane whose `test_first` is set (bug by default), one commit with a failing test before the fix | the commit exists; **Today:** not that the test fails on the base and passes after |
 | implementer | builds on a fresh runner; ends with `done` and evidence rows, `asked`, or `blocked`. It never edits the design: each change of a type, signature or file placement is a `deviations` entry, which the host posts as one `[writer] DEVIATION:` note (ADR-0018) | the report's shape (`src/core/report.ts`). **Today:** a deviation that changes what an AC observes must be an `asked`, but only the role card says so |
-| cleanup | tidies the branch's own lines, re-runs the evidence, lists what would change behaviour as `deferred` | **Today:** not that it stayed inside the branch's lines |
+| cleanup | tidies the branch's own lines, re-runs the evidence, lists what would change behaviour as `deferred` | **Today:** the engine starts no cleanup run: the implementer's done run goes straight to the ready check, and a person runs cleanup by hand. When a cleanup run did run, not that it stayed inside the branch's lines |
 | PR body | the engine's lines, the deferred list, then the implementer's `.factory/pr.md`, cleaned | yes (`src/core/pr-body.ts`) |
 | ready check | re-runs every evidence row at the head, needs a row per `AC-n`, runs the test checks S1–S4; posts each row's re-run (exit code and last line) beside the result the implementer claimed | yes (`src/core/ready/rerun-note.ts`) |
 | automated review | the pack's section 6 holds the design and the factory's own deviation notes; a stranger's note with the same words is ignored | yes (`src/core/review/deviations.ts`) |

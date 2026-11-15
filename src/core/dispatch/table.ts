@@ -37,7 +37,6 @@
 //   the change conflicts with its target (poll's conflict)     implementer merges the default branch in
 //                                                              1 failure → needs-human (still conflicting after the
 //                                                              merge run); nothing rebases or force-pushes
-//   implementer done (fix, rework, CI), no cleanup since       cleanup run on the same branch (#236)
 //   writer done, no ready check at this head                   ready check
 //   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230);
 //   than the one a human approved or STARTed                   a test check's stop at the same check is named too
@@ -479,8 +478,8 @@ function judges(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended
   return checkedSince(s, w) || recheck(s, w.head) || notCheckedAt(s, w.head);
 }
 
-// patchChecked : a run whose patch the same-patch check leaves alone: a cleanup that left nothing to tidy commits
-// nothing, and that is its right answer (#236); a rework whose evidence, not its code, was the problem changes no
+// patchChecked : a run whose patch the same-patch check leaves alone: a cleanup run in an older ledger, which commits
+// nothing when it left nothing to tidy; a rework whose evidence, not its code, was the problem changes no
 // code, and the ready check judges its new rows (#444)
 function patchChecked(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
   return w.mode !== "cleanup" && !evidenceRework(s, w);
@@ -501,23 +500,6 @@ const samePatch: Rule = (s) => {
 
 // conflict : a change that does not merge into its target sends the implementer to merge the default branch in. The
 // head is the writer's (headMoved stands off otherwise), so a conflict right after a merge run is that run's failure.
-// the implementer's runs a cleanup run follows (#236): not a merge run, whose lines are the default branch's, and not
-// the cleanup's own
-const CLEANED: ReadonlySet<WriterMode> = new Set(["fix", "rework", "ci"]);
-
-// cleanup : after the implementer's done run, and its checks for the same patch and a conflict, the cleanup run; a run
-// that changed no code left no lines to tidy (#444)
-const cleanup: Rule = (s) => {
-  const w = s.runs.lastWriter;
-  return w.kind === "ended" && w.outcome === "done" && CLEANED.has(w.mode) && w.patch !== ""
-    ? {
-        kind: "writer",
-        task: { kind: "cleanup", head: w.head, evidence: w.evidence },
-        why: "the implementer is done: the cleanup run tidies its lines",
-      }
-    : "next";
-};
-
 const conflict: Rule = (s) => {
   const line = open(s);
   if (line === "none" || line.mergeable !== "conflict") {
@@ -715,7 +697,6 @@ const RULES: readonly Rule[] = [
   headMoved,
   samePatch,
   conflict,
-  cleanup,
   laneRaised,
   ready,
   review,

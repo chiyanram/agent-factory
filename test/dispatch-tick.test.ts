@@ -954,16 +954,13 @@ describe("tick", () => {
     expect(wrote).toEqual([]);
     await pass("2026-11-07T10:00:10Z");
     expect(wrote).toEqual(["ready-failed"]);
-    // the cleanup run follows the implementer's done run, with no backoff of its own (#236)
-    await pass("2026-11-07T10:00:30Z");
-    expect(wrote).toEqual(["ready-failed", "cleanup"]);
     // the second failure: 20 s
     await pass("2026-11-07T10:01:00Z");
     expect(await nextTry()).toEqual({ step: "ready", at: "2026-11-07T10:01:20.000Z" });
     await pass("2026-11-07T10:01:19Z");
-    expect(wrote).toEqual(["ready-failed", "cleanup"]);
+    expect(wrote).toEqual(["ready-failed"]);
     await pass("2026-11-07T10:01:20Z");
-    expect(wrote).toEqual(["ready-failed", "cleanup", "ready-failed"]);
+    expect(wrote).toEqual(["ready-failed", "ready-failed"]);
   });
 
   it("ledger ticket 4 (#444): ready failed, a rework that changed only its rows, a hold a person clears, then the ready check on the new rows", async () => {
@@ -2559,7 +2556,7 @@ describe("the design review and the cleanup run (#236)", () => {
     ]);
   });
 
-  it("the cleanup run follows the implementer's done run; the ready check then runs the cleanup's evidence rows", async () => {
+  it("the implementer's done run goes straight to the ready check with its evidence rows; no cleanup run starts", async () => {
     await approved();
     const row = { criterion: "AC-1 it answers 409", command: "npm test", result: "1 passed" };
     await record({
@@ -2575,30 +2572,16 @@ describe("the design review and the cleanup run (#236)", () => {
         hung: false,
       },
     });
-    const H2 = "2".repeat(40);
     const tasks: unknown[] = [];
     const checked: unknown[] = [];
-    let head = H;
     const steps: Steps = {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
-        run: async (input) => {
-          tasks.push(input.task);
-          head = H2;
-          return {
-            kind: "ok",
-            value: {
-              head: H2,
-              outcome: "done",
-              patch: "c1",
-              evidence: [row],
-              hung: false,
-              card: CARD,
-              deferred: ["drop the guard in loans.ts:40"],
-            },
-          };
-        },
+        run: async (input) => (
+          tasks.push(input.task),
+          { kind: "ok", value: { head: H, outcome: "done", patch: "c1", evidence: [row], hung: false } }
+        ),
       },
       ready: {
         kind: "available",
@@ -2607,17 +2590,8 @@ describe("the design review and the cleanup run (#236)", () => {
         ),
       },
     };
-    const run = async () => tick(setup({ team, open: [open({ head })], merged: [] }, [], { steps }));
-    await run();
-    expect(tasks).toEqual([{ kind: "cleanup", head: H, evidence: [row] }]);
-    const read = await readRecords(where());
-    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({
-      kind: "writer-ended",
-      mode: "cleanup",
-      card: CARD,
-      deferred: ["drop the guard in loans.ts:40"],
-    });
-    await run();
+    await tick(setup({ team, open: [open({ head: H })], merged: [] }, [], { steps }));
+    expect(tasks).toEqual([]);
     expect(checked).toEqual([[row]]);
   });
 });

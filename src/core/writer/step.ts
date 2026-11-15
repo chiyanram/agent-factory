@@ -10,7 +10,7 @@
 // change that conflicts with its target, gets the default branch fetched into its clone as origin/<default>, merges it
 // in and resolves the conflicts; the push stays a fast-forward, so nothing rebases or force-pushes. A cleanup run (#236)
 // gets the implementer's evidence rows as its task, with the default branch fetched in to diff against; what it defers
-// goes in the PR body.
+// goes in the PR body. **Today:** no dispatcher rule starts a cleanup run; a person runs cleanup by hand.
 //
 // Every run is started from its role card (process/cards.ts, #232): test-first, the implementer (fix, rework, CI and
 // merge) or cleanup. Its prompt is the card's body, then the run's own task in the engine's words, then the engine's

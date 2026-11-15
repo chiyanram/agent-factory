@@ -47,12 +47,12 @@ function line(over: Partial<OpenLine> = {}): OpenLine {
 
 const wrote = (over: Partial<Summary> = {}): Summary => ({
   ...EMPTY,
-  // the implementer's run and then the cleanup run are done (#236)
+  // the last writer run is a done cleanup run, as an older ledger has it
   lastWriter: { kind: "ended", mode: "cleanup", head: H, outcome: "done", patch: "p1", evidence: [] },
   lastAt: "2026-11-07T09:50:00Z",
   ...over,
 });
-// the implementer's done run, before its cleanup run (#236)
+// the implementer's done run
 const fixDone = { kind: "ended", mode: "fix", head: H, outcome: "done", patch: "p1", evidence: [] } as const;
 const readyOk: Partial<Summary> = {
   lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: true, why: "x" },
@@ -642,7 +642,7 @@ describe("backoff (#228)", () => {
   });
 });
 
-describe("the design review before the approval, and the cleanup run after the implementer (#236)", () => {
+describe("the design review before the approval, and no cleanup run after the implementer (#236)", () => {
   const SPEC_H = "a".repeat(64);
   const unapproved = { kind: "unapproved", lane: "feature" } as const;
   const before = { approval: unapproved, change: { kind: "none" }, runs: EMPTY } as const;
@@ -699,25 +699,41 @@ describe("the design review before the approval, and the cleanup run after the i
     ).toMatchObject({ kind: "design", step: "review" });
   });
 
-  it("the implementer's done run is followed by the cleanup run with its evidence rows; then the ready check", () => {
+  it("the implementer's done run goes straight to the ready check, then the review; no cleanup task is chosen", () => {
     const row = { criterion: "AC-1 it answers 409", command: "npm test", result: "1 passed" };
     const fix = { ...fixDone, evidence: [row] };
-    for (const mode of ["fix", "rework", "ci"] as const) {
-      expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode } }) }))).toEqual({
-        kind: "writer",
-        task: { kind: "cleanup", head: H, evidence: [row] },
-        why: "the implementer is done: the cleanup run tidies its lines",
+    for (const mode of ["fix", "rework", "ci", "rebase"] as const) {
+      const lastWriter = { ...fix, mode };
+      expect(decide(state({ runs: wrote({ lastWriter }) }))).toEqual({ kind: "ready", head: H });
+      expect(decide(state({ runs: wrote({ lastWriter, ...readyOk }) }))).toEqual({ kind: "review", head: H });
+    }
+    // an older ledger whose last writer is a cleanup run, with or without a patch, still goes on to the ready check
+    for (const patch of ["", "p2"]) {
+      expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode: "cleanup", patch } }) }))).toEqual({
+        kind: "ready",
+        head: H,
       });
     }
-    // a merge run brings no lines of the branch's own; a cleanup that changed nothing is its right answer
-    expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode: "rebase" } }) }))).toEqual({
-      kind: "ready",
+  });
+
+  it("an older ledger with a cleanup run still reads: the run is the last writer, and leaves the patches alone", () => {
+    const row = { criterion: "AC-1 it answers 409", command: "npm test", result: "1 passed" };
+    const ended = (at: string, mode: "fix" | "cleanup", patch: string): Event => ({
+      at,
+      kind: "writer-ended",
+      mode,
       head: H,
+      outcome: "done",
+      patch,
+      evidence: [row],
+      hung: false,
+      ...(mode === "cleanup" ? { deferred: ["a guard that hides a failure"] } : {}),
     });
-    expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode: "cleanup", patch: "" } }) }))).toEqual({
-      kind: "ready",
-      head: H,
-    });
+    const events = [ended("2026-11-07T09:10:00Z", "fix", "p1"), ended("2026-11-07T09:20:00Z", "cleanup", "")];
+    const runs = summarize({ events, since: APPROVED_AT });
+    expect(runs.lastWriter).toMatchObject({ kind: "ended", mode: "cleanup", patch: "" });
+    expect(runs.implementerPatch).toBe("p1");
+    expect(decide(state({ runs }))).toEqual({ kind: "ready", head: H });
   });
 
   it("the same patch twice is still caught across a cleanup run, and a cleanup that ended blocked goes back", () => {
