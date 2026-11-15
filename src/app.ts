@@ -9,6 +9,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
 import { DEFAULT_CLAIM_LABEL, format, poll as pollForge } from "./core/poll.js";
 import { openProject, openProjectForge } from "./core/forge/index.js";
+import { checkedSetup } from "./core/origin.js";
 import type { Forge } from "./core/forge/types.js";
 import {
   checkSpec,
@@ -974,7 +975,7 @@ async function setupNow(project: string, dryRun: boolean, io: Io, settings: Pass
 }
 
 async function onePass(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<number> {
-  const setup = await setupNow(project, dryRun, io, settings);
+  const setup = await checkedSetup(io.env, () => setupNow(project, dryRun, io, settings));
   const passed = setup.kind === "ok" ? await tick(setup.value) : setup;
   if (passed.kind === "failed") {
     io.err(`agent-factory dispatch: ${passed.reason}\n`);
@@ -1089,7 +1090,7 @@ async function loopPasses(project: string, io: Io, settings: PassSettings): Prom
     home: settings.home,
     project,
     pollMinutes: settings.poll,
-    setup: () => setupNow(project, false, io, settings),
+    setup: () => checkedSetup(io.env, () => setupNow(project, false, io, settings)),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     log: (line) => io.out(`${line}\n`),
     now: Date.now,

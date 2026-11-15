@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
-import { originProblem } from "../src/core/origin.js";
+import { checkedSetup, originProblem } from "../src/core/origin.js";
 import { tempDir } from "./temp.js";
 
-const GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: "1" };
+// GIT_CONFIG_* from the caller's shell (a URL rewrite, say) would change the origin git reports
+const GIT_ENV: NodeJS.ProcessEnv = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_CONFIG"))),
+  GIT_CONFIG_NOSYSTEM: "1",
+};
 
 let dir = "";
 beforeEach(() => {
@@ -74,6 +78,23 @@ describe("originProblem (#640)", () => {
     const why = await originProblem(envFor(planted(undefined)));
     expect(why).toContain(dir);
     expect(why).toContain("origin");
+  });
+
+  it("runs a pass's setup only once the clone is the project's repo", async () => {
+    let ran = 0;
+    const setup = async () => {
+      ran += 1;
+      return { kind: "ok" as const, value: "setup" };
+    };
+    const wrong = await checkedSetup(envFor(planted("https://github.com/someone/ledger.git")), setup);
+    expect(wrong).toMatchObject({ kind: "failed", reason: expect.stringContaining("someone/ledger") });
+    expect(ran).toBe(0);
+    execFileSync("git", ["-C", dir, "remote", "set-url", "origin", "https://github.com/chiyanram/ledger.git"], {
+      env: GIT_ENV,
+      stdio: "ignore",
+    });
+    expect(await checkedSetup(envFor(dir), setup)).toEqual({ kind: "ok", value: "setup" });
+    expect(ran).toBe(1);
   });
 
   it("checks nothing when the clone or the project on the git host is not set", async () => {

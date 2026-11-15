@@ -220,7 +220,8 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 - With no team pin and no user file, every value is the project file's own, as before the layers.
 - `agent-factory config show <project>` prints each key's value, layer, `file:line` and class; `config check <project>`
   resolves the layers, runs the project file's checks on the result, refuses a second pinned plugin that holds a
-  process (naming both), and exits 0 or 1; `team update <project>
+  process (naming both) and a `clone` whose `origin` is not the project's repo (naming both), and exits 0 or 1;
+  `team update <project>
   [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
   Fetch the team's clone yourself first; nothing here uses the network.
 - The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch`, `review` and
@@ -235,5 +236,9 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   refused, never a quiet switch to another git host (#369). `poll` and the loop commands (`claim`, `release`,
   `status`, `ask`, `block`, `reconcile`) read them from the project file too, so the coordinator needs no export
   (#382; [Scripts](cli.md)).
+- With `clone` and `gitHostProject` both set, the clone's `origin` must be `gitHost`'s host and `gitHostProject`,
+  letter case and a `.git` suffix aside, because a clone repointed at another repo or a fork would build from it and
+  push to it unseen. `config check` and each `dispatch` pass stop on another repo, a fork or no origin, and name the
+  clone, its origin and the project.
 - Every module reads a machine key through `src/core/settings/machine.ts`, never its variable;
   `test/settings-read.test.ts` fails on a direct read.
