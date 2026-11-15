@@ -97,8 +97,8 @@ rejected and Sources. To change a decision, write a new ADR that supersedes the 
 
 ## Commit messages
 
-One format in chiyanram/skills, chiyanram/agent-factory and chiyanram/rca-agent (#341). It has the commitizen
-sections:
+One format in chiyanram/skills, chiyanram/agent-factory and chiyanram/rca-agent (#341). A branch commit has the
+commitizen sections, which `cz commit` prompts for:
 
 ```
 type(scope): lower-case summary (#issue)
@@ -117,8 +117,15 @@ Refs #12
 - **No tool or co-author lines**: no `Co-Authored-By`, no "Generated with" line.
 
 Pull requests are squash-merged. The commit on `main` is the **PR title** (GitHub adds `(#pr)`) and the **PR
-description** as its body, so write the description as the commit body. The branch commits are dropped, so they can be
-anything. CI checks the PR title.
+description** as its body, so on `main` the body is the description in the shape of
+[the template](.github/pull_request_template.md): the `Why:` line first, then the breaking-change, rollback and
+where-to-look lines, the evidence, the change and the checklist, with the footers last. It is longer than a branch
+commit's 1–3 sentences on purpose: the next reader finds the reason, the proof and the way back in the commit itself.
+The branch commits are dropped, so they can be anything. CI checks the PR title, and `pr-body` checks the description.
+
+A breaking change carries three marks that agree: `Breaking change: yes` in the description, `!` after the title's
+scope, and a `BREAKING CHANGE:` footer. semantic-release reads only the `!` and the footer, so a yes without them ships
+as a minor release; `pr-body` fails any of the three that disagrees with the others.
 
 To get the prompts, install [commitizen](https://commitizen-tools.github.io/commitizen/) once (`pipx install
 commitizen`) and run `cz commit`. `.cz.toml` holds the prompts; it is the same file in all three repos. commitizen only
