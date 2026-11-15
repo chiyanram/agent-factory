@@ -577,6 +577,23 @@ describe("agent-factory config and team (#229)", () => {
     expect((await cli(["config", "toString", "ledger"])).code).toBe(64);
   });
 
+  it("config check refuses a clone whose origin is not the project's repo, naming both URLs (#640)", async () => {
+    const clone = join(home, "clone");
+    mkdirSync(clone);
+    const git = (args: readonly string[]): void => {
+      execFileSync("git", ["-C", clone, ...args], { env: GIT_ENV, stdio: "ignore" });
+    };
+    git(["init", "-q"]);
+    git(["remote", "add", "origin", "https://github.com/someone/ledger.git"]);
+    writeProject({ ...BASE, clone, gitHostProject: "chiyanram/ledger" });
+    const bad = await cli(["config", "check", "ledger"], { FACTORY_FORGE: "github" });
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("https://github.com/someone/ledger.git");
+    expect(bad.err).toContain("github.com/chiyanram/ledger");
+    git(["remote", "set-url", "origin", "git@github.com:ChiyanRam/ledger.git"]);
+    expect(await cli(["config", "check", "ledger"], { FACTORY_FORGE: "github" })).toMatchObject({ code: 0 });
+  });
+
   it("team update shows the change, checks it, then moves the pin; a failed check keeps the pin", async () => {
     const first = commitTeam({ ready: { timeoutMinutes: 60 } });
     const path = writeProject({ ...BASE, team: `acme@${first}` });
