@@ -39,6 +39,14 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
   comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.
+- Make each branch in its own worktree from the latest `origin/main`, never in the main checkout:
+  `git fetch origin main && git worktree add .claude/worktrees/<slug> -b <type>/<ticket>-<slug> origin/main`, because
+  runs and people working at once then never share a working tree. Never name one `writer-N` or `reviewer-N`, because
+  `reconcile` removes those. Bring the branch up to date with `git rebase origin/main`, never a merge, and push it with
+  `git push --force-with-lease`, because the lease refuses to overwrite a push you have not fetched. Never force-push
+  without a lease, onto another person's branch, or onto `main`.
+- Fill in every line of `.github/pull_request_template.md` and leave no `<placeholder>`, because the squash merge
+  makes the PR title the commit subject and the description its body on `main`, where neither can be edited.
 - Pick each build ticket's lane by its risk, as the rules pack's lanes reference does: tiny (docs, comments, a config
   value or a patch bump) skips grilling, spec, design and approval; bug skips grilling, writes a short spec and a
   failing test first, gets the operator's approval, and has a design only when an interface or more than one module

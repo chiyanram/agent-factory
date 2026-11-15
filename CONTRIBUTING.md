@@ -39,13 +39,30 @@ ticket ──▶ branch ──▶ make lint + make test ──▶ pull request �
 ```
 
 1. Open or pick a [ticket](https://github.com/chiyanram/agent-factory/issues). Say what is wrong and why it matters.
-2. Make one branch for it, named `<type>/<ticket>-<slug>`, such as `fix/56-approved-stale`.
+2. Make one branch for it, named `<type>/<ticket>-<slug>`, such as `fix/56-approved-stale`, in its own worktree from
+   the latest `main`, never in the main checkout:
+
+   ```bash
+   git fetch origin main
+   git worktree add .claude/worktrees/56-approved-stale -b fix/56-approved-stale origin/main
+   ```
+
 3. Change the code and its test together. Run `make lint` and `make test`.
-4. Open one pull request per ticket. Its title and description become the commit on `main`; see
-   [Commit messages](#commit-messages).
+4. Open one pull request per ticket, from [the template](.github/pull_request_template.md), with every line filled in.
+   Its title and description become the commit on `main`; see [Commit messages](#commit-messages).
 5. A maintainer reviews it. Answer each comment with a change or a reason.
-6. A maintainer squash-merges it once `lint-and-test` is green on the branch with the latest `main` merged in, and
+6. To take in a newer `main`, rebase onto it and push with a lease. Never merge `main` into the branch, and never
+   force-push without the lease:
+
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   git push --force-with-lease
+   ```
+
+7. A maintainer squash-merges it once `lint-and-test` is green on the branch rebased onto the latest `main`, and
    the review is resolved. A merge queue would do that step, but a repo owned by a user cannot have one (#323).
+8. Once it is merged, remove the worktree: `git worktree remove .claude/worktrees/56-approved-stale`.
 
 A comment or doc line says what the code does and why. Who decided it, when, and on which ticket go in the PR
 description and so the commit, or in an ADR; `make lint` fails a new note that says so in the code or the docs.
