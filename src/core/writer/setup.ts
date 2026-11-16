@@ -10,6 +10,7 @@ import type { Pusher } from "../finish.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import type { BoxPlan } from "../ready/steps.js";
 import { writerSettings } from "./settings.js";
+import { openAgentCli } from "../agent/index.js";
 import type { LaneProps } from "../lane.js";
 import type { PushTarget, WriterSetup } from "./step.js";
 import type { PluginDir } from "../process/read.js";
@@ -52,6 +53,8 @@ type Placed = {
   readonly push: PushTarget;
   // the project file's ready.programs (#444)
   readonly programs: readonly string[];
+  // the project file's ready.testFiles
+  readonly testFiles: readonly string[];
 };
 
 // placed : the box, the token store and where to push, or the first one missing
@@ -71,6 +74,7 @@ function placed(input: WriterInput): Result<Placed> {
           store: input.store.value,
           push: push.value,
           programs: input.plan.project.ready.programs,
+          testFiles: input.plan.project.ready.testFiles,
         },
       }
     : push;
@@ -90,7 +94,7 @@ export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
   if (specs.kind === "failed") {
     return Promise.resolve(specs);
   }
-  const { box, store, push, programs } = where.value;
+  const { box, store, push, programs, testFiles } = where.value;
   return Promise.resolve({
     kind: "ok",
     value: {
@@ -104,6 +108,8 @@ export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
       login: () => boxTokenFrom({ store, now: new Date() }),
       pusher: input.pusher,
       programs,
+      testFiles,
+      agent: openAgentCli({ env: input.env }).writer,
       lanes: input.lanes,
       specs: specs.value,
     },

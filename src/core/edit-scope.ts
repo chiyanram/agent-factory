@@ -25,7 +25,8 @@ function parsed(text: string): unknown {
   }
 }
 
-function deny(reason: string): Scoped {
+// deny : a PreToolUse refusal: the decision on stdout, the reason on stderr, exit 2
+export function deny(reason: string): Scoped {
   const decision = {
     hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
   };
@@ -35,7 +36,7 @@ function deny(reason: string): Scoped {
 // real : the path with every part that exists followed through symlinks; the parts that do not exist yet kept as typed.
 // "" when a part is there but cannot be followed (a dangling link, a loop, no access), since a Write would follow the
 // link to wherever it points
-async function real(path: string): Promise<string> {
+export async function real(path: string): Promise<string> {
   const found = await realpath(path).catch(() => "");
   if (found !== "") {
     return found;
@@ -53,7 +54,7 @@ async function real(path: string): Promise<string> {
 }
 
 // fileOf : the absolute path the tool call edits, or "" when it names none, a relative one or one with a ".."
-function fileOf(stdin: string): string {
+export function fileOf(stdin: string): string {
   const input = prop(parsed(stdin), "tool_input");
   const named = prop(input, "file_path") ?? prop(input, "notebook_path");
   const file = typeof named === "string" ? named : "";

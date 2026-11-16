@@ -8,7 +8,7 @@
 //   node            the interpreter claude's first line names (#!/usr/bin/env node: the node on PATH), and the Node
 //                   that runs this factory (process.execPath), which the lint hook's agent-factory runs on: each as its
 //                   PATH folder and its install root (the folder above bin/), such as ~/.nvm/versions/node/v22.12.0
-//   agent-factory   this package's own folder, for the lint hook (writer/tools.ts)
+//   agent-factory   this package's own folder, for the lint and scope hooks (agent/claude-writer.ts)
 
 import { access, constants, open, realpath, stat } from "node:fs/promises";
 import { basename, delimiter, dirname, join, sep } from "node:path";
@@ -53,11 +53,15 @@ async function executable(path: string): Promise<boolean> {
   }
 }
 
-// which : the first PATH entry that holds an executable `name`, as found and as its real file
+// which : the first PATH entry that holds an executable `name`, as found and as its real file; an absolute `name` is
+// taken as it is
 export async function which(
   name: string,
   path: string,
 ): Promise<{ readonly found: string; readonly real: string } | "none"> {
+  if (name.startsWith("/")) {
+    return (await executable(name)) ? { found: name, real: await realpath(name) } : "none";
+  }
   for (const dir of path.split(delimiter).filter((d) => d.startsWith("/"))) {
     const found = join(dir, name);
     if (await executable(found)) {
@@ -118,7 +122,7 @@ async function nodeDirs(interpreter: string, path: string): Promise<readonly str
 export async function locatePrograms(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly home: string;
-  // the agent CLI's name on PATH
+  // the agent CLI's name on PATH, or its absolute path (agent/claude-writer.ts writerBin)
   readonly cli: string;
   // the Node running this factory, and this package's folder
   readonly execPath: string;

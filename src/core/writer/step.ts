@@ -33,7 +33,9 @@ import type { BodyPost, PrBody } from "../post.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { keepText, readKept, recordsDirOf } from "../kept.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start } from "./clone.js";
-import { readTools, settingsOf, TARGET_REF, toolLines } from "./tools.js";
+import { readTools, TARGET_REF, toolLines } from "./tools.js";
+import { scopesOf } from "./scope.js";
+import type { ClaudeWriter } from "../agent/claude-writer.js";
 import { knownFor, type Known } from "../onboard/known.js";
 import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js";
 import { NO_TRACE, openTrace, type TraceKept, type TraceSink } from "../dispatch/trace.js";
@@ -83,6 +85,10 @@ export type WriterSetup = {
   readonly pusher: Pusher;
   // the project file's ready.programs, which the prompt names for the evidence rows (#444); none in a test's setup
   readonly programs?: readonly string[];
+  // the project file's ready.testFiles: where a test-first run may edit (scope.ts scopesOf)
+  readonly testFiles: readonly string[];
+  // the agent CLI's writer kind: the run's argv and settings file (agent/claude-writer.ts)
+  readonly agent: ClaudeWriter;
   // the project's lanes (#232); the default lanes when absent
   readonly lanes?: readonly LaneProps[];
   // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
@@ -550,7 +556,7 @@ function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
     : result;
 }
 
-// personHome : the person's real home, for the deny list's credential paths (tools.ts writerDenies); "" when unknown
+// personHome : the person's real home, for the deny list's credential paths (agent/claude-writer.ts writerDenies); "" when unknown
 function personHome(env: NodeJS.ProcessEnv): string {
   return env.HOME ?? "";
 }
@@ -562,7 +568,13 @@ async function inClone(
   work: Work,
 ): Promise<Result<WriterOut> | FailedSpent> {
   const tools = await readTools({ repo: setup.box.repo, env: setup.box.env, base: p.base });
-  const settings = settingsOf(tools, personHome(setup.box.env));
+  const scopes = scopesOf(work.card, setup.testFiles);
+  const settings = setup.agent.settings({
+    guardrails: work.card.guardrails,
+    home: personHome(setup.box.env),
+    lint: tools.lint,
+    scopes: scopes.map((s) => s.globs),
+  });
   const known = await knownFor({
     home: setup.home,
     project: setup.project,
@@ -597,11 +609,14 @@ async function inClone(
     prompt,
     login: p.login,
     timeoutSeconds: setup.settings.timeoutSeconds,
-    claude: setup.settings.claude,
-    settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
-    plugins: setup.settings.plugins.length,
-    tools: work.card.tools,
-    editScope: work.card.editScope,
+    agent: setup.agent,
+    call: {
+      claude: setup.settings.claude,
+      settings: settings.kind === "text" ? { kind: "file", path: SETTINGS_FILE } : { kind: "none" },
+      plugins: setup.settings.plugins.length,
+      tools: work.card.tools,
+    },
+    scopes,
     completion: setup.settings.completion,
     stallMs: setup.settings.stallMs,
   });

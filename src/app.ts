@@ -71,6 +71,7 @@ import {
   LOOP_COMMANDS,
   LOOP_HELP,
   editScopeCommand,
+  writerScopeCommand,
   lintEditCommand,
   loopUsage,
   projectForm,
@@ -96,6 +97,7 @@ import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
 import { enginePackPin } from "./core/process/pins.js";
 import type { Probes } from "./core/init/checks.js";
 import { which } from "./core/box/srt-programs.js";
+import { openAgentCli } from "./core/agent/index.js";
 import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
 import { onboardSetup } from "./core/onboard/settings.js";
 import { versionCheck } from "./core/init/latest.js";
@@ -794,7 +796,7 @@ function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
           programs: await locatePrograms({
             env: io.env,
             home: homedir(),
-            cli: "claude",
+            cli: openAgentCli({ env: io.env }).writer.bin("srt"),
             execPath: process.execPath,
             packageDir: packageDir(),
           }),
@@ -1636,6 +1638,8 @@ const COMMANDS: readonly Command[] = [
   { name: "lint-edit", run: ({ positionals, io }: Args) => lintEditCommand(positionals, io) },
   // the coordinator's edit hook, the same: it reads no setting, and prints only its decision
   { name: "edit-scope", run: ({ positionals, io }: Args) => editScopeCommand(positionals, io) },
+  // the writer's edit hook in the run, the same (writer/scope.ts writerScope)
+  { name: "writer-scope", run: ({ positionals, io }: Args) => writerScopeCommand(positionals, io) },
 ];
 
 // COMMAND_NAMES : every command the CLI takes, the ones that read their own options too; test/cli-doc.test.ts checks

@@ -145,8 +145,8 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 
 **The agent CLI** is no connector: it decides the trust boundary of a model run, so its adapter lives in the engine,
 like the git host seam ([ADR-0022](../adr/0022-agent-cli-adapter-in-core.md)). `src/core/agent/` builds each run's
-argv and environment, reads its answer, and stops it at its time limit. **Today:** only the read-only runs and the
-sessions list go through it; the implementer runs and the coordinator follow (#688, #691).
+argv and environment, reads its answer, and stops it at its time limit. An implementer run's tools, deny list and edit hook
+come from its role card's guardrails. **Today:** the coordinator still builds its own argv (#691).
 
 **The fixed contract** the engine keeps, whatever the plugins:
 

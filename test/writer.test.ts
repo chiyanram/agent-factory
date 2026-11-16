@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approve } from "../src/core/approval.js";
+import { openAgentCli } from "../src/core/agent/index.js";
+import { TEST_FILES } from "../src/core/ready/floor.js";
 import { start as startTicket } from "../src/core/start.js";
 import type { Box, BoxSpec, Command, Ran } from "../src/core/box/types.js";
 import type { RunInput } from "../src/core/dispatch/steps.js";
@@ -19,7 +21,7 @@ import type { ChangeRequest, FailedJob, Forge, OpenChange } from "../src/core/fo
 import { renderBody, renderPost, type Post } from "../src/core/post.js";
 import { REPORT_INSTRUCTIONS } from "../src/core/report.js";
 import { specHash } from "../src/core/spec.js";
-import { claudeArgv, lastLines, NO_TAIL, quietAfter, skipAll, tailOf } from "../src/core/writer/run.js";
+import { lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, questionsOf, stallOf } from "../src/core/writer/settings.js";
 import {
   FLOOR,
@@ -40,9 +42,32 @@ import { createHash } from "node:crypto";
 import { copyFileSync } from "node:fs";
 import { MAX_TASK_CHARS } from "../src/core/writer/task.js";
 import { outputName, scrubSecrets, WHY_CHARS, whyOf, whyText } from "../src/core/writer/why.js";
-import { quoted, settingsOf, toolsOf, WRITER_ALLOW, writerDenies } from "../src/core/writer/tools.js";
+import { toolsOf, type Tools } from "../src/core/writer/tools.js";
+import {
+  quoted,
+  skipAll,
+  WRITER_ALLOW,
+  writerArgv,
+  writerDenies as deniesFor,
+  writerSettings,
+  type Claude,
+  type SettingsArg,
+} from "../src/core/agent/claude-writer.js";
+import { GUARDRAIL_FLOOR } from "../src/core/process/guardrails.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
+
+// the writer's argv, deny list and settings for the implementer's floor, through the agent CLI's adapter
+const claudeArgv = (
+  claude: Claude,
+  settings: SettingsArg,
+  plugins: number,
+  tools: readonly string[],
+  place: "vm" | "srt",
+) => writerArgv("claude", { claude, settings, plugins, tools }, place);
+const writerDenies = (home: string) => deniesFor(GUARDRAIL_FLOOR.implementer, home);
+const settingsOf = (tools: Tools, home: string) =>
+  writerSettings({ guardrails: GUARDRAIL_FLOOR.implementer, home, lint: tools.lint, scopes: [] });
 
 const SPEC = [
   "# PROJ-1: renewals refuse a reserved loan",
@@ -293,6 +318,8 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
       notice: { kind: "none" },
     }),
     pusher: pusher(pushes),
+    agent: openAgentCli({ env: {} }).writer,
+    testFiles: TEST_FILES,
   };
 }
 
@@ -1571,6 +1598,45 @@ describe("the writer step: role cards from the process plugin (#232)", () => {
         why: expect.stringContaining("Renewal.java, outside its card's edit scope (src/test/**)"),
       },
     });
+  });
+});
+
+describe("test-first edits only the project's test files (#688)", () => {
+  it("blocks a built-in test-first run that commits outside ready.testFiles, and names the path", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []);
+    const out = await run({ ...s, settings: { ...s.settings, plugins: [] } }, { kind: "test-first" });
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: {
+        outcome: "blocked",
+        why: expect.stringContaining("Renewal.java, outside the project's test files (ready.testFiles)"),
+      },
+    });
+    expect(seen[0]?.settings).toContain("agent-factory writer-scope");
+  });
+
+  it("lets it through when the project's test files name what it committed", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []);
+    const out = await run(
+      { ...s, testFiles: ["*.java"], settings: { ...s.settings, plugins: [] } },
+      { kind: "test-first" },
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+    expect(seen[0]?.settings).toContain(JSON.stringify([["*.java"]]).replaceAll('"', '\\"'));
+  });
+
+  it("runs the image's claude in a vm whatever FACTORY_CLAUDE says, and leaves the implementer's settings with no scope hook", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const seen: Seen[] = [];
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []);
+    await run({ ...s, agent: openAgentCli({ env: { FACTORY_CLAUDE: "/opt/claude" } }).writer }, FIX);
+    // the fake box is a vm: the image's pinned claude runs there
+    expect(command(fake).argv[0]).toBe("claude");
+    expect(seen[0]?.settings).not.toContain("writer-scope");
   });
 });
 

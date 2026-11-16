@@ -2,14 +2,14 @@
 // host call goes through the Forge seam. The adapter owns the trust boundary: the argv, the environment the CLI gets,
 // and the run's time limit. Claude Code is the one adapter so far.
 //
-//   FACTORY_CLAUDE   the claude CLI (default: claude)
+//   FACTORY_CLAUDE   the claude CLI (default: claude); a writer run in a vm starts the image's own, which it pins
 //
-// **Today:** only the read-only runs and the sessions list go through it; the writer runs and the coordinator still
-// build their own argv (#688, #691).
+// **Today:** the coordinator still builds its own argv (#691).
 
 import type { Sessions } from "../review/live.js";
 import type { Model } from "../review/model.js";
 import { claudeEnv, claudeModel, claudeSessions } from "./claude.js";
+import { claudeWriter, type ClaudeWriter } from "./claude-writer.js";
 import { runInFolder, type FolderRunner } from "./folder.js";
 
 export type AgentCli = {
@@ -18,6 +18,8 @@ export type AgentCli = {
   readonly readOnly: Model;
   // the CLI's live background sessions
   readonly sessions: Sessions;
+  // the writer run's argv and settings file, built from its role card; the box runs them (writer/run.ts)
+  readonly writer: ClaudeWriter;
 };
 
 // how long `claude agents --json` may take before the list is read as unknown
@@ -37,5 +39,10 @@ export function openAgentCli(input: {
     minuteMs: input.minuteMs ?? 60_000,
     sessionsMs: input.sessionsMs ?? SESSIONS_MS,
   };
-  return { name: "claude", readOnly: claudeModel(setup), sessions: claudeSessions(setup) };
+  return {
+    name: "claude",
+    readOnly: claudeModel(setup),
+    sessions: claudeSessions(setup),
+    writer: claudeWriter(setup.bin),
+  };
 }

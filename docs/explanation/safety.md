@@ -68,9 +68,11 @@ Two rules follow from this:
   implementer run does so (#113).
 - **Enforced: skip-all permissions only inside a runner** (`vm` or `srt`), never bare on the host; config never from
   the branch ([Q6, Q7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681210370), #114). The
-  implementer's `.factory/settings.json` also holds its lists: allow Bash (inside the runner) and edits in the clone;
-  deny `git push`, `WebFetch`, `curl` and reads of the credential paths. Claude Code keeps deny rules even with
-  skip-all; the runner is the wall, the lists are the second line.
+  implementer's `.factory/settings.json` also holds its lists, built from its role card's guardrails: allow Bash
+  (inside the runner) and edits in the clone; deny `git push`, `WebFetch`, `curl` and reads of the credential paths.
+  A test-first run's settings also hold a hook that refuses an edit outside the project's test files, and the host
+  blocks a run whose commits touch one. Claude Code keeps deny rules and hooks even with skip-all; the runner is the
+  wall, the lists are the second line.
 - **Enforced: zero findings is never green.** Only a human undrafts. Every PR gets a script-made status list of
   protected files and new dependencies ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344), #118).
 - **Code goes to an implementer, always.** The coordinator never edits code: its edit-scope hook refuses every Edit or

@@ -3,7 +3,7 @@ import { capsOf, heldWords, NO_CAPS, overCaps, projectStop, roomAt, ticketCapped
 import { hoursOf, openAt, within } from "../src/core/dispatch/hours.js";
 import { keyById } from "../src/core/settings/keys.js";
 import { settingName } from "../src/core/settings/machine.js";
-import { claudeArgv } from "../src/core/writer/run.js";
+import { writerArgv } from "../src/core/agent/claude-writer.js";
 import type { Spent } from "../src/core/dispatch/usage.js";
 
 // The caps on spend (#131): per run, per ticket, per project-day, and the share of a window with its stop line.
@@ -65,7 +65,11 @@ describe("the caps are cap-class settings keys", () => {
   });
 
   it("per run: the writer's run carries the run cap as --max-budget-usd", () => {
-    const argv = claudeArgv({ maxUsd: "2", model: "" }, { kind: "none" }, 1, ["Read"], "vm");
+    const argv = writerArgv(
+      "claude",
+      { claude: { maxUsd: "2", model: "" }, settings: { kind: "none" }, plugins: 1, tools: ["Read"] },
+      "vm",
+    );
     expect(argv.slice(argv.indexOf("--max-budget-usd"), argv.indexOf("--max-budget-usd") + 2)).toEqual([
       "--max-budget-usd",
       "2",

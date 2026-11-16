@@ -18,7 +18,8 @@ import type { Identity } from "./core/identity.js";
 import { hostPush } from "./core/push.js";
 import type { PushTarget } from "./core/writer/step.js";
 import type { Forge } from "./core/forge/types.js";
-import { editScope } from "./core/edit-scope.js";
+import { deny, editScope } from "./core/edit-scope.js";
+import { scopesArg, writerScope } from "./core/writer/scope.js";
 import { lintEdit } from "./core/lint-edit.js";
 import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
 import { questionsIn, type Question } from "./core/report.js";
@@ -50,6 +51,7 @@ const USAGE: Readonly<Record<string, string>> = {
   reconcile: "reconcile [<project>]",
   "lint-edit": "lint-edit '<lint command>'",
   "edit-scope": "edit-scope <specs folder>",
+  "writer-scope": "writer-scope '<JSON list of glob lists>'",
 };
 
 // loopUsage : the command's usage on stderr, exit 64
@@ -321,7 +323,7 @@ export async function lintEditCommand(positionals: readonly string[], io: LoopIo
   if (command === undefined || positionals.length !== 1) {
     return loopUsage("lint-edit", io);
   }
-  const root = io.env.CLAUDE_PROJECT_DIR ?? io.env.PWD ?? "";
+  const root = hookRoot(io.env);
   const hooked = await lintEdit({ command, stdin: await io.readStdin(), root, env: io.env, run: runInFolder });
   io.err(hooked.err);
   return hooked.code;
@@ -334,6 +336,28 @@ export async function editScopeCommand(positionals: readonly string[], io: LoopI
     return loopUsage("edit-scope", io);
   }
   const hooked = await editScope(await io.readStdin(), specs);
+  io.out(hooked.out);
+  io.err(hooked.err);
+  return hooked.code;
+}
+
+// hookRoot : the folder Claude Code runs a hook for: the project it started in
+function hookRoot(env: NodeJS.ProcessEnv): string {
+  return env.CLAUDE_PROJECT_DIR ?? env.PWD ?? "";
+}
+
+// writerScopeCommand : the writer's edit hook in the run; it reads no setting and names no project. Every refusal,
+// a bad argument too, exits 2: Claude Code lets an edit through on any other exit
+export async function writerScopeCommand(positionals: readonly string[], io: LoopIo): Promise<number> {
+  const scopes = positionals.length === 1 ? scopesArg(positionals[0] ?? "") : "bad";
+  if (scopes === "bad") {
+    loopUsage("writer-scope", io);
+    return 2;
+  }
+  const hooked = await io
+    .readStdin()
+    .then((stdin) => writerScope(stdin, hookRoot(io.env), scopes))
+    .catch((error: unknown) => deny(`cannot check this edit, so it is refused: ${String(error)}`));
   io.out(hooked.out);
   io.err(hooked.err);
   return hooked.code;
@@ -371,4 +395,5 @@ export const LOOP_HELP = `  claim [<project>] <number>   add the claim label to 
                                commits on top of the change's branch and label the change needs-human
   lint-edit '<lint command>'   the writer's PostToolUse hook: lint the file an Edit or Write changed, no shell
   edit-scope <specs folder>    the coordinator's PreToolUse hook: refuse an Edit or Write outside the spec drafts
+  writer-scope '<glob lists>'  the test-first run's PreToolUse hook: refuse an Edit or Write outside the test files
 `;
