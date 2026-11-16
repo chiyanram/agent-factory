@@ -55,8 +55,10 @@ one user of it (`src/core/process/pack-schema.ts`, #484): before it uses a plugi
 the file against the pack's own schema, then runs its own checks (the role's tools, guardrails and hand-off; the
 approval floor).
 
-Each part has its own format version, the `N` in its file name. The engine reads this version and the one before. For
-each part, it uses the highest version it reads. When a part is at no version that the engine reads, the
+Each part has its own format version, the `N` in its file name. The engine reads each part at its own version and the
+one before: card 2 and 1, lanes and finding 1 and 0. For each part, it uses the highest version it reads. Card v2 adds
+`edit-scope` to `enforced_guardrails`: on the test-first card it means the project's test files (`ready.testFiles`), and
+the card's own `Edit(…)` only narrows them. When a part is at no version that the engine reads, the
 engine refuses the whole pack and names that part and both versions. A newer version beside a readable one is left for the engine that reads it: a pack adds a new
 version as a new file beside the old one, so an older engine still works. Lanes v1 checks `lanes.json`; the ticket that
 reads a later lanes version names its data file. A pack with no schema folder has no parts and is read by the engine's
