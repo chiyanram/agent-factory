@@ -1,13 +1,15 @@
 // settings — the design review's setup, from the settings the automated review already reads (#236): the project's
 // clone (FACTORY_REPO), the project's plugins whose process may hold the role cards (process/use.ts, #232), the per-run
-// cap, and the logic model the review's verify pass uses, a full id (review/pinned.ts, #213). The claude CLI gets only the environment it needs: no forge token, no FACTORY_*
-// (review/settings.ts claudeEnv; ADR-0012 S2).
+// cap, the logic model the review's verify pass uses, a full id (review/pinned.ts), and the time limits:
+// FACTORY_DESIGN_MINUTES for the design-reviewer, FACTORY_VERIFY_MINUTES for its verify pass (agent/limits.ts). The
+// runs go through the agent seam, which gives the CLI no forge token and no FACTORY_* (agent/claude.ts; ADR-0012 S2).
 
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
-import type { Forge } from "../forge/types.js";
-import { claudeModel, runInFolder, type Model } from "../review/model.js";
-import { claudeEnv, paths } from "../review/settings.js";
+import { openAgentCli } from "../agent/index.js";
+import { limitOf } from "../agent/limits.js";
+import type { Model } from "../review/model.js";
+import { paths } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import type { PluginDir } from "../process/read.js";
 import { REVIEW_MODELS } from "../review/pinned.js";
@@ -15,7 +17,7 @@ import type { DesignSetup } from "./step.js";
 
 export function designSetup(input: {
   readonly env: NodeJS.ProcessEnv;
-  readonly forge: Forge;
+  readonly forge: DesignSetup["forge"];
   readonly home: string;
   readonly project: string;
   // the project's plugins, in order (process/use.ts, #232): the process plugin among them holds the role cards
@@ -26,9 +28,11 @@ export function designSetup(input: {
   if (p.kind === "failed") {
     return { kind: "failed", reason: `the design review is not set up: ${p.reason}` };
   }
-  const model =
-    input.model ??
-    claudeModel({ bin: input.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(input.env), run: runInFolder });
+  const review = limitOf(input.env, "design.minutes");
+  if (review.kind === "failed") {
+    return { kind: "failed", reason: `the design review is not set up: ${review.reason}` };
+  }
+  const model = input.model ?? openAgentCli({ env: input.env }).readOnly;
   return {
     kind: "ok",
     value: {
@@ -40,6 +44,7 @@ export function designSetup(input: {
       model,
       modelName: settingOf(input.env, "review.logicModel") ?? REVIEW_MODELS.logic,
       maxUsd: p.value.maxUsd,
+      limits: { review: review.value, verify: p.value.limits.verify },
       plugins: input.plugins,
       runsDir: join(input.home, "design-runs"),
     },

@@ -20,7 +20,7 @@ An AI run that holds all three of these legs at once can be turned against you b
 | run | untrusted input | private data | a way out | so |
 |---|---|---|---|---|
 | implementer, cleanup, test-first | yes | the repo | the model API and the package registries | holds all three: the runner and the egress list narrow the way out, they do not close it (see [What is open](#what-is-open)) |
-| automated review, design review, onboarder | yes | the repo | the model API only | read-only tools; **Today:** they run on the host, not on a runner (#674) |
+| automated review, design review, onboarder | yes | the repo | the model API only | read-only tools, and a time limit per run that stops the run and everything it started; **Today:** they run on the host, not on a runner (#674) |
 | coordinator | the ticket and the chat | your laptop | your own network | a human is in the loop; on a laptop its deny list is not a wall (accepted risk) |
 | orchestrator, host push | data only | the git host login | the git host | code with no model: text it reads never changes what it does |
 
@@ -90,8 +90,10 @@ Two rules follow from this:
 - **The automated review reads, and the script posts.** It runs in a throwaway folder (under
   `$FACTORY_HOME/review-runs/`) with the pack and a copy of the whole code at the head. Every `CLAUDE.md`, `AGENTS.md`,
   `.claude/` and `.agents/` is removed from that copy, so the PR cannot choose the rules it is judged by. It has Read,
-  Grep and Glob only, and an environment with no git host token and no `FACTORY_*` setting. **Today:** it runs on the
-  host, not on a runner (#674).
+  Grep and Glob only, and an environment with no git host token and no `FACTORY_*` setting. Each of its runs has a
+  wall-clock limit (`FACTORY_FINDER_MINUTES`, `FACTORY_VERIFY_MINUTES`); past it the agent seam stops the run and
+  everything it started, and the run fails with the reason ([ADR-0022](../adr/0022-agent-cli-adapter-in-core.md)).
+  **Today:** it runs on the host, not on a runner (#674).
 - **Rules come from the default branch** or a pinned plugin, never from the PR. A PR that edits a rule file is flagged
   for the human.
 - **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent

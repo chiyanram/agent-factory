@@ -17,7 +17,7 @@ import { keepTraceIn, prunedIn } from "../dispatch/trace.js";
 import type { Result } from "../forge/api.js";
 import { readCard } from "../process/cards.js";
 import { findProcess, type PluginDir } from "../process/read.js";
-import type { Model, ModelResult } from "../review/model.js";
+import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { lessonsOf, LESSON_SCHEMA, type Lesson } from "./lesson.js";
 import type { Failure } from "./repeated.js";
 
@@ -30,6 +30,8 @@ export type DraftSetup = {
   readonly plugins: readonly PluginDir[];
   readonly model: Model;
   readonly modelName: string;
+  // the run's time limit
+  readonly limit: RunLimit;
   readonly now: () => number;
 };
 
@@ -181,6 +183,7 @@ async function ranOn(setup: DraftSetup, failures: readonly Failure[], skillDir: 
       prompt: `${card.value.body}\n\n${ENGINE_WORDS}`,
       name: `retro-${setup.project}`,
       maxUsd: RETRO_USD,
+      limit: setup.limit,
       tools: card.value.tools,
     });
     return await draftsOf(setup, ran, failures);

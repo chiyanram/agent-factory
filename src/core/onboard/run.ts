@@ -28,7 +28,7 @@ import { hostGit } from "../git.js";
 import { readCard, type Card } from "../process/cards.js";
 import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
-import type { Model, ModelResult } from "../review/model.js";
+import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { ANSWER_SCHEMA, readAnswer, type Answer } from "./answer.js";
 import { written, type Written } from "./brief.js";
 import { stage, type Hashes } from "./home.js";
@@ -46,6 +46,8 @@ export type OnboardSetup = {
   readonly model: Model;
   readonly modelName: string;
   readonly maxUsd: string;
+  // the run's time limit
+  readonly limit: RunLimit;
   readonly plugins: readonly PluginDir[];
   readonly runsDir: string;
   readonly now: () => number;
@@ -177,6 +179,7 @@ async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<R
     prompt: `${card.body}\n\n${FLOOR}\n`,
     name: `onboarder-${setup.project}`,
     maxUsd: setup.maxUsd,
+    limit: setup.limit,
     // the card's tools, narrowed to the read-only ones the model seam gives (#232)
     tools: card.tools,
   });

@@ -24,9 +24,8 @@ import { ask, block, claim, grill, reconcile, release, status, type AtHead } fro
 import { questionsIn, type Question } from "./core/report.js";
 import { questionRound, readsBackAs } from "./core/finish.js";
 import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
-import { claudeSessions } from "./core/review/live.js";
-import { runInFolder } from "./core/review/model.js";
-import { claudeEnv } from "./core/review/settings.js";
+import { openAgentCli } from "./core/agent/index.js";
+import { runInFolder } from "./core/agent/folder.js";
 import { settingOf } from "./core/settings/machine.js";
 
 export type LoopIo = {
@@ -287,7 +286,7 @@ function reconciled(io: LoopIo): Promise<number> | number {
     );
     return 1;
   }
-  const sessions = claudeSessions({ bin: io.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(io.env) });
+  const { sessions } = openAgentCli({ env: io.env });
   return onForge("reconcile", io, (forge, label, identity) =>
     reconcile({
       forge,

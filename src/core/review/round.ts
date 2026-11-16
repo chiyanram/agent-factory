@@ -47,7 +47,8 @@ import {
   type Touched,
 } from "./lenses.js";
 import { holdRun, type Sessions } from "./live.js";
-import type { Model, ModelAnswer } from "./model.js";
+import type { Model, ModelAnswer, RunLimit } from "./model.js";
+import type { RunLimits } from "./settings.js";
 import type { RoundPart } from "../dispatch/spend.js";
 import { deviationNotes } from "./deviations.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
@@ -98,6 +99,8 @@ export type ReviewSetup = {
   readonly prompts: { readonly find: string; readonly verify: string };
   readonly models: { readonly find: string; readonly rule: string; readonly logic: string };
   readonly maxUsd: string;
+  // each finder's and each verify pass's time limit
+  readonly limits: RunLimits;
   readonly model: Model;
   // the live runs on this machine, and how many may run at once (live.ts)
   readonly sessions: Sessions;
@@ -368,6 +371,11 @@ async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
   }, "cannot keep the pass's answer");
 }
 
+// limitFor : a finder's time limit, or a verify pass's. Pure.
+function limitFor(limits: RunLimits, part: RoundPart): RunLimit {
+  return part.kind === "finder" ? limits.finder : limits.verify;
+}
+
 async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<ModelAnswer>> {
   const prompt = await readFile(pass.prompt, "utf8").catch(() => "");
   if (prompt === "") {
@@ -380,6 +388,7 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
     prompt: withFloor(prompt),
     name: `reviewer-${ctx.setup.number}`,
     maxUsd: ctx.setup.maxUsd,
+    limit: limitFor(ctx.setup.limits, pass.part),
     part: pass.part,
   });
   // every answer that spent tokens is kept, a failed pass too, so the retro sees what was spent

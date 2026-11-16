@@ -26,7 +26,7 @@ import type { OpenLine } from "../src/core/poll.js";
 import { srtEnv } from "../src/core/box/srt-plan.js";
 import { keepText } from "../src/core/kept.js";
 import { keepActOn, readActOn } from "../src/core/review/act-on.js";
-import { claudeEnv } from "../src/core/review/settings.js";
+import { claudeEnv } from "../src/core/agent/claude.js";
 import { buildPack } from "../src/core/review/pack.js";
 import { resolve as resolveSettings, type FileLayer } from "../src/core/settings/resolve.js";
 import { modesOf } from "../src/core/settings/layers.js";

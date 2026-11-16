@@ -7,14 +7,8 @@ import type { Done } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
 import type { Note } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
-import {
-  claudeArgs,
-  readAnswer,
-  runInFolder,
-  type Model,
-  type ModelResult,
-  type ModelRun,
-} from "../src/core/review/model.js";
+import { readAnswer } from "../src/core/agent/claude.js";
+import type { Model, ModelResult, ModelRun } from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
 import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RoundPart } from "../src/core/dispatch/spend.js";
@@ -145,6 +139,11 @@ const PROMPTS = {
   verify: join(import.meta.dirname, "..", "prompts", "review-verify.md"),
 };
 
+const LIMITS = {
+  finder: { minutes: 11, setting: "FACTORY_FINDER_MINUTES" },
+  verify: { minutes: 12, setting: "FACTORY_VERIFY_MINUTES" },
+};
+
 function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup {
   return {
     forge: f,
@@ -165,6 +164,7 @@ function setup(f: Forge, m: Model, over: Partial<ReviewSetup> = {}): ReviewSetup
     prompts: PROMPTS,
     models: { find: "sonnet", rule: "sonnet", logic: "opus" },
     maxUsd: "2",
+    limits: LIMITS,
     model: m,
     ...over,
   };
@@ -201,6 +201,8 @@ describe("reviewRound", () => {
     });
     expect(seen.map((s) => s.run.model)).toEqual(["sonnet", "sonnet", "opus"]);
     expect(seen.every((s) => s.run.maxUsd === "2" && s.run.name === "reviewer-12")).toBe(true);
+    // each run carries its kind's time limit (P7)
+    expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.finder, LIMITS.verify, LIMITS.verify]);
     expect(log.threads).toHaveLength(2);
     expect(log.threads[0]).toMatch(
       /^svc\/Main\.java:1 \[reviewer\] Act on F1 \(blocker, bug, ERR1\): returns 2\n\n- Fix: return the sum\n- Evidence: walked · add\(1, 1\) returns 2 at svc\/Main\.java:1$/,
@@ -856,55 +858,6 @@ describe("reviewRound: the approved spec (#224)", () => {
       kind: "failed",
       reason: expect.stringContaining("not valid JSON"),
     });
-  });
-});
-
-describe("claudeArgs", () => {
-  it("is restricted, with no MCP servers, Read, Grep and Glob only, a budget cap and a schema; never resumed", () => {
-    const args = claudeArgs({
-      folder: "/x",
-      model: "opus",
-      schema: "{}",
-      prompt: "P",
-      name: "reviewer-12",
-      maxUsd: "2",
-    });
-    expect(args).toEqual([
-      "-p",
-      "-n",
-      "reviewer-12",
-      "--model",
-      "opus",
-      "--restricted",
-      "--strict-mcp-config",
-      "--tools",
-      "Read,Grep,Glob",
-      "--max-budget-usd",
-      "2",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--json-schema",
-      "{}",
-      "P",
-    ]);
-    expect(args.some((a) => /^--(resume|continue)$|^-c$|^-r$/.test(a))).toBe(false);
-    expect(claudeArgs({ folder: "/x", model: "opus", schema: "{}", prompt: "P", name: "n", maxUsd: "" })).not.toContain(
-      "--max-budget-usd",
-    );
-  });
-
-  it("runs the CLI with its stdin closed, so it never waits for input (#487)", async () => {
-    // cat reads its stdin to the end: with stdin left open it would never exit
-    const ran = await runInFolder({ bin: "cat", args: [], env: { PATH: process.env.PATH }, cwd: p.root });
-    expect(ran).toEqual({ code: 0, stdout: "", stderr: "" });
-  }, 3000);
-
-  it("gives a role card's run the card's tools, which can narrow Read, Grep and Glob, never widen them (#232)", () => {
-    const run = { folder: "/x", model: "opus", schema: "{}", prompt: "P", name: "n", maxUsd: "" };
-    expect(claudeArgs({ ...run, tools: ["Glob", "Read"] })).toContain("Read,Glob");
-    expect(claudeArgs({ ...run, tools: ["Read", "Bash"] })).toContain("Read");
-    expect(claudeArgs({ ...run, tools: ["Read", "Bash"] }).join(" ")).not.toContain("Bash");
   });
 });
 

@@ -789,8 +789,8 @@ describe("every module reads the resolved settings (#254)", () => {
     const team = layer("team", { eval: { judgeUsdPerRun: 0.2, judgeModel: "claude-opus-5-5" } });
     const flags = { drafts: false, aim: "none" as const };
     expect(evalSettings(runEnv({}, withEnv([team], {})), flags)).toMatchObject({
-      judgeUsd: "0.2",
-      judgeModel: "claude-opus-5-5",
+      kind: "ok",
+      value: { judgeUsd: "0.2", judgeModel: "claude-opus-5-5" },
     });
     expect(errors(withEnv([team], { FACTORY_JUDGE_MAX_USD: "1" }))[0]).toContain(
       "eval.judgeUsdPerRun: the machine layer (env FACTORY_JUDGE_MAX_USD) 1 is higher than 0.2",
@@ -831,6 +831,56 @@ describe("the reviewer's models, pinned to full ids (ADR-0015 E9, #213)", () => 
         'FACTORY_RULE_MODEL must be a full model id, such as "claude-sonnet-5-5", never an alias such as "sonnet", got "sonnet"',
     });
     expect(paths({ ...env, FACTORY_RULE_MODEL: "claude-sonnet-5-5" }).kind).toBe("ok");
+  });
+});
+
+describe("the read-only runs' time limits (ADR-0012 S7, P7)", () => {
+  const withEnv = (layers: readonly FileLayer[], env: NodeJS.ProcessEnv): ReturnType<typeof resolve> =>
+    resolve({ layers, modes: modesOf(layers.find((l) => l.name === "team")).modes, env, problems: [] });
+
+  it("are cap keys from 1 to 60, which a lower layer may only lower", () => {
+    const team = layer("team", { review: { finderMinutes: 10 }, design: { minutes: 30 }, eval: { judgeMinutes: 5 } });
+    expect(settingOf(runEnv({}, withEnv([team], {})), "review.finderMinutes")).toBe("10");
+    expect(errors(withEnv([team], { FACTORY_FINDER_MINUTES: "15" }))[0]).toContain(
+      "review.finderMinutes: the machine layer (env FACTORY_FINDER_MINUTES) 15 is higher than 10",
+    );
+    expect(errors(withEnv([layer("user", { onboard: { minutes: 61 } })], {}))[0]).toContain("from 1 to 60");
+    expect(errors(withEnv([layer("user", { retro: { minutes: 0 } })], {}))[0]).toContain("from 1 to 60");
+  });
+
+  it("reach the review's finder and verify pass runs through paths", () => {
+    const env = { FACTORY_REPO: "/r", FACTORY_HOME: "/h", FACTORY_VERIFY_MINUTES: "9" };
+    expect(paths(env)).toMatchObject({
+      kind: "ok",
+      value: {
+        limits: {
+          finder: { minutes: 20, setting: "FACTORY_FINDER_MINUTES" },
+          verify: { minutes: 9, setting: "FACTORY_VERIFY_MINUTES" },
+        },
+      },
+    });
+    expect(paths({ ...env, FACTORY_FINDER_MINUTES: "x" })).toEqual({
+      kind: "failed",
+      reason: "FACTORY_FINDER_MINUTES must be a whole number from 1 to 60",
+    });
+  });
+
+  it("reach the eval's finder, verify and judge runs", () => {
+    const flags = { drafts: false, aim: "none" as const };
+    expect(evalSettings({ FACTORY_JUDGE_MINUTES: "3" }, flags)).toMatchObject({
+      kind: "ok",
+      value: {
+        limits: {
+          finder: { minutes: 20, setting: "FACTORY_FINDER_MINUTES" },
+          verify: { minutes: 20, setting: "FACTORY_VERIFY_MINUTES" },
+          judge: { minutes: 3, setting: "FACTORY_JUDGE_MINUTES" },
+        },
+      },
+    });
+    expect(evalSettings({ FACTORY_JUDGE_MINUTES: "90" }, flags)).toEqual({
+      kind: "failed",
+      reason: "FACTORY_JUDGE_MINUTES must be a whole number from 1 to 60",
+    });
   });
 });
 

@@ -22,7 +22,6 @@ export const EXTENSION_POINTS = [
   "forge.read",
   "forge.write",
   "notify",
-  "runner",
   "box",
 ] as const;
 export type ExtensionPoint = (typeof EXTENSION_POINTS)[number];

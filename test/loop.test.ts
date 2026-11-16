@@ -12,7 +12,7 @@ import { tempDir } from "./temp.js";
 import { renderPost } from "../src/core/post.js";
 import type { PushRequest } from "../src/core/push.js";
 import type { PushTarget } from "../src/core/writer/step.js";
-import { runInFolder, type FolderCall } from "../src/core/review/model.js";
+import { runInFolder, type FolderCall } from "../src/core/agent/folder.js";
 import { project, type Project } from "./review-repo.js";
 
 const SHA = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";

@@ -1627,6 +1627,8 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     fix: "reuse it",
   };
 
+  const LIMIT = { minutes: 20, setting: "FACTORY_DESIGN_MINUTES" };
+
   // the design review and its verify pass, with a fake model; what each run was given
   async function designRuns(plugins: readonly PluginDir[]) {
     const seen: ModelRun[] = [];
@@ -1648,6 +1650,7 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
         },
         modelName: "opus",
         maxUsd: "2",
+        limits: { review: LIMIT, verify: LIMIT },
         plugins,
         runsDir: join(p.root, "design-runs"),
       },

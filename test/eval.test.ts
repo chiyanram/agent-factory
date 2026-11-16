@@ -163,8 +163,14 @@ function words(line: string): readonly string[] {
   return Array.isArray(list) ? list.map(String) : [];
 }
 
+const limit = { minutes: 20, setting: "FACTORY_FINDER_MINUTES" };
+
 function settings(over: Partial<EvalSettings> = {}): EvalSettings {
-  return { ...evalSettings({}, { drafts: false, aim: "none" }), ...over };
+  const s = evalSettings({ FACTORY_JUDGE_MINUTES: "17" }, { drafts: false, aim: "none" });
+  if (s.kind === "failed") {
+    throw new Error(s.reason);
+  }
+  return { ...s.value, ...over };
 }
 
 async function pass(model: Model, s: EvalSettings = settings()) {
@@ -230,6 +236,13 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     expect(seen.filter((s) => s.schema.includes("confidence"))).toHaveLength(RUNS);
     expect(seen).toHaveLength(RUNS * 2 * 2 + RUNS);
     expect(seen.every((s) => s.maxUsd !== "")).toBe(true);
+    // the judge runs under its own time limit, the review runs under the finder's and the verify pass's (P7)
+    expect(seen.filter((s) => s.schema.includes("confidence")).map((s) => s.limit.setting)).toEqual(
+      Array(RUNS).fill("FACTORY_JUDGE_MINUTES"),
+    );
+    expect(new Set(seen.map((s) => s.limit.setting))).toEqual(
+      new Set(["FACTORY_FINDER_MINUTES", "FACTORY_VERIFY_MINUTES", "FACTORY_JUDGE_MINUTES"]),
+    );
     expect(r.cost_usd).toBeCloseTo(seen.length * 0.1);
     expect(log.join("\n")).toContain("1 draft");
     // the pass's clones and run folders are gone
@@ -421,14 +434,19 @@ describe("eval reviewer, the parts", () => {
       async (run) => (ran.push(run.maxUsd), { kind: "ok", value: { output: {}, answer: {}, costUsd: 0.4, tokens: 0 } }),
       p,
     );
-    const run = (maxUsd: string) => model({ folder: "/", model: "m", schema: "{}", prompt: "", name: "n", maxUsd });
+    const run = (maxUsd: string) =>
+      model({ folder: "/", model: "m", schema: "{}", prompt: "", name: "n", maxUsd, limit });
     expect((await run("0.5")).kind).toBe("ok");
     expect((await run("0.5")).kind).toBe("ok");
     expect(await run("0.5")).toMatchObject({ kind: "failed", reason: expect.stringContaining("$1 cap") });
     expect(ran).toEqual(["0.5", "0.5"]);
     expect(
-      (await capped(model, purse(100))({ folder: "/", model: "m", schema: "{}", prompt: "", name: "n", maxUsd: "" }))
-        .kind,
+      (
+        await capped(
+          model,
+          purse(100),
+        )({ folder: "/", model: "m", schema: "{}", prompt: "", name: "n", maxUsd: "", limit })
+      ).kind,
     ).toBe("failed");
     expect(dollars("")).toBe(Number.POSITIVE_INFINITY);
     expect(costOf({ kind: "failed", reason: "budget", answer: { total_cost_usd: 0.3 } })).toBe(0.3);
