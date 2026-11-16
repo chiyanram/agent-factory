@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
 import { specHash } from "../src/core/spec.js";
@@ -653,6 +653,83 @@ describe("agent-factory setup", () => {
 
   it("names its steps when given none", async () => {
     expect((await cli(["setup"])).code).toBe(64);
+  });
+
+  describe("copilot (#690)", () => {
+    const PAT = `github_pat_11ABCDEFG0${"a1B2_".repeat(16)}`;
+    const soon = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+    it("stores a fine-grained token, 0600, with the expiry date typed, and never prints it", async () => {
+      const run = await cli(["setup", "copilot", soon(90)], { FACTORY_HOME: home }, `${PAT}\n`);
+      expect(run).toMatchObject({ code: 0, out: expect.stringContaining("stored the copilot token in") });
+      expect(run.out).toContain(`expires ${soon(90)}T00:00:00.000Z`);
+      expect(run.out + run.err).not.toContain(PAT);
+      const file = join(home, "secrets", "copilot-token");
+      expect(readFileSync(file, "utf8").trim()).toBe(PAT);
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    });
+
+    it("refuses a classic token, and the claude runner still refuses the fine-grained one", async () => {
+      const classic = await cli(
+        ["setup", "copilot", soon(90)],
+        { FACTORY_HOME: home },
+        "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+      );
+      expect(classic).toMatchObject({ code: 1, err: expect.stringContaining("fine-grained token") });
+      expect(classic.err).not.toContain("ghp_16C7");
+      const claude = await cli(["setup", "claude"], { FACTORY_HOME: home }, PAT);
+      expect(claude).toMatchObject({ code: 1, err: expect.stringContaining("GitHub login") });
+      expect(existsSync(join(home, "secrets", "copilot-token"))).toBe(false);
+    });
+
+    it("refuses a missing, past or too-late expiry and stores nothing", async () => {
+      for (const date of [[], ["2020-01-01"], [soon(400)], ["tomorrow"]]) {
+        const run = await cli(["setup", "copilot", ...date], { FACTORY_HOME: home }, PAT);
+        expect(run.code).toBe(1);
+        expect(run.err).toMatch(/expiry|YYYY-MM-DD/);
+      }
+      expect(existsSync(join(home, "secrets", "copilot-token"))).toBe(false);
+    });
+
+    it("refuses a missing expiry before it asks for the token", async () => {
+      let asked = 0;
+      const code = await runCli(["setup", "copilot"], {
+        env: { FACTORY_HOME: home },
+        out: () => undefined,
+        err: () => undefined,
+        readSecret: async () => (asked++, PAT),
+        readStdin: async () => "",
+        system: {
+          platform: "linux",
+          ...ME,
+          run: async () => ({ code: 1, stdout: "", stderr: "" }),
+          interactive: async () => 0,
+          background: async () => ({ kind: "failed", reason: "none" }),
+        },
+      });
+      expect([code, asked]).toEqual([1, 0]);
+    });
+
+    it("status names a copilot token the store refuses, and fails", async () => {
+      await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+      await cli(["setup", "copilot", soon(90)], { FACTORY_HOME: home }, PAT);
+      chmodSync(join(home, "secrets", "copilot-token"), 0o644);
+      const run = await cli(["setup", "status"], { FACTORY_HOME: home, FACTORY_BOX: "vm" });
+      expect(run.code).toBe(1);
+      expect(run.out).toContain("copilot token: none:");
+    });
+
+    it("status shows the copilot token's age once one is stored", async () => {
+      await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+      expect((await cli(["setup", "status"], { FACTORY_HOME: home, FACTORY_BOX: "vm" })).out).not.toContain(
+        "copilot token",
+      );
+      await cli(["setup", "copilot", soon(90)], { FACTORY_HOME: home }, PAT);
+      const run = await cli(["setup", "status"], { FACTORY_HOME: home, FACTORY_BOX: "vm" });
+      expect(run.code).toBe(0);
+      expect(run.out).toMatch(/copilot token: valid, 8\d days left/);
+      expect(run.out).not.toContain(PAT);
+    });
   });
 });
 

@@ -36,8 +36,11 @@ import { locateToolchains, toolchainLines } from "./core/box/srt-toolchains.js";
 import { openEgress } from "./core/egress/index.js";
 import {
   claudeTokenStatus,
+  tokenStatus,
   openStore,
   saveClaudeToken,
+  saveCopilotToken,
+  copilotMeta,
   saveDiscordWebhook,
   type Age,
   type Meta,
@@ -154,8 +157,10 @@ commands:
                                repository, as JSON {token, login, expiresAt}
   setup claude                 store the box's model-only token: run claude setup-token first, then paste it
                                at the hidden prompt; it is never printed (#136)
+  setup copilot [YYYY-MM-DD]   store the model-only token for Copilot runs: a fine-grained token with only the
+                               Copilot requests permission, at the hidden prompt, and its expiry date (#690)
   setup discord                store the Discord webhook the dispatcher pings through, at a hidden prompt (#119)
-  setup status                 the box chosen, its risks, and whether the claude token is valid
+  setup status                 the box chosen, its risks, and whether the claude token (and a copilot one) is valid
   setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
                                <home>/coordinator
   coordinator [<project>] [copilot]
@@ -1248,9 +1253,11 @@ async function appTokenCommand({ positionals, io }: Args): Promise<number> {
   return 0;
 }
 
+type SetupInput = { readonly store: TokenStore; readonly io: Io; readonly args: readonly string[] };
+
 type SetupStep = {
   readonly name: string;
-  readonly run: (input: { readonly store: TokenStore; readonly io: Io }) => Promise<number>;
+  readonly run: (input: SetupInput) => Promise<number>;
 };
 
 const PASTE = "Paste the token that `claude setup-token` printed (it stays hidden), then Enter: ";
@@ -1276,18 +1283,46 @@ async function setupClaude({ store, io }: { readonly store: TokenStore; readonly
   return 0;
 }
 
-const RENEW = "renew it: claude setup-token, then agent-factory setup claude";
+const COPILOT_PASTE =
+  "Paste the fine-grained GitHub token that has only the Copilot requests permission (it stays hidden), then Enter: ";
 
-function ageLine(age: Age, meta: Meta): { readonly line: string; readonly ok: boolean } {
+// setupCopilot : the copilot token and the expiry date GitHub showed for it, from the argument or asked for; a date
+// that will be refused is refused before the token is asked for
+async function setupCopilot({ store, io, args }: SetupInput): Promise<number> {
+  const typed =
+    args[0] ??
+    (io.readLine === undefined ? "" : await io.readLine("The token's expiry date, as GitHub shows it (YYYY-MM-DD): "));
+  const meta = copilotMeta(typed, new Date());
+  if (meta.kind === "failed") {
+    io.err(`agent-factory setup copilot: not stored: ${meta.reason}\n`);
+    return 1;
+  }
+  const pasted = await io.readSecret(COPILOT_PASTE);
+  const saved = await saveCopilotToken({ store, pasted, expires: typed, now: new Date() });
+  if (saved.kind === "refused") {
+    io.err(`agent-factory setup copilot: ${saved.reason}\n`);
+    return 1;
+  }
+  io.out(`stored the copilot token in ${saved.where}; made ${saved.meta.madeAt}, expires ${saved.meta.expiresAt}\n`);
+  return 0;
+}
+
+const RENEW: Readonly<Record<"claude" | "copilot", string>> = {
+  claude: "renew it: claude setup-token, then agent-factory setup claude",
+  copilot: "renew it: make a new fine-grained token, then agent-factory setup copilot",
+};
+
+function ageLine(runner: "claude" | "copilot", age: Age, meta: Meta): { readonly line: string; readonly ok: boolean } {
+  const renew = RENEW[runner];
   switch (age.kind) {
     case "valid":
-      return { line: `claude token: valid, ${age.daysLeft} days left (expires ${meta.expiresAt})`, ok: true };
+      return { line: `${runner} token: valid, ${age.daysLeft} days left (expires ${meta.expiresAt})`, ok: true };
     case "expiring":
-      return { line: `claude token: expires in ${age.daysLeft} days (${meta.expiresAt}); ${RENEW}`, ok: true };
+      return { line: `${runner} token: expires in ${age.daysLeft} days (${meta.expiresAt}); ${renew}`, ok: true };
     case "expired":
-      return { line: `claude token: expired at ${age.since}; ${RENEW}`, ok: false };
+      return { line: `${runner} token: expired at ${age.since}; ${renew}`, ok: false };
     case "unknown":
-      return { line: `claude token: unknown age: ${age.reason}`, ok: false };
+      return { line: `${runner} token: unknown age: ${age.reason}`, ok: false };
   }
 }
 
@@ -1295,7 +1330,17 @@ function ageLine(age: Age, meta: Meta): { readonly line: string; readonly ok: bo
 function tokenLine(status: Status): { readonly line: string; readonly ok: boolean } {
   return status.kind === "none"
     ? { line: `claude token: none: ${status.reason}`, ok: false }
-    : ageLine(status.age, status.meta);
+    : ageLine("claude", status.age, status.meta);
+}
+
+// copilotLines : the copilot token's line once one is stored; none when there is none, since Copilot is optional, but
+// a store that cannot read one says why and fails
+function copilotLines(status: Status): { readonly lines: readonly string[]; readonly ok: boolean } {
+  if (status.kind === "none") {
+    return status.missing ? { lines: [], ok: true } : { lines: [`copilot token: none: ${status.reason}`], ok: false };
+  }
+  const line = ageLine("copilot", status.age, status.meta);
+  return { lines: [line.line], ok: line.ok };
 }
 
 // srtLines : the srt runner's toolchain folders as setup status prints them (#371), and whether none was refused
@@ -1321,8 +1366,9 @@ async function setupStatus({ store, io }: { readonly store: TokenStore; readonly
       ? [`box: ${box.place}`, ...box.risks.map((r) => `  risk: ${r}`), ...srt.lines.map((l) => `  ${l}`)]
       : [`box: refused: ${box.reason}`];
   const token = tokenLine(await claudeTokenStatus({ store, now: new Date() }));
-  io.out([...boxLines, token.line, ...(await latestLines(io))].map((l) => `${l}\n`).join(""));
-  return box.kind === "chosen" && srt.ok && token.ok ? 0 : 1;
+  const copilot = copilotLines(await tokenStatus({ store, runner: "copilot", now: new Date() }));
+  io.out([...boxLines, token.line, ...copilot.lines, ...(await latestLines(io))].map((l) => `${l}\n`).join(""));
+  return [box.kind === "chosen", srt.ok, token.ok, copilot.ok].every(Boolean) ? 0 : 1;
 }
 
 // this package's folder: next to dist/ (or src/ in a test)
@@ -1392,6 +1438,7 @@ async function setupCoordinator({ io }: { readonly io: Io }): Promise<number> {
 
 const SETUP: readonly SetupStep[] = [
   { name: "claude", run: setupClaude },
+  { name: "copilot", run: setupCopilot },
   { name: "discord", run: setupDiscord },
   { name: "status", run: setupStatus },
 ];
@@ -1587,7 +1634,7 @@ async function setupStep({
 }): Promise<number> {
   const step = SETUP.find((s) => s.name === positionals[0]);
   if (step === undefined) {
-    io.err("usage: agent-factory setup claude | discord | status | coordinator\n");
+    io.err("usage: agent-factory setup claude | copilot [YYYY-MM-DD] | discord | status | coordinator\n");
     return 64;
   }
   const home = factoryHome(io.env);
@@ -1607,8 +1654,8 @@ async function setupStep({
   }
   // status reads the user and machine layers, so a user file's srt.readOnly shows (#371)
   return step.name === "status"
-    ? resolvedRun("setup status", undefined, io, (resolved) => step.run({ store: store.store, io: resolved }))
-    : step.run({ store: store.store, io });
+    ? resolvedRun("setup status", undefined, io, (resolved) => step.run({ store: store.store, io: resolved, args: [] }))
+    : step.run({ store: store.store, io, args: positionals.slice(1) });
 }
 
 const COMMANDS: readonly Command[] = [

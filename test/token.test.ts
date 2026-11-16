@@ -5,7 +5,11 @@ import type { Call, Runner } from "../src/core/forge/api.js";
 import {
   boxToken,
   boxTokenFrom,
+  checkCopilotToken,
   checkToken,
+  copilotLogin,
+  copilotLoginFrom,
+  copilotMeta,
   fileVault,
   keychainVault,
   metaFor,
@@ -88,6 +92,101 @@ describe("tokenAge and boxToken", () => {
       kind: "ready",
       notice: { kind: "warn" },
     });
+  });
+});
+
+const PAT = `github_pat_11ABCDEFG0${"a1B2_".repeat(16)}`;
+
+describe("checkCopilotToken", () => {
+  it("keeps a fine-grained token, trimmed", () => {
+    const checked = checkCopilotToken(`  ${PAT}\n`);
+    expect(checked.kind === "ok" && checked.token.reveal()).toBe(PAT);
+  });
+
+  it.each([
+    "gho_16C7e42F292c6912E7710c838347Ae178B4a",
+    "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+    "ghu_16C7e42F292c6912E7710c838347Ae178B4a",
+    "ghs_16C7e42F292c6912E7710c838347Ae178B4a",
+    "ghr_16C7e42F292c6912E7710c838347Ae178B4a",
+  ])("refuses the classic or app token %s", (login) => {
+    expect(checkCopilotToken(login)).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining("fine-grained token with only the Copilot requests permission"),
+    });
+  });
+
+  it.each([
+    ["", "nothing was pasted"],
+    [`${PAT} extra`, "space or a line break"],
+    [TOKEN, "not a fine-grained token"],
+    ["github_pat_short", "not a fine-grained token"],
+    [`${PAT}-`, "not a fine-grained token"],
+  ])("refuses %j and never quotes it", (pasted, why) => {
+    const checked = checkCopilotToken(pasted);
+    expect(checked).toEqual({ kind: "refused", reason: expect.stringContaining(why) });
+    expect(JSON.stringify(checked)).not.toContain(PAT);
+  });
+
+  it("leaves the claude runner refusing every github_pat_", () => {
+    expect(checkToken(PAT)).toEqual({ kind: "refused", reason: expect.stringContaining("GitHub login") });
+  });
+});
+
+describe("copilotMeta and copilotLogin", () => {
+  it("expires at the start of the date the person typed, in UTC", () => {
+    expect(copilotMeta("2027-02-01", NOW)).toEqual({
+      kind: "ok",
+      value: { madeAt: "2026-11-07T10:00:00.000Z", expiresAt: "2027-02-01T00:00:00.000Z" },
+    });
+    expect(copilotMeta(" 2027-11-08\n", NOW).kind).toBe("ok");
+  });
+
+  it.each([
+    ["2026-11-07", "after today"],
+    ["2025-01-01", "after today"],
+    ["2027-11-09", "366 days"],
+    ["2027-02-30", "YYYY-MM-DD"],
+    ["1 Feb 2027", "YYYY-MM-DD"],
+    ["", "YYYY-MM-DD"],
+  ])("refuses the expiry %j", (typed, why) => {
+    expect(copilotMeta(typed, NOW)).toEqual({ kind: "failed", reason: expect.stringContaining(why) });
+  });
+
+  const meta = { madeAt: NOW.toISOString(), expiresAt: "2027-02-01T00:00:00.000Z" };
+
+  it("passes COPILOT_GITHUB_TOKEN and nothing else", () => {
+    expect(copilotLogin({ token: secret(PAT), meta, now: NOW })).toEqual({
+      kind: "ready",
+      env: { COPILOT_GITHUB_TOKEN: PAT },
+      notice: { kind: "none" },
+    });
+  });
+
+  it("warns in the last 7 days and refuses once expired, naming setup copilot", () => {
+    expect(copilotLogin({ token: secret(PAT), meta, now: new Date("2027-01-28T00:00:00Z") })).toEqual({
+      kind: "ready",
+      env: { COPILOT_GITHUB_TOKEN: PAT },
+      notice: { kind: "warn", text: expect.stringContaining("agent-factory setup copilot") },
+    });
+    expect(copilotLogin({ token: secret(PAT), meta, now: new Date("2027-02-01T00:00:00Z") })).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining("agent-factory setup copilot"),
+    });
+  });
+
+  it("reads the copilot token from the store, never the claude one", async () => {
+    const asked: string[] = [];
+    const store: TokenStore = {
+      where: "test",
+      put: () => Promise.resolve({ kind: "ok" }),
+      get: (runner) => {
+        asked.push(runner);
+        return Promise.resolve({ kind: "found", token: secret(PAT), meta });
+      },
+    };
+    expect(await copilotLoginFrom({ store, now: NOW })).toMatchObject({ kind: "ready" });
+    expect(asked).toEqual(["copilot"]);
   });
 });
 

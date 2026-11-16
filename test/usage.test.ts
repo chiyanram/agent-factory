@@ -165,6 +165,40 @@ describe("agent-factory usage", () => {
     ...(spend === undefined ? {} : { spend }),
   });
 
+  it("reads a line's Copilot runs and seconds, counts a Copilot run with no spend as unmeasured, never as free (#690)", async () => {
+    const head = "1".repeat(40);
+    write("ledger", "PROJ-1", [
+      { ...writerEnded("2026-11-09T09:00:00Z"), copilot: { runs: 1, seconds: 600 } },
+      {
+        at: "2026-11-09T10:00:00Z",
+        kind: "review-ended",
+        head,
+        actOn: 0,
+        spend: { usd: 2, tokens: 20 },
+        split: { finders: { errors: { usd: 2, tokens: 20 } }, verify: { usd: 0, tokens: 0 } },
+        copilot: { runs: 2, seconds: 300 },
+      },
+      {
+        at: "2026-11-09T10:30:00Z",
+        kind: "spent",
+        phase: "review",
+        head,
+        spend: { usd: 0, tokens: 0 },
+        copilot: { runs: 1, seconds: 60 },
+      },
+    ]);
+    const read = await readSpends({ home, project: "ledger" });
+    expect(read.problems).toEqual([]);
+    expect(read.runs.map((r) => r.copilot)).toEqual([
+      { runs: 1, seconds: 600 },
+      { runs: 2, seconds: 300 },
+      { runs: 1, seconds: 60 },
+    ]);
+    expect(totalOf(read.runs, 0).unmeasured).toBe(1);
+    write("ledger", "PROJ-2", [{ ...writerEnded("2026-11-09T09:00:00Z"), copilot: { runs: -1, seconds: 600 } }]);
+    expect((await readSpends({ home, project: "ledger" })).problems).toHaveLength(1);
+  });
+
   it("names each record's run kind: the writer's mode, each finder and verify pass of a round, an older round, each design review run, the onboarder", async () => {
     const head = "1".repeat(40);
     const designEnded = (step: string, spend: unknown) => ({
