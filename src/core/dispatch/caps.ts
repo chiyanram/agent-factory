@@ -10,6 +10,13 @@
 //                    project and for every project on this machine; the share is the stop line: at it, no new run
 //                    starts until the window (window.hours) has room again, and one notice goes out
 //
+//   Copilot          caps.copilotMinutesPerProjectDay, caps.copilotRunsPerProjectDay: a Copilot run's cost is unknown
+//                    so its wall-clock minutes and its count today (UTC) are capped instead; at either cap no
+//                    new run starts that day. A project that names Copilot for a role while any dollar or token cap is
+//                    set and neither of these is, is refused (copilotCapsGap): a cap never silently passes.
+//                    caps.aiCreditsPerRun goes to each Copilot run as --max-ai-credits. **Today:** no Copilot run writes
+//                    a line yet (#697), so these count nothing so far.
+//
 //   runs at once     caps.liveRuns: the most runs one dispatch pass starts (default 1), one after another, each only
 //                    while the caps above still allow it; the review step also refuses a machine at this many live runs
 //   run hours        runHours: the hours, in UTC, in which a pass may start a run (hours.ts); outside them none starts
@@ -31,6 +38,8 @@ import type { Spend } from "./spend.js";
 import { HOURS_HINT, hoursOf, type RunHours } from "./hours.js";
 import { reached, spentLine } from "./ticket-cap.js";
 import { periodsAt, totalOf, WINDOW_HOURS, type Spent } from "./usage.js";
+import type { CopilotRuns } from "./spend.js";
+import { MOST_AI_CREDITS } from "../settings/variables.js";
 
 // a cap left unset is no cap
 export type Limit = number | "none";
@@ -39,6 +48,8 @@ export type Caps = {
   readonly ticket: { readonly usd: Limit; readonly tokens: Limit };
   readonly day: { readonly usd: Limit; readonly tokens: Limit };
   readonly window: { readonly tokens: Limit; readonly machineTokens: Limit };
+  // a project's Copilot runs in a UTC day, whose cost is unknown
+  readonly copilot: { readonly minutes: Limit; readonly runs: Limit };
   readonly windowHours: number;
   // runs at once: the most runs one pass starts
   readonly runsAtOnce: number;
@@ -53,12 +64,14 @@ export const NO_CAPS: Caps = {
   ticket: { usd: "none", tokens: "none" },
   day: { usd: "none", tokens: "none" },
   window: { tokens: "none", machineTokens: "none" },
+  copilot: { minutes: "none", runs: "none" },
   windowHours: WINDOW_HOURS,
   runsAtOnce: RUNS_AT_ONCE,
   runHours: "any",
 };
 
-type Read = { readonly id: MachineId; readonly whole: boolean };
+// a cap and what it counts: dollars, or a whole number of tokens, minutes or runs
+type Read = { readonly id: MachineId; readonly whole: "tokens" | "minutes" | "runs" | false };
 
 // amountOf : a cap's text as a number above 0, whole when it counts tokens, or "bad". Pure.
 function amountOf(raw: string, whole: boolean): number | "bad" {
@@ -72,12 +85,12 @@ function limitOf(env: NodeJS.ProcessEnv, read: Read): Result<Limit> {
   if (raw === undefined) {
     return { kind: "ok", value: "none" };
   }
-  const n = amountOf(raw, read.whole);
+  const n = amountOf(raw, read.whole !== false);
   return n !== "bad"
     ? { kind: "ok", value: n }
     : {
         kind: "failed",
-        reason: `${settingName(read.id)} must be ${read.whole ? "a whole number of tokens" : "a dollar amount"} above 0`,
+        reason: `${settingName(read.id)} must be ${read.whole === false ? "a dollar amount" : `a whole number of ${read.whole}`} above 0`,
       };
 }
 
@@ -108,25 +121,28 @@ function runHoursOf(env: NodeJS.ProcessEnv): Result<RunHours | "any"> {
     : { kind: "failed", reason: `${settingName("runHours")} must be ${HOURS_HINT}, got ${JSON.stringify(raw)}` };
 }
 
-// the six limits, in the order Caps holds them
+// the eight limits, in the order Caps holds them
 const READS: readonly Read[] = [
   { id: "caps.usdPerTicket", whole: false },
-  { id: "caps.tokensPerTicket", whole: true },
+  { id: "caps.tokensPerTicket", whole: "tokens" },
   { id: "caps.usdPerProjectDay", whole: false },
-  { id: "caps.tokensPerProjectDay", whole: true },
-  { id: "caps.windowTokens", whole: true },
-  { id: "caps.machineWindowTokens", whole: true },
+  { id: "caps.tokensPerProjectDay", whole: "tokens" },
+  { id: "caps.windowTokens", whole: "tokens" },
+  { id: "caps.machineWindowTokens", whole: "tokens" },
+  { id: "caps.copilotMinutesPerProjectDay", whole: "minutes" },
+  { id: "caps.copilotRunsPerProjectDay", whole: "runs" },
 ];
 
 type Runs = { readonly windowHours: number; readonly runsAtOnce: number; readonly runHours: RunHours | "any" };
 
-// capsFrom : the six limits, in READS order, and the runs' limits, as Caps. Pure.
+// capsFrom : the eight limits, in READS order, and the runs' limits, as Caps. Pure.
 function capsFrom(limits: readonly Limit[], runs: Runs): Caps {
   const at = (i: number): Limit => limits[i] ?? "none";
   return {
     ticket: { usd: at(0), tokens: at(1) },
     day: { usd: at(2), tokens: at(3) },
     window: { tokens: at(4), machineTokens: at(5) },
+    copilot: { minutes: at(6), runs: at(7) },
     ...runs,
   };
 }
@@ -243,6 +259,7 @@ export function projectStop(input: {
       period: "day",
       until: () => p.day + 86_400_000,
     }),
+    copilotStop({ runs: input.project, from: p.day, today, caps }),
     stopFor({
       what: `in the last ${caps.windowHours} h the project`,
       spend: totalOf(input.project, p.window).spend,
@@ -261,6 +278,78 @@ export function projectStop(input: {
     }),
   ];
   return stops.find((s) => s.kind === "stop") ?? { kind: "go" };
+}
+
+// copilotSince : the project's Copilot runs and their seconds since `from`. Pure.
+function copilotSince(runs: readonly Spent[], from: number): CopilotRuns {
+  return runs
+    .filter((r) => r.copilot !== undefined && Date.parse(r.at) >= from)
+    .reduce(
+      (sum, r) => ({ runs: sum.runs + (r.copilot?.runs ?? 0), seconds: sum.seconds + (r.copilot?.seconds ?? 0) }),
+      { runs: 0, seconds: 0 },
+    );
+}
+
+// copilotStop : the day's Copilot cap the project's runs have reached, minutes first, then runs. Pure.
+function copilotStop(input: {
+  readonly runs: readonly Spent[];
+  readonly from: number;
+  readonly today: string;
+  readonly caps: Caps;
+}): Stop {
+  const done = copilotSince(input.runs, input.from);
+  const minutes = Math.floor(done.seconds / 60);
+  const hits: readonly (readonly [Limit, number, string, MachineId])[] = [
+    [input.caps.copilot.minutes, minutes, "minutes", "caps.copilotMinutesPerProjectDay"],
+    [input.caps.copilot.runs, done.runs, "runs", "caps.copilotRunsPerProjectDay"],
+  ];
+  const hit = hits.find(([limit, used]) => limit !== "none" && used >= limit);
+  if (hit === undefined) {
+    return { kind: "go" };
+  }
+  const [limit, , unit, id] = hit;
+  return {
+    kind: "stop",
+    why: `today (${input.today}, UTC) the project's Copilot runs took ${minutes} minutes in ${done.runs} runs, at the cap of ${String(limit)} ${unit} (${settingName(id)})`,
+    notice: `day ${input.today}`,
+    period: "day",
+    until: input.from + 86_400_000,
+  };
+}
+
+// copilotCapsGap : why a project that names Copilot for a role may not run under these caps, or "": a dollar or
+// token cap is set, and Copilot's cost is unknown, so with no Copilot cap it would pass that cap silently. Pure.
+export function copilotCapsGap(caps: Caps, agents: Readonly<Record<string, string>>): string {
+  const named = Object.values(agents).includes("copilot");
+  const counted = [
+    caps.ticket.usd,
+    caps.ticket.tokens,
+    caps.day.usd,
+    caps.day.tokens,
+    caps.window.tokens,
+    caps.window.machineTokens,
+  ];
+  const capped = counted.some((c) => c !== "none");
+  const copilotCapped = caps.copilot.minutes !== "none" || caps.copilot.runs !== "none";
+  return named && capped && !copilotCapped
+    ? `a Copilot run's cost is unknown, so it would pass the dollar and token caps silently; set ${settingName("caps.copilotMinutesPerProjectDay")} or ${settingName("caps.copilotRunsPerProjectDay")}`
+    : "";
+}
+
+// aiCreditsOf : caps.aiCreditsPerRun, the --max-ai-credits of each Copilot run: "" for none
+export function aiCreditsOf(env: NodeJS.ProcessEnv): Result<string> {
+  const raw = settingOf(env, "caps.aiCreditsPerRun");
+  if (raw === undefined) {
+    return { kind: "ok", value: "" };
+  }
+  const [least, most] = MOST_AI_CREDITS;
+  const n = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  return n >= least && n <= most
+    ? { kind: "ok", value: String(n) }
+    : {
+        kind: "failed",
+        reason: `${settingName("caps.aiCreditsPerRun")} must be a whole number from ${least} to ${most}, got ${JSON.stringify(raw)}`,
+      };
 }
 
 // hhmm : a time as HH:MM UTC. Pure.

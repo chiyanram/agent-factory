@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { plainName } from "../spec.js";
 import type { Result } from "../forge/api.js";
 import { readRecords, type DesignStep, type Event, type Phase, type WriterMode } from "./records.js";
-import { addSpend, NO_SPEND, RUN_KINDS, type RoundSpend, type RunKind, type Spend } from "./spend.js";
+import { addSpend, NO_SPEND, RUN_KINDS, type CopilotRuns, type RoundSpend, type RunKind, type Spend } from "./spend.js";
 import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 import { tallyOf, type TicketTally } from "./touches.js";
 import { dayStart, monthStart, shownAt, UTC, type Zone } from "../zone.js";
@@ -26,6 +26,8 @@ export type Spent = {
   // a finder's lens (#337)
   readonly lens?: string;
   readonly spend: Spend | "unmeasured";
+  // the Copilot runs the line's spend leaves out: the Copilot day caps count them
+  readonly copilot?: CopilotRuns;
 };
 
 // one review round's acted-on rows (#220): the last full round's findings, each acted on or not since
@@ -108,9 +110,22 @@ function kindOf(e: Spending): RunKind {
 // spent; any other line, or a round line with no split, is one run of its kind. Pure.
 function spentOf(e: Spending, project: string, ticket: string): readonly Spent[] {
   const split = splitOf(e);
+  const copilot = e.copilot === undefined ? {} : { copilot: e.copilot };
   return split === undefined
-    ? [{ project, ticket, at: e.at, kind: kindOf(e), spend: e.spend ?? "unmeasured" }]
-    : splitRuns(split, { project, ticket, at: e.at });
+    ? [{ project, ticket, at: e.at, kind: kindOf(e), spend: e.spend ?? "unmeasured", ...copilot }]
+    : withCopilot(splitRuns(split, { project, ticket, at: e.at }), e, { project, ticket });
+}
+
+// withCopilot : a round's runs with the line's Copilot runs on its first run only, so they count once; a round with
+// no measured run keeps them on a run of its own. Pure.
+function withCopilot(runs: readonly Spent[], e: Spending, where: Pick<Spent, "project" | "ticket">): readonly Spent[] {
+  if (e.copilot === undefined) {
+    return runs;
+  }
+  const [first, ...rest] = runs;
+  return first === undefined
+    ? [{ ...where, at: e.at, kind: kindOf(e), spend: NO_SPEND, copilot: e.copilot }]
+    : [{ ...first, copilot: e.copilot }, ...rest];
 }
 
 // splitOf : a review round line's spend per run; none on another line, or an older one (#337). Pure.

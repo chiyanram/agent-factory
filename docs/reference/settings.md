@@ -12,7 +12,7 @@ variable needs exporting.
 | `FACTORY_SPEC_STORE` | where the ticket specs live (`specStore`, a ladder: `issue` < `local`). `local`: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, never on the git host, the rule at work. `issue`: the body of the git host issue whose number is the ticket, read through the git host seam; `spec`, `approve`, `approval`, `request` and `dispatch` check and hash it exactly like a local spec, so an edit to the issue makes its approval stale, and the ticket must be the issue number. A ladder, so a team or user file that says `local` holds every project to it, and a project marked `work` that says `issue` is refused. `agent-factory init` asks it, recommending `issue` for a personal project on github.com or gitlab.com. The coordinator changes an issue's spec through a kept write ([A spec change in the issue store](connectors.md#a-spec-change-in-the-issue-store)) | `local` |
 | `FACTORY_DEFAULT_PROJECT` | the project a command that names none acts on (`poll`, `claim`, `status` and the rest); `agent-factory coordinator <project>` sets it in its session, so you never export it (#382). Not a settings key | — |
 | `FACTORY_HOME` | the factory home, an absolute path: the specs, approvals, project files and run records | `~/.factory` |
-| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries; an implementer run in a `vm` runner starts the image's own `claude`, which the image pins | `glab`, `gh`, `claude` |
+| `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE`, `FACTORY_COPILOT` | the `glab`, `gh`, `claude` and `copilot` binaries; an implementer run in a `vm` runner starts the image's own `claude`, which the image pins. **Today:** no run starts `copilot` yet (#697) | `glab`, `gh`, `claude`, `copilot` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
 | `FACTORY_QUESTIONS` | `dispatch`: how an implementer run's questions are posted (`questions`, a preference). `round` posts every open question at once, in one numbered `[writer] OPEN:` note: each question with 2 to 4 lettered choices and the recommended one marked, so you reply with a letter per question (`1A 2B`) or `accept all`. `one-at-a-time` posts only the first and says how many wait; once it is answered, the next run asks again what is still open. Either way the implementer never guesses (#320). **Today:** a report's plain-text question is still read, for one release, as one with no choices, which you answer in words | `round` |
 | `FACTORY_POLL_MINUTES` | `dispatch`: how long the orchestrator loop waits between passes; each pass keeps it with its last-poll time, and while a loop is meant to be running `status` flags it `LATE` after 3 of these while a change is claimed | `5` |
@@ -31,6 +31,8 @@ variable needs exporting.
 | `FACTORY_MAX_USD_TICKET`, `FACTORY_MAX_TOKENS_TICKET` | `dispatch`: the most a ticket's runs may spend since its START or approval (`caps.usdPerTicket`, `caps.tokensPerTicket`); at either, the ticket goes to `needs-human` with what it spent, once. A new START or approval starts the count afresh (#131) | no cap |
 | `FACTORY_MAX_USD_DAY`, `FACTORY_MAX_TOKENS_DAY` | `dispatch`: the most a project's runs may spend in a UTC day (`caps.usdPerProjectDay`, `caps.tokensPerProjectDay`); at either, no new run starts that day and one notice goes out (#131) | no cap |
 | `FACTORY_WINDOW_TOKENS`, `FACTORY_MACHINE_WINDOW_TOKENS` | `dispatch`: the factory's share of a subscription window, in tokens, for the project and for every project on this machine (`caps.windowTokens`, `caps.machineWindowTokens`). The share is the stop line: at it, no new run starts until the last `FACTORY_WINDOW_HOURS` hold less, and one notice goes out (#131) | no cap |
+| `FACTORY_COPILOT_MINUTES_DAY`, `FACTORY_COPILOT_RUNS_DAY` | `dispatch`: a Copilot run's cost is unknown, so the dollar and token caps cannot count it; these cap a project's Copilot runs in a UTC day by their wall-clock minutes and by their count (`caps.copilotMinutesPerProjectDay`, `caps.copilotRunsPerProjectDay`); at either, no new run starts that day and one notice goes out. A project file that names `copilot` for a role is refused while any dollar or token cap is set and neither of these is, so no cap passes silently. **Today:** no Copilot run starts yet, so they count nothing (#697) | no cap |
+| `FACTORY_COPILOT_AI_CREDITS` | the most AI credits one Copilot run may use, a whole number from 30, passed as `--max-ai-credits` (`caps.aiCreditsPerRun`). The CLI calls it a soft cap that blocks the next model call. **Today:** untried on a live run (#697) | no cap |
 | budget settings | the rest of ADR-0012 S16: runs at once, run hours and the model per phase are the keys above (`FACTORY_MAX_RUNS`, `FACTORY_RUN_HOURS`, the `*_MODEL` keys) | — |
 | `FACTORY_WRITER_MODEL` | the implementer's model | Claude's default |
 | `FACTORY_WRITER_MINUTES` | the longest one implementer run may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
@@ -60,7 +62,8 @@ so a branch cannot choose its own gate or the programs its evidence runs (#91):
   "lanes": { "oneWayDoor": ["db/migrations/**", "api/openapi.yaml"] },
   "connectors": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" },
   "plugins": ["rulebook@chiyanram"],
-  "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } }
+  "policy": { "tracker.comment": { "mode": "allow", "cap": 5 } },
+  "agents": { "finder": "claude" }
 }
 ```
 
@@ -90,6 +93,10 @@ there.
 - `ready.testFiles`: the globs the floor guard reads as test files; they replace the built-in list (`src/test/**`,
   `test/**`, `tests/**`, `__tests__/**`, `*Test.java`, `*Spec.groovy`, `*.test.*`, `*.spec.*`, `test_*.py`,
   `*_test.go` and the like; `src/core/ready/floor.ts`).
+- `agents`: the agent CLI per role, `claude` or `copilot`. The roles are `implementer`, `test-first`, `cleanup`,
+  `design-reviewer`, `verify-pass`, `onboarder` and `finder` (every lens); a role not named runs on `claude`. An unknown
+  role or CLI is refused. **Today:** a file that names `copilot` for any role is refused on every read, so no run starts
+  on it: Copilot read-only runs are off until a real run is checked (#697), and implementer, test-first and cleanup runs are not built (#698).
 - `ready.judgeFiles`: more globs for the judge files (#231), added to the built-in ones, never in their place: the
   build files, the verify command's files and the test config (`src/core/ready/judge.ts`).
 - `egress.allow`: the hosts this project's runners may reach, by name: `api.anthropic.com` (the implementer needs it), or

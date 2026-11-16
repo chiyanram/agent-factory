@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readProjectFile } from "../src/core/project.js";
+import { agentsOf, readProjectFile, readProjectRaw, runSettings } from "../src/core/project.js";
 import { commandArgv, evidencePrograms, GIT_READS, READ_ONLY_PROGRAMS } from "../src/core/ready/command.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
 import { tempDir } from "./temp.js";
@@ -150,6 +150,60 @@ describe("commandArgv: an evidence row with no shell (#91)", () => {
     ];
     for (const [command, reason] of cases) {
       expect(commandArgv(command, programs)).toMatchObject({ kind: "failed", reason: expect.stringContaining(reason) });
+    }
+  });
+});
+
+describe("agents: the agent CLI per role (#690)", () => {
+  it("reads claude per role, and no agents key as claude for every role", () => {
+    expect(agentsOf({})).toEqual({ kind: "ok", value: {} });
+    expect(agentsOf({ agents: { implementer: "claude", finder: "claude" } })).toEqual({
+      kind: "ok",
+      value: { implementer: "claude", finder: "claude" },
+    });
+  });
+
+  it.each(["design-reviewer", "verify-pass", "onboarder", "finder"])(
+    "refuses copilot for the read-only role %s until a real run is checked (#697)",
+    (role) => {
+      expect(agentsOf({ agents: { [role]: "copilot" } })).toEqual({
+        kind: "failed",
+        reason: expect.stringMatching(new RegExp(`"agents.${role}".*Copilot read-only runs are off.*#697`)),
+      });
+    },
+  );
+
+  it.each(["implementer", "test-first", "cleanup"])("refuses copilot for the writer role %s (#698)", (role) => {
+    expect(agentsOf({ agents: { [role]: "copilot" } })).toEqual({
+      kind: "failed",
+      reason: expect.stringMatching(new RegExp(`"agents.${role}".*Copilot writer runs are off.*#698`)),
+    });
+  });
+
+  it("refuses an unknown role, a value that is no CLI, and agents that is not an object", () => {
+    expect(agentsOf({ agents: { reviewer: "claude" } })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"agents.reviewer" is not a role'),
+    });
+    expect(agentsOf({ agents: { implementer: "opencode" } })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"claude" or "copilot"'),
+    });
+    expect(agentsOf({ agents: ["claude"] })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('"agents"'),
+    });
+  });
+
+  it("refuses every read of a project file that names copilot, so no run starts on it", async () => {
+    write({ gate: "forge-ci", ready: { programs: ["make"] }, agents: { finder: "copilot" } });
+    const path = join(home, "projects", "ledger.json");
+    for (const got of [
+      await readProjectRaw({ home, project: "ledger", env: {} }, ""),
+      await readProjectFile({ home, project: "ledger", env: {} }),
+      await runSettings({ home, project: "ledger", env: {} }),
+    ]) {
+      expect(got).toEqual({ kind: "failed", reason: expect.stringContaining(`${path}: "agents.finder"`) });
     }
   });
 });

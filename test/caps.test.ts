@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { capsOf, heldWords, NO_CAPS, overCaps, projectStop, roomAt, ticketCapped } from "../src/core/dispatch/caps.js";
+import {
+  aiCreditsOf,
+  capsOf,
+  copilotCapsGap,
+  heldWords,
+  NO_CAPS,
+  overCaps,
+  projectStop,
+  roomAt,
+  ticketCapped,
+} from "../src/core/dispatch/caps.js";
 import { hoursOf, openAt, within } from "../src/core/dispatch/hours.js";
 import { keyById } from "../src/core/settings/keys.js";
 import { settingName } from "../src/core/settings/machine.js";
@@ -41,6 +51,7 @@ describe("the caps are cap-class settings keys", () => {
         ticket: { usd: 4.5, tokens: 9000 },
         day: { usd: 20, tokens: 1_000_000 },
         window: { tokens: 500, machineTokens: 800 },
+        copilot: { minutes: "none", runs: "none" },
         windowHours: 3,
         runsAtOnce: 1,
         runHours: "any",
@@ -215,5 +226,79 @@ describe("overCaps: a review round's worst case against the dollar caps (#237)",
   it("never holds an unbounded worst case, or a project with no dollar caps", () => {
     expect(overCaps({ worst: "unbounded", ticket: spent(5), day: spent(10), caps })).toBe("");
     expect(overCaps({ worst: 100, ticket: spent(5), day: spent(10), caps: NO_CAPS })).toBe("");
+  });
+});
+
+describe("Copilot runs, whose cost is unknown (#690)", () => {
+  const NOW = Date.parse("2026-11-09T12:00:00Z");
+  const copilotRun = (at: string, seconds: number, runs = 1): Spent => ({
+    project: "ledger",
+    ticket: "PROJ-1",
+    at,
+    kind: "finder",
+    spend: "unmeasured",
+    copilot: { runs, seconds },
+  });
+
+  it("reads the Copilot caps as cap-class keys; a bad one refuses the pass", () => {
+    for (const id of ["caps.copilotMinutesPerProjectDay", "caps.copilotRunsPerProjectDay", "caps.aiCreditsPerRun"]) {
+      expect(keyById(id)?.class).toBe("cap");
+    }
+    expect(capsOf({ FACTORY_COPILOT_MINUTES_DAY: "90", FACTORY_COPILOT_RUNS_DAY: "12" })).toMatchObject({
+      kind: "ok",
+      value: { copilot: { minutes: 90, runs: 12 } },
+    });
+    expect(capsOf({ FACTORY_COPILOT_RUNS_DAY: "1.5" })).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("FACTORY_COPILOT_RUNS_DAY"),
+    });
+  });
+
+  it("stops the project at today's Copilot minutes, and at today's Copilot runs, never at yesterday's", () => {
+    const minutes = { ...NO_CAPS, copilot: { minutes: 30, runs: "none" as const } };
+    const yesterday = copilotRun("2026-11-08T23:00:00Z", 3600);
+    expect(projectStop({ project: [yesterday], machine: [], now: NOW, caps: minutes })).toEqual({ kind: "go" });
+    const today = [yesterday, copilotRun("2026-11-09T01:00:00Z", 1200), copilotRun("2026-11-09T02:00:00Z", 600)];
+    expect(projectStop({ project: today, machine: [], now: NOW, caps: minutes })).toMatchObject({
+      kind: "stop",
+      period: "day",
+      notice: "day 2026-11-09",
+      until: Date.parse("2026-11-10T00:00:00Z"),
+      why: expect.stringMatching(
+        /Copilot runs took 30 minutes in 2 runs.*cap of 30 minutes \(FACTORY_COPILOT_MINUTES_DAY\)/,
+      ),
+    });
+    const runs = { ...NO_CAPS, copilot: { minutes: "none" as const, runs: 3 } };
+    expect(projectStop({ project: today, machine: [], now: NOW, caps: runs })).toEqual({ kind: "go" });
+    const more = [...today, copilotRun("2026-11-09T03:00:00Z", 10, 1)];
+    expect(projectStop({ project: more, machine: [], now: NOW, caps: runs })).toMatchObject({
+      kind: "stop",
+      why: expect.stringContaining("cap of 3 runs (FACTORY_COPILOT_RUNS_DAY)"),
+    });
+  });
+
+  it("refuses Copilot for a project with a dollar or token cap and no Copilot cap, so a cap never silently passes", () => {
+    const usd = { ...NO_CAPS, day: { usd: 5, tokens: "none" as const } };
+    expect(copilotCapsGap(usd, { finder: "copilot" })).toContain(
+      "FACTORY_COPILOT_MINUTES_DAY or FACTORY_COPILOT_RUNS_DAY",
+    );
+    expect(copilotCapsGap({ ...NO_CAPS, ticket: { usd: "none", tokens: 9000 } }, { finder: "copilot" })).not.toBe("");
+    expect(
+      copilotCapsGap({ ...NO_CAPS, window: { tokens: 500, machineTokens: "none" } }, { finder: "copilot" }),
+    ).not.toBe("");
+    expect(copilotCapsGap({ ...usd, copilot: { minutes: "none", runs: 4 } }, { finder: "copilot" })).toBe("");
+    expect(copilotCapsGap(usd, { finder: "claude" })).toBe("");
+    expect(copilotCapsGap(NO_CAPS, { finder: "copilot" })).toBe("");
+  });
+
+  it("reads caps.aiCreditsPerRun: none, or a whole number from 30", () => {
+    expect(aiCreditsOf({})).toEqual({ kind: "ok", value: "" });
+    expect(aiCreditsOf({ FACTORY_COPILOT_AI_CREDITS: "30" })).toEqual({ kind: "ok", value: "30" });
+    for (const bad of ["29", "0", "40.5", "lots"]) {
+      expect(aiCreditsOf({ FACTORY_COPILOT_AI_CREDITS: bad })).toMatchObject({
+        kind: "failed",
+        reason: expect.stringContaining("FACTORY_COPILOT_AI_CREDITS must be a whole number from 30"),
+      });
+    }
   });
 });

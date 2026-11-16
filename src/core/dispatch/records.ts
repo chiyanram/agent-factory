@@ -34,7 +34,7 @@ import { isVia, type Via } from "../human-record.js";
 import type { Evidence } from "../report.js";
 import type { PluginHash } from "../process/use.js";
 import { scrubbedJson } from "../scrub.js";
-import { addSpend, NO_SPEND, RUN_KINDS, type RoundSpend, type RunKind, type Spend } from "./spend.js";
+import { addSpend, NO_SPEND, RUN_KINDS, type CopilotRuns, type RoundSpend, type RunKind, type Spend } from "./spend.js";
 import { recordedFindings, recordedKept, type DesignFinding, type Kept } from "../design/findings.js";
 import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js";
 import { BUCKETS } from "../finding.js";
@@ -128,6 +128,8 @@ export type Event =
       readonly hung: boolean;
       // what the run spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // the Copilot runs its spend leaves out; none on a line that has none
+      readonly copilot?: CopilotRuns;
       // the role card's hash, for a run started from a card (#236: cleanup)
       readonly card?: string;
       // what a cleanup run left for a person, as each would change behaviour (#236)
@@ -173,6 +175,8 @@ export type Event =
       readonly nextTry?: NextTry;
       // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
+      // the round's Copilot runs, which its spend leaves out; none on a line that has none
+      readonly copilot?: CopilotRuns;
       // the same spend per run: each finder's by its lens, and the verify pass's (#337); none on an older line
       readonly split?: RoundSpend;
       // the last full round's Act on and Consider findings at its head, each acted on or not by this head (#220);
@@ -195,6 +199,8 @@ export type Event =
       readonly phase: Phase;
       readonly head: string;
       readonly spend: Spend;
+      // the Copilot runs its spend leaves out; none on a line that has none
+      readonly copilot?: CopilotRuns;
       // a review round's spend per run (#337); none on another phase's line or an older one
       readonly split?: RoundSpend;
       // the failed run's traces, plain file names in the ticket's folder (trace.ts, #487); none on an older line
@@ -217,6 +223,8 @@ export type Event =
       // the role card's hash; none when the run failed before it read one
       readonly card?: string;
       readonly spend?: Spend;
+      // the Copilot runs its spend leaves out; none on a line that has none
+      readonly copilot?: CopilotRuns;
       // a failure no retry fixes, such as a cite that does not hold: the step stops at once (#489); absent otherwise
       readonly final?: true;
       // the spec's lane and its Planned files when the run read it, so a later edit that raises the lane or changes
@@ -422,15 +430,27 @@ function amount(value: unknown): number | Bad {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : BAD;
 }
 
-// spendField : an ended line's spend, as a field to spread: none on a line that has none (#131)
-function spendField(raw: unknown): { readonly spend?: Spend } | Bad {
+// spendField : an ended line's spend and its Copilot runs, as fields to spread: none on a line that has none
+function spendField(raw: unknown): { readonly spend?: Spend; readonly copilot?: CopilotRuns } | Bad {
+  const copilot = copilotField(raw);
   const spend = prop(raw, "spend");
-  if (spend === undefined) {
-    return {};
+  if (spend === undefined || copilot === BAD) {
+    return copilot;
   }
   const usd = amount(prop(spend, "usd"));
   const tokens = amount(prop(spend, "tokens"));
-  return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens } };
+  return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens }, ...copilot };
+}
+
+// copilotField : a line's Copilot runs and their seconds, as a field to spread: none on a line that has none
+function copilotField(raw: unknown): { readonly copilot?: CopilotRuns } | Bad {
+  const copilot = prop(raw, "copilot");
+  if (copilot === undefined) {
+    return {};
+  }
+  const runs = prop(copilot, "runs");
+  const seconds = prop(copilot, "seconds");
+  return isCount(runs) && isCount(seconds) ? { copilot: { runs: Number(runs), seconds: Number(seconds) } } : BAD;
 }
 
 // spendIn : one spend figure, or BAD
@@ -468,11 +488,12 @@ function spentOf(raw: unknown, at: string): Event | Bad {
   return spend === BAD || extras === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...extras };
 }
 
-// spentExtras : a spent line's optional split and traces, as fields to spread, or BAD
-function spentExtras(raw: unknown): Pick<Extract<Event, { kind: "spent" }>, "split" | "traces"> | Bad {
+// spentExtras : a spent line's optional split, traces and Copilot runs, as fields to spread, or BAD
+function spentExtras(raw: unknown): Pick<Extract<Event, { kind: "spent" }>, "split" | "traces" | "copilot"> | Bad {
   const split = splitField(raw);
   const traces = tracesField(raw);
-  return split === BAD || traces === BAD ? BAD : { ...split, ...traces };
+  const copilot = copilotField(raw);
+  return split === BAD || traces === BAD || copilot === BAD ? BAD : { ...split, ...traces, ...copilot };
 }
 
 // tracesField : a line's traces, as a field to spread: none on a line that has none (#487)
@@ -552,7 +573,10 @@ function notesFields(
 function writerExtras(
   raw: unknown,
 ):
-  | Pick<Extract<Event, { kind: "writer-ended" }>, "spend" | "card" | "deferred" | "stale" | "why" | "output" | "trace">
+  | Pick<
+      Extract<Event, { kind: "writer-ended" }>,
+      "spend" | "copilot" | "card" | "deferred" | "stale" | "why" | "output" | "trace"
+    >
   | Bad {
   const spend = spendField(raw);
   const card = cardField(raw);

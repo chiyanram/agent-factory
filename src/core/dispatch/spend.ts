@@ -15,6 +15,10 @@ export type Spend = { readonly usd: number; readonly tokens: number };
 
 export const NO_SPEND: Spend = { usd: 0, tokens: 0 };
 
+// the Copilot runs a line's spend leaves out, since their cost is unknown: how many, and their wall-clock
+// seconds, which the Copilot day caps count
+export type CopilotRuns = { readonly runs: number; readonly seconds: number };
+
 // RunKind : what a run was, in the glossary's role names (#337), as far as its record tells: an automated review's
 // round line splits its spend into each finder's, by lens, and the verify pass's; an older round line that has no split
 // is one "automated review". A design review records each of its two runs, the design-reviewer's and the verify

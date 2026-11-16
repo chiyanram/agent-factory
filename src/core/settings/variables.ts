@@ -25,6 +25,16 @@ export const wholeNumber =
       ? ""
       : `a whole number from 1 to ${most}`;
 
+// the fewest and the most AI credits one Copilot run may be capped at: the CLI takes no cap under 30
+export const MOST_AI_CREDITS = [30, 1_000_000] as const;
+
+export const wholeFrom =
+  (least: number, most: number): Check =>
+  (value) =>
+    Number.isSafeInteger(value) && Number(value) >= least && Number(value) <= most
+      ? ""
+      : `a whole number from ${least} to ${most}`;
+
 export const list: Check = (value) => (words(value) ? "" : 'a list of words, such as ["make"]');
 
 const text: Check = (value) => (word(value) ? "" : "a word");
@@ -242,6 +252,27 @@ export const MACHINE_KEYS = [
     "cap",
     "every project's share of a subscription window on this machine, in tokens: the machine's stop line",
     wholeNumber(MOST_TOKENS),
+  ),
+  machine(
+    "caps.copilotMinutesPerProjectDay",
+    "FACTORY_COPILOT_MINUTES_DAY",
+    "cap",
+    "the most wall-clock minutes a project's Copilot runs may take in a UTC day, since their cost is unknown",
+    wholeNumber(MOST_TOKENS),
+  ),
+  machine(
+    "caps.copilotRunsPerProjectDay",
+    "FACTORY_COPILOT_RUNS_DAY",
+    "cap",
+    "the most Copilot runs a project may start in a UTC day, since their cost is unknown",
+    wholeNumber(MOST_TOKENS),
+  ),
+  machine(
+    "caps.aiCreditsPerRun",
+    "FACTORY_COPILOT_AI_CREDITS",
+    "cap",
+    "the most AI credits one Copilot run may use, passed as --max-ai-credits (at least 30)",
+    wholeFrom(MOST_AI_CREDITS[0], MOST_AI_CREDITS[1]),
   ),
   machine(
     "eval.judgeUsdPerRun",

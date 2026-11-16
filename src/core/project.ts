@@ -15,8 +15,12 @@
 //     },
 //     "egress": {
 //       "allow": ["api.anthropic.com"]       the hosts this project's boxes may reach (#130; egress/allowlist.ts);
-//     }                                      none means no box runs for the project
+//     },                                     none means no box runs for the project
+//     "agents": {"finder": "claude"}         the agent CLI per role: "claude" (the default) or "copilot"
 //   }
+//
+// **Today:** a file that names "copilot" for any role is refused on every read, so no run starts on it: Copilot
+// read-only runs are off until #697, writer runs until #698 (agent/switch.ts).
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -29,6 +33,8 @@ import { TEST_FILES } from "./ready/floor.js";
 import { READY_MINUTES } from "./settings/keys.js";
 import { layered, refusals } from "./settings/layers.js";
 import { runEnv } from "./settings/machine.js";
+import { capsOf, copilotCapsGap } from "./dispatch/caps.js";
+import { COPILOT_ON, COPILOT_ROLES, COPILOT_TICKET, type AgentName, type AgentRole } from "./agent/switch.js";
 
 // a command with no shell: argv[0] is the program
 export type Argv = readonly [string, ...string[]];
@@ -167,6 +173,52 @@ function parsed(text: string): unknown {
   }
 }
 
+export type Agents = Readonly<Partial<Record<AgentRole, AgentName>>>;
+
+const ROLE_KIND: ReadonlyMap<string, "readOnly" | "writer"> = new Map([
+  ...COPILOT_ROLES.readOnly.map((r) => [r, "readOnly"] as const),
+  ...COPILOT_ROLES.writer.map((r) => [r, "writer"] as const),
+]);
+
+const OFF = {
+  readOnly: `Copilot read-only runs are off until a real run is checked (${COPILOT_TICKET.readOnly})`,
+  writer: `Copilot writer runs are off until a real run is checked (${COPILOT_TICKET.writer})`,
+};
+
+// agentProblem : why one "agents" entry is refused, or "" when it is fine. Pure.
+function agentProblem(role: string, cli: unknown): string {
+  const kind = ROLE_KIND.get(role);
+  if (kind === undefined) {
+    return `"agents.${role}" is not a role: one of ${[...ROLE_KIND.keys()].join(", ")}`;
+  }
+  return cli === "claude" || cli === "copilot"
+    ? offProblem(role, kind, cli)
+    : `"agents.${role}" must be "claude" or "copilot", got ${JSON.stringify(cli)}`;
+}
+
+// offProblem : why a role may not run on this CLI yet, or "": Copilot is off until each kind is turned on. Pure.
+function offProblem(role: string, kind: "readOnly" | "writer", cli: AgentName): string {
+  return cli === "copilot" && !COPILOT_ON[kind] ? `"agents.${role}": ${OFF[kind]}` : "";
+}
+
+// agentsOf : the agent CLI per role a project file names; a role it does not name runs on claude. Pure.
+export function agentsOf(raw: object): Result<Agents> {
+  const agents = prop(raw, "agents");
+  if (agents === undefined) {
+    return { kind: "ok", value: {} };
+  }
+  if (!isObject(agents)) {
+    return {
+      kind: "failed",
+      reason: `"agents" must map a role to "claude" or "copilot", such as {"finder": "claude"}`,
+    };
+  }
+  const problem = Object.entries(agents)
+    .map(([role, cli]) => agentProblem(role, cli))
+    .find((p) => p !== "");
+  return problem === undefined ? { kind: "ok", value: agents } : { kind: "failed", reason: problem };
+}
+
 type Missing = { readonly kind: "missing"; readonly reason: string };
 
 async function fileText(path: string, missing: string): Promise<Result<string> | Missing> {
@@ -206,7 +258,11 @@ export async function readProjectRaw(
     return read;
   }
   const raw = parsed(read.value);
-  return isObject(raw) ? withLayers(input, path, read.value, raw) : failed(path, "is not a JSON object");
+  if (!isObject(raw)) {
+    return failed(path, "is not a JSON object");
+  }
+  const agents = agentsOf(raw);
+  return agents.kind === "ok" ? withLayers(input, path, read.value, raw) : failed(path, agents.reason);
 }
 
 async function withLayers(
@@ -254,12 +310,26 @@ async function resolvedRun(
   if (!isObject(value)) {
     return failed(path, "is not a JSON object");
   }
+  const agents = agentsOf(value);
+  if (agents.kind === "failed") {
+    return failed(path, agents.reason);
+  }
   const resolved = await layered({ home: input.home, env: input.env, project: { path, text, value } });
   const refused = refusals(resolved);
   const warnings = resolved.problems.filter((p) => p.level === "warning").map((p) => p.text);
-  return refused === ""
-    ? { kind: "ok", value: { env: runEnv(input.env, resolved), warnings } }
-    : failed(path, `the settings layers refuse to start: ${refused}`);
+  if (refused !== "") {
+    return failed(path, `the settings layers refuse to start: ${refused}`);
+  }
+  const env = runEnv(input.env, resolved);
+  const gap = capsGap(env, agents.value);
+  return gap === "" ? { kind: "ok", value: { env, warnings } } : failed(path, gap);
+}
+
+// capsGap : why the caps refuse the roles this file gives Copilot, or "" (dispatch/caps.ts copilotCapsGap); a bad cap
+// is left for the caps' own reader to refuse
+function capsGap(env: NodeJS.ProcessEnv, agents: Agents): string {
+  const caps = capsOf(env);
+  return caps.kind === "ok" ? copilotCapsGap(caps.value, agents) : "";
 }
 
 function isObject(value: unknown): value is object {
