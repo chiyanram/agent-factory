@@ -4,9 +4,9 @@ One word per idea. Use these words, and only these, in docs, role cards, code co
 a word under _Avoid_, use the term instead.
 
 The factory words are Matt Pocock's `software-factory` vocabulary (mattpocock/skills @4ae2317,
-`skills/in-progress/software-factory/`, MIT). The term map was confirmed on #144 on 2026-11-08, and four clashes were
-settled on 2026-11-09 ([ADR-0016](docs/adr/0016-adopt-the-software-factory-vocabulary.md)). Code names that still use an old word are renamed in #144 phase 4. Until then, the alias column
-says what they mean.
+`skills/in-progress/software-factory/`, MIT), adopted with four clashes settled in
+[ADR-0016](docs/adr/0016-adopt-the-software-factory-vocabulary.md). Some code names still use an old word; until they
+are renamed, [Old words, do not use](#old-words-do-not-use) says what they mean.
 
 ## The factory
 
@@ -63,9 +63,9 @@ review. Every loop of runs is capped at a few tries before a human.
 
 ## Services
 
-**Ticket tracker**: where tickets live: GitLab or GitHub issues, Jira.
+**Ticket tracker**: where tickets live: GitLab or GitHub issues, Jira. Here, unlike Pocock's design, the tracker is
+not where humans talk to the factory. That is a front door.
 _Avoid_: issue tracker, project board
-Here, unlike Pocock's design, the tracker is not where humans talk to the factory. That is a front door.
 
 **Ticket**: one tracked piece of work.
 _Avoid_: issue (for a ticket), story

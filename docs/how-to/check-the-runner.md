@@ -38,16 +38,15 @@ secret-like name the runner was not given, is there. Where there is no image or 
 
 **Today:** the egress proxy is tested only on a fake docker. Each runner joins its project's `--internal` network,
 `factory-int-<project>`, and leaves only through the project's Squid proxy; that it holds on a real Docker host is
-proven only by this check (#130). Run it on the VM after the first `box build`, as the user that runs the orchestrator,
+proven only by this check (#493). Run it on the VM after the first `box build`, as the user that runs the orchestrator,
 with the same settings as a dispatch pass:
 
 ```bash
 agent-factory egress check <project> --port 22
 ```
 
-Name with `--port` each port a runner may reach on the host's gateway (setup lists the ports that listen on all
-interfaces, #136). It starts the project's proxy as a run does, then a fresh runner on an empty folder, and prints one
-line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each one on #130 with the output:
+Name with `--port` each port a runner may reach on the host's gateway. It starts the project's proxy as a run does, then a fresh runner on an empty folder, and prints one
+line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each one on #493 with the output:
 
 - [ ] a host off the allowlist (`example.com`) is refused: the proxy answers 403;
 - [ ] a model call reaches `api.anthropic.com` through the proxy (any HTTP answer from it), and the same host on
@@ -59,7 +58,7 @@ line per check, `pass`, `fail` or `skipped`. Exit 0 means none failed. Tick each
   `production.cloudflare.docker.com`, and `--pull` names the image your ITs use;
 - [ ] a real model call, by the first implementer run on the VM, goes through: the check reaches the host, not the model;
 - [ ] the open question: does the work build need a private-registry token? Run the work project's build in the
-  runner; if a registry answers 401, record it on #130.
+  runner; if a registry answers 401, record it on #493.
 
 On the work laptop there is no Squid proxy: the srt runner keeps its own, and `egress check` says so; run the srt
 check below instead.
@@ -95,7 +94,7 @@ Tick each one on #114 with the output:
 - [ ] the factory home's files and your `gh`, `glab`, `.netrc` and `.git-credentials` logins cannot be read;
 - [ ] no Docker socket answers (Docker Desktop, Rancher Desktop);
 - [ ] by hand: one implementer run with `claude` finishes inside `srt` (`FACTORY_BOX=srt agent-factory dispatch
-  <project>`); a run with Copilot comes with #162.
+  <project>`); a run with Copilot comes with #493.
 
 The policy hides your whole home ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531);
 the operator's choice A on #114). It allows back only the run's clone and private home, and, read-only, the install

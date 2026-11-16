@@ -4,7 +4,8 @@ Tickets and specs for this repo live as GitHub issues. Use the `gh` CLI for all 
 
 ## Conventions
 
-- **Create a ticket**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+- **Create a ticket**: `gh issue create --title "..." --label type:<bug|feature|task> --body "..."`, with one type
+  label, as in [triage-labels.md](triage-labels.md#type-labels). Use a heredoc for multi-line bodies.
 - **Read a ticket**: `gh issue view <number> --json number,title,body,labels,comments`.
 - **List tickets**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Make a ticket a sub-issue of a parent**: `gh issue create --parent <parent> ...`, or `gh issue edit <parent> --add-sub-issue <child>` afterwards (`gh` 2.94+). Older `gh`: `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child-db-id>` (database id, as in **Blocking** below). Without sub-issues, put `Part of #<parent>` at the top of the child body.
@@ -12,7 +13,8 @@ Tickets and specs for this repo live as GitHub issues. Use the `gh` CLI for all 
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-The repo is `chiyanram/agent-factory`; `gh` infers it when run inside a clone. More than one wayfinder map can be open at once, so list them instead of naming one here: `gh issue list --label wayfinder:map --state open`.
+The repo is `chiyanram/agent-factory`; `gh` infers it when run inside a clone. More than one wayfinder map can be
+open at once, so list them: `gh issue list --label wayfinder:map --state open`.
 
 ## Pull requests as a triage surface
 

@@ -23,9 +23,10 @@ What a ticket carries into a build, where it lives, and what is decided next. Th
   start the build. It converges (P15, #489): its findings feed one grill round, and the edit is reviewed again only
   when the round kept an Act on CONFLICT. The re-review and its verify pass read `earlier.json`, every earlier round
   and the text the last one read, and the engine drops a repeat of a finding an earlier round settled. After 2 rounds
-  the person is told "no further design review (round cap)" and decides. An edit that raises the lane or changes the
-  Planned files to a pair no round read is a new review past those, at most 2 more. A spec whose Planned files need a heavier lane holds the review
-  until the lane is raised, and a `file:line@commit` cite that does not hold stops it at once.
+  the person is told "no further design review (round cap)" and decides. An edit that raises the lane, or that changes the
+  Planned files to a pair no round read, starts a new review past the cap, of at most 2 more rounds. A spec whose
+  Planned files need a heavier lane holds the review until the lane is raised. A `file:line@commit` cite that does not
+  hold stops the review at once.
 - **The approval** binds the spec's and the design's hashes. Any edit to either makes it stale, and a stale approval
   stops the work (`src/core/approval.ts`).
 
@@ -51,15 +52,17 @@ linked, never copied. **Today:** the automated review does not read them.
 
 ## What is decided next
 
-Decided in the design audit (2026-11-10), not built:
+Decided, not built:
 
 | change | why |
 |---|---|
-| **Build deviations.** The implementer never edits the design. It posts a `[writer] DEVIATION:` note on the PR: what changed, why, `file:line`. The approval stays valid, and the review judges against the design plus the note. A deviation that touches an acceptance criterion is an `OPEN:` question and stops the work | the rulebook's PD7 says "record the deviation in the design", which would make the approval stale |
 | **At most 3 questions per round.** The rest become marked defaults that "accept all" takes | a round with no cap floods the human |
 | **"AC-n — should X when Y"** is the standard form | it gives the trigger a place, as EARS and Gherkin do |
 | **Each slice names its AC-n**, and the design-reviewer flags an AC with no slice | coverage is checked before the approval, not after the build |
 | **A one-screen approval digest**: intent, ACs, irreversible steps, kept findings by severity | the human reads one screen, not every file |
-| **The memory before the PR.** P3 is reworded to say what is true. Before a project is shared, the approval's spec, design and hashes are copied to the ticket (the issue, or Jira at work), so another machine can continue | a lost or switched laptop loses the ticket's records today |
+| **The memory before the PR.** P3 is reworded to say what is true. Before a project is shared, the approval's spec, design and hashes are copied to the ticket (the issue, or Jira at work), so another machine can continue (#498) | a lost or switched laptop loses the ticket's records today |
 | **The brief holds only what an agent cannot infer**: build and test commands, gotchas; its commands are re-run each run; runs with and without it are measured | a study found context files gave no success gain and raised cost by more than 20% |
-| **Each lesson carries a review-by date** ([The improvement loop](improvement-loop.md)) | lessons rot |
+
+Two changes decided with these are built: build deviations, where the implementer posts a `[writer] DEVIATION:` note
+and never edits the design ([ADR-0018](../adr/0018-build-deviations-on-the-pr.md),
+[Build path](build-path.md)), and a review-by date on each lesson ([The improvement loop](improvement-loop.md)).

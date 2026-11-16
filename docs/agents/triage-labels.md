@@ -1,18 +1,15 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's ticket tracker.
+The skills speak in terms of five canonical triage roles. This repo uses the same label names as mattpocock/skills.
+When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the label from this table.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this ticket |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
-
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
-
-Edit the "Label in our tracker" column to match whatever vocabulary you actually use.
+| Label | Meaning |
+| ----- | ------- |
+| `needs-triage` | Maintainer needs to evaluate this ticket |
+| `needs-info` | Waiting on reporter for more information |
+| `ready-for-agent` | Fully specified, ready for an AFK agent |
+| `ready-for-human` | Requires human implementation |
+| `wontfix` | Will not be actioned |
 
 ## Type labels
 
@@ -26,3 +23,11 @@ Each issue form sets one type label (#327). chiyanram/skills and chiyanram/rca-a
 
 The "Open question for the map" form sets no type label: it feeds the build map, not a change. The labels were created
 once with `gh label create`; there is no sync tool.
+
+## Other labels
+
+| Label | Meaning |
+| ----- | ------- |
+| `released` | Set by semantic-release on a ticket whose change shipped in a release |
+| `eval-baseline-approved` | The operator approves a change to `evals/reviewer/baseline.json` ([the proof check](../../evals/reviewer/README.md#the-proof-check)) |
+| `after-pilot` | Work moved until after the first pilot has run |

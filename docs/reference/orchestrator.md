@@ -10,12 +10,16 @@ table it follows, the ready check, and what each rework run is handed. The coord
 A run ends with a report (#109, [`src/core/report.ts`](../../src/core/report.ts)). The implementer writes `.factory/report.json` (never committed)
 and exits: `status` `done` with `evidence` rows (criterion, command, result), `asked` with one to twenty `questions`
 (`MOST_QUESTIONS`), or `blocked` with a `blocker`. The host checks it, then acts (`src/core/finish.ts`):
-`done` → push, post the evidence, run the ready check; `asked` → push, post the questions in one `[writer] OPEN:`
-note, wait (the answers that close it, and how the next run receives them, are under [Answers](#answers)). A note that
-would not read back as written (a question cut at 500 characters, or split by a ` · ` or ` A) ` in its text) is never
-posted as `OPEN:`: the change gets `needs-human` and one `[coordinator] blocked:` note naming the question, with the
-questions as written listed (#522); `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post
-`blocked: <reason>` (with the implementer's prefix when the implementer said it). A missing, unreadable or malformed
+
+- `done` → push, post the evidence, run the ready check.
+- `asked` → push, post the questions in one `[writer] OPEN:` note, wait (the answers that close it, and how the next
+  run receives them, are under [Answers](#answers)). A note that would not read back as written (a question cut at
+  500 characters, or split by a ` · ` or ` A) ` in its text) is never posted as `OPEN:`: the change gets
+  `needs-human` and one `[coordinator] blocked:` note naming the question, with the questions as written listed (#522).
+- `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post `blocked: <reason>`
+  (with the implementer's prefix when the implementer said it).
+
+A missing, unreadable or malformed
 report, any other field, a non-zero exit, a timeout, a cap or a failed runner is `blocked` with the reason; a reason
 never quotes the report. The host decides from the report only after the runner has stopped, never through a
 symlink, and refuses to push when any new commit touches `.factory` (`excludeFactory` keeps it out of `git add`).
@@ -34,7 +38,7 @@ The host reads the stream's last line, the result event, for the run's cost and 
 `usage` token, cache reads and writes too), and keeps them as `spend` on the run's `writer-ended` record; a review
 round's `review-ended` record keeps what its passes spent the same way (#131). A run stopped before its result event
 has no `spend`: `usage` counts it as unmeasured, never as free. The dollar figure is the CLI's own; on a
-subscription it need not be what you are charged, so count tokens there (an open check on #131).
+subscription it need not be what you are charged, so count tokens there.
 A run that ends `blocked` or `asked` says why, even before its PR exists (#62): its `writer-ended` record carries
 `why` (the implementer's blocker or questions, or the host's reason, such as `the run exited 1` or `the run wrote no
 .factory/report.json`, followed by `the run said: …`, the CLI's last words), and the pass logs
@@ -114,7 +118,7 @@ No cron or launchd job runs the orchestrator: a human's command starts the **orc
 itself (#305). `agent-factory dispatch <project>` without `--once` runs one pass, then the next, while any ticket
 with a START or an approval is in flight. After a pass that ran a step itself (an implementer, ready check, review, local
 verifier or design run) or wrote to the git host, the next pass starts at once ("next pass now"); it waits
-`FACTORY_POLL_MINUTES` only when each ticket waits on something outside the factory (CI, a person, a hold), and names
+`FACTORY_POLL_MINUTES` (default 5) only when each ticket waits on something outside the factory (CI, a person, a hold), and names
 it ("in flight: 4 (waiting on CI); next pass in 5 min"). A step that fails the same way twice in a row falls back to
 that wait, so a broken step never spins (#445). It ends when each such ticket is
 finished (merged or closed), has asked a person, stopped at `needs-human`, or waits on a human (an approval, a merge,
@@ -258,12 +262,12 @@ meant to be running (its `loop.pid` is there), it is flagged `LATE` when that is
 that just sit. With no loop it says "no orchestrator loop running". When the last loop stopped while a ticket was still
 in flight (a step not set up, a cap, failed passes) it adds when and why, from `$FACTORY_HOME/runs/<project>/loop-end.json`;
 otherwise it names `agent-factory dispatch <project>` while a change is claimed. A red check is a fail: the factory
-never re-runs it, and red CI sends the implementer back as a CI round (#456 decision 3, #485); only a person re-runs a
+never re-runs it, and red CI sends the implementer back as a CI round (#456 decision 3); only a person re-runs a
 red check, once, or quarantines a CI job in the project file's `quarantine.checks` (owner, added, expiry at most
 `quarantine.maxDays` later, ticket): a quarantined job still runs, is logged each pass and named in the ping, and does
-not block until it expires (#485).
+not block until it expires.
 The order is fixed: implementer done → ready check → automated review → gate → human ([gap 2](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681560750)).
-The orchestrator loop polls the git host every `FACTORY_POLL_MINUTES` (5) while each ticket in flight waits on CI or a person, and at once after a step it ran itself (#445). Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
+Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
 
 ## The table by hand

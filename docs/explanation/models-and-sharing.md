@@ -20,7 +20,7 @@ ticket and per run kind.
 
 ```text
  step 4  you and a friend      one rulebook pin, each person on their own model login
- step 5  your work laptop      srt runner, local specs, Claude plan or (later) Copilot (#162)
+ step 5  your work laptop      srt runner, local specs, Claude plan or (later) Copilot (#493)
  step 6  colleagues            a team layer: shared settings and plugin pins, caps on by default
 ```
 
@@ -34,14 +34,14 @@ ticket and per run kind.
 
 ## What is decided next
 
-Decided in the design audit (2026-11-10), not built:
+Decided, not built:
 
 | change | why |
 |---|---|
 | model keys become an allow-list: the team lists the allowed models, a person picks inside it, a model outside it refuses the run | vendors let an org lock the allowed set; a preference lets anyone pick anything |
 | the implementer's model is a full model id, never the CLI default, and every run record names the model it used | a default that changes under you changes results with no trace |
 | an effort setting per role | tune effort before changing models |
-| no cheaper-model routing per lens yet; revisit on the golden set after the baseline (#216) | routing gains are shown on question benchmarks, not on agent coding |
+| no cheaper-model routing per lens yet; revisit on the golden set, which now has a baseline | routing gains are shown on question benchmarks, not on agent coding |
 | plugin pins (commit and hash) move into the team layer as a locked key; moving one is a PR on the team repo with its eval proof | everyone on a team runs the same rules |
 | `setup status` ends with one table, a row per item with its fix, and the orchestrator refuses to run until every row passes | `init` checks pieces; nothing yet refuses to run on a failed one |
 | caps on by default from the team layer; a person may lower them, never raise them | an unset cap is no cap |

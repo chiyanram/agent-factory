@@ -19,7 +19,7 @@ agent-factory init            # the project's name defaults to the clone folder'
    (`rulebook@chiyanram` or none), when it found migrations, whether they are one-way doors, and where the ticket
    specs live (`specStore`): `issue`, the git host issue's body, recommended for a personal project on github.com or
    gitlab.com, or `local`, recommended on a company's own git host; a project marked `work` is not asked and stays
-   `local` (#381). Each question has
+   `local`. Each question has
    lettered choices with the recommended one marked; answer `1A 2B`, or press Enter to take every recommendation.
    `--yes` takes them all, for a repeat setup. A question whose key the files already hold is not asked.
 3. **Writes the answers** to the settings layers, never to the repo or a shell profile: `runner` to
@@ -31,9 +31,9 @@ agent-factory init            # the project's name defaults to the clone folder'
    the marketplace to `$FACTORY_HOME/marketplaces/<marketplace>` through hostGit when it is not there
    (`https://github.com/chiyanram/skills` for `chiyanram`). A plugin from `chiyanram` is pinned at the commit this
    engine is tested with, the one its `.github/rules-pack.json` names (it ships in the package), never at the skills
-   `HEAD`; the fix it prints names that commit too. A plugin from any other marketplace is pinned at its `HEAD` (#607).
+   `HEAD`; the fix it prints names that commit too. A plugin from any other marketplace is pinned at its `HEAD`.
    A first pin shows a count of files per folder (`+ 12 files in skills/crq`), not every file; a later update shows
-   each file it adds, removes or changes (#482).
+   each file it adds, removes or changes.
    `agent-factory plugin update <project> <name@marketplace>` later moves a pin to the marketplace's `HEAD`; to go
    back to the tested pack, name the engine's commit:
    `agent-factory plugin update <project> rulebook@chiyanram <the commit in .github/rules-pack.json>`.
@@ -45,8 +45,8 @@ agent-factory init            # the project's name defaults to the clone folder'
    25 first on `PATH` while `mise.toml` declares 27: it names the manager that wins and the fix), the coordinator's
    settings, `config check`, and the installed `agent-factory` against the latest release, with the install line when
    a newer one is out (it never fails the run, and says so when the release list cannot be read; `agent-factory setup
-   status` shows the same line, #482).
-6. **Writes the coordinator's settings**, as `agent-factory setup coordinator` does (#485), so the settings check
+   status` shows the same line).
+6. **Writes the coordinator's settings**, as `agent-factory setup coordinator` does, so the settings check
    passes on a new laptop. They hold no secret.
 7. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
    claude` when the token is missing, opening `claude` once in the clone, `agent-factory onboard <project>`,
@@ -59,7 +59,7 @@ It never handles a secret and never runs a command only a human runs (`setup cla
 hold the coordinator's wall. Exit 0 when every check passes, 1 when one fails or init refuses, 3 when `--yes` kept a
 value. Running it again is safe: it asks only what is missing and writes nothing when nothing changed. Once the files
 hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports, naming
-each profile file and line that sets one (a symlinked profile by the file it points to, #482):
-every command, the coordinator's `poll`, `status` and the loop commands too, reads them from the files (#382).
+each profile file and line that sets one (a symlinked profile by the file it points to):
+every command, the coordinator's `poll`, `status` and the loop commands too, reads them from the files.
 
 The sections below are the manual steps, kept as reference.

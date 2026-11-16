@@ -47,7 +47,7 @@ a `PATH` folder only its owner can write; where it is not (some CI tool caches),
 connector, and reads each answer back in the seam's own shapes, so a connector that answers anything else fails that
 call. A git host call has the built-in adapter's room: an answer of up to 64 MiB, and time to wait out a rate limit on every
 try. `FACTORY_DRY_RUN` still holds every write back, opening a change too. Without the mapping, the built-in adapter
-runs, as before.
+runs.
 
 The connector's name must be the git host's (`FACTORY_FORGE`), and each request names its git host, which the
 connector checks. A setting the connector cannot honour stops the pass instead of being dropped without a word: `FACTORY_GH`,
@@ -156,7 +156,7 @@ a person's edit in between is never written over. A change to an approved ticket
 
 ## Decided, not built
 
-From the design audit (2026-11-10), for [ADR-0014](../adr/0014-plugin-model.md):
+For [ADR-0014](../adr/0014-plugin-model.md):
 
 - **The front door is not a connector.** How work arrives (`agent-factory start`, a Discord command, a spec PR) is
   not a `describe` and `call` connector; ADR-0014 is scoped to say so (P1).
