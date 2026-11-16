@@ -754,7 +754,7 @@ function released(state: TicketState, action: Action): Action {
     : action;
 }
 
-const RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify", "design"]);
+export const RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify", "design"]);
 
 // capped : a run of a ticket at its cap goes to a person instead, with what the ticket spent (#131)
 function capped(state: TicketState, action: Action): Action {

@@ -1,6 +1,7 @@
 // board-cli — agent-factory board [<project>] [--json] (#487 AC-5; #456 decision 4): one line per ticket in flight, PR
-// or not, with its step, what it waits on and for how long (src/core/dispatch/board.ts). It reads what a pass would
-// decide, read-only: it takes no lock and writes no record, label or note. --json gives the same fields, times in UTC,
+// or not, with its step, what it waits on and for how long, grouped into needs you, ready to merge and factory
+// (src/core/dispatch/board.ts). It reads what a pass would decide, read-only: it takes no lock and writes no record,
+// label or note. --json gives the same fields with each line's lane, times in UTC,
 // for a program (the chat bot's /waiting, #233; the web view, #120).
 
 import type { Done, Result } from "./core/forge/api.js";
@@ -25,8 +26,9 @@ export type BoardIo = {
   readonly decided: () => Promise<Result<readonly Decided[]>>;
 };
 
-export const BOARD_HELP = `  board [<project>] [--json]   one line per ticket in flight, PR or not: its step, what it waits on (a person by
-                               name, the gate or a run) and for how long; read-only. --json: the same, times in UTC
+export const BOARD_HELP = `  board [<project>] [--json]   one line per ticket in flight, PR or not, in lanes: needs you, ready to merge,
+                               factory; its step, what it waits on (a person by name, the gate or a run) and for
+                               how long; read-only. --json: the same with each line's lane, times in UTC
 `;
 
 const REFUSED = "agent-factory board writes nothing to the git host";

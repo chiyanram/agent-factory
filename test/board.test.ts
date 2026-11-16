@@ -101,11 +101,11 @@ describe("the board (#487 AC-5)", () => {
 
   it("lists every ticket in flight, PR or not, and leaves out a merged one", () => {
     expect(lines.map((l) => [l.ticket, l.change])).toEqual([
+      ["PROJ-4", "none"],
+      ["PROJ-6", "none"],
       ["PROJ-1", 12],
       ["PROJ-2", 14],
       ["PROJ-3", "none"],
-      ["PROJ-4", "none"],
-      ["PROJ-6", "none"],
     ]);
   });
 
@@ -131,28 +131,28 @@ describe("the board (#487 AC-5)", () => {
 
   it("names what each waits on: the approver for a merge, the STARTer for an approval, the gate, a run", () => {
     expect(lines.map((l) => l.waitsOn)).toEqual([
+      { kind: "person", who: "ram", does: "approves the spec: agent-factory approve <project> <ticket> <hash>" },
+      { kind: "person", who: "a person", does: "reads why it cannot be read: PROJ-6.jsonl line 2 is not a record" },
       { kind: "person", who: "mo", does: "reviews and merges the change" },
       { kind: "gate", what: "wait: CI is running at this head" },
       { kind: "run", what: "starts the writer step" },
-      { kind: "person", who: "ram", does: "approves the spec: agent-factory approve <project> <ticket> <hash>" },
-      { kind: "person", who: "a person", does: "reads why it cannot be read: PROJ-6.jsonl line 2 is not a record" },
     ]);
   });
 
   it("waits since the newest record line, else the approval; a ticket with neither has no time", () => {
     expect(lines.map((l) => [l.since, l.forMs])).toEqual([
+      ["2026-11-13T11:00:00Z", 3_600_000],
+      ["", 0],
       ["2026-11-13T10:00:00Z", 2 * 3_600_000],
       ["2026-11-13T08:00:00Z", 4 * 3_600_000],
       ["2026-11-13T08:00:00Z", 4 * 3_600_000],
-      ["2026-11-13T11:00:00Z", 3_600_000],
-      ["", 0],
     ]);
   });
 
   it("shows each ticket in the reader's zone, and the same fields as JSON in UTC", () => {
     const text = boardText({ lines, zone: { name: "Asia/Tokyo" }, mark: "#" });
-    expect(text.slice(0, 3)).toEqual([
-      "tickets in flight (times in Asia/Tokyo):",
+    expect(text.slice(6, 9)).toEqual([
+      "ready to merge (1)",
       "  PROJ-1  #12  wait: the gate is green; the human reviews and merges",
       "    waits on mo, who reviews and merges the change, for 2h 00m since 2026-11-13 19:00 Asia/Tokyo",
     ]);
@@ -161,15 +161,121 @@ describe("the board (#487 AC-5)", () => {
     );
     expect(text).toContain("  PROJ-3  no PR  writer (fix): approved; no run yet");
     const json = JSON.parse(boardJson(lines)) as unknown;
-    expect(Array.isArray(json) && json[0]).toEqual({
+    expect(Array.isArray(json) && json[2]).toEqual({
       ticket: "PROJ-1",
       change: 12,
+      lane: "ready-to-merge",
       step: "wait: the gate is green; the human reviews and merges",
       waitsOn: { kind: "person", who: "mo", does: "reviews and merges the change" },
       since: "2026-11-13T10:00:00Z",
       forMs: 2 * 3_600_000,
     });
-    expect(Array.isArray(json) && json[4]).toMatchObject({ change: null, since: null });
-    expect(boardText({ lines: [], zone: { name: "UTC" }, mark: "#" })).toEqual(["no ticket in flight"]);
+    expect(Array.isArray(json) && json[1]).toMatchObject({ change: null, since: null, lane: "needs-you" });
+    // every row, broken or decided, keeps one key order
+    expect(Array.isArray(json) ? json.map((r: object) => Object.keys(r).join(",")) : json).toEqual(
+      Array(5).fill("ticket,change,lane,step,waitsOn,since,forMs"),
+    );
+    expect(boardText({ lines: [], zone: { name: "UTC" }, mark: "#" })).toEqual([
+      "no ticket in flight:",
+      "needs you (0)",
+      "  nothing",
+      "ready to merge (0)",
+      "  nothing",
+      "factory (0)",
+      "  nothing",
+    ]);
+  });
+});
+
+// whose turn each ticket is: needs you, ready to merge, or the factory's, from whoseTurn (next-step.ts)
+describe("the board's lanes (#671)", () => {
+  const planted: readonly Decided[] = [
+    // the factory's run: approved, no PR yet
+    decided("PROJ-3", { change: { kind: "none" }, runs: EMPTY }),
+    // a person's step: a START in a lane that needs approval
+    decided(
+      "PROJ-4",
+      { change: { kind: "none" }, runs: EMPTY, approval: { kind: "unapproved", lane: "feature" } },
+      "none",
+    ),
+    // the gate is green and pinged
+    decided("PROJ-1", { runs: { ...done, pingedAt: H } }),
+    // the gate: CI runs at the head
+    decided("PROJ-2", { change: { kind: "open", line: line({ number: 14, pipeline: { kind: "running" } }) } }),
+    { kind: "broken", ticket: "PROJ-6", reason: "PROJ-6.jsonl line 2 is not a record" },
+  ];
+  const laned = boardOf({ decided: planted, events: new Map(), now: NOW, describe: describeAction });
+
+  it("puts a person's step and a broken row under needs you, first", () => {
+    expect(laned.slice(0, 2).map((l) => [l.ticket, l.lane])).toEqual([
+      ["PROJ-4", "needs-you"],
+      ["PROJ-6", "needs-you"],
+    ]);
+  });
+
+  it("puts a green gate under ready to merge, pinged or not yet pinged", () => {
+    const unpinged = decided("PROJ-7", {});
+    expect("kind" in unpinged ? "" : unpinged.action.kind).toBe("ping");
+    const [one] = boardOf({ decided: [unpinged], events: new Map(), now: NOW, describe: describeAction });
+    expect(one?.lane).toBe("ready-to-merge");
+    expect(one?.waitsOn).toMatchObject({ kind: "person", does: "reviews and merges the change" });
+    expect(laned[2]).toMatchObject({ ticket: "PROJ-1", lane: "ready-to-merge" });
+  });
+
+  it("puts the factory's runs and the gate under factory, after ready to merge, in decision order", () => {
+    expect(laned.slice(2).map((l) => [l.ticket, l.lane, l.waitsOn.kind])).toEqual([
+      ["PROJ-1", "ready-to-merge", "person"],
+      ["PROJ-3", "factory", "run"],
+      ["PROJ-2", "factory", "gate"],
+    ]);
+  });
+
+  it("puts a design note, and a wait no row names, under needs you", () => {
+    const base = decided("PROJ-8", { change: { kind: "none" }, runs: EMPTY });
+    const note =
+      "kind" in base
+        ? base
+        : {
+            ...base,
+            action: {
+              kind: "design-note" as const,
+              spec: "s",
+              design: "none",
+              why: "no further design review (round cap): the person decides",
+            },
+          };
+    const odd = "kind" in base ? base : { ...base, action: { kind: "wait" as const, why: "a why no row gives" } };
+    const two = boardOf({ decided: [note, odd], events: new Map(), now: NOW, describe: describeAction });
+    expect(two.map((l) => [l.lane, l.waitsOn.kind])).toEqual([
+      ["needs-you", "person"],
+      ["needs-you", "person"],
+    ]);
+  });
+
+  it("prints every lane's header, with nothing under an empty lane", () => {
+    const only = laned.filter((l) => l.lane === "factory");
+    expect(boardText({ lines: only, zone: { name: "UTC" }, mark: "#" })).toEqual([
+      "tickets in flight (times in UTC):",
+      "needs you (0)",
+      "  nothing",
+      "ready to merge (0)",
+      "  nothing",
+      "factory (2)",
+      "  PROJ-3  no PR  writer (fix): approved; no run yet",
+      "    waits on the run: starts the writer step, for 4h 00m since 2026-11-13 08:00 UTC",
+      "  PROJ-2  #14  wait: CI is running at this head",
+      "    waits on the gate: wait: CI is running at this head, for 4h 00m since 2026-11-13 08:00 UTC",
+    ]);
+  });
+
+  it("gives each JSON row its lane, in lane order", () => {
+    const json = JSON.parse(boardJson(laned)) as unknown;
+    expect(Array.isArray(json) ? json.map((r: { ticket: string; lane: string }) => [r.ticket, r.lane]) : json).toEqual([
+      ["PROJ-4", "needs-you"],
+      ["PROJ-6", "needs-you"],
+      ["PROJ-1", "ready-to-merge"],
+      ["PROJ-3", "factory"],
+      ["PROJ-2", "factory"],
+    ]);
   });
 });
