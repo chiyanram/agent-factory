@@ -63,13 +63,12 @@ connector checks. A setting the connector cannot honour stops the pass instead o
 
 ## Pings
 
-The orchestrator pings you on Discord when a ticket needs you (#119), through the bundled `discord` notify connector:
-- each hand-over its table makes on a change: CI red twice, the ready check's failures, the same patch twice, a run
-  that never ended, and its other stops;
-- an implementer run that ended blocked, or with a question that waits on your answer;
-- a change ready for you to review and merge (the gate is green).
-
-Each goes once per event and head, as its git host note does. To set it up:
+The orchestrator pings you on Discord when a ticket enters your turn (#119), through the bundled `discord` notify
+connector: it enters **needs you** (a hand-over, a question that waits on your answer, a manual CI job, CI skipped, a
+person's push, a `/stop`, a spec changed after its approval, a START or approval it waits for, a design note) or
+**ready to merge** (the gate is green), as `board` groups it. Each goes once; it goes again only after the ticket went
+back to the factory and came back to you ([Pings](orchestrator.md#the-decision-table-and-the-loop)). A build held by
+its blockers and the project at a cap also ping, once each time what they say changes. To set it up:
 1. In the Discord channel, Integrations → Webhooks → New Webhook, and copy its URL.
 2. `agent-factory setup discord` and paste it at the hidden prompt. It is kept like the claude token: the login
    Keychain on macOS, `~/.factory/secrets/discord-token` (mode 600) on Linux, never printed. On the VM run it as the
@@ -84,8 +83,6 @@ never an approval. `FACTORY_DRY_RUN=1` prints each ping instead. The coordinator
 same connector, within its policy and cap ([Writes](#writes)). The webhook goes only to the package's own
 `plugins/discord/plugin`, matched by its real path, never to another connector that calls itself `discord`. **Today:**
 
-- A stop the automated review makes itself (open Act on findings, an empty change, a protected file, its round
-  limit) and a hand-over with no change to label ping no one yet; the git host note or the pass's error is the record.
 - The connector runs `curl` with no proxy setting, so a host that reaches Discord only through a proxy sends no ping.
 - The text is the git host's posting template, so `&` and `<` show as `&amp;` and `&lt;` in Discord.
 

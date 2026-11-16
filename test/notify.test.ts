@@ -99,6 +99,15 @@ describe("the Discord webhook in the token store (#119)", () => {
   });
 });
 
+// the ping for a writer's question: the wait's why, and the person's step
+const ASKED = {
+  kind: "needs-you",
+  ticket: "PROJ-1",
+  change: 12,
+  why: "an open question waits for a person",
+  next: "answers the OPEN round on the change: a choice per question",
+} as const;
+
 describe("the pings (#119)", () => {
   it("are posting templates: no mention, reference or link forms, whatever the reason says", () => {
     const post = pingPost(WHERE, {
@@ -106,12 +115,13 @@ describe("the pings (#119)", () => {
       ticket: "PROJ-1",
       change: 12,
       why: "@everyone see https://x.io #3",
+      next: "runs the manual CI job on the git host",
     });
     const text = renderPost(post);
     expect(text.kind === "ok" && text.text).toBe(
-      "[coordinator] PROJ-1 needs you: @⁠everyone see https:⁠//x.io #⁠3\n\n- project: ledger\n- change: #⁠12",
+      "[coordinator] PROJ-1 needs you: @⁠everyone see https:⁠//x.io #⁠3\n\n- project: ledger\n- change: #⁠12\n- next: runs the manual CI job on the git host",
     );
-    expect(renderPost(pingPost(WHERE, { kind: "asked", ticket: "PROJ-2", change: "none" }))).toMatchObject({
+    expect(renderPost(pingPost(WHERE, { ...ASKED, ticket: "PROJ-2", change: "none" }))).toMatchObject({
       text: expect.stringContaining("- change: no change yet"),
     });
   });
@@ -160,7 +170,7 @@ describe("the pings (#119)", () => {
         plugin: "discord",
         ...WHERE,
       });
-      expect(await none({ kind: "asked", ticket: "PROJ-1", change: 12 })).toMatchObject({
+      expect(await none(ASKED)).toMatchObject({
         kind: "failed",
         reason: expect.stringContaining("no Discord webhook"),
       });
@@ -170,7 +180,7 @@ describe("the pings (#119)", () => {
         plugin: "discord",
         ...WHERE,
       });
-      const sent = await refused({ kind: "asked", ticket: "PROJ-1", change: 12 });
+      const sent = await refused(ASKED);
       expect(sent).toMatchObject({ kind: "failed", reason: expect.stringContaining("curl exited 22") });
       expect(JSON.stringify(sent)).not.toContain(HOOK);
       expect(JSON.stringify(sent)).not.toContain("abcdefghijklmnopqrstuvwxyz_-0123");
@@ -181,10 +191,10 @@ describe("the pings (#119)", () => {
 
   it("print instead of sending under a dry run, and come from the project file's notify plugin", async () => {
     const lines: string[] = [];
-    expect(await dryNotify((l) => lines.push(l))({ kind: "asked", ticket: "PROJ-1", change: 12 })).toEqual({
+    expect(await dryNotify((l) => lines.push(l))(ASKED)).toEqual({
       kind: "ok",
     });
-    expect(lines).toEqual(["DRY RUN: notify: PROJ-1: the writer asked a question that waits on you"]);
+    expect(lines).toEqual(["DRY RUN: notify: PROJ-1 needs you: an open question waits for a person"]);
     expect(await notifyPluginOf({ home, project: "ledger" })).toEqual({ kind: "ok", value: "" });
     mkdirSync(join(home, "projects"), { recursive: true });
     writeFileSync(join(home, "projects", "ledger.json"), JSON.stringify({ connectors: { notify: "discord" } }));

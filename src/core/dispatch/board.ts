@@ -11,7 +11,7 @@
 // the board (board-cli.ts).
 
 import { LANES, whoseTurn, type Lane } from "./next-step.js";
-import type { Event } from "./records.js";
+import { isActivity, type Event } from "./records.js";
 import type { Decided } from "./tick.js";
 import type { Action } from "./table.js";
 import { shownAt, shownFor, type Zone } from "../zone.js";
@@ -60,9 +60,9 @@ function placed(
   return { lane: "factory", waitsOn };
 }
 
-// sinceOf : the ticket's newest record time, else its approval's, else "". Pure.
+// sinceOf : the ticket's newest activity time (records.ts isActivity), else its approval's, else "". Pure.
 function sinceOf(events: readonly Event[], approvedAt: string): string {
-  return events.reduce((max, e) => (e.at > max ? e.at : max), "") || approvedAt;
+  return events.filter(isActivity).reduce((max, e) => (e.at > max ? e.at : max), "") || approvedAt;
 }
 
 // brokenLine : a ticket whose spec, START, approval or records cannot be read. Pure.

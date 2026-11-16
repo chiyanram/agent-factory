@@ -172,9 +172,12 @@ const many: Rule = (s) =>
     ? { kind: "needs-human", why: `${s.change.numbers.length} changes use factory/${s.ticket}` }
     : "next";
 
+// the wait on the needs-human label, which names no reason of its own: a ping reads the hand-over's (turn-ping.ts)
+export const LABEL_WAIT = "needs-human: a person decides";
+
 const needsHuman: Rule = (s) => {
   const line = open(s);
-  return line !== "none" && line.needsHuman ? { kind: "wait", why: "needs-human: a person decides" } : "next";
+  return line !== "none" && line.needsHuman ? { kind: "wait", why: LABEL_WAIT } : "next";
 };
 
 // a design run pushes nothing, so its lost start is a failed try (design.ts), never a person's to check

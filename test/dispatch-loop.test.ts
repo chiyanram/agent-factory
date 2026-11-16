@@ -214,7 +214,7 @@ describe("the orchestrator loop (#305)", () => {
     expect(loop.lines).toContain("in flight: PROJ-1; next pass now");
   });
 
-  it("ends after the pass whose writer asked a person", async () => {
+  it("ends after the pass that pings the person the writer asked: one pass more, at once (#672)", async () => {
     await approved();
     const runs: string[] = [];
     const asked = { body: "[writer] OPEN: which port?", author: { name: "ram" }, at: "2026-11-07T09:30:00Z" };
@@ -222,7 +222,8 @@ describe("the orchestrator loop (#305)", () => {
       () => ({ team, open: [open({ comments: runs.length > 0 ? [asked] : [] })], merged: [] }),
       writer("asked", runs),
     );
-    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 1, failedActions: false, held: [] } });
+    // the run's pass leaves a person's turn no pass has pinged: in flight, so the next pass pings, and the loop ends
+    expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 2, failedActions: false, held: [] } });
     expect(runs).toEqual(["PROJ-1"]);
     expect(loop.slept).toEqual([]);
   });
