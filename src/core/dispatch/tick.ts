@@ -40,6 +40,7 @@ import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import { pruneTraces } from "./trace.js";
 import type { Notify, Ping } from "../notify.js";
+import { turnPing, turnStep } from "./turn-ping.js";
 import type { Post } from "../post.js";
 import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, raisedWhy, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec, type SpecStore } from "../spec.js";
@@ -64,7 +65,7 @@ import { timelineOf } from "./timeline.js";
 import { blockersView, withIssue, type Blocker, type BlockersView, type BlockerState } from "./blockers.js";
 import type { BranchState } from "../forge/types.js";
 import { designView, dropRepeats, roundsBefore, type DesignView, type EarlierRound, type SpecRead } from "./design.js";
-import { nextStep } from "./next-step.js";
+import { nextStep, whoseTurn } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
@@ -568,7 +569,8 @@ function nextFields(why: string): Post["fields"] {
 }
 
 // handOver : needs-human, the claim released (as block does), one note, and a record so the same stop is never posted
-// twice. With no change to label, the pass fails for this ticket, so the operator sees it.
+// twice; the person's ping is the turn's (turnPinged). With no change to label, the pass fails for this ticket, so the
+// operator sees it.
 async function handOver(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
   const n = number(state);
   if (n === "none") {
@@ -579,7 +581,6 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
     () => setup.forge.removeLabel({ number: n, label: setup.label }),
     () => say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields: nextFields(why), items: [] }),
     () => record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } }),
-    () => informed(setup, { kind: "needs-you", ticket: state.ticket, change: n, why }),
   ];
   for (const step of steps) {
     const done = await step();
@@ -591,17 +592,9 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
 }
 
 // handOverUnchanged : a stop with no change to label or note on, such as a held ticket's broken blocker (#494): the
-// record first, so the same stop is never sent twice (table.ts once), then a ping to the person, which only informs
-async function handOverUnchanged(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
-  const kept = await record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } });
-  return kept.kind === "ok"
-    ? informed(setup, {
-        kind: "needs-you",
-        ticket: state.ticket,
-        change: "none",
-        why: `${why}; there is no change yet`,
-      })
-    : kept;
+// record, so the same stop is never sent twice (table.ts once); the person's ping is the turn's (turnPinged)
+function handOverUnchanged(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
+  return record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } });
 }
 
 // each action by its kind, so a handler per kind is typed without an assertion
@@ -645,13 +638,9 @@ async function ping(setup: TickSetup, state: TicketState, head: string): Promise
     fields: [],
     items: quarantineItems(held),
   });
-  const pinged =
-    said.kind === "ok"
-      ? await record({ where: where(setup, state), event: { at: at(setup), kind: "pinged", head } })
-      : said;
-  return pinged.kind === "ok"
-    ? informed(setup, { kind: "ready", ticket: state.ticket, change: number(state), head })
-    : pinged;
+  return said.kind === "ok"
+    ? record({ where: where(setup, state), event: { at: at(setup), kind: "pinged", head } })
+    : said;
 }
 
 // informed : a person pinged; a ping only informs, so one that fails is printed and the pass goes on (#119)
@@ -661,18 +650,6 @@ async function informed(setup: TickSetup, message: Ping): Promise<Done> {
     setup.log(`${message.ticket}: the ping did not go out (the forge note is the record): ${sent.reason}`);
   }
   return { kind: "ok" };
-}
-
-// writerPing : a writer run that ended on a person: a question that waits on them, or a blocked run, with why (#62)
-function writerPing(state: TicketState, value: WriterValue): Ping | "none" {
-  const change = number(state);
-  if (value.outcome === "asked") {
-    return { kind: "asked", ticket: state.ticket, change };
-  }
-  const why = value.why ?? "its note on the change says why";
-  return value.outcome === "blocked"
-    ? { kind: "needs-you", ticket: state.ticket, change, why: `the writer's run is blocked: ${why}` }
-    : "none";
 }
 
 // writerSaid : the log line of a writer run that is not done, in place of "done" (#62): why it stopped, the file that
@@ -838,7 +815,8 @@ type WriterValue = Extract<
   { kind: "ok" }
 >["value"];
 
-// writerEnded : the run's end recorded, then the person pinged when it ended on them; the pass logs why it stopped
+// writerEnded : the run's end recorded; a run that ended on a person is pinged on the next pass, which sees their turn
+// (turnPinged); the pass logs why it stopped
 async function writerEnded(
   setup: TickSetup,
   state: TicketState,
@@ -849,10 +827,8 @@ async function writerEnded(
     where: where(setup, state),
     event: { at: at(setup), kind: "writer-ended", mode, ...value },
   });
-  const message = writerPing(state, value);
-  const done = ended.kind === "ok" && message !== "none" ? await informed(setup, message) : ended;
   const said = writerSaid(state, value);
-  return done.kind === "ok" && said !== "" ? { kind: "ok", said } : done;
+  return ended.kind === "ok" && said !== "" ? { kind: "ok", said } : ended;
 }
 
 // usedBy : the plugins and hashes a run of this pass records
@@ -1276,22 +1252,14 @@ async function readAt(setup: TickSetup, state: TicketState, a: DesignAction): Pr
     : "none";
 }
 
-// designNote : the person told once why the design review holds or ends at these hashes (#489): the record first, so
-// the note is never sent twice, then a ping, which only informs
-async function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAction): Promise<Done> {
+// designNote : the person told once why the design review holds or ends at these hashes, in the record, so the note is
+// never sent twice; the person's ping is the turn's (turnPinged)
+function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAction): Promise<Done> {
   setup.log(`${state.ticket}: design review: ${a.why}`);
-  const kept = await record({
+  return record({
     where: where(setup, state),
     event: { at: at(setup), kind: "design-noted", spec: a.spec, design: a.design, why: a.why },
   });
-  return kept.kind === "ok"
-    ? informed(setup, {
-        kind: "needs-you",
-        ticket: state.ticket,
-        change: number(state),
-        why: `design review: ${a.why}`,
-      })
-    : kept;
 }
 
 type DesignNoteAction = Extract<Action, { kind: "design-note" }>;
@@ -1320,17 +1288,14 @@ export function designPost(ended: DesignEnded): Post {
   };
 }
 
-// designPosted : what the verify pass kept, to the front doors: the pass's log, a note on the ticket's PR when one is
-// open, and a ping. A ping only informs; the record holds the findings, so a note that fails fails the pass, and the
-// next pass does not post it again: it reads the review as done.
-async function designPosted(setup: TickSetup, state: TicketState, ended: DesignEnded): Promise<Done> {
+// designPosted : what the verify pass kept, to the front doors: the pass's log and a note on the ticket's PR when one is
+// open; the person is pinged when the next pass sees their turn (turnPinged). The record holds the findings, so a note
+// that fails fails the pass, and the next pass does not post it again: it reads the review as done.
+function designPosted(setup: TickSetup, state: TicketState, ended: DesignEnded): Promise<Done> {
   for (const k of ended.kept) {
     setup.log(`${state.ticket}: design review: ${keptLine(k)}`);
   }
-  const noted = await say(setup, state, designPost(ended));
-  const why = `the design review is in, ${ended.kept.length} finding(s) kept at spec ${ended.spec.slice(0, 8)}: read them, then approve`;
-  const pinged = await informed(setup, { kind: "needs-you", ticket: state.ticket, change: number(state), why });
-  return noted.kind === "ok" ? pinged : noted;
+  return say(setup, state, designPost(ended));
 }
 
 // the actions that start a run; "none" for the rest
@@ -1444,7 +1409,35 @@ async function heard(setup: TickSetup, d: Read): Promise<void> {
   }
 }
 
-// forgePass : every forge-only action, on fresh decisions; what is left is a run or a wait
+// turnPinged : the ticket's turn recorded when it moved, then the person pinged when it entered theirs (turn-ping.ts):
+// the record first, so the ping goes once; a line that cannot be written is printed, sends no ping, and the
+// next pass tries again. It follows the forge action, so the note on the change is there before the ping.
+async function turnPinged(setup: TickSetup, d: Read & { readonly action: Action }): Promise<void> {
+  const step = turnStep(d.state.runs, whoseTurn(d.action).lane);
+  if (step.record === "none") {
+    return;
+  }
+  const kept = await record({ where: where(setup, d.state), event: { at: at(setup), kind: "turn", to: step.record } });
+  if (kept.kind === "failed") {
+    setup.log(`${d.state.ticket}: the turn was not recorded, so no ping went out: ${kept.reason}`);
+    return;
+  }
+  if (step.ping) {
+    await informed(setup, turnPing({ state: d.state, action: d.action, change: number(d.state) }));
+  }
+}
+
+// forgeThenTurn : the ticket's forge-only action, then its turn, unless that action failed: the next pass decides it
+// again, and pings then
+async function forgeThenTurn(setup: TickSetup, d: Read & { readonly action: Action }): Promise<Done | "none"> {
+  const done = await forgeAction(setup, d.state, d.action);
+  if (done === "none" || done.kind === "ok") {
+    await turnPinged(setup, d);
+  }
+  return done;
+}
+
+// forgePass : every forge-only action, on fresh decisions, and each ticket's turn; what is left is a run or a wait
 async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran[]): Promise<readonly Later[]> {
   const later: Later[] = [];
   for (const d of decided) {
@@ -1460,7 +1453,7 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
     setup.log(`${d.state.ticket}: ${describe(d.action)}`);
     await heard(setup, d);
     await share(setup, d);
-    const done = await forgeAction(setup, d.state, d.action);
+    const done = await forgeThenTurn(setup, d);
     if (done === "none") {
       later.push(d);
     } else {

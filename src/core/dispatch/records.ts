@@ -39,6 +39,7 @@ import { recordedFindings, recordedKept, type DesignFinding, type Kept } from ".
 import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js";
 import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
+import type { Lane as TurnLane } from "./next-step.js";
 
 // "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
@@ -233,7 +234,11 @@ export type Event =
       readonly design: string;
       readonly why: string;
     }
+  // the "ready for you" note went on the change at this head, once per head
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
+  // whose turn the ticket entered: a person was pinged on entering needs-you or ready-to-merge, and factory re-arms
+  // that ping (turn-ping.ts)
+  | { readonly at: string; readonly kind: "turn"; readonly to: TurnLane }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
   | { readonly at: string; readonly kind: "blocked"; readonly why: string }
   // the ticket's build is held by its spec's "Blocked by" for this reason; a person was pinged when it changed (#494)
@@ -326,6 +331,13 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
   return allowed.find((a) => a === v) ?? BAD;
 }
 
+// every lane, once: a key the Lane type adds and this misses fails the type check
+const TURN_LANE_KEYS: Readonly<Record<TurnLane, TurnLane>> = {
+  "needs-you": "needs-you",
+  "ready-to-merge": "ready-to-merge",
+  factory: "factory",
+};
+const TURN_LANES: readonly TurnLane[] = Object.values(TURN_LANE_KEYS);
 const PHASES = ["writer", "ready", "review", "verify", "design-review", "design-verify", "onboard"] as const;
 const MODES = ["test-first", "fix", "rework", "ci", "rebase", "cleanup"] as const;
 const OUTCOMES = ["done", "asked", "blocked"] as const;
@@ -928,6 +940,10 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const head = str(raw, "head");
     return head === BAD ? BAD : { at, kind: "pinged", head };
   },
+  turn: (raw, at) => {
+    const to = oneOf(raw, "to", TURN_LANES);
+    return to === BAD ? BAD : { at, kind: "turn", to };
+  },
   blocked: (raw, at) => {
     const why = str(raw, "why");
     return why === BAD ? BAD : { at, kind: "blocked", why };
@@ -1164,6 +1180,13 @@ export type Summary = {
   readonly nextTry: { readonly kind: "none" } | ({ readonly kind: "set" } & NextTry);
   readonly rebaseRuns: number;
   readonly pingedAt: string;
+  // the lane of the newest "turn" line, or, before the ticket has one, the lane its older lines say a person was
+  // already pinged for (seedTurn); "none" for neither
+  readonly turn: TurnLane | "none";
+  // whether a "turn" line was read: then the older lines no longer seed the turn
+  readonly turnRead: boolean;
+  // why the newest writer run was blocked, which only its own line keeps; "" for none, or once a later run started
+  readonly blockedRun: string;
   // every reason the dispatcher already handed the ticket to a person for
   readonly blocked: readonly string[];
   // why the newest "held" line held the build, "" for none; and the passes since it on which the git host did not
@@ -1173,7 +1196,7 @@ export type Summary = {
   // the git host's reason on the first of those passes, and when it was, so a person reads one stable reason per outage
   readonly unreadFirst: string;
   readonly unreadSince: string;
-  // the time of the newest line, or "" for none
+  // the time of the newest line but a "turn" line (isActivity), or "" for none
   readonly lastAt: string;
   // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
   readonly spent: Spend;
@@ -1196,6 +1219,9 @@ export const EMPTY: Summary = {
   nextTry: { kind: "none" },
   rebaseRuns: 0,
   pingedAt: "",
+  turn: "none",
+  turnRead: false,
+  blockedRun: "",
   blocked: [],
   heldWhy: "",
   unreadPasses: 0,
@@ -1215,6 +1241,15 @@ function patches(
     : { previousPatch: s.implementerPatch, implementerPatch: e.patch };
 }
 
+// writerTurn : the turn a run's end seeds (seedTurn), and why it was blocked when it was. Pure.
+function writerTurn(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): Partial<Summary> {
+  const why = e.why ?? "its note on the change says why";
+  return {
+    ...seedTurn(s, e.outcome === "done" ? "factory" : "needs-you"),
+    blockedRun: e.outcome === "blocked" ? `the writer's run is blocked: ${why}` : "",
+  };
+}
+
 function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): Summary {
   const testFirst = e.mode === "test-first" && e.outcome === "done";
   return {
@@ -1230,6 +1265,7 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
       evidence: e.evidence,
       at: e.at,
     },
+    ...writerTurn(s, e),
     testFirstDone: s.testFirstDone || testFirst,
     rebaseRuns: s.rebaseRuns + Number(e.mode === "rebase"),
     ciRounds: s.ciRounds + Number(e.mode === "ci"),
@@ -1244,8 +1280,20 @@ function nextTryView(next: NextTry | undefined): Summary["nextTry"] {
 
 type Steps = { readonly [K in Kind]: (s: Summary, e: EventMap[K]) => Summary };
 
+// seedTurn : the turn an older line implies, for records written before the "turn" line: a run started is the
+// factory's turn, and a line the old code pinged a person with is that person's turn. Once a "turn" line is read, only
+// "turn" lines move it. Pure.
+function seedTurn(s: Summary, lane: TurnLane): Partial<Summary> {
+  return s.turnRead ? {} : { turn: lane };
+}
+
 const STEPS: Steps = {
-  started: (s, e) => ({ ...s, interrupted: { kind: "interrupted", phase: e.phase, at: e.at } }),
+  started: (s, e) => ({
+    ...s,
+    ...seedTurn(s, "factory"),
+    blockedRun: "",
+    interrupted: { kind: "interrupted", phase: e.phase, at: e.at },
+  }),
   "writer-ended": writerEnded,
   "ready-ended": (s, e) => ({
     ...s,
@@ -1283,11 +1331,18 @@ const STEPS: Steps = {
   // a failed run's spend counts toward the ticket's cap; it ends nothing
   spent: (s, e) => ({ ...s, spent: addSpend(s.spent, e.spend) }),
   // a design review's run ends its start; what it spent counts toward the ticket's cap (#236)
-  "design-ended": (s, e) => ({ ...s, interrupted: { kind: "none" }, spent: addSpend(s.spent, e.spend ?? NO_SPEND) }),
+  // a finished verify pass pinged a person before the "turn" line
+  "design-ended": (s, e) => ({
+    ...s,
+    ...(e.step === "verify" && e.outcome === "done" ? seedTurn(s, "needs-you") : {}),
+    interrupted: { kind: "none" },
+    spent: addSpend(s.spent, e.spend ?? NO_SPEND),
+  }),
   // a note to a person counts nothing; design.ts reads it so the note is sent once
-  "design-noted": (s) => s,
-  pinged: (s, e) => ({ ...s, pingedAt: e.head }),
-  blocked: (s, e) => ({ ...s, blocked: [...s.blocked, e.why] }),
+  "design-noted": (s) => ({ ...s, ...seedTurn(s, "needs-you") }),
+  pinged: (s, e) => ({ ...s, ...seedTurn(s, "ready-to-merge"), pingedAt: e.head }),
+  turn: (s, e) => ({ ...s, turn: e.to, turnRead: true }),
+  blocked: (s, e) => ({ ...s, ...seedTurn(s, "needs-you"), blocked: [...s.blocked, e.why] }),
   // a read that held the build again starts the count of passes the git host did not answer afresh
   held: (s, e) => ({ ...s, heldWhy: e.why, unreadPasses: 0, unreadFirst: "", unreadSince: "" }),
   "blockers-unread": (s, e) => ({
@@ -1309,10 +1364,16 @@ function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {
   return STEPS[kind](s, e);
 }
 
+// isActivity : whether a line is the ticket's activity: every line but "turn", which records whom a ping went to, so a
+// claim's quiet time and "claimed, but not by this orchestrator" (table.ts) read the same as without it. Pure.
+export function isActivity(e: Event): boolean {
+  return e.kind !== "turn";
+}
+
 // summarize : the counts since the approval at `since` (ISO 8601); older lines belong to an earlier approval.
 export function summarize(input: { readonly events: readonly Event[]; readonly since: string }): Summary {
   const from = Date.parse(input.since);
   return input.events
     .filter((e) => !(Date.parse(e.at) < from))
-    .reduce((s, e) => ({ ...step(s, e.kind, e), lastAt: e.at }), EMPTY);
+    .reduce((s, e) => ({ ...step(s, e.kind, e), lastAt: isActivity(e) ? e.at : s.lastAt }), EMPTY);
 }

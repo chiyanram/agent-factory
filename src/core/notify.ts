@@ -1,8 +1,10 @@
-// notify — the dispatcher's pings to a person (#119; ADR-0014 P5). The dispatcher pings when a ticket needs a person:
-// a hand-over to needs-human (CI red twice, a cap, a blocked run, the ready check's failures), a writer's question that
-// waits on an answer, and a change ready to merge. Each goes once per event and head, as its forge note does, through
-// the notify plugin the project file maps (the bundled discord plugin). This is the dispatcher's own channel, like
-// forge.write: the coordinator's request policy does not cap it.
+// notify — the orchestrator's pings to a person (#119; ADR-0014 P5). One rule says when (turn-ping.ts): a pass
+// pings when a ticket enters a person's turn, needs you or ready to merge, as whoseTurn reads it, and not again until the
+// ticket has left that turn: a hand-over to needs-human, a writer's question, a manual CI job, a person's push, a spec
+// changed after approval, a change ready to merge. A build held by its blockers (held) and the project at a cap (paused)
+// only inform, so they keep their own checks. Each goes through the notify plugin the project file maps (the bundled
+// discord plugin). This is the orchestrator's own channel, like forge.write: the coordinator's request policy does not
+// cap it.
 //
 // A ping only informs. A failure never stops the pass or the ticket: the pass prints why, the forge note is still the
 // record, and the ping is not tried again. A reply in Discord is never an approval. The text is a post.ts template, so
@@ -17,8 +19,14 @@ import { readProjectRaw } from "./project.js";
 import type { TokenStore } from "./token/store.js";
 
 export type Ping =
-  | { readonly kind: "needs-you"; readonly ticket: string; readonly change: number | "none"; readonly why: string }
-  | { readonly kind: "asked"; readonly ticket: string; readonly change: number | "none" }
+  // next: the person's step (next-step.ts)
+  | {
+      readonly kind: "needs-you";
+      readonly ticket: string;
+      readonly change: number | "none";
+      readonly why: string;
+      readonly next: string;
+    }
   | { readonly kind: "ready"; readonly ticket: string; readonly change: number | "none"; readonly head: string }
   // the project is at a day cap or its window share (#131): no new run starts; ticket is the first one held
   | { readonly kind: "paused"; readonly ticket: string; readonly change: number | "none"; readonly why: string }
@@ -38,7 +46,6 @@ function changeOf(where: Where, change: number | "none"): string {
 
 const TITLES: { readonly [K in Ping["kind"]]: (p: Extract<Ping, { kind: K }>) => string } = {
   "needs-you": (p) => `${p.ticket} needs you: ${p.why}`,
-  asked: (p) => `${p.ticket}: the writer asked a question that waits on you`,
   ready: (p) => `${p.ticket} is ready for you to review and merge at ${p.head.slice(0, 8)}`,
   paused: (p) => `no new runs: ${p.why}`,
   held: (p) => `${p.ticket} waits: ${p.why}`,
@@ -56,6 +63,7 @@ export function pingPost(where: Where, ping: Ping): Post {
     fields: [
       { label: "project", value: where.project },
       { label: "change", value: changeOf(where, ping.change) },
+      ...(ping.kind === "needs-you" ? [{ label: "next", value: ping.next }] : []),
     ],
     items: [],
   };

@@ -14,6 +14,7 @@ import { traceName } from "../src/core/dispatch/trace.js";
 import { STEPS_TODAY, type DesignInput, type Steps } from "../src/core/dispatch/steps.js";
 import { lock, runHoursEnd, tick, type TickSetup } from "../src/core/dispatch/tick.js";
 import { ROUND_CAP } from "../src/core/dispatch/design.js";
+import { LANES } from "../src/core/dispatch/next-step.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
 import { goAhead, start } from "../src/core/start.js";
@@ -337,9 +338,9 @@ describe("tick", () => {
       "log PROJ-1: writer (fix): approved; no run yet",
       "log PROJ-1: unavailable: the writer's box is not built yet (#113)",
     ]);
-    // no run line: only the person's START and approval, kept once each (#487)
+    // no run line: only the person's START and approval, kept once each, and the turn, the factory's
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
-    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual(["begun", "approved"]);
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual(["begun", "approved", "turn"]);
   });
 
   it("an available writer: claims the change, records the start and the end with its spend; one run per pass", async () => {
@@ -382,6 +383,7 @@ describe("tick", () => {
       "begun",
       "approved",
       "shared",
+      "turn",
       "started",
       "writer-ended",
     ]);
@@ -450,6 +452,7 @@ describe("tick", () => {
       "begun",
       "approved",
       "shared",
+      "turn",
       "answered",
       "started",
       "writer-ended",
@@ -547,7 +550,13 @@ describe("tick", () => {
     expect(runs).toEqual([]);
     const why = "blocked by 12, closed, no merge seen";
     expect(pings).toEqual([
-      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `${why}; there is no change yet` },
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: "none",
+        why,
+        next: expect.stringContaining("removes needs-human"),
+      },
     ]);
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "blocked") : []).toMatchObject([{ why }]);
@@ -620,7 +629,13 @@ describe("tick", () => {
       "the git host did not answer for the ticket's blockers on 3 passes in a row since 2026-11-07T10:00:00.000Z: PROJ-0: github: 502";
     expect(await pass("github: 504")).toContain(`needs-human: ${why}`);
     expect(pings).toEqual([
-      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `${why}; there is no change yet` },
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: "none",
+        why,
+        next: expect.stringContaining("checks the git host's login"),
+      },
     ]);
     // the passes after it keep counting quietly, and never say to START again: the ticket has no change
     const after = await pass("github: 505");
@@ -775,8 +790,16 @@ describe("tick", () => {
     expect(log).not.toContain("log PROJ-1: done");
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read.kind === "ok" ? read.value.at(-1) : undefined).toMatchObject({ kind: "writer-ended", why, output });
+    // the run is the factory's turn; the next pass sees the person's and pings them once, with why
+    expect(pings).toEqual([]);
+    await tick(setup({ team, open: [], merged: [] }, [], { notify: pinger(pings) }));
     expect(pings).toEqual([
-      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `the writer's run is blocked: ${why}` },
+      expect.objectContaining({
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: "none",
+        why: expect.stringContaining(why),
+      }),
     ]);
   });
 
@@ -818,6 +841,7 @@ describe("tick", () => {
       value: [
         { kind: "begun" },
         { kind: "approved" },
+        { kind: "turn", to: "factory" },
         { kind: "started", phase: "writer" },
         { kind: "spent", phase: "writer", spend: { usd: 0.3, tokens: 900 } },
       ],
@@ -837,7 +861,13 @@ describe("tick", () => {
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read).toMatchObject({
       kind: "ok",
-      value: [{ kind: "begun" }, { kind: "approved" }, { kind: "started" }, { kind: "writer-ended", trace }],
+      value: [
+        { kind: "begun" },
+        { kind: "approved" },
+        { kind: "turn", to: "factory" },
+        { kind: "started" },
+        { kind: "writer-ended", trace },
+      ],
     });
   });
 
@@ -853,7 +883,13 @@ describe("tick", () => {
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read).toMatchObject({
       kind: "ok",
-      value: [{ kind: "begun" }, { kind: "approved" }, { kind: "started" }, { kind: "spent", traces: [trace] }],
+      value: [
+        { kind: "begun" },
+        { kind: "approved" },
+        { kind: "turn", to: "factory" },
+        { kind: "started" },
+        { kind: "spent", traces: [trace] },
+      ],
     });
   });
 
@@ -1074,7 +1110,13 @@ describe("tick", () => {
     expect(await last()).toMatchObject({ kind: "ready-ended", passed: false, human: true });
     expect(await last()).not.toHaveProperty("nextTry");
     await pass("2026-11-07T10:01:00Z");
-    expect(await last()).toMatchObject({
+    // the hand-over, then the person's turn it begins
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.slice(-2) : []).toMatchObject([
+      { kind: "blocked" },
+      { kind: "turn", to: "needs-you" },
+    ]);
+    expect(read.kind === "ok" ? read.value.at(-2) : undefined).toMatchObject({
       kind: "blocked",
       why: expect.stringContaining("the test checks stopped the change at 11111111: the floor guard: build.gradle"),
     });
@@ -1127,12 +1169,22 @@ describe("tick", () => {
       `note #14 ${COPY("PROJ-3")}`,
       "note #14 [coordinator] ready for you at 11111111: the gate is green; review and merge",
     ]);
-    expect(pings).toEqual([{ kind: "ready", ticket: "PROJ-3", change: 14, head: H }]);
+    // the spec changed after its approval is the person's turn too, pinged once
+    expect(pings).toEqual([
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: 12,
+        why: "the spec or its design changed after its approval",
+        next: "approves the spec again: agent-factory approve <project> <ticket> <hash>",
+      },
+      { kind: "ready", ticket: "PROJ-3", change: 14, head: H },
+    ]);
     const again: string[] = [];
     await tick(setup(changes, again, { notify: pinger(pings) }));
     expect(again.filter((l) => l.startsWith("note #14"))).toEqual([]);
-    // pinged once, as the note
-    expect(pings).toHaveLength(1);
+    // each pinged once, the ready one as its note
+    expect(pings).toHaveLength(2);
   });
 
   it("a merged change's merge is recorded once, as the git host has it, before the claim comes off (#487)", async () => {
@@ -1454,7 +1506,13 @@ describe("tick", () => {
       `note #12 [coordinator] blocked: the writer's run changed nothing${NEXT}`,
     ]);
     expect(pings).toEqual([
-      { kind: "needs-you", ticket: "PROJ-1", change: 12, why: "the writer's run changed nothing" },
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: 12,
+        why: "the writer's run changed nothing",
+        next: expect.stringContaining("removes needs-human"),
+      },
     ]);
     const second: string[] = [];
     await tick(setup(changes, second, { notify: pinger(pings) }));
@@ -1463,25 +1521,43 @@ describe("tick", () => {
     expect(second.join(" ")).toContain("approve again");
   });
 
-  it("pings when the writer asked or was blocked; a ping that fails is printed and never stops the pass (#119)", async () => {
+  it("pings when the writer asked or was blocked, on the pass that sees the person's turn; a ping that fails is printed and never stops the pass (#119)", async () => {
     await approved();
-    const changes = { team, open: [open({ labels: [] })], merged: [] };
-    for (const [outcome, kind] of [
-      ["asked", "asked"],
-      ["blocked", "needs-you"],
+    const question = renderPost({
+      seat: "writer",
+      title: "OPEN: 1 question",
+      fields: [],
+      items: ["1. a? A) x · B) y"],
+    });
+    const asked = [
+      { author: { name: "ram" }, body: question.kind === "ok" ? question.text : "", at: "2026-11-07T09:01:00Z" },
+    ];
+    for (const [outcome, after, why] of [
+      ["asked", open({ labels: [], comments: asked }), "an open question waits for a person"],
+      [
+        "blocked",
+        open({ labels: ["needs-human"] }),
+        "needs-human: a person decides; the writer's run is blocked: no key",
+      ],
     ] as const) {
-      const log: string[] = [];
       const pings: Ping[] = [];
       const steps: Steps = {
         ...STEPS_TODAY,
         writer: {
           kind: "available",
-          run: async () => ({ kind: "ok", value: { head: H, outcome, patch: "p1", evidence: [], hung: false } }),
+          run: async () => ({
+            kind: "ok",
+            value: { head: H, outcome, patch: "p1", evidence: [], hung: false, why: "no key" },
+          }),
         },
       };
-      const ran = await tick(setup(changes, log, { steps, notify: pinger(pings, true) }));
+      // the run is the factory's turn: it pings nobody
+      await tick(setup({ team, open: [open({ labels: [] })], merged: [] }, [], { steps, notify: pinger(pings, true) }));
+      expect(pings).toEqual([]);
+      const log: string[] = [];
+      const ran = await tick(setup({ team, open: [after], merged: [] }, log, { notify: pinger(pings, true) }));
       expect(ran).toMatchObject({ kind: "ok" });
-      expect(pings.map((p) => p.kind)).toEqual([kind]);
+      expect(pings).toMatchObject([{ kind: "needs-you", why }]);
       expect(log.join("\n")).toContain(
         "PROJ-1: the ping did not go out (the forge note is the record): discord is down",
       );
@@ -2311,14 +2387,8 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(second).toContain(
       "log PROJ-1: design review: D1 conflict (act on, walked) src/loans.ts:12: the loans table already holds renewals",
     );
-    expect(pings).toEqual([
-      {
-        kind: "needs-you",
-        ticket: "PROJ-1",
-        change: "none",
-        why: `the design review is in, 1 finding(s) kept at spec ${specHash(text).slice(0, 8)}: read them, then approve`,
-      },
-    ]);
+    // the run is the factory's turn; the person is pinged on the pass that sees theirs
+    expect(pings).toEqual([]);
     // each run record carries the card's hash, what it spent and its trace (#487)
     const read = await readRecords(where());
     const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
@@ -2327,8 +2397,17 @@ describe("the design review and the cleanup run (#236)", () => {
       ["verify", "done", CARD, 0.2, undefined],
     ]);
     // the build waits for the human's approval, and runs nothing more
-    const third = await pass(steps, "2026-11-07T09:02:00Z");
+    const third = await pass(steps, "2026-11-07T09:02:00Z", pings);
     expect(third).toEqual(["log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only"]);
+    expect(pings).toEqual([
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: "none",
+        why: "the feature lane needs a human's approval; the ticket has a START only",
+        next: "approves the spec: agent-factory approve <project> <ticket> <hash>",
+      },
+    ]);
     expect(seen).toHaveLength(2);
     expect(
       (await approve({ where: where(), seenHash: specHash(text), by: "ram", at: "2026-11-07T09:30:00Z" })).kind,
@@ -2466,7 +2545,13 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(seen.filter((s) => s.startsWith("review"))).toHaveLength(2);
     expect(after).toContain(`log PROJ-1: design review: ${ROUND_CAP}`);
     expect(pings).toEqual([
-      { kind: "needs-you", ticket: "PROJ-1", change: "none", why: `design review: ${ROUND_CAP}` },
+      {
+        kind: "needs-you",
+        ticket: "PROJ-1",
+        change: "none",
+        why: `design review: ${ROUND_CAP}`,
+        next: "reads the design note on the change, then decides how the spec goes on",
+      },
     ]);
     const read = await readRecords(where());
     expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "design-noted").length : -1).toBe(1);
@@ -2593,5 +2678,127 @@ describe("the design review and the cleanup run (#236)", () => {
     await tick(setup({ team, open: [open({ head: H })], merged: [] }, [], { steps }));
     expect(tasks).toEqual([]);
     expect(checked).toEqual([[row]]);
+  });
+});
+
+// a pass pings once when a ticket enters a person's turn, never on the next pass in that turn, and once again
+// only after the ticket has left it for the factory's and come back
+describe("one ping per person's turn (#672)", () => {
+  const OTHER = "2".repeat(40);
+  const question = renderPost({ seat: "writer", title: "OPEN: 1 question", fields: [], items: ["1. a? A) x · B) y"] });
+  const ASK = {
+    author: { name: "ram" },
+    body: question.kind === "ok" ? question.text : "",
+    at: "2026-11-07T09:20:00Z",
+  };
+  const STOP = { author: { name: "ram" }, body: "/stop", at: "2026-11-07T09:20:00Z" };
+
+  // the ticket at the gate: the writer's run done at H, the ready check passed and the review found nothing
+  async function atGate(): Promise<void> {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    for (const event of [
+      {
+        at: "2026-11-07T09:00:00Z",
+        kind: "writer-ended",
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        patch: "p",
+        evidence: [],
+        hung: false,
+      },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
+      { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+    ] as const) {
+      await record({ where, event });
+    }
+  }
+
+  // the ping a person's wait sends: its why and the person's step
+  const needsYou = (why: string): Partial<Ping> => ({
+    kind: "needs-you",
+    why: expect.stringContaining(why),
+    next: expect.any(String),
+  });
+  const waits: readonly (readonly [string, Partial<OpenChange>, Partial<Ping>])[] = [
+    ["a manual CI job", { pipeline: { kind: "manual" } }, needsYou("a manual CI job waits for a person")],
+    ["CI skipped", { pipeline: { kind: "skipped" } }, needsYou("CI skipped this head")],
+    ["the gate green", {}, { kind: "ready", head: H }],
+    ["an open question", { comments: [ASK] }, needsYou("an open question waits for a person")],
+    ["a person's push", { head: OTHER }, needsYou("the head is not the writer's: a person pushed; stand off")],
+    ["the needs-human label", { labels: ["agent::claimed", "needs-human"] }, needsYou("needs-human: a person decides")],
+    ["a maintainer's /stop", { comments: [STOP] }, needsYou("a maintainer's /stop is newer")],
+  ];
+
+  for (const [name, entered, said] of waits) {
+    it(`${name}: one ping on entering, none on the next pass, one again after the ticket leaves and comes back`, async () => {
+      await atGate();
+      const pings: Ping[] = [];
+      const pass = (over: Partial<OpenChange>) =>
+        tick(setup({ team, open: [open(over)], merged: [] }, [], { notify: pinger(pings) }));
+      await pass(entered);
+      expect(pings).toHaveLength(1);
+      expect(pings[0]).toMatchObject({ ticket: "PROJ-1", change: 12, ...said });
+      await pass(entered);
+      expect(pings).toHaveLength(1);
+      // CI running at the writer's head: the factory's turn, recorded, which re-arms the ping; it sends nothing
+      await pass({ pipeline: { kind: "running" } });
+      expect(pings).toHaveLength(1);
+      const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+      expect(read.kind === "ok" ? read.value.findLast((e) => e.kind === "turn") : undefined).toMatchObject({
+        to: "factory",
+      });
+      await pass(entered);
+      expect(pings).toHaveLength(2);
+      expect(pings[1]).toMatchObject(said);
+    });
+  }
+
+  it("a turn line is no activity: a claim quiet since its last line is given back on time", async () => {
+    await atGate();
+    const pass = async (time: string, pipeline: "manual" | "running") => {
+      const log: string[] = [];
+      const changes = { team, open: [open({ pipeline: { kind: pipeline } })], merged: [] };
+      await tick(setup(changes, log, { now: () => Date.parse(time) }));
+      return log.join("\n");
+    };
+    // 09:11: the approval's shared copy, the newest activity, and the person's turn
+    expect(await pass("2026-11-07T09:11:00Z", "manual")).toContain("wait: a manual CI job waits for a person");
+    // 09:20: CI runs, the factory's turn, recorded
+    expect(await pass("2026-11-07T09:20:00Z", "running")).toContain("wait: CI is running at this head");
+    // 09:42: 31 minutes after the shared copy, 22 after the turn line: quiet, so the claim goes back
+    expect(await pass("2026-11-07T09:42:00Z", "manual")).toContain(
+      "release: quiet for over 30 minutes: a manual CI job waits for a person",
+    );
+  });
+
+  it("reads a turn line for every lane from the records file", async () => {
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    for (const to of LANES) {
+      await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "turn", to } });
+    }
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.map((e) => ("to" in e ? e.to : "")) : read).toEqual([...LANES]);
+  });
+
+  it("reads a pinged line written before the turn line as a ping already sent: the upgrade pings no one again", async () => {
+    await atGate();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const line = { at: "2026-11-07T09:30:00.000Z", kind: "pinged", head: H };
+    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `${JSON.stringify(line)}\n`, { flag: "a" });
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.at(-1) : undefined).toEqual(line);
+    const summary = summarize({ events: read.kind === "ok" ? read.value : [], since: "1970-01-01T00:00:00Z" });
+    expect(summary).toMatchObject({ pingedAt: H, turn: "ready-to-merge", turnRead: false });
+    const pings: Ping[] = [];
+    const log: string[] = [];
+    await tick(setup({ team, open: [open()], merged: [] }, log, { notify: pinger(pings) }));
+    expect(pings).toEqual([]);
+    // and the "ready for you" note is not posted again at this head
+    expect(log.filter((l) => l.includes("ready for you"))).toEqual([]);
+    // the pass writes the turn it found, so from now on only turn lines move it
+    const after = await readRecords(where);
+    expect(after.kind === "ok" ? after.value.at(-1) : undefined).toMatchObject({ kind: "turn", to: "ready-to-merge" });
   });
 });

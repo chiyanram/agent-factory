@@ -47,6 +47,7 @@ import type { Forge } from "../forge/types.js";
 import { plainName } from "../spec.js";
 import { LOOP_END_FILE, LOOP_PID_FILE, type LoopEnded } from "./last-poll.js";
 import { inFlight } from "./table.js";
+import { turnDue } from "./turn-ping.js";
 import {
   decideAll,
   holder,
@@ -128,9 +129,12 @@ export async function loopRunning(input: {
   return found.kind === "alive" ? found.pid : "none";
 }
 
-// flying : the tickets still in flight, by the table. A ticket that cannot be read is a person's to fix, not in flight.
+// flying : the tickets still in flight, by the table, and each one that entered a person's turn no pass has pinged yet,
+// so one more pass sends that ping (turn-ping.ts). A ticket that cannot be read is a person's to fix, not in flight.
 export function flying(decided: readonly Decided[]): readonly string[] {
-  return decided.flatMap((d) => ("kind" in d || !inFlight(d.state) ? [] : [d.state.ticket]));
+  return decided.flatMap((d) =>
+    "kind" in d || !(inFlight(d.state) || turnDue(d.state, d.action)) ? [] : [d.state.ticket],
+  );
 }
 
 // waitingOn : what each ticket in flight waits on, by ticket, as the loop's log names it: CI, or the wait's why; a

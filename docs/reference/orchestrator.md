@@ -43,7 +43,7 @@ A run that ends `blocked` or `asked` says why, even before its PR exists (#62): 
 `why` (the implementer's blocker or questions, or the host's reason, such as `the run exited 1` or `the run wrote no
 .factory/report.json`, followed by `the run said: …`, the CLI's last words), and the pass logs
 `<ticket>: writer blocked: <why>` in place of `done`, with `there is no open change to say so on` when no PR exists
-yet, and the ping says it too. A run the host blocked also keeps the last 40 lines of its stdout and stderr in
+yet, and the ping on the pass after it says it too. A run the host blocked also keeps the last 40 lines of its stdout and stderr in
 `$FACTORY_HOME/runs/<project>/<ticket>/writer-<time>.log`, named as `output` in the record and the log line. Every
 reason and kept line has what looks like a token or key scrubbed (`src/core/writer/why.ts`). To read why a run
 stopped, read that record line and that file; on a PR, the run's note says the same.
@@ -122,7 +122,7 @@ verifier or design run) or wrote to the git host, the next pass starts at once (
 it ("in flight: 4 (waiting on CI); next pass in 5 min"). A step that fails the same way twice in a row falls back to
 that wait, so a broken step never spins (#445). It ends when each such ticket is
 finished (merged or closed), has asked a person, stopped at `needs-human`, or waits on a human (an approval, a merge,
-a `/stop`); a loop with nothing in flight ends after its first pass. It never waits on what only a person can change:
+a `/stop`), and each person's turn is pinged; a loop with nothing in flight ends after its first pass. It never waits on what only a person can change:
 a pass that starts no run because each run it could start is held back ends the loop after that pass, with why and
 what to do. A step that is not set up says so, and says to run `agent-factory dispatch <project>` again once it is; the project-day cap says to run it again tomorrow; the window's share says when the
 window has room ("the window is full until HH:MM UTC"); outside the run hours it says when they are. Three
@@ -132,7 +132,21 @@ nothing happened reads the git host's changes once, not twice. `agent-factory st
 the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
 While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
 the runs a pass may start, hold in each pass. A laptop that sleeps stops the loop; run `dispatch` again and it carries
-on from the records. It never opens a ticket: the ticket list is the START and approval records and the
+on from the records.
+
+**Pings.** One rule says when a person is pinged ([`turn-ping.ts`](../../src/core/dispatch/turn-ping.ts)). Each
+pass reads whose turn each ticket is from its decision (`whoseTurn`, as `board` groups it) and pings once when a ticket
+enters **needs you** or **ready to merge**: a hand-over, a question, a manual CI job, CI skipped, a person's push, a
+`/stop`, a spec changed after its approval, a START or approval it waits for, a design note, a green gate. The pass
+writes a `turn` line first, so a ping goes once even when the post fails; a change of step inside the lane pings
+nothing. When the ticket goes back to the factory (a run, CI), the pass writes `turn` `factory`, which re-arms the
+ping. Leaving sends nothing, since a Discord post cannot be taken back. A person's turn no pass has pinged yet keeps the
+ticket in flight, so a run that ends on a person is pinged by the next pass, which starts at once. A ticket with no
+`turn` line takes its turn from its older lines (`pinged`, `blocked`, `design-noted`, a verify pass's
+`design-ended`, a `writer-ended` that asked or was blocked, unless a run `started` after it), so no wait is pinged
+twice. The `pinged` line is the once-per-head record of the "ready for you" note. A build held by its blockers and the
+project at a cap inform and ask nothing, so they keep their own checks: `held` pings again only when what it waits on
+changes, the cap notice once per cap and period. `board` never pings. It never opens a ticket: the ticket list is the START and approval records and the
 `factory/<ticket>` changes. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
 ended goes to a person. START and approval are each one file a new one replaces, so a pass records each one once as a
