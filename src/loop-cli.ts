@@ -1,5 +1,6 @@
 // loop-cli — the coordinator's forge commands and the writer's lint hook on the command line (#138): claim, release,
-// status, ask, block, reconcile (core/loop.ts) and lint-edit (core/lint-edit.ts). Each prints one line per action;
+// status, ask, block, reconcile (core/loop.ts), lint-edit (core/lint-edit.ts) and the coordinator's edit-scope hook
+// (core/edit-scope.ts). Each prints one line per action;
 // with FACTORY_DRY_RUN=1 the seam prints each write on stderr instead, and the line ends in "(dry run)".
 //
 // Each forge command may name its project first (#382): `claim ledger 12`. Its words are checked before the project's
@@ -17,6 +18,7 @@ import type { Identity } from "./core/identity.js";
 import { hostPush } from "./core/push.js";
 import type { PushTarget } from "./core/writer/step.js";
 import type { Forge } from "./core/forge/types.js";
+import { editScope } from "./core/edit-scope.js";
 import { lintEdit } from "./core/lint-edit.js";
 import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
 import { questionsIn, type Question } from "./core/report.js";
@@ -48,6 +50,7 @@ const USAGE: Readonly<Record<string, string>> = {
   block: 'block [<project>] <number> "<reason>" [<log>]',
   reconcile: "reconcile [<project>]",
   "lint-edit": "lint-edit '<lint command>'",
+  "edit-scope": "edit-scope <specs folder>",
 };
 
 // loopUsage : the command's usage on stderr, exit 64
@@ -325,6 +328,18 @@ export async function lintEditCommand(positionals: readonly string[], io: LoopIo
   return hooked.code;
 }
 
+// editScopeCommand : the coordinator's hook; it reads no setting and names no project
+export async function editScopeCommand(positionals: readonly string[], io: LoopIo): Promise<number> {
+  const [specs] = positionals;
+  if (specs === undefined || positionals.length !== 1) {
+    return loopUsage("edit-scope", io);
+  }
+  const hooked = await editScope(await io.readStdin(), specs);
+  io.out(hooked.out);
+  io.err(hooked.err);
+  return hooked.code;
+}
+
 // the forge commands: each checks its words (with the project word taken off), then runs on the resolved settings
 export const LOOP_COMMANDS: Readonly<Record<string, (positionals: readonly string[]) => Parsed>> = {
   claim: (p) => claimed("claim", p),
@@ -356,4 +371,5 @@ export const LOOP_HELP = `  claim [<project>] <number>   add the claim label to 
                                with no live run (the project's clone), but keep a writer's that holds unlanded work: push its
                                commits on top of the change's branch and label the change needs-human
   lint-edit '<lint command>'   the writer's PostToolUse hook: lint the file an Edit or Write changed, no shell
+  edit-scope <specs folder>    the coordinator's PreToolUse hook: refuse an Edit or Write outside the spec drafts
 `;

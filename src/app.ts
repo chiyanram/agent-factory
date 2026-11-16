@@ -67,7 +67,15 @@ import { readyPrograms, readyStep, verifyStep, type BoxPlan } from "./core/ready
 import { designSteps } from "./core/design/step.js";
 import { designSetup } from "./core/design/settings.js";
 import { countsLine } from "./core/review/verdicts.js";
-import { LOOP_COMMANDS, LOOP_HELP, lintEditCommand, loopUsage, projectForm, projectWord } from "./loop-cli.js";
+import {
+  LOOP_COMMANDS,
+  LOOP_HELP,
+  editScopeCommand,
+  lintEditCommand,
+  loopUsage,
+  projectForm,
+  projectWord,
+} from "./loop-cli.js";
 import { chosenProject, DEFAULT_PROJECT, projectNames } from "./core/which-project.js";
 import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
@@ -1626,6 +1634,8 @@ const COMMANDS: readonly Command[] = [
   ...Object.keys(LOOP_COMMANDS).map((name) => ({ name, run: (args: Args) => loopCommand(name, args) })),
   // the writer's lint hook reads no setting, and prints only the lint's own output
   { name: "lint-edit", run: ({ positionals, io }: Args) => lintEditCommand(positionals, io) },
+  // the coordinator's edit hook, the same: it reads no setting, and prints only its decision
+  { name: "edit-scope", run: ({ positionals, io }: Args) => editScopeCommand(positionals, io) },
 ];
 
 // COMMAND_NAMES : every command the CLI takes, the ones that read their own options too; test/cli-doc.test.ts checks

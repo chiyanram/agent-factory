@@ -73,8 +73,9 @@ Two rules follow from this:
   skip-all; the runner is the wall, the lists are the second line.
 - **Enforced: zero findings is never green.** Only a human undrafts. Every PR gets a script-made status list of
   protected files and new dependencies ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344), #118).
-- **Code goes to an implementer, always.** The coordinator never edits code. **Today:** a prompt rule; an edit outside
-  the spec drafts asks you rather than being refused (#674).
+- **Code goes to an implementer, always.** The coordinator never edits code: its edit-scope hook refuses every Edit or
+  Write outside the spec drafts, and its settings deny `WebFetch` and `WebSearch`, so outside context comes only
+  through `agent-factory fetch` (ADR-0012 S2, S18).
 - **START, approval and merge are the human's.** An approval is `agent-factory approve`, which records the spec's and
   the design's full hashes; a note on the PR approves nothing, and the bot cannot merge the protected branch. In the
   coordinator's settings `approve` and `start` are denied, not asked, and the orchestrator refuses to start while those
@@ -115,7 +116,7 @@ Two rules follow from this:
   `!`, `GH-` before a digit, `://` and every `www.` are broken with an invisible joiner; Markdown and Jira markup characters are escaped
   (`src/core/post.ts`, #126). The PR body's `.factory/pr.md` goes through its own cleaner (`src/core/pr-body.ts`,
   #335): no raw HTML, no mention, no closing keyword, no link off the project's git host, capped length.
-- **The coordinator cannot widen its own wall.** It edits only spec drafts with no prompt, and never its settings, any
+- **The coordinator cannot widen its own wall.** It edits only spec drafts, and never its settings, any
   `.claude/` or the factory ([review 7](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682899888), #106).
 - **Where state lives.** **Today:** before the PR opens, a ticket's records are only on the machine that ran START
   ([Where it lives](spec-and-knowledge.md#where-it-lives)). Copying the approved spec to the ticket at approval is
