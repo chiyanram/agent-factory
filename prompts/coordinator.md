@@ -75,6 +75,7 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    empty one), run `agent-factory request spec.body --file $FACTORY_HOME/specs/<project>/<issue number>/spec.md`, and
    run the confirm command it prints, exactly as printed: the person's yes in its prompt sends the whole body to the
    issue (#542). It refuses a line outside code that starts with `/` or mentions an `@name`: put those in backticks.
+   It refuses anything shaped like a secret, in code too: take it out.
    Never ask the person to paste a spec. Then run `agent-factory spec <project> <issue number>`. Cite today's code as `file:line@commit`. When the
    ticket must wait for others to merge first, name them in an optional `## Blocked by` section, one ticket per line
    (#494): the orchestrator holds the ticket's first build until each is merged (or its issue closed as completed),

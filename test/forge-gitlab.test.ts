@@ -312,6 +312,36 @@ describe("single calls", () => {
     expect(JSON.parse(f.calls[1]!.stdin)).toEqual({ body: "[reviewer] Act on F1\n\n- at: src/A.java:400" });
   });
 
+  it("note and lineFinding post no secret, anchored or not (#678)", async () => {
+    const token = `glpat-${"Zq7".repeat(7)}`;
+    const leaky: Post = { seat: "reviewer", title: `Act on F1: ${token}`, fields: [], items: [`uses ${token}`] };
+    const change: Change = {
+      number: 12,
+      state: "opened",
+      sha: "h1",
+      sourceBranch: "x",
+      targetBranch: "main",
+      labels: [],
+      description: "",
+      anchor: { kind: "gitlab", base: "b", start: "s", head: "h1" },
+    };
+    const f = fake("gitlab", [
+      ok({ id: 1 }),
+      { status: 400, body: { message: "line_code can not be blank" } },
+      { status: 201, body: { id: "d2" } },
+    ]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.note({ number: 12, post: leaky })).toEqual({ kind: "ok" });
+    expect(await forge.lineFinding({ change, at: { file: "src/A.java", line: 400 }, post: leaky })).toEqual({
+      kind: "ok",
+    });
+    expect(f.calls).toHaveLength(3);
+    for (const call of f.calls) {
+      expect(call.stdin).not.toContain(token);
+      expect(JSON.parse(call.stdin).body).toContain("\\[scrubbed\\]");
+    }
+  });
+
   it("me is the CLI's username", async () => {
     const f = fake("gitlab", [ok({ username: "ram", bot: false })]);
     expect(await gitlab(f.client, project).me()).toEqual({ kind: "ok", value: "ram" });

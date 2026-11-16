@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LANES, type Lane } from "./lane-order.js";
 import { cleanField } from "./post.js";
+import { scrubSecrets } from "./scrub.js";
 
 export { LANES, type Lane } from "./lane-order.js";
 
@@ -318,10 +319,14 @@ function lineProblems(line: { readonly n: number; readonly text: string }): read
 
 // postableSpec : why this text may not be sent as an issue's new body (#542); none when it may. Its characters must
 // all show, as checkSpec's must (a \r\n line end is the one carriage return allowed), it must fit the git host, and
-// no line outside code may run a GitLab quick action or notify a person. Whether it follows the template is not
-// asked: a draft may be sent before it passes `spec`. Pure.
+// no line outside code may run a GitLab quick action or notify a person, and nothing in it, code or not, may look like a
+// secret: a person confirms the text as it is, so it is refused, never scrubbed (P4). Whether it follows the template is
+// not asked: a draft may be sent before it passes `spec`. Pure.
 export function postableSpec(text: string): readonly string[] {
   return [
+    ...(scrubSecrets(text) === text
+      ? []
+      : ["the text holds something shaped like a secret (a token, a key or a login): take it out; nothing is sent"]),
     ...(text.length > MAX_BODY ? [`the body is ${text.length} characters; a git host keeps at most ${MAX_BODY}`] : []),
     ...hiddenProblems(text.replaceAll("\r\n", "\n")),
     ...unfenced(text.replaceAll("\r\n", "\n")).flatMap(lineProblems),

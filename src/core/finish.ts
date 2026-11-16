@@ -369,9 +369,10 @@ function readsBack(q: Question, back: Asked | undefined): boolean {
 }
 
 // sameWords : whether a text read back is the text written, as the template made it inert in the middle of a line: the
-// template escapes a "/" only at a line's start, and a posted question never starts one (#522)
+// template escapes a "/" only at a line's start, and a posted question never starts one; the space keeps a word
+// boundary in front of the text, so a secret at its start is scrubbed as in the post
 function sameWords(back: string, written: string): boolean {
-  return back === cleanField(`x${flatText(written)}`, Number.POSITIVE_INFINITY).slice(1);
+  return back === cleanField(`x ${flatText(written)}`, Number.POSITIVE_INFINITY).slice(2);
 }
 
 // sameChoices : whether a question's choices and recommended one read back as written

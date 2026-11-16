@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { github } from "../src/core/forge/github.js";
 import { gitlab } from "../src/core/forge/gitlab.js";
-import { cleanedBody } from "../src/core/forge/plugin.js";
+import { cleanedPost } from "../src/core/forge/plugin.js";
 import { reader } from "../src/core/forge/read.js";
 import { bodyPostOf, changeRequestOf } from "../src/core/forge/shapes.js";
 import { renderBody, renderPost, type BodyPost } from "../src/core/post.js";
@@ -270,7 +270,7 @@ describe("the Forge.setBody seam carries the cleaned PR body (#335)", () => {
   });
 
   it("a forge plugin gets the Markdown already cleaned, and reads the PR body back on its side", () => {
-    const sent = JSON.parse(JSON.stringify({ number: 12, post: cleanedBody(BODY) }));
+    const sent = JSON.parse(JSON.stringify({ number: 12, post: cleanedPost(BODY) }));
     expect(sent.post.prBody.markdown).toBe(`## Why\n@${J}alice x\n\\/approve\n- spec: forged`);
     const r = reader("test");
     const back = r.done(bodyPostOf(r, sent.post));
@@ -279,5 +279,105 @@ describe("the Forge.setBody seam carries the cleaned PR body (#335)", () => {
     expect(request.kind === "ok" && request.value.body.prBody?.host).toBe(HOST);
     const plain = r.done(bodyPostOf(r, { seat: "writer", title: "t", fields: [], items: [] }));
     expect(plain).toEqual({ kind: "ok", value: { seat: "writer", title: "t", fields: [], items: [] } });
+  });
+});
+
+describe("no secret in the posted PR body (#678; ADR-0012 S13, P4)", () => {
+  // built from parts, so no scanner takes the test for a leak
+  const TOKEN = `ghp_${"a1B2".repeat(9)}`;
+  const LAB = `glpat-${"Zq7".repeat(7)}`;
+  const HIDDEN = String.fromCharCode(0x200b);
+  const PEM = [
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "b3BlbnNzaC1rZXktdjEA",
+    "AAAABG5vbmU=",
+    "-----END OPENSSH PRIVATE KEY-----",
+  ];
+  const PLANTED = [
+    "## Evidence",
+    "",
+    `| AC1 | \`curl -H "Authorization: Bearer ${TOKEN}"\` | 200 |`,
+    "",
+    "```",
+    `GITLAB_TOKEN=${LAB}`,
+    ...PEM,
+    "```",
+    "",
+    `Cloned from https://bot:${TOKEN}@github.com/o/r and ${TOKEN.slice(0, 6)}${HIDDEN}${TOKEN.slice(6)}.`,
+  ].join("\n");
+  const SECRETS = [TOKEN, LAB, ...PEM.slice(1, 3), "bot:", TOKEN.slice(6)];
+
+  const WITH: BodyPost = {
+    ...BODY,
+    title: `PROJ-1: ${TOKEN}`,
+    fields: [{ label: "spec", value: "abc123" }],
+    items: [`deferred: rotate ${LAB}`],
+    prBody: { markdown: PLANTED, host: HOST },
+  };
+
+  function noSecret(text: string): void {
+    for (const secret of SECRETS) {
+      expect(text).not.toContain(secret);
+    }
+  }
+
+  it("cleanBody scrubs a token in a table, in code, a PEM key, a login in a URL, and one split by a hidden character", () => {
+    const out = clean(PLANTED);
+    noSecret(out);
+    expect(out.split("\n")).toEqual([
+      "## Evidence",
+      "",
+      '| AC1 | `curl -H "Authorization: Bearer [scrubbed]"` | 200 |',
+      "",
+      "```",
+      "GITLAB_TOKEN=[scrubbed]",
+      "[scrubbed]",
+      "```",
+      "",
+      `Cloned from https:${J}//[scrubbed]@${J}github.com/o/r and [scrubbed].`,
+    ]);
+    expect(clean(out)).toBe(out);
+  });
+
+  it("renderBody scrubs the engine's fields and the Markdown, and keeps the engine's own lines as they were", () => {
+    const out = renderBody(WITH);
+    expect(out.kind).toBe("ok");
+    const text = out.kind === "ok" ? out.text : "";
+    noSecret(text);
+    expect(text.split("\n").slice(0, 7)).toEqual([
+      "[coordinator] PROJ-1: \\[scrubbed\\]",
+      "",
+      "- spec: abc123",
+      "- deferred: rotate \\[scrubbed\\]",
+      "",
+      "---",
+      "",
+    ]);
+  });
+
+  it("GitHub and GitLab set and open a change with no secret in its title or body", async () => {
+    const hub = fake("github", [ok({}), ok([]), { status: 201, body: { number: 42 } }]);
+    const forge = github(hub.client, { owner: "o", name: "r" });
+    expect(await forge.setBody({ number: 12, post: WITH })).toEqual({ kind: "ok" });
+    const request = { branch: "factory/PROJ-1", base: "main", title: `t ${TOKEN}`, body: WITH };
+    expect(await forge.openChange(request)).toEqual({ kind: "ok", value: 42 });
+    const lab = fake("gitlab", [ok({})]);
+    expect(await gitlab(lab.client, "g/p").setBody({ number: 12, post: WITH })).toEqual({ kind: "ok" });
+    for (const call of [hub.calls[0], hub.calls[2], lab.calls[0]]) {
+      noSecret(call?.stdin ?? "");
+    }
+  });
+
+  it("a forge plugin gets the title, the fields, the items and the Markdown already scrubbed", () => {
+    const sent = JSON.stringify(cleanedPost(WITH));
+    noSecret(sent);
+    expect(sent).toContain("[scrubbed]");
+  });
+
+  it("a forge plugin gets a note or a line finding, with no PR body, scrubbed too", () => {
+    const { prBody: _, ...note } = WITH;
+    const sent = cleanedPost(note);
+    noSecret(JSON.stringify(sent));
+    expect(sent).toEqual({ ...note, title: "PROJ-1: [scrubbed]", items: ["deferred: rotate [scrubbed]"] });
   });
 });

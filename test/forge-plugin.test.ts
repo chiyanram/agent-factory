@@ -177,6 +177,37 @@ describe("the forge as a plugin (#134 PR C)", () => {
     }
   });
 
+  it("hands the plugin a note and a line finding with no secret in them (#678)", async () => {
+    const token = `ghp_${"a1B2".repeat(9)}`;
+    const leaky: Post = { seat: "reviewer", title: `one finding ${token}`, fields: [], items: [`uses ${token}`] };
+    const { setup, fakes } = await bundled([http("201 Created", { id: 1 }), http("201 Created", { id: 2 })]);
+    try {
+      const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+      const sha = "a".repeat(40);
+      const change: Change = {
+        number: 5,
+        state: "opened",
+        sha,
+        sourceBranch: "factory/P-1",
+        targetBranch: "main",
+        labels: [],
+        description: "",
+        anchor: { kind: "github", head: sha },
+      };
+      expect(await forge.note({ number: 5, post: leaky })).toEqual({ kind: "ok" });
+      expect(await forge.lineFinding({ change, at: { file: "src/a.ts", line: 3 }, post: leaky })).toEqual({
+        kind: "ok",
+      });
+      const calls = await fakes.calls();
+      expect(calls).toHaveLength(2);
+      for (const call of calls) {
+        expect(call.stdin).not.toContain(token);
+      }
+    } finally {
+      await fakes.remove();
+    }
+  });
+
   it("carries the failed jobs at a head, a log's end and a job with no log, as the built-in adapter does (#171)", async () => {
     const sha = "b".repeat(40);
     const { setup, fakes } = await bundled([

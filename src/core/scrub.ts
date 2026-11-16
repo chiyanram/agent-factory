@@ -1,6 +1,6 @@
-// scrub — what looks like a token or a key, replaced before a text is kept (#62, #485; P4: no record or trace ever
-// holds a secret). The writer's why (writer/why.ts) and every string a run record keeps (dispatch/records.ts) pass
-// through it. Pure.
+// scrub — what looks like a token or a key, replaced before a text is kept or posted (P4: no record, trace
+// or post ever holds a secret). The writer's why (writer/why.ts), every string a run record keeps (dispatch/records.ts)
+// and every text the host posts (cleanField in post.ts, cleanBody in pr-body.ts) pass through it. Pure.
 
 export const SCRUBBED = "[scrubbed]";
 

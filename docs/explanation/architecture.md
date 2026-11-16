@@ -149,7 +149,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 |---|---|
 | spec | intent · lane · acceptance criteria (numbered `AC-n`, [Spec, design and project knowledge](spec-and-knowledge.md)) · design link · out of scope · planned files (optional) |
 | report | `.factory/report.json`: `done` with evidence per AC (and an optional `deferred` list), `asked` with questions, or `blocked` |
-| PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner (#335; ADR-0012 S13) |
+| PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner, which also scrubs anything shaped like a secret (ADR-0012 S13; P4) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
 | finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), grade (how strong the proof is: `cited`, `walked` or `ran`), evidence (the proof itself), finding (the plain description), fix; the finder gives all but the lens, which the engine adds |
