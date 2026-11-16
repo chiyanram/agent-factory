@@ -22,12 +22,37 @@ make lint && make test
 
 | target | does |
 |---|---|
-| `make lint` | `node scripts/check-links.ts .` (every relative link in a tracked `.md` file resolves), `node scripts/check-size.ts .` (the root `AGENTS.md` is under 200 lines), `node scripts/check-temp-dirs.ts .` (no test calls `tmpdir()` itself: it makes a temp folder with `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink), `node scripts/check-evals.ts .` (each case of the automated review's golden set is well-formed: [evals/reviewer/README.md](evals/reviewer/README.md)), `node scripts/check-eval-proof.ts .` (a change to an automated review input adds an eval pass that proves it, and a change to the baseline carries the operator's label: [evals/reviewer/README.md](evals/reviewer/README.md#the-proof-check)), `node scripts/check-musts.ts .` (each `AGENTS.md` MUST that code can check: no `gh`, `glab` or `git` outside their seams, `node:child_process` only in the reviewed modules that start programs, no git host token or skip-permissions flag outside the git host seam, no disable comment, no raised `scripts/lint-baseline.json` against the default branch, and no bash script; the exceptions and their reasons are in the script), `node scripts/check-words.ts .` (no old word from `GLOSSARY.md` in the prose of `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, every `.md` under `docs/` but the ADRs, `prompts/coordinator.md` or a role card; an identifier goes in backticks), `node scripts/check-history.ts .` (no ticket, approval or dated decision in a comment or doc line the change adds, against the default branch; the exceptions are in the script), `tsc --noEmit`, `biome ci` and the oxlint ratchet |
+| `make lint` | runs every [lint check](#lint-checks) below, then `tsc --noEmit`, `biome ci` and the oxlint ratchet |
 | `make test` | builds, then runs the vitest suite. CI runs it on Linux and on macOS (`test-macos`), each with the pinned rules pack (`FACTORY_RULES_PACK`, see `AGENTS.md`). One file: `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
-| `make garden` | prints the code's health from git history with repo-gardener: `gardener snapshot` (size, files over 800 lines, type escapes, lint suppressions), `gardener hotspots --days 60 --limit 10` (files that keep needing fixes) and `gardener window --days 7` (fix share, cleanup share and rework). Add `--transcripts` or `--github` only in a hand run of `npx gardener`: `--transcripts` reads the agent logs on your own machine. `gardener.config.json` leaves out `tests/fixtures/`, the planted bad input of the lint checks |
-| `make garden-pr` | prints, for each code file a change touches, its lines, type escapes, lint suppressions and, in a test file, mocked modules and call assertions, at the merge base and at the head, then the numbers that got worse: a file over 800 lines that grew, more type escapes or suppressions over the touched files, more mocks in a test file ([src/core/garden/numbers.ts](src/core/garden/numbers.ts)). It compares `origin/main` with `HEAD`; set `BASE=` or `HEAD=` for another pair. `node scripts/garden-pr.ts --json` prints the same as JSON. It is a measure for you and for whoever reviews the change, not a gate: it always exits 0 once it has measured |
+| `make garden` | prints the code's health from git history with repo-gardener: `gardener snapshot`, `gardener hotspots --days 60 --limit 10` and `gardener window --days 7` |
+| `make garden-pr` | prints, for each code file a change touches, its numbers at the merge base and at the head, then the numbers that got worse ([src/core/garden/numbers.ts](src/core/garden/numbers.ts)) |
 | `make help` | lists the targets |
+
+- `make garden`: `snapshot` gives size, files over 800 lines, type escapes and lint suppressions; `hotspots` gives the
+  files that keep needing fixes; `window` gives fix share, cleanup share and rework. Add `--transcripts` or `--github`
+  only in a hand run of `npx gardener`: `--transcripts` reads the agent logs on your own machine.
+  `gardener.config.json` leaves out `tests/fixtures/`, the planted bad input of the lint checks.
+- `make garden-pr`: the numbers are lines, type escapes, lint suppressions and, in a test file, mocked modules and
+  call assertions. "Worse" means a file over 800 lines that grew, more type escapes or suppressions over the touched
+  files, or more mocks in a test file. It compares `origin/main` with `HEAD`; set `BASE=` or `HEAD=` for another pair.
+  `node scripts/garden-pr.ts --json` prints the same as JSON. It is a measure for you and for whoever reviews the
+  change, not a gate: it always exits 0 once it has measured.
+
+### Lint checks
+
+Each runs as `node scripts/<script> .`.
+
+| script | fails when |
+|---|---|
+| `check-links.ts` | a relative link in a tracked `.md` file does not resolve |
+| `check-size.ts` | the root `AGENTS.md` reaches 200 lines |
+| `check-temp-dirs.ts` | a test calls `tmpdir()` itself instead of `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink |
+| `check-evals.ts` | a case of the automated review's golden set is not well-formed ([evals/reviewer/README.md](evals/reviewer/README.md)) |
+| `check-eval-proof.ts` | a change to an automated review input adds no eval pass that proves it, or a change to the baseline lacks the operator's label ([the proof check](evals/reviewer/README.md#the-proof-check)) |
+| `check-musts.ts` | the code breaks an `AGENTS.md` MUST that code can check: `gh`, `glab` or `git` outside their seams, `node:child_process` outside the reviewed modules that start programs, a git host token or skip-permissions flag outside the git host seam, a disable comment, a raised `scripts/lint-baseline.json` against the default branch, or a bash script. The exceptions and their reasons are in the script |
+| `check-words.ts` | an old word from `GLOSSARY.md` is in the prose of `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, any `.md` under `docs/` but the ADRs, `prompts/coordinator.md` or a role card. An identifier goes in backticks |
+| `check-history.ts` | a comment or doc line the change adds names a ticket, an approval or a dated decision, against the default branch. The exceptions are in the script |
 
 Tests are vitest files under `test/`, one per module, named `<module>.test.ts`. A test makes its temp folders with
 `tempDir()` from [test/temp.ts](test/temp.ts).
@@ -148,10 +173,8 @@ from `ci.yml` first (#351); semantic-release (`release.config.mjs`, #153) then r
 way as chiyanram/skills.
 
 - Pull requests are squash-merged with the PR title as the commit subject, so **the PR title decides the release**.
-  CI fails a title that is not `type(scope): lower-case summary (#ticket)`, such as `feat(box): one box seam (#112)`, and
-  a title, description or commit that holds a skip-ci marker. The ticket can be in another repo:
-  `(chiyanram/skills#276)`. Only Dependabot (scope `deps`) and the release commit name no ticket. chiyanram/skills and
-  chiyanram/rca-agent use the same rule (#327).
+  CI fails a title that does not follow [Commit messages](#commit-messages), and a title, description or commit that
+  holds a skip-ci marker.
 - `feat` releases a minor version, `fix` and `perf` a patch, and `!` or a `BREAKING CHANGE:` footer a major one.
   `docs`, `chore`, `ci`, `style`, `refactor`, `test` and `build` release nothing.
 - A release is a tag `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`, which semantic-release writes; do not

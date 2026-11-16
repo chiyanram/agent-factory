@@ -17,7 +17,7 @@ findings is not a pass. A human reviews the design and the intent of each change
 ## One round
 
 ```text
- pack ──▶ pick lenses ──▶ one finder per lens ──▶ merge ──▶ verify per kind ──▶ buckets ──▶ post
+ pack ──▶ pick lenses ──▶ one finder per lens ──▶ merge ──▶ verify per kind ──▶ buckets ──▶ check cites ──▶ post
 ```
 
 1. **The context pack** (`pack.ts`), one per head: the diff (from round 2, the interdiff), the approved spec and
@@ -62,7 +62,7 @@ From vendor docs and company papers (retrieved 2026-11-09):
 
 ## What is decided next
 
-Decided in the design audit (2026-11-10), not built:
+Decided, not built yet:
 
 | change | why |
 |---|---|
@@ -75,4 +75,4 @@ Decided in the design audit (2026-11-10), not built:
 
 **Today:** the finder and verify-pass role cards are not used; the round runs `prompts/review-find.md` and
 `prompts/review-verify.md` until the review's eval has a baseline (#216). The review runs on the host with read-only
-tools, not on a runner (#113).
+tools, not on a runner (#674).

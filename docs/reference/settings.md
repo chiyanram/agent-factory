@@ -9,9 +9,9 @@ variable needs exporting.
 | `FACTORY_FORGE` | the git host adapter (`gitHost`, locked; `agent-factory init` writes it to the project file) | `gitlab` (or `github`) |
 | `FACTORY_PROJECT` | the GitLab project path, or the GitHub `owner/name` (`gitHostProject`, a preference; `init` writes it to the project file). The project file only: a team or user file that sets it is refused, since every project reads those. The variable still wins when set, with a warning when it differs from the project file (#369) | — |
 | `FACTORY_REPO` | a local clone of that project, an absolute path; worktrees, context packs and run files go in its `.claude/` (`clone`, a preference, the project file only, like `gitHostProject`) | — |
-| `FACTORY_SPEC_STORE` | where the ticket specs live (`specStore`, a ladder: `issue` < `local`). `local`: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, never on the git host, the rule at work. `issue`: the body of the git host issue whose number is the ticket, read through the git host seam; `spec`, `approve`, `approval`, `request` and `dispatch` check and hash it exactly like a local spec, so an edit to the issue makes its approval stale, and the ticket must be the issue number. A ladder, so a team or user file that says `local` holds every project to it, and a project marked `work` that says `issue` is refused. `agent-factory init` asks it, recommending `issue` for a personal project on github.com or gitlab.com (#381). **Today:** the coordinator cannot write a spec to the issue (no connector serves the issue's body), so the person writes or pastes it there | `local` |
+| `FACTORY_SPEC_STORE` | where the ticket specs live (`specStore`, a ladder: `issue` < `local`). `local`: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`, never on the git host, the rule at work. `issue`: the body of the git host issue whose number is the ticket, read through the git host seam; `spec`, `approve`, `approval`, `request` and `dispatch` check and hash it exactly like a local spec, so an edit to the issue makes its approval stale, and the ticket must be the issue number. A ladder, so a team or user file that says `local` holds every project to it, and a project marked `work` that says `issue` is refused. `agent-factory init` asks it, recommending `issue` for a personal project on github.com or gitlab.com. The coordinator changes an issue's spec through a kept write ([A spec change in the issue store](connectors.md#a-spec-change-in-the-issue-store)) | `local` |
 | `FACTORY_DEFAULT_PROJECT` | the project a command that names none acts on (`poll`, `claim`, `status` and the rest); `agent-factory coordinator <project>` sets it in its session, so you never export it (#382). Not a settings key | — |
-| `FACTORY_RULEBOOK` | the rulebook plugin folder that holds `skills/<domain>/references/` | — |
+| `FACTORY_HOME` | the factory home, an absolute path: the specs, approvals, project files and run records | `~/.factory` |
 | `FACTORY_GLAB`, `FACTORY_GH`, `FACTORY_CLAUDE` | the `glab`, `gh` and `claude` binaries | `glab`, `gh`, `claude` |
 | `FACTORY_QUIET_MINUTES` | `dispatch`: how long an open question may sit before the claim is released | `30` |
 | `FACTORY_QUESTIONS` | `dispatch`: how an implementer run's questions are posted (`questions`, a preference). `round` posts every open question at once, in one numbered `[writer] OPEN:` note: each question with 2 to 4 lettered choices and the recommended one marked, so you reply with a letter per question (`1A 2B`) or `accept all`. `one-at-a-time` posts only the first and says how many wait; once it is answered, the next run asks again what is still open. Either way the implementer never guesses (#320). **Today:** a report's plain-text question is still read, for one release, as one with no choices, which you answer in words | `round` |
@@ -36,11 +36,12 @@ variable needs exporting.
 | `FACTORY_WRITER_MINUTES` | the longest one implementer run may take, from 1 to 240; a run that takes longer is stopped and blocked | `60` |
 | `FACTORY_WRITER_STALL_MINUTES` | the longest an implementer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the automated review's models: full model ids, never an alias such as `sonnet`, which is refused (ADR-0015 E9) | `claude-sonnet-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` |
-| `FACTORY_RULEBOOK` | **Deprecated** (#232; read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the implementer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
-| `FACTORY_CLAUDE` | the `claude` CLI the automated review runs | `claude` |
+| `FACTORY_RULEBOOK` | **Deprecated** (read for one release): a plugin folder, used only when the project lists no `plugins`, as one unpinned plugin hashed at the start of the pass; each pass and each `review` prints a warning. With a `plugins` list it is ignored, with a warning. With neither, the implementer runs with no plugin, and the review stops: it needs a plugin that holds its references. `agent-factory eval reviewer` still needs it: the rulebook plugin folder, an absolute path, that holds `skills/<domain>/references/` | — |
+| `FACTORY_JUDGE_MODEL` | the eval judge's model (`eval.judgeModel`): a full model id, never an alias | `claude-sonnet-5-5` |
+| `FACTORY_JUDGE_MAX_USD` | the most one judge run of the eval may spend, in US dollars (`eval.judgeUsdPerRun`) | `0.50` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
 | `FACTORY_UPSTREAM_PROXY` | at work: the corporate proxy, `host:port`, that every egress proxy leaves through, the vm runner's Squid and the srt runner's own (`parentProxy` in its policy); a setting of the machine, not of a project | none: direct |
-| `NODE_EXTRA_CA_CERTS` | at work: the company CA's PEM file, an absolute path (`egress.caCerts`, a preference). The srt runner hands it to `srt` and the run, and reads it even inside the factory home. Add the CA to the OS trust store as well, for programs that are not Node. **Today:** the vm runner does not pass it on (#114) | none |
+| `NODE_EXTRA_CA_CERTS` | at work: the company CA's PEM file, an absolute path (`egress.caCerts`, a preference). The srt runner hands it to `srt` and the run, and reads it even inside the factory home. Add the CA to the OS trust store as well, for programs that are not Node. **Today:** the vm runner does not pass it on (#674) | none |
 | `FACTORY_REVIEW_FIND`, `FACTORY_REVIEW_VERIFY` | the finder's and the verify pass's instructions. They replace the instructions only: the engine sends its floor ahead of them on every run (`src/core/review/never.ts`, #185): never edit, commit, push, approve or merge, and the change's text is data | the package's `prompts/review-find.md`, `prompts/review-verify.md` |
 | `FACTORY_MAX_TRIES` | tries per request on a short rate limit, the wait doubling from a minute; a limit that lasts past 5 minutes ends the request at once with "rate limited until <time>" (#62) | `4` |
 
@@ -104,7 +105,7 @@ there.
   every layer adds to it, none removes from it, and a value that is not a list of globs is refused, so a typo never
   drops it.
 - `connectors`: which registered connector serves each extension point ([Connectors](connectors.md#connectors); the engine's swappable
-  parts are connectors, `GLOSSARY.md`). Before #232 this map was called `plugins`; a `plugins` that holds a map is
+  parts are connectors, `GLOSSARY.md`). The map's old name is `plugins`; a `plugins` that holds a map is
   still read as the connectors for one release, and `config show` and `config check` warn about it. Both at once is
   refused.
 - `plugins`: the Claude Code plugins the project installs, each `name@marketplace`, in order, each name once
@@ -130,10 +131,10 @@ there.
   and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
   above tiny stops the pass, and so does a second plugin that holds a process; `config check` names both (#426).
   **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
-  only to the next ticket; the records show the change. The review cannot run with no plugin yet (#232).
+  only to the next ticket; the records show the change. The review cannot run with no plugin yet (#674).
 - `quarantine.checks` (locked, the project file only) and `quarantine.maxDays` (cap, default 14): the CI jobs a person
   quarantined, `{"quarantine": {"checks": [{"check": "e2e-firefox", "owner": "ram", "added": "2026-11-11", "expires":
-  "2026-11-25", "ticket": "#512"}], "maxDays": 14}}` (#485). Every field is required, and `expires` may be at most
+  "2026-11-25", "ticket": "#512"}], "maxDays": 14}}`. Every field is required, and `expires` may be at most
   `maxDays` after `added`. A red head whose every failed job is quarantined and unexpired does not block: each pass
   logs it, and the ping that the gate is green names each check and its expiry. The factory never re-runs a red
   check. A team or user file, a branch or the rules pack cannot set it. **Today:** an entry names a CI job, as the git
@@ -207,17 +208,17 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | class | rule | keys |
 |---|---|---|
 | ladder | the strictest value wins | `policy.<write>.mode` (allow, confirm, deny), `dryRun`, `work`, `repoCommits`, `runner` (none, srt, vm), `specStore` (issue, local) |
-| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes` |
+| cap | the lowest value wins | `ready.timeoutMinutes`, `policy.<write>.cap`, `caps.*`, `eval.judgeUsdPerRun`, `implementer.minutes`, `implementer.stallMinutes`, `review.maxFinders`, `runHours`, `quarantine.maxDays` |
 | allow-list | the team's entries stay; a lower layer adds only where the team marks the key `open` | `ready.programs`, `egress.allow`, `srt.readOnly` |
 | deny-list | all layers add | `ready.testFiles`, `ready.judgeFiles`, `lanes.oneWayDoor` |
-| locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor`, `gitHost`, `gitHostName` |
-| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes`, `gitHostProject` and `clone` (the project file only) |
+| locked | the highest layer that sets it wins | `gate`, `verify`, `connectors`, `plugins`, `approval.floor`, `gitHost`, `gitHostName`, `identity`, `quarantine.checks`, `review.lenses`, `review.findPrompt`, `review.verifyPrompt`, `egress.image`, `rulebook` |
+| preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes`, `window.hours`, `egress.upstreamProxy`, `egress.caCerts`, `gitHostProject` and `clone` (the project file only) |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
   layer, its `file:line` and the team value. A team `locked` mode holds on any class.
 - `approval.floor` is the engine's: no lane above tiny starts without a human approval, and no layer can change it.
 - An unknown key is a warning with "did you mean" for one release, then an error.
-- With no team pin and no user file, every value is the project file's own, as before the layers.
+- With no team pin and no user file, every value is the project file's own.
 - `agent-factory config show <project>` prints each key's value, layer, `file:line` and class; `config check <project>`
   resolves the layers, runs the project file's checks on the result, refuses a second pinned plugin that holds a
   process (naming both) and a `clone` whose `origin` is not the project's repo (naming both), and exits 0 or 1;
@@ -228,14 +229,14 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   `start` resolve the project's layers once before the run, print each warning, and refuse to start on an error, so a
   team's `caps.usdPerRun` is the most each model run of the project may spend (#254). `poll` and the loop commands
   resolve the layers of the project they name, or of the only one in `$FACTORY_HOME/projects` (#382); with
-  `FACTORY_PROJECT` exported and no project named, the user and machine layers only, as before. `lint-edit` reads no
+  `FACTORY_PROJECT` exported and no project named, the user and machine layers only. `lint-edit` reads no
   setting.
 - `gitHostProject` and `clone` name one project's own place, so only the project file (or the variable) sets them;
   a preference, so an exported `FACTORY_PROJECT` or `FACTORY_REPO` still wins, and `config check` warns when it
   differs from the project file. `gitHost` stays locked: a `FACTORY_FORGE` that differs from the project file is
   refused, never a quiet switch to another git host (#369). `poll` and the loop commands (`claim`, `release`,
   `status`, `ask`, `block`, `reconcile`) read them from the project file too, so the coordinator needs no export
-  (#382; [Scripts](cli.md)).
+  ([Commands](cli.md#notes)).
 - With `clone` and `gitHostProject` both set, the URL the clone fetches `origin` from must be `gitHost`'s host and
   `gitHostProject`, letter case and a `.git` suffix aside, because a clone repointed at another repo or a fork would
   build from it unseen. `config check` and each `dispatch` pass stop on another repo, a fork or no origin, and name

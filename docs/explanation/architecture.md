@@ -1,8 +1,8 @@
 # agent-factory design
 
-This page says what agent-factory is, how a ticket goes through it, what changes from today, and the order we build it
-in. Words are defined in [GLOSSARY.md](../../GLOSSARY.md). Decisions and their reasons live in `docs/adr/` and on map
-#30, and this page points at them. When this page and an ADR disagree, the ADR wins and this page is fixed.
+This page says what agent-factory is, how a ticket goes through it, and its parts. What is still to build is in
+[the roadmap](roadmap.md). Words are defined in [GLOSSARY.md](../../GLOSSARY.md). Decisions and their reasons live in
+`docs/adr/`, and this page points at them. When this page and an ADR disagree, the ADR wins and this page is fixed.
 
 ## 1. What it is
 
@@ -30,8 +30,6 @@ anyone. An RCA agent for work comes later, on the same engine.
 
 The principles, P1–P21, live in [the constitution](../CONSTITUTION.md), each with why and how it is checked. This page
 does not repeat them.
-
-Run one orchestrator loop per project: `dispatch` holds a lock per project and refuses to start a second loop for it.
 
 ## 3. How a ticket goes
 
@@ -69,7 +67,8 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   their tickets and exits when none is in flight (`dispatch`, or `start` and `approve` in the background). No cron
   and no launchd job: nothing runs when nothing is in flight, and a loop never waits on a cap or a step that is not
   set up: it exits and says when to run it again. A sleeping laptop stops the loop; `dispatch` again
-  carries on from the records. `dispatch --once` is one pass by hand.
+  carries on from the records. `dispatch --once` is one pass by hand. Run one orchestrator loop per project:
+  `dispatch` holds a lock per project and refuses to start a second loop for it.
 - **Extra tasks** (full retro, weekly clean-up, triage) are off until a human starts one. A schedule can be switched on
   per task later.
 - **Lane:** tiny, bug, feature or one-way door.
@@ -82,13 +81,8 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   numbered round**; each question carries 2 to 4 short choices and one recommended choice, so a person answers with
   taps, "1A 2B", or "accept all". The project setting `questions` can be `one-at-a-time` instead. Never a guess. The
   round goes to the front doors (terminal, Discord thread, spec PR). The answer goes **into the spec**, so an approval
-  lane approves again (the operator, [2026-11-09](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6744864148); #320).
-- **Limits:**
-  - **caps** per run, per ticket and per project per day. A ticket at its cap goes to needs-human with the spend shown.
-    A day at its cap starts no new runs and sends one notice; nothing is killed mid-run.
-  - **stall:** a run streams its output, and 5 minutes with no output stops it and shows its last output. Time asleep
-    does not count.
-  - **backoff:** a failed step waits from 10 s, doubling, up to 5 minutes. The next-try time is kept in the run record.
+  lane approves again.
+- **Limits:** caps, stall, backoff and rounds: see [the build path](build-path.md#limits).
 
 ## 4. How the AI is kept from approving
 
@@ -107,7 +101,7 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   - A Discord user id maps to a person for `by`.
 - The shared copy of an approval on the git host is for visibility only. It never starts anything, and it is trusted
   only when the project's factory bot posted it.
-- **Accepted risk (decided 2026-11-09):** on a laptop the AI runs as the developer, so the deny list is not a wall.
+- **Accepted risk:** on a laptop the AI runs as the developer, so the deny list is not a wall.
   The human merge review stays the hard gate. Signed approvals come later.
 
 ## 5. The parts
@@ -158,7 +152,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
 | PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner (#335; ADR-0012 S13) |
 | approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
 | evidence row | criterion · command · result |
-| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), grade (how strong the proof is: `cited`, `walked` or `ran`), evidence (the proof itself), finding (the plain description), fix; the finder gives all but the lens, which the engine adds (decided on #30, 2026-11-09) |
+| finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), grade (how strong the proof is: `cited`, `walked` or `ran`), evidence (the proof itself), finding (the plain description), fix; the finder gives all but the lens, which the engine adds |
 | verdict | id, bucket (`act_on`, `consider`, `noted`, `dismissed`), why |
 
 **Tests are judged twice:**
@@ -166,7 +160,7 @@ nothing. Each passes the shared test kit: approve, stale after an edit, refuse a
   A human may clear one with a waiver scoped to the head; a new head re-checks only the new interdiff.
 - **A test-integrity lens** reviews every other edit to an existing test.
 
-**Project knowledge** (decided 2026-11-09). Each part does what it is good at:
+**Project knowledge.** Each part does what it is good at:
 - **structure:** a repo map built at run time, never stored;
 - **meaning:** `glossary.md`, with avoid words, plus the decision records;
 - **commands and gotchas:** `brief.md`, written once by the onboarder, which writes only to the project home, and
@@ -189,7 +183,7 @@ rots, such as counts, goes in, and every `file:line` is checked again on each ru
 - The host Docker socket is never mounted.
 - The egress allowlist refuses git host names.
 
-**Toolchains: the project declares, the runner provides** (operator, 2026-11-10, #371). The hybrid model:
+**Toolchains: the project declares, the runner provides.** The hybrid model:
 
 | part | model | in agent-factory |
 |---|---|---|

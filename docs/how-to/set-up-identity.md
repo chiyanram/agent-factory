@@ -10,7 +10,7 @@ human           agent-factory start · approve · waive (local records) · revie
 ```
 
 Agent text is marked by content, not by author: every post starts with `[writer]`, `[reviewer]` or `[coordinator]`
-(the implementer's, the automated review's and the coordinator's prefixes, which keep their names until #144 phase 4),
+(the implementer's, the automated review's and the coordinator's prefixes, which keep their old names),
 and agent commits carry an `Agent: <seat>` trailer that names the role. The implementer gets it from a
 `prepare-commit-msg` hook in its clone, mounted read-only, and the host push refuses an implementer commit without it (#128). With your own login
 (`FACTORY_IDENTITY=own`, the default) there is nothing more to set up; the steps below are for a project that uses a
@@ -27,9 +27,10 @@ runner, and the host pushes and posts for it. The bash `start-writer`, which gav
 | 1 | group owner | Create the service account `agent-<name>` (Group → Settings → Service accounts). | Free since GitLab 18.11, up to 100 per top-level group, and it takes no paid user. |
 | 2 | group owner | Add it to the project as **Developer**. | It can push branches, open PRs and comment. |
 | 3 | group owner | Protect `master`: merge = Maintainers, push = no one. | An agent cannot merge into `master`. |
-| 4 | developer | Create a token for the account: scopes `api` and `write_repository`, expiry 365 days. Store it in glab's config with `glab auth login`. Never put it in an environment variable. | Agents never handle tokens. An environment variable leaks to every child process. |
-| 5 | developer | Set the git author for agent commits to `agent-<name>`. Every agent commit carries `Co-authored-by: <developer>`. | The human and the agent are both on the record. |
-| 6 | developer | Set a reminder two weeks before the token expires. | An expired token stops every agent of that developer. |
+| 4 | developer | Create a token for the account: scopes `api` and `write_repository`, expiry 365 days. | Step 5 stores it, and step 7 reminds you before it expires. |
+| 5 | developer | Store the token in glab's config with `glab auth login`. Never put it in an environment variable. | Agents never handle tokens. An environment variable leaks to every child process. |
+| 6 | developer | Set the git author for agent commits to `agent-<name>`. Every agent commit carries `Co-authored-by: <developer>`. | The human and the agent are both on the record. |
+| 7 | developer | Set a reminder two weeks before the token expires. | An expired token stops every agent of that developer. |
 
 ## GitHub
 
@@ -51,11 +52,17 @@ orchestrator, poll, host push (your user)
 | 1 | developer | Create the App: Settings → Developer settings → GitHub Apps → New. Turn the webhook off. Repository permissions: Contents, Issues and Pull requests read and write; Checks, Commit statuses and Metadata read. Leave Workflows out. Install it on: only this account. Note the App ID and generate a private key. | Without Workflows the bot cannot change CI. |
 | 2 | developer | Install the App on the project's repository only. | A token is minted for that one repository; `app-token` fails on any other. |
 | 3 | developer | Add a ruleset on `main`: restrict updates, require a pull request with one approval, block force pushes and deletion. Make the repository admin the only bypass actor, for pull requests only. | Only the owner can merge into `main`. A ruleset on a private repo of a personal account needs GitHub Pro. |
-| 4 | developer, on the VM | Create the user and hand it the key: `sudo useradd --system --create-home --shell /usr/sbin/nologin factory`; `sudo install -d -m 700 -o factory -g factory ~factory/.config ~factory/.config/agent-factory`; `sudo install -m 600 -o factory -g factory <key>.pem ~factory/.config/agent-factory/app.pem`; then delete the `.pem` from your own folders. | Your user, and anything it runs, can never read the key. |
-| 5 | developer, on the VM | Write `~factory/.config/agent-factory/github-app.json`, mode 600, owned by `factory`: `{"appId": "<id>", "key": "/home/factory/.config/agent-factory/app.pem"}` (use the real home of `factory`). | `app-token` refuses a file of another user's, or one others can read. |
-| 6 | developer, on the VM | Install a root-owned copy: `sudo git clone https://github.com/chiyanram/agent-factory /opt/agent-factory`, then `cd /opt/agent-factory && sudo npm ci && sudo npm run build`. Write the wrapper `/usr/local/bin/agent-factory-app-token`, owned by root, mode 755, with two lines: `#!/bin/sh` and `exec /usr/bin/node /opt/agent-factory/dist/cli.js app-token "$1"` (use `command -v node` for the real path). | The package is not on npm. Root owns every file the rule reaches, and the absolute `node` path means your PATH never chooses the program that reads the key. |
-| 7 | developer, on the VM | Add the rule with `sudo visudo -f /etc/sudoers.d/agent-factory`, one line per project: `<you> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory-app-token <owner/name>`. Check it with `sudo -n -u factory -- /usr/local/bin/agent-factory-app-token <owner/name> \| jq .login`, which prints `"<slug>[bot]"`. | sudo matches the whole command line, so the rule allows that one command for that one repository. Never print the token itself. |
-| 8 | developer | Set `FACTORY_FORGE=github`, `FACTORY_PROJECT=<owner/name>` and `FACTORY_IDENTITY=app`. Clone `FACTORY_REPO` over `https://github.com/`, with no credential helper in the clone's own config, and with no global `url.*.insteadOf` that rewrites `https://github.com/`. | The host push checks the one URL git will really push to: for an App it must be `https://github.com/<owner/name>`, and a clone that sets its own helper is refused, since git would fall back to your login. |
+| 4 | developer, on the VM | Create the user: `sudo useradd --system --create-home --shell /usr/sbin/nologin factory`. | The key will belong to this user, not to yours. |
+| 5 | developer, on the VM | Make its folders: `sudo install -d -m 700 -o factory -g factory ~factory/.config ~factory/.config/agent-factory`. | Only `factory` can open them. |
+| 6 | developer, on the VM | Hand it the key: `sudo install -m 600 -o factory -g factory <key>.pem ~factory/.config/agent-factory/app.pem`. | Your user, and anything it runs, can never read the key. |
+| 7 | developer, on the VM | Delete the `.pem` from your own folders. | No copy stays where your user can read it. |
+| 8 | developer, on the VM | Write `~factory/.config/agent-factory/github-app.json`, mode 600, owned by `factory`: `{"appId": "<id>", "key": "/home/factory/.config/agent-factory/app.pem"}` (use the real home of `factory`). | `app-token` refuses a file of another user's, or one others can read. |
+| 9 | developer, on the VM | Install a root-owned copy: `sudo git clone https://github.com/chiyanram/agent-factory /opt/agent-factory`, then `cd /opt/agent-factory && sudo npm ci && sudo npm run build`. | The package is not on npm. Root owns every file the rule reaches. |
+| 10 | developer, on the VM | Write the wrapper `/usr/local/bin/agent-factory-app-token`, owned by root, mode 755, with two lines: `#!/bin/sh` and `exec /usr/bin/node /opt/agent-factory/dist/cli.js app-token "$1"` (use `command -v node` for the real path). | The absolute `node` path means your PATH never chooses the program that reads the key. |
+| 11 | developer, on the VM | Add the rule with `sudo visudo -f /etc/sudoers.d/agent-factory`, one line per project: `<you> ALL=(factory) NOPASSWD: /usr/local/bin/agent-factory-app-token <owner/name>`. | sudo matches the whole command line, so the rule allows that one command for that one repository. |
+| 12 | developer, on the VM | Check the rule: `sudo -n -u factory -- /usr/local/bin/agent-factory-app-token <owner/name> \| jq .login` prints `"<slug>[bot]"`. | Never print the token itself. |
+| 13 | developer | Set `FACTORY_FORGE=github`, `FACTORY_PROJECT=<owner/name>` and `FACTORY_IDENTITY=app`. | The orchestrator and the host push then act as the App. |
+| 14 | developer | Clone `FACTORY_REPO` over `https://github.com/`, with no credential helper in the clone's own config, and with no global `url.*.insteadOf` that rewrites `https://github.com/`. | The host push checks the one URL git will really push to: for an App it must be `https://github.com/<owner/name>`, and a clone that sets its own helper is refused, since git would fall back to your login. |
 
 Any process of your user can run the same sudo line and get a token. The coordinator's settings
 ([#106](https://github.com/chiyanram/agent-factory/issues/106), "Set up the coordinator") deny `sudo` and the wrapper,

@@ -163,11 +163,16 @@ noise of [ADR-0021](adr/0021-keep-a-change-only-by-experiment.md); every other c
 held-out cases a change was not tuned on are not built (ADR-0021 N8, #599).
 
 **A new step climbs, manual first (#621):** a new check, role, lens or outside skill starts manual (a typed-only
-toolbox skill or a checklist a person runs) and moves up when real use catches something; then measured (still
-manual, each use recorded against a keep rule written before the trial) until the keep rule passes on about 15–20
-tickets; then automatic in shadow (the engine runs it, records the results and shows nobody) until its findings match
-what people later found; then automatic and visible in the lanes that pay for it. A person decides each step up. A
-step the engine runs lands in the engine first, then in the rules pack as a new format version (P18), then the pin
+toolbox skill or a checklist a person runs) and climbs these rungs; a person decides each step up:
+
+1. **Manual**: it moves up when real use catches something.
+2. **Measured**: still manual, each use recorded against a keep rule written before the trial, until the keep rule
+   passes on about 15–20 tickets.
+3. **Automatic in shadow**: the engine runs it, records the results and shows nobody, until its findings match what
+   people later found.
+4. **Automatic and visible**: in the lanes that pay for it.
+
+A step the engine runs lands in the engine first, then in the rules pack as a new format version (P18), then the pin
 moves.
 **Why:** a new check that went straight into the automatic flow (skills #375, the breaker) had never been used by
 hand, and the engine could not run it, so the pin stalled.
@@ -215,13 +220,17 @@ not pinged again, and a person's pause or take-over is the `needs-human` label (
 **Kind:** non-negotiable for "the writer cannot change what judges it" and "a blocking finding needs proof"; the rest
 is guidance.
 **Why:** a claim a run makes about its own work is not evidence; a person approving must see what was proved.
-**How it's checked:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run;
-an Act on finding graded only `cited` settles as Consider; a finding whose `file:line` is not at the reviewed commit is
-noted as "cite not found", never posted. **Today:** with no mutation command set (#495), the assertion check counts
-lines and catches a value check turned into a presence check; any other weakened assertion passes. The design review converges: a
-re-review runs only for an Act on CONFLICT or an edit that raises the lane or changes the Planned files, reads every
-earlier round, and stops at 2 rounds with the person told (`test/dispatch-design.test.ts`); the automated code
-review's next round still gets no earlier findings (#489).
+**How it's checked:**
+
+- **Stops:** a weakened assertion, a deleted or skipped test, and an edited eval, rule or CI file each stop the run.
+  **Today:** with no mutation command set (#495), the assertion check counts lines and catches a value check turned
+  into a presence check; any other weakened assertion passes.
+- **Findings:** an Act on finding graded only `cited` settles as Consider; a finding whose `file:line` is not at the
+  reviewed commit is noted as "cite not found", never posted.
+- **Convergence:** the design review converges: a re-review runs only for an Act on CONFLICT or an edit that raises
+  the lane or changes the Planned files, reads every earlier round, and stops at 2 rounds with the person told
+  (`test/dispatch-design.test.ts`). **Today:** the automated code review's next round still gets no earlier findings
+  (#489).
 
 ## P16. One home and one way
 

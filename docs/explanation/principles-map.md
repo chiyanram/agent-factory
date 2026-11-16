@@ -2,8 +2,8 @@
 
 The principles in [the constitution](../CONSTITUTION.md) (P1–P21) and the rules pack's own principles (K1–K9, in
 chiyanram/skills `PRINCIPLES.md`) name no source. This page lists, for each input they were checked against, the
-general principles it states and the P or K that covers each. It comes from the coverage records on #460 (step 1,
-2026-11-11); the claim sheets with every row are there.
+general principles it states and the P or K that covers each. It comes from the coverage records on #460 (step 1),
+which hold the claim sheets with every row.
 
 ## By input
 

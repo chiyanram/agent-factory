@@ -9,8 +9,9 @@
 
   For example, 7 of 10 tickets merge, and the median fix time is under 15 minutes.
 
-  **Today:** `agent-factory usage` reports tokens and cost per ticket and run kind, and the automated review's
-  acted-on rate. The merge rate, the fix minutes, the rework rounds and the reverts are not computed yet.
+  **Today:** [`agent-factory usage`](../reference/cli.md) reports tokens and cost per ticket and run kind, each
+  ticket's rework rounds, and the automated review's acted-on rate. For a merged ticket, it also reports the outcome:
+  clean, reverted, or fixed on the same lines within 30 days. The merge rate and the fix minutes are not computed yet.
 - **The numbers never rate a person.**
 - **A rule that stops paying goes on a list for the operator**, who decides; nothing is retired by itself
   ([The improvement loop](improvement-loop.md)). **Today:** nothing retires anything.
@@ -20,11 +21,11 @@
   - three scenarios per role card, in the process plugin.
 
   A model, prompt, card or plugin change ships only if its evals do not get worse. **Today:** only the review prompts
-  are gated, and no baseline exists yet (#216).
+  are gated, against the baseline in `evals/reviewer/baseline.json`.
 
 ## What is decided next
 
-Decided in the design audit (2026-11-10), not built:
+Decided, not built:
 
 | change | why |
 |---|---|

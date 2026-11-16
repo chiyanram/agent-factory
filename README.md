@@ -18,6 +18,8 @@ flowchart LR
     G -- green --> M([human merges])
 ```
 
+Terms such as START and lane are defined in [GLOSSARY.md](GLOSSARY.md).
+
 ## What it is
 
 - **Code decides each step.** The orchestrator follows a fixed table; no model chooses what runs next.
@@ -32,7 +34,8 @@ flowchart LR
 
 For a developer or a small team who wants agent-built pull requests on their own GitHub or GitLab repos, with each
 run sandboxed and capped. It is not a hosted service, not always on (nothing runs until a human starts a ticket), and
-not a merge bot. Today the runs need a Claude plan; Copilot is #162.
+not a merge bot. Today the runs need a Claude plan; Copilot support is planned
+([#493](https://github.com/chiyanram/agent-factory/issues/493)).
 
 ## Install and set up
 
@@ -62,7 +65,7 @@ The whole path, from install to a merged PR: [Your first merged PR](docs/how-to/
 
 ## Status
 
-A pilot on one small personal project (#62). The code does not follow the design everywhere yet; each place that
+A pilot on one small personal project ([#62](https://github.com/chiyanram/agent-factory/issues/62)). The code does not follow the design everywhere yet; each place that
 differs is marked **Today:** in the docs, and [the roadmap](docs/explanation/roadmap.md) lists what is still to build.
 
 ## Docs

@@ -1,8 +1,8 @@
 # Set up the runner's model login
 
 The runner gets one model-only token, never your full login (ADR-0012 S6, #136). `claude setup-token` makes a one-year
-token that "can only make model requests". It needs a Claude Pro, Max, Ultra, Team or Enterprise plan. Copilot follows
-at stage B.
+token that "can only make model requests". It needs a Claude Pro, Max, Ultra, Team or Enterprise plan. **Today:**
+Copilot comes with #493.
 
 | # | who | step | why |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 # agent-factory design
 
-This page moved into [explanation/](explanation/) (#378). Find each old section here.
+This page moved into [explanation/](explanation/). Find each old section here.
 
 | old section | now |
 |---|---|

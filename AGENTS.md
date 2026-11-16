@@ -1,11 +1,15 @@
 # agent-factory
 
-A coordinator AI that talks with the human, and an orchestrator (code) that starts fresh implementer and automated
-review runs on a runner for a project's pull requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the code
-does not follow it everywhere yet). The rules those
-runs follow live in chiyanram/skills, not here ([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
-People start at `README.md`; the principles are `docs/CONSTITUTION.md`; `docs/explanation/architecture.md` is the design; `docs/` holds the how-to, reference and
-explanation pages, and `CONTRIBUTING.md` the rest.
+A coordinator AI talks with the human. An orchestrator (code) starts fresh implementer and automated review runs on
+a runner for a project's pull requests ([ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md); the code does
+not follow it everywhere yet).
+
+The rules those runs follow live in chiyanram/skills, not here
+([ADR-0009](docs/adr/0009-tool-and-rules-in-separate-repos.md)).
+
+People start at `README.md`. The principles are `docs/CONSTITUTION.md`, and the design is
+`docs/explanation/architecture.md`. `docs/` holds the how-to, reference and explanation pages; `CONTRIBUTING.md`
+holds the rest.
 
 ## Check
 
@@ -50,22 +54,26 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   makes the PR title the commit subject and the description its body on `main`, where neither can be edited. The
   `pr-body` workflow (`scripts/check-pr-body.ts`) fails a ready PR with a missing line, a placeholder, an unticked item, or a breaking change whose line, `!` and
   `BREAKING CHANGE:` footer disagree.
-- Pick each build ticket's lane by its risk, as the rules pack's lanes reference does: tiny (docs, comments, a config
-  value or a patch bump) skips grilling, spec, design and approval; bug skips grilling, writes a short spec and a
-  failing test first, gets the operator's approval, and has a design only when an interface or more than one module
-  changes; feature and one-way door take the full flow of grilling, spec, design and the operator's approval of both
-  on the ticket, and a one-way door lists each irreversible step for a yes. Every lane ends in build, automated code
-  review and a PR from `.github/pull_request_template.md`. The coordinator says the lane and why when it picks up a
-  ticket, and the operator can raise it, never lower it; split work too big for one PR into child tickets before the
-  build, because brakes scale with risk and no lane lowers the approval floor (P21), and the operator approves the
+- Pick each build ticket's lane by its risk, as the rules pack's lanes reference does, because brakes scale with risk
+  and no lane lowers the approval floor (P21):
+
+  | lane | for | grilling | spec | design | operator approval |
+  |---|---|---|---|---|---|
+  | tiny | docs, comments, a config value, a patch bump | no | no | no | no |
+  | bug | a defect | no | short, plus a failing test first | only when an interface or more than one module changes | yes |
+  | feature | something new | yes | yes | yes | spec and design, on the ticket |
+  | one-way door | an irreversible change | yes | yes | yes | spec and design, plus a yes for each irreversible step |
+
+  Every lane ends in build, automated code review and a PR from `.github/pull_request_template.md`.
+- Say the lane and why when you pick up a ticket. The operator can raise it, never lower it.
+- Split work too big for one PR into child tickets before the build, because the operator approves the
   shape before code exists, not after (#557 is the worked example).
 - Run one fresh session per ticket, starting from `agent-factory board` and the ticket's body and comments, never
   from another ticket's thread, because a long session re-reads its whole thread on every turn (#615).
 - Cut a step from a lane only on measured numbers, the cost per run kind on #488's timeline line, read after about
   15 tickets, because a few tickets' impressions are not a measure.
-- Bring in a new check, role, lens or outside skill manual first: a manual skill, then measured, then automatic in
-  shadow, then visible, and a person decides each step up (P11, #621), because a step made automatic before anyone
-  used it by hand cannot be judged and is hard to take back.
+- Bring in a new check, role, lens or outside skill manual first and climb one rung at a time, as P11 in
+  `docs/CONSTITUTION.md` says, because a step made automatic before anyone used it by hand cannot be judged.
 - Land a step the rules pack must follow in the engine first, then in the pack as a new format version (P18), then
   move the pin, because an engine that cannot run a pack's step refuses the pack and blocks the pin.
 

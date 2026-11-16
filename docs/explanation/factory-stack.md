@@ -26,7 +26,7 @@ eval baseline live in our files, not in an agent product.
 | Orchestration | the dispatch loop and the lanes | in place |
 | Engineering intelligence | `usage`, `trace`, `board`, the timeline line, `retro` | in place |
 | AI observability and evals | run traces; the automated review's eval set and [ADR-0021](../adr/0021-keep-a-change-only-by-experiment.md) | in place |
-| Environments | the runner: `vm` (a runner under Sysbox) or `srt` (an OS sandbox on a laptop) | partly. **Today:** the runner and gate are finished in #493 |
+| Environments | the runner: `vm` (a runner under Sysbox) or `srt` (an OS sandbox on a laptop) | partly. **Today:** the runner and gate are not finished; #493 finishes them |
 | Code context | the onboarder's brief and glossary in the project home | partly |
 | AI registry | the pinned rules pack: skills, role cards, versions | partly: runs load no MCP server, so there is no server list |
 | AI gateway | the egress proxy and its allowlist; spend caps per run, ticket and project-day | partly. **Today:** no model routing; #562 adds it |

@@ -43,8 +43,8 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 | `enforced_guardrails` | enforces | a `[list]` of IDs from the engine's closed list (`src/core/process/guardrails.ts`): `read-only`, `no-push`, `no-web`, `no-credentials`, `judge-files-locked`, `edit-scope`. Each ID names the code that enforces it. The role's floor always applies; a card may add an ID its role can have, never drop one. An unknown ID, or one the role cannot have, refuses the card. **Today:** plain text, the old form, is still read and ignored for one release |
 | `input`, `steps`, `rules` | reads no meaning | text the model reads. `next` is dropped, because the lanes hold the flow. **Today:** a card that still has it is read for one release |
 
-The engine starts a run from a card for six roles: implementer, test-first, cleanup, design-reviewer, verify pass and
-onboarder. Every run record carries the card's hash. **Today:** no orchestrator rule starts a cleanup run; a person
+The engine starts a run from a card for seven roles: implementer, test-first, cleanup, design-reviewer, verify pass,
+onboarder and retro. Every run record carries the card's hash. **Today:** no orchestrator rule starts a cleanup run; a person
 runs cleanup by hand.
 
 ## The rules pack's own format
@@ -64,15 +64,16 @@ own checks alone. A pack whose card format allows a role or guardrail ID the
 engine does not know is refused, so a pack never names a guardrail the engine would skip (the engine may know more).
 The engine's finding values (categories, severities, grades) are the pinned pack's: CI fails when they differ. A
 finding's line may be a range, read as its first line, and its rule may be null. The finding schema is read; **Today:** the finder runs
-from the built-in prompt, not its card, so nothing checks a finding against it yet (#438).
+from the built-in prompt, not its card, so nothing checks a finding against it yet. #438 closed unbuilt, and no open
+ticket plans the change.
 
 This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI
 checks that commit out and reads every plugin's process and every role card the engine runs, so a pack the engine
 cannot read fails CI here. The npm package ships the file, and `agent-factory init` pins each `chiyanram` plugin at
-that commit, not at the skills `HEAD`, so a new user gets the pack CI tested (#607).
+that commit, not at the skills `HEAD`, so a new user gets the pack CI tested.
 
 The sessions working on this repo load the same pack: [`.claude/settings.json`](../../.claude/settings.json) declares the
-chiyanram marketplace at the release tag that file names (`tag`), and enables the rulebook and toolbox plugins (#580).
+chiyanram marketplace at the release tag that file names (`tag`), and enables the rulebook and toolbox plugins.
 Claude Code pins a marketplace by tag, not by commit, so the pin is a release tag and its commit. `make lint`
 (`scripts/check-plugin-pin.ts`) fails when the two files name a different tag, and CI fails when the tag no longer
 points at the pinned commit. To move the pin, change the tag in both files and the commit in `rules-pack.json`, in its
@@ -85,19 +86,19 @@ declared this way is not confirmed.
 |---|---|---|
 | implementer, test-first, cleanup | `.factory/report.json`: `done` with evidence rows, `asked` with questions, or `blocked` | yes (`src/core/report.ts`) |
 | design-reviewer | a **Finding** per design decision, with its verdict: aligned, conflict or open | yes (`src/core/design/findings.ts`) |
-| verify pass | one bucket per finding: act on, consider, noted, dismissed; it may set a lower severity or grade, never a higher one | yes (`src/core/finding.ts`): a verdict that raises either is refused, and the finding is Consider. **Today:** only the design review's card asks for it; the review's prompt waits for #438 |
+| verify pass | one bucket per finding: act on, consider, noted, dismissed; it may set a lower severity or grade, never a higher one | yes (`src/core/finding.ts`): a verdict that raises either is refused, and the finding is Consider. **Today:** only the design review's card asks for it; the review's verify prompt does not, and #438, which would add it, closed unbuilt |
 | onboarder | the brief and the glossary | yes (`src/core/onboard/answer.ts`) |
-| finder | a **Finding** each, with lens, rule, `file:line`, grade | yes (`src/core/review/verdicts.ts`). **Today:** its card is not used; the review runs `prompts/review-find.md` until its eval has a baseline (#438) |
+| finder | a **Finding** each, with lens, rule, `file:line`, grade | yes (`src/core/review/verdicts.ts`). **Today:** its card is not used; the review runs `prompts/review-find.md`. #438, which would run it from the card, closed unbuilt |
 | coordinator | a **Question** per ask: the question, 2 to 4 choices, the recommended one; the retro's actions as JSON | no: its prompt asks for the shape |
 
 ## What is decided next
 
-Decided in the design audit (2026-11-10), not built:
+Decided, not built:
 
 | change | why |
 |---|---|
-| `tests-read-only` joins the guardrail IDs with #422, and `own-hunks` with #423; plain-text `enforced_guardrails` and `next` are refused one release after #424 | each ID lands with the code that enforces it |
+| `tests-read-only` and `own-hunks` join the guardrail IDs with the code that enforces them; plain-text `enforced_guardrails` and `next` are refused one release after the closed list of IDs | each ID lands with the code that enforces it. **Today:** #422 and #423, which held that code, closed unbuilt |
 | plugins other than the process plugin add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
-| the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade (#438, after #216) | a project cannot replace the finder today |
-| a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline (#216 first) | today `plugin update` runs `config check` only, no eval |
-| with the Copilot runner (#162), `.github/skills/`, `.github/copilot-instructions.md` and `.github/instructions/` join the agent settings the host push protects | Copilot reads them; a run could plant one |
+| the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade | a project cannot replace the finder. **Today:** #438, which held this, closed unbuilt |
+| a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline | today `plugin update` runs `config check` only, no eval |
+| with the Copilot runner (#493), `.github/skills/`, `.github/copilot-instructions.md` and `.github/instructions/` join the agent settings the host push protects | Copilot reads them; a run could plant one |

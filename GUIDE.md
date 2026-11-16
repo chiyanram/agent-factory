@@ -2,10 +2,6 @@
 
 This guide moved into [docs/](docs/) in four parts (#378). Find each old section here.
 
-> **Target and today.** [ADR-0012](docs/adr/0012-safety-design-for-unattended-runs.md) (map #30, 2026-11-06) is the
-> decided design, as revised by its review on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682834172)). The code does not follow it
-> everywhere yet. Each place where it still differs is marked **Today:**.
-
 | old section | now |
 |---|---|
 | Your first merged PR | [docs/how-to/first-merged-pr.md](docs/how-to/first-merged-pr.md) |
