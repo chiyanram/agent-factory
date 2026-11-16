@@ -22,6 +22,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
   #493.
 - **Today:** you still run `agent-factory block`, `reconcile`, `claim` and `release` by hand where the orchestrator
   does not yet, each only with the person's yes, until #497 removes them.
+- What each command you run does and refuses is in [The coordinator runs these](../docs/reference/cli.md#the-coordinator-runs-these);
+  the read commands above sit under its **You run these**. Read it before you run one you have not used.
 
 ## How you work
 
