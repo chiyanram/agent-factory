@@ -249,3 +249,36 @@ describe("role card guardrails and edit scope (#424)", () => {
     });
   });
 });
+
+describe("test-first's edit scope and the onboarder's tools (#688)", () => {
+  const card = (role: Role, front: string) => cardOf(role, `---\nrole: ${role}\n${front}\n---\n\nx\n`, "team");
+
+  it("gives the built-in test-first card, and the rulebook's, edit-scope from the role's floor", async () => {
+    const builtIn = await readCard([], "test-first");
+    expect(builtIn).toMatchObject({ kind: "ok", value: { guardrails: expect.arrayContaining(["edit-scope"]) } });
+    const rulebook = cardOf(
+      "test-first",
+      readFileSync(join(RULEBOOK_ROLES, "test-first.md"), "utf8"),
+      "rulebook test-first",
+    );
+    expect(rulebook).toMatchObject({ kind: "ok", value: { guardrails: expect.arrayContaining(["edit-scope"]) } });
+  });
+
+  it("lets test-first name edit-scope with no Edit(…) path: its scope is the project's test files", () => {
+    expect(card("test-first", "tools: [Read, Edit]\nenforced_guardrails: [edit-scope]")).toMatchObject({
+      kind: "ok",
+      value: { editScope: [], guardrails: ["no-push", "no-web", "no-credentials", "edit-scope"] },
+    });
+  });
+
+  it("refuses an onboarder card that asks for Bash, and keeps the onboarder read-only", () => {
+    expect(card("onboarder", "tools: [Read, Grep, Glob, Bash]\nenforced_guardrails: []")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("the onboarder gets only Read, Grep, Glob; the card asks for Bash"),
+    });
+    expect(card("onboarder", "tools: [Read, Grep, Glob]\nenforced_guardrails: []")).toMatchObject({
+      kind: "ok",
+      value: { guardrails: ["read-only"] },
+    });
+  });
+});

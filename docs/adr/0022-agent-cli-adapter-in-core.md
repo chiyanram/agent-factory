@@ -28,8 +28,7 @@ that forgets the box runs an agent on the host.
 | A4 | **The limits are settings, keyed on the run kinds the setups already have.** Each key has a default and a maximum, and is a `cap`, so a lower layer can only lower it. Each setup picks its own key, so the adapter names no run kind. For the read-only runs the keys are `review.finderMinutes`, `review.verifyMinutes`, `design.minutes`, `onboard.minutes`, `retro.minutes` and `eval.judgeMinutes`: each 20 minutes by default, 60 at most. The implementer keeps `implementer.minutes`. |
 | A5 | **The sessions list has a limit too.** `claude agents --json` that does not answer in 60 s fails as "cannot list live runs", which already fails closed: no claim is released on an unknown list. |
 
-**Today:** only the read-only runs and the sessions list go through the seam. The writer runs move in #688, and the
-coordinator in #691. The read-only runs still run on the host, not on a runner (ADR-0012 S5; #674, #493).
+**Today:** the coordinator does not go through the seam yet (#691). The read-only runs still run on the host, not on a runner (ADR-0012 S5; #674, #493).
 
 ## Considered
 

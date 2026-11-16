@@ -99,4 +99,18 @@ describe("srt programs: an install under the home", () => {
       reason: "claude is not on PATH; the srt runner runs the agent CLI from it",
     });
   });
+
+  it("takes an absolute agent CLI path, FACTORY_CLAUDE, as it is, not from PATH (#688)", async () => {
+    const home = join(ROOT, "absolute");
+    const cli = join(home, "tools/claude");
+    program(cli, "binary\n");
+    const found = await locatePrograms({
+      env: { PATH: join(ROOT, "empty") },
+      home,
+      cli,
+      execPath: "/usr/bin/node",
+      packageDir: "/opt/agent-factory",
+    });
+    expect(found).toEqual({ kind: "ok", value: [join(home, "tools")] });
+  });
 });

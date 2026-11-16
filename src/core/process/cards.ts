@@ -8,7 +8,8 @@
 //   role          the card names the role it is read for
 //   tools         only tools the engine gives that role; the run then gets the card's tools and no others. An Edit may
 //                 carry a path scope in Claude Code's permission syntax, Edit(src/test/**): an edit outside it blocks
-//                 the run (writer/scope.ts, #424). Only Edit takes one. "Bash (on the runner)", with a space, is a note
+//                 the run (writer/scope.ts). Only Edit takes one. "Bash (on the runner)", with a space, is a note.
+//                 Test-first may edit only the project's test files, whatever its card says; its Edit(…) only narrows
 //   enforced_guardrails  a [list] of IDs from the engine's closed list (guardrails.ts): an unknown ID, or one the role
 //                 cannot have, refuses the card. The role's floor always applies. Plain text is the old form: read for
 //                 one release and ignored, then refused (#424)
@@ -31,7 +32,14 @@ import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
 import { LESSON_SCHEMA } from "../retro/lesson.js";
-import { allowedGuardrails, GUARDRAIL_FLOOR, GUARDRAILS, isGuardrail, type GuardrailId } from "./guardrails.js";
+import {
+  allowedGuardrails,
+  GUARDRAIL_FLOOR,
+  GUARDRAILS,
+  isGuardrail,
+  testFilesOnly,
+  type GuardrailId,
+} from "./guardrails.js";
 import { frontmatterOf, packProblem, readPackSchemas, unknownToEngine } from "./pack-schema.js";
 import { findProcess, type PluginDir } from "./read.js";
 
@@ -47,9 +55,8 @@ export const ROLE_TOOLS = {
   cleanup: WRITES,
   "design-reviewer": READS,
   "verify-pass": READS,
-  // its Bash is the build tool's help and task list only: the engine lists the commands itself and hands the run the
-  // list, so the run gets the read-only tools alone (#235; onboard/run.ts)
-  onboarder: [...READS, "Bash"],
+  // the engine lists the build tool's commands itself and hands the run the list (onboard/run.ts)
+  onboarder: READS,
   // the retro's lesson drafts, started only by a person (#488; retro/draft.ts)
   retro: READS,
 } as const;
@@ -212,7 +219,7 @@ function guardrailsProblem(role: Role, front: string): string {
   if (unknown !== undefined) {
     return `the card's enforced_guardrails names ${JSON.stringify(unknown)}, which is not a guardrail ID the engine enforces`;
   }
-  return roleGuardrailProblem(role, named) || scopeGuardrailProblem(named, field(front, "tools") ?? "");
+  return roleGuardrailProblem(role, named) || scopeGuardrailProblem(role, named, field(front, "tools") ?? "");
 }
 
 // roleGuardrailProblem : an ID the role cannot have, or "". Pure.
@@ -224,9 +231,10 @@ function roleGuardrailProblem(role: Role, named: readonly string[]): string {
     : `the ${role} cannot have the guardrail ${other} (it may have ${allowed.join(", ")})`;
 }
 
-// scopeGuardrailProblem : edit-scope named with no Edit(…) path to hold it to, or "". Pure.
-function scopeGuardrailProblem(named: readonly string[], tools: string): string {
-  return named.includes("edit-scope") && scopeOf(tools).length === 0
+// scopeGuardrailProblem : edit-scope named with no Edit(…) path to hold it to, or "". Test-first's scope is the
+// project's test files, so it needs no path. Pure.
+function scopeGuardrailProblem(role: Role, named: readonly string[], tools: string): string {
+  return named.includes("edit-scope") && !testFilesOnly(role) && scopeOf(tools).length === 0
     ? "the card names edit-scope, but its tools give no Edit(…) path"
     : "";
 }

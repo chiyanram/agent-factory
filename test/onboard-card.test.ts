@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { record, readRecords } from "../src/core/dispatch/records.js";
 import { cardOf, readCard } from "../src/core/process/cards.js";
 import { tempDir } from "./temp.js";
-
-// the rulebook's own onboarder card, as chiyanram/skills ships it (crq/process/roles/onboarder.md)
-const RULEBOOK_CARD = join(import.meta.dirname, "..", "tests", "fixtures", "process", "rulebook-roles", "onboarder.md");
 
 describe("the onboarder's role card (#235)", () => {
   it("the engine runs alone: its built-in card passes the check", async () => {
     expect(await readCard([], "onboarder")).toMatchObject({ kind: "ok", value: { role: "onboarder" } });
   });
 
-  it("the rulebook's card passes the check: its Bash is the listing the engine does for it", () => {
-    expect(cardOf("onboarder", readFileSync(RULEBOOK_CARD, "utf8"), "rulebook")).toMatchObject({ kind: "ok" });
+  it("refuses a card that asks for Bash or Edit: the onboarder is read-only (#688)", () => {
+    expect(cardOf("onboarder", "---\nrole: onboarder\ntools: [Read, Bash]\n---\nx", "p")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("asks for Bash"),
+    });
     expect(cardOf("onboarder", "---\nrole: onboarder\ntools: [Read, Edit]\n---\nx", "p")).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("asks for Edit"),

@@ -4,7 +4,7 @@
 //   at the push  the host refuses a commit that adds or changes one, so a file the branch did not have yet cannot be
 //                planted for the next session either (protected.ts)
 // A person changes them in their own commit. The writer's own claude never loads the branch's settings
-// (--setting-sources user, writer/run.ts); the rulebook and the host's settings come from .factory.
+// (--setting-sources user, agent/claude-writer.ts); the rulebook and the host's settings come from .factory.
 
 import { protectedFiles, treesOf, type ProtectedSetup } from "./protected.js";
 import type { Guard } from "./push.js";

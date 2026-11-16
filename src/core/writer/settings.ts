@@ -13,7 +13,8 @@ import { maxUsd } from "../review/settings.js";
 import { settingName, settingOf } from "../settings/machine.js";
 import type { PluginDir } from "../process/read.js";
 import { QUESTIONS, type Questions } from "../settings/variables.js";
-import { COMPLETION, STALL_MS, type Claude, type Completion } from "./run.js";
+import type { Claude } from "../agent/claude-writer.js";
+import { COMPLETION, STALL_MS, type Completion } from "./run.js";
 
 export type WriterSettings = {
   // the plugins, in the project's order: each folder is copied into the run and loaded with --plugin-dir, and the

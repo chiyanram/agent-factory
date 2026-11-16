@@ -1,12 +1,10 @@
 // run — one writer run in a fresh box (#113; ADR-0012 S5, S11, S13). The host has made the clone (clone.ts); this
 // file runs the agent in it and reads how it ended:
 //   1 the project's egress proxy, then the box, with the clone mounted and only the model login and the proxy settings
-//   2 claude -p, the prompt on stdin, skip-all permissions (S11: only inside a runner, vm or srt, #114; never bare), the
-//     writer's deny list in .factory/settings.json (tools.ts), each plugin with --plugin-dir, and
-//     no settings from the branch: --setting-sources user drops its .claude/settings.json, hooks, env and .mcp.json,
-//     and the box's user home is empty (#110; checked on a real run, decision on #110, 2026-11-08). Its output is
-//     streamed (stream-json, which -p takes only with --verbose): one JSON event a line, the last one the result with
-//     the cost, so the host hears the run while it works. A run that prints nothing for the stall time (5 minutes) is
+//   2 the agent CLI's writer command, which the adapter builds from the role card (agent/claude-writer.ts): the prompt
+//     on stdin, skip-all only inside a runner, the card's deny list and hooks in .factory/settings.json, and no
+//     settings from the branch; the box's user home is empty. Its output is streamed (stream-json): one JSON
+//     event a line, the last one the result with the cost, so the host hears the run while it works. A run that prints nothing for the stall time (5 minutes) is
 //     stopped and blocked, its last lines shown (#228). Only awake time counts: each poll adds at most two polls'
 //     worth, so an hour the machine slept between two polls adds ten seconds, not an hour.
 //   3 the box stops; only then is .factory/report.json read (report.ts), and the outcome decided from it and the exit.
@@ -24,7 +22,7 @@
 //     closes it
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
-import type { Argv } from "../project.js";
+import type { ClaudeWriter, WriterCall } from "../agent/claude-writer.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
 import {
@@ -38,10 +36,10 @@ import {
   type RunEnd,
 } from "../report.js";
 import { PR_BODY_PATH } from "../pr-body.js";
-import type { BoxPlace, Ran, Session } from "../box/index.js";
+import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
-import { pluginPaths, type Clone } from "./clone.js";
-import { outsideScope, scoped } from "./scope.js";
+import type { Clone } from "./clone.js";
+import { outsideScope, scoped, type EditScope } from "./scope.js";
 import {
   NO_STREAM,
   spentFailure,
@@ -52,13 +50,6 @@ import {
   type Stream,
 } from "../dispatch/spend.js";
 import type { TraceSink } from "../dispatch/trace.js";
-
-export type Claude = {
-  // "" for no cap (FACTORY_MAX_USD)
-  readonly maxUsd: string;
-  // "" for Claude's default (FACTORY_WRITER_MODEL)
-  readonly model: string;
-};
 
 // the completion window (#182): how often the host looks for the report while the writer runs, how long the writer may
 // keep running after a valid one, and the grace past the run's timeout and past a stop after which the host waits no
@@ -71,9 +62,6 @@ export const COMPLETION: Completion = { pollMs: 5000, windowMs: 60_000, graceMs:
 // the stall time (#228): the longest a run may print nothing, while the machine is awake; a setting can only lower it
 export const STALL_MS = 5 * 60_000;
 
-// the writer's settings file in the clone, for claude --settings (tools.ts), or none
-export type SettingsArg = { readonly kind: "none" } | { readonly kind: "file"; readonly path: string };
-
 export type WriterRun = {
   readonly setup: BoxSetup;
   readonly clone: Clone;
@@ -81,14 +69,12 @@ export type WriterRun = {
   // the model-only login (#136): CLAUDE_CODE_OAUTH_TOKEN and its scrub setting
   readonly login: Readonly<Record<string, string>>;
   readonly timeoutSeconds: number;
-  readonly claude: Claude;
-  readonly settings: SettingsArg;
-  // how many plugins the clone holds (clone.ts pluginPaths)
-  readonly plugins: number;
-  // the role card's tools (process/cards.ts): the run gets these and no others (#232)
-  readonly tools: readonly string[];
-  // where the card lets the run edit (process/cards.ts editScope); none is anywhere in the clone (#424)
-  readonly editScope: readonly string[];
+  // the agent CLI's writer kind, and what this run asks of it: the box starts its argv for the place it runs at, with
+  // its environment besides the login (agent/claude-writer.ts)
+  readonly agent: ClaudeWriter;
+  readonly call: WriterCall;
+  // where the run may edit (scope.ts scopesOf): a path must match each; none is anywhere in the clone
+  readonly scopes: readonly EditScope[];
   readonly completion: Completion;
   readonly stallMs: number;
   // where the run's whole output goes as it comes, scrubbed (dispatch/trace.ts, #487)
@@ -113,71 +99,6 @@ export type Ended = {
   // the run's trace, once step.ts has closed it (#487); none when none was kept
   readonly trace?: string;
 };
-
-// only the model API is needed: no update checks, no telemetry, so the egress list holds api.anthropic.com alone
-const QUIET: Readonly<Record<string, string>> = {
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-  DISABLE_AUTOUPDATER: "1",
-};
-
-// the claude tools each role card tool stands for: a card's Edit also writes a new file. With any tools, a run also
-// gets claude's helpers that add no reach of their own: its task list, its skills (read like any file), and subagents,
-// which get the same tools.
-const CLAUDE_TOOLS: Readonly<Record<string, readonly string[]>> = {
-  Read: ["Read"],
-  Grep: ["Grep"],
-  Glob: ["Glob"],
-  Edit: ["Edit", "Write"],
-  Bash: ["Bash"],
-};
-const HELPERS = ["TodoWrite", "Skill", "Task"];
-
-// claudeTools : the --tools value for a card's tools, in claude's names. Pure.
-export function claudeTools(tools: readonly string[]): string {
-  const named = tools.flatMap((t) => CLAUDE_TOOLS[t] ?? []);
-  return [...new Set([...named, ...(named.length === 0 ? [] : HELPERS)])].join(",");
-}
-
-// the runners skip-all is allowed in (ADR-0012 S11; #114): a sandbox around the whole process. A run anywhere else, or
-// bare on the host, gets no skip flag, so with -p every tool call that would ask is denied.
-const SKIP_ALL_IN: ReadonlySet<BoxPlace> = new Set(["vm", "srt"]);
-
-// skipAll : the skip-all flag, inside a runner only. Pure.
-export function skipAll(place: BoxPlace): readonly string[] {
-  return SKIP_ALL_IN.has(place) ? ["--dangerously-skip-permissions"] : [];
-}
-
-// claudeArgv : the writer's command in the runner at `place`. Pure. The prompt goes on stdin; the plugin and settings
-// paths are relative to the clone. The run gets only the role card's tools (#232).
-export function claudeArgv(
-  claude: Claude,
-  settings: SettingsArg,
-  plugins: number,
-  tools: readonly string[],
-  place: BoxPlace,
-): Argv {
-  return [
-    "claude",
-    "-p",
-    "--setting-sources",
-    "user",
-    ...skipAll(place),
-    ...pluginArgs(plugins),
-    "--tools",
-    claudeTools(tools),
-    "--output-format",
-    "stream-json",
-    "--verbose",
-    ...(claude.maxUsd === "" ? [] : ["--max-budget-usd", claude.maxUsd]),
-    ...(claude.model === "" ? [] : ["--model", claude.model]),
-    ...(settings.kind === "file" ? ["--settings", settings.path] : []),
-  ];
-}
-
-// pluginArgs : one --plugin-dir per plugin the clone holds, in order. Pure.
-function pluginArgs(count: number): readonly string[] {
-  return pluginPaths(count).flatMap((dir) => ["--plugin-dir", dir]);
-}
 
 // runEnd : how the run ended, as the report reads it. Pure.
 export function runEnd(ran: Ran): RunEnd {
@@ -289,7 +210,7 @@ async function inBox(run: WriterRun): Promise<InBox> {
   const session = await startBox(run.setup, {
     worktree: run.clone.repo,
     readOnly: run.clone.readOnly,
-    env: { ...run.login, ...QUIET },
+    env: { ...run.login, ...run.agent.env },
   });
   if (session.kind === "failed") {
     return { end: { kind: "failed", reason: session.reason }, spend: "unmeasured", said: "", output: [] };
@@ -298,7 +219,7 @@ async function inBox(run: WriterRun): Promise<InBox> {
   const running = run.setup.box.run({
     session: session.value,
     command: {
-      argv: claudeArgv(run.claude, run.settings, run.plugins, run.tools, session.value.place),
+      argv: run.agent.argv(run.call, session.value.place),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
       // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it;
@@ -472,7 +393,7 @@ function reasonOf(a: Result<unknown>, b: Result<unknown>): string {
 
 // changedPaths : every path the run's commits touch, a rename as both its paths; none when it changed nothing
 async function changedPaths(run: WriterRun, tip: string): Promise<Result<readonly string[]>> {
-  if (tip === run.clone.start || run.editScope.length === 0) {
+  if (tip === run.clone.start || run.scopes.length === 0) {
     return { kind: "ok", value: [] };
   }
   const names = await git(run, ["diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", run.clone.start, tip]);
@@ -503,7 +424,7 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedS
   if (tip.kind === "failed" || paths.kind === "failed") {
     return spentFailure(`cannot read what the run committed: ${reasonOf(tip, paths)}`, spend);
   }
-  const final = scoped(outcome, outsideScope(paths.value, run.editScope), run.editScope);
+  const final = scoped(outcome, outsideScope(paths.value, run.scopes), run.scopes);
   return {
     kind: "ok",
     value: { outcome: final, ending: endingOf(end), spend, said: words, output, ...pr, ...tip.value },

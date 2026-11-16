@@ -123,7 +123,7 @@ export const ALLOW: readonly Allow[] = [
     why: "the wall refuses a settings file in bypass mode",
   },
   {
-    file: "src/core/writer/run.ts",
+    file: "src/core/agent/claude-writer.ts",
     rule: "skip-permissions",
     has: '"--dangerously-skip-permissions"',
     why: "the writer runs only in a runner (vm or srt), where S11 allows skip-all (#114); it holds no forge credential (S6)",
