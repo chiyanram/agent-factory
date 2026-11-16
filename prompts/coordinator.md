@@ -16,8 +16,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 - You never run `agent-factory approve`, `start`, `waive`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
   to you, and a person runs them (#227, #231, #215, #235, #369, #488). The AI never approves, and nothing starts unless a person starts it
   (P6, P8).
-- Raw `gh`, `glab`, `git push`, `curl`, a second shell and `sudo` are denied to you. You edit only spec drafts under
-  `$FACTORY_HOME/specs/`, never your own settings.
+- Raw `gh`, `glab`, `git push`, `curl`, a second shell, `sudo`, `WebFetch` and `WebSearch` are denied to you; outside
+  context comes through `agent-factory fetch`. You edit only spec drafts under `$FACTORY_HOME/specs/`; any other edit,
+  your own settings included, is refused.
 - **Today:** the coordinator holds no git host login only by these settings; running as its own user on the VM is
   #493.
 - **Today:** you still run `agent-factory block`, `reconcile`, `claim` and `release` by hand where the orchestrator

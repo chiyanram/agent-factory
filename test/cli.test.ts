@@ -713,6 +713,8 @@ describe("agent-factory loop commands (#138)", () => {
       ["status", "ledger", "12", "aaaa1111"],
       ["block", "../x", "12", "why"],
       ["lint-edit"],
+      ["edit-scope"],
+      ["edit-scope", "a", "b"],
     ];
     for (const argv of cases) {
       const run = await cli(argv, {});
@@ -745,6 +747,19 @@ describe("agent-factory loop commands (#138)", () => {
       out: "",
       err: "",
     });
+  });
+});
+
+describe("agent-factory edit-scope, the coordinator's hook (#676)", () => {
+  it("denies an edit outside the specs folder with exit 2, and passes one inside with exit 0", async () => {
+    const specs = join(home, "specs");
+    const outside = JSON.stringify({ tool_input: { file_path: "/etc/hostname" } });
+    const run = await cli(["edit-scope", specs], {}, outside);
+    expect(run.code).toBe(2);
+    expect(JSON.parse(run.out)).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
+    expect(run.err).toContain("only spec drafts");
+    const inside = JSON.stringify({ tool_input: { file_path: join(specs, "ledger", "spec.md") } });
+    expect(await cli(["edit-scope", specs], {}, inside)).toEqual({ code: 0, out: "", err: "" });
   });
 });
 

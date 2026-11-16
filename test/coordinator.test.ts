@@ -147,9 +147,33 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     }
   });
 
-  it("lets it edit only spec drafts with no prompt; any other edit asks the person", () => {
+  it("lets it edit spec drafts with no prompt; the edit-scope hook refuses any other edit before the rules (#676)", () => {
     expect(verdict("Edit", "/home/ram/.factory/specs/ledger/PROJ-1/spec.md")).toBe("allow");
+    // no rule names a project file, so only the hook stands between it and a prompt
     expect(verdict("Edit", "/work/project/src/app.ts")).toBe("prompt");
+    expect(claudeSettings(PLACES).hooks).toEqual({
+      PreToolUse: [
+        {
+          matcher: "Edit|Write|MultiEdit|NotebookEdit",
+          hooks: [
+            {
+              type: "command",
+              command: "node '/opt/agent-factory/dist/cli.js' edit-scope '/home/ram/.factory/specs'",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("quotes the hook's paths, so a package or factory home with a space or a quote stays one word", () => {
+    const command = claudeSettings({ ...PLACES, pkg: "/opt/agent factory", factoryHome: "/home/o'neil/.factory" }).hooks
+      .PreToolUse[0]?.hooks[0]?.command;
+    expect(command).toBe("node '/opt/agent factory/dist/cli.js' edit-scope '/home/o'\\''neil/.factory/specs'");
+  });
+
+  it("denies WebFetch and WebSearch: outside context comes only through fetch (S18, #676)", () => {
+    expect(claudeSettings(PLACES).permissions.deny).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
   });
 
   it("runs the read commands, status and request with no prompt; confirm and every old loop command ask", () => {
@@ -367,6 +391,28 @@ describe("the wall's check (#105, #227)", () => {
       expect({ problem, found: found.includes(problem) }).toEqual({ problem, found: true });
     }
     expect(wallProblems("not settings", PLACES).length).toBeGreaterThan(0);
+  });
+
+  it("names a missing WebFetch or WebSearch deny, and a missing, changed or switched-off edit-scope hook (#676)", () => {
+    for (const tool of ["WebFetch", "WebSearch"]) {
+      const found = wallProblems(
+        loosened((p) => (p.deny = p.deny.filter((r) => r !== tool))),
+        PLACES,
+      );
+      expect(found).toContain(`the deny rule ${tool} is missing`);
+    }
+    const settings = claudeSettings(PLACES);
+    const hook = settings.hooks.PreToolUse[0];
+    const cases: readonly unknown[] = [
+      { ...settings, hooks: undefined },
+      { ...settings, hooks: { PreToolUse: [] } },
+      { ...settings, hooks: { PreToolUse: [{ ...hook, matcher: "Edit|Write" }] } },
+      { ...settings, hooks: { PreToolUse: [{ ...hook, hooks: [{ type: "command", command: "true" }] }] } },
+      { ...settings, disableAllHooks: true },
+    ];
+    for (const loose of cases) {
+      expect(wallProblems(loose, PLACES).join("\n")).toContain("the edit-scope hook");
+    }
   });
 
   it("matches Bash rules as Claude Code does: a trailing * also matches the bare command", () => {

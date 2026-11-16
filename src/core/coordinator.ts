@@ -1,7 +1,9 @@
 // coordinator — the coordinator's wall as harness settings (#106; ADR-0012 S2). The coordinator talks with the person,
 // reads the factory's state, posts one status line or its round of questions; it holds no forge login of its own, edits only spec drafts,
-// and never its own settings. The rules are built here, once, for Claude Code (settings.json) and for Copilot CLI
-// (flags), and `agent-factory setup coordinator` writes them where `agent-factory coordinator` starts the session.
+// and never its own settings. Edit and Write outside the drafts are refused by the edit-scope hook (core/edit-scope.ts),
+// since an allow rule cannot carve the drafts out of a deny rule. The rules are built here, once, for Claude Code
+// (settings.json) and for Copilot CLI (flags), and `agent-factory setup coordinator` writes them where
+// `agent-factory coordinator` starts the session.
 //
 //   allow   the factory's read commands, `agent-factory status`, `agent-factory grill` (its numbered round of
 //           questions, #517), and `agent-factory request`, which the project's policy checks, caps and cleans in code
@@ -15,7 +17,8 @@
 //           ADR-0015 E11), and only a human starts one (#215). `agent-factory onboard`: the onboarder's run and a
 //           human's acceptance of the brief it stages (#235). Raw git host and network clients, git push, a second
 //           interpreter or shell (a Read deny does not stop a program that opens files itself), sudo and the App
-//           token's wrapper; editing any .claude/ (the user's settings and each project's), the package, the START,
+//           token's wrapper; WebFetch and WebSearch, so outside context comes only through `agent-factory fetch`
+//           (S18); editing any .claude/ (the user's settings and each project's), the package, the START,
 //           approval and waiver records, the project home, the team and user settings layers, the local rubric folders, the
 //           secrets, the run records, the pending writes and the write log, and the plugin list;
 //           `agent-factory plugin`, `agent-factory project` and `agent-factory init`; reading the secret paths
@@ -144,8 +147,13 @@ function exact(command: string): readonly string[] {
   return [`Bash(${command})`, bash(command)];
 }
 
+export type CommandHook = { readonly type: "command"; readonly command: string };
+
 export type ClaudeSettings = {
   readonly $schema: string;
+  readonly hooks: {
+    readonly PreToolUse: readonly { readonly matcher: string; readonly hooks: readonly CommandHook[] }[];
+  };
   readonly permissions: {
     readonly defaultMode: "default";
     readonly disableBypassPermissionsMode: "disable";
@@ -166,6 +174,9 @@ function readDenies(p: CoordinatorPlaces): readonly string[] {
     "Read(//**/.env*)",
   ];
 }
+
+// the model's own web tools: outside context comes only through `agent-factory fetch` (ADR-0012 S18)
+const WEB = ["WebFetch", "WebSearch"];
 
 export function editDenies(p: CoordinatorPlaces): readonly string[] {
   const home = absolute(p.factoryHome);
@@ -195,11 +206,28 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
   ];
 }
 
+// the built-in tools that edit files, which the edit-scope hook sees
+const EDIT_TOOLS = "Edit|Write|MultiEdit|NotebookEdit";
+
+// word : one shell word, as a hook's command line needs (coordinator.ts loads with no build, so it imports no value)
+function word(text: string): string {
+  return `'${text.replaceAll("'", `'\\''`)}'`;
+}
+
+// editScopeHook : the hook that refuses an edit outside the spec drafts, run from the installed package by its
+// absolute path, so the package's own command answers; `node` itself comes from the session's PATH, and a hook that
+// cannot run makes the edit ask, never pass
+function editScopeHook(p: CoordinatorPlaces): CommandHook {
+  const cli = word(`${p.pkg}/dist/cli.js`);
+  return { type: "command", command: `node ${cli} edit-scope ${word(`${p.factoryHome}/specs`)}` };
+}
+
 // claudeSettings : the coordinator's .claude/settings.json
 export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
   const specs = `${absolute(p.factoryHome)}/specs`;
   return {
     $schema: "https://json.schemastore.org/claude-code-settings.json",
+    hooks: { PreToolUse: [{ matcher: EDIT_TOOLS, hooks: [editScopeHook(p)] }] },
     permissions: {
       defaultMode: "default",
       disableBypassPermissionsMode: "disable",
@@ -207,7 +235,7 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
       additionalDirectories: [`${p.factoryHome}/specs`],
       allow: [...READS.flatMap((c) => exact(`agent-factory ${c}`)), `Edit(${specs}/**)`, `Read(${specs}/**)`],
       ask: [...exact("agent-factory confirm"), ...STARTS.flatMap((c) => exact(`agent-factory ${c}`))],
-      deny: [...DENY_BASH.flatMap(exact), ...editDenies(p), ...readDenies(p)],
+      deny: [...DENY_BASH.flatMap(exact), ...WEB, ...editDenies(p), ...readDenies(p)],
     },
   };
 }
@@ -252,10 +280,13 @@ const NEVER_LET = [
   "bash -c true",
 ];
 
+// prop : as dispatch/records.ts has it; copied, since this file loads with no build and so imports no value
+function prop(value: unknown, name: string): unknown {
+  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
+}
+
 function permission(settings: unknown, key: string): unknown {
-  const permissions: unknown =
-    typeof settings === "object" && settings !== null ? Reflect.get(settings, "permissions") : undefined;
-  return typeof permissions === "object" && permissions !== null ? Reflect.get(permissions, key) : undefined;
+  return prop(prop(settings, "permissions"), key);
 }
 
 function rules(settings: unknown, key: "allow" | "ask" | "deny"): readonly string[] {
@@ -291,8 +322,28 @@ function letProblems(settings: unknown): readonly string[] {
 
 function denyProblems(settings: unknown, p: CoordinatorPlaces): readonly string[] {
   const deny = new Set(rules(settings, "deny"));
-  const needed = [...HUMAN_ONLY.flatMap(exact), ...editDenies(p)];
+  const needed = [...HUMAN_ONLY.flatMap(exact), ...WEB, ...editDenies(p)];
   return needed.filter((rule) => !deny.has(rule)).map((rule) => `the deny rule ${rule} is missing`);
+}
+
+// hookProblems : the edit-scope hook must stand, exactly as built, with hooks switched on
+function hookProblems(settings: unknown, p: CoordinatorPlaces): readonly string[] {
+  const hooks = prop(prop(settings, "hooks"), "PreToolUse");
+  const want = editScopeHook(p);
+  const holds =
+    Array.isArray(hooks) &&
+    hooks.some((entry: unknown) => {
+      const commands = prop(entry, "hooks");
+      return (
+        prop(entry, "matcher") === EDIT_TOOLS &&
+        Array.isArray(commands) &&
+        commands.some((h: unknown) => prop(h, "type") === want.type && prop(h, "command") === want.command)
+      );
+    });
+  return [
+    ...(holds ? [] : [`the edit-scope hook is missing (PreToolUse, ${EDIT_TOOLS}: ${want.command})`]),
+    ...(prop(settings, "disableAllHooks") === true ? ["the edit-scope hook is switched off (disableAllHooks)"] : []),
+  ];
 }
 
 function bypassProblems(settings: unknown): readonly string[] {
@@ -310,5 +361,11 @@ export function wallProblems(settings: unknown, p: CoordinatorPlaces): readonly 
   const edits = rules(settings, "allow")
     .filter((rule) => editsOutside(rule, specs))
     .map((rule) => `${rule} lets the coordinator edit outside the spec drafts`);
-  return [...letProblems(settings), ...edits, ...denyProblems(settings, p), ...bypassProblems(settings)];
+  return [
+    ...letProblems(settings),
+    ...edits,
+    ...denyProblems(settings, p),
+    ...hookProblems(settings, p),
+    ...bypassProblems(settings),
+  ];
 }
