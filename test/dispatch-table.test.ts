@@ -16,10 +16,11 @@ import {
   MAX_CONFLICT_RUNS,
   MAX_READY_FAILURES,
   MAX_REVIEW_ROUNDS,
+  type Action,
   type TicketState,
   MAX_UNREAD_PASSES,
 } from "../src/core/dispatch/table.js";
-import { nextStep } from "../src/core/dispatch/next-step.js";
+import { LANES, nextStep, whoseTurn, type Lane, type NextStep } from "../src/core/dispatch/next-step.js";
 import type { OpenLine } from "../src/core/poll.js";
 
 const H = "1".repeat(40);
@@ -935,6 +936,15 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
   });
 });
 
+// the lanes of the notices the factory sends, and of each one who acts next
+const NOTICE: Partial<Record<Action["kind"], Lane>> = { ping: "ready-to-merge", "design-note": "needs-you" };
+const BY_WHO: Readonly<Record<NextStep["who"], Lane>> = { factory: "factory", person: "needs-you" };
+
+// laneOf : the lane a decided action belongs in, read from its kind and its next step, as the board's lanes say
+function laneOf(action: Action, step: NextStep): Lane {
+  return NOTICE[action.kind] ?? (step.does === "reviews and merges the change" ? "ready-to-merge" : BY_WHO[step.who]);
+}
+
 // #485 (was #462) "can it get stuck?": over generated ticket states with an open change, the next decision is a step,
 // a wait the factory carries on by itself (inFlight), or a hand-over that says what the person does: the loop never
 // ends silently while a ticket's PR is open
@@ -1040,6 +1050,41 @@ describe("can it get stuck? (#485)", () => {
     });
     expect(all.length).toBeGreaterThan(2000);
     expect(stuck.map((s) => [s.approval.kind, s.change.kind, s.design.kind, decide(s)])).toEqual([]);
+  });
+
+  // whoseTurn gives each decided action one lane, read from its next step: a person's step needs you, the merge
+  // is ready to merge, the factory's own steps are the factory's; a notice goes in the lane of the turn it announces
+  it("gives every state exactly one lane, from its next step, and reaches each lane (#671)", () => {
+    const reached = new Set<Lane>();
+    const off = all.flatMap((s) => {
+      const action = decide(s);
+      const turn = whoseTurn(action);
+      reached.add(turn.lane);
+      const expected = laneOf(action, nextStep(action) ?? { who: "person", does: "" });
+      return LANES.filter((l) => l === turn.lane).length === 1 && turn.lane === expected ? [] : [[action, turn]];
+    });
+    expect(off).toEqual([]);
+    expect([...reached].toSorted()).toEqual([...LANES].toSorted());
+  });
+
+  it("says whether a factory turn waits on a run or the gate, and names a step for a wait no row gives (#671)", () => {
+    expect(whoseTurn({ kind: "review", head: H })).toMatchObject({ lane: "factory", on: "run" });
+    expect(whoseTurn({ kind: "wait", why: "CI is running at this head" })).toMatchObject({
+      lane: "factory",
+      on: "gate",
+    });
+    expect(whoseTurn({ kind: "held", why: "blocked by PROJ-0", ping: true })).toMatchObject({
+      lane: "factory",
+      on: "gate",
+    });
+    expect(whoseTurn({ kind: "ping", head: H })).toEqual({
+      lane: "ready-to-merge",
+      step: { who: "person", does: "reviews and merges the change" },
+    });
+    expect(whoseTurn({ kind: "wait", why: "a why no row gives" })).toEqual({
+      lane: "needs-you",
+      step: { who: "person", does: "looks at the ticket: the factory names no next step for this wait" },
+    });
   });
 
   it("names what the person does for a pushed head and a change someone else claimed", () => {

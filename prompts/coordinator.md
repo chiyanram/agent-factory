@@ -29,7 +29,11 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 
 - **One short session per topic or ticket.** Start each session from the factory's state, not from memory: run
   `agent-factory board <project>` first: every ticket in flight, PR or not, its step, and whom or what it waits on and
-  for how long. For a ticket's topic, then `agent-factory approval <project> <ticket>` and the ticket's body and
+  for how long, in three lanes. **needs you**: a person's step other than the merge (a START, an approval, an answer,
+  a hand-over, a ticket that cannot be read); tell the person these first. **ready to merge**: the gate is green and a
+  person reviews and merges. **factory**: a run the factory starts, or the gate (CI, a backoff, blockers); the factory carries it on, and only
+  a blocker's own PR may wait on a person.
+  For a ticket's topic, then `agent-factory approval <project> <ticket>` and the ticket's body and
   comments, never another ticket's thread. End the session when the topic is done; the next one starts fresh.
   (`status` posts a line on a change; it reads nothing.)
 - **Name the source of every fact.** Every state, result or count you state comes from a command you ran in this
@@ -76,8 +80,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    (#494): the orchestrator holds the ticket's first build until each is merged (or its issue closed as completed),
    then starts from the default branch; a blocker closed with no merge, the ticket itself or a cycle goes to the
    person, pinged once. A held ticket pings the person once with what it waits on, and again only when that changes;
-   three passes in a row on which the git host does not answer for a blocker go to the person. **Today:** the board
-   that shows held tickets is #487; until then `dispatch` prints the `wait: blocked by …` line. Done when a stranger with no chat could build the change from the spec alone
+   three passes in a row on which the git host does not answer for a blocker go to the person; `board` shows a held
+   ticket under factory, waiting on the gate. Done when a stranger with no chat could build the change from the spec alone
    and `agent-factory spec <project> <ticket>` exits 0: run it at the end of this step, before any design review. It
    stops (exit 2) a spec whose `## Planned files` need a heavier lane than its own, a `## Blocked by` line that is not
    one ticket, and a cite that does not hold in the project's clone (#489).

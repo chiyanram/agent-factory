@@ -201,7 +201,8 @@ describe("the board writes nothing (#487 AC-5)", () => {
     expect(await boardCommand("ledger", false, { ...io, decided: () => decideAll(pass) })).toBe(0);
     const text = out.join("");
     expect(text).toContain("  PROJ-1  no PR  writer (fix)");
-    expect(text).toContain("  PROJ-2  #14  ping at 11111111");
+    // a green gate not yet pinged is a person's merge already
+    expect(text).toContain("ready to merge (1)\n  PROJ-2  #14  ping at 11111111");
     expect(text).not.toContain("PROJ-9");
     expect(writes).toEqual([]);
     expect(snapshot()).toEqual(before);
@@ -247,10 +248,10 @@ describe("agent-factory board (#487 AC-5)", () => {
     const decided = await decideAll(setup(recording({ team: [], open: [], merged: [] }, []), []));
     const value = decided.kind === "ok" ? decided.value : [];
     expect(await boardCommand("ledger", false, io(value))).toBe(0);
-    expect(out.join("")).toContain("tickets in flight (times in UTC):\n  PROJ-1  no PR  writer (fix)");
+    expect(out.join("")).toContain("factory (1)\n  PROJ-1  no PR  writer (fix)");
     out.length = 0;
     expect(await boardCommand("ledger", true, io(value))).toBe(0);
-    expect(JSON.parse(out.join(""))).toMatchObject([{ ticket: "PROJ-1", change: null }]);
+    expect(JSON.parse(out.join(""))).toMatchObject([{ ticket: "PROJ-1", change: null, lane: "factory" }]);
     expect(await boardCommand("ledger", false, io("fail"))).toBe(1);
     expect(err.join("")).toBe("agent-factory board: the git host did not answer\n");
   });
