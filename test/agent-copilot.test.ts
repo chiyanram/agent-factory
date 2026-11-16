@@ -316,7 +316,10 @@ describe("copilotModel (#690)", () => {
     const dir = folder();
     const bin = join(dir, "copilot");
     const pidFile = join(dir, "grandchild.pid");
-    writeFileSync(bin, `#!/bin/sh\necho "$HOME" > ${join(dir, "home")}\n/bin/sleep 600 &\necho $! > ${pidFile}\nwait\n`);
+    writeFileSync(
+      bin,
+      `#!/bin/sh\necho "$HOME" > ${join(dir, "home")}\n/bin/sleep 600 &\necho $! > ${pidFile}\nwait\n`,
+    );
     chmodSync(bin, 0o755);
     const run = copilotModel(setupWith(runInFolder, READY, { bin, minuteMs: 300 }));
     const result = await run(runIn(dir, { limit: { minutes: 1, setting: "FACTORY_FINDER_MINUTES" } }));
