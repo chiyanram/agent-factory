@@ -162,10 +162,10 @@ allowed.
 noise of [ADR-0021](adr/0021-keep-a-change-only-by-experiment.md); every other change, by review. **Today:** the
 held-out cases a change was not tuned on are not built (ADR-0021 N8, #599).
 
-**A new step climbs, manual first (#621):** a new check, role, lens or outside skill climbs these rungs, and a person
-decides each step up:
+**A new step climbs, manual first (#621):** a new check, role, lens or outside skill starts manual (a typed-only
+toolbox skill or a checklist a person runs) and climbs these rungs; a person decides each step up:
 
-1. **Manual**: a typed-only toolbox skill or a checklist a person runs. It moves up when real use catches something.
+1. **Manual**: it moves up when real use catches something.
 2. **Measured**: still manual, each use recorded against a keep rule written before the trial, until the keep rule
    passes on about 15–20 tickets.
 3. **Automatic in shadow**: the engine runs it, records the results and shows nobody, until its findings match what

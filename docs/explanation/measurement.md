@@ -30,5 +30,6 @@ Decided, not built:
 | change | why |
 |---|---|
 | fix minutes come from git host timestamps, never from a person's own report | a self-report is a guess |
+| escaped defects: a bug ticket that names a factory PR's file within 30 days counts against that PR (our own rule; no primary source uses exactly this) | reverts alone miss bugs fixed forward |
 | one "why" question to the human per ticket, at merge or at a rescue | the numbers say what happened, not why |
 | the pilot's targets are written as counts, such as 7 of 10 tickets merge | a percentage of a few tickets hides how few they are |

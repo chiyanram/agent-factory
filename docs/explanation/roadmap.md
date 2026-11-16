@@ -37,4 +37,4 @@ Each step widens only after its exit check passes. Map #460 keeps the current li
 ## 9. Open
 
 - **Copilot CLI and Claude plugins:** whether Copilot CLI loads them. If not, the engine passes it the plugin's skills
-  folder (the #162 spike).
+  folder (the #493 spike).

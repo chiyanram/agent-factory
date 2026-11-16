@@ -40,15 +40,15 @@ The wall (`src/core/coordinator.ts`):
 - Bypass and auto mode are switched off.
 
 Check it once after setup: in the coordinator, ask it to read `~/.ssh/canary` (make an empty one first), a
-project's `.env`, and to edit a file of the package and a project's `.claude/settings.json`; each must be refused. **Today:**
+project's `.env`, and to edit a file of the package and a project's `.claude/settings.json`; each must be refused. Where the wall does not hold yet:
 
-- Bash deny rules match a command as typed, and Claude Code's docs say they are no security boundary; the OS-level
+- **Today:** Bash deny rules match a command as typed, and Claude Code's docs say they are no security boundary; the OS-level
   sandbox is not switched on, since `agent-factory status` posts with your own `gh` or `glab` login, which it would
   block (#674). A program the coordinator may run that reads files itself is not held by the Read rules.
-- Copilot CLI has no read or edit rule by path, so under `agent-factory coordinator copilot` none of the Read or
+- **Today:** Copilot CLI has no read or edit rule by path, so under `agent-factory coordinator copilot` none of the Read or
   Edit denies above hold; only the command denies, and its folder plus `--add-dir`, do. The flags are not yet tried
   against a live Copilot CLI. Use Claude Code for the coordinator until they are.
-- The read-only mode of the settings is no wall: your own user owns the folder, so the coordinator could rename or replace
+- **Today:** the read-only mode of the settings is no wall: your own user owns the folder, so the coordinator could rename or replace
   the file with a command its Bash rules do not name. The wall holds once the folder belongs to the `factory` OS user
   (ADR-0012 S2) or the sandbox is on (#674).
-- Jira reads come with its connector (#566); writes to them go through `request` ([Writes](../reference/connectors.md#writes)).
+- **Today:** Jira reads come with its connector (#566); writes to them go through `request` ([Writes](../reference/connectors.md#writes)).

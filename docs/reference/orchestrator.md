@@ -15,7 +15,7 @@ and exits: `status` `done` with `evidence` rows (criterion, command, result), `a
 - `asked` → push, post the questions in one `[writer] OPEN:` note, wait (the answers that close it, and how the next
   run receives them, are under [Answers](#answers)). A note that would not read back as written (a question cut at
   500 characters, or split by a ` · ` or ` A) ` in its text) is never posted as `OPEN:`: the change gets
-  `needs-human` and one `[coordinator] blocked:` note naming the question, with the questions as written listed (#522).
+  `needs-human` and one `[coordinator] blocked:` note naming the question, with the questions as written listed.
 - `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post `blocked: <reason>`
   (with the implementer's prefix when the implementer said it).
 
@@ -262,7 +262,7 @@ meant to be running (its `loop.pid` is there), it is flagged `LATE` when that is
 that just sit. With no loop it says "no orchestrator loop running". When the last loop stopped while a ticket was still
 in flight (a step not set up, a cap, failed passes) it adds when and why, from `$FACTORY_HOME/runs/<project>/loop-end.json`;
 otherwise it names `agent-factory dispatch <project>` while a change is claimed. A red check is a fail: the factory
-never re-runs it, and red CI sends the implementer back as a CI round (#456 decision 3); only a person re-runs a
+never re-runs it, and red CI sends the implementer back as a CI round; only a person re-runs a
 red check, once, or quarantines a CI job in the project file's `quarantine.checks` (owner, added, expiry at most
 `quarantine.maxDays` later, ticket): a quarantined job still runs, is logged each pass and named in the ping, and does
 not block until it expires.

@@ -41,7 +41,8 @@ What a ticket carries into a build, where it lives, and what is decided next. Th
 
 **Today:** before the PR opens, a ticket's START, approval and run records, and at work its spec too, live only on the
 machine that ran START. The build must run there. After the PR opens, the branch, the PR and a copy of the approval
-are on the git host. The coordinator cannot write a spec to the issue yet; the person writes or pastes it.
+are on the git host. With the issue store, the coordinator changes the issue's spec through a kept write
+([A spec change in the issue store](../reference/connectors.md#a-spec-change-in-the-issue-store)).
 
 ## Project knowledge
 

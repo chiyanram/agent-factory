@@ -66,8 +66,8 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 
   Every lane ends in build, automated code review and a PR from `.github/pull_request_template.md`.
 - Say the lane and why when you pick up a ticket. The operator can raise it, never lower it.
-- Split work too big for one PR into child tickets before the build, because the operator approves the shape before
-  code exists, not after (#557 is the worked example).
+- Split work too big for one PR into child tickets before the build, because the operator approves the
+  shape before code exists, not after (#557 is the worked example).
 - Run one fresh session per ticket, starting from `agent-factory board` and the ticket's body and comments, never
   from another ticket's thread, because a long session re-reads its whole thread on every turn (#615).
 - Cut a step from a lane only on measured numbers, the cost per run kind on #488's timeline line, read after about

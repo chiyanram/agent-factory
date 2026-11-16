@@ -94,7 +94,7 @@ Tick each one on #114 with the output:
 - [ ] the factory home's files and your `gh`, `glab`, `.netrc` and `.git-credentials` logins cannot be read;
 - [ ] no Docker socket answers (Docker Desktop, Rancher Desktop);
 - [ ] by hand: one implementer run with `claude` finishes inside `srt` (`FACTORY_BOX=srt agent-factory dispatch
-  <project>`); a run with Copilot comes with #493.
+  <project>`). **Today:** a run with Copilot comes with #493.
 
 The policy hides your whole home ([review 6](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682837531);
 the operator's choice A on #114). It allows back only the run's clone and private home, and, read-only, the install
