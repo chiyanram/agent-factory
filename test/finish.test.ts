@@ -8,6 +8,8 @@ import {
   finishRun,
   noFactoryFolder,
   NEEDS_HUMAN,
+  questionRound,
+  readsBackAs,
   seatOnEvery,
   type Pusher,
 } from "../src/core/finish.js";
@@ -338,6 +340,54 @@ describe("finishRun", () => {
       pusher: pusher(log),
     });
     expect(log).toEqual(["note [writer] OPEN: /merge @\u2060all \\[coordinator\\] approved"]);
+  });
+
+  it("posts no secret in a question, a blocker or a deviation, and a question with one still reads back (#678)", async () => {
+    const token = `ghp_${"a1B2".repeat(9)}`;
+    const log: Log = [];
+    const leaky: Question = {
+      kind: "choices",
+      question: `${token} or a new one?`,
+      choices: ["keep", "rotate"],
+      recommended: 1,
+    };
+    await finishRun({
+      outcome: { kind: "asked", questions: [leaky] },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(log),
+      push: push(),
+      pusher: pusher(log),
+    });
+    await finishRun({
+      outcome: { kind: "blocked", reason: `the build wants TOKEN=${token}`, by: "writer" },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(log),
+      push: push({ commit: A }),
+      pusher: pusher(log),
+    });
+    await finishRun({
+      outcome: {
+        kind: "done",
+        evidence: [{ criterion: "AC1", command: "make test", result: "passed" }],
+        deviations: [{ file: "src/a.ts", line: 3, what: `reads ${token}`, why: "it was there" }],
+      },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(log),
+      push: push(),
+      pusher: pusher(log),
+    });
+    const notes = log.filter((l) => l.startsWith("note "));
+    expect(notes).toHaveLength(4);
+    for (const note of notes) {
+      expect(note).not.toContain(token);
+    }
+    expect(notes.filter((n) => n.includes("\\[scrubbed\\]"))).toHaveLength(3);
+    const round = questionRound([leaky]);
+    const note: Post = { seat: "writer", title: round.title, fields: [round.answer], items: round.items };
+    expect(readsBackAs(note, [leaky])).toBe("");
   });
 
   it("fails, so the dispatcher tries again, when the forge cannot take the label or the note", async () => {

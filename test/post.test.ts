@@ -185,3 +185,45 @@ describe("renderPost", () => {
     );
   });
 });
+
+describe("renderPost: no secret in posted text (#678; ADR-0012 S13, P4)", () => {
+  // built from parts, so no scanner takes the test for a leak
+  const TOKEN = `ghp_${"a1B2".repeat(9)}`;
+  const KEY = `sk-ant-api03-${"x9".repeat(16)}`;
+  const PEM = ["-----BEGIN RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEA", "q2Vb7Y+ZkL", "-----END RSA PRIVATE KEY-----"];
+
+  it("scrubs a token in the title, in a field and in an item, before it makes them inert", () => {
+    const out = text({
+      seat: "writer",
+      title: `BLOCKED: ${TOKEN} was refused`,
+      fields: [{ label: "blocker", value: `push to https://bot:${TOKEN}@github.com/o/r failed` }],
+      items: [`FACTORY_API_KEY=${KEY} in .env`, `ask with ${KEY}`],
+    });
+    for (const secret of [TOKEN, KEY, "bot:"]) {
+      expect(out).not.toContain(secret);
+    }
+    expect(out).toBe(
+      [
+        "[writer] BLOCKED: \\[scrubbed\\] was refused",
+        "",
+        `- blocker: push to https:${J}//\\[scrubbed\\]@${J}github.com/o/r failed`,
+        "- FACTORY_API_KEY=\\[scrubbed\\] in .env",
+        "- ask with \\[scrubbed\\]",
+      ].join("\n"),
+    );
+  });
+
+  it("scrubs a whole PEM key, though a field puts its lines on one", () => {
+    expect(cleanField(`key:\n${PEM.join("\n")}\nafter`)).toBe("key: \\[scrubbed\\] after");
+  });
+
+  it("scrubs a token that a hidden character splits, which would show as two words a reader joins", () => {
+    const split = `${TOKEN.slice(0, 6)}${String.fromCharCode(0x200b)}${TOKEN.slice(6)}`;
+    expect(cleanField(`use ${split} now`)).toBe("use \\[scrubbed\\] now");
+  });
+
+  it("leaves the engine's own words as they were when they hold no secret", () => {
+    const words = "spec 3f2a9c approved locally by ram at 2026-11-16T05:00:00Z";
+    expect(cleanField(words)).toBe(words);
+  });
+});

@@ -1,12 +1,15 @@
 // post — the one place that builds text the factory posts to a forge, Jira or an issue (#126; ADR-0012 S13).
 //
-// The words in a post come from a writer, a reviewer or a ticket, and any of them may carry an injected line. Posted
-// with a person's or a bot's login, such a line acts: on GitLab a line that starts with "/" is a quick action run as
-// the poster (/approve, /merge, /label); on GitHub and GitLab "@name" pings people and "closes #12" closes an issue on
-// merge; a link or an image can carry data out. So no free text is posted. A post is a fixed template, and outside
-// words only fill its fields, each made inert by cleanField. It breaks the characters that start each of these, rather
+// The words in a post come from a writer, a reviewer or a ticket, and any of them may carry an injected line or a
+// secret. Posted with a person's or a bot's login, such a line acts: on GitLab a line that starts with "/" is a quick
+// action run as the poster (/approve, /merge, /label); on GitHub and GitLab "@name" pings people and a closing keyword
+// before an issue reference closes that issue on merge; a link or an image can carry data out. So no free text is
+// posted. A post is a fixed template, and outside words only fill its fields, each made inert by cleanField. It
+// breaks the characters that start each of these, rather
 // than matching every form a forge accepts, because a pattern always misses one (a review of the first version found
 // "closing #1", "Closes issue #1" and a mention right after a code span):
+//   - anything shaped like a secret (scrubSecrets, scrub.ts) is replaced first, while a key's lines are still lines,
+//     and one that a hidden character splits too, so no post carries one out (P4)
 //   - one line: line breaks and runs of white space become one space; control and invisible format characters go
 //   - "\" is escaped first, so no later escape can be undone
 //   - "@" (mentions, e-mail links), "#" and "!" (issue and merge-request references, and so closing keywords; Jira
@@ -25,6 +28,7 @@
 // comments render with renderPost, which never reads it.
 
 import { cleanBody } from "./pr-body.js";
+import { scrubSecrets } from "./scrub.js";
 
 export type Seat = "writer" | "reviewer" | "coordinator";
 
@@ -57,6 +61,8 @@ const JOIN = "\u2060";
 // no one sees; then the line and paragraph separators.
 const CONTROL = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 const LABEL = /^[A-Za-z0-9 ()_.,'-]+$/;
+// the invisible characters alone, which a reader never sees, so a secret they split still reads whole
+const HIDDEN = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 
 function cut(text: string, limit: number): string {
   const chars = Array.from(text);
@@ -76,9 +82,17 @@ export function flatText(value: string): string {
   return value.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
 }
 
+// scrubbed : the value with each secret replaced, also one a hidden character splits: then the value as a reader sees
+// it, scrubbed; otherwise the value with its hidden characters, which flatText turns into spaces
+function scrubbed(value: string): string {
+  const shown = value.replace(HIDDEN, "");
+  const clean = scrubSecrets(shown);
+  return clean === shown ? scrubSecrets(value) : clean;
+}
+
 // cleanField : one field's words, made inert inside a template line. See the header for the rules.
 export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): string {
-  const flat = flatText(value);
+  const flat = flatText(scrubbed(value));
   const inert = flat
     .replace(/\\/g, "\\\\")
     .replace(/&/g, "&amp;")

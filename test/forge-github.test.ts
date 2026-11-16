@@ -364,6 +364,36 @@ describe("single calls", () => {
     expect(JSON.parse(f.calls[1]!.stdin).body).toBe("[reviewer] Act on F1\n\n- at: src/A.java:400");
   });
 
+  it("note and lineFinding post no secret, anchored or not (#678)", async () => {
+    const token = `ghp_${"a1B2".repeat(9)}`;
+    const leaky: Post = { seat: "reviewer", title: `Act on F1: ${token}`, fields: [], items: [`uses ${token}`] };
+    const change: Change = {
+      number: 12,
+      state: "opened",
+      sha: "abc123",
+      sourceBranch: "x",
+      targetBranch: "main",
+      labels: [],
+      description: "",
+      anchor: { kind: "github", head: "abc123" },
+    };
+    const f = fake("github", [
+      ok({ id: 1 }),
+      { status: 422, body: { message: "Validation Failed" } },
+      { status: 201, body: { id: 2 } },
+    ]);
+    const forge = github(f.client, project);
+    expect(await forge.note({ number: 12, post: leaky })).toEqual({ kind: "ok" });
+    expect(await forge.lineFinding({ change, at: { file: "src/A.java", line: 400 }, post: leaky })).toEqual({
+      kind: "ok",
+    });
+    expect(f.calls).toHaveLength(3);
+    for (const call of f.calls) {
+      expect(call.stdin).not.toContain(token);
+      expect(JSON.parse(call.stdin).body).toContain("\\[scrubbed\\]");
+    }
+  });
+
   it("me names the App hint when gh has no user", async () => {
     const f = fake("github", [{ status: 403, body: { message: "Resource not accessible by integration" } }]);
     expect(await github(f.client, project).me()).toMatchObject({

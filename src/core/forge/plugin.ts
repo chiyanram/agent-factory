@@ -14,6 +14,7 @@ import { changeOf, changesOf, ciConfigOf, failedJobsOf, notesOf, numbersOf } fro
 import { markOf } from "./target.js";
 import type { BodyPost } from "../post.js";
 import { cleanBody } from "../pr-body.js";
+import { scrubSecrets } from "../scrub.js";
 import type { BranchState, Change, Changes, CiConfig, FailedJob, Forge, ForgeName, Landed } from "./types.js";
 
 export type PluginTarget = {
@@ -96,12 +97,22 @@ async function opened(target: PluginTarget, input: object): Promise<Result<numbe
   return r.done(r.int(done.value, ""));
 }
 
-// cleanedBody : a PR body whose Markdown is cleaned before it leaves the host (#335): a plugin gets no model text that
-// cleanBody has not seen, whether or not it cleans it again
-export function cleanedBody(post: BodyPost): BodyPost {
+// cleanedPost : a post as it leaves the host for a plugin: its title, field values and items scrubbed, and a PR body's
+// Markdown cleaned, so a plugin gets no secret and no model text that cleanBody has not seen, whether or not it
+// cleans them again. Labels are the factory's own words, which renderPost checks.
+export function cleanedPost<P extends BodyPost>(post: P): P {
+  const scrubbed = {
+    ...post,
+    title: scrubSecrets(post.title),
+    fields: post.fields.map((f) => ({ ...f, value: scrubSecrets(f.value) })),
+    items: post.items.map(scrubSecrets),
+  };
   return post.prBody === undefined
-    ? post
-    : { ...post, prBody: { ...post.prBody, markdown: cleanBody(post.prBody.markdown, { host: post.prBody.host }) } };
+    ? scrubbed
+    : {
+        ...scrubbed,
+        prBody: { ...post.prBody, markdown: cleanBody(post.prBody.markdown, { host: post.prBody.host }) },
+      };
 }
 
 // landedOf : a plugin's answer to landed: when, as which commit and by whom (#487)
@@ -130,15 +141,15 @@ export function pluginForge(target: PluginTarget): Forge {
       read(target, "issueState", i, (r, v) => r.word(v, "", ["open", "completed", "not_planned", "closed"])),
     addLabel: (i) => written(target, "addLabel", i),
     removeLabel: (i) => written(target, "removeLabel", i),
-    note: (i) => written(target, "note", i),
-    setBody: (i) => written(target, "setBody", { ...i, post: cleanedBody(i.post) }),
+    note: (i) => written(target, "note", { ...i, post: cleanedPost(i.post) }),
+    setBody: (i) => written(target, "setBody", { ...i, post: cleanedPost(i.post) }),
     setIssueBody: (i) => written(target, "setIssueBody", i),
     notes: (i): Promise<Result<readonly Note[]>> => read(target, "notes", i, notesOf),
-    lineFinding: (i) => written(target, "lineFinding", i),
+    lineFinding: (i) => written(target, "lineFinding", { ...i, post: cleanedPost(i.post) }),
     status: (i) => written(target, "status", i),
     ciConfig: (): Promise<Result<CiConfig>> => read(target, "ciConfig", {}, ciConfigOf),
     claimed: (i) => read(target, "claimed", i, numbersOf),
-    openChange: (i) => opened(target, { ...i, body: cleanedBody(i.body) }),
+    openChange: (i) => opened(target, { ...i, title: scrubSecrets(i.title), body: cleanedPost(i.body) }),
     changes: (i): Promise<Result<Changes>> => read(target, "changes", i, changesOf),
     failedJobs: (i): Promise<Result<readonly FailedJob[]>> => read(target, "failedJobs", i, failedJobsOf),
   };

@@ -6,6 +6,8 @@
 // it is posted with a person's or a bot's login. The cleaner keeps the Markdown a person reads (headings, lists, tables,
 // emphasis, code) and makes every acting part inert:
 //   - control and invisible format characters go; line ends become "\n"
+//   - anything shaped like a secret (scrubSecrets, scrub.ts) is replaced, once no hidden character can split it and
+//     before the rules below break "://" or "@" in a login, so no PR body carries one out (P4)
 //   - raw HTML is dropped: comments and tags, outside code; any "<" left (in code, or "a < b") gets a word joiner
 //     (U+2060) after it, so no forge reads a tag or an autolink there, whatever it takes for code
 //   - "@" gets a word joiner after it, so no forge sees a mention or an e-mail link
@@ -22,6 +24,8 @@
 // The rules that make a part inert hold anywhere in the text: a reader that disagrees with this one about where code
 // starts or ends still sees nothing that acts. Only dropping HTML looks for code first, so a type such as List<String>
 // in code keeps its words. Cleaning cleaned text gives the same text.
+
+import { scrubSecrets } from "./scrub.js";
 
 export const PR_BODY_PATH = ".factory/pr.md";
 
@@ -247,7 +251,7 @@ function capped(text: string, limit: number): string {
 // cleanBody : the implementer's PR body, made inert for posting. See the header for the rules. Pure.
 export function cleanBody(text: string, cleaning: Cleaning): string {
   const host = cleaning.host.toLowerCase();
-  const plain = text.replace(/\r\n?/g, "\n").replace(INVISIBLE, "");
+  const plain = scrubSecrets(text.replace(/\r\n?/g, "\n").replace(INVISIBLE, ""));
   const cleaned = inert(noOutsideAddresses(noOutsideLinks(noHtml(plain), host), host)).trim();
   return capped(cleaned, cleaning.limit ?? MAX_PR_BODY);
 }

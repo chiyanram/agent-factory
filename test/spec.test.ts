@@ -330,6 +330,14 @@ describe("postableSpec (#542)", () => {
     ]);
   });
 
+  it("refuses a body that holds something shaped like a secret, which a person's yes would post as it is (#678)", () => {
+    const token = `ghp_${"a1B2".repeat(9)}`;
+    expect(postableSpec(`${BODY}Use ${token} to clone.\n`)).toEqual([
+      "the text holds something shaped like a secret (a token, a key or a login): take it out; nothing is sent",
+    ]);
+    expect(postableSpec(`${BODY}\`\`\`\nGITLAB_TOKEN=abc12345\n\`\`\`\n`)).toHaveLength(1);
+  });
+
   it("refuses a lone carriage return, a hidden character, a text not in NFC, and a body past the git host's limit", () => {
     expect(postableSpec(`${BODY}a\rb\n`)).toEqual([expect.stringContaining("do not show")]);
     expect(postableSpec(`${BODY}\u200b\n`)).toEqual([expect.stringContaining("do not show")]);
