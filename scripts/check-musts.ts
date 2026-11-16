@@ -137,8 +137,12 @@ export const ALLOW: readonly Allow[] = [
   { file: "src/core/forge/api.ts", rule: "spawn-seam", has: "node:child_process", why: "runProcess, the one runner" },
   { file: "src/core/git.ts", rule: "spawn-seam", has: "node:child_process", why: "hostGit" },
   { file: "src/core/plugin/exec.ts", rule: "spawn-seam", has: "node:child_process", why: "a plugin call (ADR-0014)" },
-  { file: "src/core/review/model.ts", rule: "spawn-seam", has: "node:child_process", why: "the reviewer's claude run" },
-  { file: "src/core/review/live.ts", rule: "spawn-seam", has: "node:child_process", why: "claude agents --json" },
+  {
+    file: "src/core/agent/folder.ts",
+    rule: "spawn-seam",
+    has: "node:child_process",
+    why: "the agent seam's CLI call, which a stop ends with its process group (ADR-0022)",
+  },
   { file: "src/cli.ts", rule: "spawn-seam", has: "node:child_process", why: "the operator's interactive session" },
   {
     file: "test/floor.test.ts",

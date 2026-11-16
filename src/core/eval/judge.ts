@@ -8,7 +8,7 @@ import { prop } from "../dispatch/records.js";
 import type { Result } from "../forge/api.js";
 import type { ActOn } from "../review/act-on.js";
 import { fence } from "../review/fence.js";
-import type { Model } from "../review/model.js";
+import type { Model, RunLimit } from "../review/model.js";
 import type { GoldenFinding } from "./golden.js";
 
 export const LINE_WINDOW = 5;
@@ -63,6 +63,7 @@ export function modelJudge(input: {
   readonly instructions: string;
   readonly folder: string;
   readonly maxUsd: string;
+  readonly limit: RunLimit;
 }): Judge {
   return async (seed, finding) => {
     const ran = await input.model({
@@ -72,6 +73,7 @@ export function modelJudge(input: {
       prompt: judgePrompt(input.instructions, seed, finding),
       name: "eval-judge",
       maxUsd: input.maxUsd,
+      limit: input.limit,
     });
     return ran.kind === "ok" ? readJudgment(ran.value.output) : { kind: "failed", reason: ran.reason };
   };

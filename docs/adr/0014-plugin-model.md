@@ -3,7 +3,8 @@
 > Words: this record keeps the words it was written in. [GLOSSARY.md](../../GLOSSARY.md) maps each old word to today's ([ADR-0016](0016-adopt-the-software-factory-vocabulary.md)).
 
 Status: accepted 2026-11-07 (operator, map #30: plugin model Q1–Q11). Extends ADR-0013 T2 and T3, and widens
-ADR-0012 S18 from context sources to every outside tool.
+ADR-0012 S18 from context sources to every outside tool. P7 is amended by
+[ADR-0022](0022-agent-cli-adapter-in-core.md): the agent CLI adapter lives in core, and `runner` is no extension point.
 
 ## Context
 

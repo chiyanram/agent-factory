@@ -8,8 +8,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { draftRetro, RETRO_USD, type DraftSetup } from "../src/core/retro/draft.js";
 import { LESSON_SCHEMA } from "../src/core/retro/lesson.js";
 import type { Failure } from "../src/core/retro/repeated.js";
-import { claudeArgs, type Model, type ModelRun } from "../src/core/review/model.js";
-import { claudeEnv } from "../src/core/review/settings.js";
+import { claudeArgs, claudeEnv } from "../src/core/agent/claude.js";
+import type { Model, ModelRun } from "../src/core/review/model.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -92,6 +92,7 @@ const setup = (model: Model): DraftSetup => ({
   plugins: [{ label: "rulebook", dir: plugin }],
   model,
   modelName: "the-logic-model",
+  limit: { minutes: 16, setting: "FACTORY_RETRO_MINUTES" },
   now: () => Date.parse("2026-11-14T10:00:00Z"),
 });
 
@@ -122,6 +123,8 @@ describe("retro --draft", () => {
     expect(run.folder.startsWith(join(home, "retro-runs", "loans-"))).toBe(true);
     expect(run.tools).toEqual(["Read", "Grep", "Glob"]);
     expect(run).toMatchObject({ maxUsd: RETRO_USD, schema: LESSON_SCHEMA, model: "the-logic-model" });
+    // the retro draft's time limit (P7)
+    expect(run.limit).toEqual({ minutes: 16, setting: "FACTORY_RETRO_MINUTES" });
     expect(RETRO_USD).toBe("10");
     expect(run.prompt.startsWith("# Retro")).toBe(true);
     // only the failures' tickets, their traces, and the pack with no symlink out of it

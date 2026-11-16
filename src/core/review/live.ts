@@ -1,13 +1,12 @@
 // live — one run per change, and at most FACTORY_MAX_RUNS on this machine (GUIDE, Triggers). A run is live while
-// `claude agents --json` lists its session (a writer: writer-<n>) or its pid file in <repo>/.claude/runs/ names a
+// the agent CLI's sessions list (src/core/agent/) names its session (a writer: writer-<n>) or its pid file in <repo>/.claude/runs/ names a
 // process that is still there. The reviewer writes reviewer-<n>.pid while
 // it runs, so reconcile sees it, and removes it after, only when the file is still its own.
 
-import { execFile } from "node:child_process";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
-import { codeOf, prop } from "../dispatch/records.js";
+import { codeOf } from "../dispatch/records.js";
 import { attempt } from "./safe.js";
 
 export type Sessions = () => Promise<Result<readonly string[]>>;
@@ -36,35 +35,6 @@ async function pidRuns(dir: string): Promise<readonly string[]> {
     }
   }
   return live;
-}
-
-// sessionNames : the names in `claude agents --json`, or why it did not print a list
-export function sessionNames(stdout: string): Result<readonly string[]> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    parsed = undefined;
-  }
-  if (!Array.isArray(parsed)) {
-    return { kind: "failed", reason: "cannot list live runs: claude agents --json did not print a list" };
-  }
-  const names = parsed.map((s: unknown) => prop(s, "name")).filter((n): n is string => typeof n === "string");
-  return { kind: "ok", value: names };
-}
-
-// claudeSessions : the live background sessions, through the claude CLI
-export function claudeSessions(input: { readonly bin: string; readonly env: NodeJS.ProcessEnv }): Sessions {
-  return () =>
-    new Promise((resolve) => {
-      execFile(input.bin, ["agents", "--json"], { env: input.env, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-        resolve(
-          error === null
-            ? sessionNames(stdout)
-            : { kind: "failed", reason: "cannot list live runs: claude agents --json failed" },
-        );
-      });
-    });
 }
 
 function refusal(runs: readonly string[], number: number, maxRuns: number): string {

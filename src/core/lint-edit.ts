@@ -11,7 +11,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { prop } from "./dispatch/records.js";
-import { CANNOT_START, type FolderRunner } from "./review/model.js";
+import { CANNOT_START, type FolderRunner } from "./agent/folder.js";
 import { commandWords } from "./ready/command.js";
 import type { Result } from "./forge/api.js";
 import type { Argv } from "./project.js";

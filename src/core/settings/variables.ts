@@ -274,6 +274,13 @@ export const MACHINE_KEYS = [
     wholeNumber(5),
   ),
   machine("implementer.model", "FACTORY_WRITER_MODEL", "preference", "the implementer's model"),
+  // the read-only runs' time limits (agent/limits.ts reads them)
+  machine("review.finderMinutes", "FACTORY_FINDER_MINUTES", "cap", "each finder run's time", wholeNumber(60)),
+  machine("review.verifyMinutes", "FACTORY_VERIFY_MINUTES", "cap", "each verify pass run's time", wholeNumber(60)),
+  machine("design.minutes", "FACTORY_DESIGN_MINUTES", "cap", "each design-reviewer run's time", wholeNumber(60)),
+  machine("onboard.minutes", "FACTORY_ONBOARD_MINUTES", "cap", "each onboarder run's time", wholeNumber(60)),
+  machine("retro.minutes", "FACTORY_RETRO_MINUTES", "cap", "each retro draft run's time", wholeNumber(60)),
+  machine("eval.judgeMinutes", "FACTORY_JUDGE_MINUTES", "cap", "each eval judge run's time", wholeNumber(60)),
   machine(
     "review.findModel",
     "FACTORY_FIND_MODEL",

@@ -30,7 +30,7 @@ import { keepTrace } from "../dispatch/trace.js";
 import { inputsOf, readCard, type Card, type Part, type Role } from "../process/cards.js";
 import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
-import type { Model, ModelResult } from "../review/model.js";
+import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { readVerdicts, VERIFY_SCHEMA } from "../review/verdicts.js";
 import { designPath, NO_DESIGN, plainName } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
@@ -43,7 +43,7 @@ export type DesignSetup = {
   readonly project: string;
   // the project's clone on the host, which the default branch is fetched into
   readonly repo: string;
-  // the host's environment, for git on the project's clone; the model gets only its own (review/settings.ts claudeEnv)
+  // the host's environment, for git on the project's clone; the model gets only its own (agent/claude.ts claudeEnv)
   readonly env: NodeJS.ProcessEnv;
   // the git host, for the default branch, and the issue that is the spec when the project keeps its specs there (#381)
   readonly forge: Pick<Forge, "defaultBranch" | "issueBody">;
@@ -51,6 +51,8 @@ export type DesignSetup = {
   // the model each run uses, and the most one run may spend ("" for no cap)
   readonly modelName: string;
   readonly maxUsd: string;
+  // the design-reviewer's time limit, and its verify pass's
+  readonly limits: { readonly review: RunLimit; readonly verify: RunLimit };
   // the plugins whose process may hold the role cards, in the project's order
   readonly plugins: readonly PluginDir[];
   // a private folder (0700) the run folders go in
@@ -281,7 +283,8 @@ async function modelRun(
   again = "",
 ): Promise<Traced> {
   const name = call.kind === "design-review" ? `design-reviewer-${call.ticket}` : `verify-pass-${call.ticket}`;
-  const ran = await modelCall(setup, card, run, call.schema, name, again);
+  const limit = call.kind === "design-review" ? setup.limits.review : setup.limits.verify;
+  const ran = await modelCall(setup, card, run, { schema: call.schema, name, limit }, again);
   return { ran, ...(await tracedRun(setup, call, ran.kind === "ok" ? ran.value.stream : ran.stream)) };
 }
 
@@ -302,17 +305,17 @@ async function modelCall(
   setup: DesignSetup,
   card: Card,
   run: string,
-  schema: string,
-  name: string,
+  call: { readonly schema: string; readonly name: string; readonly limit: RunLimit },
   again: string,
 ): Promise<ModelResult> {
   return setup.model({
     folder: run,
     model: setup.modelName,
-    schema,
+    schema: call.schema,
     prompt: `${card.body}\n\n${again === "" ? "" : `${again}\n\n`}${FLOOR}\n`,
-    name,
+    name: call.name,
     maxUsd: setup.maxUsd,
+    limit: call.limit,
     tools: card.tools,
   });
 }

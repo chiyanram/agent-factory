@@ -9,8 +9,8 @@ import { parseArgs } from "node:util";
 import type { Result } from "./core/forge/api.js";
 import { AIMS, type Aim } from "./core/eval/bar.js";
 import { evalReviewer, evalSettings, type EvalInput, type EvalSettings, type Written } from "./core/eval/harness.js";
-import { claudeModel, runInFolder } from "./core/review/model.js";
-import { claudeEnv, unpinnedModel } from "./core/review/settings.js";
+import { openAgentCli } from "./core/agent/index.js";
+import { unpinnedModel } from "./core/review/settings.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
 
 export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--aim quality|cost]
@@ -133,7 +133,7 @@ function inputOf(p: Parsed, s: EvalSettings, io: EvalIo, work: string): EvalInpu
     env: io.env,
     work,
     rulebook: settingOf(io.env, "rulebook") ?? "",
-    model: claudeModel({ bin: io.env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(io.env), run: runInFolder }),
+    model: openAgentCli({ env: io.env }).readOnly,
     settings: s,
     now: new Date(),
     log: (line) => io.err(`${line}\n`),
@@ -159,5 +159,10 @@ export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<
     io.err(`agent-factory eval: ${refused}\n`);
     return 1;
   }
-  return run(p, evalSettings(io.env, { drafts: p.drafts, aim: p.aim }), io);
+  const settings = evalSettings(io.env, { drafts: p.drafts, aim: p.aim });
+  if (settings.kind === "failed") {
+    io.err(`agent-factory eval: ${settings.reason}\n`);
+    return 1;
+  }
+  return run(p, settings.value, io);
 }

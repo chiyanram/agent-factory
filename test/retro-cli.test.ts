@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Event } from "../src/core/dispatch/records.js";
 import type { MergeOutcome } from "../src/core/outcome.js";
 import { runCli, type Io } from "../src/app.js";
-import { cloneOutcomes, retroCommand, type Merged, type Outcomes } from "../src/retro-cli.js";
+import { cardDraft, cloneOutcomes, retroCommand, type Merged, type Outcomes } from "../src/retro-cli.js";
 import { tempDir } from "./temp.js";
 
 const AT = "2026-11-01T12:00:00Z";
@@ -146,6 +146,16 @@ describe("agent-factory retro", () => {
   it("reads every outcome as unknown when the project's clone is not set", async () => {
     const read = await cloneOutcomes({}, () => 0)([{ ticket: "12", at: AT, sha: "1".repeat(40) }]);
     expect(read.get("12")).toEqual({ kind: "unknown", why: "the project's clone is not set" });
+  });
+});
+
+describe("the retro card's draft", () => {
+  it("refuses a time limit that is not valid before it reads a plugin or runs a model (P7)", async () => {
+    const draft = cardDraft(home, { FACTORY_RETRO_MINUTES: "61" });
+    expect(await draft("loans", [])).toEqual({
+      kind: "failed",
+      reason: "FACTORY_RETRO_MINUTES must be a whole number from 1 to 60",
+    });
   });
 });
 

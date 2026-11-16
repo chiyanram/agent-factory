@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { designSetup } from "../src/core/design/settings.js";
 import { AGAIN, designSteps, FLOOR, VERIFY_AGAIN, type DesignSetup } from "../src/core/design/step.js";
 import type { EarlierRound } from "../src/core/dispatch/design.js";
 import type { DesignFinding } from "../src/core/design/findings.js";
@@ -69,6 +70,11 @@ function model(seen: Seen[], outputs: readonly unknown[]): Model {
   };
 }
 
+const LIMITS = {
+  review: { minutes: 13, setting: "FACTORY_DESIGN_MINUTES" },
+  verify: { minutes: 14, setting: "FACTORY_VERIFY_MINUTES" },
+};
+
 function setup(m: Model): DesignSetup {
   return {
     home,
@@ -79,6 +85,7 @@ function setup(m: Model): DesignSetup {
     model: m,
     modelName: "opus",
     maxUsd: "2",
+    limits: LIMITS,
     plugins: [],
     runsDir: join(p.root, "design-runs"),
   };
@@ -106,6 +113,26 @@ function promptSeen(seen: readonly Seen[], i: number): string {
   return String(seen[i]?.run.prompt);
 }
 
+describe("designSetup's time limits (P7)", () => {
+  it("gives the design-reviewer design.minutes and its verify pass review.verifyMinutes, and refuses one not valid", () => {
+    const given = { forge, home: "/h", project: "ledger", plugins: [] };
+    const env = { FACTORY_REPO: "/r", FACTORY_HOME: "/h", FACTORY_DESIGN_MINUTES: "30" };
+    expect(designSetup({ ...given, env })).toMatchObject({
+      kind: "ok",
+      value: {
+        limits: {
+          review: { minutes: 30, setting: "FACTORY_DESIGN_MINUTES" },
+          verify: { minutes: 20, setting: "FACTORY_VERIFY_MINUTES" },
+        },
+      },
+    });
+    expect(designSetup({ ...given, env: { ...env, FACTORY_DESIGN_MINUTES: "0" } })).toEqual({
+      kind: "failed",
+      reason: "the design review is not set up: FACTORY_DESIGN_MINUTES must be a whole number from 1 to 60",
+    });
+  });
+});
+
 describe("the design review's runs (#236)", () => {
   it("the design-reviewer reads the spec, the design and the code at the default branch, read-only, from its card", async () => {
     const seen: Seen[] = [];
@@ -126,6 +153,8 @@ describe("the design review's runs (#236)", () => {
     expect(prompt).toMatch(/^# Design-reviewer/);
     expect(prompt).toContain(FLOOR);
     expect(seen[0]?.run.schema).toContain('"verdict"');
+    // the design-reviewer's own time limit (P7)
+    expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.review]);
     // the folder is gone after the run
     expect(readdirSync(join(p.root, "design-runs"))).toEqual([]);
   });
@@ -247,6 +276,8 @@ describe("the design review's runs (#236)", () => {
     const out = await steps.designVerify.run({ ...input(), findings });
     expect(done(out).kept.map((k) => [k.id, k.bucket])).toEqual([["D1", "act_on"]]);
     expect(seen[0]?.files).toEqual(["code", "design.md", "findings.json", "spec.md"]);
+    // a verify pass's time limit (P7)
+    expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.verify]);
     expect(JSON.parse(String(seen[0]?.findings))).toHaveLength(2);
     expect(seen[0]?.run.prompt).toMatch(/^# Verify pass/);
     const none = await steps.designVerify.run({ ...input(), findings: [] });

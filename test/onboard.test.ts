@@ -144,6 +144,8 @@ function model(seen: Seen[], output: unknown = ANSWER): Model {
   };
 }
 
+const LIMIT = { minutes: 15, setting: "FACTORY_ONBOARD_MINUTES" };
+
 function setup(m: Model): OnboardSetup {
   return {
     home: r.home,
@@ -154,6 +156,7 @@ function setup(m: Model): OnboardSetup {
     model: m,
     modelName: "opus",
     maxUsd: "2",
+    limit: LIMIT,
     plugins: [],
     runsDir: join(r.home, "onboard-runs"),
     now: () => Date.parse("2026-11-09T10:00:00Z"),
@@ -186,6 +189,8 @@ describe("agent-factory onboard (#235)", () => {
     const before = git(r.clone, "status", "--porcelain");
     const out = await onboard(setup(model(seen)));
     expect(out).toMatchObject({ kind: "ok", value: { spend: { usd: 0.75, tokens: 1200 } } });
+    // the onboarder's time limit (P7)
+    expect(seen.map((s) => s.run.limit)).toEqual([LIMIT]);
     const brief = staged("brief.md");
     expect(brief).toContain("- `make build`: compile and package (`Makefile:2`, verified)");
     expect(brief).toContain("- `make test`: unit and integration tests (`Makefile:4`, verified)");
@@ -305,6 +310,25 @@ describe("onboardSetup (#235, after #232 and #213)", () => {
     expect(set).toMatchObject({ kind: "ok", value: { plugins, modelName: REVIEW_MODELS.logic } });
     const other = onboardSetup({ ...input, env: { FACTORY_REPO: "/r", FACTORY_LOGIC_MODEL: "claude-opus-5-1" } });
     expect(other).toMatchObject({ kind: "ok", value: { modelName: "claude-opus-5-1" } });
+  });
+
+  it("gives the run its time limit, onboard.minutes, and refuses one that is not valid (P7)", () => {
+    const input = {
+      forge: { defaultBranch: async () => ({ kind: "ok" as const, value: "main" }) },
+      home: "/h",
+      project: "ledger",
+      now: () => 0,
+      plugins: [],
+    };
+    const env = { FACTORY_REPO: "/r", FACTORY_HOME: "/h" };
+    expect(onboardSetup({ ...input, env })).toMatchObject({
+      kind: "ok",
+      value: { limit: { minutes: 20, setting: "FACTORY_ONBOARD_MINUTES" } },
+    });
+    expect(onboardSetup({ ...input, env: { ...env, FACTORY_ONBOARD_MINUTES: "61" } })).toEqual({
+      kind: "failed",
+      reason: "the onboarder is not set up: FACTORY_ONBOARD_MINUTES must be a whole number from 1 to 60",
+    });
   });
 });
 

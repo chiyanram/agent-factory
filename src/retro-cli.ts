@@ -11,9 +11,9 @@ import { ticketsOf } from "./core/dispatch/usage.js";
 import { fetchDefault, outcomeOf, type MergeOutcome } from "./core/outcome.js";
 import { draftRetro, type Drafted } from "./core/retro/draft.js";
 import { runPlugins } from "./core/process/use.js";
-import { claudeModel, runInFolder } from "./core/review/model.js";
+import { openAgentCli } from "./core/agent/index.js";
+import { limitOf } from "./core/agent/limits.js";
 import { REVIEW_MODELS } from "./core/review/pinned.js";
-import { claudeEnv } from "./core/review/settings.js";
 import { repeatedOf, REPEATS, type Failure, type Merge } from "./core/retro/repeated.js";
 import { settingOf } from "./core/settings/machine.js";
 import { plainName } from "./core/spec.js";
@@ -67,17 +67,22 @@ function fetchedWhy(repo: string, env: NodeJS.ProcessEnv, merges: number): Promi
   return merges === 0 ? Promise.resolve("") : fetchDefault({ repo, env });
 }
 
-// cardDraft : the retro card's one run over the failures, with the project's plugins, the logic model and the claude
-// env, which holds no git host token (retro/draft.ts)
+// cardDraft : the retro card's one run over the failures, with the project's plugins, the logic model and its time
+// limit, through the agent seam, whose env holds no git host token (retro/draft.ts)
 export function cardDraft(home: string, env: NodeJS.ProcessEnv): RetroIo["draft"] {
   return async (project, failures) => {
+    const limit = limitOf(env, "retro.minutes");
+    if (limit.kind === "failed") {
+      return limit;
+    }
     const used = await runPlugins({ home, project, env });
     if (used.kind === "failed") {
       return used;
     }
-    const model = claudeModel({ bin: env.FACTORY_CLAUDE ?? "claude", env: claudeEnv(env), run: runInFolder });
+    const model = openAgentCli({ env }).readOnly;
     const modelName = settingOf(env, "review.logicModel") ?? REVIEW_MODELS.logic;
-    return draftRetro({ home, project, plugins: used.value.plugins, model, modelName, now: Date.now }, failures);
+    const setup = { home, project, plugins: used.value.plugins, model, modelName, limit: limit.value, now: Date.now };
+    return draftRetro(setup, failures);
   };
 }
 

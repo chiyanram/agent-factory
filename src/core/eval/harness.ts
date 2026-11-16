@@ -17,11 +17,12 @@ import { hostGit } from "../git.js";
 import { specHash } from "../spec.js";
 import { ACT_ON_FILE, isActOn, type ActOn } from "../review/act-on.js";
 import { readKept } from "../kept.js";
-import type { Model } from "../review/model.js";
+import { limitOf } from "../agent/limits.js";
+import type { Model, RunLimit } from "../review/model.js";
 import { reviewRound, type Outcome, type ReviewSetup } from "../review/round.js";
 import { JUDGE_MODEL } from "../review/pinned.js";
 import type { Aim } from "./bar.js";
-import { MAX_FINDERS, reviewSetup } from "../review/settings.js";
+import { MAX_FINDERS, reviewSetup, runLimitsOf, type RunLimits } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
 import {
@@ -55,6 +56,8 @@ export type EvalSettings = {
   readonly judgeUsd: string;
   readonly judgeModel: string;
   readonly judgePrompt: string;
+  // each run's time limit, as in production for the review's runs
+  readonly limits: RunLimits & { readonly judge: RunLimit };
   readonly drafts: boolean;
   // what the change this pass proves aims at (ADR-0021), recorded in the results file; none for a baseline
   readonly aim: Aim | "none";
@@ -77,18 +80,33 @@ export type EvalInput = {
 export type Written = { readonly path: string; readonly partial: boolean; readonly proof: boolean };
 
 // evalSettings : the eval's own settings from the environment; a review run with no cap is given one, since an
-// uncapped run could spend anything (budget.ts)
+// uncapped run could spend anything (budget.ts). A time limit that is set but not valid is refused.
 export function evalSettings(
   env: NodeJS.ProcessEnv,
   flags: { readonly drafts: boolean; readonly aim: Aim | "none" },
-): EvalSettings {
+): Result<EvalSettings> {
+  const limits = evalLimits(env);
+  return limits.kind === "ok" ? { kind: "ok", value: { ...evalCaps(env), limits: limits.value, ...flags } } : limits;
+}
+
+// evalCaps : each run's cap, the judge's model and its instructions
+function evalCaps(env: NodeJS.ProcessEnv): Pick<EvalSettings, "runUsd" | "judgeUsd" | "judgeModel" | "judgePrompt"> {
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
     judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
     judgeModel: settingOf(env, "eval.judgeModel") || JUDGE_MODEL,
     judgePrompt: env.FACTORY_EVAL_JUDGE || join(PROMPTS, "eval-judge.md"),
-    ...flags,
   };
+}
+
+// evalLimits : the review runs' time limits, as in production, and the judge's
+function evalLimits(env: NodeJS.ProcessEnv): Result<EvalSettings["limits"]> {
+  const review = runLimitsOf(env);
+  if (review.kind === "failed") {
+    return review;
+  }
+  const judge = limitOf(env, "eval.judgeMinutes");
+  return judge.kind === "ok" ? { kind: "ok", value: { ...review.value, judge: judge.value } } : judge;
 }
 
 type Ctx = EvalInput & { readonly purse: Purse; readonly capped: Model; readonly judgeText: string };
@@ -169,7 +187,14 @@ function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, descripti
     factory: LOGIN,
     project: PROJECT,
     number: run,
-    paths: { repo: cloned.repo, home, maxUsd: ctx.settings.runUsd, maxRuns: 1, maxFinders: MAX_FINDERS },
+    paths: {
+      repo: cloned.repo,
+      home,
+      maxUsd: ctx.settings.runUsd,
+      maxRuns: 1,
+      maxFinders: MAX_FINDERS,
+      limits: { finder: ctx.settings.limits.finder, verify: ctx.settings.limits.verify },
+    },
     plugins: [{ label: "the eval's plugin", dir: ctx.rulebook }],
     model: ctx.capped,
     sessions: async () => ({ kind: "ok", value: [] }),
@@ -246,6 +271,7 @@ async function runs(ctx: Ctx, c: Case, cloned: Cloned, home: string): Promise<re
     instructions: ctx.judgeText,
     folder: judgeDir,
     maxUsd: ctx.settings.judgeUsd,
+    limit: ctx.settings.limits.judge,
   });
   const out: RunRecord[] = [];
   for (let run = 1; run <= RUNS; run++) {

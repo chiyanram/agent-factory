@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { addedLines, applies, baseRef, commentOf, scan } from "../scripts/check-history.js";
-import { claudeEnv } from "../src/core/review/settings.js";
+import { claudeEnv } from "../src/core/agent/claude.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
