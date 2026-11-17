@@ -14,6 +14,9 @@
 //   - one pointer per module header or doc section: a code file's leading comment block, or a markdown section, may
 //     hold one distinct ticket; outside its header block, code holds none
 //   - an ADR's Status: line, and the last cell of an ADR table row (its "from" column)
+//   - on a line of an ADR's body whose text outside its **Today:** note is on the default branch already, that text:
+//     check-adrs froze it, so the change wrote the note alone, and only the note is judged; the same line with its
+//     note taken out passes
 //
 //   node scripts/check-history.ts [ROOT]     (make lint)
 //
@@ -182,21 +185,100 @@ function rulesOf(text: string, ticketed: boolean): readonly Rule[] {
 
 const statusLine = (file: string, text: string): boolean => ADR.test(file) && text.startsWith("Status:");
 
+// MARK : a Today: note's marker, as check-adrs reads it in an ADR's body
+const MARK = "**Today:**";
+
+// a raw ADR line cut as check-adrs cuts it: the frozen text, which carries the decision, and the note ("" for none)
+type Cut = { readonly frozen: string; readonly note: string };
+
+// noteOf : a raw line cut at the note that starts on it: the text before the marker, and in a table row the cells
+// after the note's own, which ends at its next "|" no backslash escapes, are frozen. Pure.
+function noteOf(raw: string): Cut {
+  const line = raw.trimEnd();
+  const at = line.indexOf(MARK);
+  if (at < 0) {
+    return { frozen: line, note: "" };
+  }
+  const before = line.slice(0, at).trimEnd();
+  if (!isRow(line)) {
+    return { frozen: before, note: line.slice(at) };
+  }
+  const end = line.slice(at).search(/(?<!\\)\|/);
+  const cut = end < 0 ? line.length : at + end;
+  return { frozen: `${before} ${line.slice(cut).trimStart()}`, note: line.slice(at, cut) };
+}
+
+// bodyStart : the index of an ADR's first "## " line, where check-adrs starts to freeze it. Pure.
+function bodyStart(raws: readonly string[]): number {
+  const at = raws.findIndex((r) => r.startsWith("## "));
+  return at < 0 ? raws.length : at;
+}
+
+// how often each frozen text stands in an ADR's body, and the frozen texts of the lines that held a note
+type Frozen = { readonly counts: ReadonlyMap<string, number>; readonly noted: ReadonlySet<string> };
+
+// frozenIn : the frozen text of an ADR's body. Pure.
+function frozenIn(raws: readonly string[]): Frozen {
+  const cuts = raws.slice(bodyStart(raws)).map(noteOf);
+  const counts = new Map<string, number>();
+  for (const c of cuts) {
+    counts.set(c.frozen, (counts.get(c.frozen) ?? 0) + 1);
+  }
+  return { counts, noted: new Set(cuts.filter((c) => c.note !== "").map((c) => c.frozen)) };
+}
+
+// keptCut : an ADR body line whose frozen text is on the default branch already, so the change wrote its note alone:
+// a note added or edited beside a frozen text there, or taken out of a line that held one. A frozen text standing
+// more often now than on the default branch was copied, so none of its lines is kept. undefined for any other line
+function keptCut(raw: string, was: Frozen, now: Frozen): Cut | undefined {
+  const cut = noteOf(raw);
+  const held = cut.note !== "" || was.noted.has(cut.frozen);
+  const copied = countOf(now, cut.frozen) > countOf(was, cut.frozen);
+  return held && !copied ? cut : undefined;
+}
+
+const countOf = (f: Frozen, frozen: string): number => f.counts.get(frozen) ?? 0;
+
+// dateBy : whether a date in one text stands with a person or a decision in another
+const dateBy = (dates: string, people: string): boolean => DATE.test(dates) && PERSON.test(people);
+
+// noteRules : the rules a note the change wrote breaks: a ticket is allowed in it; a date or a person in it counts
+// with a person or a date anywhere on its line, since together they make a new dated decision
+function noteRules(cut: Cut): readonly Rule[] {
+  const note = plain(cut.note);
+  const line = `${plain(cut.frozen)} ${note}`;
+  const dated = dateBy(note, line) || dateBy(line, note);
+  return [...(DECIDED_BY.test(note) ? (["decided-by"] as const) : []), ...(dated ? (["person-date"] as const) : [])];
+}
+
+// rulesOn : the rules one judged line breaks: the note's alone on a line whose frozen text is kept, else the line's
+function rulesOn(l: Read, cut: Cut | undefined, pointed: boolean): readonly Rule[] {
+  if (cut !== undefined) {
+    return noteRules(cut);
+  }
+  return rulesOf(l.text ?? "", tickets(l.loose).length > 0 && !pointed);
+}
+
 // scan : file:line, the rule and the reason, for each history note on an added line of one file's text. The context
 // (Today notes, the header block, a section's pointer, fences) is read from the whole text; only lines whose number
-// is in ADDED are reported. Pure.
-export function scan(file: string, text: string, added: ReadonlySet<number>): readonly string[] {
+// is in ADDED are reported. BASE is the file's text on the default branch, when it is there. Pure.
+export function scan(file: string, text: string, added: ReadonlySet<number>, base?: string): readonly string[] {
   if (!applies(file)) {
     return [];
   }
+  const raws = text.split("\n");
+  const body = bodyStart(raws);
+  const both =
+    ADR.test(file) && base !== undefined ? ([frozenIn(base.split("\n")), frozenIn(raws)] as const) : undefined;
   const lines = withLoose(file, CODE.test(file) ? codeLines(text) : mdLines(text));
   const scopes = ticketsBy(lines);
+  const cutAt = (i: number): Cut | undefined =>
+    both === undefined || i < body ? undefined : keptCut(raws[i] ?? "", ...both);
   return lines.flatMap((l, i) => {
     if (!added.has(i + 1) || l.text === undefined || statusLine(file, l.text)) {
       return [];
     }
-    const ticketed = tickets(l.loose).length > 0 && !pointer(scopes, l.scope);
-    return rulesOf(l.text, ticketed).map((r) => `${file}:${i + 1}: history-note: ${r}: ${WHY}`);
+    return rulesOn(l, cutAt(i), pointer(scopes, l.scope)).map((r) => `${file}:${i + 1}: history-note: ${r}: ${WHY}`);
   });
 }
 
@@ -274,9 +356,14 @@ function problems(root: string, env: NodeJS.ProcessEnv): readonly string[] {
     const count = readFileSync(join(root, file), "utf8").split("\n").length;
     added.set(file, new Set(Array.from({ length: count }, (_, i) => i + 1)));
   }
+  const at = base.out.trim();
+  const baseOf = (file: string): string | undefined => {
+    const shown = ADR.test(file) ? git(root, ["show", `${at}:${file}`]) : undefined;
+    return shown?.code === 0 ? shown.out : undefined;
+  };
   return [...added]
     .filter(([file]) => applies(file) && existsSync(join(root, file)))
-    .flatMap(([file, lines]) => scan(file, readFileSync(join(root, file), "utf8"), lines));
+    .flatMap(([file, lines]) => scan(file, readFileSync(join(root, file), "utf8"), lines, baseOf(file)));
 }
 
 if (process.argv[1] === import.meta.filename) {

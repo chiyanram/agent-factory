@@ -90,6 +90,62 @@ describe("scan", () => {
     ]);
   });
 
+  it("judges only the note, or nothing once the note is out, on an ADR line whose frozen text is on the default branch", () => {
+    const adr = "docs/adr/0099-x.md";
+    const row = (decision: string, note: string) => `| X1 | ${decision} **Today:** ${note} | #10 |`;
+    const old = row("one (operator, 2026-11-09, #11; see #12).", "not yet (#13).");
+    const base = ["## Decision", "", old].join("\n");
+    const judge = (line: string) =>
+      scan(adr, ["## Decision", "", line].join("\n"), new Set([3]), base).map((f) =>
+        f.split(": ").slice(0, 3).join(": "),
+      );
+    expect(judge(row("one (operator, 2026-11-09, #11; see #12).", "built; the rest is #14 and #15."))).toEqual([]);
+    expect(judge(row("one (operator, 2026-11-09, #11; see #12).", "approved by the operator 2026-11-17."))).toEqual([
+      `${adr}:3: history-note: decided-by`,
+      `${adr}:3: history-note: person-date`,
+    ]);
+    expect(judge(row("one (operator, 2026-11-09, #11; see #12 and #16).", "not yet (#13)."))).toEqual([
+      `${adr}:3: history-note: ticket`,
+      `${adr}:3: history-note: person-date`,
+    ]);
+    expect(judge("| X1 | one (operator, 2026-11-09, #11; see #12). | #10 |")).toEqual([]);
+    expect(scan("docs/a.md", ["## B", "", old].join("\n"), new Set([3]), base).map((f) => f.split(": ")[2])).toEqual([
+      "ticket",
+      "person-date",
+    ]);
+  });
+
+  it("still judges a date the kept note adds beside a person in its frozen text, and lines check-adrs does not freeze", () => {
+    const adr = "docs/adr/0099-x.md";
+    const base = [
+      "# 0099 · X",
+      "",
+      "See #9.",
+      "",
+      "## Decision",
+      "",
+      "One rule (operator, #11; see #12). **Today:** no.",
+      "",
+    ];
+    const judge = (lines: readonly string[], at: number) =>
+      scan(adr, lines.join("\n"), new Set([at]), base.join("\n")).map((f) => f.split(": ").slice(0, 3).join(": "));
+    const body = (line: string) => [...base.slice(0, 6), line, ""];
+    expect(judge(body("One rule (operator, #11; see #12). **Today:** built (#30), see #31."), 7)).toEqual([]);
+    expect(judge(body("One rule (operator, #11; see #12). **Today:** built 2026-11-17."), 7)).toEqual([
+      `${adr}:7: history-note: person-date`,
+    ]);
+    expect(judge(body("One rule (operator, #11; see #12). Today: built (#30).\r"), 7)).toEqual([
+      `${adr}:7: history-note: ticket`,
+    ]);
+    expect(judge(body("One rule (operator, #11; see #12). **Today:** built (#30).\r"), 7)).toEqual([]);
+    expect(judge([...base.slice(0, 7), "", "One rule (operator, #11; see #12).", ""], 9)).toEqual([
+      `${adr}:9: history-note: ticket`,
+    ]);
+    expect(judge(["# 0099 · X", "", "One rule (operator, #11; see #12). **Today:** no.", ...base.slice(3)], 3)).toEqual(
+      [`${adr}:3: history-note: ticket`],
+    );
+  });
+
   it("does not judge code that is not a comment, headings, inline code, fences or URLs", () => {
     const code = ["class A {", "  #count = 1;", '  label = "#12 // not a comment";', "}"];
     expect(notes("src/a.ts", [...BODY, ...code])).toEqual([]);
@@ -205,6 +261,9 @@ describe("the script", () => {
     const out = run(dir, { ...process.env, FACTORY_BASE_REF: "main" });
     expect(out.code).toBe(1);
     expect(out.out.split("\n").map((l) => l.split(": ").slice(0, 3).join(": "))).toEqual([
+      "docs/adr/0099-x.md:10: history-note: ticket",
+      "docs/adr/0099-x.md:11: history-note: decided-by",
+      "docs/adr/0099-x.md:11: history-note: person-date",
       "docs/page.md:5: history-note: ticket",
       "docs/page.md:6: history-note: decided-by",
       "docs/page.md:6: history-note: person-date",
@@ -212,7 +271,7 @@ describe("the script", () => {
       "src/a.ts:2: history-note: ticket",
       "src/a.ts:7: history-note: ticket",
       "src/a.ts:7: history-note: person-date",
-      "check-history: 7 history note(s) on added lines; say what and why; history goes in the commit, the PR or an ADR",
+      "check-history: 10 history note(s) on added lines; say what and why; history goes in the commit, the PR or an ADR",
       "",
     ]);
   });
