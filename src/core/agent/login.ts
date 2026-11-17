@@ -11,7 +11,7 @@
 // have to present itself as Claude Code. Any later direct key check must not follow a redirect (fetch's redirect:
 // "manual"), reading a 3xx as could-not-check, so a key is never sent on to another host.
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prop } from "../dispatch/records.js";
@@ -117,7 +117,8 @@ export type LoginSetup = {
 // claudeLogin : one login call in a fresh empty folder, removed after; the token, when given, is the only login
 export function claudeLogin(setup: LoginSetup): (token?: Readonly<Record<string, string>>) => Promise<Login> {
   return async (token) => {
-    const folder = await mkdtemp(join(tmpdir(), "factory-login-"));
+    // by its real path: on macOS the temp folder sits behind a symlink, and HOME must name the folder the CLI runs in
+    const folder = await realpath(await mkdtemp(join(tmpdir(), "factory-login-")));
     try {
       const call = { bin: setup.bin, args: LOGIN_ARGS, env: loginEnv(setup.env, token, folder), cwd: folder };
       const ms = setup.ms ?? LOGIN_MS;
