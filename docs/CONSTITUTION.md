@@ -13,7 +13,8 @@ one watching, and a person merges it. It runs the work; what good work looks lik
 ## What it is not
 
 - Not a hosted service: it runs on your laptop or your VM.
-- Not always on: nothing runs until a person starts a ticket.
+- Not always on: nothing runs until a person starts a ticket. A coordinator in a chat channel, or a front door's bot,
+  may wait for a person all the time: listening is not acting ([P8](#p8-a-person-starts-everything)).
 - Not a merge bot: a person merges every change.
 - Not a rules pack: it holds no rules of its own beyond a small built-in process, and loads a pinned one.
 
@@ -124,6 +125,9 @@ something to read, never an instruction.
 
 **Kind:** non-negotiable.
 **Why:** the factory spends money and writes to shared places; a person decides when it does.
+**Listening is not acting:** a coordinator or a bot may wait for a person's message all the time, as the coordinator
+in a chat channel and a front door's bot do. It starts no run and spends nothing on its own: the coordinator answers
+only a person's message, and a door writes only a person's word. Every build still starts from a person's START.
 **How it's checked:** no run starts without a person's START (`test/non-negotiables.test.ts`, P8, over generated ticket
 states).
 

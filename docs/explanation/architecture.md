@@ -69,6 +69,10 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   set up: it exits and says when to run it again. A sleeping laptop stops the loop; `dispatch` again
   carries on from the records. `dispatch --once` is one pass by hand. Run one orchestrator loop per project:
   `dispatch` holds a lock per project and refuses to start a second loop for it.
+- **Listening is not acting** ([P8](../CONSTITUTION.md#p8-a-person-starts-everything)). The coordinator in a Discord
+  channel and the Discord door bot run all the time, but each only waits for a person's message: neither starts a run
+  or spends anything on its own. The coordinator answers a person's message, the door writes a person's START or
+  approval, and every build still starts from that START. **Today:** neither is built; #732 and #731 add them.
 - **Extra tasks** (full retro, weekly clean-up, triage) are off until a human starts one. A schedule can be switched on
   per task later.
 - **Lane:** tiny, bug, feature or one-way door.
