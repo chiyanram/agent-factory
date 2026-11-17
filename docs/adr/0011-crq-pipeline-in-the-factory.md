@@ -4,10 +4,9 @@
 
 Status: accepted 2026-11-06 (operator, chiyanram/skills#210, D1–D17). Amends ADR-0001 and ADR-0004.
 
-Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md) and [ADR-0013](0013-typescript-package-cli-first.md).
-
-**Today:** D14's CI failure signatures are not built (#132): a repeated red is capped at 2 CI rounds instead, and a CI
-run that changes nothing goes to a person. #645 records this in a new ADR.
+Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md), [ADR-0013](0013-typescript-package-cli-first.md)
+and [ADR-0024](0024-ci-red-and-merge-conflicts.md). D14's CI failure signatures and its rebase stop are amended by
+ADR-0024: the factory records no failure signatures, and a merge conflict is a merge run, never a rebase.
 
 ## Context
 
@@ -97,5 +96,4 @@ By ADR-0012 S3 and S13, as revised ([review 4](https://github.com/chiyanram/agen
 - **D10, D12, D14:** the writer's question, evidence and blocker come from `.factory/report.json` (status `done`,
   `asked` or `blocked`). The ready check re-runs its `evidence` rows. The host posts only templated, cleaned text.
 - **D14:** the dispatcher's table gives every failure path a stop: ready check 3, review rounds 3, CI rounds 2,
-  rebase 1. A claim is released only when the MR has been quiet for `FACTORY_QUIET_MINUTES`. **Today:** the conflict
-  stop is a merge of the default branch, not a rebase, as ADR-0012 S3's note says (#645).
+  rebase 1. A claim is released only when the MR has been quiet for `FACTORY_QUIET_MINUTES`.
