@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
 import { SRT_VERSION } from "../src/core/box/srt-plan.js";
+import type { Login } from "../src/core/agent/login.js";
 import { majorOf, owner, toolCheck, type Probes } from "../src/core/init/checks.js";
 import { detect, hostOf, parseRemote, projectName, toolsOf } from "../src/core/init/detect.js";
 import { answersOf, type Question } from "../src/core/init/round.js";
@@ -121,6 +122,7 @@ function probes(over: Partial<Probes> = {}): Probes {
     version: "0.31.0",
     gitHost: async () => ({ kind: "ok", value: "main" }),
     wall: async () => ({ kind: "ok", value: "" }),
+    login: async () => ({ kind: "authorized" }),
     ...over,
   };
 }
@@ -472,7 +474,7 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
     expect(ran.err).toContain("nothing was written");
   });
 
-  it("prints a ✗ with its fix, and never reads the token: srt off the pin, no token, a git host login that fails", async () => {
+  it("prints a ✗ with its fix: srt off the pin, no token, a git host login that fails", async () => {
     const ran = await init(ledger(), {
       yes: true,
       probes: {
@@ -488,6 +490,190 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
     expect(ran.out).toContain("fix: claude setup-token, then agent-factory setup claude");
     expect(ran.out).toContain("fix: gh auth login");
     expect(ran.out).toContain("fix: agent-factory setup coordinator");
+  });
+});
+
+describe("init's login checks: the tools gate first, then a real call (#665)", () => {
+  type Who = Parameters<Probes["login"]>[0];
+
+  // login probes that answer per login, and the logins asked, in order
+  function logins(answers: Partial<Record<Who, Login>>): { readonly asked: Who[]; readonly login: Probes["login"] } {
+    const asked: Who[] = [];
+    return {
+      asked,
+      login: async (who) => {
+        asked.push(who);
+        return answers[who] ?? { kind: "authorized" };
+      },
+    };
+  }
+
+  it("checks both logins after the gate passes, and says each works", async () => {
+    token("2027-11-01T00:00:00Z");
+    const probe = logins({});
+    const ran = await init(ledger(), { yes: true, probes: { login: probe.login } });
+    expect(ran.code).toBe(0);
+    expect(probe.asked).toEqual(["writer", "readOnly"]);
+    expect(ran.out).toContain("✓ the implementer's claude token: Anthropic accepted it (a real one-word call)");
+    expect(ran.out).toContain("✓ the read-only runs' claude login: Anthropic accepted it (a real one-word call)");
+    expect(ran.out.indexOf("✓ claude is on PATH")).toBeLessThan(ran.out.indexOf("the implementer's claude token:"));
+  });
+
+  it("fails a revoked or expired implementer's token with the fix named, though its date on record is fine", async () => {
+    token("2027-11-01T00:00:00Z");
+    const ran = await init(ledger(), {
+      yes: true,
+      probes: { login: logins({ writer: { kind: "refused", status: 401 } }).login },
+    });
+    expect(ran.code).toBe(1);
+    expect(ran.out).toMatch(/✓ claude token: \d+ days left/);
+    expect(ran.out).toContain(
+      "✗ the implementer's claude token: Anthropic refused it (HTTP 401): it was revoked, or has expired early",
+    );
+    expect(ran.out).toContain("fix: claude setup-token, then agent-factory setup claude");
+    // the fix is the first of the next steps
+    expect(ran.out).toMatch(/Next, in this order[^\n]*\n {2}1\. claude setup-token, then agent-factory setup claude/);
+  });
+
+  it("fails a refused read-only login with its own fix: this shell's login, not the stored token", async () => {
+    token("2027-11-01T00:00:00Z");
+    const ran = await init(ledger(), {
+      yes: true,
+      probes: { login: logins({ readOnly: { kind: "refused", status: 401 } }).login },
+    });
+    expect(ran.code).toBe(1);
+    expect(ran.out).toContain("✗ the read-only runs' claude login: Anthropic refused it (HTTP 401)");
+    expect(ran.out).toContain(
+      "fix: run claude and sign in with /login; unset a stale ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN in your shell",
+    );
+  });
+
+  it("prints ? for a login it could not check, and does not fail init: offline is not a revoked token", async () => {
+    token("2027-11-01T00:00:00Z");
+    const offline: Login = {
+      kind: "unknown",
+      reason: "no answer within 60 s (offline, or a proxy that holds the call?)",
+    };
+    const ran = await init(ledger(), {
+      yes: true,
+      probes: { login: logins({ writer: offline, readOnly: offline }).login },
+    });
+    expect(ran.code).toBe(0);
+    expect(ran.out).toContain(
+      "? the implementer's claude token: could not check: no answer within 60 s (offline, or a proxy that holds the call?)",
+    );
+    expect(ran.out).toContain("retry: agent-factory init, once claude can reach Anthropic");
+    expect(ran.out).not.toContain("1. agent-factory init, once");
+  });
+
+  it("makes no login call when claude is not on PATH: the person needs an install, not a login", async () => {
+    token("2027-11-01T00:00:00Z");
+    const probe = logins({});
+    const ran = await init(ledger(), {
+      yes: true,
+      probes: {
+        login: probe.login,
+        which: async (name) =>
+          name === "claude" ? "none" : { found: `/opt/node/bin/${name}`, real: `/opt/node/bin/${name}` },
+      },
+    });
+    expect(probe.asked).toEqual([]);
+    expect(ran.out).toContain("✗ claude is not on PATH");
+    expect(ran.out).not.toContain("claude token: Anthropic");
+  });
+
+  it("does not call with a token whose date already fails, but still checks the read-only login", async () => {
+    token("2026-11-01T00:00:00Z");
+    const probe = logins({});
+    const ran = await init(ledger(), { yes: true, probes: { login: probe.login } });
+    expect(probe.asked).toEqual(["readOnly"]);
+    expect(ran.out).toContain("✗ claude token: expired at 2026-11-01T00:00:00Z");
+    expect(ran.out).not.toContain("the implementer's claude token:");
+  });
+
+  it("a rerun after a refused token, once it is renewed, passes and redoes nothing else", async () => {
+    token("2027-11-01T00:00:00Z");
+    const dir = ledger();
+    const first = await init(dir, {
+      yes: true,
+      probes: { login: logins({ writer: { kind: "refused", status: 401 } }).login },
+    });
+    expect(first.code).toBe(1);
+    const again = await init(dir, { replies: [] });
+    expect(again.code).toBe(0);
+    expect(again.asked).toEqual([]);
+    expect(again.out).not.toContain("wrote ");
+    expect(again.out).toContain("plugin rulebook@chiyanram pinned at");
+    expect(again.out).toContain("✓ the implementer's claude token: Anthropic accepted it");
+  });
+});
+
+// fakeGit : a git on a PATH of its own that dies in the middle of a clone, leaving a half-made folder, as a lost
+// connection or a Ctrl-C does; every other git call goes to the real git
+function fakeGit(): string {
+  const bin = join(root, "fake-bin");
+  mkdirSync(bin, { recursive: true });
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(
+    join(bin, "git"),
+    `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.includes("clone")) {
+  const fs = require("node:fs");
+  const dest = args.at(-1);
+  fs.mkdirSync(require("node:path").join(dest, ".git"), { recursive: true });
+  fs.writeFileSync(require("node:path").join(dest, "HALF"), "the connection dropped here\\n");
+  process.stderr.write("fatal: early EOF\\n");
+  process.exit(128);
+}
+const r = require("node:child_process").spawnSync(${JSON.stringify(real)}, args, { stdio: "inherit" });
+process.exit(r.status ?? 1);
+`,
+  );
+  chmodSync(join(bin, "git"), 0o755);
+  return bin;
+}
+
+describe("init resumes after a failure at a step (#665)", () => {
+  it("a clone of the marketplace cut off midway is not taken as done: the rerun clones it again and pins", async () => {
+    token("2027-11-01T00:00:00Z");
+    const dir = ledger();
+    const cut = await init(dir, { yes: true, env: { PATH: `${fakeGit()}:${process.env.PATH ?? ""}` } });
+    expect(cut.err).toBe("");
+    expect(cut.code).toBe(1);
+    expect(cut.out).toContain("✗ plugin rulebook@chiyanram: cannot clone");
+    expect(existsSync(join(home, "marketplaces", "chiyanram"))).toBe(false);
+    const again = await init(dir, { yes: true });
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("✓ plugin rulebook@chiyanram pinned");
+    expect(readdirSync(join(home, "marketplaces"))).toEqual(["chiyanram"]);
+  });
+
+  it("a .partial left by an init that was killed mid-clone is removed, and the clone goes ahead", async () => {
+    token("2027-11-01T00:00:00Z");
+    mkdirSync(join(home, "marketplaces", "chiyanram.partial", ".git"), { recursive: true });
+    writeFileSync(join(home, "marketplaces", "chiyanram.partial", "HALF"), "killed here\n");
+    const ran = await init(ledger(), { yes: true });
+    expect(ran.code).toBe(0);
+    expect(ran.out).toContain("✓ plugin rulebook@chiyanram pinned");
+    expect(readdirSync(join(home, "marketplaces"))).toEqual(["chiyanram"]);
+  });
+
+  it("keeps the files it wrote when a later step fails, and the rerun only finishes what failed", async () => {
+    token("2027-11-01T00:00:00Z");
+    const dir = ledger();
+    const failed = await init(dir, {
+      yes: true,
+      setupCoordinator: async () => ({ kind: "failed", reason: "cannot write the settings" }),
+      probes: { wall: async () => ({ kind: "failed", reason: "no coordinator settings" }) },
+    });
+    expect(failed.code).toBe(1);
+    const before = readFileSync(projectPath(home, "ledger"), "utf8");
+    const again = await init(dir, { replies: [] });
+    expect(again.code).toBe(0);
+    expect(again.asked).toEqual([]);
+    expect(readFileSync(projectPath(home, "ledger"), "utf8")).toBe(before);
+    expect(again.out).toContain("plugin rulebook@chiyanram pinned at");
   });
 });
 
@@ -612,7 +798,47 @@ describe("init pins chiyanram's plugins at the engine's rules-pack pin (#607)", 
   });
 });
 
+// withoutHostCa : the test's env with bin first on PATH; the host's own CA variable would win over a settings file,
+// so it is left out
+function withoutHostCa(bin: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...GIT_ENV, FACTORY_HOME: home, PATH: `${bin}:${process.env.PATH ?? ""}` };
+  return Object.fromEntries(Object.entries(env).filter(([name]) => name !== "NODE_EXTRA_CA_CERTS"));
+}
+
 describe("agent-factory init on the command line (#369)", () => {
+  it("makes each login call in the environment the project's settings give its runs, such as a company CA", async () => {
+    token("2027-11-01T00:00:00Z");
+    const dir = ledger();
+    execFileSync("git", ["clone", "-q", market(), join(home, "marketplaces", "chiyanram")], { env: GIT_ENV });
+    writeFileSync(join(home, "user.json"), JSON.stringify({ runner: "srt", egress: { caCerts: "/etc/corp/ca.pem" } }));
+    // a claude on PATH for the gate; the agent fake answers the login calls, so none starts
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\n");
+    chmodSync(join(bin, "claude"), 0o755);
+    const seen: NodeJS.ProcessEnv[] = [];
+    await runCli(["init", "--repo", dir, "--yes"], {
+      env: withoutHostCa(bin),
+      out: () => undefined,
+      err: () => undefined,
+      readSecret: async () => "",
+      readStdin: async () => "",
+      system: {
+        platform: "linux",
+        uid: 0,
+        gid: 0,
+        run: async () => ({ code: 1, stdout: "", stderr: "no" }),
+        interactive: async () => 0,
+        background: async () => ({ kind: "failed", reason: "no" }),
+        agent: async (call) => (seen.push(call.env), { code: 1, stdout: "", stderr: "" }),
+      },
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const e of seen) {
+      expect(e.NODE_EXTRA_CA_CERTS).toBe("/etc/corp/ca.pem");
+    }
+  });
+
   it("runs no program but its probes' and no human-only command, and needs an absolute --repo", async () => {
     const dir = ledger();
     // the marketplace is already cloned, so nothing reaches the network
@@ -634,6 +860,7 @@ describe("agent-factory init on the command line (#369)", () => {
           run: async (call) => (calls.push([call.bin, ...call.args].join(" ")), { code: 1, stdout: "", stderr: "no" }),
           interactive: async () => 0,
           background: async () => ({ kind: "failed", reason: "no" }),
+          agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
         },
       });
     expect(await run(["init", "--repo", "ledger"])).toBe(64);

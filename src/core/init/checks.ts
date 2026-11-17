@@ -1,10 +1,13 @@
 // checks — the pieces `agent-factory init` checks once the files are written (#369), each a ✓ or a ✗ with its fix:
 // the pinned srt, the claude CLI, srt and agent-factory under the active Node, the model token's days left (read from
-// its expiry record, never the token), the git host login for the project, the toolchain the project declares against
-// the one PATH gives a run, and the coordinator's settings. Every program call goes through the probes, so a test runs
+// its expiry record), the git host login for the project, the toolchain the project declares against the one PATH
+// gives a run, and the coordinator's settings. That is the fast gate. Then each claude login is proved by one real
+// call: the stored token an implementer run gets, and this shell's login the read-only runs get. A login call that
+// cannot answer is a ? that names why and fails nothing. Every program call goes through the probes, so a test runs
 // none. It never runs a command only a human runs; a ✗ prints the command for the human.
 
 import { join } from "node:path";
+import { SIGN_IN, type Login } from "../agent/login.js";
 import type { Result, Runner } from "../forge/api.js";
 import { SRT_INSTALL, SRT_VERSION } from "../box/srt-plan.js";
 import { MANAGERS, tilde } from "../box/srt-toolchains.js";
@@ -12,7 +15,11 @@ import { under } from "../box/srt-programs.js";
 import { tokenAge, tokenRecord, type Age, type Meta } from "../token/index.js";
 import type { Declared, HostKind, Tool } from "./detect.js";
 
-export type Check = { readonly ok: boolean; readonly line: string; readonly fix: string };
+// unsure: the check could not answer, so it fails nothing; its fix is how to try again
+export type Check = { readonly ok: boolean; readonly line: string; readonly fix: string; readonly unsure?: boolean };
+
+// the logins runs use: the stored token a writer's box gets, and this shell's login the read-only runs get
+export type Who = "writer" | "readOnly";
 
 export type Probes = {
   readonly run: Runner;
@@ -33,6 +40,8 @@ export type Probes = {
   readonly gitHost: (project: string) => Promise<Result<string>>;
   // the coordinator's settings hold its wall
   readonly wall: () => Promise<Result<string>>;
+  // one real call with that login, through the agent CLI (agent/login.ts), in the environment the project's runs get
+  readonly login: (who: Who, project: string) => Promise<Login>;
 };
 
 function pass(line: string): Check {
@@ -90,15 +99,20 @@ export async function nodeCheck(p: Probes): Promise<Check> {
     : pass(`agent-factory ${p.version} on the active Node`);
 }
 
-const RENEW = "claude setup-token, then agent-factory setup claude (you run both; init never reads the token)";
+const RENEW = "claude setup-token, then agent-factory setup claude";
 
-// tokenCheck : the claude token's expiry on record, read without the token
-export async function tokenCheck(home: string, now: Date): Promise<Check> {
+// tokenCheck : the claude token's expiry on record, read without the token; usable: a box would start with it, as
+// boxToken decides (valid or expiring), so the login call is worth making
+export async function tokenCheck(
+  home: string,
+  now: Date,
+): Promise<{ readonly check: Check; readonly usable: boolean }> {
   const meta = await tokenRecord(home, "claude");
   if (meta === "none") {
-    return fail("claude token: none on record", RENEW);
+    return { check: fail("claude token: none on record", RENEW), usable: false };
   }
-  return ageCheck(meta, tokenAge(meta, now));
+  const age = tokenAge(meta, now);
+  return { check: ageCheck(meta, age), usable: age.kind === "valid" || age.kind === "expiring" };
 }
 
 function ageCheck(meta: Meta, age: Age): Check {
@@ -112,6 +126,32 @@ function ageCheck(meta: Meta, age: Age): Check {
     case "unknown":
       return fail(`claude token: ${age.reason}`, RENEW);
   }
+}
+
+const LOGIN: Readonly<Record<Who, { readonly name: string; readonly fix: string }>> = {
+  writer: { name: "the implementer's claude token", fix: RENEW },
+  readOnly: { name: "the read-only runs' claude login", fix: SIGN_IN },
+};
+
+// loginCheck : one login, proved by a real call: ✓ only when Anthropic accepted it, ✗ only when it refused it, and ?
+// when the call could not tell
+export async function loginCheck(p: Probes, who: Who, project: string): Promise<Check> {
+  const { name, fix } = LOGIN[who];
+  const login = await p.login(who, project);
+  switch (login.kind) {
+    case "authorized":
+      return pass(`${name}: Anthropic accepted it (a real one-word call)`);
+    case "refused":
+      return fail(`${name}: Anthropic refused it (HTTP ${login.status}): it was revoked, or has expired early`, fix);
+    case "unknown":
+      return unsure(`${name}: could not check: ${login.reason}`);
+    case "missing":
+      return unsure(`${name}: could not check: claude did not start`);
+  }
+}
+
+function unsure(line: string): Check {
+  return { ok: true, unsure: true, line, fix: "agent-factory init, once claude can reach Anthropic" };
 }
 
 function loginFix(host: HostKind, hostName: string): string {
@@ -234,7 +274,14 @@ export async function toolchainChecks(p: Probes, declared: Declared | "none"): P
   return each;
 }
 
-// checkLines : each check as it prints: ✓ or ✗, and a ✗'s fix under it
+// checkLines : each check as it prints: ✓, ✗ with its fix under it, or ? with how to retry
 export function checkLines(checks: readonly Check[]): string {
-  return checks.map((c) => (c.ok ? `  ✓ ${c.line}\n` : `  ✗ ${c.line}\n      fix: ${c.fix}\n`)).join("");
+  return checks.map(checkLine).join("");
+}
+
+function checkLine(c: Check): string {
+  if (c.unsure === true) {
+    return `  ? ${c.line}\n      retry: ${c.fix}\n`;
+  }
+  return c.ok ? `  ✓ ${c.line}\n` : `  ✗ ${c.line}\n      fix: ${c.fix}\n`;
 }

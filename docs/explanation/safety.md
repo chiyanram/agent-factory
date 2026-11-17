@@ -21,6 +21,7 @@ An AI run that holds all three of these legs at once can be turned against you b
 |---|---|---|---|---|
 | implementer, cleanup, test-first | yes | the repo | the model API and the package registries | holds all three: the runner and the egress list narrow the way out, they do not close it (see [What is open](#what-is-open)) |
 | automated review, design review, onboarder | yes | the repo | the model API only | read-only tools, and a time limit per run that stops the run and everything it started; **Today:** they run on the host, not on a runner (#674) |
+| login call (`init`, `setup claude`) | no: one fixed prompt | the model login it checks | the model API only | no tools, no MCP servers, no settings files, one turn, 60 s, in an empty folder it removes after |
 | coordinator | the ticket and the chat | your laptop | your own network | a human is in the loop; on a laptop its deny list is not a wall (accepted risk) |
 | orchestrator, host push | data only | the git host login | the git host | code with no model: text it reads never changes what it does |
 
@@ -96,6 +97,12 @@ Two rules follow from this:
   wall-clock limit (`FACTORY_FINDER_MINUTES`, `FACTORY_VERIFY_MINUTES`); past it the agent seam stops the run and
   everything it started, and the run fails with the reason ([ADR-0022](../adr/0022-agent-cli-adapter-in-core.md)).
   **Today:** it runs on the host, not on a runner (#674).
+- **Enforced: the login call is a model call and nothing more**. `init` and `setup claude` prove a claude login
+  with one `claude -p "Reply with the word ok"` through the agent seam: no tools, no MCP servers, no settings files,
+  one turn, stopped after 60 s, in a fresh empty folder that is removed after. The implementer's token goes alone, in an
+  empty `HOME`, in the environment, never in argv; no git host token and no `FACTORY_*` setting goes with either call.
+  It never quotes the CLI's output. agent-factory itself sends no model token over HTTP; a direct key check added
+  later must not follow a redirect (`src/core/agent/login.ts`).
 - **Rules come from the default branch** or a pinned plugin, never from the PR. A PR that edits a rule file is flagged
   for the human.
 - **Protected files go to the human.** A review round that finds a change to CI config, `CODEOWNERS` or agent

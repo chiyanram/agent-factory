@@ -315,6 +315,7 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
               run: async () => ({ code: 1, stdout: "", stderr: "" }),
               interactive: async () => 0,
               background: async () => ({ kind: "failed", reason: "no background in this test" }),
+              agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
             },
           }),
         err: () => err,
@@ -381,6 +382,7 @@ process.stdout.write(JSON.stringify({ type: "system", subtype: "task_summary" })
         run: async () => ({ code: 1, stdout: "", stderr: "" }),
         interactive: async () => 0,
         background: async () => ({ kind: "failed", reason: "no background in this test" }),
+        agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
       },
     });
     expect({ code, err: err.includes("agent-factory eval:") ? err : "" }).toEqual({ code: 0, err: "" });

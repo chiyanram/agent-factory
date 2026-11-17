@@ -29,6 +29,7 @@ async function cli(argv: readonly string[]): Promise<Run> {
       run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
       interactive: async () => 0,
       background: async () => ({ kind: "failed", reason: "no background in this test" }),
+      agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
     },
   });
   return { code, out, err };

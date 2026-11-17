@@ -40,12 +40,19 @@ agent-factory init            # the project's name defaults to the clone folder'
 5. **Checks each piece** and prints ✓ or ✗ with the fix: `srt` at the pinned version (the exact install command, with
    `--omit=optional`), the `claude` CLI, `agent-factory` and `srt` under the active Node (after a Node upgrade they
    are gone; it prints the reinstall commands), the model token's days left (read from its expiry record in
-   `tokens.json`, never the token), the git host login for the project (the project's default branch, through the
+   `tokens.json`), the git host login for the project (the project's default branch, through the
    `Forge` seam), each tool the toolchain file declares against the one `PATH` gives a run (for example SDKMAN!'s Java
    25 first on `PATH` while `mise.toml` declares 27: it names the manager that wins and the fix), the coordinator's
    settings, `config check`, and the installed `agent-factory` against the latest release, with the install line when
    a newer one is out (it never fails the run, and says so when the release list cannot be read; `agent-factory setup
    status` shows the same line).
+   That is the fast gate. Then, when `claude` is on `PATH`, it proves each claude login with one real call: a
+   one-word `claude -p` with no tools, no MCP servers and no settings files, stopped after 60 s, costing about a cent.
+   It checks **the implementer's token** (the stored one, while its date holds, alone in an empty `HOME`, as a runner gets
+   it) and **the read-only runs' login** (this shell's `claude` login, which the automated review, design review and
+   onboarder use on this host). A date on record cannot see a token that was revoked, so only the call says ✓. A 401
+   is a ✗ with the fix; a call that cannot tell (offline, a proxy, no answer) prints `?` with the reason and fails
+   nothing.
 6. **Writes the coordinator's settings**, as `agent-factory setup coordinator` does, so the settings check
    passes on a new laptop. They hold no secret.
 7. **Prints the next commands**, in order, for you to run: each fix, then `claude setup-token` and `agent-factory setup
@@ -54,10 +61,13 @@ agent-factory init            # the project's name defaults to the clone folder'
    store, else the local file), `agent-factory start` and
    `agent-factory coordinator <project>`.
 
-It never handles a secret and never runs a command only a human runs (`setup claude`, `onboard`, `onboard accept`,
-`start`, `approve`, `waive`). The coordinator's settings deny `agent-factory init`, since it writes the settings that
+It never prints or logs a secret and never runs a command only a human runs (`setup claude`, `onboard`, `onboard
+accept`, `start`, `approve`, `waive`). The one secret it reads is the stored claude token, which it hands to the login
+call in the CLI's environment, never in argv. The coordinator's settings deny `agent-factory init`, since it writes the settings that
 hold the coordinator's wall. Exit 0 when every check passes, 1 when one fails or init refuses, 3 when `--yes` kept a
-value. Running it again is safe: it asks only what is missing and writes nothing when nothing changed. Once the files
+value; a `?` fails nothing. Running it again is safe, also after a failure: it asks only what is missing, writes
+nothing when nothing changed, keeps a plugin already pinned, and never takes a marketplace clone that was cut off
+midway as done (it clones into a `.partial` folder and renames it once whole). Once the files
 hold `FACTORY_FORGE`, `FACTORY_PROJECT`, `FACTORY_REPO` and `FACTORY_BOX`, it says you can remove their exports, naming
 each profile file and line that sets one (a symlinked profile by the file it points to):
 every command, the coordinator's `poll`, `status` and the loop commands too, reads them from the files.

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
 import { hostGit } from "./core/git.js";
+import type { FolderRunner } from "./core/agent/folder.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { openStore, type TokenStore } from "./core/token/index.js";
 import { chosenProject } from "./core/which-project.js";
@@ -37,6 +38,9 @@ export type Io = {
     // this command line, run again in the background with these words, its output appended to log; it outlives this
     // command and gives its pid (the orchestrator loop, #305). A test passes a fake that starts nothing.
     readonly background: (call: { readonly args: readonly string[]; readonly log: string }) => Promise<Result<number>>;
+    // the agent CLI's calls that init and setup make, such as the login call (agent/folder.ts runInFolder); a test
+    // passes a fake, so no test starts a CLI or reaches the model API
+    readonly agent: FolderRunner;
   };
 };
 

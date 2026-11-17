@@ -14,6 +14,7 @@ import type { Sessions } from "../review/live.js";
 import type { Model } from "../review/model.js";
 import { claudeEnv, claudeModel, claudeSessions } from "./claude.js";
 import { claudeWriter, type ClaudeWriter } from "./claude-writer.js";
+import { claudeLogin, type Login } from "./login.js";
 import { copilotModel, type CopilotModel } from "./copilot.js";
 import type { BoxToken } from "../token/index.js";
 import { runInFolder, type FolderRunner } from "./folder.js";
@@ -26,6 +27,9 @@ export type AgentCli = {
   readonly sessions: Sessions;
   // the writer run's argv and settings file, built from its role card; the box runs them (writer/run.ts)
   readonly writer: ClaudeWriter;
+  // whether a login works, by one real call (login.ts): with a token, that token alone, as a writer's box gets it;
+  // without, this shell's login, as the read-only runs get it
+  readonly login: (token?: Readonly<Record<string, string>>) => Promise<Login>;
 };
 
 // how long `claude agents --json` may take before the list is read as unknown
@@ -37,6 +41,7 @@ export function openAgentCli(input: {
   readonly run?: FolderRunner;
   readonly minuteMs?: number;
   readonly sessionsMs?: number;
+  readonly loginMs?: number;
 }): AgentCli {
   const setup = {
     bin: input.env.FACTORY_CLAUDE ?? "claude",
@@ -50,6 +55,7 @@ export function openAgentCli(input: {
     readOnly: claudeModel(setup),
     sessions: claudeSessions(setup),
     writer: claudeWriter(setup.bin),
+    login: claudeLogin({ bin: setup.bin, env: setup.env, run: setup.run, ms: input.loginMs }),
   };
 }
 

@@ -79,6 +79,7 @@ describe("agent-factory trace (#487)", () => {
         run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
         interactive: async () => 1,
         background: async () => ({ kind: "failed", reason: "no background in this test" }),
+        agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
       },
     };
     expect(await runCli(["trace", "ledger", "PROJ-1"], cli)).toBe(0);

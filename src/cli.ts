@@ -7,6 +7,7 @@ import { constants } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli } from "./app.js";
+import { runInFolder } from "./core/agent/folder.js";
 import { latestRelease } from "./core/init/latest.js";
 import { runProcess } from "./core/forge/api.js";
 import { readHidden } from "./core/token/index.js";
@@ -68,6 +69,7 @@ runCli(process.argv.slice(2), {
     gid: process.getgid?.() ?? -1,
     run: runProcess,
     background,
+    agent: runInFolder,
     interactive: ({ bin, args, cwd, env }) =>
       new Promise((resolve) => {
         // Ctrl-C reaches the session, which uses it to stop a turn; the launcher waits for the session to end

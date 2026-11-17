@@ -25,6 +25,7 @@
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { ClaudeWriter, WriterCall } from "../agent/claude-writer.js";
+import { refusedLogin } from "../agent/login.js";
 import { NO_LIMIT, type UsageLimit } from "../agent/usage-limit.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
@@ -41,6 +42,7 @@ import {
 import { PR_BODY_PATH } from "../pr-body.js";
 import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
+import { RENEW } from "../token/rules.js";
 import type { Clone } from "./clone.js";
 import { outsideScope, scoped, type EditScope } from "./scope.js";
 import {
@@ -157,12 +159,16 @@ export function lastLines(tail: Tail, most: number = SHOWN_LINES): readonly stri
 // tail kept for a person (#62), and its stream-json output read for the result event (#131)
 type Heard = { at: number; tail: Tail; kept: Tail; stream: Stream };
 
+// a writer signs in with the stored token (token/rules.ts boxToken), so a refused one is renewed in the store
+const RENEW_REFUSED = `the claude token was refused (HTTP 401); ${RENEW}`;
+
 // resultText : the text of the run's result event: its last message, or the CLI's error ("Invalid API key", a budget
-// hit); "" with none. Pure.
+// hit); "" with none. A login the provider refused (HTTP 401) names the renewal first. Pure.
 function resultText(stream: Stream): string {
   const result: unknown = stream.result;
   const text = typeof result === "object" && result !== null ? (Reflect.get(result, "result") as unknown) : undefined;
-  return typeof text === "string" ? text.trim() : "";
+  const plain = typeof text === "string" ? text.trim() : "";
+  return refusedLogin(result) ? `${RENEW_REFUSED}; the CLI said: ${plain}` : plain;
 }
 
 // lastPlain : the last line that is not a stream-json event, "" for none. Pure.
