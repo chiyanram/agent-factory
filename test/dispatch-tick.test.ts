@@ -1,3 +1,7 @@
+import type { PushRequest } from "../src/core/push.js";
+import type { Done } from "../src/core/forge/api.js";
+import { keepLeft } from "../src/core/left.js";
+import { execFileSync } from "node:child_process";
 import { NO_NOTIFY, type Notify, type Ping } from "../src/core/notify.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -2953,5 +2957,184 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
       `blocked: the provider's usage limit; its reset time is unknown: ${SAID}`,
     );
     expect(pings.filter((p) => p.kind === "held")).toEqual([]);
+  });
+});
+
+// ---- a writer run killed mid-run keeps its work
+
+describe("a killed writer run keeps its work", () => {
+  const AT = "2026-11-07T09:00:00Z";
+  const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
+  const gitEnv = () => ({
+    PATH: process.env.PATH,
+    HOME: home,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+  });
+  const g = (cwd: string, ...args: string[]) =>
+    execFileSync("git", args, { cwd, env: gitEnv(), encoding: "utf8" }).trim();
+
+  // a forge whose branch is a local bare repo: factory/PROJ-1 at A; the run's folder holds a clone at B (one commit on
+  // A) and one uncommitted file, as a pass killed mid-run leaves it
+  function killedRun(): { readonly bare: string; readonly folder: string; readonly a: string; readonly b: string } {
+    const bare = join(home, "origin.git");
+    g(home, "init", "-q", "--bare", "-b", "main", bare);
+    const folder = join(home, "box-runs", "writer-k1");
+    const repo = join(folder, "repo");
+    mkdirSync(folder, { recursive: true });
+    g(folder, "clone", "-q", bare, repo);
+    g(repo, "checkout", "-q", "-b", "main");
+    writeFileSync(join(repo, "a.txt"), "a\n");
+    g(repo, "add", "a.txt");
+    g(repo, "commit", "-q", "-m", "start");
+    g(repo, "push", "-q", "origin", "main");
+    g(repo, "checkout", "-q", "-b", "factory/PROJ-1");
+    g(repo, "push", "-q", "origin", "factory/PROJ-1");
+    const a = g(repo, "rev-parse", "HEAD");
+    writeFileSync(join(repo, "fix.txt"), "fix\n");
+    g(repo, "add", "fix.txt");
+    g(repo, "commit", "-q", "-m", "fix\n\nAgent: writer");
+    const b = g(repo, "rev-parse", "HEAD");
+    writeFileSync(join(repo, "notes.txt"), "half done\n");
+    return { bare, folder, a, b };
+  }
+
+  // the push the host would make: every guard first, then a plain push to the bare repo
+  function pusher(pushes: PushRequest[]) {
+    return async (request: PushRequest): Promise<Done> => {
+      pushes.push(request);
+      for (const guard of request.guards) {
+        const ok = await guard({ repo: request.repo, commit: request.commit, lease: request.lease });
+        if (ok.kind === "failed") {
+          return ok;
+        }
+      }
+      g(request.repo, "push", "-q", "origin", `${request.commit}:refs/heads/${request.branch}`);
+      return { kind: "ok" };
+    };
+  }
+
+  function stepsFor(changes: Changes, log: string[], pushes: PushRequest[]): { forge: Forge; steps: Steps } {
+    const f: Forge = {
+      ...forge(changes, log),
+      defaultBranch: async () => ({ kind: "ok", value: "main" }),
+      ciConfig: async () => ({ kind: "ok", value: { kind: "none", why: "test" } }),
+    };
+    const target = {
+      forge: "github" as const,
+      host: "github.com",
+      project: "chiyanram/ledger",
+      identity: { kind: "own" } as const,
+      env: gitEnv(),
+    };
+    const writer: Steps["writer"] = {
+      kind: "available",
+      run: async () => ({ kind: "failed", reason: "no run in this test" }),
+      keep: keepLeft({
+        env: gitEnv(),
+        forge: f,
+        landing: { target: { kind: "ok", value: target }, pusher: pusher(pushes) },
+      }),
+    };
+    return { forge: f, steps: { ...STEPS_TODAY, writer } };
+  }
+
+  it("the start line names the run folder before the run, and the run gets that folder", async () => {
+    await approved();
+    const folder = join(home, "box-runs", "writer-n1");
+    const seen: (string | undefined)[] = [];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        folder: async () => (mkdirSync(folder, { recursive: true }), { kind: "ok", value: folder }),
+        run: async (input) => {
+          const read = await readRecords(where());
+          const last = read.kind === "ok" ? read.value.at(-1) : undefined;
+          seen.push(input.folder, last?.kind === "started" ? last.folder : "no start line");
+          return { kind: "failed", reason: "killed" };
+        },
+      },
+    };
+    const changes = { team, open: [open({ labels: [] })], merged: [] };
+    await tick(setup(changes, [], { steps }));
+    expect(seen).toEqual([folder, folder]);
+    // a step that makes no folder names none, as before
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.filter((e) => e.kind === "started").length : 0).toBe(1);
+  });
+
+  it("an older start line, with no folder, still goes to a person to check what it pushed", async () => {
+    await approved();
+    await record({ where: where(), event: { at: AT, kind: "started", phase: "writer", mode: "fix", head: H } });
+    const changes = { team, open: [open()], merged: [] };
+    const log: string[] = [];
+    await tick(setup(changes, log));
+    expect(log.find((l) => l.startsWith("note #12 [coordinator] blocked:"))).toContain(
+      "never ended; check what it pushed",
+    );
+  });
+
+  it("the next pass names the commit and each uncommitted file, pushes it on top of the branch, keeps the folder", async () => {
+    await approved();
+    const { bare, folder, a, b } = killedRun();
+    await record({
+      where: where(),
+      event: { at: AT, kind: "started", phase: "writer", mode: "fix", head: a, folder },
+    });
+    const changes = { team, open: [open({ head: a })], merged: [] };
+    const log: string[] = [];
+    const pushes: PushRequest[] = [];
+    const { forge: f, steps } = stepsFor(changes, log, pushes);
+    await tick(setup(changes, log, { forge: f, steps }));
+    expect(log).toContain("label +needs-human #12");
+    const note = log.find((l) => l.startsWith("note #12 [coordinator] blocked:")) ?? "";
+    expect(note).toContain("never ended");
+    expect(note).not.toContain("check what it pushed");
+    expect(note).toContain(b.slice(0, 8));
+    expect(note).toContain(`pushed 1 on top of factory/PROJ-1`);
+    expect(note).toContain("notes.txt");
+    expect(note).toContain(folder);
+    // the commit is on the branch, the folder is kept, one push
+    expect(g(bare, "rev-parse", "refs/heads/factory/PROJ-1")).toBe(b);
+    expect(existsSync(join(folder, "repo", "notes.txt"))).toBe(true);
+    expect(pushes).toHaveLength(1);
+
+    // P3: the next pass hands nothing over again and pushes nothing
+    const second: string[] = [];
+    await tick(setup(changes, second, { forge: f, steps }));
+    expect(second.filter((l) => !l.startsWith("log"))).toEqual([]);
+    expect(pushes).toHaveLength(1);
+  });
+
+  it("a pass killed after the push and before its record pushes nothing new the next time: one push", async () => {
+    await approved();
+    const { folder, a, b } = killedRun();
+    await record({
+      where: where(),
+      event: { at: AT, kind: "started", phase: "writer", mode: "fix", head: a, folder },
+    });
+    const pushes: PushRequest[] = [];
+    const first: string[] = [];
+    const before = { team, open: [open({ head: a })], merged: [] };
+    const one = stepsFor(before, first, pushes);
+    await tick(setup(before, first, { forge: one.forge, steps: one.steps }));
+    expect(pushes).toHaveLength(1);
+    // the "blocked" line never written, and the label a person took off: the branch is at B now
+    const file = join(home, "runs", "ledger", "PROJ-1.jsonl");
+    const lines = readFileSync(file, "utf8")
+      .split("\n")
+      .filter((l) => l !== "" && !l.includes('"kind":"blocked"'));
+    writeFileSync(file, `${lines.join("\n")}\n`);
+    const after = { team, open: [open({ head: b })], merged: [] };
+    const again: string[] = [];
+    const two = stepsFor(after, again, pushes);
+    await tick(setup(after, again, { forge: two.forge, steps: two.steps }));
+    expect(pushes).toHaveLength(1);
+    const note = again.find((l) => l.startsWith("note #12 [coordinator] blocked:")) ?? "";
+    expect(note).toContain("nothing to push");
   });
 });

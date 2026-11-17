@@ -305,11 +305,18 @@ describe("P8: a person starts everything", () => {
 describe("P3: one record per ticket; a restart loses nothing", () => {
   it("a writer run killed before its end line is never run again on restart: one push and one PR at most", () => {
     const killed: Summary = { ...EMPTY, interrupted: { kind: "interrupted", phase: "writer", at: AT } };
-    for (const change of CHANGES.filter((c) => c.kind === "open" && !c.line.needsHuman)) {
-      const first = states()[0];
-      if (first === undefined) throw new Error("no states");
-      const a = decide({ ...first, change, runs: killed });
-      expect(a.kind).toBe("needs-human");
+    // a start line that names its run folder: the hand-over saves that run's work, and still never runs it again
+    const named: Summary = {
+      ...EMPTY,
+      interrupted: { kind: "interrupted", phase: "writer", at: AT, run: { folder: "/f/writer-1", head: AT } },
+    };
+    for (const runs of [killed, named]) {
+      for (const change of CHANGES.filter((c) => c.kind === "open" && !c.line.needsHuman)) {
+        const first = states()[0];
+        if (first === undefined) throw new Error("no states");
+        const a = decide({ ...first, change, runs });
+        expect(a.kind).toBe("needs-human");
+      }
     }
   });
 });

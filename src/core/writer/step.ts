@@ -15,6 +15,7 @@
 // Every run is started from its role card (process/cards.ts): its prompt is prompt.ts's, the run gets only the card's
 // tools, the card's must_not_see leaves its input out of the run, and the card's hash goes in the run record.
 
+import { rmdir } from "node:fs/promises";
 import { goAhead, type GoAhead } from "../start.js";
 import type { LaneProps } from "../lane.js";
 import type { BoxToken } from "../token/rules.js";
@@ -31,7 +32,8 @@ import type { BodyPost, PrBody } from "../post.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { keepText, readKept, recordsDirOf } from "../kept.js";
 import { dataFence } from "../review/fence.js";
-import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start } from "./clone.js";
+import { makeClone, removeClone, runFolder, SETTINGS_FILE, type Clone, type Start } from "./clone.js";
+import { keepLeft } from "../left.js";
 import { readTools, TARGET_REF, toolLines } from "./tools.js";
 import { scopesOf } from "./scope.js";
 import type { ClaudeWriter } from "../agent/claude-writer.js";
@@ -91,7 +93,7 @@ export type WriterSetup = {
   readonly specs?: SpecStore;
 };
 
-type Input = RunInput & { readonly task: Task };
+type Input = RunInput & { readonly task: Task; readonly folder?: string };
 export type WriterOut = {
   readonly head: string;
   readonly outcome: "done" | "asked" | "blocked" | "parked";
@@ -478,6 +480,11 @@ function knowledgeOf(known: Known): Pick<Parameters<typeof makeClone>[1], "knowl
   return known.files.kind === "text" ? { knowledge: { brief: known.files.brief, glossary: known.files.glossary } } : {};
 }
 
+// dirOf : the run folder the start line names, as a field to spread; none when the dispatcher named none
+function dirOf(input: Input): { readonly dir?: string } {
+  return input.folder === undefined ? {} : { dir: input.folder };
+}
+
 // withStale : each stale cite of the brief goes into the run record, for the retro (#235)
 function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
   return result.kind === "ok" && known.stale.length > 0
@@ -512,6 +519,7 @@ async function inClone(
     ref: TARGET_REF,
   });
   const clone = await makeClone(setup.box, {
+    ...dirOf(input),
     start: p.start,
     spec: p.spec.text,
     plugins: setup.settings.plugins.map((d) => d.dir),
@@ -555,7 +563,21 @@ async function inClone(
       ? await finished(setup, input, p, { clone: clone.value, ended: ended.value, mode: work.mode })
       : ended;
   const out = spentOn(await withOutput(setup, input, ended, withStale(withCard(result, work), known)), ended);
-  const removed = await removeClone(clone.value.dir);
+  return afterRun(input, clone.value.dir, out, ended);
+}
+
+// afterRun : the run folder removed once the run has an end; a failed step whose start line names the folder writes no
+// end, so its folder stays for the next pass's hand-over, which pushes what it holds and tells a person
+async function afterRun(
+  input: Input,
+  dir: string,
+  out: Result<WriterOut> | FailedSpent,
+  ended: Result<Ended> | FailedSpent,
+): Promise<Result<WriterOut> | FailedSpent> {
+  if (out.kind !== "ok" && input.folder !== undefined) {
+    return out;
+  }
+  const removed = await removeClone(dir);
   return removed.kind === "ok" ? out : spentOn(removed, ended);
 }
 
@@ -818,9 +840,31 @@ async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOu
   return p.kind === "ok" ? inClone(setup, input, p.value, plan.work) : p;
 }
 
-// writerStep : the dispatcher's writer, or why it cannot run here
+// runIn : one run in the folder the start line names. A run that stopped before its clone was made leaves the folder
+// empty, and rmdir removes only an empty one; a clone a failed run left stays for the hand-over (afterRun).
+async function runIn(setup: WriterSetup, input: Input): Promise<Result<WriterOut> | FailedSpent> {
+  const out = await runOne(setup, input);
+  if (input.folder !== undefined) {
+    await rmdir(input.folder).catch(() => undefined);
+  }
+  return out;
+}
+
+// writerStep : the dispatcher's writer, or why it cannot run here; the run folder is made before the start is
+// recorded, and a dead run's folder is looked into by the hand-over
 export function writerStep(setup: Result<WriterSetup>): Steps["writer"] {
-  return setup.kind === "ok"
-    ? { kind: "available", run: (input) => runOne(setup.value, input) }
-    : { kind: "unavailable", reason: setup.reason };
+  if (setup.kind === "failed") {
+    return { kind: "unavailable", reason: setup.reason };
+  }
+  const s = setup.value;
+  return {
+    kind: "available",
+    run: (input) => runIn(s, input),
+    folder: () => runFolder(s.box),
+    keep: keepLeft({
+      env: s.box.env,
+      forge: s.forge,
+      landing: { target: { kind: "ok", value: s.push }, pusher: s.pusher },
+    }),
+  };
 }

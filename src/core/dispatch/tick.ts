@@ -25,7 +25,7 @@
 import type { PluginHash } from "../process/use.js";
 import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   approvalState,
@@ -36,6 +36,7 @@ import {
 } from "../approval.js";
 import { NEEDS_HUMAN } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
+import { leftNote, type KeptInput, type KeptRun } from "../left.js";
 import type { Forge } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import { pruneTraces } from "./trace.js";
@@ -58,6 +59,7 @@ import {
   summarize,
   type Event,
   type Retried,
+  type RunFolder,
   type Summary,
   type Task,
   type Where,
@@ -575,7 +577,13 @@ function nextFields(why: string): Post["fields"] {
 // handOver : needs-human, the claim released (as block does), one note, and a record so the same stop is never posted
 // twice; the person's ping is the turn's (turnPinged). With no change to label, the pass fails for this ticket, so the
 // operator sees it.
-async function handOver(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
+// told: what the note says besides why, worked out once the change is labelled, so nothing hands it out meanwhile
+async function handOver(
+  setup: TickSetup,
+  state: TicketState,
+  why: string,
+  told: () => Promise<Told> = async () => NOTHING_MORE,
+): Promise<Done> {
   const n = number(state);
   if (n === "none") {
     return handOverUnchanged(setup, state, why);
@@ -583,7 +591,11 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
   const steps: readonly (() => Promise<Done>)[] = [
     () => setup.forge.addLabel({ number: n, label: NEEDS_HUMAN }),
     () => setup.forge.removeLabel({ number: n, label: setup.label }),
-    () => say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields: nextFields(why), items: [] }),
+    async () => {
+      const more = await told();
+      const fields = [...more.fields, ...nextFields(why)];
+      return say(setup, state, { seat: "coordinator", title: `blocked: ${why}`, fields, items: more.items });
+    },
     () => record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } }),
   ];
   for (const step of steps) {
@@ -593,6 +605,44 @@ async function handOver(setup: TickSetup, state: TicketState, why: string): Prom
     }
   }
   return { kind: "ok" };
+}
+
+// Told : the fields and items a hand-over's note adds
+type Told = { readonly fields: Post["fields"]; readonly items: readonly string[] };
+const NOTHING_MORE: Told = { fields: [], items: [] };
+
+// keptTold : a dead writer run's work, saved before the person is told: its commits pushed on top of the
+// change's branch as a blocked run's are, every uncommitted file named, the folder kept. A step that cannot look says
+// why in the note, and the folder is still kept.
+async function keptTold(setup: TickSetup, state: TicketState, run: RunFolder): Promise<Told> {
+  const kept = await keptIn(setup, state, run);
+  const folder = { label: "run folder", value: run.folder };
+  if (kept.kind === "failed") {
+    return { fields: [folder, { label: "push", value: `nothing pushed: ${kept.reason}` }], items: [] };
+  }
+  const note = leftNote(kept.value, kept.value.pushed, "the hand-over");
+  return { fields: [folder, ...note.fields], items: note.items };
+}
+
+// keptIn : what the writer's step found in the folder and did with it, or why it could not look
+function keptIn(setup: TickSetup, state: TicketState, run: RunFolder): Promise<Result<KeptRun>> {
+  const step = setup.steps.writer;
+  const keep = step.kind === "available" ? step.keep : undefined;
+  return keep === undefined
+    ? Promise.resolve({ kind: "failed", reason: "the writer's step cannot look into it" })
+    : keep({ folder: run.folder, since: run.head, change: changeNow(state) });
+}
+
+// changeNow : the open change's branch and head as the pass read them, or none
+function changeNow(state: TicketState): KeptInput["change"] {
+  return state.change.kind === "open" ? { branch: state.change.line.branch, head: state.change.line.head } : "none";
+}
+
+// handOverRun : a hand-over, with a dead writer run's work saved first when the action names its folder
+function handOverRun(setup: TickSetup, state: TicketState, why: string, run: RunFolder | undefined): Promise<Done> {
+  return run === undefined
+    ? handOver(setup, state, why)
+    : handOver(setup, state, why, () => keptTold(setup, state, run));
 }
 
 // handOverUnchanged : a stop with no change to label or note on, such as a held ticket's broken blocker (#494): the
@@ -717,7 +767,7 @@ async function mergeOf(
 
 // the actions that only touch the forge; "none" for a run or a wait
 const FORGE: Handler<Promise<Done> | "none"> = {
-  "needs-human": (setup, state, a) => handOver(setup, state, a.why),
+  "needs-human": (setup, state, a) => handOverRun(setup, state, a.why, a.run),
   release: (setup, state, a) => releaseClaim(setup, state, a.why),
   ping: (setup, state, a) => ping(setup, state, a.head),
   "design-note": (setup, state, a) => designNote(setup, state, a),
@@ -787,6 +837,42 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
   return kept.kind === "ok" ? startWriter(setup, state, task, step) : kept;
 }
 
+// begin : the run folder made, the start recorded with it, then the claim taken; the folder, as a field to spread.
+// The start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to
+// a person, never a claim with no record, which would look like someone else's. The folder is named before the run,
+// so a pass that dies mid-run leaves its work where the record says.
+async function begin(
+  setup: TickSetup,
+  state: TicketState,
+  step: Extract<Steps["writer"], { kind: "available" }>,
+  mode: ReturnType<typeof modeOf>,
+): Promise<Result<{ readonly folder?: string }>> {
+  const folder = await folderFor(step);
+  if (folder.kind === "failed") {
+    return folder;
+  }
+  const named = folder.value;
+  const started = await record({
+    where: where(setup, state),
+    event: {
+      at: at(setup),
+      kind: "started",
+      phase: "writer",
+      mode,
+      head: headOf(state),
+      plugins: usedBy(setup),
+      ...named,
+    },
+  });
+  const claimed = started.kind === "ok" ? await claim(setup, state) : started;
+  if (claimed.kind === "failed") {
+    // the folder is still empty, and rmdir removes only an empty one
+    await emptied(named.folder);
+    return claimed;
+  }
+  return { kind: "ok", value: named };
+}
+
 // startWriter : the writer's start recorded, the claim taken, then the run
 async function startWriter(
   setup: TickSetup,
@@ -794,19 +880,13 @@ async function startWriter(
   task: Task,
   step: Extract<Steps["writer"], { kind: "available" }>,
 ): Promise<Logged> {
-  const place = where(setup, state);
   const mode = modeOf(task);
-  // the start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to
-  // a person, never a claim with no record, which would look like someone else's
-  const started = await record({
-    where: place,
-    event: { at: at(setup), kind: "started", phase: "writer", mode, head: headOf(state), plugins: usedBy(setup) },
-  });
-  const claimed = started.kind === "ok" ? await claim(setup, state) : started;
-  if (claimed.kind === "failed") {
-    return claimed;
+  const begun = await begin(setup, state, step, mode);
+  if (begun.kind === "failed") {
+    return begun;
   }
-  const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task });
+  const named = begun.value;
+  const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task, ...named });
   // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person; what the
   // run spent is still recorded (#483)
   if (ran.kind !== "ok") {
@@ -861,6 +941,24 @@ async function parkNoticed(setup: TickSetup, state: TicketState, until: string, 
   await writeFile(path, key, { mode: 0o600 }).catch(() => undefined);
   const why = `${PARK_WAIT} ${shownAt(until, UTC)}, then its run starts again: ${said}`;
   await informed(setup, { kind: "held", ticket: state.ticket, change: number(state), why });
+}
+
+// folderFor : the run folder the step makes, as a field to spread; a step that makes none (a test's) names none
+async function folderFor(
+  step: Extract<Steps["writer"], { kind: "available" }>,
+): Promise<Result<{ readonly folder?: string }>> {
+  if (step.folder === undefined) {
+    return { kind: "ok", value: {} };
+  }
+  const made = await step.folder();
+  return made.kind === "ok" ? { kind: "ok", value: { folder: made.value } } : made;
+}
+
+// emptied : a run folder no run used, removed; rmdir refuses one that holds anything
+async function emptied(folder: string | undefined): Promise<void> {
+  if (folder !== undefined) {
+    await rmdir(folder).catch(() => undefined);
+  }
 }
 
 type WriterValue = Extract<

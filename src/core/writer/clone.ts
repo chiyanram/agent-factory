@@ -308,12 +308,21 @@ export async function removeClone(dir: string): Promise<Result<string>> {
   }, `cannot remove ${dir}`);
 }
 
-// makeClone : a run folder with the writer's clone in it; a folder that could not be set up is removed again
-export async function makeClone(setup: CloneSetup, input: Files & { readonly start: Start }): Promise<Result<Clone>> {
-  const dir = await attempt(async () => {
+// runFolder : a new, empty run folder (writer-XXXXXX), private to this user
+export function runFolder(setup: Pick<CloneSetup, "runsDir">): Promise<Result<string>> {
+  return attempt(async () => {
     await mkdir(setup.runsDir, { recursive: true, mode: 0o700 });
     return mkdtemp(join(setup.runsDir, "writer-"));
   }, `cannot make a folder in ${setup.runsDir}`);
+}
+
+// makeClone : a run folder with the writer's clone in it: the folder given, which the start line names, or a
+// new one; a folder that could not be set up is removed again
+export async function makeClone(
+  setup: CloneSetup,
+  input: Files & { readonly start: Start; readonly dir?: string },
+): Promise<Result<Clone>> {
+  const dir: Result<string> = input.dir === undefined ? await runFolder(setup) : { kind: "ok", value: input.dir };
   if (dir.kind === "failed") {
     return dir;
   }
