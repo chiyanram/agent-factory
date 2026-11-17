@@ -24,6 +24,7 @@ import {
 } from "./core/coordinator.js";
 import { attempt } from "./core/review/safe.js";
 import { checkDiscord, discordArgv, discordEnv, discordStateDir } from "./core/coordinator-discord.js";
+import { clearReset, resetWanted } from "./core/coordinator-turns.js";
 import type { BoxToken } from "./core/token/index.js";
 
 export type Interactive = (input: {
@@ -31,6 +32,8 @@ export type Interactive = (input: {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
+  // ends the session (SIGTERM) when aborted: the --discord launcher's reset
+  readonly signal?: AbortSignal;
 }) => Promise<number>;
 
 export type CoordinatorIo = {
@@ -40,6 +43,8 @@ export type CoordinatorIo = {
   readonly interactive: Interactive;
   // the coordinator seat's own model login; it never reads the runs' token
   readonly seat: () => Promise<SeatLogin>;
+  // how often the --discord launcher looks for the reset marker, in ms (a test makes it short)
+  readonly pollMs?: number;
 };
 
 export type SeatLogin = BoxToken | { readonly kind: "missing"; readonly reason: string };
@@ -200,14 +205,50 @@ export async function startCoordinator(places: CoordinatorPlaces, launch: Launch
     io.err(`agent-factory coordinator: no settings in ${dir}; run agent-factory setup coordinator first\n`);
     return 1;
   }
+  return launch.kind === "plain" ? startOnce(places, launch, io, dir) : supervised(places, launch, io, dir);
+}
+
+// startOnce : one session: the launch prepared afresh (the Discord files checked, the seat's login read), then run
+async function startOnce(
+  places: CoordinatorPlaces,
+  launch: Launch,
+  io: CoordinatorIo,
+  dir: string,
+  signal?: AbortSignal,
+): Promise<number> {
   const ready = await prepared(places, launch, io);
   if (ready.kind === "failed") {
     io.err(`agent-factory coordinator: ${ready.reason}\n`);
     return 1;
   }
   const [bin, ...args] = ready.value.argv;
-  return io.interactive({ bin: bin ?? "claude", args, cwd: dir, env: ready.value.env });
+  return io.interactive({ bin: bin ?? "claude", args, cwd: dir, env: ready.value.env, ...(signal ? { signal } : {}) });
 }
+
+// supervised : the Discord session, ended after the turn that reached the reset size (coordinator-turns.ts) and started
+// again fresh, from the brief and the handoff note, before the client would compact; it returns when the session
+// ends for any other reason
+async function supervised(
+  places: CoordinatorPlaces,
+  launch: Extract<Launch, { kind: "discord" }>,
+  io: CoordinatorIo,
+  dir: string,
+): Promise<number> {
+  await clearReset(launch.home, launch.project);
+  const control = new AbortController();
+  const watch = setInterval(() => {
+    void resetWanted(launch.home, launch.project).then((wanted) => wanted && control.abort());
+  }, io.pollMs ?? 2000);
+  const code = await startOnce(places, launch, io, dir, control.signal).finally(() => clearInterval(watch));
+  if (!control.signal.aborted) {
+    return code;
+  }
+  io.err(
+    "agent-factory coordinator: the context reached its reset size; starting a fresh session from the handoff note\n",
+  );
+  return supervised(places, launch, io, dir);
+}
+
 function parsedSettings(text: string, path: string): Result<unknown> {
   try {
     return { kind: "ok", value: JSON.parse(text) as unknown };

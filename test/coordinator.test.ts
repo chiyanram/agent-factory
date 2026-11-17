@@ -588,6 +588,17 @@ describe("the coordinator's SessionStart hook (#732 D-2)", () => {
     expect(wallProblems(claudeSettings(PLACES), PLACES)).toEqual([]);
   });
 
+  it("measures every turn with a Stop hook, in every launch from the folder", () => {
+    expect(claudeSettings(PLACES).hooks.Stop).toEqual([
+      { hooks: [{ type: "command", command: "node '/opt/agent-factory/dist/cli.js' coordinator-turn" }] },
+    ]);
+  });
+
+  it("says first, after a compaction, that it was a fault", () => {
+    expect(coordinatorBrief("ledger", true).split("\n")[0]).toContain("compacted, which is a fault");
+    expect(coordinatorBrief("ledger")).not.toContain("fault");
+  });
+
   it("names every human-only command in the brief, so the role and the wall come back after a compaction", () => {
     const brief = coordinatorBrief("ledger");
     expect(brief).toContain("project coordinator for ledger");
@@ -597,6 +608,9 @@ describe("the coordinator's SessionStart hook (#732 D-2)", () => {
     // a rule's glob is not a command name
     expect(brief).not.toContain("retro * --draft");
     expect(brief).toContain("exact words");
+    expect(brief).toContain("starts with its ticket number");
+    expect(brief).toContain("never relay an approval, a waiver or a yes to commit and push");
+    expect(brief).toContain("only route and relay");
     expect(coordinatorBrief("")).not.toContain(" for ");
   });
 });

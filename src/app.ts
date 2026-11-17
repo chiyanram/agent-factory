@@ -91,6 +91,7 @@ import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
 import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
 import { coordinatorBrief, type CoordinatorPlaces } from "./core/coordinator.js";
+import { recordStart, recordTurn, type TurnIo } from "./core/coordinator-turns.js";
 import { checkWall, installCoordinator, startCoordinator, type Launch, type SeatLogin } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 import { runSettings } from "./core/project.js";
@@ -186,6 +187,8 @@ commands:
                                plugin, after checking the state folder's .env and access.json (#732)
   coordinator-brief            the coordinator's SessionStart hook, not yours: its role, its wall and the handoff
                                note for its project; it always exits 0
+  coordinator-turn             the coordinator's Stop hook, not yours: logs each turn's context size and asks for
+                               a reset below the client's compaction; it always exits 0
   plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
   plugin update <project> <name@marketplace> [<commit>]
@@ -1732,6 +1735,29 @@ async function seatOf(io: Io): Promise<SeatLogin> {
   return store.kind === "refused" ? store : seatLogin({ store: store.store, now: new Date() });
 }
 
+// turnIo : where the coordinator's turns are logged: its own OS user's state folder
+function turnIo(io: Io, project: string): TurnIo {
+  return { home: userHome(io), project, now: () => new Date() };
+}
+
+// coordinatorTurnCommand : the Stop hook: the turn's context size logged, and a reset asked for at the
+// size below the client's compaction; a launch with no supervisor (the app, a plain terminal) shows the person a line
+// to reset. It always exits 0, so the hook never blocks the session.
+async function coordinatorTurnCommand({ io }: Args): Promise<number> {
+  const project = io.env[DEFAULT_PROJECT] ?? "";
+  const turn = await recordTurn(await io.readStdin(), turnIo(io, project)).catch(() => undefined);
+  if (turn?.kind === "measured" && turn.reset) {
+    io.out(`${JSON.stringify({ systemMessage: resetNote(turn.tokens, project) })}\n`);
+  }
+  return 0;
+}
+
+// resetNote : the line the person sees at the reset size. Pure.
+function resetNote(tokens: number, project: string): string {
+  const handoff = project === "" ? "agent-factory handoff" : `agent-factory handoff ${project}`;
+  return `the coordinator's context is ${tokens} tokens, at its reset size; start a fresh coordinator from ${handoff}`;
+}
+
 // userHome : the session user's home, as the env names it
 function userHome(io: Io): string {
   const named = io.env.HOME;
@@ -1753,7 +1779,8 @@ function seatStore(io: Io): Opened {
 // the session's project; exit 0 whatever the note's reads did, so the hook never blocks the session
 async function coordinatorBriefCommand({ io }: Args): Promise<number> {
   const project = io.env[DEFAULT_PROJECT] ?? "";
-  io.out(coordinatorBrief(project));
+  const compacted = await recordStart(await io.readStdin(), turnIo(io, project)).catch(() => false);
+  io.out(coordinatorBrief(project, compacted));
   if (project !== "") {
     await boardReaderCli(HANDOFF_READER, [project], io);
   }
@@ -1898,6 +1925,8 @@ const COMMANDS: readonly Command[] = [
   { name: "edit-scope", run: ({ positionals, io }: Args) => editScopeCommand(positionals, io) },
   // the coordinator's SessionStart hook
   { name: "coordinator-brief", run: coordinatorBriefCommand },
+  // the coordinator's Stop hook
+  { name: "coordinator-turn", run: coordinatorTurnCommand },
   // the writer's edit hook in the run, the same (writer/scope.ts writerScope)
   { name: "writer-scope", run: ({ positionals, io }: Args) => writerScopeCommand(positionals, io) },
 ];

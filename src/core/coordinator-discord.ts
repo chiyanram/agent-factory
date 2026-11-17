@@ -19,12 +19,18 @@ import type { Result } from "./forge/api.js";
 import { field } from "./human-record.js";
 import type { Argv } from "./project.js";
 import { SNOWFLAKE } from "./door/discord/files.js";
+import { AUTOCOMPACT } from "./coordinator-turns.js";
 
 export const DISCORD_PLUGIN = "discord@claude-plugins-official";
 
 // discordArgv : the coordinator's launch with the channel plugin. --setting-sources project keeps the person's own
 // user settings out, and with it a plugin enabled at user scope does not load, so --settings enables this one plugin
-// for this session. Never --continue or --resume: every start is fresh, from the handoff note.
+// for this session. dontAsk refuses anything that would prompt, so no permission prompt ever reaches the plugin's
+// relay (its DM buttons and its `yes <id>` text path): the relay stays off. --autocompact sets the window the client
+// compacts in, above the size the coordinator resets at (coordinator-turns.ts). Never --continue or --resume: every
+// start is fresh, from the handoff note.
+//
+// Today: the relay stays off until the hand test #729 shows its text path is safe.
 export function discordArgv(): Argv {
   return [
     "claude",
@@ -34,6 +40,10 @@ export function discordArgv(): Argv {
     JSON.stringify({ enabledPlugins: { [DISCORD_PLUGIN]: true } }),
     "--channels",
     `plugin:${DISCORD_PLUGIN}`,
+    "--permission-mode",
+    "dontAsk",
+    "--autocompact",
+    AUTOCOMPACT,
   ];
 }
 
@@ -79,7 +89,7 @@ function channelProblems(id: string, group: unknown, people: readonly string[] |
   }
   return samePeople(allowed, people)
     ? []
-    : [`groups.${id}.allowFrom must be the same people as allowFrom, who get the relay's buttons`];
+    : [`groups.${id}.allowFrom must be the same people as allowFrom, the mapped people`];
 }
 
 // groupProblems : exactly one channel, the project's
