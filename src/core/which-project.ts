@@ -12,20 +12,21 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
-import { projectPath } from "./project.js";
+import { projectOfFile, projectPath } from "./project.js";
 import { settingOf } from "./settings/machine.js";
 import { plainName } from "./spec.js";
 
 // the variable `agent-factory coordinator` sets in its session for the project it was started for
 export const DEFAULT_PROJECT = "FACTORY_DEFAULT_PROJECT";
 
-// projectNames : the projects in <home>/projects, one per <project>.json, sorted; none when the folder is missing
+// projectNames : the projects in <home>/projects, one per project file (projectOfFile), sorted; none when the folder
+// is missing
 export async function projectNames(home: string): Promise<readonly string[]> {
   const entries = await readdir(join(home, "projects"), { withFileTypes: true }).catch(() => []);
   return entries
-    .filter((e) => e.isFile() && e.name.endsWith(".json"))
-    .map((e) => e.name.slice(0, -".json".length))
-    .filter(plainName)
+    .filter((e) => e.isFile())
+    .map((e) => projectOfFile(e.name))
+    .filter((project) => project !== undefined)
     .toSorted();
 }
 
