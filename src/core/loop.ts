@@ -17,14 +17,24 @@
 
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { NEEDS_HUMAN, pushOnTop, questionRound, type Pusher } from "./finish.js";
+import { NEEDS_HUMAN, questionRound } from "./finish.js";
 import type { Question } from "./report.js";
 import type { Done, Result } from "./forge/api.js";
 import type { Change, Forge } from "./forge/types.js";
 import { hostGit } from "./git.js";
 import { renderPost, type Post, type Seat } from "./post.js";
-import type { PushRequest } from "./push.js";
-import type { PushTarget } from "./writer/step.js";
+import {
+  gitWhy,
+  landed,
+  leftIn as readLeft,
+  leftNote,
+  nothingLeft,
+  out,
+  summary,
+  textOf,
+  type Landing,
+  type Left,
+} from "./left.js";
 import { liveRuns, type Sessions } from "./review/live.js";
 import { attempt } from "./review/safe.js";
 
@@ -213,7 +223,7 @@ export type Reconcile = {
   readonly dryRun: boolean;
   // where a writer's unlanded commits are pushed, and the push itself (hostPush; a test passes its own); a target that
   // is not set keeps such a worktree unpushed, and says why
-  readonly landing: { readonly target: Result<PushTarget>; readonly pusher: Pusher };
+  readonly landing: Landing;
 };
 
 const RUN = /^(writer|reviewer)-(\d+)$/;
@@ -289,18 +299,6 @@ function inWorktree(input: Reconcile, path: string, args: readonly string[]): Re
   });
 }
 
-function gitWhy(result: Awaited<ReturnType<typeof hostGit>>): string {
-  if (result.kind === "refused") {
-    return result.reason;
-  }
-  const last = result.stderr.trim().split("\n").at(-1) ?? "";
-  return last === "" ? "git failed" : last;
-}
-
-function out(result: Awaited<ReturnType<typeof hostGit>>, what: string): Result<string> {
-  return result.kind === "ok" ? { kind: "ok", value: result.stdout } : failed(`cannot ${what}: ${gitWhy(result)}`);
-}
-
 // isWorktree : the folder is one of the clone's worktrees, and git there sees that folder, not another
 async function isWorktree(input: Reconcile, path: string): Promise<Done> {
   const real = await realpath(path).catch(() => "");
@@ -328,9 +326,6 @@ async function isListed(porcelain: string, real: string): Promise<boolean> {
   return reals.includes(real);
 }
 
-// Left : what a dead writer left in its worktree: commits no remote branch holds, and files git has not committed
-type Left = { readonly head: string; readonly commits: readonly string[]; readonly files: readonly string[] };
-
 // fetched : the remote branches brought up to date, so a commit pushed since counts as landed; a dry run changes no ref,
 // and reads the ones it has, which can only count more commits as unlanded, never fewer
 async function fetched(input: Reconcile, path: string): Promise<Done> {
@@ -343,46 +338,10 @@ async function fetched(input: Reconcile, path: string): Promise<Done> {
     : failed(`cannot fetch (${gitWhy(done)}), so cannot tell whether it holds unlanded work`);
 }
 
+// leftIn : what a dead writer left in its worktree: commits no remote branch holds, and files git has not committed
 async function leftIn(input: Reconcile, path: string): Promise<Result<Left>> {
   const fetch = await fetched(input, path);
-  if (fetch.kind === "failed") {
-    return fetch;
-  }
-  const head = out(await inWorktree(input, path, ["rev-parse", "HEAD"]), "read its head");
-  const commits = out(await inWorktree(input, path, ["rev-list", "HEAD", "--not", "--remotes"]), "list its commits");
-  const files = out(
-    await inWorktree(input, path, ["status", "--porcelain", "--no-renames", "--untracked-files=all", "-z"]),
-    "read its status",
-  );
-  const bad = [head, commits, files].find((r) => r.kind === "failed");
-  return bad?.kind === "failed" ? bad : { kind: "ok", value: leftOf(head, commits, files) };
-}
-
-function textOf(r: Result<string>): string {
-  return r.kind === "ok" ? r.value : "";
-}
-
-function leftOf(head: Result<string>, commits: Result<string>, files: Result<string>): Left {
-  return {
-    head: textOf(head).trim(),
-    commits: textOf(commits)
-      .split("\n")
-      .filter((l) => l !== ""),
-    // each entry of `status -z` is "XY path"
-    files: textOf(files)
-      .split("\0")
-      .filter((e) => e.length > 3)
-      .map((e) => e.slice(3)),
-  };
-}
-
-function nothingLeft(left: Left): boolean {
-  return left.commits.length === 0 && left.files.length === 0;
-}
-
-function summary(left: Left): string {
-  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
-  return `${n(left.commits.length, "unlanded commit")}, ${n(left.files.length, "uncommitted file")}`;
+  return fetch.kind === "ok" ? readLeft((args) => inWorktree(input, path, args), ["--remotes"]) : fetch;
 }
 
 async function onTop(input: Reconcile, path: string, change: Change, left: Left): Promise<Done> {
@@ -395,53 +354,17 @@ async function onTop(input: Reconcile, path: string, change: Change, left: Left)
     : failed(`cannot compare with the branch: ${gitWhy(ancestor)}`);
 }
 
-// readyToPush : where the commits go, once they fit on top of the branch as the forge has it now
-async function readyToPush(input: Reconcile, path: string, change: Change, left: Left): Promise<Result<PushRequest>> {
-  const { target } = input.landing;
-  if (target.kind === "failed") {
-    return target;
-  }
-  const fits = await onTop(input, path, change, left);
-  const base = fits.kind === "ok" ? await input.forge.defaultBranch() : fits;
-  return base.kind === "ok"
-    ? {
-        kind: "ok",
-        value: {
-          ...target.value,
-          repo: path,
-          branch: change.sourceBranch,
-          commit: left.head,
-          lease: { kind: "sha", sha: change.sha },
-          protectedBranches: [base.value],
-          guards: [],
-        },
-      }
-    : base;
-}
-
-// landed : the writer's unlanded commits pushed on top of the change's open branch, or why they were not
-async function landed(input: Reconcile, path: string, change: Change, left: Left): Promise<string> {
-  if (left.commits.length === 0 || left.head === change.sha) {
-    return "nothing to push";
-  }
-  const push = await readyToPush(input, path, change, left);
-  const done =
-    push.kind === "ok" ? await pushOnTop({ forge: input.forge, pusher: input.landing.pusher, push: push.value }) : push;
-  return done.kind === "ok"
-    ? `pushed ${left.commits.length} on top of ${change.sourceBranch}`
-    : `not pushed: ${done.reason}`;
+// pushedFrom : the writer's unlanded commits pushed on top of the change's open branch, or why they were not
+function pushedFrom(input: Reconcile, path: string, change: Change, left: Left): Promise<string> {
+  const onto = { repo: path, branch: change.sourceBranch, sha: change.sha };
+  return landed(input, onto, left, () => onTop(input, path, change, left));
 }
 
 function keptPost(name: string, pushed: string, left: Left): Post {
   return {
     seat: "coordinator",
     title: `reconcile found unlanded work in ${name}, and kept it for a person`,
-    fields: [
-      { label: "unlanded commits", value: left.commits.map((c) => c.slice(0, 8)).join(", ") || "none" },
-      { label: "push", value: pushed },
-      { label: "uncommitted files, never committed by reconcile", value: String(left.files.length) },
-    ],
-    items: left.files.slice(0, 20),
+    ...leftNote(left, pushed, "reconcile"),
   };
 }
 
@@ -475,7 +398,7 @@ async function handOver(input: Reconcile, name: string, change: Change, left: Le
   if (labelled.kind === "failed") {
     return `kept worktree ${name} (${summary(left)}; cannot label ${where} ${NEEDS_HUMAN}: ${labelled.reason})`;
   }
-  const pushed = await landed(input, join(worktreesDir(input), name), change, left);
+  const pushed = await pushedFrom(input, join(worktreesDir(input), name), change, left);
   const post = keptPost(name, pushed, left);
   const noted =
     renderPost(post).kind === "ok" ? await input.forge.note({ number: change.number, post }) : failed("no note");

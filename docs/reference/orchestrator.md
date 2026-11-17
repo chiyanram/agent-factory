@@ -154,7 +154,15 @@ project at a cap inform and ask nothing, so they keep their own checks: `held` p
 changes, the cap notice once per cap and period. `board` never pings. It never opens a ticket: the ticket list is the START and approval records and the
 `factory/<ticket>` changes. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
-ended goes to a person. START and approval are each one file a new one replaces, so a pass records each one once as a
+ended goes to a person. An implementer run's folder, `$FACTORY_HOME/box-runs/writer-XXXXXX`, is made before its
+`started` line, which names it as `folder`. The run's step removes the folder once the run has an end. A step that
+fails writes no end, so it leaves its clone there. When such a run never ends (the step failed, or the pass was
+killed), the next pass labels the PR `needs-human` and saves the work before the note (`src/core/left.ts`). It
+pushes the folder's commits since the run's start head on top of the PR's branch, with a blocked run's guards and a
+lease on the head the run started from, so a branch that moved since is left for a person. Its note names the
+folder, the commits, the push and every uncommitted file. It commits no file and deletes no folder: once you have
+taken the work, delete the folder by hand. A first run with no PR yet pushes nothing, and its `blocked` line names
+the folder. An older `started` line with no `folder` still says "check what it pushed". START and approval are each one file a new one replaces, so a pass records each one once as a
 `begun` or `approved` line, at the record's own time, keeping it for the ticket's touches (`usage`, #487). When a
 pass reconciles a merged change, it first records the merge once as a `merged` line: the git host's merged-at, the
 commit it landed as and who merged it (`Forge.landed`). A merge the git host cannot answer for is logged, and the claim

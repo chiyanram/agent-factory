@@ -1116,6 +1116,45 @@ describe("the writer step: a later run on the change", () => {
     expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the approval is stale") });
     expect(existsSync(join(p.root, "box-runs"))).toBe(false);
   });
+
+  it("runs in the folder its step made for the start line, and removes it however the run ended", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const step = writerStep({
+      kind: "ok",
+      value: setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []),
+    });
+    if (step.kind !== "available" || step.folder === undefined) throw new Error("no folder");
+    const folder = valueOf(await step.folder());
+    expect(folder.startsWith(join(p.root, "box-runs", "writer-"))).toBe(true);
+    const out = await step.run({ ticket: "PROJ-1", change: { kind: "none" }, head: "", task: FIX, folder });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+    expect(started(fake).worktree).toBe(join(folder, "repo"));
+    expect(existsSync(folder)).toBe(false);
+    // a run that stops before its clone is made still leaves no folder
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
+    const empty = valueOf(await step.folder());
+    const refused = await step.run({ ticket: "PROJ-1", change: { kind: "none" }, head: "", task: FIX, folder: empty });
+    expect(refused).toMatchObject({ kind: "failed" });
+    expect(existsSync(empty)).toBe(false);
+  });
+
+  it("a step that fails after its run writes no end line, so its folder, clone and commit stay for the hand-over", async () => {
+    const told = forge();
+    const failing = {
+      ...told,
+      forge: { ...told.forge, openChange: async () => ({ kind: "failed" as const, reason: "HTTP 502" }) },
+    };
+    const fake2 = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const step2 = writerStep({
+      kind: "ok",
+      value: setup(writer(fake2, { commit: true, report: DONE, exit: 0 }, []), failing, []),
+    });
+    if (step2.kind !== "available" || step2.folder === undefined) throw new Error("no folder");
+    const kept = valueOf(await step2.folder());
+    const lost = await step2.run({ ticket: "PROJ-1", change: { kind: "none" }, head: "", task: FIX, folder: kept });
+    expect(lost).toMatchObject({ kind: "failed", reason: expect.stringContaining("HTTP 502") });
+    expect(existsSync(join(kept, "repo", ".git"))).toBe(true);
+  });
 });
 
 const FINDING: Sorted = {

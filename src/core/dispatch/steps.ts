@@ -7,6 +7,7 @@ import type { Acted, FoundByRule } from "../review/acted-on.js";
 import type { DesignFinding, Kept } from "../design/findings.js";
 import type { Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
+import type { KeptInput, KeptRun } from "../left.js";
 import type { Lane } from "../spec.js";
 import type { EarlierRound } from "./design.js";
 import type { Task } from "./records.js";
@@ -18,9 +19,17 @@ export const BRANCH_PREFIX = "factory/";
 // held: a cap kept the run from starting (#131, #237), not a step that is not set up
 export type Unavailable = { readonly kind: "unavailable"; readonly reason: string; readonly held?: boolean };
 // F: how a failed run may say what it spent, for a step whose runs spend (#483)
-export type Step<I, O, F = never> =
+export type Step<I, O, F = never, X = unknown> =
   | Unavailable
-  | { readonly kind: "available"; readonly run: (input: I) => Promise<Result<O> | F> };
+  | ({ readonly kind: "available"; readonly run: (input: I) => Promise<Result<O> | F> } & X);
+
+// what the writer's step adds: the run folder, made before the start is recorded so the start line can name
+// it, and the hand-over's look into the folder of a run that never ended. A step without them (a test's) names no
+// folder, and its dead run's work is left for a person to find.
+export type WriterExtras = {
+  readonly folder?: () => Promise<Result<string>>;
+  readonly keep?: (input: KeptInput) => Promise<Result<KeptRun>>;
+};
 
 export type RunInput = { readonly ticket: string; readonly change: ChangeView; readonly head: string };
 // what a design review's run reads (#236): the spec and design with these hashes, and for the verify pass the
@@ -45,7 +54,8 @@ export type DesignRan<T> = { readonly card: string; readonly spend?: Spend; read
 export type ReadyFacts = { readonly criteria: readonly string[]; readonly oneWayDoor: readonly string[] };
 export type Steps = {
   readonly writer: Step<
-    RunInput & { readonly task: Task },
+    // folder: the run folder the start line names; the step makes its own when none is given
+    RunInput & { readonly task: Task; readonly folder?: string },
     {
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked" | "parked";
@@ -69,7 +79,8 @@ export type Steps = {
       readonly trace?: string;
     },
     // a writer step that fails after the run still says what the run spent (#483)
-    FailedSpent
+    FailedSpent,
+    WriterExtras
   >;
   // the ready check runs the writer's evidence rows again at the head; why names the first row that failed, and human
   // says a test check stopped it for a person (#231). It reads the lane the real diff needs (#230), and holds each

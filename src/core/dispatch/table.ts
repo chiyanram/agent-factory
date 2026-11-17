@@ -15,8 +15,8 @@
 //   the change is merged and still claimed                     reconcile (remove the claim)
 //   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
 //   needs-human on the change                                  wait: a person decides
-//   a run started and never ended (the dispatcher died)        needs-human: check what that run pushed (a design run
-//                                                              pushed nothing: it is tried again, below)
+//   a run started and never ended (the dispatcher died)        needs-human: a writer's folder's work pushed and named;
+//                                                              else check what it pushed (a design run: tried again)
 //   a design review due at the spec's and design's hashes      design-reviewer, then verify pass; a failed run is tried
 //                                                              again after its backoff, 3 failures → wait for a person
 //   approved before the design review's verify pass ended      wait: the human approves again, after the findings
@@ -74,7 +74,7 @@
 
 import { above, raisedWhy, type Lane } from "../lane-order.js";
 import type { OpenLine, MergedLine } from "../poll.js";
-import type { Retried, Summary, Task, WriterMode } from "./records.js";
+import type { Retried, RunFolder, Summary, Task, WriterMode } from "./records.js";
 import type { Caps } from "./caps.js";
 import { ticketCapped } from "./ticket-cap.js";
 import { waitingWhy, type BlockersView } from "./blockers.js";
@@ -151,7 +151,7 @@ export type Action =
   | { readonly kind: "blockers-unread"; readonly why: string }
   // a person told, once, why the design review holds or ends at these hashes: a raised lane, the round cap (#489)
   | { readonly kind: "design-note"; readonly spec: string; readonly design: string; readonly why: string }
-  | { readonly kind: "needs-human"; readonly why: string }
+  | { readonly kind: "needs-human"; readonly why: string; readonly run?: RunFolder }
   | { readonly kind: "release"; readonly why: string }
   | { readonly kind: "ping"; readonly head: string }
   | { readonly kind: "reconcile" };
@@ -186,11 +186,16 @@ const needsHuman: Rule = (s) => {
 // a design run pushes nothing, so its lost start is a failed try (design.ts), never a person's to check
 const DESIGN_PHASES: ReadonlySet<string> = new Set(["design-review", "design-verify"]);
 
+// a writer start that names its folder hands its work over, saved first; an older start, or a check's, names none
 const interrupted: Rule = (s) => {
   const i = s.runs.interrupted;
-  return i.kind === "interrupted" && !DESIGN_PHASES.has(i.phase)
-    ? { kind: "needs-human", why: `the ${i.phase} run started at ${i.at} never ended; check what it pushed` }
-    : "next";
+  if (i.kind !== "interrupted" || DESIGN_PHASES.has(i.phase)) {
+    return "next";
+  }
+  const ended = `the ${i.phase} run started at ${i.at} never ended`;
+  return i.run === undefined
+    ? { kind: "needs-human", why: `${ended}; check what it pushed` }
+    : { kind: "needs-human", why: `${ended}; its run folder is ${i.run.folder}`, run: i.run };
 };
 
 // goAt : when a human's START or approval let the build begin, or "" while nothing does

@@ -128,6 +128,9 @@ export type Event =
       readonly head: string;
       // each plugin the run used and its hash (#232); absent on older lines
       readonly plugins?: readonly PluginHash[];
+      // the writer's run folder, named before the run: a pass that dies mid-run leaves its work there; absent
+      // on older lines and on every other phase
+      readonly folder?: string;
     }
   | {
       readonly at: string;
@@ -395,10 +398,19 @@ function startedOf(raw: unknown, at: string): Event | Bad {
   if (phase === BAD || mode === BAD || head === BAD) {
     return BAD;
   }
+  return { at, kind: "started", phase, mode, head, ...pluginsOf(raw), ...folderOf(raw) };
+}
+
+// pluginsOf : a started line's plugins, as a field to spread; none on an older line
+function pluginsOf(raw: unknown): { readonly plugins?: readonly PluginHash[] } {
   const plugins = hashesIn(prop(raw, "plugins"));
-  return plugins === undefined
-    ? { at, kind: "started", phase, mode, head }
-    : { at, kind: "started", phase, mode, head, plugins };
+  return plugins === undefined ? {} : { plugins };
+}
+
+// folderOf : a writer's start line's run folder, as a field to spread; none on an older line or another phase's
+function folderOf(raw: unknown): { readonly folder?: string } {
+  const folder = prop(raw, "folder");
+  return typeof folder === "string" ? { folder } : {};
 }
 
 // hashesIn : a started line's plugins and their hashes; none on an older line, or one that holds no list
@@ -1259,11 +1271,20 @@ export type LastWriter =
       readonly at?: string;
     };
 
+// RunFolder : a writer run's folder, as its start line names it, and the head the run started from
+export type RunFolder = { readonly folder: string; readonly head: string };
+
 export type Summary = {
   // a run whose start has no end: the dispatcher died during it
   readonly interrupted:
     | { readonly kind: "none" }
-    | { readonly kind: "interrupted"; readonly phase: Phase; readonly at: string };
+    | {
+        readonly kind: "interrupted";
+        readonly phase: Phase;
+        readonly at: string;
+        // a writer run's folder and the head it started from; none on an older line
+        readonly run?: RunFolder;
+      };
   readonly lastWriter: LastWriter;
   // the implementer's patch before its last one, to catch the same patch twice; a cleanup run's is never one (#236)
   readonly previousPatch: string;
@@ -1465,7 +1486,12 @@ const STEPS: Steps = {
     ...s,
     ...seedTurn(s, "factory"),
     blockedRun: "",
-    interrupted: { kind: "interrupted", phase: e.phase, at: e.at },
+    interrupted: {
+      kind: "interrupted",
+      phase: e.phase,
+      at: e.at,
+      ...(e.folder === undefined ? {} : { run: { folder: e.folder, head: e.head } }),
+    },
   }),
   "writer-ended": writerEnded,
   "ready-ended": (s, e) => ({
