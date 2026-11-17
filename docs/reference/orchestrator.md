@@ -71,10 +71,10 @@ A review round that fails after it spent (a pass at its budget, say) writes a `s
 the failed one's too: its start still reads as a run that never ended, so a person looks, and its spend counts toward
 the caps and `usage`.
 Every implementer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
-in `src/core/writer/step.ts`), so nothing is left in the background when the run ends.
+in `src/core/writer/prompt.ts`), so nothing is left in the background when the run ends.
 Every build run starts from its role card (#232): test-first, the implementer (fix, rework, CI and merge runs) or
 cleanup, from the process plugin's `process/roles/`, else the engine's `prompts/roles/`. The prompt is the card's
-body, then the run's task in the engine's words, then the engine's floor (`FLOOR` in `src/core/writer/step.ts`),
+body, then the run's task in the engine's words, then the engine's floor (`FLOOR` in `src/core/writer/prompt.ts`),
 which no card can drop. The engine enforces the card's frontmatter (`src/core/process/cards.ts`): its `tools` are
 the run's only tools (`claude --tools`, with the task list, skills and subagents, which add no reach); its
 `must_not_see` leaves those inputs out of the run, on top of the role's own floor, and a card that leaves out what
