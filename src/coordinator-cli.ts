@@ -1,6 +1,7 @@
 // coordinator-cli — `agent-factory setup coordinator` writes the coordinator's settings and instructions, and
 // `agent-factory coordinator [<project>] [copilot]` starts its session there, or with --discord in the
-// project's Discord channel after checking the plugin's state folder (core/coordinator-discord.ts). The settings come
+// project's Discord channel after checking that its plugin is on (core/agent/claude-plugins.ts) and its state
+// folder (core/coordinator-discord.ts). The settings come
 // from src/core/coordinator.ts. The launch reads only the coordinator's own model token from its OS user's store
 // (setup claude --seat coordinator), never the runs' token, and puts it in the env, never argv.
 //
@@ -18,12 +19,14 @@ import {
   claudeArgv,
   claudeMd,
   claudeSettings,
+  coordinatorDir,
   copilotArgs,
   wallProblems,
   type CoordinatorPlaces,
 } from "./core/coordinator.js";
 import { attempt } from "./core/review/safe.js";
-import { checkDiscord, discordArgv, discordEnv, discordStateDir } from "./core/coordinator-discord.js";
+import { pluginProblem, pluginState } from "./core/agent/claude-plugins.js";
+import { checkDiscord, DISCORD_PLUGIN, discordArgv, discordEnv, discordStateDir } from "./core/coordinator-discord.js";
 import { clearReset, resetWanted } from "./core/coordinator-turns.js";
 import type { BoxToken } from "./core/token/index.js";
 
@@ -55,9 +58,7 @@ export type Launch =
   | { readonly kind: "plain"; readonly runner: "claude" | "copilot" }
   | { readonly kind: "discord"; readonly project: string; readonly home: string; readonly uid: number };
 
-export function coordinatorDir(factoryHome: string): string {
-  return join(factoryHome, "coordinator");
-}
+export { coordinatorDir };
 
 async function isLink(path: string): Promise<boolean> {
   return lstat(path).then(
@@ -165,12 +166,34 @@ async function launchOf(
     const argv = launch.runner === "claude" ? claudeArgv() : ["copilot", ...copilotArgs(places)];
     return { kind: "ok", value: { argv, env: io.env } };
   }
-  // Today: the plugin-enabled check (#555's pluginState for DISCORD_PLUGIN) is not built yet, so a plugin that is off
-  // is not refused here and the session starts deaf
+  return discordLaunch(places, launch, io);
+}
+
+// pluginOff : why the Discord plugin is not on at user scope in the session user's home, nor kept out of the
+// coordinator's folder, with its fix; "" when it is. An install can exit 0 and leave it off, and the session would
+// then start deaf.
+async function pluginOff(places: CoordinatorPlaces, home: string, env: Env): Promise<string> {
+  const state = await pluginState(DISCORD_PLUGIN, {
+    env: { ...env, HOME: home },
+    folders: [coordinatorDir(places.factoryHome)],
+  });
+  return pluginProblem(DISCORD_PLUGIN, state);
+}
+
+// discordLaunch : the Discord launch's argv and env, after its two files and the plugin's state are checked
+async function discordLaunch(
+  places: CoordinatorPlaces,
+  launch: Extract<Launch, { kind: "discord" }>,
+  io: CoordinatorIo,
+): Promise<Result<{ readonly argv: readonly string[]; readonly env: Env }>> {
   const dir = discordStateDir(launch.home, launch.project);
   const checked = await checkDiscord(dir, launch.uid);
   if (checked.kind === "failed") {
     return checked;
+  }
+  const off = await pluginOff(places, launch.home, io.env);
+  if (off !== "") {
+    return { kind: "failed", reason: off };
   }
   for (const warning of checked.value) {
     io.err(`agent-factory coordinator: ${warning}\n`);
@@ -193,8 +216,8 @@ async function prepared(
 }
 
 // startCoordinator : the session in its folder, with only the folder's settings (Claude Code) or the same rules as
-// flags (Copilot CLI), and its seat's own login; refused when setup has not written them, or when the Discord files
-// are looser than the wall
+// flags (Copilot CLI), and its seat's own login; refused when setup has not written them, or, for the Discord launch,
+// when its plugin is not on at user scope or its files are looser than the wall
 export async function startCoordinator(places: CoordinatorPlaces, launch: Launch, io: CoordinatorIo): Promise<number> {
   const dir = coordinatorDir(places.factoryHome);
   const there = await readFile(join(dir, ".claude", "settings.json"), "utf8").then(

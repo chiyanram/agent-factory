@@ -22,7 +22,8 @@ check)*. **Today:** the service that keeps the session up is #748, so for now ru
 
 - Claude Code with a claude.ai login (channels need one), and the plugin installed at **user** scope:
   `claude plugin install discord@claude-plugins-official --scope user`. Never install it at project scope, which writes
-  into the folder. **Today:** the launch does not yet refuse a plugin that is off (#555).
+  into the folder. The launch refuses to start while the plugin is off, not installed, or set in the coordinator's
+  folder, and names the fix ([Claude Code plugins](set-up-coordinator.md#claude-code-plugins)).
 - `agent-factory setup coordinator` run once, so the coordinator's folder holds its wall.
 - On the VM, the coordinator's own OS user, which is not `factory`. On a laptop, your own user.
 - Developer Mode in Discord (User Settings → Advanced), so you can copy ids.

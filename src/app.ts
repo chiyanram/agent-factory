@@ -196,7 +196,7 @@ commands:
   plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
   plugin list                  the registered plugins
   config show <project>        every settings key: its value, layer, file:line and class (--json: as JSON)
-  config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
+  config check <project>       check the resolved layers, and show each Claude Code plugin the factory needs: exit 0 or 1
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
 ${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${HANDOFF_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile

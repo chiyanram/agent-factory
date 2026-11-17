@@ -61,11 +61,25 @@ function commitTeam(value: unknown): string {
 const BASE = { gate: "forge-ci", ready: { programs: ["make", "npm"], timeoutMinutes: 30 } };
 
 type Run = { readonly code: number; readonly out: string; readonly err: string };
+// discordOn : the Discord plugin on at user scope, in the Claude config folder cli points at, so config check has no
+// plugin warning
+function discordOn(): string {
+  const config = join(home, "claude");
+  const id = "discord@claude-plugins-official";
+  mkdirSync(join(config, "plugins"), { recursive: true });
+  writeFileSync(join(config, "settings.json"), JSON.stringify({ enabledPlugins: { [id]: true } }));
+  writeFileSync(
+    join(config, "plugins", "installed_plugins.json"),
+    JSON.stringify({ version: 2, plugins: { [id]: [{ scope: "user" }] } }),
+  );
+  return join(config, "settings.json");
+}
+
 async function cli(argv: readonly string[], env?: NodeJS.ProcessEnv): Promise<Run> {
   let out = "";
   let err = "";
   const code = await runCli(argv, {
-    env: { ...process.env, ...env, FACTORY_HOME: home },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: join(home, "claude"), ...env, FACTORY_HOME: home },
     out: (t) => (out += t),
     err: (t) => (err += t),
     readSecret: async () => "",
@@ -578,6 +592,18 @@ describe("agent-factory config and team (#229)", () => {
     expect((await cli(["config", "toString", "ledger"])).code).toBe(64);
   });
 
+  it("config check shows the Discord plugin's state, and a plugin not on is a warning, not an error (#555)", async () => {
+    writeProject(BASE);
+    const id = "discord@claude-plugins-official";
+    const missing = await cli(["config", "check", "ledger"]);
+    expect(missing.code).toBe(0);
+    expect(missing.err).toContain(`warning: claude plugin ${id}: not installed`);
+    const file = discordOn();
+    const on = await cli(["config", "check", "ledger"]);
+    expect(on).toMatchObject({ code: 0, err: "" });
+    expect(on.out).toContain(`claude plugin ${id}: on (user, ${file})`);
+  });
+
   it("config check refuses a clone whose origin is not the project's repo, naming both URLs (#640)", async () => {
     const clone = join(home, "clone");
     mkdirSync(clone);
@@ -888,6 +914,7 @@ describe("the read-only runs' time limits (ADR-0012 S7, P7)", () => {
 describe("connectors and the plugin list (#232)", () => {
   it("reads the connectors, and the old plugins map for one release with a warning", async () => {
     writeProject({ ...BASE, connectors: { notify: "discord" } });
+    discordOn();
     const now = await readPluginConfig({ home, project: "ledger" });
     expect(now).toMatchObject({ kind: "ok" });
     expect(now.kind === "ok" ? [...now.value.plugins] : []).toEqual([["notify", "discord"]]);
@@ -945,6 +972,7 @@ describe("connectors and the plugin list (#232)", () => {
     const pins = [pin("team", "a".repeat(64), true), pin("rules", "b".repeat(64), false)];
     writeFileSync(join(home, "projects", "ledger.plugins.json"), text(Object.fromEntries(pins)));
     writeProject({ ...BASE, plugins: ["team@acme", "rules@acme", "other@acme"] });
+    discordOn();
     expect(await cli(["config", "check", "ledger"])).toMatchObject({ code: 0, err: "" });
 
     const both = [...pins, pin("other", "d".repeat(64), true)];

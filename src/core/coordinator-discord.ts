@@ -20,8 +20,9 @@ import { field } from "./human-record.js";
 import type { Argv } from "./project.js";
 import { SNOWFLAKE } from "./door/discord/files.js";
 import { AUTOCOMPACT } from "./coordinator-turns.js";
+import { DISCORD_PLUGIN } from "./agent/claude-plugins.js";
 
-export const DISCORD_PLUGIN = "discord@claude-plugins-official";
+export { DISCORD_PLUGIN };
 
 // discordArgv : the coordinator's launch with the channel plugin. --setting-sources project keeps the person's own
 // user settings out, and with it a plugin enabled at user scope does not load, so --settings enables this one plugin

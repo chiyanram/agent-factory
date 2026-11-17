@@ -38,6 +38,7 @@
 // project, so the person's own user settings add no allow rule. Bash deny rules match a command as typed; the docs say
 // they are no security boundary, which is why the forge login stays out of the coordinator's reach in the target.
 
+import { join } from "node:path";
 import type { Argv } from "./project.js";
 
 export type CoordinatorPlaces = {
@@ -327,6 +328,11 @@ export function claudeMd(p: CoordinatorPlaces): string {
   const guide = `${p.pkg}/prompts/coordinator.md`;
   const importLine = /\s/.test(guide) ? "" : `\n@${guide}\n`;
   return `# Coordinator\n\nYou are the factory's coordinator. Follow ${guide} as your instructions.\n${importLine}`;
+}
+
+// coordinatorDir : the coordinator's folder in the factory home, where its settings and instructions live
+export function coordinatorDir(factoryHome: string): string {
+  return join(factoryHome, "coordinator");
 }
 
 export function claudeArgv(): Argv {

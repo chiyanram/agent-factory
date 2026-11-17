@@ -63,3 +63,24 @@ session; a hook that cannot run falls back to asking, never to allowing. Where t
   the file with a command its Bash rules do not name. The wall holds once the folder belongs to the `factory` OS user
   (ADR-0012 S2) or the sandbox is on (#674).
 - **Today:** Jira reads come with its connector (#566); writes to them go through `request` ([Writes](../reference/connectors.md#writes)).
+
+## Claude Code plugins
+
+Install a Claude Code plugin the coordinator needs at user scope only:
+`claude plugin install <name>@<marketplace> --scope user`. Never use `--scope project` or `--scope local`, because
+they write into the folder (a clone, or the coordinator's own) and override your user choice. An install can exit 0
+and leave the plugin off, so the factory reads Claude Code's files back instead of trusting it (#555):
+
+- `agent-factory config check <project>` prints each plugin it knows, today `discord@claude-plugins-official`, as on
+  with the file it read, or as a warning that names the state and the fix: off, not installed, set at project scope,
+  or a settings file it cannot read or that is not JSON.
+- `agent-factory coordinator <project> --discord` refuses to start Claude Code while the Discord plugin is not on,
+  and names the fix. The plain launch needs no plugin.
+
+The coordinator starts with `--setting-sources project`, under which Claude Code loads no plugin enabled at user
+scope, so the Discord launch also enables its plugin with `--settings`. The check is what makes that safe: `--settings`
+cannot load a plugin that is not installed.
+
+It reads `enabledPlugins` in `$CLAUDE_CONFIG_DIR/settings.json` (else `~/.claude/settings.json`), the user install in
+`plugins/installed_plugins.json` beside it, and `.claude/settings.json` and `.claude/settings.local.json` in the clone
+and the coordinator's folder (the launch reads only the coordinator's folder).
