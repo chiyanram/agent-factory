@@ -66,6 +66,10 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 
   Every lane ends in build, automated code review and a PR from `.github/pull_request_template.md`.
 - Say the lane and why when you pick up a ticket. The operator can raise it, never lower it.
+- Keep one report per ticket: the grilling, spec, design and ADR draft live in one ticket comment. When any of them
+  changes, edit that comment in place, with one line at its top saying what changed and from whose words; never
+  post an amendment beside it. Report to the operator in chat the same way, as one whole message, not pieces.
+  The operator approves one text, and a report split across comments hides what is being approved.
 - Split work too big for one PR into child tickets before the build, because the operator approves the
   shape before code exists, not after (#557 is the worked example).
 - Run one fresh session per ticket, starting from `agent-factory board` and the ticket's body and comments, never
