@@ -40,4 +40,5 @@ The two gaps are on the [roadmap](roadmap.md#8-order-of-work) at the step where 
 
 The article's factory is always on. Ours starts nothing until a person starts it
 ([P8](../CONSTITUTION.md#p8-a-person-starts-everything)): an unattended run is one a person started and nobody
-watches, not one that starts itself.
+watches, not one that starts itself. A coordinator or bot that waits in a chat channel does not change this: listening
+is not acting, so it starts no run and spends nothing until a person writes to it.

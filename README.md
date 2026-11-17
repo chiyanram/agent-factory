@@ -33,8 +33,9 @@ Terms such as START and lane are defined in [GLOSSARY.md](GLOSSARY.md).
 ## Who it is for, and what it is not
 
 For a developer or a small team who wants agent-built pull requests on their own GitHub or GitLab repos, with each
-run sandboxed and capped. It is not a hosted service, not always on (nothing runs until a human starts a ticket), and
-not a merge bot. Today the runs need a Claude plan; Copilot support is planned
+run sandboxed and capped. It is not a hosted service, not always on (nothing runs until a human starts a ticket, and a
+coordinator or bot that waits in a chat only listens), and not a merge bot. Today the runs need a Claude plan; Copilot
+support is planned
 ([#493](https://github.com/chiyanram/agent-factory/issues/493)).
 
 ## Install and set up
