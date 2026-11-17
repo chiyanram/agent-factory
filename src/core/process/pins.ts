@@ -14,7 +14,7 @@ import { lstat, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
-import { projectPath, readProjectRaw } from "../project.js";
+import { readProjectRaw, sidePath } from "../project.js";
 import { attempt } from "../review/safe.js";
 import { pluginListOf, refText, type PluginRef } from "./plugins.js";
 import type { PluginDir } from "./read.js";
@@ -36,7 +36,7 @@ export function marketplaceDir(home: string, marketplace: string): string {
 }
 
 export function pinsPath(home: string, project: string): string {
-  return projectPath(home, project).replace(/\.json$/, ".plugins.json");
+  return sidePath(home, project, "plugins");
 }
 
 export function storeDir(home: string, ref: PluginRef, sha256: string): string {

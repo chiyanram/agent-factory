@@ -235,6 +235,21 @@ export function projectPath(home: string, project: string): string {
   return join(home, "projects", `${project}.json`);
 }
 
+// the files that sit beside a project's file in <home>/projects, each <project>.<kind>.json; none of them is a project
+const SIDE_FILES = ["plugins"] as const;
+export type SideFile = (typeof SIDE_FILES)[number];
+
+export function sidePath(home: string, project: string, kind: SideFile): string {
+  return join(home, "projects", `${project}.${kind}.json`);
+}
+
+// projectOfFile : the project whose project file a file name in <home>/projects is, or undefined when it is not one:
+// not *.json, not a plain name, or a side file
+export function projectOfFile(file: string): string | undefined {
+  const name = file.endsWith(".json") ? file.slice(0, -".json".length) : "";
+  return plainName(name) && !SIDE_FILES.some((kind) => name.endsWith(`.${kind}`)) ? name : undefined;
+}
+
 // a read of the file as JSON, not yet checked: its path and its value, none at all, or one that is refused
 export type RawRead =
   | { readonly kind: "ok"; readonly path: string; readonly value: object }

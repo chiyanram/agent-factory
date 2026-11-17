@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentsOf, readProjectFile, readProjectRaw, runSettings } from "../src/core/project.js";
+import {
+  agentsOf,
+  projectOfFile,
+  projectPath,
+  readProjectFile,
+  readProjectRaw,
+  runSettings,
+  sidePath,
+} from "../src/core/project.js";
 import { commandArgv, evidencePrograms, GIT_READS, READ_ONLY_PROGRAMS } from "../src/core/ready/command.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
 import { tempDir } from "./temp.js";
@@ -18,6 +26,24 @@ function write(value: unknown): void {
 }
 
 const read = () => readProjectFile({ home, project: "ledger" });
+
+describe("the files in <home>/projects: a project file or a side file beside it", () => {
+  it("names the project of a project file, and no project for a side file or anything else", () => {
+    expect(projectOfFile("ledger.json")).toBe("ledger");
+    expect(projectOfFile("my.app.json")).toBe("my.app");
+    expect(projectOfFile("ledger.plugins.json")).toBeUndefined();
+    expect(projectOfFile("ledger.json.tmp")).toBeUndefined();
+    expect(projectOfFile(".json")).toBeUndefined();
+    expect(projectOfFile("-x.json")).toBeUndefined();
+  });
+
+  it("puts a side file beside the project's file, and never reads it back as a project", () => {
+    const path = sidePath(home, "ledger", "plugins");
+    expect(path).toBe(join(home, "projects", "ledger.plugins.json"));
+    expect(path.startsWith(projectPath(home, "ledger").slice(0, -".json".length))).toBe(true);
+    expect(projectOfFile("ledger.plugins.json")).toBeUndefined();
+  });
+});
 
 describe("readProjectFile (ADR-0014 P3, #91)", () => {
   it("reads the floor guard's own test globs, which replace the built-in ones; refuses a list that is not one (#190)", async () => {
