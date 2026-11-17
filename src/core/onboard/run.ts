@@ -28,6 +28,7 @@ import { hostGit } from "../git.js";
 import { readCard, type Card } from "../process/cards.js";
 import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
+import { dataFence } from "../review/fence.js";
 import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { ANSWER_SCHEMA, readAnswer, type Answer } from "./answer.js";
 import { written, type Written } from "./brief.js";
@@ -148,7 +149,7 @@ function commandsText(commands: Commands): string {
   const rows = commands.commands.map(
     (c) => `- \`${c.command}\`${c.help === "" ? "" : `: ${c.help}`} (${c.file}:${c.line})`,
   );
-  return `# Commands\n\nListed by the engine from ${commands.from}:\n\n${rows.join("\n")}\n`;
+  return `# Commands\n\nListed by the engine from ${commands.from}:\n${dataFence({ title: "the commands", text: rows.join("\n") })}`;
 }
 
 // rulesText : the MUSTs the engine read from the root AGENTS.md and CLAUDE.md, for the model to read as data: code/
@@ -162,8 +163,9 @@ function rulesText(musts: readonly Must[]): string {
     "The engine read the root ones itself and writes this section of the brief alone. Write no line about the",
     "project's rules or its instruction files: the engine drops any line that names them.",
     "",
-    ...(rows.length === 0 ? ["No MUST found in the root AGENTS.md or CLAUDE.md."] : rows),
-    "",
+    rows.length === 0
+      ? "No MUST found in the root AGENTS.md or CLAUDE.md.\n"
+      : dataFence({ title: "the MUSTs", text: rows.join("\n") }),
   ].join("\n");
 }
 

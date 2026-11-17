@@ -30,6 +30,7 @@ import type { Approver, Spec, SpecStore } from "../spec.js";
 import type { BodyPost, PrBody } from "../post.js";
 import type { BoxSetup } from "../ready/boxrun.js";
 import { keepText, readKept, recordsDirOf } from "../kept.js";
+import { dataFence } from "../review/fence.js";
 import { makeClone, removeClone, SETTINGS_FILE, type Clone, type Start } from "./clone.js";
 import { readTools, TARGET_REF, toolLines } from "./tools.js";
 import { scopesOf } from "./scope.js";
@@ -712,9 +713,7 @@ export function cleanupText(evidence: readonly Evidence[], base: string): string
     `The branch's own lines are its diff against origin/${base}: \`git diff origin/${base}...HEAD\`.`,
     "",
     "The implementer's evidence rows. Run each again after your cleanup; each must give the same result, and your report's evidence is these rows, run again:",
-    "",
-    ...rows,
-    "",
+    dataFence({ title: "the evidence rows", text: rows.join("\n") }),
   ].join("\n");
 }
 

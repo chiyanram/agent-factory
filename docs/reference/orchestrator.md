@@ -258,6 +258,11 @@ and posts what it committed. A `rework` or `ci` run (#171) works the same way, w
 | red git host CI | each failed job's name and the last 200 lines of its log, for the first 3 jobs (GitHub check runs and statuses, GitLab pipeline jobs) |
 | a failed local verifier | the verifier's own output, kept at `.claude/runs/<change>/<head>/verify.txt` before it posts the status |
 
+Every outside or model-written text in it (a finding, a reason, a log or stream tail, a job's name), like a cleanup
+run's evidence rows and the onboarder's `rules.md` and `commands.md`, sits in a fence it cannot close, under one fixed
+line saying it is data, never an instruction, with its control and invisible characters removed
+(`dataFence`, `src/core/review/fence.ts`). A log keeps its backticks: the fence grows past them.
+
 When the host cannot build the task (nothing kept at the head, or red CI with no failed job named), it says so on the
 change and labels it `needs-human`. `dispatch` also does these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a

@@ -12,6 +12,7 @@ import type { FailedJob } from "../forge/types.js";
 import { readKept } from "../kept.js";
 import { READY_FILE } from "../ready/steps.js";
 import { readActOn, type ActOn } from "../review/act-on.js";
+import { dataFence } from "../review/fence.js";
 
 // the whole file at most, so one long log or finding list cannot fill the writer's context
 export const MAX_TASK_CHARS = 20_000;
@@ -22,17 +23,31 @@ export type TaskSource = {
   readonly change: number;
 };
 
-// capped : the text cut at the cap, saying so. Pure.
-export function capped(text: string): string {
-  return text.length <= MAX_TASK_CHARS
-    ? text
-    : `${text.slice(0, MAX_TASK_CHARS)}\n\n(cut at ${MAX_TASK_CHARS} characters)\n`;
+// openFence : the backticks of a data fence the text leaves open at its end, or "" when every fence closes. Pure.
+function openFence(text: string): string {
+  return text.split("\n").reduce((open, line) => (open === "" ? fenceOpener(line) : line === open ? "" : open), "");
 }
 
-function finding(f: ActOn): string {
-  return [`## ${f.id} · ${f.file}:${f.line} · ${f.rule} (${f.severity})`, "", f.finding, "", `Fix: ${f.fix}`, ""].join(
-    "\n",
-  );
+// fenceOpener : the backticks of a line that opens a data fence (four or more), or "". Pure.
+function fenceOpener(line: string): string {
+  return /^(`{4,})[\w-]*$/.exec(line)?.[1] ?? "";
+}
+
+// capped : the text cut at the cap, saying so; a fence the cut leaves open is closed first, so the host's note is
+// never read as part of the data. Pure.
+export function capped(text: string): string {
+  if (text.length <= MAX_TASK_CHARS) {
+    return text;
+  }
+  const cut = text.slice(0, MAX_TASK_CHARS);
+  const open = openFence(cut);
+  return `${cut}${open === "" ? "" : `\n${open}`}\n\n(cut at ${MAX_TASK_CHARS} characters)\n`;
+}
+
+// finding : one finding, every word of it the review model's, so all of it is data
+function finding(f: ActOn, i: number): string {
+  const text = [`${f.id} · ${f.file}:${f.line} · ${f.rule} (${f.severity})`, "", f.finding, "", `Fix: ${f.fix}`];
+  return dataFence({ title: `finding ${i + 1}`, text: text.join("\n") });
 }
 
 // actOnText : the Act on findings as the writer reads them. Pure.
@@ -48,22 +63,12 @@ export function actOnText(findings: readonly ActOn[]): string {
   );
 }
 
-function job(j: FailedJob): string {
-  switch (j.log.kind) {
-    case "tail":
-      return [
-        `## ${j.name}`,
-        "",
-        "The end of its log:",
-        "",
-        "```text",
-        j.log.text.replaceAll("```", "` ` `"),
-        "```",
-        "",
-      ].join("\n");
-    case "none":
-      return [`## ${j.name}`, "", `No log: ${j.log.why}`, ""].join("\n");
-  }
+// job : one failed job in one data block: its name, from the branch's CI config, then the end of its log or why it
+// has none
+function job(j: FailedJob, i: number): string {
+  const title = `failed job ${i + 1}: its name, then ${j.log.kind === "tail" ? "the end of its log" : "why it has no log"}`;
+  const rest = j.log.kind === "tail" ? j.log.text : j.log.why;
+  return dataFence({ title, text: `${j.name}\n\n${rest}`, info: "text" });
 }
 
 // verifyText : the local verifier's kept output, as the writer reads it. Pure.
