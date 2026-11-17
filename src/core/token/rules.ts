@@ -145,7 +145,7 @@ export type BoxToken =
   | { readonly kind: "ready"; readonly env: Readonly<Record<string, string>>; readonly notice: Notice }
   | { readonly kind: "refused"; readonly reason: string };
 
-const RENEW = "renew it: claude setup-token, then agent-factory setup claude";
+export const RENEW = "renew it: claude setup-token, then agent-factory setup claude";
 
 // boxToken : the env a box gets for its model login, or why no box may start. SUBPROCESS_ENV_SCRUB keeps the token out
 // of Bash, hooks and MCP servers (ADR-0012 S6). The token comes only from the store, never from the host env.

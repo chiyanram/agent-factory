@@ -785,6 +785,24 @@ describe("a writer run that stops says why, even before a change exists (#62)", 
     };
   }
 
+  it("a run its login refused (HTTP 401) says how to renew the token first (#665)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const refused: Box = {
+      ...fake.box,
+      run: async (call) => {
+        await fake.box.run(call);
+        const stdout =
+          '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"api_error","result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}\n';
+        call.command.watch?.(stdout);
+        return { kind: "exited", code: 1, stdout, stderr: "" };
+      },
+    };
+    const out = valueOf(await run(setup(refused, forge(), []), FIX));
+    expect(out.why).toBe(
+      "the run exited 1; the run said: the claude token was refused (HTTP 401); renew it: claude setup-token, then agent-factory setup claude; the CLI said: Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+    );
+  });
+
   it("a run that exits non-zero with no report: the record has why, and the end of its output is kept, scrubbed", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();

@@ -21,6 +21,7 @@ import type { Sessions } from "../review/live.js";
 import type { Model, ModelResult, ModelRun } from "../review/model.js";
 import { settingName } from "../settings/machine.js";
 import { timed, type FolderRunner } from "./folder.js";
+import { refusedLogin, SIGN_IN } from "./login.js";
 
 const READ_ONLY = ["Read", "Grep", "Glob"];
 
@@ -46,9 +47,13 @@ export function claudeArgs(run: ModelRun): readonly string[] {
   ];
 }
 
+// the read-only runs sign in with this shell's claude login (CLAUDE_ENV), so a refused one is renewed there
+const REFUSED = `the claude login was refused (HTTP 401); ${SIGN_IN}; `;
+
 function failure(answer: unknown, stderr: string): string {
   const said = [prop(answer, "subtype"), prop(answer, "result")].filter((s) => typeof s === "string").join(": ");
-  return (said || stderr.trim().split("\n")[0] || "no answer").slice(0, 200);
+  const fix = refusedLogin(answer) ? REFUSED : "";
+  return fix + (said || stderr.trim().split("\n")[0] || "no answer").slice(0, 200);
 }
 
 // lastResult : the last result event of the stream; a stream with none, or output that is no stream, has none

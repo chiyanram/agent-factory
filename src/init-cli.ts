@@ -10,13 +10,17 @@
 //      replaced only after the person sees the diff and says yes (--yes keeps it, and exits 3);
 //   4. pins each listed plugin through `plugin update`, after it says what that does and the person says yes;
 //   5. writes the coordinator's settings, as `agent-factory setup coordinator` does (#485: install, init, start);
-//   6. checks each piece (core/init/checks.ts) and prints ✓ or ✗ with the fix, then the next commands in order.
+//   6. checks each piece (core/init/checks.ts): the fast gate first, then each claude login by one real call, and
+//      prints ✓, ✗ with the fix, or ? when a login could not be checked; then the next commands in order.
 //
-// It never handles a secret and never runs a command only a human runs (setup claude, onboard, onboard accept,
-// start, approve, waive): it prints them. The coordinator's settings hold no secret, so init writes them itself. Exit 0 every check passed, 1 a check failed or init was refused, 3 an
-// existing value was kept under --yes, 64 usage.
+// It never prints, logs or passes in argv a secret, and never runs a command only a human runs (setup claude,
+// onboard, onboard accept, start, approve, waive): it prints them. The one secret it reads is the stored claude token,
+// handed to the agent CLI's login call in its environment. The coordinator's settings hold no secret, so init
+// writes them itself. A step is safe to run again: the files are written whole, a plugin already pinned is kept, and
+// a cut-off marketplace clone is never taken as done. Exit 0 every check passed (a ? fails nothing), 1 a check failed
+// or init was refused, 3 an existing value was kept under --yes, 64 usage.
 
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { codeOf } from "./core/dispatch/records.js";
 import type { Result } from "./core/forge/api.js";
@@ -34,6 +38,7 @@ import {
   checkLines,
   claudeCheck,
   gitHostCheck,
+  loginCheck,
   nodeCheck,
   srtCheck,
   tokenCheck,
@@ -41,6 +46,7 @@ import {
   wallCheck,
   type Check,
   type Probes,
+  type Who,
 } from "./core/init/checks.js";
 import { detect, type Detected } from "./core/init/detect.js";
 import { versionCheck } from "./core/init/latest.js";
@@ -312,7 +318,9 @@ async function there(path: string): Promise<boolean> {
   );
 }
 
-// cloneMarket : the marketplace's clone in the factory home, made through hostGit when it is not there
+// cloneMarket : the marketplace's clone in the factory home, made through hostGit when it is not there. It clones into
+// <dir>.partial and renames it once whole, so a clone cut off midway is never taken as done; a .partial left by one
+// is init's own, so the next try removes it
 async function cloneMarket(io: InitIo, ref: PluginRef): Promise<Result<string>> {
   const dir = marketplaceDir(io.home, ref.marketplace);
   if (await there(dir)) {
@@ -322,16 +330,29 @@ async function cloneMarket(io: InitIo, ref: PluginRef): Promise<Result<string>> 
   if (url === undefined) {
     return { kind: "failed", reason: `init does not know where ${ref.marketplace} comes from; git clone it to ${dir}` };
   }
+  const partial = `${dir}.partial`;
   await mkdir(dirname(dir), { recursive: true, mode: 0o700 });
+  await rm(partial, { recursive: true, force: true });
   const got = await hostGit({
-    args: ["clone", "--quiet", url, dir],
+    args: ["clone", "--quiet", url, partial],
     repo: { kind: "none" },
     env: io.env,
     stdin: { kind: "none" },
   });
-  return got.kind === "ok"
-    ? { kind: "ok", value: dir }
-    : { kind: "failed", reason: `cannot clone ${url}: ${got.kind === "refused" ? got.reason : got.stderr.trim()}` };
+  if (got.kind !== "ok") {
+    await rm(partial, { recursive: true, force: true });
+    return {
+      kind: "failed",
+      reason: `cannot clone ${url}: ${got.kind === "refused" ? got.reason : got.stderr.trim()}`,
+    };
+  }
+  return rename(partial, dir).then(
+    (): Result<string> => ({ kind: "ok", value: dir }),
+    (): Result<string> => ({
+      kind: "failed",
+      reason: `cannot move the clone into ${dir}; remove ${partial} and retry`,
+    }),
+  );
 }
 
 async function pinnedAt(io: InitIo, name: string, word: string): Promise<string> {
@@ -424,17 +445,30 @@ async function configCheck(io: InitIo, name: string): Promise<Check> {
 async function checksOf(io: InitIo, plan: Plan, runner: unknown): Promise<readonly Check[]> {
   const p = io.probes;
   const d = plan.detected;
+  const claude = await claudeCheck(p);
+  const token = await tokenCheck(io.home, p.now);
   return [
     ...(runner === "srt" ? [await srtCheck(p)] : []),
-    await claudeCheck(p),
+    claude,
     await nodeCheck(p),
-    await tokenCheck(io.home, p.now),
+    token.check,
     await gitHostCheck(p, { ...d, name: plan.name }),
     ...(await toolchainChecks(p, d.toolchain)),
     await wallCheck(p),
     await configCheck(io, plan.name),
+    ...(await loginChecks(p, plan.name, claude.ok ? token.usable : "no claude")),
     ...(p.latest === undefined ? [] : [versionCheck(p.version, await p.latest())]),
   ];
+}
+
+// loginChecks : each login by a real call, both at once, once the gate says claude is there (a missing CLI needs an
+// install, not a login); the stored token only while a box would start with it, since a box refuses it otherwise
+async function loginChecks(p: Probes, project: string, token: boolean | "no claude"): Promise<readonly Check[]> {
+  if (token === "no claude") {
+    return [];
+  }
+  const who: readonly Who[] = token ? ["writer", "readOnly"] : ["readOnly"];
+  return Promise.all(who.map((w) => loginCheck(p, w, project)));
 }
 
 // the variables the files now hold: an export of one in a shell profile can go

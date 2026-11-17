@@ -95,6 +95,7 @@ describe("the commands prompts/coordinator.md names (#517)", () => {
           run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
           interactive: async () => 0,
           background: async () => ({ kind: "ok", value: 4242 }),
+          agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
         },
       });
       return { code, err };

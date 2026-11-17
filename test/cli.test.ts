@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
+import type { FolderCall } from "../src/core/agent/folder.js";
+import { LOGIN_ARGS } from "../src/core/agent/login.js";
 import { specHash } from "../src/core/spec.js";
 import { tempDir } from "./temp.js";
 
@@ -17,6 +19,13 @@ const started: {
 }[] = [];
 // the background commands a test asked for: the fake starts none of them (#305)
 const backgrounded: { readonly args: readonly string[]; readonly log: string }[] = [];
+// the agent CLI's login call: what each test's fake answers, and the calls it got; no test starts a CLI
+const ACCEPTED =
+  '{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"ok","total_cost_usd":0.008}';
+const REFUSED =
+  '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"api_error","result":"Failed to authenticate. API Error: 401 OAuth access token is invalid.","total_cost_usd":0}';
+let loginAnswer = { code: 0, stdout: ACCEPTED };
+const agentCalls: FolderCall[] = [];
 // this test's own ids: a test never runs as root, and the platform is linux so no Keychain is touched
 const ME = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 type Run = { readonly code: number; readonly out: string; readonly err: string };
@@ -39,6 +48,7 @@ async function cli(
       run: async () => ({ code: 1, stdout: "", stderr: "no CLI in this test" }),
       interactive: async (call) => (started.push(call), 0),
       background: async (call) => (backgrounded.push(call), { kind: "ok", value: 4242 }),
+      agent: async (call) => (agentCalls.push(call), { ...loginAnswer, stderr: "" }),
     },
   });
   return { code, out, err };
@@ -51,6 +61,8 @@ function writeSpec(text: string): void {
 beforeEach(() => {
   home = tempDir("factory-cli-");
   backgrounded.length = 0;
+  agentCalls.length = 0;
+  loginAnswer = { code: 0, stdout: ACCEPTED };
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -600,6 +612,51 @@ describe("agent-factory setup", () => {
     expect(run.out + run.err).not.toContain(TOKEN);
   });
 
+  describe("tries the pasted token with one real call before it stores it", () => {
+    const stored = (): string => readFileSync(join(home, "secrets", "claude-token"), "utf8").trim();
+
+    it("hands the token to the login call in its env, never in argv, and stores it once Anthropic accepts it", async () => {
+      const run = await cli(["setup", "claude"], { FACTORY_HOME: home, GH_TOKEN: "ghp_host" }, TOKEN);
+      expect(run.code).toBe(0);
+      expect(agentCalls).toHaveLength(1);
+      const [call] = agentCalls;
+      expect(call?.args).toEqual(LOGIN_ARGS);
+      expect(call?.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(TOKEN);
+      expect(call?.env.GH_TOKEN).toBeUndefined();
+      expect(call?.args.join(" ")).not.toContain(TOKEN);
+      expect(run.out).toContain("Anthropic accepted it");
+      expect(stored()).toBe(TOKEN);
+    });
+
+    it("does not store a token Anthropic refuses, and keeps the one stored before", async () => {
+      await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+      loginAnswer = { code: 1, stdout: REFUSED };
+      const other = "sk-ant-oat01-Revoked0123456789_xyz-TOKEN";
+      const run = await cli(["setup", "claude"], { FACTORY_HOME: home }, other);
+      expect(run.code).toBe(1);
+      expect(run.err).toContain(
+        "not stored: Anthropic refused this token (HTTP 401); make a new one with claude setup-token",
+      );
+      expect(run.out + run.err).not.toContain(other);
+      expect(stored()).toBe(TOKEN);
+    });
+
+    it("stores a token it could not check, and says why: offline is not a refusal", async () => {
+      loginAnswer = { code: 1, stdout: "" };
+      const run = await cli(["setup", "claude"], { FACTORY_HOME: home }, TOKEN);
+      expect(run.code).toBe(0);
+      expect(run.out).toContain("stored the claude token");
+      expect(run.out).toContain("could not check it with Anthropic: claude exited 1 with no result");
+      expect(stored()).toBe(TOKEN);
+    });
+
+    it("makes no call for text that is not a token", async () => {
+      const run = await cli(["setup", "claude"], { FACTORY_HOME: home }, "gho_16C7e42F292c6912E7710c838347Ae178B4a");
+      expect(run.code).toBe(1);
+      expect(agentCalls).toEqual([]);
+    });
+  });
+
   it("stores the Discord webhook at a hidden prompt, 0600, never printed; refuses anything else (#119)", async () => {
     const hook = "https://discord.com/api/webhooks/1234567890/abcdefghijklmnopqrstuvwxyz_-0123";
     const run = await cli(["setup", "discord"], { FACTORY_HOME: home }, `${hook}\n`);
@@ -705,6 +762,7 @@ describe("agent-factory setup", () => {
           run: async () => ({ code: 1, stdout: "", stderr: "" }),
           interactive: async () => 0,
           background: async () => ({ kind: "failed", reason: "none" }),
+          agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
         },
       });
       expect([code, asked]).toEqual([1, 0]);

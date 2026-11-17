@@ -27,6 +27,7 @@ describe("docs/reference/cli.md lists every command (#482)", () => {
         run: async () => ({ code: 1, stdout: "", stderr: "" }),
         interactive: async () => 0,
         background: async () => ({ kind: "failed" as const, reason: "none here" }),
+        agent: async () => ({ code: 127, stdout: "", stderr: "no agent CLI in this test" }),
       },
     };
     expect(await runCli(["--help"], io)).toBe(0);

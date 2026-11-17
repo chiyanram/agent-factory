@@ -260,6 +260,16 @@ describe("readAnswer", () => {
   it("fails a run with no result event, naming the first line of stderr", () => {
     expect(readAnswer({ code: 1, stdout: "", stderr: "boom\nmore" })).toMatchObject({ kind: "failed", reason: "boom" });
   });
+
+  it("names the fix first when the login was refused (HTTP 401): this shell's claude login (#665)", () => {
+    const stdout =
+      '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}\n';
+    expect(readAnswer({ code: 1, stdout, stderr: "" })).toMatchObject({
+      kind: "failed",
+      reason:
+        "the claude login was refused (HTTP 401); run claude and sign in with /login; unset a stale ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN in your shell; success: Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+    });
+  });
 });
 
 describe("claudeEnv (ADR-0012 S6)", () => {

@@ -35,6 +35,7 @@ import { locatePrograms } from "./core/box/srt-programs.js";
 import { locateToolchains, toolchainLines } from "./core/box/srt-toolchains.js";
 import { openEgress } from "./core/egress/index.js";
 import {
+  boxTokenFrom,
   claudeTokenStatus,
   tokenStatus,
   openStore,
@@ -98,9 +99,10 @@ import { cardDraft, cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.
 import { BOARD_HELP, boardCommand, boardPass } from "./board-cli.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
 import { enginePackPin } from "./core/process/pins.js";
-import type { Probes } from "./core/init/checks.js";
+import type { Probes, Who } from "./core/init/checks.js";
 import { which } from "./core/box/srt-programs.js";
-import { openAgentCli } from "./core/agent/index.js";
+import { openAgentCli, type AgentCli } from "./core/agent/index.js";
+import type { Login } from "./core/agent/login.js";
 import { ONBOARD_HELP, onboardCommand } from "./onboard-cli.js";
 import { onboardSetup } from "./core/onboard/settings.js";
 import { versionCheck } from "./core/init/latest.js";
@@ -1273,14 +1275,22 @@ async function setupDiscord({ store, io }: { readonly store: TokenStore; readonl
   return 0;
 }
 
+// setupClaude : the pasted token, tried by one real login call with the env a box gets, then stored
 async function setupClaude({ store, io }: { readonly store: TokenStore; readonly io: Io }): Promise<number> {
-  const saved = await saveClaudeToken({ store, pasted: await io.readSecret(PASTE), now: new Date() });
+  const pasted = await io.readSecret(PASTE);
+  const saved = await saveClaudeToken({ store, pasted, now: new Date(), login: agentOf(io).login });
   if (saved.kind === "refused") {
     io.err(`agent-factory setup claude: ${saved.reason}\n`);
     return 1;
   }
   io.out(`stored the claude token in ${saved.where}; made ${saved.meta.madeAt}, expires ${saved.meta.expiresAt}\n`);
+  io.out(`${saved.note}\n`);
   return 0;
+}
+
+// agentOf : the agent CLI that init and setup call, through this machine's runner (a fake in a test)
+function agentOf(io: Io): AgentCli {
+  return openAgentCli({ env: io.env, run: io.system.agent });
 }
 
 const COPILOT_PASTE =
@@ -1515,7 +1525,24 @@ function initProbes(io: Io, home: string): Probes {
       const wall = places.kind === "ok" ? await checkWall(places.value) : places;
       return wall.kind === "ok" ? { kind: "ok", value: "" } : wall;
     },
+    login: (who, project) => initLogin(io, home, who, project),
   };
+}
+
+// initLogin : one login by a real call, in the environment the project's settings resolve to, as its runs get it (a
+// company CA or proxy may come from a settings file): the stored token as a box gets it, or this shell's login as
+// the read-only runs get it
+async function initLogin(io: Io, home: string, who: Who, project: string): Promise<Login> {
+  const settings = await runSettings({ home, project, env: io.env });
+  const agent = agentOf(settings.kind === "ok" ? { ...io, env: settings.value.env } : io);
+  if (who === "readOnly") {
+    return agent.login();
+  }
+  const store = tokenStore(io, home);
+  const box = store.kind === "ok" ? await boxTokenFrom({ store: store.value, now: new Date() }) : store;
+  return box.kind === "ready"
+    ? agent.login(box.env)
+    : { kind: "unknown", reason: `cannot read the token: ${box.reason}` };
 }
 
 function realExecPath(): string {
