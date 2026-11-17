@@ -59,6 +59,8 @@ export const HUMAN_ONLY = [
   "agent-factory approve",
   "agent-factory start",
   "agent-factory waive",
+  // a front door writes a person's word (ADR-0023)
+  "agent-factory door",
   "agent-factory eval",
   "agent-factory onboard",
   // the retro's drafts spend on a model run; its listing is a read (#488 Q10 A)
@@ -273,6 +275,7 @@ const NEVER_LET = [
   "agent-factory approve PROJ PROJ-1 0",
   "agent-factory start PROJ PROJ-1",
   "agent-factory waive PROJ PROJ-1 0",
+  "agent-factory door discord",
   "agent-factory eval reviewer",
   "gh api user",
   "glab api user",

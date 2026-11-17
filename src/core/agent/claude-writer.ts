@@ -10,6 +10,7 @@
 
 import type { BoxPlace } from "../box/types.js";
 import type { GuardrailId } from "../process/guardrails.js";
+import { MODEL_RUN_MARK } from "./mark.js";
 import type { Argv } from "../project.js";
 import type { FileText } from "../writer/clone.js";
 import { pluginPaths } from "../writer/clone.js";
@@ -94,6 +95,7 @@ export function writerArgv(bin: string, call: WriterCall, place: BoxPlace): Argv
 export const WRITER_ENV: Readonly<Record<string, string>> = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   DISABLE_AUTOUPDATER: "1",
+  ...MODEL_RUN_MARK,
 };
 
 // what the writer may do without asking, outside skip-all: Bash inside the runner's sandbox, edits in the clone

@@ -5,8 +5,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
-import { homedir, userInfo } from "node:os";
-import { hostGit } from "./core/git.js";
+import { homedir } from "node:os";
 import type { FolderRunner } from "./core/agent/folder.js";
 import type { Runner as CliRunner, Result } from "./core/forge/api.js";
 import { openStore, type TokenStore } from "./core/token/index.js";
@@ -67,19 +66,6 @@ export function version(): string {
     throw new Error(`no version string in ${file}`);
   }
   return pkg.version;
-}
-
-// whoApproves : the OS user and, when set, the operator's own git user.name. A record, not proof: the harness prompt is
-// the gate.
-export async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
-  const name = await hostGit({
-    args: ["config", "--get", "user.name"],
-    repo: { kind: "none" },
-    env,
-    stdin: { kind: "none" },
-  });
-  const gitName = name.kind === "ok" ? name.stdout.trim() : "";
-  return gitName.length > 0 ? `${userInfo().username} (${gitName})` : userInfo().username;
 }
 
 // tokenStore : where the box's model login is kept (#136), as a result

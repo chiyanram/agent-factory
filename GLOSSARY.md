@@ -82,8 +82,9 @@ _Avoid_: MR, merge request (outside the GitLab adapter)
 **Observability platform**: where runs send logs and status for a human to read. Today: none; the run records and
 notes are enough.
 
-**Connector**: one of the engine's swappable parts, a small program behind a fixed contract (ADR-0014): front door,
-approval, gate, agent CLI, runner. Each has a dry mode. In code: `src/core/plugin/`, `plugins/`.
+**Connector**: one of the engine's swappable parts, a small program behind a fixed contract (ADR-0014): approval,
+gate, agent CLI, runner. A front door is not one (ADR-0023). Each has a dry mode. In code: `src/core/plugin/`,
+`plugins/`.
 _Avoid_: plugin (for a connector)
 
 **Plugin**: a normal Claude Code plugin a project installs, `name@marketplace`, for rules or process. Listed in the
@@ -91,7 +92,8 @@ project's settings, pinned, and a locked key.
 _Avoid_: pack
 
 **Front door**: a place a human talks to the factory: the terminal, a Discord thread per ticket, a web app later, a
-spec PR, or Jira's status (later). Every front door writes the same START, approval and answer records.
+spec PR, or Jira's status (later). Every front door writes the same START, approval and answer records. A door is an
+engine command on one door seam, `src/core/door/`, never a plugin (ADR-0023).
 _Avoid_: interface, channel
 
 ## A ticket's way through

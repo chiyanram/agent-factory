@@ -5,6 +5,8 @@
 Status: accepted 2026-11-07 (operator, map #30: plugin model Q1–Q11). Extends ADR-0013 T2 and T3, and widens
 ADR-0012 S18 from context sources to every outside tool. P7 is amended by
 [ADR-0022](0022-agent-cli-adapter-in-core.md): the agent CLI adapter lives in core, and `runner` is no extension point.
+The picture is amended by [ADR-0023](0023-front-doors-are-engine-commands.md): a front door is an engine command, not
+an extension point, and `discord` below is the `notify` plugin only.
 
 ## Context
 
