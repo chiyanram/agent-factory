@@ -65,6 +65,13 @@ describe("prompts/coordinator.md (#486)", () => {
     }
   });
 
+  it("starts every relay with its ticket number and keeps no ticket facts", () => {
+    const flat = prompt.replace(/\s+/g, " ");
+    expect(flat).toContain("start with the ticket number");
+    expect(flat).toContain("`#<ticket>: Operator, <date>, in the coordinator");
+    expect(flat).toContain("Keep no ticket's facts");
+  });
+
   it("says a red check is never re-run by the factory, here and in the orchestrator reference", () => {
     for (const text of [prompt, reference]) {
       expect(text).not.toMatch(/flaky job gets a rerun|not rerun yet/);

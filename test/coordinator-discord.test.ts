@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   accessFileProblem,
@@ -44,9 +44,17 @@ describe("the --discord launch (#732 D-1)", () => {
       '{"enabledPlugins":{"discord@claude-plugins-official":true}}',
       "--channels",
       "plugin:discord@claude-plugins-official",
+      "--permission-mode",
+      "dontAsk",
+      "--autocompact",
+      "200k",
     ]);
     for (const flag of ["--continue", "-c", "--resume", "-r", "--dangerously-skip-permissions"]) {
       expect(argv).not.toContain(flag);
+    }
+    // the plugin's permission relay stays off: no mode in which a prompt could reach it
+    for (const mode of ["default", "auto", "acceptEdits", "bypassPermissions", "manual"]) {
+      expect(argv).not.toContain(mode);
     }
     expect(argv.join(" ")).not.toMatch(/bypass|skip-permissions/);
   });
@@ -219,6 +227,8 @@ describe("checkDiscord and the launch, on planted files", () => {
         args: discordArgv().slice(1),
         cwd: join(home, "coordinator"),
         env: { PATH: "/usr/bin", DISCORD_ACCESS_MODE: "static", DISCORD_STATE_DIR: dir },
+        // the supervisor's: it ends the session at the reset size
+        signal: expect.any(AbortSignal),
       },
     ]);
     // a Discord session with no seat token of its own says the chat shares the runs' limit
@@ -241,5 +251,37 @@ describe("checkDiscord and the launch, on planted files", () => {
     expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(1);
     expect(calls).toEqual([]);
     expect(err.join("")).toContain("seat token: expired");
+  });
+
+  it("ends the session after the turn that reached the reset size, and starts a fresh one from the brief", async () => {
+    await installCoordinator(places());
+    plant();
+    const calls: Parameters<Interactive>[0][] = [];
+    const err: string[] = [];
+    const marker = join(home, ".local", "state", "agent-factory", "coordinator-ledger.reset");
+    // a marker left from before the launch is not a reset
+    mkdirSync(join(home, ".local", "state", "agent-factory"), { recursive: true });
+    writeFileSync(marker, "1\n");
+    const io = {
+      env: { PATH: "/usr/bin" },
+      out: () => undefined,
+      err: (t: string) => void err.push(t),
+      pollMs: 5,
+      seat: async () => ({ kind: "missing", reason: "none" }) as const,
+      // the first session runs until it is aborted, after its Stop hook wrote the marker; the second ends by itself
+      interactive: (call: Parameters<Interactive>[0]) => {
+        calls.push(call);
+        if (calls.length > 1) {
+          return Promise.resolve(0);
+        }
+        writeFileSync(marker, "120000\n");
+        return new Promise<number>((resolve) => call.signal?.addEventListener("abort", () => resolve(143)));
+      },
+    };
+    expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(0);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.args).toEqual(discordArgv().slice(1));
+    expect(err.join("")).toContain("starting a fresh session from the handoff note");
+    expect(existsSync(marker)).toBe(false);
   });
 });

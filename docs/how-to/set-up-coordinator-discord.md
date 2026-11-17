@@ -9,7 +9,11 @@ through the separate door bot ([Set up the Discord door](set-up-discord-door.md)
 - One channel per project, and one bot and one coordinator session per channel.
 - You make one thread per ticket by hand. The session sees the channel and all its threads, and relays your words to
   each ticket's own session, quoting them exactly.
-- Chat is data (P5). A permission button the bot sends you by DM is consent to one tool call, never an approval.
+- Chat is data (P5). The session runs in `dontAsk` mode: anything that would ask for a permission is refused, so the
+  plugin's permission relay (DM buttons and `yes <id>` replies) never fires. Run `agent-factory confirm` and the other
+  asked commands at a terminal. **Today:** the relay stays off until the hand test #729 shows it is safe.
+- A relay to a ticket's session carries answers only. Type an approval, a waiver or a yes to commit and push in that
+  ticket's session or thread, or use the door bot.
 
 **Check against #729:** the operator's hand test has not run these steps yet. Each step it checks is marked *(to
 check)*. **Today:** the service that keeps the session up is #748, so for now run it in a terminal.
@@ -66,7 +70,8 @@ The launch refuses, before Claude starts:
 - `groups` with anything but the one project channel;
 - a channel `allowFrom` that is empty or not the same people as `allowFrom`. The plugin lets anyone who passes the
   channel's gate answer a permission prompt by text (`yes <id>`), so with an empty list anyone in the channel could
-  allow a tool call. **Today:** this rests on a reading of the plugin's code that #729 confirms;
+  allow a tool call if the relay were on. It stays off, and this list is the second guard. **Today:** this rests on a
+  reading of the plugin's code that #729 confirms;
 - pending pairings, and a file or folder that group or others can write.
 
 List the same people as the door's `people.json`. The guided setup that writes both from one list is #744.
@@ -102,6 +107,12 @@ agent-factory coordinator ledger --discord
 
 It starts fresh every time, never with `--continue`, and a SessionStart hook gives the session its role, its wall and
 `agent-factory handoff ledger`. Write in the channel, or in a ticket's thread.
+
+At the end of each turn a hook logs the session's context size to `~/.local/state/agent-factory/coordinator-ledger.jsonl`.
+The launch sets the client's compaction window (`--autocompact 200k`). When a turn reaches 120,000 tokens, below that
+window, the launcher ends the session after the turn and starts a fresh one from the handoff note. A compaction that
+happens anyway is logged as a fault. **Today:** a message sent in the few seconds of a restart may be missed; ask
+again if a reply does not come.
 
 ## Rotate the token
 

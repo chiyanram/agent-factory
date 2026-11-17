@@ -70,7 +70,7 @@ runCli(process.argv.slice(2), {
     run: runProcess,
     background,
     agent: runInFolder,
-    interactive: ({ bin, args, cwd, env }) =>
+    interactive: ({ bin, args, cwd, env, signal }) =>
       new Promise((resolve) => {
         // Ctrl-C reaches the session, which uses it to stop a turn; the launcher waits for the session to end
         const ignore = (): void => undefined;
@@ -81,13 +81,17 @@ runCli(process.argv.slice(2), {
           process.off("SIGQUIT", ignore);
           resolve(code);
         };
-        const child = spawn(bin, [...args], { cwd, env, stdio: "inherit" });
+        const child = spawn(bin, [...args], { cwd, env, stdio: "inherit", ...(signal ? { signal } : {}) });
         child.on("error", (error) => {
+          // an abort ends the session on purpose: its exit resolves the launch
+          if (error.name === "AbortError") {
+            return;
+          }
           process.stderr.write(`agent-factory: cannot start ${bin}: ${error.message}\n`);
           done(127);
         });
-        child.on("exit", (code, signal) =>
-          done(code ?? 128 + (signal === null ? 0 : (constants.signals[signal] ?? 0))),
+        child.on("exit", (code, killedBy) =>
+          done(code ?? 128 + (killedBy === null ? 0 : (constants.signals[killedBy] ?? 0))),
         );
       }),
   },

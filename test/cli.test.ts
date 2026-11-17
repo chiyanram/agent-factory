@@ -5,6 +5,7 @@ import { runCli } from "../src/app.js";
 import type { FolderCall } from "../src/core/agent/folder.js";
 import { LOGIN_ARGS } from "../src/core/agent/login.js";
 import { specHash } from "../src/core/spec.js";
+import { field } from "../src/core/human-record.js";
 import { tempDir } from "./temp.js";
 
 const SPEC =
@@ -434,6 +435,39 @@ describe("commands read the project's git host and clone from the project file (
       code: 0,
       out: expect.stringContaining("You are the project coordinator:"),
     });
+  });
+
+  it("coordinator-turn logs the turn's size, and at the reset size shows the person a line to reset (#732)", async () => {
+    const transcript = join(home, "t.jsonl");
+    const turn = (tokens: number): string => {
+      const usage = { input_tokens: tokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+      writeFileSync(transcript, `${JSON.stringify({ type: "assistant", message: { usage } })}\n`);
+      return JSON.stringify({ session_id: "s1", transcript_path: transcript });
+    };
+    const env = { FACTORY_HOME: home, HOME: home, FACTORY_DEFAULT_PROJECT: "ledger" };
+    expect(await cli(["coordinator-turn"], env, turn(1000))).toEqual({ code: 0, out: "", err: "" });
+    const big = await cli(["coordinator-turn"], env, turn(130_000));
+    expect(big.code).toBe(0);
+    expect(JSON.parse(big.out)).toEqual({ systemMessage: expect.stringContaining("agent-factory handoff ledger") });
+    const log = readFileSync(join(home, ".local", "state", "agent-factory", "coordinator-ledger.jsonl"), "utf8");
+    expect(
+      log
+        .trim()
+        .split("\n")
+        .map((l): unknown => JSON.parse(l))
+        .map((l) => field(l, "kind")),
+    ).toEqual(["turn", "turn", "reset"]);
+    // a hook input it cannot read still exits 0, so the hook never blocks the session
+    expect(await cli(["coordinator-turn"], env, "not json")).toMatchObject({ code: 0 });
+  });
+
+  it("coordinator-brief logs a start from a compaction as a fault and says so first (#732)", async () => {
+    const env = { FACTORY_HOME: home, HOME: home };
+    const run = await cli(["coordinator-brief"], env, JSON.stringify({ source: "compact", session_id: "s1" }));
+    expect(run.out.split("\n")[0]).toContain("compacted, which is a fault");
+    expect(readFileSync(join(home, ".local", "state", "agent-factory", "coordinator-none.jsonl"), "utf8")).toContain(
+      '"kind":"compaction"',
+    );
   });
 });
 
