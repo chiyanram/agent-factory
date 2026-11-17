@@ -26,6 +26,10 @@
 // that failed on the git host's rate limit names the time the limit lasts until (api.ts), and the next pass waits for
 // that time when it is later than the poll interval, so the loop never asks a rate-limited git host again early (#62).
 //
+// A ticket the provider's usage limit parked is in flight: the factory runs it again after the reset. When every
+// ticket in flight is parked, the next pass waits until the earliest reset, never less than the poll interval, so the
+// loop neither ends on a wait no person has to act on nor reads the git host every poll interval for hours.
+//
 // The loop sleeps only on what is outside the factory (#445): CI running, a person, a hold. After a pass that ran a
 // step itself (a writer, ready check, review, local verifier or design run) or wrote to the git host (a label, a note, a
 // ping), what it did may have made the next step due, so the next pass starts at once and reads the git host again.
@@ -46,7 +50,7 @@ import { rateLimitedUntil, type Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { plainName } from "../spec.js";
 import { LOOP_END_FILE, LOOP_PID_FILE, type LoopEnded } from "./last-poll.js";
-import { inFlight } from "./table.js";
+import { inFlight, PARK_WAIT } from "./table.js";
 import { turnDue } from "./turn-ping.js";
 import {
   decideAll,
@@ -287,6 +291,17 @@ function next(loop: LoopSetup, count: Count, step: Result<Step>): After {
   return afterPass(loop, count, step.value) === "end" ? "end" : paced(loop, step.value, pace(step.value.ran, before));
 }
 
+// parkedUntil : the earliest reset when every ticket in flight waits on the provider's usage limit, in ms since
+// the epoch; "none" when any ticket waits on something else. Pure.
+export function parkedUntil(step: Pick<Step, "flying" | "waits">): number | "none" {
+  const prefix = `waiting: ${PARK_WAIT} `;
+  const resets = step.flying.map((t) => {
+    const why = step.waits.get(t) ?? "";
+    return why.startsWith(prefix) ? Date.parse(why.slice(prefix.length)) : Number.NaN;
+  });
+  return resets.length > 0 && resets.every((r) => !Number.isNaN(r)) ? Math.min(...resets) : "none";
+}
+
 // paced : how long the loop waits before the next pass, logged with what it waits on (#445)
 function paced(loop: LoopSetup, step: Step, how: Pace): After {
   if (how.kind === "now") {
@@ -299,6 +314,14 @@ function paced(loop: LoopSetup, step: Step, how: Pace): After {
     const until = new Date(how.until).toISOString();
     loop.log(
       `in flight: ${step.flying.join(", ")}; the git host's rate limit lasts until ${until}; next pass in ${Math.ceil(wait / 60_000)} min, when the rate limit is over`,
+    );
+    return { wait };
+  }
+  const reset = parkedUntil(step);
+  if (reset !== "none") {
+    const wait = Math.max(poll, reset - loop.now());
+    loop.log(
+      `in flight: ${step.flying.join(", ")}; ${PARK_WAIT} ${new Date(reset).toISOString().replace(".000Z", "Z")}; next pass in ${Math.ceil(wait / 60_000)} min, when it resets`,
     );
     return { wait };
   }

@@ -6,6 +6,8 @@
 // A run that ends with no result event (a stall, a timeout, a box that failed) reports nothing: its record carries no
 // spend, and `usage` counts it as unmeasured, never as free.
 
+import { NO_WINDOWS, windowsOf, type Windows } from "../agent/usage-limit.js";
+
 // prop : one property of a parsed JSON value, or undefined (records.ts has the same; it imports this file)
 function prop(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
@@ -109,10 +111,11 @@ export function addRoundSpend(round: RoundSpend, part: RoundPart, spend: Spend):
 // the longest output line kept while it is printed: a result event carries the run's last message, never a whole file
 const MOST_LINE_CHARS = 1024 * 1024;
 
-// Stream : what the reader holds of a stream-json output: the line still being printed, and the result event once seen
-export type Stream = { readonly partial: string; readonly result: unknown };
+// Stream : what the reader holds of a stream-json output: the line still being printed, the result event once seen,
+// and the usage-limit windows its rate-limit events named (agent/usage-limit.ts)
+export type Stream = { readonly partial: string; readonly result: unknown; readonly windows: Windows };
 
-export const NO_STREAM: Stream = { partial: "", result: undefined };
+export const NO_STREAM: Stream = { partial: "", result: undefined, windows: NO_WINDOWS };
 
 function parsed(line: string): unknown {
   try {
@@ -133,7 +136,11 @@ export function streamOf(stream: Stream, chunk: string): Stream {
   const lines = (stream.partial + chunk).split("\n");
   const partial = lines.pop() ?? "";
   const result = lines.map(resultEvent).findLast((e) => e !== undefined) ?? stream.result;
-  return { partial: partial.length > MOST_LINE_CHARS ? "" : partial, result };
+  const windows = lines
+    .filter((l) => l.includes('"rate_limit_event"'))
+    .map(parsed)
+    .reduce(windowsOf, stream.windows);
+  return { partial: partial.length > MOST_LINE_CHARS ? "" : partial, result, windows };
 }
 
 // streamSpend : the run's spend from its result event, or "unmeasured" with none. Pure.

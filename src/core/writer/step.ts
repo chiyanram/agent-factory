@@ -93,7 +93,10 @@ export type WriterSetup = {
 type Input = RunInput & { readonly task: Task };
 export type WriterOut = {
   readonly head: string;
-  readonly outcome: "done" | "asked" | "blocked";
+  readonly outcome: "done" | "asked" | "blocked" | "parked";
+  // the provider's usage limit the run hit, for a parked run: the reset, ISO 8601 UTC or "unknown", and the
+  // CLI's refusal, scrubbed and cut
+  readonly parked?: { readonly until: string; readonly said: string };
   readonly patch: string;
   readonly evidence: readonly Evidence[];
   // the writer hung after its report and the host stopped it after the completion window (#182)
@@ -175,7 +178,15 @@ export function outOf(ended: Ended, next: Next): WriterOut {
       return { ...base, outcome: "asked", evidence: [], ...whyField(whyOf(ended.outcome, ended.said)) };
     case "needs-human":
       return { ...base, outcome: "blocked", evidence: [], ...whyField(nextWhy(ended, next)) };
+    case "parked":
+      return { ...base, head: next.head, outcome: "parked", evidence: [], ...parkedField(ended.outcome) };
   }
+}
+
+// parkedField : a parked run's reset and the CLI's refusal, as a field to spread; none for any other outcome.
+// Pure.
+function parkedField(outcome: Outcome): { readonly parked?: { readonly until: string; readonly said: string } } {
+  return outcome.kind === "parked" ? { parked: { until: outcome.until, said: whyText(outcome.said) } } : {};
 }
 
 type Prepared = {
@@ -352,6 +363,7 @@ async function finished(
       value: {
         head: ended.tip,
         outcome: outcome.kind,
+        ...parkedField(outcome),
         patch: "",
         evidence: [],
         hung: ended.ending.kind === "hung",

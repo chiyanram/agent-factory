@@ -18,6 +18,9 @@ and exits: `status` `done` with `evidence` rows (criterion, command, result), `a
   `needs-human` and one `[coordinator] blocked:` note naming the question, with the questions as written listed.
 - `blocked` → label `needs-human` first, push the work in progress only on top of the branch, post `blocked: <reason>`
   (with the implementer's prefix when the implementer said it).
+- **parked** (the host's, never the report's) → the provider's usage limit refused the run, so its work in progress is
+  pushed only on top of the branch, with no label and no note, and a `parked` record line keeps the reset time and
+  the run's task. See [The provider's usage limit](#the-providers-usage-limit).
 
 A missing, unreadable or malformed
 report, any other field, a non-zero exit, a timeout, a cap or a failed runner is `blocked` with the reason; a reason
@@ -127,7 +130,9 @@ a pass that starts no run because each run it could start is held back ends the 
 what to do. A step that is not set up says so, and says to run `agent-factory dispatch <project>` again once it is; the project-day cap says to run it again tomorrow; the window's share says when the
 window has room ("the window is full until HH:MM UTC"); outside the run hours it says when they are. Three
 failed passes in a row end it too. A pass that fails on the git host's rate limit says until when ("rate limited until
-<time>"), and the next pass waits for that time, never asking the git host again before it (#62). A pass in which
+<time>"), and the next pass waits for that time, never asking the git host again before it. When every ticket
+in flight is parked at the provider's usage limit, the next pass waits until the earliest reset, never less than
+`FACTORY_POLL_MINUTES` ("the provider's usage limit lasts until <time>; next pass in 300 min, when it resets"). A pass in which
 nothing happened reads the git host's changes once, not twice. `agent-factory start` and `approve` start it in
 the background when none runs (`--no-loop`: they do not), with its output in `$FACTORY_HOME/runs/<project>/loop.log`.
 While it runs it holds `$FACTORY_HOME/runs/<project>/loop.pid`, so a second loop for the project is refused. Caps, and
@@ -306,3 +311,43 @@ person or the coordinator runs the rest by hand.
 | a claimed PR with no live run has a stale approval (`agent-factory approval` exits 3) or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved PR; `claim` it again when the human answers |
 | the usage limit is near | pause every run |
 
+## The provider's usage limit
+
+When the subscription's window is used up, the agent CLI refuses mid-run and exits non-zero (#707). The adapter
+reads that refusal only from the CLI's own words ([`src/core/agent/usage-limit.ts`](../../src/core/agent/usage-limit.ts)):
+the text of its last error result event, or its stderr's first line when there is none, must start with a refusal
+Claude Code prints ("You've hit your", "You've reached your", …) or say "usage limit reached". A run that writes about
+limits is never parked.
+
+The reset time is read in this order:
+
+1. the stream's `rate_limit_event` lines: the latest window the provider rejected with no overage in use, its
+   `resetsAt` in epoch seconds, within 31 days. An epoch time has no time zone to misread.
+2. the refusal's text: an ISO time after "resets", or a clock time ("resets 3pm (Europe/London)") that names UTC or
+   an IANA zone. A clock time is anchored to when the run ended, and one that daylight saving skips or repeats is not
+   guessed.
+3. else unknown.
+
+The run is **parked**:
+
+- its work is pushed on top of the branch, no label goes on, and no failure or round is counted;
+- the record gets a `parked` line with the reset and the task;
+- the project gets one notice per reset time, so tickets parked on the same reset send one between them.
+
+**While the reset is ahead,** the ticket waits in the factory lane, with no ping, and `board` shows the reset in the
+reader's zone with UTC beside it. **After the reset,** the same task runs again as a fresh run, from the branch the parked run pushed.
+
+**It goes to a person (`needs-human`)** when:
+
+- the reset time is unknown;
+- the provider refuses again at a reset no later than the one before;
+- the push of the parked run's work fails.
+
+A `/stop`, `needs-human` and the ticket's cap still come first.
+
+**Today:** only implementer runs park: a review round or a design run hit by the limit still goes to a person (#708).
+Copilot's refusal text is not known yet (#689 item 5), so a Copilot run is never parked.
+
+**Rollback:** after reverting, delete each `parked` line, and the `started` line before it, from
+`$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, and `$FACTORY_HOME/runs/<project>/provider-notice.json`. Older code
+refuses an unknown record line.

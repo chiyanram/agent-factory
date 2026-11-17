@@ -269,6 +269,48 @@ describe("finishRun", () => {
     expect(log).toEqual([`label ${NEEDS_HUMAN}`, "push bbbb guards=4", "note [coordinator] blocked: the run exited 2"]);
   });
 
+  it("parked: pushes the work in progress on top of the branch only, with no label and no note (#707)", async () => {
+    const log: Log = [];
+    const next = await finishRun({
+      outcome: { kind: "parked", until: "2026-11-17T15:00:00Z", said: "You've hit your limit" },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(log),
+      push: push(),
+      pusher: pusher(log),
+    });
+    expect(next).toEqual({
+      kind: "ok",
+      value: { kind: "parked", head: B, until: "2026-11-17T15:00:00Z", said: "You've hit your limit" },
+    });
+    expect(log).toEqual(["push bbbb guards=4"]);
+  });
+
+  it("parked: a push that fails goes to a person, as a blocked run does (#707)", async () => {
+    const log: Log = [];
+    const next = await finishRun({
+      outcome: { kind: "parked", until: "2026-11-17T15:00:00Z", said: "You've hit your limit" },
+      ending: CLEAN,
+      change: 12,
+      forge: forge(log),
+      push: push(),
+      pusher: pusher(log, { kind: "failed", reason: "refused: touches CI config" }),
+    });
+    expect(next).toEqual({
+      kind: "ok",
+      value: {
+        kind: "needs-human",
+        reason:
+          "the provider's usage limit stopped the run; its work in progress was not pushed: refused: touches CI config",
+      },
+    });
+    expect(log).toEqual([
+      "push bbbb guards=4",
+      `label ${NEEDS_HUMAN}`,
+      "note [coordinator] blocked: the provider's usage limit stopped the run; its work in progress was not pushed: refused: touches CI config",
+    ]);
+  });
+
   it("the writer's own blocker is posted in the writer's seat", async () => {
     const log: Log = [];
     await finishRun({

@@ -13,6 +13,9 @@
 //            read back as answers.ts reads it; a question it would not hold as written (cut at the field limit, or
 //            split by a " · " or " A) " in its text) is never posted as OPEN: the run ends blocked instead, with the
 //            questions as written listed in the blocked note (#522)
+//   parked   the provider's usage limit refused the run: push the work in progress on top of the branch, as a
+//            blocked run's, with no label and no note; the dispatcher records the park and sends its one notice. A
+//            push that fails goes to a person, as a blocked run does
 //   blocked  label needs-human first, so nothing hands the change out again; push the work in progress, but only on top
 //            of the branch (a run stopped in a rebase never rewrites it); post the reason, in the writer's seat when
 //            the writer said it; next: a person
@@ -50,7 +53,9 @@ export const NEEDS_HUMAN = "needs-human";
 export type Next =
   | { readonly kind: "ready-check"; readonly head: string; readonly evidence: readonly Evidence[] }
   | { readonly kind: "wait-for-answer"; readonly head: string }
-  | { readonly kind: "needs-human"; readonly reason: string };
+  | { readonly kind: "needs-human"; readonly reason: string }
+  // the run waits for the provider's reset; head: the branch after its work in progress was pushed
+  | { readonly kind: "parked"; readonly head: string; readonly until: string; readonly said: string };
 
 export type Pusher = (request: PushRequest) => Promise<Done>;
 
@@ -410,11 +415,24 @@ async function asked(input: FinishInput, questions: readonly Question[]): Promis
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }
 
+// parked : the work in progress pushed on top of the branch; nothing is labelled or posted
+async function parked(input: FinishInput, outcome: Extract<Outcome, { kind: "parked" }>): Promise<Result<Next>> {
+  const wip = await pushed(input, "on-top");
+  if (wip.kind === "failed") {
+    const reason = `the provider's usage limit stopped the run; its work in progress was not pushed: ${wip.reason}`;
+    return blocked(input, { reason, by: "host", pushFirst: false });
+  }
+  return { kind: "ok", value: { kind: "parked", head: input.push.commit, until: outcome.until, said: outcome.said } };
+}
+
 // finishRun : push and post for one run end; the result says what comes next, or why the forge could not be told.
 export async function finishRun(input: FinishInput): Promise<Result<Next>> {
   const { outcome } = input;
   if (outcome.kind === "blocked") {
     return blocked(input, { reason: outcome.reason, by: outcome.by, pushFirst: true });
+  }
+  if (outcome.kind === "parked") {
+    return parked(input, outcome);
   }
   const sent = await pushed(input, "any");
   if (sent.kind === "failed") {

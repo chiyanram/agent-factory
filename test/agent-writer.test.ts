@@ -144,3 +144,18 @@ describe("the writer behind the agent CLI seam (#688)", () => {
     expect(readers.filter((f) => !f.startsWith(join("core", "agent")))).toEqual([]);
   });
 });
+
+describe("the writer kind reads a provider's usage limit (#707)", () => {
+  it("reads Claude's refusal from what the run printed", () => {
+    const writer = openAgentCli({ env: {} }).writer;
+    const result = { type: "result", is_error: true, result: "You've hit your limit · resets 3pm (UTC)" };
+    expect(writer.usageLimit({ result, stderr: "", windows: {}, endedAt: Date.parse("2026-11-17T10:00:00Z") })).toEqual(
+      { kind: "limited", until: "2026-11-17T15:00:00Z", said: "You've hit your limit · resets 3pm (UTC)" },
+    );
+    expect(
+      writer.usageLimit({ result: { type: "result", is_error: false }, stderr: "", windows: {}, endedAt: 0 }),
+    ).toEqual({
+      kind: "none",
+    });
+  });
+});

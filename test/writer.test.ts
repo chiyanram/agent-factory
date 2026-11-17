@@ -488,6 +488,48 @@ describe("the writer step: a ticket's first run (#113)", () => {
     expect(told.log).toContain("label 41 needs-human");
     expect(told.log.at(-1)).toMatch(/note 41 .*blocked: the run exited 1/);
   });
+  it("parks a run the provider's usage limit refused: no label, no note, its work pushed, the reset kept (#707)", async () => {
+    const reset = Math.floor(Date.now() / 1000) + 3 * 3600;
+    const said = "You've hit your limit · resets 3pm (UTC)";
+    const stdout = [
+      JSON.stringify({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "rejected", resetsAt: reset, rateLimitType: "five_hour" },
+      }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: true, result: said }),
+      "",
+    ].join("\n");
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
+    const told = forge();
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 1 }, []), told, []), FIX);
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: {
+        outcome: "parked",
+        parked: { until: new Date(reset * 1000).toISOString().replace(".000Z", "Z"), said },
+        evidence: [],
+      },
+    });
+    // a first run opens and claims its change, as any first run with work does; nothing hands it to a person
+    expect(told.log.filter((l) => l.includes("needs-human") || l.startsWith("note"))).toEqual([]);
+    expect(told.log).toContain("label 41 agent::claimed");
+  });
+
+  const refusal = (isError: boolean): string =>
+    `${JSON.stringify({ type: "result", subtype: "success", is_error: isError, result: "You've hit your limit · resets 3pm (UTC)" })}\n`;
+
+  it("parks a refusal whatever the exit code (#707)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: refusal(true), stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "parked" } });
+  });
+
+  it("never parks a run whose result is no error, whatever its words (#707)", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: refusal(false), stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
+  });
+
   it("reads a box that did not stop as blocked and never reads its report, which it may still be writing", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const box: Box = {

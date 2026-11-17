@@ -759,6 +759,71 @@ describe("the design review before the approval, and no cleanup run after the im
   });
 });
 
+// a writer run parked at the provider's usage limit until `until`
+function parkedAt(until: string): Extract<Summary["parked"], { kind: "parked" }> {
+  return {
+    kind: "parked",
+    phase: "writer",
+    at: "2026-11-07T09:30:00Z",
+    head: H,
+    until,
+    said: "You've hit your limit · resets 2pm (UTC)",
+    task: { kind: "act-on", head: H },
+    repeated: false,
+  };
+}
+
+describe("a provider's usage limit parks the ticket until its reset", () => {
+  it("waits in the factory lane until the reset, with no ping, and carries the ticket on", () => {
+    const runs = wrote({ ...reviewed(1), parked: parkedAt("2026-11-07T14:00:00Z") });
+    const action = decide(state({ runs }));
+    expect(action).toEqual({ kind: "wait", why: "the provider's usage limit lasts until 2026-11-07T14:00:00Z" });
+    expect(whoseTurn(action)).toMatchObject({ lane: "factory", on: "gate" });
+    expect(inFlight(state({ runs }))).toBe(true);
+  });
+
+  it("runs the parked step again once the reset has passed, though the parked run moved the head", () => {
+    const runs = wrote({ ...reviewed(1), parked: parkedAt("2026-11-07T09:45:00Z") });
+    const moved = { kind: "open", line: line({ head: "2".repeat(40) }) } as const;
+    expect(decide(state({ runs, change: moved }))).toEqual({
+      kind: "writer",
+      task: { kind: "act-on", head: H },
+      why: "the provider's usage limit reset at 2026-11-07T09:45:00Z",
+    });
+  });
+
+  it("goes to a person when the reset time is unknown, or the provider refused again at a reset no later", () => {
+    const unknown = decide(state({ runs: wrote({ parked: parkedAt("unknown") }) }));
+    expect(unknown).toEqual({
+      kind: "needs-human",
+      why: "the provider's usage limit; its reset time is unknown: You've hit your limit · resets 2pm (UTC)",
+    });
+    expect(whoseTurn(unknown).lane).toBe("needs-you");
+    const again = decide(state({ runs: wrote({ parked: { ...parkedAt("2026-11-07T09:00:00Z"), repeated: true } }) }));
+    expect(again).toMatchObject({
+      kind: "needs-human",
+      why: "the provider refused again after its usage limit reset at 2026-11-07T09:00:00Z: You've hit your limit · resets 2pm (UTC)",
+    });
+  });
+
+  it("keeps the claim through a park longer than the quiet time, so no release note goes out", () => {
+    const runs = wrote({ ...reviewed(1), parked: parkedAt("2026-11-07T14:00:00Z"), lastAt: "2026-11-07T09:00:00Z" });
+    expect(decide(state({ runs }))).toEqual({
+      kind: "wait",
+      why: "the provider's usage limit lasts until 2026-11-07T14:00:00Z",
+    });
+  });
+
+  it("still waits on needs-human and a /stop first", () => {
+    const runs = wrote({ parked: parkedAt("2026-11-07T09:00:00Z") });
+    expect(decide(state({ runs, change: { kind: "open", line: line({ needsHuman: true }) } }))).toMatchObject({
+      kind: "wait",
+    });
+    const stopped = { kind: "open", line: line({ stop: { kind: "stopped", at: "2026-11-07T09:40:00Z" } }) } as const;
+    expect(decide(state({ runs, change: stopped }))).toMatchObject({ kind: "wait" });
+  });
+});
+
 describe("inFlight: whether the orchestrator loop carries the ticket on (#305)", () => {
   const merged = {
     kind: "merged",
@@ -979,6 +1044,11 @@ describe("can it get stuck? (#485)", () => {
     }),
     { ...EMPTY, lastWriter: fixDone },
     { ...EMPTY, interrupted: { kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" } },
+    // a writer run parked at the provider's usage limit: before its reset, after it, unknown, and a repeat
+    wrote({ parked: parkedAt("2026-11-07T14:00:00Z") }),
+    wrote({ parked: parkedAt("2026-11-07T09:00:00Z") }),
+    wrote({ parked: parkedAt("unknown") }),
+    wrote({ parked: { ...parkedAt("2026-11-07T09:00:00Z"), repeated: true } }),
   ];
   const approvals: readonly TicketState["approval"][] = [
     { kind: "approved", at: APPROVED_AT, lane: "feature", testFirst: false },

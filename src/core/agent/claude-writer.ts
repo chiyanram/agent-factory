@@ -13,6 +13,7 @@ import type { GuardrailId } from "../process/guardrails.js";
 import type { Argv } from "../project.js";
 import type { FileText } from "../writer/clone.js";
 import { pluginPaths } from "../writer/clone.js";
+import { claudeLimit, type Printed, type UsageLimit } from "./usage-limit.js";
 
 export type Claude = {
   // "" for no cap (FACTORY_MAX_USD)
@@ -192,6 +193,8 @@ export type ClaudeWriter = {
   readonly bin: (place: BoxPlace) => string;
   readonly argv: (call: WriterCall, place: BoxPlace) => Argv;
   readonly settings: (policy: WriterPolicy) => FileText;
+  // the provider's usage limit the run hit, from what it printed (usage-limit.ts)
+  readonly usageLimit: (printed: Printed) => UsageLimit;
 };
 
 // claudeWriter : the writer kind for the claude CLI at `bin`
@@ -201,5 +204,6 @@ export function claudeWriter(bin: string): ClaudeWriter {
     bin: (place) => writerBin(bin, place),
     argv: (call, place) => writerArgv(bin, call, place),
     settings: writerSettings,
+    usageLimit: claudeLimit,
   };
 }

@@ -46,8 +46,15 @@ export function whyOf(outcome: Outcome, said: string): string {
     case "asked":
       return whyText(asked(outcome.questions));
     case "blocked":
-      return whyText(withSaid(outcome.reason, outcome.by === "host" ? said : ""));
+      return blockedWhy(outcome, said);
+    case "parked":
+      return whyText(`the provider's usage limit, until ${outcome.until}: ${outcome.said}`);
   }
+}
+
+// blockedWhy : why a blocked run stopped; a reason the host decided gets the run's last words. Pure.
+function blockedWhy(outcome: Extract<Outcome, { kind: "blocked" }>, said: string): string {
+  return whyText(withSaid(outcome.reason, outcome.by === "host" ? said : ""));
 }
 
 // withSaid : a reason and what the run said last. Pure.

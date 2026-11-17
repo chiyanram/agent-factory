@@ -31,6 +31,9 @@
 //   the test-first run is done                                 writer for the fix
 //   the writer asked and a person answered                     writer again
 //   the writer was blocked and a person removed needs-human    writer again
+//   the provider's usage limit parked the writer's run         wait until the reset, then the same task again; an
+//                                                              unknown reset, or a refusal again at a reset no later
+//                                                              → needs-human
 //   the head is not the writer's (a person pushed)             wait: stand off
 //   the same patch twice, or a run that changed nothing        needs-human
 //     (but see a rework at the same head, below)
@@ -387,6 +390,39 @@ function begun(s: TicketState): boolean {
   return s.runs.lastWriter.kind !== "none" || s.change.kind !== "none";
 }
 
+// the waits and hand-overs a park gives; next-step.ts reads the wait's words
+export const PARK_WAIT = "the provider's usage limit lasts until";
+
+type ParkedRun = Extract<Summary["parked"], { kind: "parked" }>;
+
+// parkHandedOver : a park that goes to a person: its reset is unknown, or the provider refused again at a reset no
+// later than the one before; undefined for a park the factory carries on
+function parkHandedOver(p: ParkedRun): Action | undefined {
+  if (p.until === "unknown") {
+    return { kind: "needs-human", why: `the provider's usage limit; its reset time is unknown: ${p.said}` };
+  }
+  return p.repeated
+    ? { kind: "needs-human", why: `the provider refused again after its usage limit reset at ${p.until}: ${p.said}` }
+    : undefined;
+}
+
+// parked : a writer run the provider's usage limit refused: wait for the reset, then run the same task again,
+// from the head the parked run pushed; a reset that is unknown, or a refusal again at a reset no later, goes to a person
+const parked: Rule = (s) => {
+  const p = s.runs.parked;
+  if (p.kind !== "parked" || p.phase !== "writer" || p.task === undefined) {
+    return "next";
+  }
+  return parkHandedOver(p) ?? afterReset(s, p, p.task);
+};
+
+// afterReset : the wait until the reset, then the parked task again
+function afterReset(s: TicketState, p: ParkedRun, task: Task): Action {
+  return s.now < Date.parse(p.until)
+    ? { kind: "wait", why: `${PARK_WAIT} ${p.until}` }
+    : { kind: "writer", task: answered(s, task), why: `the provider's usage limit reset at ${p.until}` };
+}
+
 // the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
@@ -696,6 +732,7 @@ const RULES: readonly Rule[] = [
   claimedElsewhere,
   noChange,
   blocked,
+  parked,
   writerAgain,
   headMoved,
   samePatch,
@@ -748,11 +785,17 @@ function once(state: TicketState, action: Action): Action {
     : action;
 }
 
-// released : a wait on a claimed change that has gone quiet gives the claim back
+// releasable : a wait a quiet claim gives back; a park's is not. Pure.
+function releasable(action: Action): action is Extract<Action, { kind: "wait" }> {
+  return action.kind === "wait" && !action.why.startsWith(PARK_WAIT);
+}
+
+// released : a wait on a claimed change that has gone quiet gives the claim back; a park keeps it, since its wait is
+// the factory's until a reset hours away, and it was told once already
 function released(state: TicketState, action: Action): Action {
   const line = open(state);
   const quietClaim = line !== "none" && line.claimed && quiet(state, line);
-  return action.kind === "wait" && quietClaim
+  return quietClaim && releasable(action)
     ? { kind: "release", why: `quiet for over ${state.quietMinutes} minutes: ${action.why}` }
     : action;
 }
@@ -794,7 +837,11 @@ function designLater(why: string): boolean {
   return Object.values(DESIGN_STEP).some((step) => why.startsWith(`the ${step} failed; the next try is at`));
 }
 
-// carried : a row the engine carries on by itself: a run, a wait on CI, or a design run's backoff
+// carried : a row the engine carries on by itself: a run, a wait on CI, a design run's backoff, or a park until the
+// provider's reset
 function carried(row: Action): boolean {
-  return RUNS.has(row.kind) || (row.kind === "wait" && (MACHINE_WAITS.has(row.why) || designLater(row.why)));
+  return (
+    RUNS.has(row.kind) ||
+    (row.kind === "wait" && (MACHINE_WAITS.has(row.why) || designLater(row.why) || row.why.startsWith(PARK_WAIT)))
+  );
 }

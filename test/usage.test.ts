@@ -35,6 +35,17 @@ describe("a run's spend, from the agent CLI's output", () => {
     expect(streamSpend(streamOf(NO_STREAM, JSON.stringify(RESULT)))).toEqual({ usd: 1.5, tokens: 116 });
   });
 
+  it("keeps the rate-limit windows the stream names, however the output is cut (#707)", () => {
+    const event = {
+      type: "rate_limit_event",
+      rate_limit_info: { status: "rejected", rateLimitType: "five_hour", resetsAt: 1_800_000_000 },
+    };
+    const text = `${JSON.stringify(event)}\n${JSON.stringify(RESULT)}\n`;
+    const pieces = text.match(/.{1,7}/gs) ?? [];
+    expect(pieces.reduce(streamOf, NO_STREAM).windows).toEqual({ five_hour: 1_800_000_000_000 });
+    expect(streamOf(NO_STREAM, text).windows).toEqual({ five_hour: 1_800_000_000_000 });
+  });
+
   it("is unmeasured with no result event, and never keeps a line past the most", () => {
     expect(streamSpend(streamOf(NO_STREAM, '{"type":"assistant"}\n{"type":"res'))).toBe("unmeasured");
     const long = streamOf(NO_STREAM, "x".repeat(1024 * 1024 + 1));
@@ -197,6 +208,29 @@ describe("agent-factory usage", () => {
     expect(totalOf(read.runs, 0).unmeasured).toBe(1);
     write("ledger", "PROJ-2", [{ ...writerEnded("2026-11-09T09:00:00Z"), copilot: { runs: -1, seconds: 600 } }]);
     expect((await readSpends({ home, project: "ledger" })).problems).toHaveLength(1);
+  });
+
+  it("counts what a run the provider's usage limit parked spent, as the kind its task is (#707)", async () => {
+    const parked = (at: string, task: unknown) => ({
+      at,
+      kind: "parked",
+      phase: "writer",
+      head: "1".repeat(40),
+      until: "2026-11-09T15:00:00Z",
+      said: "You've hit your limit",
+      task,
+      spend: { usd: 0.5, tokens: 50 },
+    });
+    write("ledger", "PROJ-1", [
+      parked("2026-11-09T09:00:00Z", { kind: "fix" }),
+      parked("2026-11-09T09:30:00Z", { kind: "test-first" }),
+    ]);
+    const read = await readSpends({ home, project: "ledger" });
+    expect(read.problems).toEqual([]);
+    expect(read.runs.map((r) => [r.kind, r.spend])).toEqual([
+      ["implementer", { usd: 0.5, tokens: 50 }],
+      ["test-first", { usd: 0.5, tokens: 50 }],
+    ]);
   });
 
   it("names each record's run kind: the writer's mode, each finder and verify pass of a round, an older round, each design review run, the onboarder", async () => {
