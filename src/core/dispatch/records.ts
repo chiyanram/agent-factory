@@ -83,6 +83,20 @@ const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
   cleanup: "cleanup",
 };
 
+// ParkedTask : the task a parked writer run had, without the answers, which the table adds again from the change
+//; a cleanup run, which no dispatcher rule starts, keeps none
+export type ParkedTask =
+  | { readonly kind: "test-first" | "fix" }
+  | { readonly kind: "ready-failed" | "act-on" | "ci-red" | "verify-failed" | "conflict"; readonly head: string };
+
+// parkedTaskOf : the task a parked line keeps, from the run's task; none for a cleanup run. Pure.
+export function parkedTaskOf(task: Task): ParkedTask | undefined {
+  if (task.kind === "cleanup") {
+    return undefined;
+  }
+  return "head" in task ? { kind: task.kind, head: task.head } : { kind: task.kind };
+}
+
 // modeOf : the mode a task is recorded as. Pure.
 export function modeOf(task: Task): WriterMode {
   return MODE_OF[task.kind];
@@ -205,6 +219,22 @@ export type Event =
       readonly split?: RoundSpend;
       // the failed run's traces, plain file names in the ticket's folder (trace.ts, #487); none on an older line
       readonly traces?: readonly string[];
+    }
+  // a run the provider's usage limit refused (agent/usage-limit.ts): it ends the run's start, its work was pushed
+  // as a blocked run's is, and no failure is counted. until: the reset, ISO 8601 UTC, or "unknown"; said: the CLI's
+  // refusal, scrubbed and cut; task: the writer's task, which runs again after the reset (none for a cleanup run)
+  | {
+      readonly at: string;
+      readonly kind: "parked";
+      readonly phase: Phase;
+      readonly head: string;
+      readonly until: string;
+      readonly said: string;
+      readonly task?: ParkedTask;
+      readonly spend?: Spend;
+      // the Copilot runs its spend leaves out; none on a line that has none
+      readonly copilot?: CopilotRuns;
+      readonly trace?: string;
     }
   // one run of a design review (#236), at the spec and design hashes it read
   | {
@@ -588,6 +618,74 @@ function writerExtras(
   return deferred === BAD || notes === BAD ? BAD : { ...spend, ...card, ...deferred, ...notes };
 }
 
+const UNHEADED = ["test-first", "fix"] as const;
+const HEADED = ["ready-failed", "act-on", "ci-red", "verify-failed", "conflict"] as const;
+
+// parkedTaskField : a parked line's task, as a field to spread: none on a line that has none, or BAD
+function parkedTaskField(raw: unknown): { readonly task?: ParkedTask } | Bad {
+  const task = prop(raw, "task");
+  if (task === undefined) {
+    return {};
+  }
+  const unheaded = oneOf(task, "kind", UNHEADED);
+  if (unheaded !== BAD) {
+    return { task: { kind: unheaded } };
+  }
+  const kind = oneOf(task, "kind", HEADED);
+  const head = str(task, "head");
+  return kind === BAD || head === BAD ? BAD : { task: { kind, head } };
+}
+
+// untilOf : a parked line's reset: ISO 8601 UTC, or "unknown"
+function untilOf(raw: unknown): string | Bad {
+  const until = str(raw, "until");
+  return until === "unknown" ||
+    (until !== BAD && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(until) && !Number.isNaN(Date.parse(until)))
+    ? until
+    : BAD;
+}
+
+type ParkedParts = Pick<Extract<Event, { kind: "parked" }>, "phase" | "head" | "until" | "said">;
+type ParkedExtras = Pick<Extract<Event, { kind: "parked" }>, "task" | "spend" | "copilot" | "trace">;
+
+// parkedParts : a parked line's fields every one has, or BAD
+function parkedParts(raw: unknown): ParkedParts | Bad {
+  const phase = oneOf(raw, "phase", PHASES);
+  const head = str(raw, "head");
+  const until = untilOf(raw);
+  const said = str(raw, "said");
+  return phase === BAD || head === BAD || until === BAD || said === BAD ? BAD : { phase, head, until, said };
+}
+
+// parkedExtras : a parked line's optional task, spend and trace, as fields to spread, or BAD
+function parkedExtras(raw: unknown): ParkedExtras | Bad {
+  const task = parkedTaskField(raw);
+  const spend = spendField(raw);
+  const trace = textOf(raw, "trace");
+  if (task === BAD || spend === BAD || trace === BAD) {
+    return BAD;
+  }
+  return {
+    ...task,
+    ...spentAndTrace(spend.spend, trace),
+    ...(spend.copilot === undefined ? {} : { copilot: spend.copilot }),
+  };
+}
+
+// spentAndTrace : a line's spend and trace, as fields to spread; none for what it has not. Pure.
+export function spentAndTrace(
+  spend: Spend | undefined,
+  trace: string | undefined,
+): Pick<ParkedExtras, "spend" | "trace"> {
+  return { ...(spend === undefined ? {} : { spend }), ...(trace === undefined ? {} : { trace }) };
+}
+
+function parkedOf(raw: unknown, at: string): Event | Bad {
+  const parts = parkedParts(raw);
+  const extras = parkedExtras(raw);
+  return parts === BAD || extras === BAD ? BAD : { at, kind: "parked", ...parts, ...extras };
+}
+
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const mode = oneOf(raw, "mode", MODES);
   const outcome = oneOf(raw, "outcome", OUTCOMES);
@@ -958,6 +1056,7 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
   "review-ended": reviewEndedOf,
   "verify-ended": verifyEndedOf,
   spent: spentOf,
+  parked: parkedOf,
   "design-ended": designEndedOf,
   "design-noted": designNotedOf,
   pinged: (raw, at) => {
@@ -1224,7 +1323,23 @@ export type Summary = {
   readonly lastAt: string;
   // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
   readonly spent: Spend;
+  // the newest run the provider's usage limit parked, until another run ends; repeated: it parked at a reset no
+  // later than the park just before it, with no other run's end between
+  readonly parked: Parked;
 };
+
+export type Parked =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "parked";
+      readonly phase: Phase;
+      readonly at: string;
+      readonly head: string;
+      readonly until: string;
+      readonly said: string;
+      readonly task?: ParkedTask;
+      readonly repeated: boolean;
+    };
 
 export const EMPTY: Summary = {
   interrupted: { kind: "none" },
@@ -1253,6 +1368,7 @@ export const EMPTY: Summary = {
   unreadSince: "",
   lastAt: "",
   spent: NO_SPEND,
+  parked: { kind: "none" },
 };
 
 // patches : the same-patch check's two patches after a writer run: a cleanup run leaves them as they were (#236)
@@ -1279,6 +1395,7 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
   return {
     ...s,
     interrupted: { kind: "none" },
+    parked: UNPARKED,
     ...patches(s, e),
     lastWriter: {
       kind: "ended",
@@ -1293,6 +1410,38 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
     testFirstDone: s.testFirstDone || testFirst,
     rebaseRuns: s.rebaseRuns + Number(e.mode === "rebase"),
     ciRounds: s.ciRounds + Number(e.mode === "ci"),
+    spent: addSpend(s.spent, e.spend ?? NO_SPEND),
+  };
+}
+
+const UNPARKED: Parked = { kind: "none" };
+
+// repeatOf : a park at a reset no later than the park just before it: the provider refused again after its reset
+function repeatOf(before: Parked, until: string): boolean {
+  return (
+    before.kind === "parked" &&
+    until !== "unknown" &&
+    before.until !== "unknown" &&
+    Date.parse(until) <= Date.parse(before.until)
+  );
+}
+
+// parkedStep : a parked run ends its start and spends; the factory waits for the reset. Pure.
+function parkedStep(s: Summary, e: Extract<Event, { kind: "parked" }>): Summary {
+  return {
+    ...s,
+    ...seedTurn(s, "factory"),
+    interrupted: { kind: "none" },
+    parked: {
+      kind: "parked",
+      phase: e.phase,
+      at: e.at,
+      head: e.head,
+      until: e.until,
+      said: e.said,
+      ...(e.task === undefined ? {} : { task: e.task }),
+      repeated: repeatOf(s.parked, e.until),
+    },
     spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   };
 }
@@ -1322,6 +1471,7 @@ const STEPS: Steps = {
   "ready-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
+    parked: UNPARKED,
     lastReady: {
       kind: "ended",
       at: e.at,
@@ -1339,6 +1489,7 @@ const STEPS: Steps = {
   "review-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
+    parked: UNPARKED,
     lastReview: { kind: "ended", head: e.head, actOn: e.actOn },
     reviewRounds: s.reviewRounds + 1,
     reviewFailures: s.reviewFailures + Number(e.actOn > 0),
@@ -1348,6 +1499,7 @@ const STEPS: Steps = {
   "verify-ended": (s, e) => ({
     ...s,
     interrupted: { kind: "none" },
+    parked: UNPARKED,
     lastVerify: { kind: "ended", head: e.head, passed: e.passed },
     verifyFailures: s.verifyFailures + Number(!e.passed),
     nextTry: nextTryView(e.nextTry),
@@ -1360,8 +1512,10 @@ const STEPS: Steps = {
     ...s,
     ...(e.step === "verify" && e.outcome === "done" ? seedTurn(s, "needs-you") : {}),
     interrupted: { kind: "none" },
+    parked: UNPARKED,
     spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   }),
+  parked: parkedStep,
   // a note to a person counts nothing; design.ts reads it so the note is sent once
   "design-noted": (s) => ({ ...s, ...seedTurn(s, "needs-you") }),
   pinged: (s, e) => ({ ...s, ...seedTurn(s, "ready-to-merge"), pingedAt: e.head }),

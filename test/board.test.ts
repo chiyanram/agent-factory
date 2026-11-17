@@ -268,6 +268,27 @@ describe("the board's lanes (#671)", () => {
     ]);
   });
 
+  it("shows a park's reset in the reader's zone, with UTC beside it, in the factory lane (#707)", () => {
+    const parked = {
+      ticket: "PROJ-7",
+      change: 15,
+      lane: "factory",
+      step: "wait: the provider's usage limit lasts until 2026-11-13T15:00:00Z",
+      waitsOn: { kind: "gate", what: "wait: the provider's usage limit lasts until 2026-11-13T15:00:00Z" },
+      since: "2026-11-13T11:00:00Z",
+      forMs: 3_600_000,
+    } as const;
+    expect(boardText({ lines: [parked], zone: { name: "Asia/Tokyo" }, mark: "#" }).slice(-2)).toEqual([
+      "  PROJ-7  #15  wait: the provider's usage limit lasts until 2026-11-14 00:00 Asia/Tokyo (2026-11-13 15:00 UTC)",
+      "    waits on the gate: wait: the provider's usage limit lasts until 2026-11-14 00:00 Asia/Tokyo (2026-11-13 15:00 UTC), for 1h 00m since 2026-11-13 20:00 Asia/Tokyo",
+    ]);
+    expect(boardText({ lines: [parked], zone: { name: "UTC" }, mark: "#" }).at(-2)).toBe(
+      "  PROJ-7  #15  wait: the provider's usage limit lasts until 2026-11-13 15:00 UTC",
+    );
+    // JSON keeps the UTC time as the records have it
+    expect(JSON.parse(boardJson([parked]))).toMatchObject([{ step: parked.step }]);
+  });
+
   it("gives each JSON row its lane, in lane order", () => {
     const json = JSON.parse(boardJson(laned)) as unknown;
     expect(Array.isArray(json) ? json.map((r: { ticket: string; lane: string }) => [r.ticket, r.lane]) : json).toEqual([

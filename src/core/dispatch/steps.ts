@@ -48,7 +48,9 @@ export type Steps = {
     RunInput & { readonly task: Task },
     {
       readonly head: string;
-      readonly outcome: "done" | "asked" | "blocked";
+      readonly outcome: "done" | "asked" | "blocked" | "parked";
+      // a parked run's reset and the CLI's refusal
+      readonly parked?: { readonly until: string; readonly said: string };
       readonly patch: string;
       readonly evidence: readonly Evidence[];
       // the writer hung after its report, and the host stopped it after the completion window (#182)

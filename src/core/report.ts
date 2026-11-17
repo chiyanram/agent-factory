@@ -70,7 +70,10 @@ export type Outcome =
     }
   | { readonly kind: "asked"; readonly questions: readonly Question[] }
   // by: the writer said so, or the host decided it from how the run ended
-  | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" };
+  | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" }
+  // the provider's usage limit refused the run (agent/usage-limit.ts): the host decides it from what the CLI
+  // printed, never from the report. until: the reset, ISO 8601 UTC, or "unknown"; said: the CLI's refusal
+  | { readonly kind: "parked"; readonly until: string; readonly said: string };
 
 // How the run ended, as the box (src/core/box) and the dispatcher's caps saw it.
 export type RunEnd =

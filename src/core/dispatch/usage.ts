@@ -62,11 +62,11 @@ async function projectsOf(home: string, project: string | undefined): Promise<re
   return project === undefined ? names(join(home, "runs"), "") : [project];
 }
 
-// the lines that end or follow a model run: the writer's, a review round's, a design review run's (#236), and what a
-// failed run spent; a line of these kinds with no spend was not measured
-const SPENDING: ReadonlySet<string> = new Set(["writer-ended", "review-ended", "spent", "design-ended"]);
+// the lines that end or follow a model run: the writer's, a review round's, a design review run's, what a
+// failed run spent, and a run the provider's usage limit parked; a line of these kinds with no spend was not measured
+const SPENDING: ReadonlySet<string> = new Set(["writer-ended", "review-ended", "spent", "design-ended", "parked"]);
 
-type Spending = Extract<Event, { kind: "writer-ended" | "review-ended" | "spent" | "design-ended" }>;
+type Spending = Extract<Event, { kind: "writer-ended" | "review-ended" | "spent" | "design-ended" | "parked" }>;
 
 function spending(e: Event): e is Spending {
   return SPENDING.has(e.kind);
@@ -95,6 +95,11 @@ const KIND_OF_PHASE: Readonly<Record<Phase, RunKind>> = {
 
 const KIND_OF_STEP: Readonly<Record<DesignStep, RunKind>> = { review: "design-reviewer", verify: "verify pass" };
 
+// parkedKind : the run kind of a parked run: a test-first task's, else its phase's. Pure.
+function parkedKind(e: Extract<Spending, { kind: "parked" }>): RunKind {
+  return e.task?.kind === "test-first" ? "test-first" : KIND_OF_PHASE[e.phase];
+}
+
 // kindOf : the run kind of a line that spends. Pure.
 function kindOf(e: Spending): RunKind {
   if (e.kind === "writer-ended") {
@@ -102,6 +107,9 @@ function kindOf(e: Spending): RunKind {
   }
   if (e.kind === "design-ended") {
     return KIND_OF_STEP[e.step];
+  }
+  if (e.kind === "parked") {
+    return parkedKind(e);
   }
   return e.kind === "review-ended" ? "automated review" : KIND_OF_PHASE[e.phase];
 }

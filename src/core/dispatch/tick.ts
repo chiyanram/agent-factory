@@ -51,6 +51,8 @@ import {
   codeOf,
   modeOf,
   nextTryOf,
+  parkedTaskOf,
+  spentAndTrace,
   readRecords,
   record,
   summarize,
@@ -61,6 +63,7 @@ import {
   type Where,
 } from "./records.js";
 import { writeLastPoll } from "./last-poll.js";
+import { shownAt, UTC } from "../zone.js";
 import { timelineOf } from "./timeline.js";
 import { blockersView, withIssue, type Blocker, type BlockersView, type BlockerState } from "./blockers.js";
 import type { BranchState } from "../forge/types.js";
@@ -79,6 +82,7 @@ import { BRANCH_PREFIX, type DesignRan, type ReadyFacts, type Steps, type Unavai
 import {
   decide,
   goAt,
+  PARK_WAIT,
   type Action,
   type ApprovalView,
   type ChangeView,
@@ -805,9 +809,58 @@ async function startWriter(
   const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task });
   // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person; what the
   // run spent is still recorded (#483)
-  return ran.kind === "ok"
-    ? writerEnded(setup, state, mode, ran.value)
-    : failedSpent(setup, state, headOf(state), ran, "writer");
+  if (ran.kind !== "ok") {
+    return failedSpent(setup, state, headOf(state), ran, "writer");
+  }
+  const { outcome, parked: _parked, ...rest } = ran.value;
+  return outcome === "parked"
+    ? writerParked(setup, state, task, ran.value)
+    : writerEnded(setup, state, mode, { ...rest, outcome });
+}
+
+// parkedEvent : a parked writer run's "parked" line: its reset, the CLI's refusal, the task it runs again after the
+// reset, and what it spent. Pure.
+function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Event, { kind: "parked" }> {
+  const { until, said } = value.parked ?? { until: "unknown", said: value.why ?? "" };
+  const parkedTask = parkedTaskOf(task);
+  return {
+    at: when,
+    kind: "parked",
+    phase: "writer",
+    head: value.head,
+    until,
+    said,
+    ...(parkedTask === undefined ? {} : { task: parkedTask }),
+    ...spentAndTrace(value.spend, value.trace),
+  };
+}
+
+// writerParked : a run the provider's usage limit refused: its "parked" line, then one notice per project and reset
+// time; an unknown reset sends none, since it is a person's step, which the turn rule pings
+async function writerParked(setup: TickSetup, state: TicketState, task: Task, value: WriterValue): Promise<Logged> {
+  const event = parkedEvent(at(setup), task, value);
+  const kept = await record({ where: where(setup, state), event });
+  if (kept.kind === "failed") {
+    return kept;
+  }
+  if (event.until !== "unknown") {
+    await parkNoticed(setup, state, event.until, event.said);
+  }
+  return { kind: "ok", said: `writer parked: ${PARK_WAIT} ${event.until}: ${event.said}` };
+}
+
+// parkNoticed : one notice per project and reset time, so every ticket parked on one reset sends one between them; an
+// unknown reset is a person's step instead, which the turn rule pings
+async function parkNoticed(setup: TickSetup, state: TicketState, until: string, said: string): Promise<void> {
+  const path = join(setup.home, "runs", setup.project, "provider-notice.json");
+  const before = await readFile(path, "utf8").catch(() => "");
+  const key = JSON.stringify({ until });
+  if (before === key) {
+    return;
+  }
+  await writeFile(path, key, { mode: 0o600 }).catch(() => undefined);
+  const why = `${PARK_WAIT} ${shownAt(until, UTC)}, then its run starts again: ${said}`;
+  await informed(setup, { kind: "held", ticket: state.ticket, change: number(state), why });
 }
 
 type WriterValue = Extract<
@@ -815,13 +868,16 @@ type WriterValue = Extract<
   { kind: "ok" }
 >["value"];
 
+// EndedValue : a writer run that ended other than parked, as its "writer-ended" line holds it
+type EndedValue = Omit<WriterValue, "outcome" | "parked"> & { readonly outcome: "done" | "asked" | "blocked" };
+
 // writerEnded : the run's end recorded; a run that ended on a person is pinged on the next pass, which sees their turn
 // (turnPinged); the pass logs why it stopped
 async function writerEnded(
   setup: TickSetup,
   state: TicketState,
   mode: ReturnType<typeof modeOf>,
-  value: WriterValue,
+  value: EndedValue,
 ): Promise<Logged> {
   const ended = await record({
     where: where(setup, state),

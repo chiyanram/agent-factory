@@ -33,11 +33,20 @@ function hangingClaude(dir: string): { readonly bin: string; readonly pidFile: s
   return { bin, pidFile };
 }
 
+// statOf : a process's /proc stat line, "" once it is gone: it can end between any check and the read
+function statOf(pid: number): string {
+  try {
+    return readFileSync(join("/proc", String(pid), "stat"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
 // alive : the process is still there and not a zombie waiting to be reaped (Linux reads /proc; elsewhere a signal 0)
 function alive(pid: number): boolean {
-  const stat = join("/proc", String(pid), "stat");
   if (existsSync("/proc/self/stat")) {
-    return existsSync(stat) && !/^\d+ \(.*\) Z/.test(readFileSync(stat, "utf8"));
+    const stat = statOf(pid);
+    return stat !== "" && !/^\d+ \(.*\) Z/.test(stat);
   }
   try {
     process.kill(pid, 0);

@@ -215,6 +215,64 @@ describe("records", () => {
     });
   });
 
+  it("a parked line ends its run, keeps its task, and reads back; a bad reset time fails the read (#707)", async () => {
+    const parked: Event = {
+      at: "2026-11-07T09:20:00Z",
+      kind: "parked",
+      phase: "writer",
+      head: H,
+      until: "2026-11-07T14:00:00Z",
+      said: "You've hit your limit · resets 2pm (UTC)",
+      task: { kind: "act-on", head: H },
+      spend: { usd: 0.1, tokens: 12 },
+    };
+    const events: Event[] = [
+      { at: "2026-11-07T09:10:00Z", kind: "started", phase: "writer", mode: "rework", head: H },
+      parked,
+    ];
+    for (const event of events) {
+      expect(await record({ where: where(), event })).toEqual({ kind: "ok" });
+    }
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value : []).toEqual(events);
+    expect(summarize({ events, since: "2026-11-07T08:00:00Z" })).toMatchObject({
+      interrupted: { kind: "none" },
+      parked: { kind: "parked", until: "2026-11-07T14:00:00Z", task: { kind: "act-on", head: H }, repeated: false },
+      spent: { usd: 0.1, tokens: 12 },
+    });
+    const bad = `${JSON.stringify({ ...parked, until: "3pm" })}\n${JSON.stringify({ at: "2026-11-07T09:30:00Z", kind: "pinged", head: H })}\n`;
+    writeFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), bad, { flag: "a" });
+    expect(await readRecords(where())).toMatchObject({ kind: "failed", reason: expect.stringContaining("line 3") });
+  });
+
+  it("a park at a reset no later than the one before is a repeat; any other run's end clears the park (#707)", () => {
+    const park = (at: string, until: string): Event => ({
+      at,
+      kind: "parked",
+      phase: "writer",
+      head: H,
+      until,
+      said: "You've hit your limit",
+      task: { kind: "fix" },
+    });
+    const first = park("2026-11-07T09:00:00Z", "2026-11-07T14:00:00Z");
+    const twice = [first, park("2026-11-07T14:05:00Z", "2026-11-07T14:00:00Z")];
+    expect(summarize({ events: twice, since: "2026-11-07T08:00:00Z" }).parked).toMatchObject({ repeated: true });
+    const later = [first, park("2026-11-07T14:05:00Z", "2026-11-07T19:00:00Z")];
+    expect(summarize({ events: later, since: "2026-11-07T08:00:00Z" }).parked).toMatchObject({ repeated: false });
+    const ended: Event = {
+      at: "2026-11-07T15:00:00Z",
+      kind: "writer-ended",
+      mode: "fix",
+      head: H,
+      outcome: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    };
+    expect(summarize({ events: [...twice, ended], since: "2026-11-07T08:00:00Z" }).parked).toEqual({ kind: "none" });
+  });
+
   it("a start with no end is an interrupted run; a middle line that is not a record fails the read", async () => {
     await record({
       where: where(),
@@ -2800,5 +2858,100 @@ describe("one ping per person's turn (#672)", () => {
     // the pass writes the turn it found, so from now on only turn lines move it
     const after = await readRecords(where);
     expect(after.kind === "ok" ? after.value.at(-1) : undefined).toMatchObject({ kind: "turn", to: "ready-to-merge" });
+  });
+});
+
+describe("a provider's usage limit parks the ticket until its reset (#707)", () => {
+  const UNTIL = "2026-11-07T15:00:00Z";
+  const SAID = "You've hit your limit · resets 3pm (UTC)";
+
+  it("records the park with its task, sends one notice, waits, then runs the same task after the reset", async () => {
+    await approved();
+    const tasks: unknown[] = [];
+    const pings: Ping[] = [];
+    let limited = true;
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async (input) => {
+          tasks.push(input.task);
+          const parked = limited;
+          limited = false;
+          return parked
+            ? {
+                kind: "ok",
+                value: {
+                  head: H,
+                  outcome: "parked",
+                  parked: { until: UNTIL, said: SAID },
+                  patch: "",
+                  evidence: [],
+                  hung: false,
+                },
+              }
+            : { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } };
+        },
+      },
+    };
+    const changes = { team, open: [open({ labels: [] })], merged: [] };
+    const pass = (now: string, log: string[] = []) =>
+      tick(setup(changes, log, { steps, notify: pinger(pings), now: () => Date.parse(now) }));
+    const log: string[] = [];
+    await pass("2026-11-07T10:00:00Z", log);
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    const events = read.kind === "ok" ? read.value : [];
+    expect(events.find((e) => e.kind === "parked")).toEqual({
+      at: expect.any(String),
+      kind: "parked",
+      phase: "writer",
+      head: H,
+      until: UNTIL,
+      said: SAID,
+      task: { kind: "fix" },
+    });
+    expect(log).toContain(`log PROJ-1: writer parked: the provider's usage limit lasts until ${UNTIL}: ${SAID}`);
+    await pass("2026-11-07T11:00:00Z");
+    expect(tasks).toEqual([{ kind: "fix" }]);
+    expect(pings).toEqual([
+      {
+        kind: "held",
+        ticket: "PROJ-1",
+        change: 12,
+        why: `the provider's usage limit lasts until 2026-11-07 15:00 UTC, then its run starts again: ${SAID}`,
+      },
+    ]);
+    await pass("2026-11-07T15:01:00Z");
+    expect(tasks).toEqual([{ kind: "fix" }, { kind: "fix" }]);
+    expect(pings).toHaveLength(1);
+  });
+
+  it("hands a park with an unknown reset to a person, with the CLI's words, and sends no provider notice", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    await record({
+      where,
+      event: { at: "2026-11-07T09:00:00Z", kind: "started", phase: "writer", mode: "fix", head: H },
+    });
+    await record({
+      where,
+      event: {
+        at: "2026-11-07T09:10:00Z",
+        kind: "parked",
+        phase: "writer",
+        head: H,
+        until: "unknown",
+        said: SAID,
+        task: { kind: "fix" },
+      },
+    });
+    const log: string[] = [];
+    const pings: Ping[] = [];
+    await tick(setup({ team, open: [open()], merged: [] }, log, { notify: pinger(pings) }));
+    expect(log).toContain("label +needs-human #12");
+    expect(log.find((l) => l.startsWith("note #12 [coordinator] blocked"))).toContain(
+      `blocked: the provider's usage limit; its reset time is unknown: ${SAID}`,
+    );
+    expect(pings.filter((p) => p.kind === "held")).toEqual([]);
   });
 });

@@ -49,6 +49,10 @@ const STEPS: readonly (readonly [RegExp, NextStep])[] = [
     { who: "factory", does: "polls the git host again for CI" },
   ],
   [/failed; the next try is at /, { who: "factory", does: "runs the step again at its next try" }],
+  [
+    /^the provider's usage limit lasts until /,
+    { who: "factory", does: "runs the step again once the provider's usage limit resets" },
+  ],
   [/^a manual CI job waits for a person$/, { who: "person", does: "runs the manual CI job on the git host" }],
   [/^CI skipped this head$/, { who: "person", does: "starts CI at this head on the git host, or pushes a commit" }],
   [/^the gate is green; the human reviews and merges$/, MERGE],

@@ -431,6 +431,45 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
 
   // #494 review: a pass that only recorded a hold or an unanswered blocker read waits the poll interval, so three
   // unanswered passes are a poll interval apart, never a few seconds of git host errors back to back
+  it("sleeps until the provider's reset when every ticket in flight is parked at its usage limit (#707)", async () => {
+    await approved();
+    let merged = false;
+    const parking: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        run: async () => ({
+          kind: "ok",
+          value: {
+            head: H,
+            outcome: "parked",
+            parked: { until: "2026-11-07T15:00:00Z", said: "You've hit your limit" },
+            patch: "",
+            evidence: [],
+            hung: false,
+          },
+        }),
+      },
+    };
+    const loop = loopWith(
+      () =>
+        merged
+          ? { team, open: [], merged: [{ number: 12, branch: "factory/PROJ-1", fork: false }] }
+          : { team, open: [open()], merged: [] },
+      parking,
+      NO_CAPS,
+      undefined,
+      () => {
+        merged = true;
+      },
+    );
+    expect(await loop.run()).toMatchObject({ kind: "ok" });
+    expect(loop.slept).toEqual([5 * 3_600_000]);
+    expect(loop.lines).toContain(
+      "in flight: PROJ-1; the provider's usage limit lasts until 2026-11-07T15:00:00Z; next pass in 300 min, when it resets",
+    );
+  });
+
   it("waits the poll interval after a pass that only recorded a hold or an unread blocker", () => {
     for (const action of [
       { kind: "blockers-unread", why: "PROJ-0: github: 502" },

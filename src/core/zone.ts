@@ -25,7 +25,7 @@ export function readerZone(env: NodeJS.ProcessEnv): Zone {
   return known(system) ? { name: system } : UTC;
 }
 
-type Wall = {
+export type Wall = {
   readonly year: number;
   readonly month: number;
   readonly day: number;
@@ -34,7 +34,7 @@ type Wall = {
 };
 
 // wallAt : the date and time on a clock in the zone at ms since the epoch. Pure.
-function wallAt(ms: number, zone: Zone): Wall {
+export function wallAt(ms: number, zone: Zone): Wall {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: zone.name,
     year: "numeric",
@@ -65,6 +65,29 @@ export function shownAt(iso: string, zone: Zone): string {
   }
   const w = wallAt(ms, zone);
   return `${w.year}-${two(w.month)}-${two(w.day)} ${two(w.hour)}:${two(w.minute)} ${zone.name}`;
+}
+
+// atWall : the moment the zone's clock shows this wall time, in ms since the epoch; "skipped" when daylight saving
+// jumps over it, "repeated" when the clock shows it twice. Every offset the zone has within a day of it is tried, so
+// a guess is never made. Pure.
+export function atWall(wall: Wall, zone: Zone): number | "skipped" | "repeated" {
+  const naive = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
+  const offsets = new Set([-1, 0, 1].map((d) => offsetAt(naive + d * 86_400_000, zone)));
+  const same = (ms: number): boolean => {
+    const w = wallAt(ms, zone);
+    return (
+      w.year === wall.year &&
+      w.month === wall.month &&
+      w.day === wall.day &&
+      w.hour === wall.hour &&
+      w.minute === wall.minute
+    );
+  };
+  const moments = [...new Set([...offsets].map((o) => naive - o))].filter(same);
+  if (moments.length === 0) {
+    return "skipped";
+  }
+  return moments.length === 1 ? (moments[0] ?? naive) : "repeated";
 }
 
 // dayStart : the start of the zone's day that holds now, in ms since the epoch. Pure.

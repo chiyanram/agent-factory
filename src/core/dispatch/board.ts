@@ -13,8 +13,8 @@
 import { LANES, whoseTurn, type Lane } from "./next-step.js";
 import { isActivity, type Event } from "./records.js";
 import type { Decided } from "./tick.js";
-import type { Action } from "./table.js";
-import { shownAt, shownFor, type Zone } from "../zone.js";
+import { PARK_WAIT, type Action } from "./table.js";
+import { shownAt, shownFor, UTC, type Zone } from "../zone.js";
 
 export type WaitsOn =
   | { readonly kind: "person"; readonly who: string; readonly does: string }
@@ -122,6 +122,19 @@ function waitText(w: WaitsOn): string {
   return w.kind === "person" ? `${w.who}, who ${w.does}` : `the ${w.kind}: ${w.what}`;
 }
 
+// parkInZone : a park's reset as a person reads it: in the reader's zone, with UTC beside it, so a reset is
+// never read in the wrong zone; any other text as it is. Pure.
+function parkInZone(text: string, zone: Zone): string {
+  return text.replace(
+    new RegExp(`(${PARK_WAIT} )(\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ)`),
+    (_m, words: string, iso: string) => {
+      const utc = shownAt(iso, UTC);
+      const local = shownAt(iso, zone);
+      return `${words}${local === utc ? utc : `${local} (${utc})`}`;
+    },
+  );
+}
+
 // boardText : the board as a person reads it, times in the reader's zone. Pure.
 export function boardText(input: {
   readonly lines: readonly BoardLine[];
@@ -129,8 +142,8 @@ export function boardText(input: {
   readonly mark: string;
 }): readonly string[] {
   const row = (l: BoardLine): readonly string[] => [
-    `  ${l.ticket}  ${l.change === "none" ? "no PR" : `${input.mark}${l.change}`}  ${l.step}`,
-    `    waits on ${waitText(l.waitsOn)}${l.since === "" ? "" : `, for ${shownFor(l.forMs)} since ${shownAt(l.since, input.zone)}`}`,
+    `  ${l.ticket}  ${l.change === "none" ? "no PR" : `${input.mark}${l.change}`}  ${parkInZone(l.step, input.zone)}`,
+    `    waits on ${parkInZone(waitText(l.waitsOn), input.zone)}${l.since === "" ? "" : `, for ${shownFor(l.forMs)} since ${shownAt(l.since, input.zone)}`}`,
   ];
   return [
     input.lines.length === 0 ? "no ticket in flight:" : `tickets in flight (times in ${input.zone.name}):`,

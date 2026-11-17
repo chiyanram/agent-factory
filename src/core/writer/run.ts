@@ -20,9 +20,12 @@
 //     up to OUTPUT_LINES lines of its stdout and stderr, so a run the host blocks can say why (step.ts keeps them)
 //   7 its whole stdout, line by line, to the run's trace as it comes (dispatch/trace.ts, #487); step.ts opens and
 //     closes it
+//   8 a run that exited is read for the provider's usage limit by the agent CLI's own reader
+//     (agent/usage-limit.ts): one that hit it ends parked, decided from what the CLI printed, never from its report
 // Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
 
 import type { ClaudeWriter, WriterCall } from "../agent/claude-writer.js";
+import { NO_LIMIT, type UsageLimit } from "../agent/usage-limit.js";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
 import {
@@ -203,6 +206,8 @@ type InBox = {
   readonly spend: Spend | "unmeasured";
   readonly said: string;
   readonly output: readonly string[];
+  // the provider's usage limit the run hit, read only from a run that exited
+  readonly limit: UsageLimit;
 };
 
 // inBox : the agent's run, start to stop; the run's end, or why the box itself failed
@@ -213,7 +218,13 @@ async function inBox(run: WriterRun): Promise<InBox> {
     env: { ...run.login, ...run.agent.env },
   });
   if (session.kind === "failed") {
-    return { end: { kind: "failed", reason: session.reason }, spend: "unmeasured", said: "", output: [] };
+    return {
+      end: { kind: "failed", reason: session.reason },
+      spend: "unmeasured",
+      said: "",
+      output: [],
+      limit: NO_LIMIT,
+    };
   }
   const heard: Heard = { at: 0, tail: NO_TAIL, kept: NO_TAIL, stream: NO_STREAM };
   const running = run.setup.box.run({
@@ -236,7 +247,21 @@ async function inBox(run: WriterRun): Promise<InBox> {
   });
   const end = await watched(run, running, heard);
   const stopped = await stoppedEnd(run, session.value, running, { end, heard });
-  return { end: stopped, spend: streamSpend(heard.stream), ...lastWords(end, heard) };
+  return { end: stopped, spend: streamSpend(heard.stream), ...lastWords(end, heard), limit: limitOf(run, end, heard) };
+}
+
+// limitOf : the provider's usage limit a run that exited hit, read by the agent CLI from what it printed: a refusal is
+// an error result, so a run that finished its work never reads as one
+function limitOf(run: WriterRun, end: Watched, heard: Heard): UsageLimit {
+  const exited = end.kind === "ran" && end.ran.kind === "exited" ? end.ran : undefined;
+  return exited === undefined
+    ? NO_LIMIT
+    : run.agent.usageLimit({
+        result: heard.stream.result,
+        stderr: exited.stderr,
+        windows: heard.stream.windows,
+        endedAt: Date.now(),
+      });
 }
 
 // lastWords : what the run said last and the end of its output. An exit hands back its own output's end; a run the
@@ -410,14 +435,23 @@ async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: s
   return file.kind === "text" && file.text.trim() !== "" ? { pr: file.text } : {};
 }
 
-// writerRun : the run, then its outcome, the branch's tip, the patch and the PR body it wrote. A failure here is the
-// host's, not the run's, and still says what the run spent (#483).
-export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedSpent> {
-  const { end, spend, said: words, output } = await inBox(run);
-  const outcome = decide({
+// outcomeOf : the run's outcome: parked when the provider's usage limit refused it, decided from what the CLI printed;
+// else decided from its end and its report, read after the box stopped
+async function outcomeOf(run: WriterRun, end: RunEnd, limit: UsageLimit): Promise<Outcome> {
+  if (limit.kind === "limited") {
+    return { kind: "parked", until: limit.until, said: limit.said };
+  }
+  return decide({
     end,
     file: end.kind === "failed" ? { kind: "missing" } : await loadReport({ worktree: run.clone.repo }),
   });
+}
+
+// writerRun : the run, then its outcome, the branch's tip, the patch and the PR body it wrote. A failure here is the
+// host's, not the run's, and still says what the run spent.
+export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedSpent> {
+  const { end, spend, said: words, output, limit } = await inBox(run);
+  const outcome = await outcomeOf(run, end, limit);
   const pr = await prOf(run, outcome);
   const tip = await committed(run);
   const paths = tip.kind === "ok" ? await changedPaths(run, tip.value.tip) : tip;

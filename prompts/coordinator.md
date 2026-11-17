@@ -99,8 +99,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    before the review's findings does not let the build begin. A tiny ticket needs only the person's
    `agent-factory start <project> <ticket>`.
 5. **Watch the queue.** The orchestrator runs every step from there (see the reference). You answer the person's
-   questions about where a ticket is, from `poll`, `status`, `approval`, `usage` and the run records. Done when the PR is
-   merged or carries `needs-human`.
+   questions about where a ticket is, from `poll`, `status`, `approval`, `usage` and the run records. A ticket parked
+   at the provider's usage limit needs nothing from the person: `board` shows it under factory until its reset, and the
+   orchestrator runs it again after. Done when the PR is merged or carries `needs-human`.
 
 A retro runs only when a person starts it (P12, #488); you never start one on your own count of merges. When the
 person asks, `agent-factory retro <project>` lists the failures seen on two or more merges, with no model. Its lesson
