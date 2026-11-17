@@ -97,6 +97,7 @@ import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
 import { cardDraft, cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.js";
 import { BOARD_HELP, boardCommand } from "./board-cli.js";
+import { DOOR_HELP, doorCommand, setupDoorDiscord, type DoorWiring } from "./door-cli.js";
 import { boardPass, ticketsAreIssues } from "./core/door/read.js";
 import { WAITING_LABEL } from "./core/dispatch/waiting.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
@@ -163,6 +164,8 @@ commands:
   setup copilot [YYYY-MM-DD]   store the model-only token for Copilot runs: a fine-grained token with only the
                                Copilot requests permission, at the hidden prompt, and its expiry date (#690)
   setup discord                store the Discord webhook the dispatcher pings through, at a hidden prompt (#119)
+  setup door-discord           store the Discord door bot's token at a hidden prompt, in
+                               <factory home>/door/discord/token at mode 600; it is never printed
   setup status                 the box chosen, its risks, and whether the claude token (and a copilot one) is valid
   setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
                                <home>/coordinator
@@ -180,7 +183,7 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
@@ -1646,10 +1649,14 @@ function sessionEnv(io: Io, project: string): NodeJS.ProcessEnv {
 
 // setup : make and keep the box's model-only token (#136), and say whether a box may start
 async function setupCommand({ positionals, io }: Args): Promise<number> {
-  return positionals[0] === "coordinator" && positionals.length === 1
-    ? // the coordinator's settings need no token store
-      setupCoordinator({ io })
-    : setupStep({ positionals, io });
+  // the coordinator's settings and the door's token file need no token store
+  const own: Readonly<Record<string, () => Promise<number>>> = {
+    coordinator: () => setupCoordinator({ io }),
+    "door-discord": () => setupDoorDiscord(io),
+  };
+  const name = positionals[0] ?? "";
+  const run = positionals.length === 1 && Object.hasOwn(own, name) ? own[name] : undefined;
+  return run === undefined ? setupStep({ positionals, io }) : run();
 }
 
 async function setupStep({
@@ -1661,7 +1668,9 @@ async function setupStep({
 }): Promise<number> {
   const step = SETUP.find((s) => s.name === positionals[0]);
   if (step === undefined) {
-    io.err("usage: agent-factory setup claude | copilot [YYYY-MM-DD] | discord | status | coordinator\n");
+    io.err(
+      "usage: agent-factory setup claude | copilot [YYYY-MM-DD] | discord | door-discord | status | coordinator\n",
+    );
     return 64;
   }
   const home = factoryHome(io.env);
@@ -1685,6 +1694,32 @@ async function setupStep({
     : step.run({ store: store.store, io, args: positionals.slice(1) });
 }
 
+// boardText : the project's board as the terminal prints it, for the Discord door's /board
+async function boardText(io: Io, project: string): Promise<Result<string>> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = await boardOn(project, false, { ...io, out: (t) => out.push(t), err: (t) => err.push(t) });
+  return code === 0 ? { kind: "ok", value: out.join("") } : { kind: "failed", reason: err.join("").trim() };
+}
+
+// DOOR_WIRING : what the Discord door does through the terminal's own start, approve and board code
+const DOOR_WIRING: DoorWiring = {
+  where: (io, project, ticket) => {
+    const at = specsAt(io, project, ticket);
+    return at.kind === "at" ? { kind: "ok", value: at.where } : { kind: "failed", reason: at.reason };
+  },
+  branchThere: async (io, project, ticket) => {
+    const home = factoryHome(io.env);
+    return home.kind === "home"
+      ? branchOnHost(io, home.path, project, ticket)
+      : { kind: "failed", reason: home.reason };
+  },
+  board: boardText,
+  after: async (io, project) => {
+    await withLoop("door discord", io, project);
+  },
+};
+
 const COMMANDS: readonly Command[] = [
   { name: "poll", run: poll },
   { name: "spec", run: spec },
@@ -1699,6 +1734,7 @@ const COMMANDS: readonly Command[] = [
   { name: "trace", run: trace },
   { name: "retro", run: retro },
   { name: "board", run: boardCli },
+  { name: "door", run: ({ positionals, io }: Args) => doorCommand(positionals, io, DOOR_WIRING) },
   { name: "onboard", run: onboardCli },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
