@@ -47,8 +47,21 @@ export type CoordinatorPlaces = {
 
 // the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
 // that the policy decides in code
+// (handoff is the coordinator's reset note, built by code from the records)
 // (retro is its listing; its --draft spends on a model run and is in HUMAN_ONLY, #488 Q10 A)
-const READS = ["poll", "board", "spec", "approval", "status", "grill", "request", "retro", "--help", "--version"];
+const READS = [
+  "poll",
+  "board",
+  "handoff",
+  "spec",
+  "approval",
+  "status",
+  "grill",
+  "request",
+  "retro",
+  "--help",
+  "--version",
+];
 // Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
 const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
 

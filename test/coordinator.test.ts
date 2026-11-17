@@ -194,6 +194,9 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory request tracker.comment --file /home/ram/.factory/specs/ledger/PROJ-1/comment.json",
       // the retro's listing, with no model (#488)
       "agent-factory retro ledger --json",
+      // the reset note, built by code
+      "agent-factory handoff ledger",
+      "agent-factory handoff",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "allow" });
     }
