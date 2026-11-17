@@ -138,7 +138,9 @@ number, the file is that `spec.md`, the cap has room, and the body may be posted
 end is the one carriage return allowed), it holds at most 65,536 characters, and no line outside code starts with `/`
 (GitLab may run it as a quick action) or mentions an `@name` (the git host would notify them); put those in backticks.
 Nothing in it, code included, may look like a secret (a token, a key, a login in a URL, `NAME=value` where the name
-says token, secret, password or key): your yes posts the text as it is, so it is refused, never scrubbed (P4).
+says token, secret, password or key): your yes posts the text as it is, so it is refused, never scrubbed (P4). Prose
+and placeholders pass: a plain word after `token:` or `password:` (`the token: is read from the env`), a count
+(`max_tokens: 4096`), and `…`, `<token>`, `${NAME}`, `$NAME`, `xxx` or `***` as the value.
 It needs no approval, since a spec mostly changes before one: the cap counts the changes since the latest approval, or
 since none. At `confirm` the text must be the kept text, and the issue's body must still be the one `request` saw, so
 a person's edit in between is never written over. A change to an approved ticket's spec makes its approval stale, and

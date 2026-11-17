@@ -338,6 +338,17 @@ describe("postableSpec (#542)", () => {
     expect(postableSpec(`${BODY}\`\`\`\nGITLAB_TOKEN=abc12345\n\`\`\`\n`)).toHaveLength(1);
   });
 
+  it("passes a body whose prose names a token or a password, or holds a placeholder (#686)", () => {
+    const prose = [
+      "the token: is read from the env",
+      "password: see the how-to",
+      "the password: field is never hashed",
+      "- AC2: a `password:` line with no value is refused",
+      "Set `TOKEN=<token>` or TOKEN=${GITHUB_TOKEN}, never TOKEN=… in a file.",
+    ].join("\n");
+    expect(postableSpec(`${BODY}${prose}\n`)).toEqual([]);
+  });
+
   it("refuses a lone carriage return, a hidden character, a text not in NFC, and a body past the git host's limit", () => {
     expect(postableSpec(`${BODY}a\rb\n`)).toEqual([expect.stringContaining("do not show")]);
     expect(postableSpec(`${BODY}\u200b\n`)).toEqual([expect.stringContaining("do not show")]);
