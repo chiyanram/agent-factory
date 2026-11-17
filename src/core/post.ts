@@ -59,7 +59,7 @@ const JOIN = "\u2060";
 // spaces and joiners, the bidi controls and isolates that can reorder what a person sees, the word joiner itself, the
 // soft hyphen, the BOM, the variation selectors, the blank Hangul fillers, and the tag characters that can carry text
 // no one sees; then the line and paragraph separators.
-const CONTROL = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
+export const CONTROL = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 const LABEL = /^[A-Za-z0-9 ()_.,'-]+$/;
 // the invisible characters alone, which a reader never sees, so a secret they split still reads whole
 const HIDDEN = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;

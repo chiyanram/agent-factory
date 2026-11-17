@@ -24,6 +24,7 @@
 
 import type { Result } from "../forge/api.js";
 import { keepText, recordsDirOf, tailOf } from "../kept.js";
+import { dataFence } from "../review/fence.js";
 import type { Forge, StatusState } from "../forge/types.js";
 import type { ReadyFacts, RunInput, Steps } from "../dispatch/steps.js";
 import type { Argv, ProjectFile } from "../project.js";
@@ -269,32 +270,21 @@ export function readyPrograms(plan: BoxPlan): readonly string[] | undefined {
 const MOST_REASON_CHARS = 2_000;
 const MOST_STREAM_CHARS = 8_500;
 
-// cutNote : what cutting a text to its last `most` characters drops, as a line; none when nothing is cut. Pure.
-function cutNote(text: string, most: number): readonly string[] {
-  return text.length <= most ? [] : [`(…${text.length - most} earlier characters cut)`];
+// cutNote : what cutting a text to its last `most` characters drops, for a block's title; none when nothing is cut.
+// Pure.
+function cutNote(text: string, most: number): string {
+  return text.length <= most ? "" : ` (…${text.length - most} earlier characters cut)`;
 }
 
-// lastChars : the end of a text, at most `most` characters, after a line saying how much went before it. Pure.
-function lastChars(text: string, most: number): readonly string[] {
-  return [...cutNote(text, most), text.slice(-most)];
+// lastFenced : the end of a text, at most `most` characters, fenced as data under a title that says how much went
+// before it. Pure.
+function lastFenced(title: string, text: string, most: number, info = ""): string {
+  return dataFence({ title: `${title}${cutNote(text, most)}`, text: text.slice(-most), info }).trim();
 }
 
-// stream : one stream's last lines, plain and fenced; none when it printed nothing. Pure.
+// stream : one stream's last lines, plain and fenced as data; none when it printed nothing. Pure.
 function stream(name: string, text: string): readonly string[] {
-  if (text.trim() === "") {
-    return [];
-  }
-  const plain = tailOf(text).replaceAll("```", "` ` `");
-  const note = cutNote(plain, MOST_STREAM_CHARS);
-  return [
-    `${name}, its last lines:`,
-    "",
-    ...(note.length === 0 ? [] : [...note, ""]),
-    "```text",
-    plain.slice(-MOST_STREAM_CHARS),
-    "```",
-    "",
-  ];
+  return text.trim() === "" ? [] : ["", lastFenced(`${name}, its last lines`, tailOf(text), MOST_STREAM_CHARS, "text")];
 }
 
 // printed : a row's stdout and stderr tails; none for a row that ran out of time. Pure.
@@ -311,9 +301,9 @@ export function readyOutput(why: string, row: Row | "none"): string {
     "",
     "The host checked your head, and ran your evidence rows again there in a fresh box. It failed:",
     "",
-    ...lastChars(why, MOST_REASON_CHARS),
-    "",
+    lastFenced("why", why, MOST_REASON_CHARS),
     ...(row === "none" ? [] : printed(row)),
+    "",
   ].join("\n");
 }
 
@@ -365,8 +355,8 @@ export function verifyOutput(row: Row): string {
     `# The local verifier failed`,
     "",
     `\`${rowLine(row)}\` at your head, in a fresh box.`,
-    "",
     ...printed(row),
+    "",
   ].join("\n");
 }
 

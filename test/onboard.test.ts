@@ -14,6 +14,7 @@ import { onboardSetup } from "../src/core/onboard/settings.js";
 import { REVIEW_MODELS } from "../src/core/review/pinned.js";
 import { onboardCommand } from "../src/onboard-cli.js";
 import { tempDir } from "./temp.js";
+import { fencedOnly } from "./fenced.js";
 
 // the rulebook's onboarder scenarios (chiyanram/skills plugins/rulebook/evals/onboarder/), as fixtures
 const MAKEFILE = [
@@ -131,7 +132,12 @@ const ANSWER = {
   ],
 };
 
-type Seen = { readonly run: ModelRun; readonly files: readonly string[]; readonly commands: string };
+type Seen = {
+  readonly run: ModelRun;
+  readonly files: readonly string[];
+  readonly commands: string;
+  readonly rules: string;
+};
 
 function model(seen: Seen[], output: unknown = ANSWER): Model {
   return async (run) => {
@@ -139,6 +145,7 @@ function model(seen: Seen[], output: unknown = ANSWER): Model {
       run,
       files: readdirSync(run.folder).toSorted(),
       commands: readFileSync(join(run.folder, "commands.md"), "utf8"),
+      rules: readFileSync(join(run.folder, "rules.md"), "utf8"),
     });
     return { kind: "ok", value: { output, answer: {}, costUsd: 0.75, tokens: 1200 } };
   };
@@ -397,6 +404,16 @@ describe("the project's MUSTs and the cite check (#383)", () => {
     expect(mustsIn("CLAUDE.md", ["intro", "line two says you MUST log in", "", "- plain item"])).toEqual([
       { file: "CLAUDE.md", line: 2, text: "intro line two says you MUST log in" },
     ]);
+  });
+
+  it("the model reads the repo's MUSTs and commands as data, fenced under the label (#705)", async () => {
+    const seen: Seen[] = [];
+    await onboard(setup(model(seen)));
+    expect(seen).toHaveLength(1);
+    const { rules, commands } = seen[0] ?? { rules: "", commands: "" };
+    expect(fencedOnly(rules, "You MUST NOT push to main.")).toBe(true);
+    expect(fencedOnly(rules, "Keep ./gradlew check green.")).toBe(true);
+    expect(fencedOnly(commands, "`make test`: unit and integration tests (Makefile:4)")).toBe(true);
   });
 
   it("the brief carries every MUST of AGENTS.md and CLAUDE.md under Project rules, cited, and the model reads them", async () => {

@@ -54,7 +54,7 @@ export async function readKept(at: At, file: string): Promise<Result<string>> {
 }
 
 // a terminal colour or cursor code, which a log carries and a reader never needs
-const ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
+export const ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
 
 // any character that is not a line break, a tab, or printable: the other control codes a log carries
 const UNSEEN = /[^\n\t -~\u0080-￿]/g;
