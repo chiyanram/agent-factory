@@ -1,8 +1,9 @@
 // onboard-cli — agent-factory onboard (#235): the onboarder's run, and a human's acceptance of what it staged. Both are
-// a human's to run: the coordinator's settings deny them (coordinator.ts HUMAN_ONLY).
+// a human's to run: the coordinator's settings deny them (coordinator.ts HUMAN_ONLY). The acceptance is a person's word,
+// so it is written through the terminal's front door (door/terminal.ts, ADR-0023).
 
 import type { Result } from "./core/forge/api.js";
-import { accept } from "./core/onboard/home.js";
+import { acceptAtTerminal } from "./core/door/terminal.js";
 import { onboard, type OnboardSetup } from "./core/onboard/run.js";
 import { plainName } from "./core/spec.js";
 
@@ -20,7 +21,8 @@ export type OnboardIo = {
   readonly err: (text: string) => void;
   // the run's setup, once the project is known
   readonly setup: (project: string) => Promise<Result<OnboardSetup>>;
-  readonly by: () => Promise<string>;
+  // the terminal's env: its door names the person, and a model run is refused (door/write.ts)
+  readonly env: NodeJS.ProcessEnv;
   readonly now: () => number;
 };
 
@@ -46,14 +48,13 @@ async function run(project: string, io: OnboardIo): Promise<number> {
 }
 
 async function accepted(project: string, brief: string, glossary: string, io: OnboardIo): Promise<number> {
-  const done = await accept({
+  const done = await acceptAtTerminal(io.env, {
     home: io.home,
     project,
     seen: { brief, glossary },
-    by: await io.by(),
     at: new Date(io.now()).toISOString(),
   });
-  if (done.kind === "failed") {
+  if (done.kind !== "ok") {
     io.err(`agent-factory onboard accept: ${done.reason}\n`);
     return 1;
   }

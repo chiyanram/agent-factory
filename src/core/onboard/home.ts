@@ -15,8 +15,8 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
-import { field, readRecordFile, writeRecordFile } from "../human-record.js";
-import { plainName, specHash } from "../spec.js";
+import { field, readRecordFile, writeRecordFile, type Via } from "../human-record.js";
+import { plainName, specHash, type Refused } from "../spec.js";
 import type { KeptCite, Written } from "./brief.js";
 import { prop } from "../dispatch/records.js";
 
@@ -79,14 +79,21 @@ async function hashesIn(dir: string): Promise<Hashes | "missing"> {
     : { brief: specHash(brief), glossary: specHash(glossary) };
 }
 
-// accept : a human's acceptance of the staged files with exactly these hashes; they move into the project home
-export async function accept(input: {
+// what an acceptance comes to: the project home the files moved to, a failure, or the door seam's refusal
+export type Accept = Result<string> | Refused;
+
+export type AcceptRequest = {
   readonly home: string;
   readonly project: string;
   readonly seen: Hashes;
   readonly by: string;
+  readonly via: Via;
   readonly at: string;
-}): Promise<Result<string>> {
+};
+
+// accept : a human's acceptance of the staged files with exactly these hashes; they move into the project home. Only
+// the door seam calls it (door/write.ts acceptAs), with the by and via of the person a door vouched for
+export async function accept(input: AcceptRequest): Promise<Result<string>> {
   const dir = projectDir(input.home, input.project);
   if (dir.kind === "failed") {
     return dir;
@@ -105,7 +112,13 @@ export async function accept(input: {
 async function moved(
   dir: string,
   staged: string,
-  input: { readonly project: string; readonly hashes: Hashes; readonly by: string; readonly at: string },
+  input: {
+    readonly project: string;
+    readonly hashes: Hashes;
+    readonly by: string;
+    readonly via: Via;
+    readonly at: string;
+  },
 ): Promise<Result<string>> {
   try {
     for (const f of FILES) {
@@ -121,7 +134,7 @@ async function moved(
     brief_hash: input.hashes.brief,
     glossary_hash: input.hashes.glossary,
     by: input.by,
-    via: "terminal",
+    via: input.via,
     at: input.at,
   };
   const written = await writeRecordFile(join(dir, "knowledge.json"), record);

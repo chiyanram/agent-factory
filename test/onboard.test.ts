@@ -248,8 +248,12 @@ describe("agent-factory onboard (#235)", () => {
     const by = "ram";
     const at = "2026-11-09T11:00:00Z";
     const wrong = { brief: "0".repeat(64), glossary: out.value.hashes.glossary };
-    expect(await accept({ home: r.home, project: "ledger", seen: wrong, by, at })).toMatchObject({ kind: "failed" });
-    expect(await accept({ home: r.home, project: "ledger", seen: out.value.hashes, by, at })).toMatchObject({
+    expect(await accept({ home: r.home, project: "ledger", seen: wrong, by, via: "terminal", at })).toMatchObject({
+      kind: "failed",
+    });
+    expect(
+      await accept({ home: r.home, project: "ledger", seen: out.value.hashes, by, via: "terminal", at }),
+    ).toMatchObject({
       kind: "ok",
     });
     expect(existsSync(join(r.home, "projects", "ledger", "staged"))).toBe(false);
@@ -264,7 +268,14 @@ describe("agent-factory onboard (#235)", () => {
   it("a stale file:line in the brief is reported on the next run: the line moved, or the file is gone", async () => {
     const out = await onboard(setup(model([])));
     if (out.kind !== "ok") throw new Error(out.reason);
-    await accept({ home: r.home, project: "ledger", seen: out.value.hashes, by: "ram", at: "2026-11-09T11:00:00Z" });
+    await accept({
+      home: r.home,
+      project: "ledger",
+      seen: out.value.hashes,
+      by: "ram",
+      via: "terminal",
+      at: "2026-11-09T11:00:00Z",
+    });
     const known = () =>
       knownFor({ home: r.home, project: "ledger", repo: r.clone, env: r.env, ref: "refs/heads/main" });
     expect((await known()).stale).toEqual([]);
@@ -285,6 +296,20 @@ describe("agent-factory onboard (#235)", () => {
     ]);
   });
 
+  // acceptWords : the `onboard accept` words that `onboard <project>` printed for ledger
+  const acceptWords = (printed: readonly string[]): string[] => {
+    const hashes = printed.join("").match(/onboard accept ledger ([0-9a-f]{64}) ([0-9a-f]{64})/);
+    return ["accept", "ledger", hashes?.[1] ?? "", hashes?.[2] ?? ""];
+  };
+
+  // plainTerminal : the env of a plain terminal, outside any model run, with no git config but the test's own
+  const plainTerminal = (): NodeJS.ProcessEnv => ({
+    PATH: process.env.PATH,
+    HOME: r.home,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+  });
+
   it("onboard accept takes the project and both full hashes; anything else is the usage", async () => {
     const lines: string[] = [];
     const io = {
@@ -292,14 +317,53 @@ describe("agent-factory onboard (#235)", () => {
       out: (t: string) => lines.push(t),
       err: (t: string) => lines.push(t),
       setup: async () => ({ kind: "ok", value: setup(model([])) }) as const,
-      by: async () => "ram",
+      env: plainTerminal(),
       now: () => Date.parse("2026-11-09T11:00:00Z"),
     };
     expect(await onboardCommand(["accept", "ledger", "abc", "def"], io)).toBe(64);
     expect(await onboardCommand(["ledger"], io)).toBe(0);
-    const hashes = lines.join("").match(/onboard accept ledger ([0-9a-f]{64}) ([0-9a-f]{64})/);
-    expect(await onboardCommand(["accept", "ledger", hashes?.[1] ?? "", hashes?.[2] ?? ""], io)).toBe(0);
+    const words = acceptWords(lines);
+    lines.length = 0;
+    expect(await onboardCommand(words, io)).toBe(0);
+    expect(lines).toEqual([
+      `accepted: every run of ledger reads ${join(r.home, "projects", "ledger")}/brief.md and glossary.md\n`,
+    ]);
     expect(await readKnowledge(r.home, "ledger")).toMatchObject({ kind: "accepted" });
+    const record: unknown = JSON.parse(readFileSync(join(r.home, "projects", "ledger", "knowledge.json"), "utf8"));
+    expect(Object.keys(record ?? {})).toEqual([
+      "version",
+      "kind",
+      "project",
+      "brief_hash",
+      "glossary_hash",
+      "by",
+      "via",
+      "at",
+    ]);
+    expect(record).toMatchObject({ via: "terminal", at: "2026-11-09T11:00:00.000Z", by: expect.stringMatching(/\S/) });
+  });
+
+  it("onboard accept inside a model run is refused through the door seam, and writes no record (#727)", async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = {
+      home: r.home,
+      out: (t: string) => out.push(t),
+      err: (t: string) => err.push(t),
+      setup: async () => ({ kind: "ok", value: setup(model([])) }) as const,
+      env: { ...plainTerminal(), CLAUDECODE: "1" },
+      now: () => Date.parse("2026-11-09T11:00:00Z"),
+    };
+    expect(await onboardCommand(["ledger"], io)).toBe(0);
+    const words = acceptWords(out);
+    out.length = 0;
+    expect(await onboardCommand(words, io)).toBe(1);
+    expect(out).toEqual([]);
+    expect(err.join("")).toMatch(
+      /^agent-factory onboard accept: a model run never writes a person's word \(CLAUDECODE/m,
+    );
+    expect(existsSync(join(r.home, "projects", "ledger", "knowledge.json"))).toBe(false);
+    expect(await readKnowledge(r.home, "ledger")).toEqual({ kind: "none" });
   });
 });
 
