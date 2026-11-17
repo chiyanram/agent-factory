@@ -148,7 +148,11 @@ describe("checkDiscord and the launch, on planted files", () => {
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
+  // each plant starts from no files: a read-only access.json from an earlier plant cannot be written over by a
+  // user other than root
   const plant = (access: unknown = good(), tokenMode = 0o600): void => {
+    rmSync(join(dir, ".env"), { force: true });
+    rmSync(join(dir, "access.json"), { force: true });
     writeFileSync(join(dir, ".env"), `DISCORD_BOT_TOKEN=${TOKEN_CANARY}\n`, { mode: tokenMode });
     chmodSync(join(dir, ".env"), tokenMode);
     writeFileSync(join(dir, "access.json"), typeof access === "string" ? access : JSON.stringify(access));
