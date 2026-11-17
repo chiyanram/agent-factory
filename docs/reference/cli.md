@@ -8,7 +8,7 @@ prints the same list; `test/cli-doc.test.ts` fails when a command is missing her
 
 A person runs these, at a terminal. The coordinator's settings deny each one that records a person's word (START, approval, waiver, acceptance) or spends on its own (the eval).
 
-`start`, `approve` and `waive` are the terminal's front door ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)): each writes through the door seam (`src/core/door/`), which names the person at the terminal (the OS user and, when set, git `user.name`) and the door (`via: terminal`). There is no `--by` or `--via` flag. The seam refuses, exit 1, where `CLAUDECODE` or `AGENT_FACTORY_MODEL_RUN` is set, so run them from a plain terminal, not as `!agent-factory …` inside Claude Code. `agent-factory door discord` is the Discord door, and the coordinator's settings deny every `door` command. **Today:** the web app's door comes last (#714, #715).
+`start`, `approve`, `waive` and `onboard accept` are the terminal's front door ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)): each writes through the door seam (`src/core/door/`), which names the person at the terminal (the OS user and, when set, git `user.name`) and the door (`via: terminal`). There is no `--by` or `--via` flag. The seam refuses, exit 1, where `CLAUDECODE` or `AGENT_FACTORY_MODEL_RUN` is set, so run them from a plain terminal, not as `!agent-factory …` inside Claude Code. `agent-factory door discord` is the Discord door, and the coordinator's settings deny every `door` command. **Today:** the web app's door comes last (#714, #715).
 
 | command | does |
 |---|---|

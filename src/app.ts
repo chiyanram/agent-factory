@@ -27,7 +27,7 @@ import { brokenCites, specCites } from "./core/spec-cites.js";
 import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
 import { approvalState } from "./core/approval.js";
 import { readWaiver } from "./core/waiver.js";
-import { approveAtTerminal, startAtTerminal, waiveAtTerminal, whoApproves } from "./core/door/terminal.js";
+import { approveAtTerminal, startAtTerminal, waiveAtTerminal } from "./core/door/terminal.js";
 import type { Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type BoxChoice, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
@@ -286,7 +286,7 @@ function onboardCli({ positionals, io }: Args): Promise<number> {
       out: io.out,
       err: io.err,
       now: Date.now,
-      by: () => whoApproves(resolved.env),
+      env: resolved.env,
       setup: async (name) => {
         const opened = await openProjectForge(
           { env: resolved.env, log: (line) => io.err(`${line}\n`) },

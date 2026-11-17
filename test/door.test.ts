@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { specHash } from "../src/core/spec.js";
 import { isVouched, vouch, type Person } from "../src/core/door/person.js";
 import { terminalDoor } from "../src/core/door/terminal.js";
-import { approveAs, MODEL_RUN_MARKERS, startAs, waiveAs } from "../src/core/door/write.js";
+import { acceptAs, approveAs, MODEL_RUN_MARKERS, startAs, waiveAs } from "../src/core/door/write.js";
 import { tempDir } from "./temp.js";
 
 // The door seam (ADR-0023): a front door hands the core a person only its own check vouched for, and the write
@@ -147,6 +147,47 @@ describe("a model run cannot write a person's word (#713)", () => {
   });
 });
 
+describe("an onboard acceptance goes through the seam (#727)", () => {
+  const BRIEF = "# brief\n";
+  const GLOSSARY = "# glossary\n";
+  const project = () => join(home, "projects", "ledger");
+  const knowledge = () => join(project(), "knowledge.json");
+  const acceptOf = () => ({
+    home,
+    project: "ledger",
+    seen: { brief: specHash(BRIEF), glossary: specHash(GLOSSARY) },
+    at: AT,
+  });
+  beforeEach(() => {
+    const staged = join(project(), "staged");
+    mkdirSync(staged, { recursive: true });
+    writeFileSync(join(staged, "brief.md"), BRIEF);
+    writeFileSync(join(staged, "glossary.md"), GLOSSARY);
+    writeFileSync(join(staged, "cites.json"), "[]\n");
+  });
+
+  it("acceptAs writes the record with the person's by and via", async () => {
+    expect(await acceptAs(vouched("discord", "ram"), acceptOf(), PLAIN)).toMatchObject({ kind: "ok" });
+    expect(JSON.parse(readFileSync(knowledge(), "utf8"))).toMatchObject({ by: "ram", via: "discord", at: AT });
+  });
+
+  it("refuses a person no door vouched for, writes no record and leaves the staged files", async () => {
+    const claimed = structuredClone(vouched("terminal", "alice"));
+    expect(await acceptAs(claimed, acceptOf(), PLAIN)).toMatchObject({
+      kind: "refused",
+      reason: expect.stringContaining("no front door verified"),
+    });
+    expect(existsSync(knowledge())).toBe(false);
+    expect(existsSync(join(project(), "staged", "brief.md"))).toBe(true);
+  });
+
+  it.each(MODEL_RUN_MARKERS)("refuses when %s is set, and writes no record", async (marker) => {
+    const result = await acceptAs(vouched("terminal", "ram"), acceptOf(), { ...PLAIN, [marker]: "1" });
+    expect(result).toMatchObject({ kind: "refused", reason: expect.stringContaining(marker) });
+    expect(existsSync(knowledge())).toBe(false);
+  });
+});
+
 describe("the terminal door (#713)", () => {
   it("vouches for the OS user, with the terminal as its via", async () => {
     const person = await terminalDoor.verify({ HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" });
@@ -199,5 +240,9 @@ describe("only the door seam makes a person or writes a person's word (#713)", (
   it("only door/write.ts takes start, approve or waive, so every front door goes through the seam", () => {
     const users = takes(/(?:^|\/)(?:start|approval|waiver)\.js$/, ["start", "approve", "waive"]);
     expect(users).toEqual([join("src", "core", "door", "write.ts")]);
+  });
+
+  it("only door/write.ts takes an onboard acceptance, so a person accepts a brief only through the seam (#727)", () => {
+    expect(takes(/(?:^|\/)home\.js$/, ["accept"])).toEqual([join("src", "core", "door", "write.ts")]);
   });
 });

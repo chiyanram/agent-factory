@@ -6,13 +6,23 @@ import { userInfo } from "node:os";
 import { hostGit } from "../git.js";
 import type { Refused } from "../spec.js";
 import type { Approve } from "../approval.js";
+import type { Accept } from "../onboard/home.js";
 import type { Start } from "../start.js";
 import type { Waive } from "../waiver.js";
 import { vouch, type Door, type Person } from "./person.js";
-import { approveAs, startAs, waiveAs, type ApproveAs, type StartAs, type WaiveAs } from "./write.js";
+import {
+  acceptAs,
+  approveAs,
+  startAs,
+  waiveAs,
+  type AcceptAs,
+  type ApproveAs,
+  type StartAs,
+  type WaiveAs,
+} from "./write.js";
 
 // whoApproves : the OS user and, when set, the operator's own git user.name
-export async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
+async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
   const name = await hostGit({
     args: ["config", "--get", "user.name"],
     repo: { kind: "none" },
@@ -46,4 +56,8 @@ export function approveAtTerminal(env: NodeJS.ProcessEnv, request: ApproveAs): P
 
 export function waiveAtTerminal(env: NodeJS.ProcessEnv, request: WaiveAs): Promise<Waive> {
   return asTerminal(env, (person) => waiveAs(person, request, env));
+}
+
+export function acceptAtTerminal(env: NodeJS.ProcessEnv, request: AcceptAs): Promise<Accept> {
+  return asTerminal(env, (person) => acceptAs(person, request, env));
 }

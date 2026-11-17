@@ -188,7 +188,10 @@ onboarder:
    to a run. Only a brief whose every model line was dropped is refused, and then nothing is staged. It prints both
    hashes. What it spent goes in `runs/<project>/onboarder.jsonl`, refused or not.
 2. Read both files, then `agent-factory onboard accept <project> <brief hash> <glossary hash>`: they move into the
-   project home, with `knowledge.json` recording the hashes, who and when. Hashes that no longer match are refused.
+   project home, with `knowledge.json` recording the hashes, who, through which door, and when. Hashes that no longer
+   match are refused. The acceptance is a person's word, so it is written through the door seam
+   ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)): run it from a plain terminal, since it is refused,
+   exit 1, where `CLAUDECODE` or `AGENT_FACTORY_MODEL_RUN` is set.
 3. Every implementer run then gets them as `.factory/brief.md` and `.factory/glossary.md`. Each `file:line` they cite
    is checked against the default branch first; a stale one (its file gone, or its line changed or moved) is listed
    in the run's `writer-ended` record as `stale`, for the retro. A brief edited after its acceptance is not handed to
