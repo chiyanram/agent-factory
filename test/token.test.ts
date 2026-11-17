@@ -14,6 +14,8 @@ import {
   keychainVault,
   metaFor,
   openStore,
+  seatHome,
+  seatLogin,
   secret,
   tokenAge,
   type TokenStore,
@@ -313,5 +315,66 @@ describe("files the store writes", () => {
     expect(existsSync(join(home, "tokens.json"))).toBe(true);
     expect(readFileSync(join(home, "tokens.json"), "utf8")).not.toContain("sk-ant");
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("the coordinator seat's own token (#550)", () => {
+  const recording = (found: boolean) => {
+    const asked: string[] = [];
+    const store: TokenStore = {
+      where: "test",
+      put: () => Promise.resolve({ kind: "ok" }),
+      get: (runner) => {
+        asked.push(runner);
+        return Promise.resolve(
+          found
+            ? { kind: "found", token: secret(TOKEN), meta: metaFor(NOW) }
+            : { kind: "missing", reason: `no ${runner} token` },
+        );
+      },
+    };
+    return { asked, store };
+  };
+
+  it("the launcher reads only the seat's token, and the runs only theirs", async () => {
+    const seat = recording(true);
+    expect(await seatLogin({ store: seat.store, now: NOW })).toMatchObject({
+      kind: "ready",
+      env: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
+    });
+    expect(seat.asked).toEqual(["claude-coordinator"]);
+    const runs = recording(true);
+    await boxTokenFrom({ store: runs.store, now: NOW });
+    expect(runs.asked).toEqual(["claude"]);
+  });
+
+  it("is missing, not refused, when none is stored; an expired one is refused and names the seat's setup", async () => {
+    expect(await seatLogin({ store: recording(false).store, now: NOW })).toEqual({
+      kind: "missing",
+      reason: "no claude-coordinator token",
+    });
+    const later = new Date("2028-01-01T00:00:00Z");
+    expect(await seatLogin({ store: recording(true).store, now: later })).toEqual({
+      kind: "refused",
+      reason: expect.stringMatching(/^the coordinator's seat token: .*agent-factory setup claude --seat coordinator$/),
+    });
+  });
+
+  it("keeps it in the coordinator's own user's config folder, never the factory home", async () => {
+    // always the folder the coordinator's Read deny names, whatever XDG_CONFIG_HOME says
+    expect(seatHome("/home/coord")).toBe("/home/coord/.config/agent-factory");
+    const home = tempDir("factory-seat-");
+    try {
+      const vault = fileVault(home, { uid: UID });
+      expect(await vault.read("claude-coordinator")).toEqual({
+        kind: "missing",
+        reason: expect.stringContaining("agent-factory setup claude --seat coordinator"),
+      });
+      await vault.write("claude-coordinator", secret(TOKEN));
+      expect(existsSync(join(home, "secrets", "claude-coordinator-token"))).toBe(true);
+      expect(await vault.read("claude")).toMatchObject({ kind: "missing" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

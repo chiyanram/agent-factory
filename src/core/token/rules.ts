@@ -3,8 +3,9 @@
 // the "Copilot requests" permission, until the date its maker picked. Nothing here sees a real token except as a
 // Secret, which never prints: String(), JSON and a template all give "[secret]".
 
-// what the store keeps: each agent CLI's model-only token, and the Discord webhook the dispatcher pings through
-export type Runner = "claude" | "copilot" | "discord";
+// what the store keeps: each agent CLI's model-only token, the Discord webhook the dispatcher pings through, and the
+// coordinator's own claude token, kept in the coordinator's own user's store (seatHome)
+export type Runner = "claude" | "copilot" | "discord" | "claude-coordinator";
 
 export type Secret = {
   readonly kind: "secret";

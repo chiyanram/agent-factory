@@ -40,11 +40,14 @@ import {
   tokenStatus,
   openStore,
   saveClaudeToken,
+  seatHome,
+  seatLogin,
   saveCopilotToken,
   copilotMeta,
   saveDiscordWebhook,
   type Age,
   type Meta,
+  type Opened,
   type Status,
   type TokenStore,
 } from "./core/token/index.js";
@@ -87,8 +90,8 @@ import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, typ
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
 import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
-import type { CoordinatorPlaces } from "./core/coordinator.js";
-import { checkWall, installCoordinator, startCoordinator } from "./coordinator-cli.js";
+import { coordinatorBrief, type CoordinatorPlaces } from "./core/coordinator.js";
+import { checkWall, installCoordinator, startCoordinator, type Launch, type SeatLogin } from "./coordinator-cli.js";
 import { configCommand, teamCommand, type SettingsIo } from "./settings-cli.js";
 import { runSettings } from "./core/project.js";
 import { settingName, settingOf } from "./core/settings/machine.js";
@@ -161,20 +164,28 @@ commands:
                                project
   app-token <owner/name>       run as the factory user only, through its one sudo rule: a GitHub App token for that
                                repository, as JSON {token, login, expiresAt}
-  setup claude                 store the box's model-only token: run claude setup-token first, then paste it
-                               at the hidden prompt; it is never printed (#136)
+  setup claude [--seat coordinator]
+                               store the box's model-only token: run claude setup-token first, then paste it
+                               at the hidden prompt; it is never printed (#136). --seat coordinator stores the
+                               coordinator's own, in its OS user's ~/.config/agent-factory (#550)
   setup copilot [YYYY-MM-DD]   store the model-only token for Copilot runs: a fine-grained token with only the
                                Copilot requests permission, at the hidden prompt, and its expiry date (#690)
   setup discord                store the Discord webhook the dispatcher pings through, at a hidden prompt (#119)
   setup door-discord           store the Discord door bot's token at a hidden prompt, in
                                <factory home>/door/discord/token at mode 600; it is never printed
-  setup status                 the box chosen, its risks, and whether the claude token (and a copilot one) is valid
+  setup status                 the box chosen, its risks, and whether the claude token (and a copilot one) is
+                               valid, and the coordinator seat's own token for this OS user
   setup coordinator            write the coordinator's settings (its wall, read-only) and instructions into
                                <home>/coordinator
   coordinator [<project>] [copilot]
                                start the coordinator's session there, with only those settings (#106), for the
                                project named, else the one in <home>/projects: its commands act on it when they name
                                none, so it needs no FACTORY_* export (#382)
+  coordinator <project> --discord
+                               start it in the project's Discord channel, through Claude Code's Discord channel
+                               plugin, after checking the state folder's .env and access.json (#732)
+  coordinator-brief            the coordinator's SessionStart hook, not yours: its role, its wall and the handoff
+                               note for its project; it always exits 0
   plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
   plugin update <project> <name@marketplace> [<commit>]
@@ -224,6 +235,10 @@ type Args = {
   readonly noLoop: boolean;
   // init: the product clone to read (default: the current folder)
   readonly repo: string | undefined;
+  // coordinator: start it in the project's Discord channel
+  readonly discord: boolean;
+  // setup claude: whose token, the runs' (none) or the coordinator's
+  readonly seat: string | undefined;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -1305,7 +1320,13 @@ async function appTokenCommand({ positionals, io }: Args): Promise<number> {
   return 0;
 }
 
-type SetupInput = { readonly store: TokenStore; readonly io: Io; readonly args: readonly string[] };
+type SetupInput = {
+  readonly store: TokenStore;
+  readonly io: Io;
+  readonly args: readonly string[];
+  // setup claude --seat coordinator
+  readonly seat?: string | undefined;
+};
 
 type SetupStep = {
   readonly name: string;
@@ -1325,15 +1346,18 @@ async function setupDiscord({ store, io }: { readonly store: TokenStore; readonl
   return 0;
 }
 
-// setupClaude : the pasted token, tried by one real login call with the env a box gets, then stored
-async function setupClaude({ store, io }: { readonly store: TokenStore; readonly io: Io }): Promise<number> {
+// setupClaude : the pasted token, tried by one real login call with the env a box gets, then stored; with
+// --seat coordinator, the coordinator's own, in its own OS user's store
+async function setupClaude({ store, io, seat }: SetupInput): Promise<number> {
   const pasted = await io.readSecret(PASTE);
-  const saved = await saveClaudeToken({ store, pasted, now: new Date(), login: agentOf(io).login });
+  const runner = seat === "coordinator" ? "claude-coordinator" : "claude";
+  const saved = await saveClaudeToken({ store, pasted, now: new Date(), login: agentOf(io).login, runner });
   if (saved.kind === "refused") {
     io.err(`agent-factory setup claude: ${saved.reason}\n`);
     return 1;
   }
-  io.out(`stored the claude token in ${saved.where}; made ${saved.meta.madeAt}, expires ${saved.meta.expiresAt}\n`);
+  const whose = runner === "claude" ? "claude token" : "coordinator's own claude token";
+  io.out(`stored the ${whose} in ${saved.where}; made ${saved.meta.madeAt}, expires ${saved.meta.expiresAt}\n`);
   io.out(`${saved.note}\n`);
   return 0;
 }
@@ -1393,6 +1417,20 @@ function tokenLine(status: Status): { readonly line: string; readonly ok: boolea
     : ageLine("claude", status.age, status.meta);
 }
 
+// seatLine : the coordinator's own token for this OS user, a warning only: without one the coordinator
+// starts on its own claude login and shares the runs' limit
+async function seatLine(io: Io): Promise<string> {
+  const store = seatStore(io);
+  const status: Status =
+    store.kind === "refused"
+      ? { kind: "none", reason: store.reason, missing: false }
+      : await tokenStatus({ store: store.store, runner: "claude-coordinator", now: new Date() });
+  if (status.kind === "none") {
+    return `coordinator seat token: none for this OS user, so the chat shares the runs' limit (${status.reason})`;
+  }
+  return `coordinator seat ${ageLine("claude", status.age, status.meta).line.replace("setup claude", "setup claude --seat coordinator")}`;
+}
+
 // copilotLines : the copilot token's line once one is stored; none when there is none, since Copilot is optional, but
 // a store that cannot read one says why and fails
 function copilotLines(status: Status): { readonly lines: readonly string[]; readonly ok: boolean } {
@@ -1427,7 +1465,8 @@ async function setupStatus({ store, io }: { readonly store: TokenStore; readonly
       : [`box: refused: ${box.reason}`];
   const token = tokenLine(await claudeTokenStatus({ store, now: new Date() }));
   const copilot = copilotLines(await tokenStatus({ store, runner: "copilot", now: new Date() }));
-  io.out([...boxLines, token.line, ...copilot.lines, ...(await latestLines(io))].map((l) => `${l}\n`).join(""));
+  const seat = await seatLine(io);
+  io.out([...boxLines, token.line, seat, ...copilot.lines, ...(await latestLines(io))].map((l) => `${l}\n`).join(""));
   return [box.kind === "chosen", srt.ok, token.ok, copilot.ok].every(Boolean) ? 0 : 1;
 }
 
@@ -1507,12 +1546,22 @@ type CoordinatorArgs = { readonly project: string | undefined; readonly runner: 
 
 const RUNNERS: ReadonlySet<string> = new Set(["claude", "copilot"]);
 
-// coordinatorArgs : [<project>] [claude | copilot]
-function coordinatorArgs(positionals: readonly string[]): CoordinatorArgs {
+// coordinatorArgs : [<project>] [claude | copilot]; with --discord, a project and Claude Code
+function coordinatorArgs(positionals: readonly string[], discord: boolean): CoordinatorArgs {
   const last = String(positionals.at(-1));
   const rest = RUNNERS.has(last) ? positionals.slice(0, -1) : positionals;
   const runner = last === "copilot" ? "copilot" : "claude";
-  return rest.length > 1 || !rest.every(plainName) ? "bad" : { project: rest[0], runner };
+  return oneProject(rest) && discordFits(discord, rest[0], runner) ? { project: rest[0], runner } : "bad";
+}
+
+// oneProject : at most one positional, a plain project name
+function oneProject(rest: readonly string[]): boolean {
+  return rest.length <= 1 && rest.every(plainName);
+}
+
+// discordFits : a Discord launch is for one named project, and only Claude Code has channels
+function discordFits(discord: boolean, project: string | undefined, runner: "claude" | "copilot"): boolean {
+  return !discord || (project !== undefined && runner === "claude");
 }
 
 // plugin : register, update, test and list plugins (#134)
@@ -1652,11 +1701,12 @@ async function coordinatorProject(home: string, project: string | undefined, io:
   return chosen.kind === "ok" ? { kind: "ok", value: project } : chosen;
 }
 
-// coordinator : the coordinator's session, in its own folder with its own settings (#106), for one project (#382)
-async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
-  const args = coordinatorArgs(positionals);
+// coordinator : the coordinator's session, in its own folder with its own settings, for one project;
+// with --discord, in that project's Discord channel, which needs the project named and Claude Code
+async function coordinatorCommand({ positionals, discord, io }: Args): Promise<number> {
+  const args = coordinatorArgs(positionals, discord);
   if (args === "bad") {
-    io.err("usage: agent-factory coordinator [<project>] [copilot]\n");
+    io.err("usage: agent-factory coordinator [<project>] [copilot] | coordinator <project> --discord\n");
     return 64;
   }
   const session = await coordinatorSession(io, args.project);
@@ -1665,11 +1715,49 @@ async function coordinatorCommand({ positionals, io }: Args): Promise<number> {
     return 1;
   }
   const { places, project } = session.value;
-  return startCoordinator(places, args.runner, {
+  const launch: Launch = discord
+    ? { kind: "discord", project, home: userHome(io), uid: io.system.uid }
+    : { kind: "plain", runner: args.runner };
+  return startCoordinator(places, launch, {
     ...io,
     env: sessionEnv(io, project),
     interactive: io.system.interactive,
+    seat: () => seatOf(io),
   });
+}
+
+// seatOf : the coordinator seat's own login, from its own OS user's store
+async function seatOf(io: Io): Promise<SeatLogin> {
+  const store = seatStore(io);
+  return store.kind === "refused" ? store : seatLogin({ store: store.store, now: new Date() });
+}
+
+// userHome : the session user's home, as the env names it
+function userHome(io: Io): string {
+  const named = io.env.HOME;
+  return named !== undefined && named.startsWith("/") ? named : homedir();
+}
+
+// seatStore : the coordinator seat's own token store, in its own OS user's config folder
+function seatStore(io: Io): Opened {
+  return openStore({
+    platform: io.system.platform,
+    home: seatHome(userHome(io)),
+    owner: { uid: io.system.uid },
+    run: io.system.run,
+    env: io.env,
+  });
+}
+
+// coordinatorBriefCommand : the SessionStart hook's text: the role and the wall, then the handoff note for
+// the session's project; exit 0 whatever the note's reads did, so the hook never blocks the session
+async function coordinatorBriefCommand({ io }: Args): Promise<number> {
+  const project = io.env[DEFAULT_PROJECT] ?? "";
+  io.out(coordinatorBrief(project));
+  if (project !== "") {
+    await boardReaderCli(HANDOFF_READER, [project], io);
+  }
+  return 0;
 }
 
 // coordinatorSession : where the session's rules point, and its project ("" for none)
@@ -1695,7 +1783,7 @@ function sessionEnv(io: Io, project: string): NodeJS.ProcessEnv {
 }
 
 // setup : make and keep the box's model-only token (#136), and say whether a box may start
-async function setupCommand({ positionals, io }: Args): Promise<number> {
+async function setupCommand({ positionals, seat, io }: Args): Promise<number> {
   // the coordinator's settings and the door's token file need no token store
   const own: Readonly<Record<string, () => Promise<number>>> = {
     coordinator: () => setupCoordinator({ io }),
@@ -1703,34 +1791,27 @@ async function setupCommand({ positionals, io }: Args): Promise<number> {
   };
   const name = positionals[0] ?? "";
   const run = positionals.length === 1 && Object.hasOwn(own, name) ? own[name] : undefined;
-  return run === undefined ? setupStep({ positionals, io }) : run();
+  return run === undefined ? setupStep({ positionals, seat, io }) : run();
 }
 
 async function setupStep({
   positionals,
+  seat,
   io,
 }: {
   readonly positionals: readonly string[];
+  readonly seat: string | undefined;
   readonly io: Io;
 }): Promise<number> {
-  const step = SETUP.find((s) => s.name === positionals[0]);
+  const step = SETUP.find((s) => s.name === positionals[0] && seatFits(s.name, seat));
   if (step === undefined) {
     io.err(
-      "usage: agent-factory setup claude | copilot [YYYY-MM-DD] | discord | door-discord | status | coordinator\n",
+      "usage: agent-factory setup claude [--seat coordinator] | copilot [YYYY-MM-DD] | discord | door-discord | status | coordinator\n",
     );
     return 64;
   }
-  const home = factoryHome(io.env);
-  const store =
-    home.kind === "home"
-      ? openStore({
-          platform: io.system.platform,
-          home: home.path,
-          owner: { uid: io.system.uid },
-          run: io.system.run,
-          env: io.env,
-        })
-      : home;
+  // the coordinator seat's token lives in its own OS user's store, not the factory home's
+  const store = seat === undefined ? factoryStore(io) : seatStore(io);
   if (store.kind === "refused") {
     io.err(`agent-factory setup: ${store.reason}\n`);
     return 1;
@@ -1738,7 +1819,26 @@ async function setupStep({
   // status reads the user and machine layers, so a user file's srt.readOnly shows (#371)
   return step.name === "status"
     ? resolvedRun("setup status", undefined, io, (resolved) => step.run({ store: store.store, io: resolved, args: [] }))
-    : step.run({ store: store.store, io, args: positionals.slice(1) });
+    : step.run({ store: store.store, io, args: positionals.slice(1), seat });
+}
+
+// seatFits : --seat names the coordinator, and only for setup claude
+function seatFits(step: string, seat: string | undefined): boolean {
+  return seat === undefined || (step === "claude" && seat === "coordinator");
+}
+
+// factoryStore : the factory home's token store, the runs' and the dispatcher's
+function factoryStore(io: Io): Opened {
+  const home = factoryHome(io.env);
+  return home.kind === "home"
+    ? openStore({
+        platform: io.system.platform,
+        home: home.path,
+        owner: { uid: io.system.uid },
+        run: io.system.run,
+        env: io.env,
+      })
+    : home;
 }
 
 // boardText : the project's board as the terminal prints it, for the Discord door's /board
@@ -1796,6 +1896,8 @@ const COMMANDS: readonly Command[] = [
   { name: "lint-edit", run: ({ positionals, io }: Args) => lintEditCommand(positionals, io) },
   // the coordinator's edit hook, the same: it reads no setting, and prints only its decision
   { name: "edit-scope", run: ({ positionals, io }: Args) => editScopeCommand(positionals, io) },
+  // the coordinator's SessionStart hook
+  { name: "coordinator-brief", run: coordinatorBriefCommand },
   // the writer's edit hook in the run, the same (writer/scope.ts writerScope)
   { name: "writer-scope", run: ({ positionals, io }: Args) => writerScopeCommand(positionals, io) },
 ];
@@ -1859,6 +1961,8 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       yes: { type: "boolean" },
       "no-loop": { type: "boolean" },
       repo: { type: "string" },
+      discord: { type: "boolean" },
+      seat: { type: "string" },
     },
   });
   if (values.version === true) {
@@ -1880,6 +1984,8 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
     yes: values.yes === true,
     noLoop: values["no-loop"] === true,
     repo: values.repo,
+    discord: values.discord === true,
+    seat: values.seat,
     positionals: positionals.slice(1),
     io,
   });
