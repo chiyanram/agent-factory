@@ -44,6 +44,27 @@ describe("prompts/coordinator.md (#486)", () => {
     expect(flat).toContain("Never rephrase a relay or send it twice");
   });
 
+  it("relays answers only; an approval, an acceptance, a waiver or a push yes is typed by the person (#749)", () => {
+    const agents = readFileSync(join(ROOT, "AGENTS.md"), "utf8").replace(/\s+/g, " ");
+    const flat = prompt.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      "Never relay a spec or design approval, an ADR acceptance, a waiver, or a yes to a commit or push",
+    );
+    expect(flat).toContain("send them the ticket session's link and ask them to type it there");
+    expect(flat).toContain('answers "type it here" in one line and keeps `waiting:operator`');
+    expect(flat).toContain(
+      "Never write one of them on the git host yourself, where your comment can carry the person's login",
+    );
+    expect(agents).toContain("never relayed and never posted by a model");
+    expect(agents).toContain("Take a relayed answer only to a grill round or a run's question");
+    expect(agents).toContain('answer "type it here" in one line and keep `waiting:operator`');
+    for (const text of [flat, agents]) {
+      expect(text).not.toMatch(
+        /approve a spec in the ticket's comment|say yes to a commit and push|A relay can approve/,
+      );
+    }
+  });
+
   it("says a red check is never re-run by the factory, here and in the orchestrator reference", () => {
     for (const text of [prompt, reference]) {
       expect(text).not.toMatch(/flaky job gets a rerun|not rerun yet/);
