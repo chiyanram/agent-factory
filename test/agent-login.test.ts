@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { CANNOT_START } from "../src/core/agent/folder.js";
 import { openAgentCli } from "../src/core/agent/index.js";
 import { LOGIN_ARGS, loginOf, refusedLogin } from "../src/core/agent/login.js";
+import { claudeUsageLimit } from "../src/core/agent/usage-limit.js";
 import { tempDir } from "./temp.js";
 
 const made: string[] = [];
@@ -78,6 +79,10 @@ describe("loginOf (#665: only a real call says the login works)", () => {
 });
 
 describe("refusedLogin", () => {
+  it("a refused login is never read as a usage limit, so the run is not parked on it", () => {
+    expect(claudeUsageLimit(REFUSED, "", Date.parse("2026-11-17T00:00:00Z"))).toEqual({ kind: "none" });
+  });
+
   it("is true only for a result event that says 401", () => {
     expect(refusedLogin(JSON.parse(REFUSED.split("\n")[2] ?? "{}"))).toBe(true);
     expect(refusedLogin(JSON.parse(ACCEPTED))).toBe(false);
