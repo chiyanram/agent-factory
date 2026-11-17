@@ -382,6 +382,59 @@ describe("commands read the project's git host and clone from the project file (
     expect(await cli(["coordinator"])).toMatchObject({ code: 0 });
     expect(started.map((s) => s.env.FACTORY_DEFAULT_PROJECT)).toEqual([undefined]);
   });
+
+  it("coordinator --discord needs its project named and Claude Code, and refuses before Claude without its files (#732)", async () => {
+    expect((await cli(["setup", "coordinator"])).code).toBe(0);
+    writeProject("ledger", "aruvii/agent-platform");
+    started.length = 0;
+    const env = { FACTORY_HOME: home, HOME: home };
+    expect(await cli(["coordinator", "--discord"], env)).toMatchObject({ code: 64 });
+    expect(await cli(["coordinator", "ledger", "copilot", "--discord"], env)).toMatchObject({ code: 64 });
+    expect(await cli(["coordinator", "ledger", "--discord"], env)).toMatchObject({
+      code: 1,
+      err: expect.stringContaining(join(home, ".claude", "channels", "discord-ledger")),
+    });
+    expect(started).toEqual([]);
+  });
+
+  it("setup claude --seat coordinator stores the seat's token in its own user's folder, apart from the runs' (#550)", async () => {
+    const TOKEN = "sk-ant-oat01-AbCdEf0123456789_xyz-SEAT";
+    const env = { FACTORY_HOME: home, HOME: home, XDG_CONFIG_HOME: join(home, "elsewhere") };
+    expect(await cli(["setup", "copilot", "--seat", "coordinator"], env)).toMatchObject({ code: 64 });
+    expect(await cli(["setup", "claude", "--seat", "reviewer"], env)).toMatchObject({ code: 64 });
+    const run = await cli(["setup", "claude", "--seat", "coordinator"], env, TOKEN);
+    expect(run).toMatchObject({
+      code: 0,
+      out: expect.stringContaining(
+        `stored the coordinator's own claude token in ${join(home, ".config", "agent-factory")}`,
+      ),
+    });
+    // XDG_CONFIG_HOME is ignored: the token stays where the coordinator's Read deny names it
+    expect(existsSync(join(home, ".config", "agent-factory", "secrets", "claude-coordinator-token"))).toBe(true);
+    expect(existsSync(join(home, "secrets", "claude-token"))).toBe(false);
+    expect(run.out).not.toContain(TOKEN);
+    const status = (await cli(["setup", "status"], { ...env, FACTORY_BOX: "vm" })).out;
+    expect(status).toMatch(/^coordinator seat claude token: valid, \d+ days left/m);
+    expect(status).toMatch(/^claude token: none/m);
+    const other = await cli(["setup", "status"], { ...env, HOME: join(home, "none"), FACTORY_BOX: "vm" });
+    expect(other.out).toContain("coordinator seat token: none for this OS user, so the chat shares the runs' limit");
+    // the launch then starts on it, in the env, never argv
+    expect((await cli(["setup", "coordinator"], env)).code).toBe(0);
+    started.length = 0;
+    expect(await cli(["coordinator"], env)).toMatchObject({ code: 0 });
+    expect(started[0]?.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(TOKEN);
+    expect(started[0]?.args.join(" ")).not.toContain(TOKEN);
+  });
+
+  it("coordinator-brief prints the role and the wall, and exits 0 when the handoff note cannot be read (#732)", async () => {
+    const run = await cli(["coordinator-brief"], { FACTORY_HOME: home, FACTORY_DEFAULT_PROJECT: "nowhere" });
+    expect(run).toMatchObject({ code: 0, out: expect.stringContaining("project coordinator for nowhere") });
+    expect(run.out).toContain("agent-factory approve");
+    expect(await cli(["coordinator-brief"], { FACTORY_HOME: home })).toMatchObject({
+      code: 0,
+      out: expect.stringContaining("You are the project coordinator:"),
+    });
+  });
 });
 
 describe("agent-factory app-token", () => {

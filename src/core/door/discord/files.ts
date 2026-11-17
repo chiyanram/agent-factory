@@ -21,7 +21,7 @@ export type DoorConfig = {
 };
 
 // a Discord id (a snowflake)
-const SNOWFLAKE = /^\d{17,20}$/;
+export const SNOWFLAKE = /^\d{17,20}$/;
 // a bot token as Discord gives one: three dot-separated parts of URL-safe base64
 const TOKEN = /^[\w-]{20,}\.[\w-]{4,}\.[\w-]{20,}$/;
 

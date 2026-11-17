@@ -7,11 +7,20 @@ import {
   claudeArgv,
   claudeMd,
   claudeSettings,
+  coordinatorBrief,
   copilotArgs,
+  HUMAN_ONLY,
   wallProblems,
   type CoordinatorPlaces,
 } from "../src/core/coordinator.js";
-import { checkWall, installCoordinator, startCoordinator, type Interactive } from "../src/coordinator-cli.js";
+import {
+  checkWall,
+  installCoordinator,
+  startCoordinator,
+  type CoordinatorIo,
+  type Interactive,
+  type SeatLogin,
+} from "../src/coordinator-cli.js";
 import { tempDir } from "./temp.js";
 
 const PLACES: CoordinatorPlaces = {
@@ -111,6 +120,8 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       `${HOME}/.claude/.credentials.json`,
       "/home/factory/.config/agent-factory/app.pem",
       "/home/ram/.factory/secrets/claude-token",
+      // the coordinator's own token on Linux
+      `${HOME}/.config/agent-factory/secrets/claude-coordinator-token`,
       "/work/project/.env.local",
       "/work/project/sub/.env",
     ]) {
@@ -151,19 +162,17 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(verdict("Edit", "/home/ram/.factory/specs/ledger/PROJ-1/spec.md")).toBe("allow");
     // no rule names a project file, so only the hook stands between it and a prompt
     expect(verdict("Edit", "/work/project/src/app.ts")).toBe("prompt");
-    expect(claudeSettings(PLACES).hooks).toEqual({
-      PreToolUse: [
-        {
-          matcher: "Edit|Write|MultiEdit|NotebookEdit",
-          hooks: [
-            {
-              type: "command",
-              command: "node '/opt/agent-factory/dist/cli.js' edit-scope '/home/ram/.factory/specs'",
-            },
-          ],
-        },
-      ],
-    });
+    expect(claudeSettings(PLACES).hooks.PreToolUse).toEqual([
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit",
+        hooks: [
+          {
+            type: "command",
+            command: "node '/opt/agent-factory/dist/cli.js' edit-scope '/home/ram/.factory/specs'",
+          },
+        ],
+      },
+    ]);
   });
 
   it("quotes the hook's paths, so a package or factory home with a space or a quote stays one word", () => {
@@ -278,6 +287,9 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory ask ledger 12 aaaa1111 q",
       "security find-generic-password -s x",
       "chmod 644 /home/ram/.factory/coordinator/.claude/settings.json",
+      // the tmux server keeps the env it started with, the seat token among it
+      "tmux show-environment",
+      "tmux -L af-coord-ledger show-environment -g",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
     }
@@ -445,17 +457,18 @@ describe("setup coordinator and the launcher (#106)", () => {
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
   const places = (): CoordinatorPlaces => ({ ...PLACES, factoryHome: home });
-  const io = (calls: Parameters<Interactive>[0][]) => {
+  const MISSING: SeatLogin = { kind: "missing", reason: "no claude-coordinator token" };
+  const io = (calls: Parameters<Interactive>[0][], seat: SeatLogin = MISSING, env: NodeJS.ProcessEnv = {}) => {
     const err: string[] = [];
-    return {
-      err,
-      io: {
-        env: { PATH: "/usr/bin" },
-        out: () => undefined,
-        err: (t: string) => void err.push(t),
-        interactive: async (call: Parameters<Interactive>[0]) => (calls.push(call), 0),
-      },
+    const seats: string[] = [];
+    const wired: CoordinatorIo = {
+      env: { PATH: "/usr/bin", ...env },
+      out: () => undefined,
+      err: (t: string) => void err.push(t),
+      interactive: async (call: Parameters<Interactive>[0]) => (calls.push(call), 0),
+      seat: async () => (seats.push("claude-coordinator"), seat),
     };
+    return { err, seats, io: wired };
   };
 
   it("writes the settings and the instructions read-only, and can run again", async () => {
@@ -509,14 +522,81 @@ describe("setup coordinator and the launcher (#106)", () => {
   it("refuses to start before setup; after it, starts Claude in its folder with only its own settings", async () => {
     const calls: Parameters<Interactive>[0][] = [];
     const before = io(calls);
-    expect(await startCoordinator(places(), "claude", before.io)).toBe(1);
+    const claude = { kind: "plain", runner: "claude" } as const;
+    expect(await startCoordinator(places(), claude, before.io)).toBe(1);
     expect(before.err.join("")).toContain("run agent-factory setup coordinator first");
     await installCoordinator(places());
-    expect(await startCoordinator(places(), "claude", io(calls).io)).toBe(0);
-    expect(await startCoordinator(places(), "copilot", io(calls).io)).toBe(0);
+    expect(await startCoordinator(places(), claude, io(calls).io)).toBe(0);
+    expect(await startCoordinator(places(), { kind: "plain", runner: "copilot" }, io(calls).io)).toBe(0);
     expect(calls.map((c) => [c.bin, c.args.slice(0, 2), c.cwd])).toEqual([
       ["claude", ["--setting-sources", "project"], join(home, "coordinator")],
       ["copilot", ["--add-dir", `${home}/specs`], join(home, "coordinator")],
     ]);
+  });
+
+  // the seat's own login: the launcher asks only the seat, and puts its token in the env, never argv
+  const READY: SeatLogin = {
+    kind: "ready",
+    env: { CLAUDE_CODE_OAUTH_TOKEN: "seat-token-canary", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
+    notice: { kind: "none" },
+  };
+
+  it("starts on the seat's own token, in the env only, dropping an API key that Claude Code would use first", async () => {
+    await installCoordinator(places());
+    const calls: Parameters<Interactive>[0][] = [];
+    const run = io(calls, READY, { ANTHROPIC_API_KEY: "sk-other", ANTHROPIC_AUTH_TOKEN: "other" });
+    expect(await startCoordinator(places(), { kind: "plain", runner: "claude" }, run.io)).toBe(0);
+    expect(run.seats).toEqual(["claude-coordinator"]);
+    expect(calls[0]?.env).toMatchObject({
+      CLAUDE_CODE_OAUTH_TOKEN: "seat-token-canary",
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
+    });
+    expect(calls[0]?.env).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(calls[0]?.env).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+    expect(calls[0]?.args.join(" ")).not.toContain("seat-token-canary");
+  });
+
+  it("starts a plain session on its own login, saying why, when the seat token is expired, unreadable or none", async () => {
+    await installCoordinator(places());
+    const calls: Parameters<Interactive>[0][] = [];
+    const refused = io(calls, { kind: "refused", reason: "the coordinator's seat token: expired" });
+    expect(await startCoordinator(places(), { kind: "plain", runner: "claude" }, refused.io)).toBe(0);
+    expect(refused.err.join("")).toContain("starting on its own claude login: the coordinator's seat token: expired");
+    expect(await startCoordinator(places(), { kind: "plain", runner: "claude" }, io(calls).io)).toBe(0);
+    expect(calls.map((c) => c.env.CLAUDE_CODE_OAUTH_TOKEN)).toEqual([undefined, undefined]);
+  });
+
+  it("gives Copilot no claude seat token", async () => {
+    await installCoordinator(places());
+    const calls: Parameters<Interactive>[0][] = [];
+    const run = io(calls, READY);
+    expect(await startCoordinator(places(), { kind: "plain", runner: "copilot" }, run.io)).toBe(0);
+    expect(run.seats).toEqual([]);
+    expect(calls[0]?.env).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
+  });
+});
+
+describe("the coordinator's SessionStart hook (#732 D-2)", () => {
+  it("re-injects the role, the wall and the handoff note on a start, a resume, a clear and a compaction", () => {
+    const starts = claudeSettings(PLACES).hooks.SessionStart;
+    expect(starts).toEqual([
+      {
+        matcher: "startup|resume|clear|compact",
+        hooks: [{ type: "command", command: "node '/opt/agent-factory/dist/cli.js' coordinator-brief" }],
+      },
+    ]);
+    expect(wallProblems(claudeSettings(PLACES), PLACES)).toEqual([]);
+  });
+
+  it("names every human-only command in the brief, so the role and the wall come back after a compaction", () => {
+    const brief = coordinatorBrief("ledger");
+    expect(brief).toContain("project coordinator for ledger");
+    for (const command of HUMAN_ONLY.filter((c) => !c.includes("*"))) {
+      expect(brief).toContain(command);
+    }
+    // a rule's glob is not a command name
+    expect(brief).not.toContain("retro * --draft");
+    expect(brief).toContain("exact words");
+    expect(coordinatorBrief("")).not.toContain(" for ");
   });
 });

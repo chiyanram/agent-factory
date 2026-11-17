@@ -18,6 +18,7 @@ import {
   type Meta,
   type Secret,
 } from "./rules.js";
+import { join } from "node:path";
 import type { Login } from "../agent/login.js";
 import type { Result } from "../forge/api.js";
 import type { TokenStore } from "./store.js";
@@ -46,6 +47,7 @@ export {
   openStore,
   tokenRecord,
   unsafeFile,
+  type Opened,
   type Owner,
   type StoreInput,
   type Stored,
@@ -89,11 +91,13 @@ function noteOf(got: Login): Result<string> {
   }
 }
 
+// saveClaudeToken : a claude token, tried, then stored for the runs, or for the coordinator's own
 export async function saveClaudeToken(input: {
   readonly store: TokenStore;
   readonly pasted: string;
   readonly now: Date;
   readonly login: TryLogin;
+  readonly runner?: "claude" | "claude-coordinator";
 }): Promise<ClaudeSaved> {
   const checked = checkToken(input.pasted);
   if (checked.kind === "refused") {
@@ -104,7 +108,7 @@ export async function saveClaudeToken(input: {
   if (note.kind === "failed") {
     return { kind: "refused", reason: `not stored: ${note.reason}` };
   }
-  const put = await input.store.put({ runner: "claude", token: checked.token, meta });
+  const put = await input.store.put({ runner: input.runner ?? "claude", token: checked.token, meta });
   return put.kind === "ok"
     ? { kind: "saved", where: input.store.where, meta, note: note.value }
     : { kind: "refused", reason: put.reason };
@@ -143,7 +147,7 @@ export function claudeTokenStatus(input: { readonly store: TokenStore; readonly 
 // tokenStatus : the age of a runner's token on record, or why there is none
 export async function tokenStatus(input: {
   readonly store: TokenStore;
-  readonly runner: "claude" | "copilot";
+  readonly runner: "claude" | "copilot" | "claude-coordinator";
   readonly now: Date;
 }): Promise<Status> {
   const stored = await input.store.get(input.runner);
@@ -158,6 +162,29 @@ export async function boxTokenFrom(input: { readonly store: TokenStore; readonly
   return stored.kind === "found"
     ? boxToken({ token: stored.token, meta: stored.meta, now: input.now })
     : { kind: "refused", reason: stored.reason };
+}
+
+// seatHome : where the coordinator seat keeps its own token on Linux, and its expiry on either OS: the coordinator's
+// own user's config folder, never the factory home, whose secrets/ only the factory user reads
+// It ignores XDG_CONFIG_HOME, so the token is always where the coordinator's Read deny names it.
+export function seatHome(home: string): string {
+  return join(home, ".config", "agent-factory");
+}
+
+// seatLogin : the coordinator's launch login from its own seat token; it never reads the runs' claude token. Missing
+// is not a refusal: the session then uses its own claude login and shares the runs' limit.
+export async function seatLogin(input: {
+  readonly store: TokenStore;
+  readonly now: Date;
+}): Promise<BoxToken | { readonly kind: "missing"; readonly reason: string }> {
+  const stored = await input.store.get("claude-coordinator");
+  if (stored.kind !== "found") {
+    return stored.kind === "missing" ? stored : { kind: "refused", reason: stored.reason };
+  }
+  const login = boxToken({ token: stored.token, meta: stored.meta, now: input.now });
+  return login.kind === "refused"
+    ? { kind: "refused", reason: `the coordinator's seat token: ${login.reason} --seat coordinator` }
+    : login;
 }
 
 // copilotLoginFrom : a Copilot run's login from the store, or why none may start

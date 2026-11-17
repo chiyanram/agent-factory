@@ -38,7 +38,9 @@ type Vault = {
 
 const SERVICE = "agent-factory";
 function setupHint(runner: Runner): string {
-  return `run: agent-factory setup ${runner}`;
+  return runner === "claude-coordinator"
+    ? "run, as the coordinator's OS user: agent-factory setup claude --seat coordinator"
+    : `run: agent-factory setup ${runner}`;
 }
 
 function message(error: unknown): string {

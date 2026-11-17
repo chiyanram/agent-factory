@@ -75,8 +75,10 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
 - **Listening is not acting** ([P8](../CONSTITUTION.md#p8-a-person-starts-everything)). The coordinator in a Discord
   channel and the Discord door bot run all the time, but each only waits for a person's message: neither starts a run
   or spends anything on its own. The coordinator answers a person's message, the door writes a person's START or
-  approval, and every build still starts from that START. **Today:** the door bot is built
-  (`agent-factory door discord`); the coordinator in a Discord channel is not, and #732 adds it.
+  approval, and every build still starts from that START. The door bot is `agent-factory door discord`, and the
+  coordinator in its project's channel is `agent-factory coordinator <project> --discord`, one bot and one session
+  per project, with a thread per ticket made by hand. **Today:** it runs in a terminal; the service that keeps it up is
+  #748, and the hand test #729 has not yet confirmed that replies land in their thread.
 - **Extra tasks** (full retro, weekly clean-up, triage) are off until a human starts one. A schedule can be switched on
   per task later.
 - **Lane:** tiny, bug, feature or one-way door.
