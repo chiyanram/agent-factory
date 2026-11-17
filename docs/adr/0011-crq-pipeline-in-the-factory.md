@@ -6,6 +6,9 @@ Status: accepted 2026-11-06 (operator, chiyanram/skills#210, D1–D17). Amends A
 
 Amended by [ADR-0012](0012-safety-design-for-unattended-runs.md) and [ADR-0013](0013-typescript-package-cli-first.md).
 
+**Today:** D14's CI failure signatures are not built (#132): a repeated red is capped at 2 CI rounds instead, and a CI
+run that changes nothing goes to a person. #645 records this in a new ADR.
+
 ## Context
 
 The rulebook now ships the whole change pipeline as its `crq` skill: lanes, phases, how a review runs, proof of done,
