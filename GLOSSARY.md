@@ -172,6 +172,12 @@ the engine, and its body is what the model reads.
 **Coordinator**: the role that talks with the human: research, questions, spec and design. It never approves and
 never starts a run.
 
+**Project coordinator**: the one long-lived coordinator session per project, in any host (the Claude app, a terminal or
+the project's Discord channel). It plans, routes, relays the operator's exact words and reports, builds no ticket, and
+resets from `agent-factory handoff`, a note built by code.
+
+**Ticket session**: a fresh session that does one ticket's work, from `board` and that ticket's body and comments.
+
 **Implementer**: the role that builds the spec, proves each AC and writes the PR body (`.factory/pr.md`), which the
 host posts cleaned (#335).
 _Avoid_: writer

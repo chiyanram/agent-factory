@@ -17,9 +17,31 @@ describe("prompts/coordinator.md (#486)", () => {
     expect(prompt).toContain("A retro runs only when a person starts it");
   });
 
-  it("AC-6: one short session per topic, started from the factory's state, and every fact's source named", () => {
-    expect(prompt).toContain("One short session per topic or ticket.");
+  it("AC-6: started from the factory's state, and every fact's source named", () => {
     expect(prompt).toContain("Name the source of every fact.");
+  });
+
+  // one long coordinator per project, reset from a note built by code; ticket work in fresh ticket sessions
+  it("is the project coordinator, which resets from the handoff note and never from a model's summary", () => {
+    const flat = prompt.replace(/\s+/g, " ");
+    expect(prompt).not.toContain("One short session per topic or ticket.");
+    expect(flat).toContain("You are the **project coordinator**");
+    expect(flat).toContain("each ticket's work runs in its own fresh **ticket session**");
+    expect(flat).toContain("never from a model's summary of the chat");
+    expect(flat).toContain("I stop coordinating now; start a fresh coordinator from `agent-factory handoff");
+  });
+
+  it("opens every reply with what waits on the person, then what is running, in short lines (the narration rule)", () => {
+    expect(prompt.replace(/\s+/g, " ")).toContain(
+      "Open every reply with what waits on the person, then what is running, one short line per ticket",
+    );
+  });
+
+  it("relays the person's exact words, never a START or an approval, and falls back when a relay is refused", () => {
+    const flat = prompt.replace(/\s+/g, " ");
+    expect(flat).toContain("quote their exact words, with where and when they said them");
+    expect(flat).toContain("A relay never writes a START or an approval");
+    expect(flat).toContain("Never rephrase a relay or send it twice");
   });
 
   it("says a red check is never re-run by the factory, here and in the orchestrator reference", () => {
@@ -107,8 +129,8 @@ describe("the commands prompts/coordinator.md names (#517)", () => {
   it("finds the forms the prompt names, grill and the session start among them", () => {
     const named = commands(prompt).map((w) => w.join(" "));
     expect(named).toContain("grill ledger 12 aaaa1111 /nonexistent/questions.json");
-    // the session starts with the board (#487)
-    expect(named).toContain("board ledger");
+    // the session starts with the reset note, which holds the board
+    expect(named).toContain("handoff ledger");
     expect(named.length).toBeGreaterThanOrEqual(8);
   });
 

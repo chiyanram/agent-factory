@@ -187,24 +187,41 @@ function parkInZone(text: string, zone: Zone): string {
   );
 }
 
+// ticketText : one ticket of the board as a person reads it: its change and step, then what it waits on. Pure.
+export function ticketText(l: BoardLine, zone: Zone, mark: string): readonly string[] {
+  return [
+    `  ${l.ticket}  ${l.change === "none" ? "no PR" : `${mark}${l.change}`}  ${parkInZone(l.step, zone)}`,
+    `    waits on ${parkInZone(waitText(l.waitsOn), zone)}${l.since === "" ? "" : `, for ${shownFor(l.forMs)} since ${shownAt(l.since, zone)}`}`,
+  ];
+}
+
+// laneHead : a lane's name and how many tickets are in it. Pure.
+export function laneHead(lane: Lane, count: number): string {
+  return `${LANE_TEXT[lane]} (${count})`;
+}
+
+// laneText : one lane of the board as a person reads it: its name and count, then each ticket, or "nothing". Pure.
+export function laneText(input: {
+  readonly lane: Lane;
+  readonly lines: readonly BoardLine[];
+  readonly zone: Zone;
+  readonly mark: string;
+}): readonly string[] {
+  const inLane = input.lines.filter((l) => l.lane === input.lane);
+  return [laneHead(input.lane, inLane.length)].concat(
+    inLane.length === 0 ? ["  nothing"] : inLane.flatMap((l) => ticketText(l, input.zone, input.mark)),
+  );
+}
+
 // boardText : the board as a person reads it, times in the reader's zone. Pure.
 export function boardText(input: {
   readonly lines: readonly BoardLine[];
   readonly zone: Zone;
   readonly mark: string;
 }): readonly string[] {
-  const row = (l: BoardLine): readonly string[] => [
-    `  ${l.ticket}  ${l.change === "none" ? "no PR" : `${input.mark}${l.change}`}  ${parkInZone(l.step, input.zone)}`,
-    `    waits on ${parkInZone(waitText(l.waitsOn), input.zone)}${l.since === "" ? "" : `, for ${shownFor(l.forMs)} since ${shownAt(l.since, input.zone)}`}`,
-  ];
   return [
     input.lines.length === 0 ? "no ticket in flight:" : `tickets in flight (times in ${input.zone.name}):`,
-    ...LANES.flatMap((lane) => {
-      const inLane = input.lines.filter((l) => l.lane === lane);
-      return [`${LANE_TEXT[lane]} (${inLane.length})`].concat(
-        inLane.length === 0 ? ["  nothing"] : inLane.flatMap(row),
-      );
-    }),
+    ...LANES.flatMap((lane) => laneText({ ...input, lane })),
   ];
 }
 

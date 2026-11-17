@@ -97,6 +97,8 @@ import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
 import { cardDraft, cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.js";
 import { BOARD_HELP, boardCommand } from "./board-cli.js";
+import { HANDOFF_HELP, handoffCommand } from "./handoff-cli.js";
+import { MAP_LABEL } from "./core/handoff.js";
 import { DOOR_HELP, doorCommand, setupDoorDiscord, type DoorWiring } from "./door-cli.js";
 import { boardPass, ticketsAreIssues } from "./core/door/read.js";
 import { WAITING_LABEL } from "./core/dispatch/waiting.js";
@@ -183,7 +185,7 @@ commands:
   config check <project>       resolve the team, project, user and machine layers and check them: exit 0 or 1 (#229)
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
-${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
+${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${HANDOFF_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
 ${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
@@ -1027,57 +1029,102 @@ function loopCommand(name: string, { positionals, io }: Args): Promise<number> {
     : projectRun(name, words.project, io, projectForm(name), (resolved) => Promise.resolve(parsed(resolved)));
 }
 
-const BOARD_FORM = "agent-factory board [<project>] [--json]";
-
 // boardNamed : a chosen project, or the usage when none was chosen. Pure.
-function boardNamed(chosen: Result<string | undefined>): Result<string> {
+function boardNamed(chosen: Result<string | undefined>, form: string): Result<string> {
   if (chosen.kind === "failed") {
     return chosen;
   }
   return chosen.value === undefined
-    ? { kind: "failed", reason: `usage: ${BOARD_FORM}` }
+    ? { kind: "failed", reason: `usage: ${form}` }
     : { kind: "ok", value: chosen.value };
 }
 
-// boardProject : the project the board is for: the one named, or the one chosen as projectRun chooses (#382)
-async function boardProject(io: Io, positionals: readonly string[]): Promise<Result<string>> {
+// boardProject : the project the board (or the handoff note) is for: the one named, or the one chosen as projectRun
+// chooses
+async function boardProject(io: Io, positionals: readonly string[], form: string): Promise<Result<string>> {
   const home = factoryHome(io.env);
   if (home.kind !== "home" || positionals.length > 1) {
-    return { kind: "failed", reason: home.kind === "home" ? `usage: ${BOARD_FORM}` : home.reason };
+    return { kind: "failed", reason: home.kind === "home" ? `usage: ${form}` : home.reason };
   }
-  return boardNamed(await chosenProject({ home: home.path, project: positionals[0], env: io.env, usage: BOARD_FORM }));
+  return boardNamed(await chosenProject({ home: home.path, project: positionals[0], env: io.env, usage: form }), form);
 }
 
-// board : every ticket in flight, read-only (#487 AC-5)
-async function boardCli({ positionals, json, io }: Args): Promise<number> {
-  const project = await boardProject(io, positionals);
+// a read of the board: the board itself, or the coordinator's reset note built on it
+type BoardReader = {
+  readonly name: "board" | "handoff";
+  readonly form: string;
+  readonly run: (project: string, io: Io, read: BoardRead) => Promise<number>;
+};
+
+// what each board reader's command gets from the read-only pass
+type BoardRead = {
+  readonly home: string;
+  readonly pass: TickSetup;
+};
+
+// boardReaderCli : a board reader for the project named or chosen, its settings resolved
+async function boardReaderCli(reader: BoardReader, positionals: readonly string[], io: Io): Promise<number> {
+  const project = await boardProject(io, positionals, reader.form);
   if (project.kind === "failed") {
-    io.err(`agent-factory board: ${project.reason}\n`);
+    io.err(`agent-factory ${reader.name}: ${project.reason}\n`);
     return 1;
   }
-  return resolvedRun("board", project.value, io, (resolved) => boardOn(project.value, json, resolved));
+  return resolvedRun(reader.name, project.value, io, (resolved) => boardReaderOn(reader, project.value, resolved));
 }
 
-// boardOn : the pass's setup made read-only (boardPass), decided with nothing acted on
-async function boardOn(project: string, json: boolean, io: Io): Promise<number> {
+// boardReaderOn : the pass's setup made read-only (boardPass), handed to the reader with nothing acted on
+async function boardReaderOn(reader: BoardReader, project: string, io: Io): Promise<number> {
   const settings = dispatchSettings(io.env);
   const setup = "kind" in settings ? settings : await setupNow(project, true, io, settings);
   if ("kind" in settings || setup.kind !== "ok") {
-    io.err(`agent-factory board: ${"reason" in setup ? setup.reason : "cannot read the project"}\n`);
+    io.err(`agent-factory ${reader.name}: ${"reason" in setup ? setup.reason : "cannot read the project"}\n`);
     return 1;
   }
-  const pass = boardPass(setup.value, io.err);
-  const decided = () => decideAll(pass);
-  const waiting = () => pass.forge.waiting({ label: WAITING_LABEL });
-  return boardCommand(project, json, {
+  return reader.run(project, io, { home: settings.home, pass: boardPass(setup.value, io.err) });
+}
+
+// boardIo : what the board and the handoff note read, from the read-only pass
+function boardIo(io: Io, { home, pass }: BoardRead) {
+  return {
     ...io,
-    home: settings.home,
+    home,
     now: Date.now,
     mark: pass.forge.mark,
-    decided,
-    waiting,
+    decided: () => decideAll(pass),
+    waiting: () => pass.forge.waiting({ label: WAITING_LABEL }),
     ticketsAreIssues: ticketsAreIssues(pass),
-  });
+  };
+}
+
+// board : every ticket in flight, read-only
+function boardReader(json: boolean): BoardReader {
+  return {
+    name: "board",
+    form: "agent-factory board [<project>] [--json]",
+    run: (project, io, read) => boardCommand(project, json, boardIo(io, read)),
+  };
+}
+
+// handoff : the project coordinator's reset note, built by code from the board and the open maps
+const HANDOFF_READER: BoardReader = {
+  name: "handoff",
+  form: "agent-factory handoff [<project>]",
+  run: (project, io, read) =>
+    handoffCommand(project, {
+      ...boardIo(io, read),
+      maps: () => read.pass.forge.waiting({ label: MAP_LABEL }),
+      mapBody: (number) => read.pass.forge.issueBody({ number }),
+    }),
+};
+
+// boardCli : the board command
+function boardCli({ positionals, json, io }: Args): Promise<number> {
+  return boardReaderCli(boardReader(json), positionals, io);
+}
+
+// boardOn : the board as the terminal prints it, for a front door
+function boardOn(project: string, json: boolean, io: Io): Promise<number> {
+  return boardReaderOn(boardReader(json), project, io);
 }
 
 // dispatch : the orchestrator loop (#305), or with --once one pass (#103). A human's command starts it; no cron or
@@ -1734,6 +1781,7 @@ const COMMANDS: readonly Command[] = [
   { name: "trace", run: trace },
   { name: "retro", run: retro },
   { name: "board", run: boardCli },
+  { name: "handoff", run: ({ positionals, io }: Args) => boardReaderCli(HANDOFF_READER, positionals, io) },
   { name: "door", run: ({ positionals, io }: Args) => doorCommand(positionals, io, DOOR_WIRING) },
   { name: "onboard", run: onboardCli },
   { name: "setup", run: setupCommand },

@@ -72,8 +72,14 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   The operator approves one text, and a report split across comments hides what is being approved.
 - Split work too big for one PR into child tickets before the build, because the operator approves the
   shape before code exists, not after (#557 is the worked example).
-- Run one fresh session per ticket, starting from `agent-factory board` and the ticket's body and comments, never
-  from another ticket's thread, because a long session re-reads its whole thread on every turn (#615).
+- Run each ticket's work in its own fresh ticket session, starting from `agent-factory board` and the ticket's body
+  and comments, never from another ticket's thread, because a long session re-reads its whole thread on every turn.
+  The project's one long coordinator plans, routes, relays and reports, builds no ticket, and resets from
+  `agent-factory handoff <project>`, never from a model's summary, because a summary drops what the records hold.
+- Take an answer the coordinator relays only when it quotes the operator's exact words, and write the quote into the
+  ticket's report, because a paraphrase is not the operator's word. A relay can approve a spec on its ticket, but never
+  writes a START or an approval record, which a person writes at a door (ADR-0012 S1). When your permission checks
+  refuse a relay, say so in one line and keep `waiting:operator`.
 - Put `waiting:operator` on the ticket's issue when the session stops for the operator's word, and take it off once it
   has the answer, because `board` and the ping find a waiting session only by that label
   (`docs/agents/triage-labels.md`). Keep every other label: add and remove this one only.
