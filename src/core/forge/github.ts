@@ -11,6 +11,7 @@ import {
   branchStateOf,
   completeAll,
   done,
+  labelledAt,
   logOf,
   nextCursor,
   nextPage,
@@ -39,6 +40,7 @@ import type {
   OpenChange,
   Person,
   Pipeline,
+  Waiting,
 } from "./types.js";
 
 import type { GithubProject } from "./target.js";
@@ -108,6 +110,14 @@ function byState(state: "opened" | "merged"): string {
   pullRequests(states: [${state === "opened" ? "OPEN" : "MERGED"}], labels: [$label], first: 100, after: $after) {
     pageInfo { hasNextPage endCursor } nodes { number headRefName isCrossRepository } } } }`;
 }
+
+// the open issues with a label, and the times labels were put on each: the newest for that label is since when it
+// waits. GitHub's issues connection holds no pull request.
+const WAITING = `query($owner: String!, $name: String!, $label: String!, $after: String) { repository(owner: $owner, name: $name) {
+  issues(states: [OPEN], labels: [$label], first: 50, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
+    pageInfo { hasNextPage endCursor }
+    nodes { number title
+      timelineItems(itemTypes: [LABELED_EVENT], last: 100) { nodes { ... on LabeledEvent { createdAt label { name } } } } } } } }`;
 
 // GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and app-token use "ledger-factory[bot]".
 // The seam always gives the [bot] form, so the factory's own notes match its login whichever way they were read. A
@@ -395,6 +405,29 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
+  async function waiting(input: { readonly label: string }): Promise<Result<readonly Waiting[]>> {
+    return pages((cursor) =>
+      query(
+        WAITING,
+        { label: text(input.label), ...after(cursor) },
+        (data, r): Page<Waiting> => ({
+          items: r.list(data, "repository.issues.nodes").map((n) => ({
+            number: r.int(n, "number"),
+            title: r.text(n, "title"),
+            since: labelledAt(
+              r
+                .list(n, "timelineItems.nodes")
+                .filter((e) => !r.absent(e, "label"))
+                .map((e) => ({ at: r.text(e, "createdAt"), label: r.text(e, "label.name") })),
+              input.label,
+            ),
+          })),
+          next: nextCursor(r, data, "repository.issues.pageInfo"),
+        }),
+      ),
+    );
+  }
+
   // the open pull requests from this branch of the repository itself: head=owner:branch leaves forks out
   async function openFrom(branch: string): Promise<Result<readonly number[]>> {
     const head = encodeURIComponent(`${project.owner}:${branch}`);
@@ -606,6 +639,7 @@ export function github(client: Client, project: GithubProject): Forge {
       const found = await labelled(input);
       return found.kind === "ok" ? { kind: "ok", value: found.value.map((c) => c.number) } : found;
     },
+    waiting,
     async changes(input): Promise<Result<Changes>> {
       const people = await team();
       if (people.kind === "failed") {

@@ -103,6 +103,7 @@ function forge(now: () => Changes | "down"): Forge {
     lineFinding: notUsed,
     status: notUsed,
     ciConfig: notUsed,
+    waiting: async () => ({ kind: "ok", value: [] }),
     claimed: notUsed,
     changes: async () => {
       const c = now();
@@ -616,6 +617,11 @@ const ANSWERS: readonly (readonly [(call: Call) => boolean, (c: Changes) => unkn
       },
     }),
   ],
+  // the open issues whose session waits for the operator (waiting.ts): none here
+  [
+    (call) => queryOf(call).includes("issues(states: [OPEN]"),
+    () => ({ data: { repository: { issues: { pageInfo: PAGE, nodes: [] } } } }),
+  ],
   [(call) => queryOf(call).includes("states: [OPEN]"), (c) => pulls(c.open.map(openNode))],
   [
     (call) => queryOf(call).includes("states: [MERGED]"),
@@ -631,7 +637,7 @@ function bodyOf(call: Call, c: Changes): unknown {
 }
 
 describe("the orchestrator loop and the git host's rate limit (#62)", () => {
-  it("a pass that did nothing reads the git host once: its login and 3 GraphQL lists, where it made 8 calls", async () => {
+  it("a pass that did nothing reads the git host once: its login, 3 GraphQL lists and the waiting issues", async () => {
     await approved();
     // the writer, the ready check and the review are done at the head, and CI runs there: the ticket waits on CI, in
     // flight, and a pass does nothing
@@ -660,15 +666,17 @@ describe("the orchestrator loop and the git host's rate limit (#62)", () => {
     const ended = await loop.run();
     expect(ended).toMatchObject({ kind: "ok", value: { passes: 3 } });
     expect(loop.lines.filter((l) => l.startsWith("PROJ-1: wait: CI"))).toHaveLength(2);
-    // pass 1 posted the approval's shared copy, so it looked again: its login, 3 lists, the note, 3 lists
+    // pass 1 posted the approval's shared copy, so it looked again: its login, 3 lists, the waiting issues, the note,
+    // 3 lists
     const [first = 0, second = 0] = marks;
-    expect(first).toBe(8);
-    // pass 2 did nothing: its login and the 3 lists, each one call; before #62 it read them twice, with the login
+    expect(first).toBe(9);
+    // pass 2 did nothing: its login, the 3 lists and the waiting issues, each one call, never a list read twice
     const pass2 = host.calls.slice(first, second);
-    expect(pass2.map((c) => c.args[2])).toEqual(["user", "graphql", "graphql", "graphql"]);
-    // no pass of this one-ticket project makes more than 9 calls: the pass that reconciles the merge reads it once
-    // (Forge.landed, #487) before the claim comes off; a pass that did nothing still makes 4, above
-    expect(host.calls.length - second).toBeLessThanOrEqual(9);
+    expect(pass2.map((c) => c.args[2])).toEqual(["user", "graphql", "graphql", "graphql", "graphql"]);
+    expect(loop.lines.some((l) => l.includes("label was not read"))).toBe(false);
+    // no pass of this one-ticket project makes more than 10 calls: the pass that reconciles the merge reads it once
+    // (Forge.landed) before the claim comes off; a pass that did nothing still makes 5, above
+    expect(host.calls.length - second).toBeLessThanOrEqual(10);
   });
 
   it("a pass that meets the limit makes one call, and the next pass waits until the reset, with no retry storm", async () => {
@@ -693,8 +701,9 @@ describe("the orchestrator loop and the git host's rate limit (#62)", () => {
       /^pass 1 failed: github: rate limited until 2026-11-07T10:40:00Z: HTTP 200 after 1 try on user: API rate limit already exceeded for user ID 15411573\./,
     );
     expect(loop.lines).toContain("next pass in 40 min, when the rate limit is over");
-    // the limited pass stopped at its first call; the next pass read the user once and the three lists
-    expect(host.calls.length).toBe(1 + 4);
+    // the limited pass stopped at its first call; the next pass read the user once, the three lists and the waiting
+    // issues
+    expect(host.calls.length).toBe(1 + 5);
   });
 });
 

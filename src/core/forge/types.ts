@@ -75,6 +75,10 @@ export type MergedChange = { readonly number: number; readonly branch: string; r
 // squash or fast-forwarded head commit), and who landed it
 export type Landed = { readonly at: string; readonly sha: string; readonly by: string };
 
+// An open issue that carries a label, and when that label was last put on it: a ticket session that waits for the
+// operator's word. since is UTC, "" when the git host keeps no time for it.
+export type Waiting = { readonly number: number; readonly title: string; readonly since: string };
+
 export type LineFinding = { readonly file: string; readonly line: number };
 
 // The CI config file the forge runs for the project (#115): a file in this repository, or none here (GitHub reads
@@ -156,6 +160,8 @@ export type Forge = {
   ciConfig(): Promise<Result<CiConfig>>;
   // the numbers of the changes in that state that carry the label
   claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>>;
+  // the open issues, never a pull or merge request, that carry the label, oldest first
+  waiting(input: { readonly label: string }): Promise<Result<readonly Waiting[]>>;
   // the change open from this branch of the repository itself, or a new draft one; two or more fail, so a person decides
   openChange(input: ChangeRequest): Promise<Result<number>>;
   // everything poll decides on, in as few calls as paging allows

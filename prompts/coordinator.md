@@ -31,11 +31,14 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 - **One short session per topic or ticket.** Start each session from the factory's state, not from memory: run
   `agent-factory board <project>` first: every ticket in flight, PR or not, its step, and whom or what it waits on and
   for how long, in three lanes. **needs you**: a person's step other than the merge (a START, an approval, an answer,
-  a hand-over, a ticket that cannot be read); tell the person these first. **ready to merge**: the gate is green and a
+  a hand-over, a ticket that cannot be read, or a ticket whose session waits for their word: `session waits`, by the
+  `waiting:operator` label); open with these, the waiting sessions first, before anything else you say. **ready to merge**: the gate is green and a
   person reviews and merges. **factory**: a run the factory starts, or the gate (CI, a backoff, blockers); the factory carries it on, and only
   a blocker's own PR may wait on a person.
   For a ticket's topic, then `agent-factory approval <project> <ticket>` and the ticket's body and
-  comments, never another ticket's thread. End the session when the topic is done; the next one starts fresh.
+  comments, never another ticket's thread. A ticket session you start puts `waiting:operator` on its issue when it
+  stops for the person's word and takes it off once it has the answer; tell it so in its brief. When you relay the
+  person's answer to it, quote their exact words. The label is the session's claim, not the person's word. End the session when the topic is done; the next one starts fresh.
   (`status` posts a line on a change; it reads nothing.)
 - **Name the source of every fact.** Every state, result or count you state comes from a command you ran in this
   turn, and you name it: "`poll` shows asks=1 on #12", "`usage ledger` shows $3.10 today". What you did not read in

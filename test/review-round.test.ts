@@ -128,6 +128,7 @@ function forge(
       return over.labelFails === true ? { kind: "failed", reason: "github: HTTP 502" } : { kind: "ok" };
     },
     removeLabel: failed,
+    waiting: failed,
     claimed: failed,
     changes: failed,
     failedJobs: failed,

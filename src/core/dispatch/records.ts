@@ -280,6 +280,9 @@ export type Event =
   // whose turn the ticket entered: a person was pinged on entering needs-you or ready-to-merge, and factory re-arms
   // that ping (turn-ping.ts)
   | { readonly at: string; readonly kind: "turn"; readonly to: TurnLane }
+  // the operator was pinged that the ticket's session waits for their word, for the waiting label put on at since
+  // (waiting.ts); a later since pings again
+  | { readonly at: string; readonly kind: "waiting"; readonly since: string }
   // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
   | { readonly at: string; readonly kind: "blocked"; readonly why: string }
   // the ticket's build is held by its spec's "Blocked by" for this reason; a person was pinged when it changed (#494)
@@ -1079,6 +1082,10 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const to = oneOf(raw, "to", TURN_LANES);
     return to === BAD ? BAD : { at, kind: "turn", to };
   },
+  waiting: (raw, at) => {
+    const since = str(raw, "since");
+    return since === BAD ? BAD : { at, kind: "waiting", since };
+  },
   blocked: (raw, at) => {
     const why = str(raw, "why");
     return why === BAD ? BAD : { at, kind: "blocked", why };
@@ -1546,6 +1553,8 @@ const STEPS: Steps = {
   "design-noted": (s) => ({ ...s, ...seedTurn(s, "needs-you") }),
   pinged: (s, e) => ({ ...s, ...seedTurn(s, "ready-to-merge"), pingedAt: e.head }),
   turn: (s, e) => ({ ...s, turn: e.to, turnRead: true }),
+  // a session's wait counts nothing; waiting.ts reads it so the ping goes once per label
+  waiting: (s) => s,
   blocked: (s, e) => ({ ...s, ...seedTurn(s, "needs-you"), blocked: [...s.blocked, e.why] }),
   // a read that held the build again starts the count of passes the git host did not answer afresh
   held: (s, e) => ({ ...s, heldWhy: e.why, unreadPasses: 0, unreadFirst: "", unreadSince: "" }),
@@ -1568,10 +1577,11 @@ function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {
   return STEPS[kind](s, e);
 }
 
-// isActivity : whether a line is the ticket's activity: every line but "turn", which records whom a ping went to, so a
-// claim's quiet time and "claimed, but not by this orchestrator" (table.ts) read the same as without it. Pure.
+// isActivity : whether a line is the ticket's activity: every line but "turn" and "waiting", which record whom a ping
+// went to, so a claim's quiet time and "claimed, but not by this orchestrator" (table.ts) read the same as without
+// them. Pure.
 export function isActivity(e: Event): boolean {
-  return e.kind !== "turn";
+  return e.kind !== "turn" && e.kind !== "waiting";
 }
 
 // summarize : the counts since the approval at `since` (ISO 8601); older lines belong to an earlier approval.

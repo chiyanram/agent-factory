@@ -74,6 +74,9 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   shape before code exists, not after (#557 is the worked example).
 - Run one fresh session per ticket, starting from `agent-factory board` and the ticket's body and comments, never
   from another ticket's thread, because a long session re-reads its whole thread on every turn (#615).
+- Put `waiting:operator` on the ticket's issue when the session stops for the operator's word, and take it off once it
+  has the answer, because `board` and the ping find a waiting session only by that label
+  (`docs/agents/triage-labels.md`). Keep every other label: add and remove this one only.
 - Cut a step from a lane only on measured numbers, the cost per run kind on #488's timeline line, read after about
   15 tickets, because a few tickets' impressions are not a measure.
 - Bring in a new check, role, lens or outside skill manual first and climb one rung at a time, as P11 in

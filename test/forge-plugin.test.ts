@@ -92,6 +92,26 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
+  it("carries the open issues that wait under a label, and since when, as the built-in adapter does", async () => {
+    const at = "2026-11-17T03:00:00Z";
+    const node = {
+      number: 12,
+      title: "board lists waiting sessions",
+      timelineItems: { nodes: [{ createdAt: at, label: { name: "waiting:operator" } }] },
+    };
+    const { setup, fakes } = await bundled([
+      http("200 OK", {
+        data: { repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [node] } } },
+      }),
+    ]);
+    const forge = pluginForge({ setup, plugin: "github", forge: "github", project: "chiyanram/ledger" });
+    expect(await forge.waiting({ label: "waiting:operator" })).toEqual({
+      kind: "ok",
+      value: [{ number: 12, title: "board lists waiting sessions", since: at }],
+    });
+    await fakes.remove();
+  });
+
   it("carries an issue's new body byte for byte, and refuses a pull request, as the built-in adapter does (#542)", async () => {
     const text = "# 12: a title\r\n\n@alice's `/close` $(y)\n";
     const { setup, fakes } = await bundled([
@@ -248,6 +268,31 @@ describe("the forge as a plugin (#134 PR C)", () => {
       reason: expect.stringContaining("HTTP 404"),
     });
     await fakes.remove();
+  });
+
+  it("reads no waiting issue from a plugin built before the waiting read, which answers it unsupported", async () => {
+    const dir = join(root, "older");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "plugin");
+    writeFileSync(
+      path,
+      `#!${process.execPath}
+const out = (v) => process.stdout.write(JSON.stringify(v));
+if (process.argv[2] === "describe") { out(${JSON.stringify({ ...described("github", "1"), name: "older", cli: [] })}); process.exit(0); }
+let t = ""; process.stdin.on("data", (d) => (t += d)); process.stdin.on("end", () => {
+  const req = JSON.parse(t);
+  if (req.op === "waiting") { out({ kind: "unsupported", op: req.op }); return; }
+  out({ kind: "failed", reason: "no" });
+});
+`,
+    );
+    chmodSync(path, 0o755);
+    const setup: Setup = { home, env: { HOME: root }, path: NODE_DIR };
+    expect((await addPlugin(setup, path)).kind).toBe("ok");
+    const forge = pluginForge({ setup, plugin: "older", forge: "github", project: "a/b" });
+    expect(await forge.waiting({ label: "waiting:operator" })).toEqual({ kind: "ok", value: [] });
+    // any other op it does not know still fails
+    expect(await forge.me()).toMatchObject({ kind: "failed" });
   });
 
   it("refuses an answer that is not the shape the interface says, or not the kind of its op", async () => {

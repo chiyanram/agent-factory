@@ -151,7 +151,16 @@ ticket in flight, so a run that ends on a person is pinged by the next pass, whi
 `design-ended`, a `writer-ended` that asked or was blocked, unless a run `started` after it), so no wait is pinged
 twice. The `pinged` line is the once-per-head record of the "ready for you" note. A build held by its blockers and the
 project at a cap inform and ask nothing, so they keep their own checks: `held` pings again only when what it waits on
-changes, the cap notice once per cap and period. `board` never pings. It never opens a ticket: the ticket list is the START and approval records and the
+changes, the cap notice once per cap and period. A ticket whose Claude session waits for the operator's word carries
+the `waiting:operator` label on its issue ([`waiting.ts`](../../src/core/dispatch/waiting.ts)); each pass reads the
+open issues with it through the `Forge` seam, writes a `waiting` line with the time the label went on, then pings once.
+A label taken off and put on again has a newer time and pings again; a ticket whose own turn is already needs you is
+recorded with no second ping; that holds only where ticket 12 is issue 12 (the project keeps its specs in issues). A
+project's git host plugin built before this read answers it unsupported, and shows no waiting session. The label is a session's claim, not a human record: nothing decides on it. A read that
+fails is logged and pings nothing. The ping goes only on a pass: the orchestrator loop ends once no ticket is in
+flight, and a waiting session does not keep it running, so a session that waits while nothing is in flight is pinged
+by the next pass that runs; `board` shows it at once. Each pass reads the label once more: one more call on GitHub,
+and on GitLab one more plus one per labelled issue. `board` never pings. It never opens a ticket: the ticket list is the START and approval records and the
 `factory/<ticket>` changes. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never
 ended goes to a person. An implementer run's folder, `$FACTORY_HOME/box-runs/writer-XXXXXX`, is made before its

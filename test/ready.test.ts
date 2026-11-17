@@ -297,6 +297,7 @@ function statusForge(posted: CommitStatus[], noted: Post[] = []): Forge {
     notes: notUsed,
     lineFinding: notUsed,
     ciConfig: notUsed,
+    waiting: notUsed,
     claimed: notUsed,
     changes: notUsed,
     failedJobs: notUsed,

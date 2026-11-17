@@ -37,11 +37,12 @@ import {
 import { NEEDS_HUMAN } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import { leftNote, type KeptInput, type KeptRun } from "../left.js";
-import type { Forge } from "../forge/types.js";
+import type { Forge, Waiting } from "../forge/types.js";
 import { poll, type MergedLine, type OpenLine } from "../poll.js";
 import { pruneTraces } from "./trace.js";
 import type { Notify, Ping } from "../notify.js";
 import { turnPing, turnStep } from "./turn-ping.js";
+import { recordedSince, WAITING_LABEL, waitingPing, waitingStep } from "./waiting.js";
 import type { Post } from "../post.js";
 import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, raisedWhy, type LaneProps } from "../lane.js";
 import { plainName, type Lane, type Spec, type SpecStore } from "../spec.js";
@@ -70,7 +71,7 @@ import { timelineOf } from "./timeline.js";
 import { blockersView, withIssue, type Blocker, type BlockersView, type BlockerState } from "./blockers.js";
 import type { BranchState } from "../forge/types.js";
 import { designView, dropRepeats, roundsBefore, type DesignView, type EarlierRound, type SpecRead } from "./design.js";
-import { nextStep, whoseTurn } from "./next-step.js";
+import { nextStep, whoseTurn, type Lane as TurnLane } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
 import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
@@ -1854,7 +1855,76 @@ async function acted(setup: TickSetup, decided: readonly Decided[]): Promise<rea
     return [];
   }
   await polled(setup);
+  await waitingPinged(setup, decided);
   return actAll(setup, decided);
+}
+
+// waitingPinged : each ticket whose session waits for the operator (waiting.ts): the label's time recorded, then the
+// operator pinged, once per label. A read that fails, or a line that cannot be written, is printed and pings nothing;
+// the next pass tries again, and the rest of this pass goes on.
+async function waitingPinged(setup: TickSetup, decided: readonly Decided[]): Promise<void> {
+  const read = await setup.forge.waiting({ label: WAITING_LABEL });
+  if (read.kind === "failed") {
+    setup.log(`the ${WAITING_LABEL} label was not read, so no session's wait was pinged: ${read.reason}`);
+    return;
+  }
+  for (const w of read.value) {
+    const ticket = String(w.number);
+    await sessionPinged(setup, w, issueTicket(setup, ticket) ? flightOf(decided, ticket) : NO_FLIGHT);
+  }
+}
+
+// the flight of a waiting issue that is no ticket in flight, or no ticket at all: a ticket's name is its issue only when
+// the project keeps its specs in issues
+const NO_FLIGHT = { lane: "none", change: "none" } as const;
+
+// flightOf : the waiting ticket's lane and change when it is in flight; none for either when it is not. Pure.
+function flightOf(
+  decided: readonly Decided[],
+  ticket: string,
+): { readonly lane: TurnLane | "none"; readonly change: number | "none" } {
+  const flying = decided.find(
+    (d): d is Read & { readonly action: Action } => !("kind" in d) && d.state.ticket === ticket,
+  );
+  return flying === undefined ? NO_FLIGHT : { lane: whoseTurn(flying.action).lane, change: number(flying.state) };
+}
+
+// sessionPinged : one waiting ticket's label time recorded, then the operator pinged when waitingStep says so
+async function sessionPinged(
+  setup: TickSetup,
+  w: Waiting,
+  flight: { readonly lane: TurnLane | "none"; readonly change: number | "none" },
+): Promise<void> {
+  const place = { home: setup.home, project: setup.project, ticket: String(w.number) };
+  const step = await sessionStep(setup, place, w.since, flight.lane);
+  if (!step.record) {
+    return;
+  }
+  const kept = await record({ where: place, event: { at: at(setup), kind: "waiting", since: w.since } });
+  if (kept.kind === "failed") {
+    setup.log(`${place.ticket}: the session's wait was not recorded, so no ping went out: ${kept.reason}`);
+    return;
+  }
+  if (step.ping) {
+    await informed(setup, waitingPing(w, flight.change));
+  }
+}
+
+// sessionStep : what the pass does about a waiting ticket, from its records; records it cannot read do nothing
+async function sessionStep(
+  setup: TickSetup,
+  place: { readonly home: string; readonly project: string; readonly ticket: string },
+  since: string,
+  lane: TurnLane | "none",
+): Promise<{ readonly record: boolean; readonly ping: boolean }> {
+  const events = await readRecords(place, { warn: setup.log });
+  if (events.kind === "failed") {
+    setup.log(
+      `${place.ticket}: the records were not read, so no ping went out for the session's wait: ${events.reason}`,
+    );
+    return { record: false, ping: false };
+  }
+  return waitingStep({ recorded: recordedSince(events.value), since, lane });
 }
 
 // polled : the pass's last-poll time; one that cannot be written is printed, and status then shows the pass as late

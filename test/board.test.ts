@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { boardJson, boardOf, boardText } from "../src/core/dispatch/board.js";
+import { boardJson, boardOf, boardText, waitingLines } from "../src/core/dispatch/board.js";
 import { EMPTY, type Event, type Summary } from "../src/core/dispatch/records.js";
 import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import { decide, type TicketState } from "../src/core/dispatch/table.js";
 import { describe as describeAction, type Decided } from "../src/core/dispatch/tick.js";
 import type { OpenLine } from "../src/core/poll.js";
 import type { ApprovalRecord } from "../src/core/approval.js";
+import type { Result } from "../src/core/forge/api.js";
+import type { Waiting } from "../src/core/forge/types.js";
 
 // One line per ticket in flight: its change, its step, what it waits on and for how long (#487 AC-5).
 
@@ -297,6 +299,148 @@ describe("the board's lanes (#671)", () => {
       ["PROJ-1", "ready-to-merge"],
       ["PROJ-3", "factory"],
       ["PROJ-2", "factory"],
+    ]);
+  });
+});
+
+// the ticket sessions that wait for the operator's word, by their label (waiting.ts)
+describe("the board's waiting sessions", () => {
+  const waitingSince = "2026-11-13T11:00:00Z";
+  const read = (numbers: readonly number[]) => ({
+    kind: "ok" as const,
+    value: numbers.map((n) => ({ number: n, title: `ticket ${n}`, since: waitingSince })),
+  });
+  const ci = decided("41", { change: { kind: "open", line: line({ number: 50, pipeline: { kind: "running" } }) } });
+  const board = (waiting: Result<readonly Waiting[]>) =>
+    boardOf({ decided: [ci], events: new Map(), now: NOW, describe: describeAction, waiting, ticketsAreIssues: true });
+
+  it("lists a waiting ticket that is not in flight under needs you, first, since its label went on", () => {
+    const lines = board(read([7]));
+    expect(lines.map((l) => [l.ticket, l.lane])).toEqual([
+      ["7", "needs-you"],
+      ["41", "factory"],
+    ]);
+    expect(lines[0]).toMatchObject({ step: "session waits", since: waitingSince, forMs: 3_600_000 });
+  });
+
+  it("moves a waiting ticket in flight to needs you, keeping its change and step, as one line", () => {
+    const lines = board(read([41]));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      ticket: "41",
+      change: 50,
+      lane: "needs-you",
+      step: "wait: CI is running at this head",
+      waitsOn: { kind: "person", who: "the operator", does: expect.stringContaining("waiting:operator: ticket 41") },
+    });
+  });
+
+  it("keeps a broken ticket's own line, which says why it cannot be read, when its session waits too", () => {
+    const broken: Decided = { kind: "broken", ticket: "41", reason: "a torn record" };
+    const lines = boardOf({
+      decided: [broken],
+      events: new Map(),
+      now: NOW,
+      describe: describeAction,
+      waiting: read([41]),
+      ticketsAreIssues: true,
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      ticket: "41",
+      step: "broken",
+      waitsOn: { does: expect.stringContaining("a torn record") },
+    });
+  });
+
+  it("never merges a waiting issue with a ticket of the same name when the project's tickets are not issues", () => {
+    const lines = boardOf({
+      decided: [ci],
+      events: new Map(),
+      now: NOW,
+      describe: describeAction,
+      waiting: read([41]),
+      ticketsAreIssues: false,
+    });
+    expect(lines.map((l) => [l.ticket, l.lane])).toEqual([
+      ["41", "needs-you"],
+      ["41", "factory"],
+    ]);
+  });
+
+  it("names a read that failed under needs you, and still lists every ticket in flight", () => {
+    const lines = board({ kind: "failed", reason: "github: 502" });
+    expect(lines.map((l) => [l.ticket, l.step])).toEqual([
+      ["waiting sessions", "broken"],
+      ["41", "wait: CI is running at this head"],
+    ]);
+  });
+
+  it("says in words that the session waits for the operator, and keeps the JSON's key order", () => {
+    const lines = board(read([7]));
+    expect(boardText({ lines, zone: { name: "UTC" }, mark: "#" }).slice(1, 4)).toEqual([
+      "needs you (1)",
+      "  7  no PR  session waits",
+      "    waits on the operator, who answers the ticket's session, which waits for their word (waiting:operator: ticket 7), for 1h 00m since 2026-11-13 11:00 UTC",
+    ]);
+    const json = JSON.parse(boardJson(lines)) as unknown;
+    expect(Array.isArray(json) && json[0]).toEqual({
+      ticket: "7",
+      change: null,
+      lane: "needs-you",
+      step: "session waits",
+      waitsOn: {
+        kind: "person",
+        who: "the operator",
+        does: "answers the ticket's session, which waits for their word (waiting:operator: ticket 7)",
+      },
+      since: waitingSince,
+      forMs: 3_600_000,
+    });
+  });
+});
+
+describe("waitingLines", () => {
+  const T = Date.parse("2026-11-17T05:00:00Z");
+  const w = (number: number, since = "2026-11-17T03:00:00Z") => ({ number, title: `ticket ${number}`, since });
+
+  it("lists each waiting ticket under needs you, waiting on the operator, since the label went on", () => {
+    expect(waitingLines({ kind: "ok", value: [w(12)] }, T)).toEqual([
+      {
+        ticket: "12",
+        change: "none",
+        lane: "needs-you",
+        step: "session waits",
+        waitsOn: {
+          kind: "person",
+          who: "the operator",
+          does: "answers the ticket's session, which waits for their word (waiting:operator: ticket 12)",
+        },
+        since: "2026-11-17T03:00:00Z",
+        forMs: 2 * 3_600_000,
+      },
+    ]);
+  });
+
+  it("shows no time for a label the git host keeps no time for", () => {
+    expect(waitingLines({ kind: "ok", value: [w(12, "")] }, T)[0]).toMatchObject({ since: "", forMs: 0 });
+  });
+
+  it("names a read that failed as one broken needs-you line, never as nothing waiting", () => {
+    expect(waitingLines({ kind: "failed", reason: "github: 502" }, T)).toEqual([
+      {
+        ticket: "waiting sessions",
+        change: "none",
+        lane: "needs-you",
+        step: "broken",
+        waitsOn: {
+          kind: "person",
+          who: "a person",
+          does: "reads why it cannot be read: the waiting:operator label: github: 502",
+        },
+        since: "",
+        forMs: 0,
+      },
     ]);
   });
 });

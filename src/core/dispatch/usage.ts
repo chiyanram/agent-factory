@@ -8,7 +8,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { plainName } from "../spec.js";
 import type { Result } from "../forge/api.js";
-import { readRecords, type DesignStep, type Event, type Phase, type WriterMode } from "./records.js";
+import { isActivity, readRecords, type DesignStep, type Event, type Phase, type WriterMode } from "./records.js";
 import { addSpend, NO_SPEND, RUN_KINDS, type CopilotRuns, type RoundSpend, type RunKind, type Spend } from "./spend.js";
 import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 import { tallyOf, type TicketTally } from "./touches.js";
@@ -153,7 +153,12 @@ function splitRuns(split: RoundSpend, where: Pick<Spent, "project" | "ticket" | 
   ];
 }
 
-type Read = { readonly runs: readonly Spent[]; readonly acted: readonly ActedSeen[]; readonly tally: TicketTally };
+// tally: none for a ticket whose lines are only pings' records (records.ts isActivity), such as a session's wait
+type Read = {
+  readonly runs: readonly Spent[];
+  readonly acted: readonly ActedSeen[];
+  readonly tally: TicketTally | "none";
+};
 
 // runsOf : every measured or unmeasured run in a ticket's lines. Pure.
 export function runsOf(events: readonly Event[], where: Pick<Spent, "project" | "ticket">): readonly Spent[] {
@@ -175,7 +180,7 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
       acted: events.value.flatMap((e) =>
         e.kind === "review-ended" && e.acted !== undefined ? [{ project, at: e.at, rows: e.acted.rows }] : [],
       ),
-      tally: tallyOf({ project, ticket }, events.value, totalOf(runs, 0)),
+      tally: events.value.some(isActivity) ? tallyOf({ project, ticket }, events.value, totalOf(runs, 0)) : "none",
     },
   };
 }
@@ -193,7 +198,7 @@ export async function readSpends(input: { readonly home: string; readonly projec
       if (read.kind === "ok") {
         runs.push(...read.value.runs);
         acted.push(...read.value.acted);
-        tallies.push(read.value.tally);
+        tallies.push(...(read.value.tally === "none" ? [] : [read.value.tally]));
       } else {
         problems.push(read.reason);
       }
