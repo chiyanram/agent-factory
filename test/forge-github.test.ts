@@ -650,3 +650,48 @@ describe("setIssueBody (#542)", () => {
     expect(f.calls.filter((c) => c.args[4] === "PATCH").length).toBe(1);
   });
 });
+
+describe("waiting", () => {
+  const labelled = (at: string, name: string) => ({ createdAt: at, label: { name } });
+  const issues = (nodes: readonly unknown[], more = false) =>
+    ok({ data: { repository: { issues: { pageInfo: page(more, "i1"), nodes } } } });
+
+  it("is each open issue with the label, since the newest time that label went on, across pages", async () => {
+    const f = fake("github", [
+      issues(
+        [
+          {
+            number: 12,
+            title: "board lists waiting sessions",
+            timelineItems: {
+              nodes: [
+                labelled("2026-11-17T01:00:00Z", "waiting:operator"),
+                labelled("2026-11-17T02:00:00Z", "type:feature"),
+                labelled("2026-11-17T03:00:00Z", "waiting:operator"),
+                {},
+              ],
+            },
+          },
+        ],
+        true,
+      ),
+      issues([{ number: 14, title: "no event in view", timelineItems: { nodes: [] } }]),
+    ]);
+    expect(await github(f.client, project).waiting({ label: "waiting:operator" })).toEqual({
+      kind: "ok",
+      value: [
+        { number: 12, title: "board lists waiting sessions", since: "2026-11-17T03:00:00Z" },
+        { number: 14, title: "no event in view", since: "" },
+      ],
+    });
+    const asked = f.calls[0]?.args.join(" ") ?? "";
+    expect(asked).toContain("issues(states: [OPEN], labels: [$label]");
+    expect(asked).toContain("waiting:operator");
+    expect(f.calls[1]?.args.join(" ")).toContain("i1");
+  });
+
+  it("fails when GitHub fails, never an empty list", async () => {
+    const f = fake("github", [{ status: 502, body: { message: "bad gateway" } }]);
+    expect(await github(f.client, project).waiting({ label: "waiting:operator" })).toMatchObject({ kind: "failed" });
+  });
+});

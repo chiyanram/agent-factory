@@ -7,12 +7,14 @@ import { specHash } from "../src/core/spec.js";
 import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import { record } from "../src/core/dispatch/records.js";
 import { STEPS_TODAY } from "../src/core/dispatch/steps.js";
+import { WAITING_LABEL } from "../src/core/dispatch/waiting.js";
 import { decideAll, type Decided, type TickSetup } from "../src/core/dispatch/tick.js";
 import { FORGE_OPS } from "../src/core/forge/ops.js";
-import type { Changes, Forge } from "../src/core/forge/types.js";
+import type { Result } from "../src/core/forge/api.js";
+import type { Changes, Forge, Waiting } from "../src/core/forge/types.js";
 import { NO_NOTIFY } from "../src/core/notify.js";
 import { boardCommand } from "../src/board-cli.js";
-import { boardPass, readOnly } from "../src/core/door/read.js";
+import { boardPass, readOnly, ticketsAreIssues } from "../src/core/door/read.js";
 import { tempDir } from "./temp.js";
 
 // agent-factory board reads what a pass would decide, and can write nothing: no forge write, no record line, no lock
@@ -69,6 +71,7 @@ function recording(changes: Changes, writes: string[]): Forge {
     issueBody: read,
     notes: read,
     ciConfig: read,
+    waiting: async () => ({ kind: "ok", value: [] }),
     claimed: read,
     changes: async () => ({ kind: "ok", value: changes }),
     failedJobs: read,
@@ -199,7 +202,10 @@ describe("the board writes nothing (#487 AC-5)", () => {
       mark: "#",
     };
     const pass = boardPass(setup(recording(changes, writes), log), () => undefined);
-    expect(await boardCommand("ledger", false, { ...io, decided: () => decideAll(pass) })).toBe(0);
+    const waiting = () => pass.forge.waiting({ label: WAITING_LABEL });
+    expect(
+      await boardCommand("ledger", false, { ...io, decided: () => decideAll(pass), waiting, ticketsAreIssues: false }),
+    ).toBe(0);
     const text = out.join("");
     expect(text).toContain("  PROJ-1  no PR  writer (fix)");
     // a green gate not yet pinged is a person's merge already
@@ -234,7 +240,10 @@ describe("agent-factory board (#487 AC-5)", () => {
     await approved("PROJ-1");
     const out: string[] = [];
     const err: string[] = [];
-    const io = (answer: readonly Decided[] | "fail") => ({
+    const io = (
+      answer: readonly Decided[] | "fail",
+      waiting: Result<readonly Waiting[]> = { kind: "ok", value: [] },
+    ) => ({
       home,
       env: { TZ: "UTC" },
       now: () => NOW,
@@ -245,6 +254,8 @@ describe("agent-factory board (#487 AC-5)", () => {
         answer === "fail"
           ? { kind: "failed" as const, reason: "the git host did not answer" }
           : { kind: "ok" as const, value: answer },
+      waiting: async () => waiting,
+      ticketsAreIssues: true,
     });
     const decided = await decideAll(setup(recording({ team: [], open: [], merged: [] }, []), []));
     const value = decided.kind === "ok" ? decided.value : [];
@@ -255,5 +266,37 @@ describe("agent-factory board (#487 AC-5)", () => {
     expect(JSON.parse(out.join(""))).toMatchObject([{ ticket: "PROJ-1", change: null, lane: "factory" }]);
     expect(await boardCommand("ledger", false, io("fail"))).toBe(1);
     expect(err.join("")).toBe("agent-factory board: the git host did not answer\n");
+  });
+
+  it("lists a ticket whose session waits for the operator under needs you, and a label it cannot read as a line", async () => {
+    const out: string[] = [];
+    const io = (waiting: Result<readonly Waiting[]>) => ({
+      home,
+      env: { TZ: "UTC" },
+      now: () => NOW,
+      out: (t: string) => out.push(t),
+      err: () => undefined,
+      mark: "#",
+      decided: async () => ({ kind: "ok" as const, value: [] }),
+      waiting: async () => waiting,
+      ticketsAreIssues: true,
+    });
+    const since = new Date(NOW - 3_600_000).toISOString();
+    const waiting = { kind: "ok" as const, value: [{ number: 712, title: "board lists waiting sessions", since }] };
+    expect(await boardCommand("ledger", false, io(waiting))).toBe(0);
+    expect(out.join("")).toContain(
+      "needs you (1)\n  712  no PR  session waits\n    waits on the operator, who answers the ticket's session",
+    );
+    out.length = 0;
+    expect(await boardCommand("ledger", false, io({ kind: "failed", reason: "github: 502" }))).toBe(0);
+    expect(out.join("")).toContain("  waiting sessions  no PR  broken");
+  });
+});
+
+describe("ticketsAreIssues", () => {
+  it("is true only for a project that keeps its specs in issues", () => {
+    const issue = { kind: "issue" as const, readIssueBody: async () => ({ kind: "missing" as const, where: "" }) };
+    expect(ticketsAreIssues({ specs: issue })).toBe(true);
+    expect(ticketsAreIssues({})).toBe(false);
   });
 });

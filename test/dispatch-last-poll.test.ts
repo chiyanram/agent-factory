@@ -50,6 +50,7 @@ function forge(claimed: readonly number[] | "down"): Forge {
     lineFinding: notUsed,
     status: notUsed,
     ciConfig: notUsed,
+    waiting: async () => ({ kind: "ok", value: [] }),
     claimed: async () =>
       claimed === "down" ? { kind: "failed", reason: "gh is down" } : { kind: "ok", value: claimed },
     changes: async () => ({ kind: "ok", value: { team: [], open: [], merged: [] } }),

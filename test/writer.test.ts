@@ -250,6 +250,7 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     lineFinding: async () => unused("lineFinding"),
     status: async () => unused("status"),
     ciConfig: async () => ({ kind: "ok", value: { kind: "file", path: ".gitlab-ci.yml" } }),
+    waiting: async () => unused("waiting"),
     claimed: async () => unused("claimed"),
     openChange: async (request) => {
       opened.push(request);

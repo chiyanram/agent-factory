@@ -7,13 +7,17 @@
 //   a run      a run the factory starts itself
 // Each line sits in one lane, whoseTurn's (next-step.ts): needs you, ready to merge, then factory, in the decisions'
 // order inside a lane; a ticket that cannot be read needs you. Since when is the ticket's newest record line, else its
-// approval; times are UTC here, and the text view shows them in the reader's zone. Pure. `agent-factory board` prints
-// the board (board-cli.ts).
+// approval; times are UTC here, and the text view shows them in the reader's zone. A ticket whose session waits for
+// the operator (waiting.ts) is in needs you, in flight or not, since its label went on; that label is shown, never
+// decided on. Pure. `agent-factory board` prints the board (board-cli.ts).
 
+import type { Result } from "../forge/api.js";
+import type { Waiting } from "../forge/types.js";
 import { LANES, whoseTurn, type Lane } from "./next-step.js";
 import { isActivity, type Event } from "./records.js";
 import type { Decided } from "./tick.js";
 import { PARK_WAIT, type Action } from "./table.js";
+import { OPERATOR, SESSION_WAITS, sessionWait, WAITING_LABEL } from "./waiting.js";
 import { shownAt, shownFor, UTC, type Zone } from "../zone.js";
 
 export type WaitsOn =
@@ -65,7 +69,7 @@ function sinceOf(events: readonly Event[], approvedAt: string): string {
   return events.filter(isActivity).reduce((max, e) => (e.at > max ? e.at : max), "") || approvedAt;
 }
 
-// brokenLine : a ticket whose spec, START, approval or records cannot be read. Pure.
+// brokenLine : a ticket whose spec, START, approval or records cannot be read, or the waiting label that cannot be. Pure.
 function brokenLine(ticket: string, reason: string): BoardLine {
   const waitsOn: WaitsOn = { kind: "person", who: "a person", does: `reads why it cannot be read: ${reason}` };
   return { ticket, change: "none", lane: "needs-you", step: "broken", waitsOn, since: "", forMs: 0 };
@@ -96,17 +100,65 @@ function lineOf(
   return d.action.kind === "reconcile" ? [] : [flyingLine(d, events, now, describe)];
 }
 
-// boardOf : every ticket in flight, by lane, in the decisions' order inside a lane. Pure.
+// waitingLines : each ticket whose session waits for the operator (waiting.ts) as an ordinary needs-you line, since its
+// label went on; a read that failed is one broken line that says why, so a failure never reads as nothing waiting. Pure.
+export function waitingLines(read: Result<readonly Waiting[]>, now: number): readonly BoardLine[] {
+  if (read.kind === "failed") {
+    return [brokenLine("waiting sessions", `the ${WAITING_LABEL} label: ${read.reason}`)];
+  }
+  return read.value.map((w) => ({
+    ticket: String(w.number),
+    change: "none",
+    lane: "needs-you",
+    step: SESSION_WAITS,
+    waitsOn: { kind: "person", who: OPERATOR, does: sessionWait(w) },
+    since: w.since,
+    forMs: w.since === "" ? 0 : Math.max(0, now - Date.parse(w.since)),
+  }));
+}
+
+// withWaiting : the ticket lines with each waiting session's line. When the project's tickets are its issues, a ticket
+// in flight keeps its step and moves to needs you, waiting on the session, and a broken one keeps its own line, which
+// says why it cannot be read; otherwise a ticket's name says nothing about an issue, so no line is merged. The waiting
+// tickets come first in needs you, oldest wait first. Pure.
+function withWaiting(
+  lines: readonly BoardLine[],
+  waiting: readonly BoardLine[],
+  ticketsAreIssues: boolean,
+): readonly BoardLine[] {
+  if (!ticketsAreIssues) {
+    return [...waiting, ...lines];
+  }
+  const byTicket = new Map(waiting.map((w) => [w.ticket, w]));
+  const merged = waiting.map((w) => {
+    const flying = lines.find((l) => l.ticket === w.ticket);
+    if (flying === undefined) {
+      return w;
+    }
+    return flying.step === "broken" ? flying : { ...w, change: flying.change, step: flying.step };
+  });
+  return [...merged, ...lines.filter((l) => !byTicket.has(l.ticket))];
+}
+
+// boardOf : every ticket in flight, by lane, in the decisions' order inside a lane, and every ticket whose session
+// waits for the operator (none read: the board shows none); ticketsAreIssues: the project keeps its specs in issues, so
+// ticket 12 is issue 12. Pure.
 export function boardOf(input: {
   readonly decided: readonly Decided[];
   readonly events: ReadonlyMap<string, readonly Event[]>;
   readonly now: number;
   readonly describe: (a: Action) => string;
+  readonly waiting?: Result<readonly Waiting[]>;
+  readonly ticketsAreIssues?: boolean;
 }): readonly BoardLine[] {
-  const lines = input.decided.flatMap((d) => {
+  const flying = input.decided.flatMap((d) => {
     const ticket = "kind" in d ? d.ticket : d.state.ticket;
     return lineOf(d, input.events.get(ticket) ?? [], input.now, input.describe);
   });
+  const lines =
+    input.waiting === undefined
+      ? flying
+      : withWaiting(flying, waitingLines(input.waiting, input.now), input.ticketsAreIssues === true);
   return LANES.flatMap((lane) => lines.filter((l) => l.lane === lane));
 }
 

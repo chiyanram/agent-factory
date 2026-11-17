@@ -20,6 +20,7 @@ export const FORGE_OPS = {
   notes: "forge.read",
   ciConfig: "forge.read",
   claimed: "forge.read",
+  waiting: "forge.read",
   changes: "forge.read",
   failedJobs: "forge.read",
   addLabel: "forge.write",

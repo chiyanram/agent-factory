@@ -45,6 +45,12 @@ export function nextPage(full: boolean, page: number): Cursor | { readonly kind:
   return full ? { kind: "after", cursor: String(page + 1) } : { kind: "end" };
 }
 
+// labelledAt : the newest time this label was put on, from an issue's label-added events; "" when none is in view.
+// Pure.
+export function labelledAt(added: readonly { readonly at: string; readonly label: string }[], label: string): string {
+  return added.filter((e) => e.label === label).reduce((max, e) => (e.at > max ? e.at : max), "");
+}
+
 // nextCursor : the next cursor from a GraphQL pageInfo at path. The cursor is read only when there is a next page:
 // GraphQL sends null for it on the last page.
 export function nextCursor(r: Reader, value: unknown, path: string): Cursor | { readonly kind: "end" } {

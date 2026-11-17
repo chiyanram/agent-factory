@@ -58,6 +58,7 @@ export function evalForge(change: Change, login: string): Forge {
     lineFinding: ok,
     status: async () => unused("status"),
     ciConfig: async () => unused("ciConfig"),
+    waiting: async () => unused("waiting"),
     claimed: async () => unused("claimed"),
     openChange: async () => unused("openChange"),
     setBody: async () => unused("setBody"),

@@ -21,6 +21,7 @@ import type {
   Person,
   Pipeline,
   PipelineState,
+  Waiting,
 } from "./types.js";
 
 const SEATS: readonly [Seat, ...Seat[]] = ["writer", "reviewer", "coordinator"];
@@ -177,4 +178,11 @@ export function failedJobsOf(r: Reader, value: unknown): readonly FailedJob[] {
 
 export function numbersOf(r: Reader, value: unknown): readonly number[] {
   return r.list(value, "").map((n) => r.int(n, ""));
+}
+
+// waitingOf : the open issues that carry a label, and since when
+export function waitingOf(r: Reader, value: unknown): readonly Waiting[] {
+  return r
+    .list(value, "")
+    .map((w) => ({ number: r.int(w, "number"), title: r.text(w, "title"), since: r.text(w, "since") }));
 }

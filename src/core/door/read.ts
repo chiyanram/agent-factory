@@ -1,10 +1,11 @@
 // door/read — the one read model every front door shows (ADR-0023 D2): the board's lines (dispatch/board.ts), decided
-// as a pass would decide them, on a git host whose write ops refuse and with no step or ping that can run. The CLI's
+// as a pass would decide them, with each ticket whose session waits for the operator (dispatch/waiting.ts) as an
+// ordinary needs-you line, on a git host whose write ops refuse and with no step or ping that can run. The CLI's
 // `board` prints them; the Discord door (#548) reads the same lines.
 
 import type { Done, Result } from "../forge/api.js";
 import { FORGE_OPS } from "../forge/ops.js";
-import type { Forge } from "../forge/types.js";
+import type { Forge, Waiting } from "../forge/types.js";
 import { boardOf, type BoardLine } from "../dispatch/board.js";
 import { readRecords, type Event } from "../dispatch/records.js";
 import { STEPS_TODAY } from "../dispatch/steps.js";
@@ -58,8 +59,17 @@ export type BoardRead = {
   readonly project: string;
   // every ticket of the project, decided as a pass would, read-only (tick.ts decideAll on a boardPass)
   readonly decided: () => Promise<Result<readonly Decided[]>>;
+  // the open issues whose session waits for the operator, read once; a failed read is one needs-you line
+  readonly waiting: () => Promise<Result<readonly Waiting[]>>;
+  // the project keeps its specs in issues, so a ticket's name is its issue's number (ticketsAreIssues)
+  readonly ticketsAreIssues: boolean;
   readonly now: () => number;
 };
+
+// ticketsAreIssues : whether the project keeps its specs in issues, so a ticket's name is its issue's number. Pure.
+export function ticketsAreIssues(setup: Pick<TickSetup, "specs">): boolean {
+  return setup.specs?.kind === "issue";
+}
 
 // doorBoard : the board's lines; a project the pass cannot read fails
 export async function doorBoard(read: BoardRead): Promise<Result<readonly BoardLine[]>> {
@@ -68,5 +78,14 @@ export async function doorBoard(read: BoardRead): Promise<Result<readonly BoardL
     return decided;
   }
   const events = await eventsOf(read.home, read.project, decided.value);
-  return { kind: "ok", value: boardOf({ decided: decided.value, events, now: read.now(), describe }) };
+  const waiting = await read.waiting();
+  const lines = boardOf({
+    decided: decided.value,
+    events,
+    now: read.now(),
+    describe,
+    waiting,
+    ticketsAreIssues: read.ticketsAreIssues,
+  });
+  return { kind: "ok", value: lines };
 }

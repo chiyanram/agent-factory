@@ -124,6 +124,7 @@ function forge(changes: Changes, log: string[]): Forge {
     lineFinding: notUsed,
     status: notUsed,
     ciConfig: notUsed,
+    waiting: async () => ({ kind: "ok", value: [] }),
     claimed: notUsed,
     changes: async () => ({ kind: "ok", value: changes }),
     failedJobs: notUsed,
@@ -3136,5 +3137,90 @@ describe("a killed writer run keeps its work", () => {
     expect(pushes).toHaveLength(1);
     const note = again.find((l) => l.startsWith("note #12 [coordinator] blocked:")) ?? "";
     expect(note).toContain("nothing to push");
+  });
+});
+
+// a ticket whose session waits for the operator's word: the pass pings once per label (waiting.ts)
+describe("a session that waits for the operator", () => {
+  const empty: Changes = { team, open: [], merged: [] };
+  const since = "2026-11-07T09:00:00Z";
+  const waitingOn = (answer: Awaited<ReturnType<Forge["waiting"]>>, log: string[], pings: Ping[]) => {
+    const base = setup(empty, log, { notify: pinger(pings) });
+    return { ...base, forge: { ...base.forge, waiting: async () => answer } };
+  };
+  const label = (at: string) => ({ kind: "ok" as const, value: [{ number: 12, title: "an approval", since: at }] });
+
+  it("records the label's time, then pings once; the same label pings no more, a label put on again pings again", async () => {
+    const pings: Ping[] = [];
+    await tick(waitingOn(label(since), [], pings));
+    await tick(waitingOn(label(since), [], pings));
+    expect(pings).toEqual([
+      {
+        kind: "needs-you",
+        ticket: "12",
+        change: "none",
+        why: "its ticket session waits for your word (an approval)",
+        next: "answers in the ticket's session, or tells the coordinator in their own words",
+      },
+    ]);
+    const read = await readRecords({ home, project: "ledger", ticket: "12" }, {});
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual(["waiting"]);
+    // a ticket that only waited ran nothing, so usage gives it no row
+    expect((await readSpends({ home, project: "ledger" })).tallies.map((t) => t.ticket)).not.toContain("12");
+    await tick(waitingOn(label("2026-11-07T09:30:00Z"), [], pings));
+    expect(pings).toHaveLength(2);
+  });
+
+  // ticket 12 STARTed and waiting for its spec's approval: its own turn is needs you
+  async function startedOnly(): Promise<void> {
+    const started = await start({
+      where: { home, project: "ledger", ticket: "12" },
+      by: "ram",
+      via: "terminal",
+      at: "2026-11-07T07:00:00Z",
+      branch: "absent",
+      confirmed: false,
+    });
+    expect(started.kind).toBe("started");
+  }
+  const sessionPings = (pings: readonly Ping[]) =>
+    pings.filter((p) => p.kind === "needs-you" && p.why.startsWith("its ticket session waits"));
+
+  it("sends no second ping for a ticket whose own turn is needs you, when the ticket is the issue", async () => {
+    await startedOnly();
+    const pings: Ping[] = [];
+    const specs: TickSetup["specs"] = {
+      kind: "issue",
+      readIssueBody: async () => ({ kind: "found", text: SPEC("feature").replace("PROJ-1", "12"), where: "issue 12" }),
+    };
+    await tick({ ...waitingOn(label(since), [], pings), specs });
+    expect(sessionPings(pings)).toEqual([]);
+    expect(pings.filter((p) => p.kind === "needs-you" && p.ticket === "12")).toHaveLength(1);
+  });
+
+  it("never takes a local ticket for the issue of the same number: the issue's session is pinged on its own", async () => {
+    await startedOnly();
+    mkdirSync(join(home, "specs", "ledger", "12"), { recursive: true });
+    writeFileSync(join(home, "specs", "ledger", "12", "spec.md"), SPEC("feature").replace("PROJ-1", "12"));
+    const pings: Ping[] = [];
+    await tick(waitingOn(label(since), [], pings));
+    expect(sessionPings(pings)).toHaveLength(1);
+  });
+
+  it("logs a label it cannot read, pings nothing, and still runs the pass", async () => {
+    const pings: Ping[] = [];
+    const log: string[] = [];
+    const ran = await tick(waitingOn({ kind: "failed", reason: "github: 502" }, log, pings));
+    expect(ran.kind).toBe("ok");
+    expect(pings).toEqual([]);
+    expect(log).toContain("log the waiting:operator label was not read, so no session's wait was pinged: github: 502");
+  });
+
+  it("reads no label on a dry run", async () => {
+    const pings: Ping[] = [];
+    const base = waitingOn(label(since), [], pings);
+    await tick({ ...base, dryRun: true });
+    expect(pings).toEqual([]);
+    expect(existsSync(join(home, "runs", "ledger", "12.jsonl"))).toBe(false);
   });
 });

@@ -93,6 +93,12 @@ const RUN: Readonly<Record<ForgeOp, Run>> = {
       (r, v) => ({ state: r.word(v, "state", ["opened", "merged"]), label: r.text(v, "label") }),
       async (x) => value(await f.claimed(x)),
     ),
+  waiting: (f, i) =>
+    withInput(
+      i,
+      (r, v) => ({ label: r.text(v, "label") }),
+      async (x) => value(await f.waiting(x)),
+    ),
   changes: (f, i) =>
     withInput(
       i,

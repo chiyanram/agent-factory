@@ -15,6 +15,7 @@ import {
   branchStateOf,
   completeAll,
   done,
+  labelledAt,
   logOf,
   nextCursor,
   nextPage,
@@ -45,6 +46,7 @@ import type {
   OpenChange,
   Person,
   Pipeline,
+  Waiting,
 } from "./types.js";
 
 // Every pipeline status GitLab defines (PipelineStatusEnum). Anything else is unknown, never "none" (#124).
@@ -396,6 +398,57 @@ export function gitlab(client: Client, project: string): Forge {
     });
   }
 
+  // since : when the label was last added to the issue, from every page of its label events, which come oldest first
+  async function since(issue: number, label: string): Promise<Result<string>> {
+    type Added = { readonly at: string; readonly label: string };
+    const added = await pages(async (cursor): Promise<Result<Page<Added>>> => {
+      const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;
+      const path = `${base}/issues/${issue}/resource_label_events?per_page=100&page=${page}`;
+      const answer = await rest(client, { path, method: "GET", body: none });
+      if (answer.kind === "failed") {
+        return answer;
+      }
+      const r = reader("gitlab label events");
+      const batch = r.list(answer.value, "");
+      const items = batch
+        .filter((e) => r.text(e, "action") === "add" && !r.absent(e, "label"))
+        .map((e) => ({ at: r.text(e, "created_at"), label: r.text(e, "label.name") }));
+      return r.done({ items, next: nextPage(batch.length === 100, page) });
+    });
+    return added.kind === "ok" ? { kind: "ok", value: labelledAt(added.value, label) } : added;
+  }
+
+  // waiting : the open issues with the label, oldest first, each with since when it carries it
+  async function waiting(input: { readonly label: string }): Promise<Result<readonly Waiting[]>> {
+    const one = oneLabel(input.label);
+    if (one.kind === "failed") {
+      return one;
+    }
+    const issues = await pages(async (cursor): Promise<Result<Page<{ number: number; title: string }>>> => {
+      const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;
+      const path = `${base}/issues?state=opened&labels=${encodeURIComponent(input.label)}&order_by=created_at&sort=asc&per_page=100&page=${page}`;
+      const answer = await rest(client, { path, method: "GET", body: none });
+      if (answer.kind === "failed") {
+        return answer;
+      }
+      const r = reader("gitlab issues");
+      const batch = r.list(answer.value, "").map((i) => ({ number: r.int(i, "iid"), title: r.text(i, "title") }));
+      return r.done({ items: batch, next: nextPage(batch.length === 100, page) });
+    });
+    if (issues.kind === "failed") {
+      return issues;
+    }
+    const out: Waiting[] = [];
+    for (const issue of issues.value) {
+      const at = await since(issue.number, input.label);
+      if (at.kind === "failed") {
+        return at;
+      }
+      out.push({ ...issue, since: at.value });
+    }
+    return { kind: "ok", value: out };
+  }
+
   // the open merge requests from this branch of the project itself: one from a fork has another source project
   async function openFrom(branch: string): Promise<Result<readonly number[]>> {
     const path = `${base}/merge_requests?state=opened&source_branch=${encodeURIComponent(branch)}&per_page=100`;
@@ -628,6 +681,7 @@ export function gitlab(client: Client, project: string): Forge {
       const found = await labelled(input);
       return found.kind === "ok" ? { kind: "ok", value: found.value.map((c) => c.number) } : found;
     },
+    waiting,
     async changes(input): Promise<Result<Changes>> {
       const people = await team();
       if (people.kind === "failed") {

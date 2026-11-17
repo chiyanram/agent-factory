@@ -607,3 +607,56 @@ describe("setIssueBody (#542)", () => {
     expect(await forge.setIssueBody({ number: 3, text })).toMatchObject({ kind: "failed" });
   });
 });
+
+describe("waiting", () => {
+  const event = (action: string, at: string, name: string) => ({ action, created_at: at, label: { name } });
+
+  it("is each open issue with the label, since the newest time that label was added", async () => {
+    const f = fake("gitlab", [
+      ok([
+        { iid: 12, title: "board lists waiting sessions" },
+        { iid: 14, title: "label added, no event kept" },
+      ]),
+      ok([
+        event("add", "2026-11-17T01:00:00Z", "waiting:operator"),
+        event("remove", "2026-11-17T02:00:00Z", "waiting:operator"),
+        event("add", "2026-11-17T03:00:00Z", "waiting:operator"),
+        event("add", "2026-11-17T04:00:00Z", "type::feature"),
+        { action: "add", created_at: "2026-11-17T05:00:00Z", label: null },
+      ]),
+      ok([]),
+    ]);
+    expect(await gitlab(f.client, project).waiting({ label: "waiting:operator" })).toEqual({
+      kind: "ok",
+      value: [
+        { number: 12, title: "board lists waiting sessions", since: "2026-11-17T03:00:00Z" },
+        { number: 14, title: "label added, no event kept", since: "" },
+      ],
+    });
+    expect(f.calls[0]?.args.join(" ")).toContain("issues?state=opened&labels=waiting%3Aoperator");
+    expect(f.calls[1]?.args.join(" ")).toContain("/issues/12/resource_label_events");
+  });
+
+  it("reads every page of an issue's label events, since they come oldest first", async () => {
+    const old = Array.from({ length: 100 }, (_, i) =>
+      event("add", `2026-11-01T00:${String(i % 60).padStart(2, "0")}:00Z`, "type::feature"),
+    );
+    const f = fake("gitlab", [
+      ok([{ iid: 12, title: "t" }]),
+      ok(old),
+      ok([event("add", "2026-11-17T03:00:00Z", "waiting:operator")]),
+    ]);
+    expect(await gitlab(f.client, project).waiting({ label: "waiting:operator" })).toEqual({
+      kind: "ok",
+      value: [{ number: 12, title: "t", since: "2026-11-17T03:00:00Z" }],
+    });
+    expect(f.calls[2]?.args.join(" ")).toContain("resource_label_events?per_page=100&page=2");
+  });
+
+  it("fails when an issue's label events cannot be read, and refuses a label with a comma", async () => {
+    const f = fake("gitlab", [ok([{ iid: 12, title: "t" }]), { status: 500, body: { message: "boom" } }]);
+    const forge = gitlab(f.client, project);
+    expect(await forge.waiting({ label: "waiting:operator" })).toMatchObject({ kind: "failed" });
+    expect(await forge.waiting({ label: "a,b" })).toMatchObject({ kind: "failed" });
+  });
+});

@@ -1,6 +1,7 @@
 // board-cli — agent-factory board [<project>] [--json] (#487 AC-5; #456 decision 4): one line per ticket in flight, PR
 // or not, with its step, what it waits on and for how long, grouped into needs you, ready to merge and factory
-// (src/core/dispatch/board.ts). It reads what a pass would decide, read-only: it takes no lock and writes no record,
+// (src/core/dispatch/board.ts), and each ticket whose session waits for the operator's word, by its label
+// (src/core/dispatch/waiting.ts). It reads what a pass would decide, read-only: it takes no lock and writes no record,
 // label or note. --json gives the same fields with each line's lane, times in UTC,
 // for a program (the chat bot's /waiting, #233; the web view, #120).
 // The lines are the door seam's read model (core/door/read.ts), so every front door shows the same board.
@@ -8,6 +9,7 @@
 import type { Result } from "./core/forge/api.js";
 import { boardJson, boardText } from "./core/dispatch/board.js";
 import type { Decided } from "./core/dispatch/tick.js";
+import type { Waiting } from "./core/forge/types.js";
 import { doorBoard } from "./core/door/read.js";
 import { readerZone } from "./core/zone.js";
 
@@ -21,16 +23,28 @@ export type BoardIo = {
   readonly mark: string;
   // every ticket of the project, decided as a pass would, read-only (tick.ts decideAll)
   readonly decided: () => Promise<Result<readonly Decided[]>>;
+  // the open issues whose session waits for the operator (waiting.ts WAITING_LABEL), on the read-only git host
+  readonly waiting: () => Promise<Result<readonly Waiting[]>>;
+  // the project keeps its specs in issues, so a ticket's name is its issue's number
+  readonly ticketsAreIssues: boolean;
 };
 
 export const BOARD_HELP = `  board [<project>] [--json]   one line per ticket in flight, PR or not, in lanes: needs you, ready to merge,
                                factory; its step, what it waits on (a person by name, the gate or a run) and for
-                               how long; read-only. --json: the same with each line's lane, times in UTC
+                               how long; a ticket whose session waits for your word (label waiting:operator) under
+                               needs you; read-only. --json: the same with each line's lane, times in UTC
 `;
 
 // boardCommand : the board on stdout; a project the pass cannot read fails on stderr, and exits 1
 export async function boardCommand(project: string, json: boolean, io: BoardIo): Promise<number> {
-  const lines = await doorBoard({ home: io.home, project, decided: io.decided, now: io.now });
+  const lines = await doorBoard({
+    home: io.home,
+    project,
+    decided: io.decided,
+    waiting: io.waiting,
+    ticketsAreIssues: io.ticketsAreIssues,
+    now: io.now,
+  });
   if (lines.kind === "failed") {
     io.err(`agent-factory board: ${lines.reason}\n`);
     return 1;

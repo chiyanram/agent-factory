@@ -78,6 +78,7 @@ function forge(
     status: notUsed,
     ciConfig: async () => ({ kind: "ok", value: { kind: "none", why: "test" } }),
     openChange: notUsed,
+    waiting: async () => ({ kind: "ok", value: [] }),
     claimed: async ({ state }): Promise<Result<readonly number[]>> => ({ kind: "ok", value: lists[state] }),
     changes: notUsed,
     failedJobs: notUsed,

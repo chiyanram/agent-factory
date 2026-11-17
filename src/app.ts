@@ -97,7 +97,8 @@ import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
 import { cardDraft, cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.js";
 import { BOARD_HELP, boardCommand } from "./board-cli.js";
-import { boardPass } from "./core/door/read.js";
+import { boardPass, ticketsAreIssues } from "./core/door/read.js";
+import { WAITING_LABEL } from "./core/dispatch/waiting.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
 import { enginePackPin } from "./core/process/pins.js";
 import type { Probes, Who } from "./core/init/checks.js";
@@ -1064,7 +1065,16 @@ async function boardOn(project: string, json: boolean, io: Io): Promise<number> 
   }
   const pass = boardPass(setup.value, io.err);
   const decided = () => decideAll(pass);
-  return boardCommand(project, json, { ...io, home: settings.home, now: Date.now, mark: pass.forge.mark, decided });
+  const waiting = () => pass.forge.waiting({ label: WAITING_LABEL });
+  return boardCommand(project, json, {
+    ...io,
+    home: settings.home,
+    now: Date.now,
+    mark: pass.forge.mark,
+    decided,
+    waiting,
+    ticketsAreIssues: ticketsAreIssues(pass),
+  });
 }
 
 // dispatch : the orchestrator loop (#305), or with --once one pass (#103). A human's command starts it; no cron or

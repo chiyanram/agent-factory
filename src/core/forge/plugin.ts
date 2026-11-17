@@ -10,12 +10,12 @@ import type { Limits } from "../plugin/exec.js";
 import { MAX_WAIT, type Done, type Result } from "./api.js";
 import { FORGE_OPS, type ForgeOp } from "./ops.js";
 import { reader, type Reader } from "./read.js";
-import { changeOf, changesOf, ciConfigOf, failedJobsOf, notesOf, numbersOf } from "./shapes.js";
+import { changeOf, changesOf, ciConfigOf, failedJobsOf, notesOf, numbersOf, waitingOf } from "./shapes.js";
 import { markOf } from "./target.js";
 import type { BodyPost } from "../post.js";
 import { cleanBody } from "../pr-body.js";
 import { scrubSecrets } from "../scrub.js";
-import type { BranchState, Change, Changes, CiConfig, FailedJob, Forge, ForgeName, Landed } from "./types.js";
+import type { BranchState, Change, Changes, CiConfig, FailedJob, Forge, ForgeName, Landed, Waiting } from "./types.js";
 
 export type PluginTarget = {
   readonly setup: Setup;
@@ -52,16 +52,21 @@ function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<P
   );
 }
 
-// read : a read op's value, in the shape the Forge interface says
+// read : a read op's value, in the shape the Forge interface says; unknown: the value of an op that a plugin built
+// before it answers unsupported, when the seam has one that means "nothing here"
 async function read<T>(
   target: PluginTarget,
   op: ForgeOp,
   input: object,
   shape: (r: Reader, value: unknown) => T,
+  unknown?: T,
 ): Promise<Result<T>> {
   const answer = await ask(target, op, input);
   if (answer.kind === "failed") {
     return answer;
+  }
+  if (answer.value.kind === "unsupported" && unknown !== undefined) {
+    return { kind: "ok", value: unknown };
   }
   if (answer.value.kind !== "ok") {
     return failed(reasonOf(target, op, answer.value));
@@ -149,6 +154,8 @@ export function pluginForge(target: PluginTarget): Forge {
     status: (i) => written(target, "status", i),
     ciConfig: (): Promise<Result<CiConfig>> => read(target, "ciConfig", {}, ciConfigOf),
     claimed: (i) => read(target, "claimed", i, numbersOf),
+    // a plugin built before the waiting read keeps no waiting label, so no session waits on it
+    waiting: (i): Promise<Result<readonly Waiting[]>> => read(target, "waiting", i, waitingOf, []),
     openChange: (i) => opened(target, { ...i, title: scrubSecrets(i.title), body: cleanedPost(i.body) }),
     changes: (i): Promise<Result<Changes>> => read(target, "changes", i, changesOf),
     failedJobs: (i): Promise<Result<readonly FailedJob[]>> => read(target, "failedJobs", i, failedJobsOf),
