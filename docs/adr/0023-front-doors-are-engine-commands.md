@@ -28,9 +28,11 @@ that sets a trust boundary must not be a plugin.
 | D4 | **The Discord chat is Claude Code's official channel plugin.** It writes no record. Its words are data (P5), and an answer that changes the spec makes the approval stale (P13). START and approve are commands to the separate, code-only door bot (#548), whose check maps a Discord user id to a person from an allowlist the factory user owns, and refuses a bot or an unknown id. |
 | D5 | **Pings stay with the `notify` plugin.** A door reads and writes a person's word; it does not ping. |
 
-**Today:** only the terminal door is built. The Discord door is #548; the web UI (#714, #715) comes last. The
-coordinator does not start through the agent adapter yet (#691), so for it the model-run refusal sees only
-`CLAUDECODE`.
+**Today:** the terminal door and the Discord door (`agent-factory door discord`) are built; the web UI (#714, #715)
+comes last. The Discord door's live steps wait on the operator's hand test (#729). On a laptop the developer user can
+read the door bot's token, so a `via: discord` record there is a record, not proof, and the human merge review stays
+the hard gate (ADR-0012 S1). The coordinator does not start through the agent adapter yet (#691), so for it the
+model-run refusal sees only `CLAUDECODE`.
 
 ## Considered
 

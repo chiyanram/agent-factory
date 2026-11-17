@@ -6,7 +6,10 @@ Status: accepted 2026-11-06 (operator, map #30: W1, Q1, Q4–Q7, Q11, Q15, gaps 
 0010 and 0011. Closes the design side of #83 gaps 1–6. The scripts do not follow it yet. Each build ticket is cut under
 #30.
 S1's front doors are refined by [ADR-0023](0023-front-doors-are-engine-commands.md): each door is an engine command on
-one door seam, which takes `by` and `via` only from a person the door's own check vouched for.
+one door seam, which takes `by` and `via` only from a person the door's own check vouched for. **Today:** the
+terminal and the Discord door (`agent-factory door discord`) are built. On a laptop the developer user can read the
+door bot's token, so a `via: discord` record there is a record, not proof, and the human merge review stays the hard
+gate. S1's own row still says the terminal is the only door, until #728 lets that row's note change.
 
 Revised 2026-11-06 by the review of this ADR on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682341406), with the
 [factory comparison](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682831580)). The rows below are the revised decisions; each names the review issue that changed it.

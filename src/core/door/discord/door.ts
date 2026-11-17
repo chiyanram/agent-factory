@@ -1,0 +1,254 @@
+// door/discord/door — the Discord door's three commands (ADR-0023 D4; #548 S-3), for the person its own check named
+// (who.ts). The word is written only through the seam (write.ts), so the record says via discord and a model run is
+// refused there too.
+//
+// /start writes START, and asks for a Confirm first when factory/<ticket> is on the git host, as the terminal does.
+// /approve shows the lane, both full hashes and both texts (shown.ts), and binds them to a one-use nonce held in memory
+// for ten minutes; a Confirm by the same person approves exactly those hashes, so `approve` refuses a spec or design
+// edited in between. /board is read only. Waive and merge stay off Discord. A restart drops every pending Confirm.
+
+import type { Result } from "../../forge/api.js";
+import type { Where } from "../../approval.js";
+import type { Start } from "../../start.js";
+import { plainName } from "../../spec.js";
+import { approveAs, startAs } from "../write.js";
+import type { DoorConfig } from "./files.js";
+import { shown, type Shown } from "./shown.js";
+import type { Attached } from "./transport.js";
+import { check, parse, type Asker, type Interaction } from "./who.js";
+
+export const CONFIRM_MS = 10 * 60 * 1000;
+
+export type Reply = {
+  readonly text: string;
+  readonly files: readonly Attached[];
+  // the Confirm button's custom_id, when the answer asks for one
+  readonly confirm?: string;
+  // the one log line for this answer; the gateway scrubs it, as it scrubs the reply
+  readonly line: string;
+};
+
+export type DoorDeps = {
+  readonly config: DoorConfig;
+  // the door's own environment, which the seam reads for the model-run marker
+  readonly env: NodeJS.ProcessEnv;
+  readonly now: () => number;
+  // a fresh random nonce, 32 hex characters
+  readonly nonce: () => string;
+  // the scrub every reply passes through; /approve refuses a text it would change
+  readonly scrub: (text: string) => string;
+  // the project, with its settings resolved once for this interaction
+  readonly open: (project: string) => Promise<Result<ProjectDoor>>;
+};
+
+// what the door does in one project, through the terminal's own code
+export type ProjectDoor = {
+  // the factory home: a START is written there, and reads no spec, as at the terminal
+  readonly home: string;
+  // where the ticket's spec and approval are: the project's spec store
+  readonly specs: (ticket: string) => Result<Where>;
+  // whether factory/<ticket> is already on the project's git host
+  readonly branchThere: (ticket: string) => Promise<Result<boolean>>;
+  // the project's board as text, read only (door/read.ts)
+  readonly board: () => Promise<Result<string>>;
+  // after a START or an approval: the project's orchestrator loop, started when none runs, as at the terminal
+  readonly after: () => Promise<void>;
+};
+
+type Pending =
+  | { readonly kind: "start"; readonly project: string; readonly ticket: string; readonly user: string }
+  | {
+      readonly kind: "approve";
+      readonly project: string;
+      readonly ticket: string;
+      readonly user: string;
+      readonly spec: string;
+      readonly design: string;
+    };
+
+type Held = Pending & { readonly until: number };
+
+// the person, and the project they act in, opened for this interaction
+type At = Asker & { readonly door: ProjectDoor };
+
+type Said = Omit<Reply, "line">;
+
+const CONFIRM = "confirm:";
+const NONCE = /^[0-9a-f]{32}$/;
+
+const refused = (reason: string): Said => ({ text: `refused: ${reason}`, files: [] });
+const said = (text: string): Said => ({ text, files: [] });
+
+// nonceOf : the nonce a Confirm button carries, or "" when the custom_id is not one. Pure.
+function nonceOf(customId: string): string {
+  const nonce = customId.startsWith(CONFIRM) ? customId.slice(CONFIRM.length) : "";
+  return NONCE.test(nonce) ? nonce : "";
+}
+
+// approveText : what /approve shows above its Confirm. Pure.
+function approveText(project: string, ticket: string, seen: Shown): string {
+  return [
+    `Approve ${project}/${ticket}, lane ${seen.lane}: ${seen.title}`,
+    `spec   ${seen.spec}`,
+    `design ${seen.design}`,
+    "The spec and design are attached. Confirm within 10 minutes approves exactly these hashes; an edit to either before then makes Confirm refuse.",
+  ].join("\n");
+}
+
+// whatOf : the interaction, named for the log line, its words quoted so they cannot break the line. Pure.
+function whatOf(i: Interaction): string {
+  return i.type === 3 ? "Confirm" : `/${JSON.stringify(i.command)} ${JSON.stringify(i.ticket)}`;
+}
+
+export type DiscordDoor = { readonly handle: (raw: unknown) => Promise<Reply> };
+
+// discordDoor : the door over one people.json; its pending Confirms live as long as it does
+export function discordDoor(deps: DoorDeps): DiscordDoor {
+  const held = new Map<string, Held>();
+
+  const sweep = (): void => {
+    for (const [nonce, h] of held) {
+      if (h.until <= deps.now()) {
+        held.delete(nonce);
+      }
+    }
+  };
+
+  const hold = (pending: Pending): string => {
+    sweep();
+    const nonce = deps.nonce();
+    held.set(nonce, { ...pending, until: deps.now() + CONFIRM_MS });
+    return `${CONFIRM}${nonce}`;
+  };
+
+  const stamp = (): string => new Date(deps.now()).toISOString();
+
+  // asked : start's question, with a Confirm that STARTs anyway
+  const asked = (at: At, ticket: string, question: string): Said => {
+    const confirm = hold({ kind: "start", project: at.project, ticket, user: at.user });
+    return { text: `${question}. Confirm within 10 minutes to START anyway.`, files: [], confirm };
+  };
+
+  // written : the answer to what the seam did with a START; the loop is started after one is written
+  const written = async (at: At, ticket: string, result: Start): Promise<Said> => {
+    if (result.kind === "refused") {
+      return refused(result.reason);
+    }
+    if (result.kind === "ask") {
+      return asked(at, ticket, result.question);
+    }
+    await at.door.after();
+    return said(`started ${at.project}/${ticket} by ${result.record.by} at ${result.record.at}`);
+  };
+
+  // started : START through the seam; with the branch on the git host and no Confirm yet, start itself asks
+  const started = async (at: At, ticket: string, there: boolean, confirmed: boolean): Promise<Said> => {
+    const where = { home: at.door.home, project: at.project, ticket };
+    const branch = there ? "present" : "absent";
+    return written(at, ticket, await startAs(at.person, { where, at: stamp(), branch, confirmed }, deps.env));
+  };
+
+  const startCommand = async (at: At, ticket: string): Promise<Said> => {
+    const there = await at.door.branchThere(ticket);
+    return there.kind === "ok"
+      ? started(at, ticket, there.value, false)
+      : refused(`cannot tell whether factory/${ticket} is on the git host: ${there.reason}`);
+  };
+
+  const approveCommand = async (at: At, ticket: string): Promise<Said> => {
+    const where = at.door.specs(ticket);
+    const seen = where.kind === "ok" ? await shown(where.value, deps.scrub) : { kind: "refused", reason: where.reason };
+    if ("kind" in seen) {
+      return refused(seen.reason);
+    }
+    const { project, user } = at;
+    const confirm = hold({ kind: "approve", project, ticket, user, spec: seen.spec, design: seen.design });
+    const files: Attached[] = [
+      { name: `${ticket}-spec.md`, text: seen.specText },
+      ...(seen.designText === undefined ? [] : [{ name: `${ticket}-design.md`, text: seen.designText }]),
+    ];
+    return { text: approveText(project, ticket, seen), files, confirm };
+  };
+
+  // approved : approve through the seam, with exactly the hashes the person was shown
+  const approved = async (at: At, p: Extract<Pending, { kind: "approve" }>): Promise<Said> => {
+    const where = at.door.specs(p.ticket);
+    const request = (w: Where) => ({ where: w, seenHash: p.spec, seenDesign: p.design, at: stamp() });
+    const result =
+      where.kind === "ok"
+        ? await approveAs(at.person, request(where.value), deps.env)
+        : { kind: "refused" as const, reason: where.reason };
+    if (result.kind === "refused") {
+      return refused(result.reason);
+    }
+    await at.door.after();
+    const r = result.record;
+    return said(`approved ${p.project}/${p.ticket} spec ${r.spec_hash} design ${r.design_hash} by ${r.by} at ${r.at}`);
+  };
+
+  const confirmed = (at: At, customId: string): Promise<Said> => {
+    sweep();
+    const nonce = nonceOf(customId);
+    const pending = held.get(nonce);
+    if (pending === undefined) {
+      return Promise.resolve(refused("this Confirm is unknown or past its 10 minutes; run /approve again, or /start"));
+    }
+    if (pending.user !== at.user || pending.project !== at.project) {
+      return Promise.resolve(refused(`only the person who ran /${pending.kind} can confirm it`));
+    }
+    held.delete(nonce);
+    return pending.kind === "approve" ? approved(at, pending) : started(at, pending.ticket, true, true);
+  };
+
+  const board = async (at: At): Promise<Said> => {
+    const text = await at.door.board();
+    return text.kind === "ok" ? said(text.value) : refused(`cannot read the board: ${text.reason}`);
+  };
+
+  // TICKET_COMMANDS : the commands that name a ticket
+  const TICKET_COMMANDS: Readonly<Record<string, (at: At, ticket: string) => Promise<Said>>> = {
+    start: startCommand,
+    approve: approveCommand,
+  };
+
+  const commanded = (at: At, command: string, ticket: string): Promise<Said> => {
+    if (command === "board") {
+      return board(at);
+    }
+    const run = Object.hasOwn(TICKET_COMMANDS, command) ? TICKET_COMMANDS[command] : undefined;
+    if (run === undefined) {
+      const named = JSON.stringify(command);
+      return Promise.resolve(refused(`${named} is not a door command: waive and merge stay at the terminal`));
+    }
+    return plainName(ticket)
+      ? run(at, ticket)
+      : Promise.resolve(refused(`${JSON.stringify(ticket)} is not a plain ticket name`));
+  };
+
+  const answer = async (asker: Asker, i: Interaction): Promise<Said> => {
+    const door = await deps.open(asker.project);
+    if (door.kind === "failed") {
+      return refused(`cannot open ${asker.project}: ${door.reason}`);
+    }
+    const at: At = { ...asker, door: door.value };
+    if (i.type === 2) {
+      return commanded(at, i.command, i.ticket);
+    }
+    return i.type === 3
+      ? confirmed(at, i.customId)
+      : refused("the door takes only its slash commands and their Confirm button");
+  };
+
+  const handle = async (raw: unknown): Promise<Reply> => {
+    const i = parse(raw);
+    const asker = check(deps.config, i);
+    if ("kind" in asker) {
+      return { ...refused(asker.reason), line: `refused ${whatOf(i)} from ${i.user ?? "no user"}: ${asker.reason}` };
+    }
+    const reply = await answer(asker, i);
+    const first = reply.text.split("\n")[0] ?? "";
+    return { ...reply, line: `${whatOf(i)} by ${asker.person.by} (${asker.user}) in ${asker.project}: ${first}` };
+  };
+
+  return { handle };
+}

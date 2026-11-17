@@ -96,8 +96,8 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   that writes a person's word through `src/core/door/`, never a plugin.
   - The write API takes `by` and `via` only from a person the door's own check vouched for: the terminal names the OS
     user, and the Discord door maps a Discord user id from an allowlist the `factory` user owns. A door cannot hand the
-    core a name it did not check, and there is no `--by` or `--via` flag. **Today:** only the terminal door is built;
-    the Discord door is #548, and the web app comes last (#714, #715).
+    core a name it did not check, and there is no `--by` or `--via` flag. **Today:** the terminal door and the Discord
+    door (`agent-factory door discord`) are built, and the web app comes last (#714, #715).
   - It refuses inside a model run: where `CLAUDECODE` or the agent adapter's `AGENT_FACTORY_MODEL_RUN` is set. A model
     can change its environment, so this backs up the walls below and is not one.
   - Every door reads the same board lines (`src/core/door/read.ts`).
