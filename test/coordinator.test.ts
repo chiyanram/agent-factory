@@ -241,6 +241,13 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(copilotArgs(PLACES)).toContain("shell(agent-factory waive)");
   });
 
+  it("denies the front doors: a door writes a person's word, so the AI never runs one (#713)", () => {
+    for (const command of ["agent-factory door discord", "agent-factory door"]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    expect(copilotArgs(PLACES)).toContain("shell(agent-factory door)");
+  });
+
   it("denies raw forge and network clients, git push, a second interpreter or shell, sudo and the App's token", () => {
     for (const command of [
       "gh api repos/o/r",
@@ -370,6 +377,10 @@ describe("the wall's check (#105, #227)", () => {
       [
         (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory waive"))),
         "Bash(agent-factory waive) is missing",
+      ],
+      [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes("agent-factory door"))),
+        "Bash(agent-factory door) is missing",
       ],
       [
         (p) => (p.deny = p.deny.filter((r) => !r.includes("/waivers/"))),

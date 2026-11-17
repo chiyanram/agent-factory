@@ -117,7 +117,7 @@ describe("claudeEnv (ADR-0012 S6)", () => {
       GLAB_TOKEN: "t",
       CI_JOB_TOKEN: "t",
     };
-    expect(claudeEnv(env)).toEqual({ PATH: "/bin" });
+    expect(claudeEnv(env)).toEqual({ PATH: "/bin", AGENT_FACTORY_MODEL_RUN: "1" });
   });
 });
 

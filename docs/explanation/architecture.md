@@ -86,8 +86,17 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
 
 ## 4. How the AI is kept from approving
 
-- `agent-factory approve` and `start` are on the coordinator's **deny** list, and the coordinator never runs in
-  bypass-permissions mode.
+- `agent-factory approve`, `start`, `waive` and `door` are on the coordinator's **deny** list, and the coordinator
+  never runs in bypass-permissions mode.
+- **One door seam** ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)). Every front door is an engine command
+  that writes a person's word through `src/core/door/`, never a plugin.
+  - The write API takes `by` and `via` only from a person the door's own check vouched for: the terminal names the OS
+    user, and the Discord door maps a Discord user id from an allowlist the `factory` user owns. A door cannot hand the
+    core a name it did not check, and there is no `--by` or `--via` flag. **Today:** only the terminal door is built;
+    the Discord door is #548, and the web app comes last (#714, #715).
+  - It refuses inside a model run: where `CLAUDECODE` or the agent adapter's `AGENT_FACTORY_MODEL_RUN` is set. A model
+    can change its environment, so this backs up the walls below and is not one.
+  - Every door reads the same board lines (`src/core/door/read.ts`).
 - The deny list also covers:
   - the user and team settings;
   - the plugin list;
@@ -111,10 +120,11 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
  │ orchestrator (fixed flow) · run records · lock · host push guards              │
  │ START + approval records · test checks · lane check · approval floor           │
  │ caps, stall, backoff · settings in layers · enforces each role card's frontmatter│
+ │ front doors on the door seam: terminal · Discord bot · web app (ADR-0023)      │
  └──────▲────────────────────────────────▲──────────────────────────────────────────┘
         │ connectors (2+ real choices)          │ plugins, per project (locked key, pinned)
-   front door  terminal · Discord bot · web app   │   "plugins": ["rulebook@chiyanram", ...]
-   approval    terminal · Discord · spec PR · Jira│   plus the repo's own files on the default branch:
+   approval    terminal · Discord · spec PR · Jira│   "plugins": ["rulebook@chiyanram", ...]
+                                                  │   plus the repo's own files on the default branch:
    gate        local runner · Verifier · CI       │   AGENTS.md, CLAUDE.md, .claude/rules, .claude/skills,
    agent CLI   claude · copilot                   │   a review-only file
    runner      vm (Sysbox) · srt (work laptop)    │

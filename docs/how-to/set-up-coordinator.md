@@ -28,6 +28,9 @@ The wall (`src/core/coordinator.ts`):
   orchestrator runs every step of the loop (#674).
 - **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
   STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
+  Run them from a plain terminal, not as `!agent-factory …` inside Claude Code: the door seam refuses a person's word
+  where `CLAUDECODE` is set ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)). `agent-factory door`: a front
+  door writes a person's word, so the AI never runs one.
   `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215).
   `agent-factory onboard`: the onboarder's run and the acceptance of its brief are a human's (#235). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,

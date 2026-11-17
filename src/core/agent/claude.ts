@@ -22,6 +22,7 @@ import type { Model, ModelResult, ModelRun } from "../review/model.js";
 import { settingName } from "../settings/machine.js";
 import { timed, type FolderRunner } from "./folder.js";
 import { refusedLogin, SIGN_IN } from "./login.js";
+import { MODEL_RUN_MARK } from "./mark.js";
 
 const READ_ONLY = ["Read", "Grep", "Glob"];
 
@@ -108,14 +109,14 @@ const CLAUDE_ENV = new Set([
   "SSL_CERT_FILE",
 ]);
 
-// claudeEnv : the environment the claude CLI gets: what it needs to run and sign in, and nothing else
+// claudeEnv : the environment the claude CLI gets: what it needs to run and sign in, the model-run mark, and nothing
+// else
 export function claudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      ([name, value]) =>
-        value !== undefined && (CLAUDE_ENV.has(name) || name.startsWith("LC_") || name.startsWith("ANTHROPIC_")),
-    ),
+  const kept = Object.entries(env).filter(
+    ([name, value]) =>
+      value !== undefined && (CLAUDE_ENV.has(name) || name.startsWith("LC_") || name.startsWith("ANTHROPIC_")),
   );
+  return { ...Object.fromEntries(kept), ...MODEL_RUN_MARK };
 }
 
 export type ClaudeSetup = {

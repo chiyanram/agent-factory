@@ -184,7 +184,8 @@ describe("the Claude adapter's read-only run", () => {
     const [call] = calls;
     expect(call?.bin).toBe("/opt/claude");
     expect(call?.cwd).toBe("/x");
-    expect(call?.env).toEqual({ PATH: "/bin", HOME: "/h" });
+    // and the model-run mark, which the door seam reads
+    expect(call?.env).toEqual({ PATH: "/bin", HOME: "/h", AGENT_FACTORY_MODEL_RUN: "1" });
     expect(call?.args).toEqual([
       "-p",
       "-n",
@@ -277,7 +278,12 @@ describe("claudeEnv (ADR-0012 S6)", () => {
     expect(claudeEnv({ PATH: "/bin", GH_TOKEN: "t", FACTORY_REPO: "/r", ANTHROPIC_MODEL: "m" })).toEqual({
       PATH: "/bin",
       ANTHROPIC_MODEL: "m",
+      AGENT_FACTORY_MODEL_RUN: "1",
     });
+  });
+
+  it("marks the run as a model run, so the door seam refuses a person's word from it (#713)", () => {
+    expect(claudeEnv({ AGENT_FACTORY_MODEL_RUN: "" })).toEqual({ AGENT_FACTORY_MODEL_RUN: "1" });
   });
 });
 

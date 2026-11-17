@@ -171,6 +171,7 @@ describe("copilotEnv (#690; ADR-0012 S6, S15)", () => {
       COPILOT_HOME: "/h/.copilot",
       TMPDIR: "/h",
       COPILOT_AUTO_UPDATE: "false",
+      AGENT_FACTORY_MODEL_RUN: "1",
       COPILOT_GITHUB_TOKEN: PAT,
     });
   });

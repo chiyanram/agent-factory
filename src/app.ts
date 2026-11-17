@@ -25,9 +25,9 @@ import {
 import { plannedCheck, raisedWhy } from "./core/lane.js";
 import { brokenCites, specCites } from "./core/spec-cites.js";
 import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
-import { approvalState, approve } from "./core/approval.js";
-import { start } from "./core/start.js";
-import { readWaiver, waive } from "./core/waiver.js";
+import { approvalState } from "./core/approval.js";
+import { readWaiver } from "./core/waiver.js";
+import { approveAtTerminal, startAtTerminal, waiveAtTerminal, whoApproves } from "./core/door/terminal.js";
 import type { Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type BoxChoice, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
@@ -96,7 +96,8 @@ import type { MachineId } from "./core/settings/keys.js";
 import { USAGE_HELP, usageCommand } from "./usage-cli.js";
 import { TRACE_HELP, traceCommand } from "./trace-cli.js";
 import { cardDraft, cloneOutcomes, RETRO_HELP, retroCommand } from "./retro-cli.js";
-import { BOARD_HELP, boardCommand, boardPass } from "./board-cli.js";
+import { BOARD_HELP, boardCommand } from "./board-cli.js";
+import { boardPass } from "./core/door/read.js";
 import { INIT_HELP, initCommand, KNOWN_MARKETS } from "./init-cli.js";
 import { enginePackPin } from "./core/process/pins.js";
 import type { Probes, Who } from "./core/init/checks.js";
@@ -117,7 +118,6 @@ import {
   resolvedRun,
   tokenStore,
   version,
-  whoApproves,
 } from "./cli-common.js";
 
 export type { Io } from "./cli-common.js";
@@ -596,10 +596,8 @@ async function startResolved(target: TicketArgs, yes: boolean, io: Io): Promise<
     io.err(`agent-factory start: refused: ${branch.reason}\n`);
     return 1;
   }
-  const result = await start({
+  const result = await startAtTerminal(io.env, {
     where: { home: branch.value.home, ...target },
-    by: await whoApproves(io.env),
-    via: "terminal",
     at: new Date().toISOString(),
     branch: branch.value.there ? "present" : "absent",
     confirmed: yes,
@@ -607,7 +605,7 @@ async function startResolved(target: TicketArgs, yes: boolean, io: Io): Promise<
   return startOutcome(io, result);
 }
 
-function startOutcome(io: Io, result: Awaited<ReturnType<typeof start>>): number {
+function startOutcome(io: Io, result: Awaited<ReturnType<typeof startAtTerminal>>): number {
   switch (result.kind) {
     case "started":
       io.out(
@@ -654,12 +652,10 @@ async function approveResolved(args: ApproveArgs, noLoop: boolean, io: Io): Prom
     io.err(`agent-factory approve: refused: ${at.reason}\n`);
     return 1;
   }
-  const result = await approve({
+  const result = await approveAtTerminal(io.env, {
     where: at.where,
     seenHash: args.hash,
     seenDesign: args.design,
-    by: await whoApproves(io.env),
-    via: "terminal",
     at: new Date().toISOString(),
   });
   if (result.kind === "refused") {
@@ -689,16 +685,10 @@ async function waiveCommand({ positionals, io }: Args): Promise<number> {
   return 0;
 }
 
-async function waiveAt(io: Io, target: TicketArgs, head: string): ReturnType<typeof waive> {
+async function waiveAt(io: Io, target: TicketArgs, head: string): ReturnType<typeof waiveAtTerminal> {
   const home = factoryHome(io.env);
   return home.kind === "home"
-    ? waive({
-        where: { home: home.path, ...target },
-        head,
-        by: await whoApproves(io.env),
-        via: "terminal",
-        at: new Date().toISOString(),
-      })
+    ? waiveAtTerminal(io.env, { where: { home: home.path, ...target }, head, at: new Date().toISOString() })
     : home;
 }
 

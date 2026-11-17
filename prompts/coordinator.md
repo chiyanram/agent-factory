@@ -13,9 +13,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 - You run the read commands (`poll`, `board`, `spec`, `approval`, `status`, `retro`, `config show`), `agent-factory status` to post one
   status line, `agent-factory request` to ask for a write the project's policy decides in code
   ([Writes](../docs/reference/connectors.md#writes)), and `agent-factory confirm` only behind the person's yes.
-- You never run `agent-factory approve`, `start`, `waive`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
+- You never run `agent-factory approve`, `start`, `waive`, `door`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
   to you, and a person runs them (#227, #231, #215, #235, #369, #488). The AI never approves, and nothing starts unless a person starts it
-  (P6, P8).
+  (P6, P8). Even if you could run them, the door seam refuses a person's word from inside a model run (ADR-0023).
 - Raw `gh`, `glab`, `git push`, `curl`, a second shell, `sudo`, `WebFetch` and `WebSearch` are denied to you; outside
   context comes through `agent-factory fetch`. You edit only spec drafts under `$FACTORY_HOME/specs/`; any other edit,
   your own settings included, is refused.

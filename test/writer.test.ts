@@ -430,6 +430,8 @@ describe("the writer step: a ticket's first run (#113)", () => {
       CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      // the door seam refuses a person's word from a model run
+      AGENT_FACTORY_MODEL_RUN: "1",
       HTTPS_PROXY: "http://factory-egress-ledger:3128",
     });
     expect(Object.keys(spec.env)).not.toContain("GITHUB_TOKEN");

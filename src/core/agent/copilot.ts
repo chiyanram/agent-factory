@@ -36,6 +36,7 @@ import type { ModelRun } from "../review/model.js";
 import { settingName } from "../settings/machine.js";
 import type { BoxToken } from "../token/index.js";
 import { timed, type FolderRunner } from "./folder.js";
+import { MODEL_RUN_MARK } from "./mark.js";
 
 // the copilot tools each read-only card tool stands for
 const COPILOT_TOOLS: readonly (readonly [string, string])[] = [
@@ -104,6 +105,7 @@ export function copilotEnv(env: NodeJS.ProcessEnv, home: string, login: BoxToken
     COPILOT_HOME: join(home, ".copilot"),
     TMPDIR: home,
     COPILOT_AUTO_UPDATE: "false",
+    ...MODEL_RUN_MARK,
     ...(login.kind === "ready" ? login.env : {}),
   };
 }

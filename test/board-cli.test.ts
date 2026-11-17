@@ -11,7 +11,8 @@ import { decideAll, type Decided, type TickSetup } from "../src/core/dispatch/ti
 import { FORGE_OPS } from "../src/core/forge/ops.js";
 import type { Changes, Forge } from "../src/core/forge/types.js";
 import { NO_NOTIFY } from "../src/core/notify.js";
-import { boardCommand, boardPass, readOnly } from "../src/board-cli.js";
+import { boardCommand } from "../src/board-cli.js";
+import { boardPass, readOnly } from "../src/core/door/read.js";
 import { tempDir } from "./temp.js";
 
 // agent-factory board reads what a pass would decide, and can write nothing: no forge write, no record line, no lock
@@ -143,7 +144,7 @@ describe("the board writes nothing (#487 AC-5)", () => {
       const call: unknown = Reflect.get(forge, op);
       answers.set(op, isCall(call) ? await call({}) : "not a function");
     }
-    const refused = { kind: "failed", reason: "agent-factory board writes nothing to the git host" };
+    const refused = { kind: "failed", reason: "the board writes nothing to the git host" };
     expect(answers).toEqual(new Map(writeOps.map((op) => [op, refused])));
     expect(writes).toEqual([]);
     expect(await forge.me()).toEqual({ kind: "ok", value: "ram" });

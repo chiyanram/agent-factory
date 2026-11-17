@@ -5,6 +5,8 @@
 Status: accepted 2026-11-06 (operator, map #30: W1, Q1, Q4–Q7, Q11, Q15, gaps 1–3). S1 revised 2026-11-09 (#227). S13 amended 2026-11-09 for the PR body (#335). S8 and S11 amended 2026-11-10 for the `srt` runner (#114). Amends ADR-0001, 0005, 0006,
 0010 and 0011. Closes the design side of #83 gaps 1–6. The scripts do not follow it yet. Each build ticket is cut under
 #30.
+S1's front doors are refined by [ADR-0023](0023-front-doors-are-engine-commands.md): each door is an engine command on
+one door seam, which takes `by` and `via` only from a person the door's own check vouched for.
 
 Revised 2026-11-06 by the review of this ADR on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682341406), with the
 [factory comparison](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682831580)). The rows below are the revised decisions; each names the review issue that changed it.
