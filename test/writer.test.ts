@@ -510,7 +510,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
         evidence: [],
       },
     });
-    // a first run opens and claims its change, as any first run with work does; nothing hands it to a person
+    // a first run opens and claims its change, as every first run with work does; nothing hands it to a person
     expect(told.log.filter((l) => l.includes("needs-human") || l.startsWith("note"))).toEqual([]);
     expect(told.log).toContain("label 41 agent::claimed");
   });
