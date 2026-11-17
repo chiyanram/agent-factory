@@ -320,6 +320,12 @@ describe("decide: one row each", () => {
         }),
       ),
     ).toMatchObject({ kind: "needs-human", why: expect.stringContaining("changed nothing") });
+    // a CI run that changed nothing, whatever it reported, goes to a person too: a red check is never passed over
+    const ciNothing = { kind: "ended", mode: "ci", head: H, outcome: "done", patch: "", evidence: [] } as const;
+    expect(decide(state({ runs: wrote({ lastWriter: ciNothing, ciRounds: 1 }) }))).toEqual({
+      kind: "needs-human",
+      why: "the writer's run changed nothing",
+    });
   });
 
   it("a change that conflicts with its target sends the implementer to merge the default branch in (#103)", () => {

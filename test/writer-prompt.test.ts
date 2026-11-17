@@ -75,4 +75,23 @@ describe("the writer's words", () => {
     const texts = modes.map((mode) => runPrompt({ card: card.value, mode, names, tools: [] }));
     expect(texts.filter((t) => !t.includes(FOREGROUND) || !t.includes(FLOOR))).toEqual([]);
   });
+
+  // a done report has no free-text field, so a CI run that finds no cause in the code stops as blocked, where its
+  // reason reaches the person, and never re-runs, waits out or drops a red check
+  it("tells the CI run to find the root cause first, and to stop as blocked when it finds none in the code", async () => {
+    const card = await readCard([], "implementer");
+    if (card.kind !== "ok") throw new Error(card.reason);
+    const text = runPrompt({
+      card: card.value,
+      mode: "ci",
+      names: { ticket: "PROJ-1", branch: "b", head: "h", base: "main" },
+      tools: [],
+    });
+    expect(text).toContain("First find the root cause in the failed job's log");
+    expect(text).toContain("when it is in the code or a test, fix it");
+    expect(text).toContain('change nothing and stop with "blocked"');
+    expect(text).toContain("name the job, quote the log line and say what you checked");
+    expect(text).toContain("Never re-run a job, add a sleep or a retry, or skip or delete a test");
+    expect(text).not.toContain("change nothing and say so in the report");
+  });
 });
