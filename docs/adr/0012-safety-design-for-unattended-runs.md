@@ -7,6 +7,8 @@ Status: accepted 2026-11-06 (operator, map #30: W1, Q1, Q4–Q7, Q11, Q15, gaps 
 #30.
 S1's front doors are refined by [ADR-0023](0023-front-doors-are-engine-commands.md): each door is an engine command on
 one door seam, which takes `by` and `via` only from a person the door's own check vouched for.
+S3's flaky-job rerun is superseded by [ADR-0024](0024-a-red-check-is-a-fail.md): the factory never reruns a red check,
+and only a person quarantines a job.
 
 Revised 2026-11-06 by the review of this ADR on map #30 ([issues 1–11](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682341406), with the
 [factory comparison](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6682831580)). The rows below are the revised decisions; each names the review issue that changed it.
