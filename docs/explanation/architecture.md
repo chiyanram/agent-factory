@@ -52,8 +52,9 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
 ```
 
 - **Two kinds of session** talk with the operator: one long **project coordinator** per project plans, routes, relays
-  the operator's exact words and reports, and resets from `agent-factory handoff`, a note built by code from the board
-  and the open maps; each ticket's work runs in its own fresh **ticket session**.
+  the operator's answers in their exact words (never an approval, an acceptance, a waiver or a push yes) and reports,
+  and resets from `agent-factory handoff`, a note built by code from the board and the open maps; each ticket's work
+  runs in its own fresh **ticket session**.
 - **START** opens a ticket: the coordinator researches, asks, and writes the spec, plus the design and its review
   where the lane needs them.
   - Front doors for START: `agent-factory start`, `/start` in Discord, a spec PR.

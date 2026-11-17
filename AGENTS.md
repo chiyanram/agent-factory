@@ -76,10 +76,13 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   and comments, never from another ticket's thread, because a long session re-reads its whole thread on every turn.
   The project's one long coordinator plans, routes, relays and reports, builds no ticket, and resets from
   `agent-factory handoff <project>`, never from a model's summary, because a summary drops what the records hold.
-- Take an answer the coordinator relays only when it quotes the operator's exact words, and write the quote into the
-  ticket's report, because a paraphrase is not the operator's word. A relay can approve a spec on its ticket, but never
-  writes a START or an approval record, which a person writes at a door (ADR-0012 S1). When your permission checks
-  refuse a relay, say so in one line and keep `waiting:operator`.
+- Take a relayed answer only to a grill round or a run's question, only when the coordinator quotes the operator's
+  exact words, and write the quote into the ticket's report, because a paraphrase is not the operator's word. A spec
+  or design approval, an ADR acceptance, a waiver and a commit or push yes are typed by the operator in this ticket's
+  session, in a comment they write themselves on the git host, or at a door (ADR-0012 S1, ADR-0023), never relayed
+  and never posted by a model, because a model can quote words nobody typed and a session's comment carries the
+  operator's login. When a relay carries one of them, or your permission checks refuse a relay, answer "type it here"
+  in one line and keep `waiting:operator`.
 - Put `waiting:operator` on the ticket's issue when the session stops for the operator's word, and take it off once it
   has the answer, because `board` and the ping find a waiting session only by that label
   (`docs/agents/triage-labels.md`). Keep every other label: add and remove this one only.

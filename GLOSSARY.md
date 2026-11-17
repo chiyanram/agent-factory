@@ -173,8 +173,9 @@ the engine, and its body is what the model reads.
 never starts a run.
 
 **Project coordinator**: the one long-lived coordinator session per project, in any host (the Claude app, a terminal or
-the project's Discord channel). It plans, routes, relays the operator's exact words and reports, builds no ticket, and
-resets from `agent-factory handoff`, a note built by code.
+the project's Discord channel). It plans, routes, relays the operator's answers in their exact words (never an
+approval, an acceptance, a waiver or a push yes) and reports, builds no ticket, and resets from `agent-factory handoff`,
+a note built by code.
 
 **Ticket session**: a fresh session that does one ticket's work, from `board` and that ticket's body and comments.
 
