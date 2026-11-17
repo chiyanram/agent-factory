@@ -22,6 +22,9 @@ const ROOT = join(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "tests", "fixtures");
 // the rules pack's own schemas, version 1, as chiyanram/skills#316 ships them
 const V1 = join(FIXTURES, "pack-schema", "v1");
+// card format version 2, as the pack plans it: version 1 with edit-scope in enforced_guardrails. It stands in for the
+// pack's own file until the pin moves to a pack that ships it, when the pinned-pack check below reads the real one.
+const V2 = join(FIXTURES, "pack-schema", "v2");
 // cards from before the pack published its format: a next: field, plain-text guardrails
 const V0_CARDS = join(FIXTURES, "pack-schema", "v0-cards");
 const LANES = readFileSync(join(FIXTURES, "process", "rulebook-lanes.json"), "utf8");
@@ -59,6 +62,12 @@ function writeAll(dir: string, files: Readonly<Record<string, string>>, suffix: 
 
 function v1Schemas(): Readonly<Record<string, string>> {
   return Object.fromEntries(readdirSync(V1).map((f) => [f, readFileSync(join(V1, f), "utf8")]));
+}
+
+// v1Schemas and card v2 beside card v1, as a pack that adds card v2 ships them
+function v2Schemas(): Readonly<Record<string, string>> {
+  const card = "card-v2.schema.json";
+  return { ...v1Schemas(), [card]: readFileSync(join(V2, card), "utf8") };
 }
 
 // a card as the pack ships it today: a [list] of guardrail IDs, no next:
@@ -126,8 +135,9 @@ describe("the checker for the pack's schemas (#484)", () => {
 });
 
 describe("the rules pack's format version (#484)", () => {
-  it("reads this version and the one before", () => {
-    expect(PACK_SUPPORTED).toEqual([PACK_FORMAT, PACK_FORMAT - 1]);
+  it("reads each part at its own version and the one before: card 2 and 1, lanes and finding 1 and 0 (#696)", () => {
+    expect(PACK_FORMAT).toEqual({ card: 2, lanes: 1, finding: 1 });
+    expect(PACK_SUPPORTED).toEqual({ card: [2, 1], lanes: [1, 0], finding: [1, 0] });
   });
 
   it("a pack with no schema folder has no parts and no versions, read by the engine's own checks alone (#600)", async () => {
@@ -176,11 +186,11 @@ describe("the rules pack's format version (#484)", () => {
   });
 
   it("uses the highest version it reads when a part ships two of them (#600)", async () => {
-    const card = v1Schemas()["card-v1.schema.json"] ?? "";
-    const { process } = pack({ schemas: { "card-v0.schema.json": "true", "card-v1.schema.json": card } });
+    const finding = v1Schemas()["finding-v1.schema.json"] ?? "";
+    const { process } = pack({ schemas: { "finding-v0.schema.json": "true", "finding-v1.schema.json": finding } });
     const read = await readPackSchemas(process);
-    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 1 } } });
-    expect(read.kind === "ok" ? read.value.parts.card : undefined).toEqual(JSON.parse(card));
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { finding: 1 } } });
+    expect(read.kind === "ok" ? read.value.parts.finding : undefined).toEqual(JSON.parse(finding));
   });
 
   it("names the version of the part whose check fails, when parts are at different versions (#600)", async () => {
@@ -197,11 +207,17 @@ describe("the rules pack's format version (#484)", () => {
     });
   });
 
-  it("refuses a part whose versions are all newer than it reads, naming the part and both versions (#600)", async () => {
-    const { process } = pack({ schemas: { "card-v2.schema.json": "{}" } });
+  it("refuses a part whose versions are all newer than it reads, naming the part and both versions (#600, #696)", async () => {
+    const { process } = pack({ schemas: { "card-v3.schema.json": "{}" } });
     expect(await readPackSchemas(process)).toEqual({
       kind: "failed",
-      reason: `${join(process, "schema")}: the rules pack's card format is version 2; this engine reads versions 1 and 0. Update agent-factory, or pin an older rules pack`,
+      reason: `${join(process, "schema")}: the rules pack's card format is version 3; this engine reads versions 2 and 1. Update agent-factory, or pin an older rules pack`,
+    });
+    rmSync(join(root, "rulebook"), { recursive: true });
+    const lanes = pack({ schemas: { "lanes-v2.schema.json": "{}" } });
+    expect(await readPackSchemas(lanes.process)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("the rules pack's lanes format is version 2; this engine reads versions 1 and 0"),
     });
   });
 
@@ -216,6 +232,71 @@ describe("the rules pack's format version (#484)", () => {
       kind: "failed",
       reason: expect.stringContaining('unsupported keyword "maximum"'),
     });
+  });
+});
+
+// the pack's test-first card, naming edit-scope as card v2 allows
+const TEST_FIRST = [
+  "---",
+  "role: test-first",
+  "steps: [build]",
+  "input: the bug spec; the code at the branch head",
+  "must_not_see: the fix, drafted or planned; the implementer's work",
+  "hand_off: one commit with the failing test, and .factory/report.json",
+  "tools: [Read, Grep, Glob, Edit (test files only), Bash (on the runner)]",
+  "enforced_guardrails: [no-push, no-web, no-credentials, edit-scope]",
+  "rules: [VB1, VB7]",
+  "---",
+  "",
+  "# Test-first",
+  "",
+].join("\n");
+
+describe("card format version 2: the test-first card names edit-scope (#696)", () => {
+  it("a pack that ships card v2 beside v1 is checked against v2, and its test-first card naming edit-scope loads", async () => {
+    const { plugin, process } = pack({ schemas: v2Schemas(), cards: { "test-first": TEST_FIRST } });
+    const read = await readPackSchemas(process);
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 2, finding: 1, lanes: 1 } } });
+    expect(read.kind === "ok" ? read.value.parts.card : undefined).toEqual(
+      JSON.parse(v2Schemas()["card-v2.schema.json"] ?? ""),
+    );
+    expect(read.kind === "ok" ? unknownToEngine(read.value, ENGINE_KNOWS) : ["unread"]).toEqual([]);
+    expect(await readCard([plugin], "test-first")).toMatchObject({
+      kind: "ok",
+      value: { role: "test-first", guardrails: expect.arrayContaining(["edit-scope"]) },
+    });
+    expect(await readProcess([plugin])).toMatchObject({ kind: "ok" });
+  });
+
+  it("the same card through a pack with card v1 only is refused by v1, so v2 is the schema that let it in", async () => {
+    const { plugin } = pack({ schemas: v1Schemas(), cards: { "test-first": TEST_FIRST } });
+    expect(await readCard([plugin], "test-first")).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        `does not follow the rules pack's card format (version 1): enforced_guardrails: matches no allowed form`,
+      ),
+    });
+  });
+
+  it("a pack with card v1 only is read at v1 as today: a card that does not name edit-scope loads", async () => {
+    const card = TEST_FIRST.replace(", edit-scope]", "]");
+    const { plugin, process } = pack({ schemas: v1Schemas(), cards: { "test-first": card } });
+    expect(await readPackSchemas(process)).toMatchObject({ kind: "ok", value: { versions: { card: 1 } } });
+    expect(await readCard([plugin], "test-first")).toMatchObject({
+      kind: "ok",
+      value: { role: "test-first", guardrails: expect.arrayContaining(["edit-scope"]) },
+    });
+  });
+
+  it("card v2 leaves lanes at v1: a lanes-v2 beside lanes-v1 is not taken up", async () => {
+    const schemas: Readonly<Record<string, string>> = { ...v2Schemas(), "lanes-v2.schema.json": '{"type": "string"}' };
+    const { plugin, process } = pack({ schemas });
+    const read = await readPackSchemas(process);
+    expect(read).toMatchObject({ kind: "ok", value: { versions: { card: 2, lanes: 1 } } });
+    expect(read.kind === "ok" ? read.value.parts.lanes : undefined).toEqual(
+      JSON.parse(schemas["lanes-v1.schema.json"] ?? ""),
+    );
+    expect(await readProcess([plugin])).toMatchObject({ kind: "ok" });
   });
 });
 

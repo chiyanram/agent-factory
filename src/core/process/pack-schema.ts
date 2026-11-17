@@ -7,8 +7,10 @@
 //   <plugin>/skills/<skill>/process/schema/lanes-v<N>.schema.json     the lanes file
 //   <plugin>/skills/<skill>/process/schema/finding-v<N>.schema.json   one finding of a finder run's answer
 //
-// Each part has its own format version: the N in its file name. For each part the engine uses the highest version it
-// reads (PACK_SUPPORTED: this version and the one before, as the plugin protocol does, plugin/contract.ts). When a part
+// Each part has its own format version: the N in its file name. The engine reads each part at its own version and the
+// one before (PACK_FORMAT, PACK_SUPPORTED; as the plugin protocol does, plugin/contract.ts): card 2 and 1, lanes and
+// finding 1 and 0, and uses the highest of them the pack ships. Card v2 adds edit-scope to enforced_guardrails, which
+// the engine already enforces (guardrails.ts), so it changes the format and not what a run gets. When a part
 // is at no version the engine reads, the whole pack is refused, naming that part and both versions. A newer version beside a readable one is
 // left for the engine that reads it, as the pack's contract says: a new version is a new file beside the old one
 // (skills docs/DESIGN.md). A pack with no schema folder, from before the pack published its format, has no parts and is
@@ -24,10 +26,22 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 
-export const PACK_FORMAT = 1;
-export const PACK_SUPPORTED: readonly number[] = [PACK_FORMAT, PACK_FORMAT - 1];
-
 export type PackPart = "card" | "lanes" | "finding";
+
+// each part's newest format version this engine reads
+export const PACK_FORMAT: Readonly<Record<PackPart, number>> = { card: 2, lanes: 1, finding: 1 };
+
+// andBefore : a version and the one before it, newest first (P18). Pure.
+function andBefore(version: number): readonly number[] {
+  return [version, version - 1];
+}
+
+// the versions this engine reads of each part
+export const PACK_SUPPORTED: Readonly<Record<PackPart, readonly number[]>> = {
+  card: andBefore(PACK_FORMAT.card),
+  lanes: andBefore(PACK_FORMAT.lanes),
+  finding: andBefore(PACK_FORMAT.finding),
+};
 export type Schema = boolean | { readonly [key: string]: unknown };
 export type PackSchemas = {
   // each part's version in use: the highest this engine reads among those the pack ships for it
@@ -296,13 +310,14 @@ function versionsIn(files: readonly string[]): ReadonlyMap<PackPart, readonly Sc
 // inUse : the part's schema file this engine uses, the highest version it reads, or why none. Pure.
 function inUse(dir: string, part: PackPart, shipped: readonly SchemaFile[]): Result<SchemaFile> {
   const newestFirst = shipped.toSorted((a, b) => b.version - a.version);
-  const use = newestFirst.find((f) => PACK_SUPPORTED.includes(f.version));
+  const supported = PACK_SUPPORTED[part];
+  const use = newestFirst.find((f) => supported.includes(f.version));
   if (use !== undefined) {
     return { kind: "ok", value: use };
   }
   const newest = newestFirst[0]?.version;
   return failed(
-    `${dir}: the rules pack's ${part} format is version ${newest}; this engine reads versions ${PACK_SUPPORTED.join(" and ")}. Update agent-factory, or pin an older rules pack`,
+    `${dir}: the rules pack's ${part} format is version ${newest}; this engine reads versions ${supported.join(" and ")}. Update agent-factory, or pin an older rules pack`,
   );
 }
 
