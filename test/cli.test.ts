@@ -1118,3 +1118,11 @@ describe("agent-factory waiting", () => {
     expect(existsSync(join(home, "runs", "ledger"))).toBe(false);
   });
 });
+
+describe("a command --help hides still runs (#767)", () => {
+  it("status, with no words, prints its own usage line, exit 64", async () => {
+    const run = await cli(["status"]);
+    expect(run).toMatchObject({ code: 64, out: "" });
+    expect(run.err).toMatch(/^usage: agent-factory status /);
+  });
+});

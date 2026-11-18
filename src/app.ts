@@ -131,10 +131,9 @@ import {
 
 export type { Io } from "./cli-common.js";
 
-const HELP = `usage: agent-factory <command>
-
-commands:
-  poll                         one line of facts per open change, read from the forge
+// HELP_COMMANDS : every command's help lines, a line "  <name> …" and its indented continuations, in one order;
+// helpText groups them by INTERNAL, so the set alone decides what --help shows
+export const HELP_COMMANDS = `  poll                         one line of facts per open change, read from the forge
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
   spec <project> <ticket> --show
                                print the ticket's spec text as stored, whether or not it passes the checks (#542)
@@ -203,9 +202,11 @@ commands:
 ${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${HANDOFF_HELP}${WAITING_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}
-options:
+${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}`;
+
+const HELP_TAIL = `options:
   --help      show this help
+  --all       with --help: the internal commands too
   --version   show the package version
   --json      poll: print the parsed records as JSON
 
@@ -1963,6 +1964,42 @@ export const COMMAND_NAMES: readonly string[] = [
   "egress",
 ];
 
+// INTERNAL : the commands a person does not run: the coordinator's, the orchestrator's and the hooks'. --help hides
+// them and --help --all shows them; each still runs. test/cli-doc.test.ts checks the set against docs/reference/cli.md.
+export const INTERNAL: ReadonlySet<string> = new Set([
+  "poll",
+  "status",
+  "ask",
+  "grill",
+  "handoff",
+  "waiting",
+  "approval",
+  "request",
+  "confirm",
+  "dispatch",
+  "review",
+  "lint-edit",
+  "edit-scope",
+  "writer-scope",
+  "coordinator-brief",
+  "coordinator-turn",
+  "app-token",
+]);
+
+// helpText : the usage, the person's commands, then the internal ones (--help --all) or a line that names
+// --help --all, then the options and settings. A block is a command's first line and its continuation lines; each
+// group keeps the order the blocks have in HELP_COMMANDS.
+function helpText(options: { readonly help?: boolean; readonly all?: boolean }): string {
+  const all = options.help === true && options.all === true;
+  const blocks = HELP_COMMANDS.split(/\n(?=  \S)/).map((block) => block.replace(/\n*$/, "\n"));
+  const internal = (block: string) => INTERNAL.has(block.trim().split(/\s/)[0] ?? "");
+  const yours = blocks.filter((block) => !internal(block)).join("");
+  const rest = all
+    ? `internal: the coordinator's, the orchestrator's and the hooks'\n${blocks.filter(internal).join("")}`
+    : "the coordinator's, the orchestrator's and the hooks' commands: agent-factory --help --all\n";
+  return `usage: agent-factory <command>\n\nfor you:\n${yours}\n${rest}\n${HELP_TAIL}`;
+}
+
 // ownOptions : request, confirm and project read their own options (--file, --template <file>, a text that is one
 // word), so the main command line never parses their words
 function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefined {
@@ -2015,6 +2052,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       repo: { type: "string" },
       discord: { type: "boolean" },
       seat: { type: "string" },
+      all: { type: "boolean" },
     },
   });
   if (values.version === true) {
@@ -2023,7 +2061,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
   }
   const command = COMMANDS.find((c) => c.name === positionals[0]);
   if (values.help === true || command === undefined) {
-    io.out(HELP);
+    io.out(helpText(values));
     return values.help === true ? 0 : 64;
   }
   return command.run({
