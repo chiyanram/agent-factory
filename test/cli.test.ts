@@ -1093,3 +1093,17 @@ describe("agent-factory plugin (#134)", () => {
     });
   });
 });
+
+describe("agent-factory waiting", () => {
+  it("takes at most one project, and says its form", async () => {
+    const r = await cli(["waiting", "ledger", "extra"]);
+    expect(r).toEqual({ code: 1, out: "", err: "agent-factory waiting: usage: agent-factory waiting [<project>]\n" });
+  });
+
+  it("refuses a project with no project file, before any record or ping", async () => {
+    const r = await cli(["waiting", "ledger"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/^agent-factory waiting: no project file .*ledger\.json/);
+    expect(existsSync(join(home, "runs", "ledger"))).toBe(false);
+  });
+});

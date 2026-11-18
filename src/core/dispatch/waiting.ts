@@ -1,8 +1,8 @@
 // waiting — the ticket sessions that wait for the operator's word (#712). A Claude session working on a ticket puts the
 // waiting:operator label on the ticket's issue when it stops for the operator (an approval, grill answers), and takes
-// it off once it has the answer. The label is a session's claim, not a human record: the board shows it and the pass
-// pings for it, and nothing decides on it (P11). board.ts makes each waiting ticket an ordinary needs-you line, so every
-// door (the board, the chat, the UI) reads one list.
+// it off once it has the answer. The label is a session's claim, not a human record: the board shows it, a pass or
+// `agent-factory waiting` pings for it (waiting-pass.ts), and nothing decides on it (P11). board.ts makes each waiting
+// ticket an ordinary needs-you line, so every door (the board, the chat, the UI) reads one list.
 //
 // The ping goes once per label: the pass records the label's time in a "waiting" line first, then pings. A label taken
 // off and put on again has a newer time, so it pings again; no pass has to see the label go. A ticket whose own turn is
