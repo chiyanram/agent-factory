@@ -5,6 +5,7 @@ import {
   accessFileProblem,
   accessProblems,
   checkDiscord,
+  DISCORD_PLUGIN,
   discordArgv,
   discordEnv,
   discordStateDir,
@@ -202,6 +203,46 @@ describe("checkDiscord and the launch, on planted files", () => {
 
   const places = (): CoordinatorPlaces => ({ pkg: "/opt/agent-factory", factoryHome: home, botHome: "/home/factory" });
   const launch = { kind: "discord", project: "ledger", home: "", uid: ME } as const;
+  // the plugin in the session user's ~/.claude, as Claude Code 2.1.326 records an install at user scope
+  const plugin = (enabled: boolean): void => {
+    mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
+    writeFileSync(
+      join(home, ".claude", "settings.json"),
+      JSON.stringify({ enabledPlugins: { [DISCORD_PLUGIN]: enabled } }),
+    );
+    writeFileSync(
+      join(home, ".claude", "plugins", "installed_plugins.json"),
+      JSON.stringify({ version: 2, plugins: { [DISCORD_PLUGIN]: [{ scope: "user" }] } }),
+    );
+  };
+
+  it("refuses before Claude while the plugin is off, missing or set in the coordinator's folder, naming the fix", async () => {
+    await installCoordinator(places());
+    plant();
+    const calls: Parameters<Interactive>[0][] = [];
+    const err: string[] = [];
+    const io = {
+      env: { PATH: "/usr/bin" },
+      out: () => undefined,
+      err: (t: string) => void err.push(t),
+      interactive: async (call: Parameters<Interactive>[0]) => (calls.push(call), 0),
+      seat: async () => ({ kind: "missing", reason: "no claude-coordinator token" }) as const,
+    };
+    expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(1);
+    expect(err.join("")).toContain(`claude plugin install ${DISCORD_PLUGIN} --scope user`);
+    plugin(false);
+    expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(1);
+    expect(err.join("")).toContain(`claude plugin enable ${DISCORD_PLUGIN} --scope user`);
+    plugin(true);
+    const local = join(home, "coordinator", ".claude", "settings.local.json");
+    writeFileSync(local, JSON.stringify({ enabledPlugins: { [DISCORD_PLUGIN]: true } }));
+    expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(1);
+    expect(err.join("")).toContain(`remove enabledPlugins.${DISCORD_PLUGIN} from ${local}`);
+    expect(calls).toEqual([]);
+    rmSync(local);
+    expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(0);
+    expect(calls).toHaveLength(1);
+  });
 
   it("starts Claude with the plugin, static mode and its state folder; refuses before Claude when a file is loose", async () => {
     await installCoordinator(places());
@@ -214,6 +255,7 @@ describe("checkDiscord and the launch, on planted files", () => {
       interactive: async (call: Parameters<Interactive>[0]) => (calls.push(call), 0),
       seat: async () => ({ kind: "missing", reason: "no claude-coordinator token" }) as const,
     };
+    plugin(true);
     plant({ ...good(), dmPolicy: "pairing" });
     expect(await startCoordinator(places(), { ...launch, home }, io)).toBe(1);
     expect(calls).toEqual([]);
@@ -239,6 +281,7 @@ describe("checkDiscord and the launch, on planted files", () => {
   it("refuses the Discord launch on a seat token it cannot use, so the chat never shares the runs' limit unawares", async () => {
     await installCoordinator(places());
     plant();
+    plugin(true);
     const calls: Parameters<Interactive>[0][] = [];
     const err: string[] = [];
     const io = {
@@ -256,6 +299,7 @@ describe("checkDiscord and the launch, on planted files", () => {
   it("ends the session after the turn that reached the reset size, and starts a fresh one from the brief", async () => {
     await installCoordinator(places());
     plant();
+    plugin(true);
     const calls: Parameters<Interactive>[0][] = [];
     const err: string[] = [];
     const marker = join(home, ".local", "state", "agent-factory", "coordinator-ledger.reset");
