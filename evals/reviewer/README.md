@@ -136,7 +136,8 @@ With no `baseline.json`, or one with fewer than two runs to measure the noise by
 not here, and #611 decides whether the check reads it.
 
 **A change to `baseline.json`** needs the operator's approval: the pull request label `eval-baseline-approved`, which
-CI reads from the pull request event. Only the operator adds it; an agent never does. A local run has no event, so it
-refuses a baseline change. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits,
+CI's `eval-approval` job reads from the pull request event (`check-eval-proof.ts --approval`). It runs when a label
+changes, so adding the label re-runs that one job. Only the operator adds it; an agent never does. A local
+`--approval` run has no event, so it refuses a baseline change; `make lint` checks the rest. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits,
 whose noise can be measured (two or more runs, each holding the same seeds), and that was run with no `--aim`, since a
 baseline proves no change.

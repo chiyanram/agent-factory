@@ -14,9 +14,11 @@
 // less the fewest, never under one seed (ADR-0021); and for cost, the spread of a run's cost times the runs. Recall is
 // compared in counts, never as rounded floats, so a pass exactly on the line does not beat it.
 // With no baseline.json yet (#216), a reviewer-input change is refused: there is nothing to prove it against.
-// A change to baseline.json needs the operator's approval: the pull request label eval-baseline-approved, which CI
-// reads from the pull request event (GITHUB_EVENT_PATH; no token, no API call). Without that event, as in a local run,
-// a baseline change is refused. The new baseline must itself be a proof pass with 0 clean-floor hits.
+// A change to baseline.json needs the operator's approval: the pull request label eval-baseline-approved, which
+// --approval reads from the pull request event (GITHUB_EVENT_PATH; no token, no API call). Without that event, as in
+// a local run, a baseline change is refused. The approval has its own mode and its own CI job (eval-approval.yml),
+// which runs when a label changes, so adding the label re-runs that one small check and not the whole suite. Without
+// --approval (make lint), the new baseline must itself be a proof pass with 0 clean-floor hits.
 //
 // The reviewer inputs today are the prompts below. A results file must also have run with the model pins. The pins
 // file itself becomes a reviewer input with the first baseline (#216): until then no change to it can be proven, and
@@ -24,7 +26,8 @@
 // kept in the factory home and not in this repository (#232), so inputs.rulebook is not checked here yet. No model
 // call, no token: it reads git, JSON and the model pins' leaf module only.
 //
-//   node scripts/check-eval-proof.ts [ROOT]     (make lint)
+//   node scripts/check-eval-proof.ts [ROOT]                (make lint)
+//   node scripts/check-eval-proof.ts --approval [ROOT]     (eval-approval.yml)
 //
 // The default branch is FACTORY_BASE_REF, else origin/<GITHUB_BASE_REF> on a pull request, else origin/main; CI checks
 // out with fetch-depth 0, so it is there. git reads this repository's own files, not a project's, so it runs plain
@@ -176,7 +179,7 @@ export function proofProblems(facts: Facts): readonly string[] {
 function approval(labels: readonly string[] | undefined): readonly string[] {
   if (labels === undefined) {
     return [
-      `only the operator may change it: the label ${LABEL} on the pull request, which CI reads; this run has none`,
+      `only the operator may change it: the label ${LABEL} on the pull request, which CI's eval-approval job reads; this run has none`,
     ];
   }
   return labels.includes(LABEL) ? [] : [`only the operator may change it: the pull request has no ${LABEL} label`];
@@ -193,14 +196,18 @@ function shapeProblems(value: unknown): readonly string[] {
   ];
 }
 
-// baselineProblems : a change to baseline.json needs the operator's label, and a proof pass with a clean floor whose
-// noise can be measured. Pure.
+// baselineProblems : a change to baseline.json needs a proof pass with a clean floor whose noise can be measured.
+// Pure.
 export function baselineProblems(facts: Facts): readonly string[] {
-  if (!facts.changed.includes(BASELINE)) {
+  if (!facts.changed.includes(BASELINE) || facts.baseline === undefined) {
     return [];
   }
-  const shape = facts.baseline === undefined ? [] : shapeProblems(parse(facts.baseline));
-  return [...approval(facts.labels), ...shape].map((why) => `${BASELINE} changed: ${why}`);
+  return shapeProblems(parse(facts.baseline)).map((why) => `${BASELINE} changed: ${why}`);
+}
+
+// approvalProblems : a change to baseline.json needs the operator's label on the pull request. Pure.
+export function approvalProblems(changed: readonly string[], labels: readonly string[] | undefined): readonly string[] {
+  return changed.includes(BASELINE) ? approval(labels).map((why) => `${BASELINE} changed: ${why}`) : [];
 }
 
 // --- reading the facts from git ---
@@ -273,18 +280,26 @@ async function readFacts(root: string, base: string, env: NodeJS.ProcessEnv): Pr
   };
 }
 
-async function main(root: string, env: NodeJS.ProcessEnv): Promise<readonly string[]> {
+async function main(root: string, env: NodeJS.ProcessEnv, approvalOnly: boolean): Promise<readonly string[]> {
   const ref = baseRef(env);
   const base = git(root, ["merge-base", ref, "HEAD"]);
   if (base.code !== 0) {
     return [`cannot find the default branch ${ref} to compare with; fetch it or set FACTORY_BASE_REF`];
+  }
+  if (approvalOnly) {
+    const changed = nameStatus(git(root, ["diff", "--name-status", "--no-renames", "-z", base.out.trim()]).out);
+    return approvalProblems(
+      changed.map(([, file]) => file),
+      eventLabels(env),
+    );
   }
   const f = await readFacts(root, base.out.trim(), env);
   return [...baselineProblems(f), ...proofProblems(f)];
 }
 
 if (process.argv[1] === import.meta.filename) {
-  const problems = await main(process.argv[2] ?? ".", process.env);
+  const args = process.argv.slice(2);
+  const problems = await main(args.find((a) => a !== "--approval") ?? ".", process.env, args.includes("--approval"));
   for (const problem of problems) {
     console.log(problem);
   }

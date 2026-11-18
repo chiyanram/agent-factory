@@ -1,10 +1,13 @@
 name: ci
 
+# A push or a ready-for-review runs this; an edited title or description runs only pr-title.yml and pr-body.yml, and a
+# label change only eval-approval.yml, so neither waits for a macOS runner. ready_for_review runs macOS on a pull request
+# that was a draft (scripts/macos-needed.ts). CONTRIBUTING.md#what-ci-runs-where has the whole table.
 on:
   pull_request:
-    # labeled and unlabeled: check-eval-proof reads the operator's eval-baseline-approved label from the event (#217)
-    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
-  # the merge queue builds each pull request on top of the ones ahead of it, and merges it only when this run passes (#323)
+    types: [opened, synchronize, reopened, ready_for_review]
+  # A repository owned by a user cannot have a merge queue, so this never fires today; it is kept so the queue works
+  # if the repository moves to an organisation.
   merge_group:
   push:
     branches: [main]
@@ -57,14 +60,11 @@ jobs:
       - run: make build
 
   # The clean-machine install test (#485): the packed package installed with npm into an empty prefix, then
-  # --version, init --yes and dispatch --dry-run on a fresh home, on Ubuntu and on macOS. release.yml runs this
-  # workflow first, so a failure here blocks a release.
+  # --version, init --yes and dispatch --dry-run on a fresh home. This job runs it on Ubuntu; test-macos runs it on
+  # macOS, so each run asks for one macOS runner, not two. release.yml runs this workflow first, so a failure here
+  # blocks a release.
   install-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,11 +74,31 @@ jobs:
       - run: npm ci --no-audit --no-fund --ignore-scripts
       - run: node scripts/install-test.ts
 
-  # The suite on macOS, with git's own default branch: the pilot hit engine bugs only a real Mac showed (the socket
-  # path limit, /var behind a symlink) (#485, was #462). The rules pack check needs no second run here.
+  # Whether test-macos runs: always but on a pull request that is a draft or touches docs only (scripts/macos-needed.ts).
+  macos-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - id: gate
+        run: node scripts/macos-needed.ts
+
+  # The suite and the install test on macOS, with git's own default branch: the pilot hit engine bugs only a real Mac
+  # showed (the socket path limit, /var behind a symlink) (#485, was #462). It stays a required check: when the gate
+  # skips it, GitHub counts the skipped job as passing. It runs unless the gate said false, so a gate that failed or
+  # wrote nothing runs macOS rather than letting a skip pass.
   test-macos:
+    needs: macos-gate
+    if: ${{ !cancelled() && needs.macos-gate.outputs.run != 'false' }}
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,42 +120,4 @@ jobs:
           git -C "$RUNNER_TEMP/rules-pack" checkout -q FETCH_HEAD
           echo "FACTORY_RULES_PACK=$RUNNER_TEMP/rules-pack" >> "$GITHUB_ENV"
       - run: make test
-
-  # Pull requests are squash-merged with the PR title as the commit subject, so the title is what semantic-release
-  # reads on main (#153).
-  pr-title:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - name: Title follows Conventional Commits
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        # One rule in chiyanram/skills, agent-factory and rca-agent (#327): a scope, a lower-case summary and the issue
-        # it works on, as (#N) or (owner/repo#N). Dependabot (scope deps) and the release commit name no issue.
-        run: |
-          pattern='^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)\([a-z0-9-]+\)!?: [^A-Z].*\([^)]*#[0-9]+[^)]*\)'
-          exempt='^[a-z]+\(deps\): |^chore\(release\): '
-          if [[ ! "$TITLE" =~ $pattern && ! "$TITLE" =~ $exempt ]]; then
-            echo "::error::PR title \"$TITLE\" must be 'type(scope): lower-case summary (#issue)', e.g. 'feat(box): one box seam (#112)'. See CONTRIBUTING.md#releases."
-            exit 1
-          fi
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      # A skip-ci marker in the title, the description or a commit message would reach main in the squash and skip the
-      # push run, and with it the release.
-      - name: No skip-ci marker that would reach main
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-          BODY: ${{ github.event.pull_request.body }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          marker='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks: *true'
-          if printf '%s\n%s\n' "$TITLE" "$BODY" | grep -qiE "$marker" || git log --format=%B "origin/$BASE_REF..$HEAD_SHA" | grep -qiE "$marker"; then
-            echo "::error::The title, description or a commit message contains a skip-ci marker. The squash merge would carry it to main and skip the checks there. Reword it."
-            exit 1
-          fi
+      - run: node scripts/install-test.ts

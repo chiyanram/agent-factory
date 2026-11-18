@@ -2,7 +2,7 @@
 // the setup commands on a fresh home, against a fake git host. CI runs it on Ubuntu and on macOS, and the release runs
 // CI first, so a failure blocks a release.
 //
-//   node scripts/install-test.ts      (after npm ci; CI's install-test job)
+//   node scripts/install-test.ts      (after npm ci; CI's install-test and test-macos jobs)
 //
 // It packs the package, installs the tarball with npm into an empty prefix, makes a fresh HOME with no FACTORY_*
 // variable and no git config, and a small clone on main, with one commit, whose origin is a GitHub project. The

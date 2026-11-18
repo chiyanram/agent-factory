@@ -1,0 +1,30 @@
+name: eval-approval
+
+# A change to evals/reviewer/baseline.json needs the operator's eval-baseline-approved label, read from the pull
+# request event (scripts/check-eval-proof.ts --approval). It runs when a label changes, so adding the label re-runs
+# this one job and not ci.yml's suite. Without a baseline change it passes at once.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-approval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval-approval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # the check diffs the change against the default branch
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - name: A baseline change has the operator's label
+        run: node scripts/check-eval-proof.ts --approval .

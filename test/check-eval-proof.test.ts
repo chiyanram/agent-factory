@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import {
   BASELINE,
   LABEL,
+  approvalProblems,
   baseRef,
   baselineProblems,
   isReviewerInput,
@@ -194,20 +195,14 @@ describe("baselineProblems", () => {
     expect(baselineProblems(facts())).toEqual([]);
   });
 
-  it("needs the operator's label, read from the pull request event", () => {
-    expect(baselineProblems(facts({ changed }))).toEqual([
-      `${BASELINE} changed: only the operator may change it: the label ${LABEL} on the pull request, which CI reads; this run has none`,
-    ]);
-    expect(baselineProblems(facts({ changed, labels: ["bug"] }))).toEqual([
-      `${BASELINE} changed: only the operator may change it: the pull request has no ${LABEL} label`,
-    ]);
-    expect(baselineProblems(facts({ changed, labels: [LABEL] }))).toEqual([]);
+  it("does not read the label: the approval is its own check", () => {
+    expect(baselineProblems(facts({ changed }))).toEqual([]);
   });
 
   it("needs the new baseline to be a proof pass with a clean floor, a noise to measure and no aim (ADR-0021)", () => {
     expect(passProblems(pass({ proof: false }, 9, 1))).toHaveLength(2);
     const approved = (doc: Record<string, unknown>) =>
-      baselineProblems(facts({ changed, labels: [LABEL], baseline: JSON.stringify(doc) }));
+      baselineProblems(facts({ changed, baseline: JSON.stringify(doc) }));
     expect(approved(baseline())).toEqual([]);
     expect(approved(baseline({ clean_floor: { hits: 1, findings: [] } }))).toEqual([
       `${BASELINE} changed: it has 1 clean-floor hit(s); the floor is 0`,
@@ -218,6 +213,25 @@ describe("baselineProblems", () => {
     expect(approved(baseline({ aim: "quality" }))).toEqual([
       `${BASELINE} changed: it says an aim; a baseline proves no change, so run it with no --aim`,
     ]);
+  });
+});
+
+describe("approvalProblems", () => {
+  const changed = [BASELINE];
+
+  it("leaves a change that does not touch the baseline alone, with or without a pull request event", () => {
+    expect(approvalProblems(["prompts/review-find.md"], undefined)).toEqual([]);
+    expect(approvalProblems([], [])).toEqual([]);
+  });
+
+  it("needs the operator's label, read from the pull request event, and fails closed without one", () => {
+    expect(approvalProblems(changed, undefined)).toEqual([
+      `${BASELINE} changed: only the operator may change it: the label ${LABEL} on the pull request, which CI's eval-approval job reads; this run has none`,
+    ]);
+    expect(approvalProblems(changed, ["bug"])).toEqual([
+      `${BASELINE} changed: only the operator may change it: the pull request has no ${LABEL} label`,
+    ]);
+    expect(approvalProblems(changed, [LABEL])).toEqual([]);
   });
 });
 
@@ -249,8 +263,11 @@ describe("check-eval-proof, the script", () => {
     }
   });
 
-  const run = (root: string, env: NodeJS.ProcessEnv) => {
-    const r = spawnSync(process.execPath, [SCRIPT, root], { encoding: "utf8", env: { ...process.env, ...env } });
+  const run = (root: string, env: NodeJS.ProcessEnv, flags: readonly string[] = []) => {
+    const r = spawnSync(process.execPath, [SCRIPT, ...flags, root], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
     return { code: r.status ?? -1, out: `${r.stdout}${r.stderr}` };
   };
 
@@ -312,7 +329,12 @@ describe("check-eval-proof, the script", () => {
     put(RESULT, `${JSON.stringify(pass({ head, inputs: { head, prompts, models: MODELS } }))}\n`);
     git("add", "-A");
     commit("the eval pass, and a baseline");
-    expect(run(dir, env)).toMatchObject({ code: 1, out: expect.stringContaining(`${BASELINE} changed`) });
-    expect(run(dir, { ...env, GITHUB_EVENT_PATH: event })).toEqual({ code: 0, out: "" });
+    // make lint checks the proof and the baseline's shape, not the label; --approval checks only the label
+    expect(run(dir, env)).toEqual({ code: 0, out: "" });
+    expect(run(dir, env, ["--approval"])).toMatchObject({
+      code: 1,
+      out: expect.stringContaining(`${BASELINE} changed: only the operator may change it`),
+    });
+    expect(run(dir, { ...env, GITHUB_EVENT_PATH: event }, ["--approval"])).toEqual({ code: 0, out: "" });
   });
 });
