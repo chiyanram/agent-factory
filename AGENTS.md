@@ -18,7 +18,8 @@ make lint   # links resolve; AGENTS.md under 200 lines; the MUSTs below (check-m
 make test   # build, then the vitest suite; no network, glab, gh or claude needed
 ```
 
-CI runs both on every pull request and on push to `main`.
+CI runs both on every pull request and on push to `main`. `make lint` skips the check for **Today:** notes that name
+only closed tickets unless `FACTORY_OPEN_TICKETS` names a list of the open ones; CI writes that list.
 
 `make test` skips the rules-pack check unless `FACTORY_RULES_PACK` names a checkout of the commit pinned in
 `.github/rules-pack.json`; CI sets it. Before you change how a role card or a process is read, fetch that commit and

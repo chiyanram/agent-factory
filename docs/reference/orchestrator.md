@@ -259,7 +259,7 @@ is a raised `## Lane` in the spec and a human's approval of it. The same check r
 Every lane above tiny needs an approval (the approval floor); a lanes value from a plugin or a settings layer that
 drops it is refused (`lanesOf`). **Today:** a config file's change counts as values when its changed lines keep the
 same keys, so a dependency's major bump in `package.json` still reads as tiny; the automated review's LN2 check is
-what catches it. Each acceptance criterion must also have an evidence row: the n-th criterion is `AC-n`, and a row
+what catches it (#674). Each acceptance criterion must also have an evidence row: the n-th criterion is `AC-n`, and a row
 names it when its `criterion` starts with that id; a criterion with no row fails the check and counts towards its 3
 tries. A row may start with a read-only program (`grep`, `test`, `wc`, `ls`, `cat`, `head`, `tail`, `git diff`,
 `log`, `show`, `status`, `ls-files`, `rev-parse`) or one of `ready.programs`; one gate command (`./gradlew check`,

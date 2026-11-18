@@ -16,6 +16,10 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
+    # a called workflow gets no more than this: ci.yml's lint-and-test reads which tickets are open
+    permissions:
+      contents: read
+      issues: read
 
   release:
     needs: checks

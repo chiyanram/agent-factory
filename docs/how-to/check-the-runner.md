@@ -66,7 +66,7 @@ check below instead.
 ## Check the srt runner
 
 **Today:** the srt runner is tested only on a fake `srt` (`test/srt-box.test.ts`); that its policy holds on a real
-laptop is proven only by this check (#114). Run it on the work laptop after installing the pinned `srt`, in a checkout
+laptop is proven only by this check (#674). Run it on the work laptop after installing the pinned `srt`, in a checkout
 of this package, as the user that runs the orchestrator:
 
 ```bash

@@ -83,7 +83,7 @@ Two rules follow from this:
   the design's full hashes; a note on the PR approves nothing, and the bot cannot merge the protected branch. In the
   coordinator's settings `approve` and `start` are denied, not asked, and the orchestrator refuses to start while those
   settings are looser (#227, #105). **Today:** on a laptop the AI runs as you, so the deny list is not a wall there;
-  your merge review is the hard gate (accepted risk, #30).
+  your merge review is the hard gate (accepted risk, #674).
 - **Enforced: the implementer never pushes.** The host pushes its branch for it through the host push
   (`src/core/push.ts`), with `--force-with-lease` against the head it saw (#113, #138).
 - **Enforced: ready is checked, not reported.** No review starts until code has run the change's evidence commands

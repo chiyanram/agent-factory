@@ -88,7 +88,7 @@ run that started and never ended goes to a person, never runs again.
 kept file (a build log kept as `ready.txt`, a reviewer pass's answer), a trace, or a text the host posts (a note, a line
 finding, a PR title or body: `cleanField` and `cleanBody` scrub first, `test/post.test.ts`, `test/pr-body.test.ts`);
 the egress allowlist always refuses the project's own git host (`test/non-negotiables.test.ts`, P4;
-`test/egress.test.ts`). **Today:** a run's full trace is not kept yet, so only the records are checked (#487).
+`test/egress.test.ts`); a trace scrubs each line as it is written (`test/trace.test.ts`).
 
 ## P5. The judge never comes from the change
 
@@ -206,7 +206,7 @@ after two sightings; how a lesson is found and fixed lives in the rules pack's r
 **Why:** an answer lost between runs is work done twice, and any note read as an answer lets a run go on unanswered.
 **How it's checked:** a reply that answers only some questions (`1A` to two questions) keeps the rest open, and the next run
 receives every answer as a field (`test/answers.test.ts`, `test/dispatch-tick.test.ts`). **Today:** a partial reply is
-not pinged again, and a person's pause or take-over is the `needs-human` label (#486).
+not pinged again, and a person's pause or take-over is the `needs-human` label (#674).
 
 ## P14. Only what the step needs
 
@@ -236,7 +236,7 @@ is guidance.
 - **Convergence:** the design review converges: a re-review runs only for an Act on CONFLICT or an edit that raises
   the lane or changes the Planned files, reads every earlier round, and stops at 2 rounds with the person told
   (`test/dispatch-design.test.ts`). **Today:** the automated code review's next round still gets no earlier findings
-  (#489).
+  (#618).
 
 ## P16. One home and one way
 
@@ -263,8 +263,7 @@ breaks the others.
 
 **Kind:** non-negotiable.
 **Why:** the two repos change on their own schedules; a pack the engine cannot read must fail in CI, not in a run.
-**How it's checked:** CI validates each card of the pinned rules pack against the pack's own schema. **Today:** not built
-until #484 lands.
+**How it's checked:** CI validates each card of the pinned rules pack against the pack's own schema (`test/pack-schema.test.ts`).
 
 ## P19. People work from where they are
 
@@ -292,8 +291,7 @@ it from review.
 **Kind:** non-negotiable (the floor).
 **Why:** risk is in the change, not its author; a lanes file that could drop an approval would undo every other brake.
 **How it's checked:** every lanes file (one lane, all lanes, missing lanes, `approval: false` on each, unknown names, any
-order) leaves bug, feature and one-way door needing approval, and a lane can only be raised. **Today:** the first lane
-listed skips the floor check until #483 lands.
+order) leaves bug, feature and one-way door needing approval, and a lane can only be raised (`test/lane.test.ts`).
 
 ## How changes are made
 
