@@ -66,8 +66,7 @@ own checks alone. A pack whose card format allows a role or guardrail ID the
 engine does not know is refused, so a pack never names a guardrail the engine would skip (the engine may know more).
 The engine's finding values (categories, severities, grades) are the pinned pack's: CI fails when they differ. A
 finding's line may be a range, read as its first line, and its rule may be null. The finding schema is read; **Today:** the finder runs
-from the built-in prompt, not its card, so nothing checks a finding against it yet. #438 closed unbuilt, and no open
-ticket plans the change.
+from the built-in prompt, not its card, so nothing checks a finding against it yet (#674).
 
 This repo pins chiyanram/skills by a full commit in [`.github/rules-pack.json`](../../.github/rules-pack.json). CI
 checks that commit out and reads every plugin's process and every role card the engine runs, so a pack the engine
@@ -88,9 +87,9 @@ declared this way is not confirmed.
 |---|---|---|
 | implementer, test-first, cleanup | `.factory/report.json`: `done` with evidence rows, `asked` with questions, or `blocked` | yes (`src/core/report.ts`) |
 | design-reviewer | a **Finding** per design decision, with its verdict: aligned, conflict or open | yes (`src/core/design/findings.ts`) |
-| verify pass | one bucket per finding: act on, consider, noted, dismissed; it may set a lower severity or grade, never a higher one | yes (`src/core/finding.ts`): a verdict that raises either is refused, and the finding is Consider. **Today:** only the design review's card asks for it; the review's verify prompt does not, and #438, which would add it, closed unbuilt |
+| verify pass | one bucket per finding: act on, consider, noted, dismissed; it may set a lower severity or grade, never a higher one | yes (`src/core/finding.ts`): a verdict that raises either is refused, and the finding is Consider. **Today:** only the design review's card asks for it; the review's verify prompt does not (#674) |
 | onboarder | the brief and the glossary | yes (`src/core/onboard/answer.ts`) |
-| finder | a **Finding** each, with lens, rule, `file:line`, grade | yes (`src/core/review/verdicts.ts`). **Today:** its card is not used; the review runs `prompts/review-find.md`. #438, which would run it from the card, closed unbuilt |
+| finder | a **Finding** each, with lens, rule, `file:line`, grade | yes (`src/core/review/verdicts.ts`). **Today:** its card is not used; the review runs `prompts/review-find.md` (#674) |
 | coordinator | a **Question** per ask: the question, 2 to 4 choices, the recommended one; the retro's actions as JSON | no: its prompt asks for the shape |
 
 ## What is decided next
@@ -99,8 +98,8 @@ Decided, not built:
 
 | change | why |
 |---|---|
-| `tests-read-only` and `own-hunks` join the guardrail IDs with the code that enforces them; plain-text `enforced_guardrails` and `next` are refused one release after the closed list of IDs | each ID lands with the code that enforces it. **Today:** #422 and #423, which held that code, closed unbuilt |
+| `tests-read-only` and `own-hunks` join the guardrail IDs with the code that enforces them; plain-text `enforced_guardrails` and `next` are refused one release after the closed list of IDs | each ID lands with the code that enforces it. **Today:** no open ticket builds that code yet (#674) |
 | plugins other than the process plugin add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
-| the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade | a project cannot replace the finder. **Today:** #438, which held this, closed unbuilt |
+| the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade | a project cannot replace the finder. **Today:** no open ticket builds this yet (#674) |
 | a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline | today `plugin update` runs `config check` only, no eval |
 | with the Copilot runner (#493), `.github/skills/`, `.github/copilot-instructions.md` and `.github/instructions/` join the agent settings the host push protects | Copilot reads them; a run could plant one |
