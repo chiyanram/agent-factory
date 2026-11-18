@@ -206,6 +206,8 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       // the reset note, built by code
       "agent-factory handoff ledger",
       "agent-factory handoff",
+      // a waiting session's ping when no loop runs
+      "agent-factory waiting ledger",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "allow" });
     }

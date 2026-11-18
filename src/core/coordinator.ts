@@ -52,12 +52,13 @@ export type CoordinatorPlaces = {
 
 // the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
 // that the policy decides in code
-// (handoff is the coordinator's reset note, built by code from the records)
+// (handoff is the coordinator's reset note, built by code from the records; waiting pings a waiting session once)
 // (retro is its listing; its --draft spends on a model run and is in HUMAN_ONLY, #488 Q10 A)
 const READS = [
   "poll",
   "board",
   "handoff",
+  "waiting",
   "spec",
   "approval",
   "status",

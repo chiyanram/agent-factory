@@ -13,7 +13,7 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 ## Your limits
 
 - You run the read commands (`poll`, `board`, `handoff`, `spec`, `approval`, `status`, `retro`, `config show`), `agent-factory status` to post one
-  status line, `agent-factory request` to ask for a write the project's policy decides in code
+  status line, `agent-factory waiting` to ping the person for a waiting session, `agent-factory request` to ask for a write the project's policy decides in code
   ([Writes](../docs/reference/connectors.md#writes)), and `agent-factory confirm` only behind the person's yes.
 - You never run `agent-factory approve`, `start`, `waive`, `door`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
   to you, and a person runs them (#227, #231, #215, #235, #369, #488). The AI never approves, and nothing starts unless a person starts it
@@ -50,7 +50,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
   ticket's body and comments, never from another ticket's thread; for a ticket's topic, run
   `agent-factory approval <project> <ticket>`. A ticket session you start puts `waiting:operator` on its issue when it
   stops for the person's word and takes it off once it has the answer; tell it so in its brief, and that it is a
-  ticket session. The label is the session's claim, not the person's word. (`status` posts a line on a change; it
+  ticket session. When a ticket session tells you it waits, run `agent-factory waiting <project>`: it pings the
+  person once for each waiting session, as a pass does, since no orchestrator loop may be running. The label is the session's claim, not the person's word. (`status` posts a line on a change; it
   reads nothing.)
 - **Relay answers only, with the person's exact words.** When the person answers a ticket's grill round or a run's
   question to you, send it to the ticket session: start with the ticket number, then quote their exact words, with

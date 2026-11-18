@@ -157,9 +157,10 @@ open issues with it through the `Forge` seam, writes a `waiting` line with the t
 A label taken off and put on again has a newer time and pings again; a ticket whose own turn is already needs you is
 recorded with no second ping; that holds only where ticket 12 is issue 12 (the project keeps its specs in issues). A
 project's git host plugin built before this read answers it unsupported, and shows no waiting session. The label is a session's claim, not a human record: nothing decides on it. A read that
-fails is logged and pings nothing. The ping goes only on a pass: the orchestrator loop ends once no ticket is in
-flight, and a waiting session does not keep it running, so a session that waits while nothing is in flight is pinged
-by the next pass that runs; `board` shows it at once. Each pass reads the label once more: one more call on GitHub,
+fails is logged and pings nothing. The orchestrator loop ends once no ticket is in flight, and a waiting session does not keep it
+running, so when no loop runs `agent-factory waiting <project>` sends the same record and ping
+([`waiting-pass.ts`](../../src/core/dispatch/waiting-pass.ts)) under the pass lock, deciding each ticket as a pass does
+and acting on none. The coordinator runs it when a ticket session tells it it waits; `board` shows the wait at once. Each pass reads the label once more: one more call on GitHub,
 and on GitLab one more plus one per labelled issue. `board` never pings. It never opens a ticket: the ticket list is the START and approval records and the
 `factory/<ticket>` changes. Each pass keeps its
 records in `$FACTORY_HOME/runs/<project>/<ticket>.jsonl`, so a restart loses nothing: a run that started and never

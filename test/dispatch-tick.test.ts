@@ -16,7 +16,7 @@ import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
 import { traceName } from "../src/core/dispatch/trace.js";
 import { STEPS_TODAY, type DesignInput, type Steps } from "../src/core/dispatch/steps.js";
-import { lock, runHoursEnd, tick, type TickSetup } from "../src/core/dispatch/tick.js";
+import { lock, runHoursEnd, tick, waitingPass, type TickSetup } from "../src/core/dispatch/tick.js";
 import { ROUND_CAP } from "../src/core/dispatch/design.js";
 import { LANES } from "../src/core/dispatch/next-step.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
@@ -3222,5 +3222,97 @@ describe("a session that waits for the operator", () => {
     await tick({ ...base, dryRun: true });
     expect(pings).toEqual([]);
     expect(existsSync(join(home, "runs", "ledger", "12.jsonl"))).toBe(false);
+  });
+
+  // agent-factory waiting: the same rule when no loop runs
+  describe("waitingPass, the pass's wait pings alone", () => {
+    it("records and pings once, and a pass after it sends no second ping for the same label", async () => {
+      const pings: Ping[] = [];
+      const ran = await waitingPass(waitingOn(label(since), [], pings));
+      expect(ran).toEqual({
+        kind: "ok",
+        value: { kind: "ran", waits: [{ ticket: "12", title: "an approval", outcome: "pinged" }] },
+      });
+      await tick(waitingOn(label(since), [], pings));
+      const again = await waitingPass(waitingOn(label(since), [], pings));
+      expect(again).toEqual({
+        kind: "ok",
+        value: { kind: "ran", waits: [{ ticket: "12", title: "an approval", outcome: "already" }] },
+      });
+      expect(sessionPings(pings)).toHaveLength(1);
+    });
+
+    it("records with no second ping a ticket whose own turn is needs you, as a pass does", async () => {
+      await startedOnly();
+      const pings: Ping[] = [];
+      const specs: TickSetup["specs"] = {
+        kind: "issue",
+        readIssueBody: async () => ({
+          kind: "found",
+          text: SPEC("feature").replace("PROJ-1", "12"),
+          where: "issue 12",
+        }),
+      };
+      const ran = await waitingPass({ ...waitingOn(label(since), [], pings), specs });
+      expect(ran).toEqual({
+        kind: "ok",
+        value: { kind: "ran", waits: [{ ticket: "12", title: "an approval", outcome: "recorded" }] },
+      });
+      expect(pings).toEqual([]);
+    });
+
+    it("starts no run, writes nothing to the git host, and leaves the turn ping to a pass", async () => {
+      await startedOnly();
+      const log: string[] = [];
+      const pings: Ping[] = [];
+      await waitingPass(waitingOn({ kind: "ok", value: [] }, log, pings));
+      expect(log.filter((l) => !l.startsWith("log "))).toEqual([]);
+      expect(pings).toEqual([]);
+      const read = await readRecords({ home, project: "ledger", ticket: "12" }, {});
+      expect(read.kind === "ok" ? read.value : read).toEqual([]);
+    });
+
+    it("does nothing while a pass holds the lock: that pass pings the label", async () => {
+      const pings: Ping[] = [];
+      const held = await lock({ home, project: "ledger" });
+      expect(held.kind).toBe("held");
+      try {
+        expect(await waitingPass(waitingOn(label(since), [], pings))).toEqual({ kind: "ok", value: { kind: "busy" } });
+      } finally {
+        if (held.kind === "held") {
+          await held.release();
+        }
+      }
+      expect(pings).toEqual([]);
+      expect(existsSync(join(home, "runs", "ledger", "12.jsonl"))).toBe(false);
+    });
+
+    it("on a dry run, names each wait and records and pings nothing", async () => {
+      const pings: Ping[] = [];
+      const ran = await waitingPass({ ...waitingOn(label(since), [], pings), dryRun: true });
+      expect(ran).toEqual({
+        kind: "ok",
+        value: { kind: "ran", waits: [{ ticket: "12", title: "an approval", outcome: "dry-run" }] },
+      });
+      expect(pings).toEqual([]);
+      expect(existsSync(join(home, "runs", "ledger", "12.jsonl"))).toBe(false);
+    });
+
+    it("says so when the ping does not go out; the label is recorded, so it is not tried again", async () => {
+      const pings: Ping[] = [];
+      const log: string[] = [];
+      const base = waitingOn(label(since), log, pings);
+      const ran = await waitingPass({ ...base, notify: pinger(pings, true) });
+      expect(ran).toEqual({
+        kind: "ok",
+        value: { kind: "ran", waits: [{ ticket: "12", title: "an approval", outcome: "ping-failed" }] },
+      });
+      expect(log).toContain("log 12: the ping did not go out (the record is kept): discord is down");
+    });
+
+    it("fails on a label it cannot read", async () => {
+      const ran = await waitingPass(waitingOn({ kind: "failed", reason: "github: 502" }, [], []));
+      expect(ran).toEqual({ kind: "failed", reason: "the waiting:operator label was not read: github: 502" });
+    });
   });
 });
