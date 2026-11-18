@@ -1,0 +1,53 @@
+name: pr-title
+
+# The title of a pull request is the commit subject on main after the squash merge, so it is checked on every edit.
+# It has its own workflow so an edited title or description runs only this and pr-body.yml, not ci.yml's suite.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Pull requests are squash-merged with the PR title as the commit subject, so the title is what semantic-release
+  # reads on main (#153).
+  pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Title follows Conventional Commits
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        # One rule in chiyanram/skills, agent-factory and rca-agent (#327): a scope, a lower-case summary and the issue
+        # it works on, as (#N) or (owner/repo#N). Dependabot (scope deps) and the release commit name no issue.
+        run: |
+          pattern='^(feat|fix|perf|revert|docs|style|refactor|test|build|ci|chore)\([a-z0-9-]+\)!?: [^A-Z].*\([^)]*#[0-9]+[^)]*\)'
+          exempt='^[a-z]+\(deps\): |^chore\(release\): '
+          if [[ ! "$TITLE" =~ $pattern && ! "$TITLE" =~ $exempt ]]; then
+            echo "::error::PR title \"$TITLE\" must be 'type(scope): lower-case summary (#issue)', e.g. 'feat(box): one box seam (#112)'. See CONTRIBUTING.md#releases."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # A skip-ci marker in the title, the description or a commit message would reach main in the squash and skip the
+      # push run, and with it the release.
+      - name: No skip-ci marker that would reach main
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          marker='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks: *true'
+          if printf '%s\n%s\n' "$TITLE" "$BODY" | grep -qiE "$marker" || git log --format=%B "origin/$BASE_REF..$HEAD_SHA" | grep -qiE "$marker"; then
+            echo "::error::The title, description or a commit message contains a skip-ci marker. The squash merge would carry it to main and skip the checks there. Reword it."
+            exit 1
+          fi

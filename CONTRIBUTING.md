@@ -23,7 +23,7 @@ make lint && make test
 | target | does |
 |---|---|
 | `make lint` | runs every [lint check](#lint-checks) below, then `tsc --noEmit`, `biome ci` and the oxlint ratchet |
-| `make test` | builds, then runs the vitest suite. CI runs it on Linux and on macOS (`test-macos`), each with the pinned rules pack (`FACTORY_RULES_PACK`, see `AGENTS.md`). One file: `npx vitest run test/poll.test.ts` |
+| `make test` | builds, then runs the vitest suite. CI runs it on Linux and on macOS (`test-macos`, see [What CI runs where](#what-ci-runs-where)), each with the pinned rules pack (`FACTORY_RULES_PACK`, see `AGENTS.md`). One file: `npx vitest run test/poll.test.ts` |
 | `make build` | compiles the TypeScript package to `dist/` |
 | `make garden` | prints the code's health from git history with repo-gardener: `gardener snapshot`, `gardener hotspots --days 60 --limit 10` and `gardener window --days 7` |
 | `make garden-pr` | prints, for each code file a change touches, its numbers at the merge base and at the head, then the numbers that got worse ([src/core/garden/numbers.ts](src/core/garden/numbers.ts)) |
@@ -39,6 +39,31 @@ make lint && make test
   `node scripts/garden-pr.ts --json` prints the same as JSON. It is a measure for you and for whoever reviews the
   change, not a gate: it always exits 0 once it has measured.
 
+### What CI runs where
+
+macOS runners are few and slow to start, so CI asks for one only where it pays. Ruleset `main` must require each job
+below: `lint-and-test`, `install-test`, `test-macos`, `pr-title`, `pr-body` and `eval-approval`. The ruleset is set by
+hand in the repository's settings, so a job added or renamed here needs that list changed too, or it gates nothing.
+Retargeting a pull request to another base runs nothing: push to it, or re-run its checks.
+
+| event | `lint-and-test`, `install-test` (Ubuntu) | `test-macos` (the suite and the install test on macOS) | `pr-title` | `pr-body` | `eval-approval` |
+|---|---|---|---|---|---|
+| push to a ready pull request | yes | yes, unless every changed file is docs | yes | yes | yes |
+| push to a draft pull request | yes | skipped | yes | no | yes |
+| marked ready for review | yes | yes, unless docs only | no | yes | no |
+| title or description edited | no | no | yes | yes | no |
+| label added or removed | no | no | no | no | yes |
+| push to `main`, a release | yes | yes | no | no | no |
+
+- `ci.yml` runs `lint-and-test`, `install-test` and `test-macos`; `pr-title.yml`, `pr-body.yml` and
+  `eval-approval.yml` run one job each.
+- `scripts/macos-needed.ts` decides whether `test-macos` runs. It skips a draft and a pull request whose every changed
+  file is docs only: `docs/`, a root `*.md`, the pull request and issue templates. It runs for anything else, and
+  whenever it cannot tell. GitHub counts a job skipped by its `if` as passing a required check, so a macOS bug still
+  blocks the merge of any change that touches code.
+- `eval-approval` reads the `eval-baseline-approved` label from the event (`check-eval-proof.ts --approval`), so adding
+  the label re-runs that one job.
+
 ### Lint checks
 
 Each runs as `node scripts/<script> .`.
@@ -49,7 +74,7 @@ Each runs as `node scripts/<script> .`.
 | `check-size.ts` | the root `AGENTS.md` reaches 200 lines |
 | `check-temp-dirs.ts` | a test calls `tmpdir()` itself instead of `tempDir()` from [test/temp.ts](test/temp.ts), which answers the real path behind macOS's `/var` symlink |
 | `check-evals.ts` | a case of the automated review's golden set is not well-formed ([evals/reviewer/README.md](evals/reviewer/README.md)) |
-| `check-eval-proof.ts` | a change to an automated review input adds no eval pass that proves it, or a change to the baseline lacks the operator's label ([the proof check](evals/reviewer/README.md#the-proof-check)) |
+| `check-eval-proof.ts` | a change to an automated review input adds no eval pass that proves it, or a new baseline is not a proof pass; with `--approval` (CI's `eval-approval` job), a change to the baseline lacks the operator's label ([the proof check](evals/reviewer/README.md#the-proof-check)) |
 | `check-musts.ts` | the code breaks an `AGENTS.md` MUST that code can check: `gh`, `glab` or `git` outside their seams, `node:child_process` outside the reviewed modules that start programs, a git host token or skip-permissions flag outside the git host seam, a disable comment, a raised `scripts/lint-baseline.json` against the default branch, or a bash script. The exceptions and their reasons are in the script |
 | `check-words.ts` | an old word from `GLOSSARY.md` is in the prose of `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, any `.md` under `docs/` but the ADRs, `prompts/coordinator.md` or a role card. An identifier goes in backticks |
 | `check-history.ts` | a comment or doc line the change adds names a ticket, an approval or a dated decision, against the default branch. The exceptions are in the script |
@@ -85,8 +110,9 @@ ticket ──▶ branch ──▶ make lint + make test ──▶ pull request �
    git push --force-with-lease
    ```
 
-7. A maintainer squash-merges it once `lint-and-test` is green on the branch rebased onto the latest `main`, and
-   the review is resolved. A merge queue would do that step, but a repo owned by a user cannot have one (#323).
+7. A maintainer squash-merges it once the required checks ([What CI runs where](#what-ci-runs-where)) are green on
+   the branch rebased onto the latest `main`, and the review is resolved. A merge queue would do that step, but a repo
+   owned by a user cannot have one (#323).
 8. Once it is merged, remove the worktree: `git worktree remove .claude/worktrees/56-approved-stale`.
 
 A comment or doc line says what the code does and why. Who decided it, when, and on which ticket go in the PR
@@ -146,7 +172,7 @@ description** as its body, so on `main` the body is the description in the shape
 [the template](.github/pull_request_template.md): the `Why:` line first, then the breaking-change, rollback and
 where-to-look lines, the evidence, the change and the checklist, with the footers last. It is longer than a branch
 commit's 1–3 sentences on purpose: the next reader finds the reason, the proof and the way back in the commit itself.
-The branch commits are dropped, so they can be anything. CI checks the PR title, and `pr-body` checks the description.
+The branch commits are dropped, so they can be anything. `pr-title` checks the PR title, and `pr-body` checks the description.
 
 A breaking change carries three marks that agree: `Breaking change: yes` in the description, `!` after the title's
 scope, and a `BREAKING CHANGE:` footer. semantic-release reads only the `!` and the footer, so a yes without them ships
@@ -161,9 +187,9 @@ Pin every GitHub Actions step to a full commit SHA, with the version in a commen
 ## Releases
 
 ```text
-merge to main          ──▶ ci.yml        checks only, no release
+merge to main          ──▶ ci.yml        checks only, macOS included, no release
 Run workflow on main   ──▶ release.yml
-                             ├─ checks   ci.yml, called with workflow_call
+                             ├─ checks   ci.yml, called with workflow_call, macOS included
                              └─ release  semantic-release, only after the checks pass
 ```
 
