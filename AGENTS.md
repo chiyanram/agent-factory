@@ -45,8 +45,7 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.
 - Make each branch in its own worktree from the latest `origin/main`, never in the main checkout:
   `git fetch origin main && git worktree add .claude/worktrees/<slug> -b <type>/<ticket>-<slug> origin/main`, because
-  runs and people working at once then never share a working tree. Never name one `writer-N` or `reviewer-N`, because
-  `reconcile` removes those. Bring the branch up to date with `git rebase origin/main`, never a merge, and push it with
+  runs and people working at once then never share a working tree. Bring the branch up to date with `git rebase origin/main`, never a merge, and push it with
   `git push --force-with-lease`, because the lease refuses to overwrite a push you have not fetched. Never force-push
   without a lease, onto another person's branch, or onto `main`. A cloud session's own fresh clone, on the branch the
   session was given, counts as its worktree, because git cannot check that branch out a second time.

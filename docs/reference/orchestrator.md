@@ -290,7 +290,7 @@ When the host cannot build the task (nothing kept at the head, or red CI with no
 change and labels it `needs-human`. `dispatch` also does these rows: reconcile a merged claim,
 release a claim on a missing or stale approval or a quiet one, leave alone a change someone else claimed, and hand to a
 person an unknown pipeline state or two changes on one branch. For each approved ticket it says which run it would
-start. Run the table below by hand for the rest.
+start. The table below lists every row.
 
 A change that does not merge into its target (`poll` shows `conflict=yes`) sends the implementer on a merge run (#103):
 the host fetches the default branch into the run's clone as `origin/<default>`, the implementer merges it in and
@@ -312,10 +312,10 @@ The order is fixed: implementer done → ready check → automated review → ga
 Limits: one run per PR, at most `FACTORY_MAX_RUNS` at once, and at most one
 heavy run (a build, an IT suite or a deploy) per machine.
 
-## The table by hand
+## The table
 
-What the orchestrator does at each state the git host shows. **Today:** the orchestrator runs most of these rows; a
-person or the coordinator runs the rest by hand.
+What the orchestrator does at each state the git host shows. A person acts only where a row says so; the coordinator
+runs none of these steps (its settings deny `dispatch`, `review` and `setup`).
 
 | when the git host shows | do |
 |---|---|
@@ -327,11 +327,12 @@ person or the coordinator runs the rest by hand.
 | the project's gate is `local` and the verifier has not run at this head | the local verifier runs `verify` on a runner and posts `agent-factory/verify` at the head; it failing sends the implementer back, as red CI does |
 | the gate is green and no Act on is open | assign a maintainer, `status "ready"`, ping the human; **never undraft**: only a human undrafts, and zero findings is not a pass ([Q5b](https://github.com/chiyanram/agent-factory/issues/30#issuecomment-6681168344)) |
 | the PR is merged | reconcile the claim; a retro runs only when a person starts it (#488) |
-| a run is silent too long, hits a cap, or fails | `block <pr> "<reason>" <log>`: `needs-human`, a `[coordinator] blocked:` note with the reason and log, and the claim released |
-| you restart | `reconcile`: every claim without a live run goes back to the queue |
+| the project is at its day cap or its window share | the pass starts no run and sends one notice; the ticket keeps its records and goes on when the cap allows |
+| a run ends `blocked` (a cap, a timeout, a failed runner), or started and never ended | the ticket goes to a person: `needs-human`, one note naming why, and its work kept on top of the branch ([How a run ends](#how-a-run-ends)) |
+| you restart | the next pass reads the records, the git host and the run folders again; a claim this loop holds on a change that went quiet is released after `FACTORY_QUIET_MINUTES`. **Today:** a claim label this loop did not add holds its PR until a person removes the label on the git host (#497 item 7) |
 | `poll` shows `stop=<time>` newer than the ticket's approval (a maintainer's `/stop`), or a human pushes to the branch | stand off that PR; approving again lifts the stop |
 | a merge conflict (`conflict=yes`) | `dispatch` sends the implementer to merge the default branch in; if it still conflicts, `needs-human`. Never rebase or force-push |
-| a claimed PR with no live run has a stale approval (`agent-factory approval` exits 3) or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | `release` it and take the next approved PR; `claim` it again when the human answers |
+| a claimed PR with no live run has a stale approval (`agent-factory approval` exits 3) or `asks` above 0 (a `[coordinator] OPEN:` or a `[writer] OPEN:` note) | the pass releases the claim and takes the next approved PR; it claims the PR again when the human answers |
 | the usage limit is near | pause every run |
 
 ## The provider's usage limit

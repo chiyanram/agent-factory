@@ -208,8 +208,9 @@ function anyClaimed(claimed: Claimed): boolean {
   return claimed.kind === "unknown" || claimed.count > 0;
 }
 
+// startWords : who restarts the loop: a person, since the coordinator's settings deny dispatch
 function startWords(loop: LoopView): string {
-  return `run \`agent-factory dispatch ${loop.project}\``;
+  return `a person runs \`agent-factory dispatch ${loop.project}\``;
 }
 
 // livenessLine : the head of status's line. While a loop is meant to be running: when the orchestrator last ran,

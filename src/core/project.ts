@@ -299,7 +299,7 @@ export type RunSettings = { readonly env: NodeJS.ProcessEnv; readonly warnings: 
 // runSettings : the layers resolved once on the host before a run (#254): the env its modules read, with each machine
 // key a file sets in place (settings/machine.ts), and the warnings to print. A layer that loosens a safety key
 // refuses the run. With no project file, the team is none and the user file still applies; a command that names no
-// project (poll, claim, reconcile: undefined) resolves only the user and machine layers.
+// project (poll, status: undefined) resolves only the user and machine layers.
 export async function runSettings(input: {
   readonly home: string;
   readonly project: string | undefined;

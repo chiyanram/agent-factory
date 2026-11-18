@@ -68,8 +68,9 @@ const READS = [
   "--help",
   "--version",
 ];
-// Today: asked, so the person says yes to each start; once the dispatcher runs the writer, these move to DENY
-const STARTS = ["claim", "release", "block", "reconcile", "review", "dispatch", "setup"];
+// the runs and the settings: the orchestrator loop starts every run (start and approve start it), and a person runs
+// setup, so the coordinator, which starts no runs, runs none of them
+const RUNS = ["agent-factory dispatch", "agent-factory review", "agent-factory setup"];
 
 // the commands only a human runs: the AI never approves, never STARTs (#227), never waives a test check (#231), and
 // never starts an eval pass, an extra task that spends on model runs (#215), nor the onboarder's run or its acceptance,
@@ -89,6 +90,7 @@ export const HUMAN_ONLY = [
 
 const DENY_BASH = [
   ...HUMAN_ONLY,
+  ...RUNS,
   "gh",
   "glab",
   "git push",
@@ -267,11 +269,12 @@ export function turnHook(p: CoordinatorPlaces): CommandHook {
   return { type: "command", command: `node ${word(`${p.pkg}/dist/cli.js`)} coordinator-turn` };
 }
 
-// coordinatorBrief : the role and the wall in a few lines, built from HUMAN_ONLY so they stay in step with the deny
-// rules. Pure.
+// coordinatorBrief : the role and the wall in a few lines, built from HUMAN_ONLY and RUNS so they stay in step with
+// the deny rules. Pure.
 export function coordinatorBrief(project: string, compacted = false): string {
   // a rule's glob ("retro * --draft") is not a command a person types
-  const never = HUMAN_ONLY.filter((c) => !c.includes("*"))
+  const never = [...HUMAN_ONLY, ...RUNS]
+    .filter((c) => !c.includes("*"))
     .map((c) => `\`${c}\``)
     .join(", ");
   return [
@@ -303,7 +306,7 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
       disableAutoMode: "disable",
       additionalDirectories: [`${p.factoryHome}/specs`],
       allow: [...READS.flatMap((c) => exact(`agent-factory ${c}`)), `Edit(${specs}/**)`, `Read(${specs}/**)`],
-      ask: [...exact("agent-factory confirm"), ...STARTS.flatMap((c) => exact(`agent-factory ${c}`))],
+      ask: exact("agent-factory confirm"),
       deny: [...DENY_BASH.flatMap(exact), ...WEB, ...editDenies(p), ...readDenies(p)],
     },
   };
@@ -313,7 +316,7 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
 // path, so the session's folder and --add-dir are its only path scope. Today: untried against a live Copilot CLI.
 export function copilotArgs(p: CoordinatorPlaces): readonly string[] {
   const allow = READS.map((c) => `shell(agent-factory ${c})`);
-  // what is not allowed asks, so the old loop commands ask here as in Claude Code; approve, start and waive are denied
+  // what is not allowed asks, so confirm asks here as in Claude Code; approve, start, waive and the runs are denied
   const deny = DENY_BASH.map((c) => `shell(${c})`);
   return [
     "--add-dir",
@@ -349,6 +352,9 @@ const NEVER_LET = [
   "agent-factory waive PROJ PROJ-1 0",
   "agent-factory door discord",
   "agent-factory eval reviewer",
+  "agent-factory dispatch PROJ",
+  "agent-factory review PROJ 1",
+  "agent-factory setup coordinator",
   "gh api user",
   "glab api user",
   "curl https://example.com",
@@ -397,7 +403,7 @@ function letProblems(settings: unknown): readonly string[] {
 
 function denyProblems(settings: unknown, p: CoordinatorPlaces): readonly string[] {
   const deny = new Set(rules(settings, "deny"));
-  const needed = [...HUMAN_ONLY.flatMap(exact), ...WEB, ...editDenies(p)];
+  const needed = [...HUMAN_ONLY.flatMap(exact), ...RUNS.flatMap(exact), ...WEB, ...editDenies(p)];
   return needed.filter((rule) => !deny.has(rule)).map((rule) => `the deny rule ${rule} is missing`);
 }
 

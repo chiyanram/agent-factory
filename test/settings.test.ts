@@ -793,7 +793,7 @@ describe("every module reads the resolved settings (#254)", () => {
     expect(errors(resolved([layer("project", { specStore: "jira" })]))[0]).toContain('one of "issue", "local"');
   });
 
-  it("start resolves the project's layers, and poll and the loop commands the user and machine layers", async () => {
+  it("start resolves the project's layers, and poll and the note commands the user and machine layers", async () => {
     const commit = commitTeam({ caps: { usdPerRun: 1 } });
     writeProject({ ...BASE, team: `acme@${commit}` });
     const start = await cli(["start", "ledger", "5"], { FACTORY_MAX_USD: "5" });
@@ -801,7 +801,7 @@ describe("every module reads the resolved settings (#254)", () => {
     expect(start.err).toContain("agent-factory start: ");
     expect(start.err).toContain("caps.usdPerRun: the machine layer");
     writeUser({ claimLabl: "x" });
-    for (const argv of [["poll"], ["claim", "5"], ["reconcile"]]) {
+    for (const argv of [["poll"], ["status", "5", "aaaa1111", "line"], ["ask", "5", "aaaa1111", "q"]]) {
       const r = await cli(argv);
       expect(r.err).toContain(`agent-factory ${argv[0]}: warning: `);
       expect(r.err).toContain("unknown key claimLabl; did you mean claimLabel?");

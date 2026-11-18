@@ -1172,7 +1172,7 @@ describe("can it get stuck? (#485)", () => {
       nextStep({ kind: "release", why: "quiet for over 30 minutes: claimed, but not by this dispatcher" }),
     ).toEqual({
       who: "person",
-      does: "whoever claimed it finishes it, or gives it back: agent-factory release <project> <change>",
+      does: "whoever claimed it finishes it, or gives it back by removing the claim label on the git host",
     });
     expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
     // a held ticket's stop for an unanswered git host has no change: the person looks at the git host (#494)

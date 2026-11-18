@@ -224,8 +224,8 @@ async function pushed(input: Sending, mode: "any" | "on-top"): Promise<Done> {
   return (input.pusher ?? hostPush)({ ...input.push, guards: [...ours, ...input.push.guards] });
 }
 
-// pushOnTop : work in progress pushed only on top of the branch, with every guard a blocked run's push has; reconcile
-// lands what a dead run left behind this way (#189)
+// pushOnTop : work in progress pushed only on top of the branch, with every guard a blocked run's push has; the
+// hand-over lands what a dead run left behind this way
 export function pushOnTop(input: Sending): Promise<Done> {
   return pushed(input, "on-top");
 }

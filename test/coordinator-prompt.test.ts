@@ -79,10 +79,8 @@ describe("prompts/coordinator.md (#486)", () => {
     expect(reference).toContain("A red check is a fail: the factory\nnever re-runs it");
   });
 
-  it("keeps the by-hand duties the orchestrator does not do yet, each behind the person's yes, until #497", () => {
-    expect(prompt.replace(/\s+/g, " ")).toContain(
-      "**Today:** you still run `agent-factory block`, `reconcile`, `claim` and `release` by hand where the orchestrator does not yet, each only with the person's yes, until #497 removes them.",
-    );
+  it("names none of the old loop commands: the orchestrator claims, releases and reconciles (#766)", () => {
+    expect(prompt).not.toMatch(/agent-factory (claim|release|block|reconcile)\b|`(claim|release|block|reconcile)`/);
   });
 
   it("the reference says how many questions a round holds and that only the writer's round gives answers", () => {

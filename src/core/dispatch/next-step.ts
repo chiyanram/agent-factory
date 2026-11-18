@@ -64,7 +64,7 @@ const STEPS: readonly (readonly [RegExp, NextStep])[] = [
     /^claimed, but not by this dispatcher$/,
     {
       who: "person",
-      does: "whoever claimed it finishes it, or gives it back: agent-factory release <project> <change>",
+      does: "whoever claimed it finishes it, or gives it back by removing the claim label on the git host",
     },
   ],
   [

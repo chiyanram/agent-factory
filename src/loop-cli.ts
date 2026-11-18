@@ -1,9 +1,9 @@
-// loop-cli — the coordinator's forge commands and the writer's lint hook on the command line (#138): claim, release,
-// status, ask, block, reconcile (core/loop.ts), lint-edit (core/lint-edit.ts) and the coordinator's edit-scope hook
-// (core/edit-scope.ts). Each prints one line per action;
+// loop-cli — the coordinator's note commands and the run hooks on the command line: status, ask and grill
+// (core/loop.ts), lint-edit (core/lint-edit.ts), the coordinator's edit-scope hook (core/edit-scope.ts) and the
+// test-first run's writer-scope hook (core/writer/scope.ts). Each prints one line per action;
 // with FACTORY_DRY_RUN=1 the seam prints each write on stderr instead, and the line ends in "(dry run)".
 //
-// Each forge command may name its project first (#382): `claim ledger 12`. Its words are checked before the project's
+// Each forge command may name its project first: `status ledger 12 <sha> "<line>"`. Its words are checked before the project's
 // settings are read (core/which-project.ts), so a wrong word prints the usage and nothing else.
 
 import { homedir } from "node:os";
@@ -13,19 +13,15 @@ import { open, realpath, stat, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { headed } from "./core/dispatch/last-poll.js";
 import type { Result } from "./core/forge/api.js";
-import { forgeHost, openProject } from "./core/forge/index.js";
-import type { Identity } from "./core/identity.js";
-import { hostPush } from "./core/push.js";
-import type { PushTarget } from "./core/writer/step.js";
+import { openProject } from "./core/forge/index.js";
 import type { Forge } from "./core/forge/types.js";
 import { deny, editScope } from "./core/edit-scope.js";
 import { scopesArg, writerScope } from "./core/writer/scope.js";
 import { lintEdit } from "./core/lint-edit.js";
-import { ask, block, claim, grill, reconcile, release, status, type AtHead } from "./core/loop.js";
+import { ask, grill, status, type AtHead } from "./core/loop.js";
 import { questionsIn, type Question } from "./core/report.js";
 import { questionRound, readsBackAs } from "./core/finish.js";
 import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
-import { openAgentCli } from "./core/agent/index.js";
 import { runInFolder } from "./core/agent/folder.js";
 import { settingOf } from "./core/settings/machine.js";
 
@@ -39,16 +35,12 @@ export type LoopIo = {
 // a command's words, checked: what it runs once the project's settings are resolved, or "usage"
 type Parsed = ((io: LoopIo) => Promise<number> | number) | "usage";
 
-type Act = (forge: Forge, label: string, identity: Identity) => Promise<Result<string | readonly string[]>>;
+type Act = (forge: Forge, label: string) => Promise<Result<string | readonly string[]>>;
 
 const USAGE: Readonly<Record<string, string>> = {
-  claim: "claim [<project>] <number>",
-  release: "release [<project>] <number>",
   status: 'status [<project>] <number> <sha> "<line>"',
   ask: 'ask [<project>] <number> <sha> "<question>"',
   grill: "grill [<project>] <number> <sha> <questions file>",
-  block: 'block [<project>] <number> "<reason>" [<log>]',
-  reconcile: "reconcile [<project>]",
   "lint-edit": "lint-edit '<lint command>'",
   "edit-scope": "edit-scope <specs folder>",
   "writer-scope": "writer-scope '<JSON list of glob lists>'",
@@ -89,9 +81,7 @@ function lines(value: string | readonly string[], dry: string): string {
 }
 
 // forgeOf : the project's forge and its claim label
-async function forgeOf(
-  io: LoopIo,
-): Promise<Result<{ readonly forge: Forge; readonly label: string; readonly identity: Identity }>> {
+async function forgeOf(io: LoopIo): Promise<Result<{ readonly forge: Forge; readonly label: string }>> {
   const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   if (label.trim() === "") {
     return { kind: "failed", reason: "FACTORY_CLAIM_LABEL is set but empty" };
@@ -103,22 +93,13 @@ async function forgeOf(
 // onForge : the action on the project's forge; its lines on stdout, or why it failed on stderr
 async function onForge(name: string, io: LoopIo, act: Act): Promise<number> {
   const opened = await forgeOf(io);
-  const done = opened.kind === "ok" ? await act(opened.value.forge, opened.value.label, opened.value.identity) : opened;
+  const done = opened.kind === "ok" ? await act(opened.value.forge, opened.value.label) : opened;
   if (done.kind === "failed") {
     io.err(`agent-factory ${name}: ${done.reason}\n`);
     return 1;
   }
   io.out(lines(done.value, settingOf(io.env, "dryRun") === "1" ? " (dry run)" : ""));
   return 0;
-}
-
-function claimed(name: "claim" | "release", positionals: readonly string[]): Parsed {
-  const number = numberOf(positionals[0]);
-  if (number === "bad" || positionals.length !== 1) {
-    return "usage";
-  }
-  const act = name === "claim" ? claim : release;
-  return (io) => onForge(name, io, (forge, label) => act({ forge, number, label }));
 }
 
 function atHead(name: "status" | "ask", positionals: readonly string[]): Parsed {
@@ -267,56 +248,6 @@ async function withLiveness(
     : done;
 }
 
-function blocked(positionals: readonly string[]): Parsed {
-  const [n, reason, log] = positionals;
-  const number = numberOf(n);
-  if (number === "bad" || reason === undefined || positionals.length > 3) {
-    return "usage";
-  }
-  return (io) => onForge("block", io, (forge, label) => block({ forge, number, label, reason, log: log ?? "" }));
-}
-
-function reconcileParsed(positionals: readonly string[]): Parsed {
-  return positionals.length === 0 ? reconciled : "usage";
-}
-
-function reconciled(io: LoopIo): Promise<number> | number {
-  const repo = settingOf(io.env, "clone") ?? "";
-  if (!isAbsolute(repo)) {
-    io.err(
-      `agent-factory reconcile: the project's clone (clone in the project file, or FACTORY_REPO) must be an absolute path, got ${JSON.stringify(repo)}\n`,
-    );
-    return 1;
-  }
-  const { sessions } = openAgentCli({ env: io.env });
-  return onForge("reconcile", io, (forge, label, identity) =>
-    reconcile({
-      forge,
-      label,
-      repo,
-      env: io.env,
-      sessions,
-      dryRun: settingOf(io.env, "dryRun") === "1",
-      landing: { target: landingTarget(io.env, forge, identity), pusher: hostPush },
-    }),
-  );
-}
-
-// landingTarget : where a dead writer's unlanded commits go: the project on its forge's host, as its identity
-function landingTarget(env: NodeJS.ProcessEnv, forge: Forge, identity: Identity): Result<PushTarget> {
-  const host = forgeHost(env, forge.name);
-  const project = settingOf(env, "gitHostProject") ?? "";
-  if (host.kind === "failed") {
-    return host;
-  }
-  return project === ""
-    ? {
-        kind: "failed",
-        reason: "the project on the git host is not set (gitHostProject in the project file, or FACTORY_PROJECT)",
-      }
-    : { kind: "ok", value: { forge: forge.name, host: host.value, project, identity, env } };
-}
-
 // lintEditCommand : the writer's lint hook; it reads no setting and names no project
 export async function lintEditCommand(positionals: readonly string[], io: LoopIo): Promise<number> {
   const [command] = positionals;
@@ -365,21 +296,15 @@ export async function writerScopeCommand(positionals: readonly string[], io: Loo
 
 // the forge commands: each checks its words (with the project word taken off), then runs on the resolved settings
 export const LOOP_COMMANDS: Readonly<Record<string, (positionals: readonly string[]) => Parsed>> = {
-  claim: (p) => claimed("claim", p),
-  release: (p) => claimed("release", p),
   status: (p) => atHead("status", p),
   ask: (p) => atHead("ask", p),
   grill: grillParsed,
-  block: blocked,
-  reconcile: reconcileParsed,
 };
 
-export const LOOP_HELP = `  claim [<project>] <number>   add the claim label to an open change that has none: one run at a time; each of
-                               these commands acts on the project it names, else on the one project in
-                               <home>/projects (#382); with FACTORY_PROJECT exported and none named, on the variables
-  release [<project>] <number> remove the claim label; a change with no claim is not an error
-  status [<project>] <number> <sha> "<line>"
-                               post one [coordinator] note; refused when the head is no longer <sha>; its line starts
+export const LOOP_HELP = `  status [<project>] <number> <sha> "<line>"
+                               post one [coordinator] note; each of these commands acts on the project it names, else
+                               on the one project in <home>/projects (#382); with FACTORY_PROJECT exported and none
+                               named, on the variables; refused when the head is no longer <sha>; its line starts
                                with when the orchestrator last ran, LATE after 3 poll intervals while a change is claimed
                                and a loop is meant to be running; with no loop, that none runs
   ask [<project>] <number> <sha> "<question>"
@@ -388,11 +313,6 @@ export const LOOP_HELP = `  claim [<project>] <number>   add the claim label to 
                                post the coordinator's round: one [coordinator] OPEN: N questions note with an item per
                                question, open until a member answers each (#517); the file, under <home>/specs, is a JSON
                                list of {question, choices (2 to 4), recommended (the index)}, 1 to 20; the same head rule
-  block [<project>] <number> "<reason>" [<log>]
-                               label needs-human, post one [coordinator] blocked: note, then release the claim
-  reconcile [<project>]        release each claim with no live run or on a merged change; remove each run's worktree
-                               with no live run (the project's clone), but keep a writer's that holds unlanded work: push its
-                               commits on top of the change's branch and label the change needs-human
   lint-edit '<lint command>'   the writer's PostToolUse hook: lint the file an Edit or Write changed, no shell
   edit-scope <specs folder>    the coordinator's PreToolUse hook: refuse an Edit or Write outside the spec drafts
   writer-scope '<glob lists>'  the test-first run's PreToolUse hook: refuse an Edit or Write outside the test files

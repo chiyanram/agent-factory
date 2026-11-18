@@ -1,5 +1,5 @@
-// which-project — the project a command acts on when it may name none (#382): poll, claim, release, status, ask,
-// block and reconcile, and the coordinator's session. Each reads the project's git host, its project there and its
+// which-project — the project a command acts on when it may name none (#382): poll, status, ask and grill, and
+// the coordinator's session. Each reads the project's git host, its project there and its
 // clone from the project file through settingOf, so the coordinator needs no FACTORY_* export.
 //
 //   1. the <project> the command names

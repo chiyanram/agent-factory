@@ -629,7 +629,7 @@ async function keptTold(setup: TickSetup, state: TicketState, run: RunFolder): P
   if (kept.kind === "failed") {
     return { fields: [folder, { label: "push", value: `nothing pushed: ${kept.reason}` }], items: [] };
   }
-  const note = leftNote(kept.value, kept.value.pushed, "the hand-over");
+  const note = leftNote(kept.value, kept.value.pushed);
   return { fields: [folder, ...note.fields], items: note.items };
 }
 
