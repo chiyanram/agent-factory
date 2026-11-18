@@ -1,7 +1,7 @@
 // left — what a dead writer run left behind, and its commits pushed on top of the change's branch as a blocked run's
-// work in progress is (finish.ts pushOnTop). Two places find such work: reconcile, in a writer's worktree (loop.ts),
-// and the dispatcher's hand-over of a run that never ended, in the run folder its start line names.
-// Neither commits an uncommitted file nor deletes the folder: a person decides what becomes of them.
+// work in progress is (finish.ts pushOnTop). The dispatcher's hand-over of a run that never ended finds such work in
+// the run folder its start line names. It never commits an uncommitted file nor deletes the folder: a person decides
+// what becomes of them.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +26,7 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
   return { kind: "failed", reason };
 }
 
-export function gitWhy(result: Awaited<ReturnType<typeof hostGit>>): string {
+function gitWhy(result: Awaited<ReturnType<typeof hostGit>>): string {
   if (result.kind === "refused") {
     return result.reason;
   }
@@ -34,11 +34,11 @@ export function gitWhy(result: Awaited<ReturnType<typeof hostGit>>): string {
   return last === "" ? "git failed" : last;
 }
 
-export function out(result: Awaited<ReturnType<typeof hostGit>>, what: string): Result<string> {
+function out(result: Awaited<ReturnType<typeof hostGit>>, what: string): Result<string> {
   return result.kind === "ok" ? { kind: "ok", value: result.stdout } : failed(`cannot ${what}: ${gitWhy(result)}`);
 }
 
-export function textOf(r: Result<string>): string {
+function textOf(r: Result<string>): string {
   return r.kind === "ok" ? r.value : "";
 }
 
@@ -58,7 +58,7 @@ function leftOf(head: Result<string>, commits: Result<string>, files: Result<str
 
 // leftIn : the head, the commits that `not` excludes none of (["--remotes"], or the commit the run started from), and
 // every uncommitted file
-export async function leftIn(git: GitIn, not: readonly string[]): Promise<Result<Left>> {
+async function leftIn(git: GitIn, not: readonly string[]): Promise<Result<Left>> {
   const head = out(await git(["rev-parse", "HEAD"]), "read its head");
   const commits = out(await git(["rev-list", "HEAD", "--not", ...not]), "list its commits");
   const files = out(
@@ -70,25 +70,16 @@ export async function leftIn(git: GitIn, not: readonly string[]): Promise<Result
 }
 
 // leftNote : what a note tells a person of the work: its unlanded commits, the push, and every uncommitted file, which
-// `by` (reconcile, the hand-over) never commits
-export function leftNote(left: Left, pushed: string, by: string): Pick<Post, "fields" | "items"> {
+// the hand-over never commits
+export function leftNote(left: Left, pushed: string): Pick<Post, "fields" | "items"> {
   return {
     fields: [
       { label: "unlanded commits", value: left.commits.map((c) => c.slice(0, 8)).join(", ") || "none" },
       { label: "push", value: pushed },
-      { label: `uncommitted files, never committed by ${by}`, value: String(left.files.length) },
+      { label: `uncommitted files, never committed by the hand-over`, value: String(left.files.length) },
     ],
     items: left.files.slice(0, 20),
   };
-}
-
-export function nothingLeft(left: Left): boolean {
-  return left.commits.length === 0 && left.files.length === 0;
-}
-
-export function summary(left: Left): string {
-  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
-  return `${n(left.commits.length, "unlanded commit")}, ${n(left.files.length, "uncommitted file")}`;
 }
 
 // Onto : the change's branch and its head as the forge has it now, and the clone or worktree that holds the commits
@@ -96,7 +87,7 @@ export type Onto = { readonly repo: string; readonly branch: string; readonly sh
 
 // landed : the unlanded commits pushed on top of the branch, or why they were not; fits says whether they still go on
 // top of the branch as it is now
-export async function landed(input: Pushing, onto: Onto, left: Left, fits: () => Promise<Done>): Promise<string> {
+async function landed(input: Pushing, onto: Onto, left: Left, fits: () => Promise<Done>): Promise<string> {
   if (left.commits.length === 0 || left.head === onto.sha) {
     return "nothing to push";
   }

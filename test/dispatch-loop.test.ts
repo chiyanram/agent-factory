@@ -358,7 +358,9 @@ describe("the orchestrator loop (#305)", () => {
       merged: [{ number: 12, branch: "factory/PROJ-1", fork: false }],
     }));
     expect(await merged.run()).toMatchObject({ kind: "ok", value: { held: [] } });
-    expect(await statusLine()).toBe("no orchestrator loop running; run `agent-factory dispatch ledger`; posted #12");
+    expect(await statusLine()).toBe(
+      "no orchestrator loop running; a person runs `agent-factory dispatch ledger`; posted #12",
+    );
   });
 });
 

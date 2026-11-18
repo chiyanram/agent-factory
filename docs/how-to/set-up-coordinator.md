@@ -10,7 +10,7 @@ sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issue
 2. Run `agent-factory coordinator [<project>]`. It starts Claude Code there with `--setting-sources project`, so the allow rules of your
    own user settings do not apply; `agent-factory coordinator [<project>] copilot` starts Copilot CLI with its command rules as flags (see Today below).
    It needs no `FACTORY_*` export (#382): the session is for the project you name, or the only one in
-   `$FACTORY_HOME/projects`, and each command it runs (`poll`, `status`, `claim`, `release`, `block`, `reconcile`) reads
+   `$FACTORY_HOME/projects`, and each command it runs (`poll`, `status`, `ask`, `grill`) reads
    that project's `gitHost`, `gitHostProject` and `clone` from its project file. With several projects and none named,
    it starts with no default, and each command names its project (`agent-factory poll ledger`). For the ledger pilot:
 
@@ -23,16 +23,17 @@ The wall (`src/core/coordinator.ts`):
 - **Runs with no prompt:** `agent-factory poll`, `board`, `spec`, `approval`, `status`, `grill` and `retro` (not `retro --draft`, which spends on a model run and is denied), with or without the project word
   (`agent-factory poll ledger`), and `agent-factory request`, whose
   write the project's policy decides in code ([Writes](../reference/connectors.md#writes)).
-- **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it. **Today:** the start commands
-  too (`claim`, `release`, `block`, `reconcile`, `review`, `dispatch`, `setup`); they become denied once the
-  orchestrator runs every step of the loop (#674).
+- **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it.
+  Nothing else asks.
 - **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
   STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
   Run them from a plain terminal, not as `!agent-factory …` inside Claude Code: the door seam refuses a person's word
   where `CLAUDECODE` is set ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)). `agent-factory door`: a front
   door writes a person's word, so the AI never runs one.
   `agent-factory eval`: an eval pass spends on model runs (up to $100), and only a human starts one (#215).
-  `agent-factory onboard`: the onboarder's run and the acceptance of its brief are a human's (#235). Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
+  `agent-factory onboard`: the onboarder's run and the acceptance of its brief are a human's.
+  `agent-factory dispatch`, `agent-factory review` and `agent-factory setup`: the orchestrator loop starts every run
+  (`start` and `approve` start it), and you write the settings, so the coordinator starts no run. Then `gh`, `glab`, `git push`, `curl`, `wget`, `ssh`, a second interpreter or shell (`node -e`, `python`,
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin`, `agent-factory project` and `agent-factory init`, which write settings. `WebFetch` and
   `WebSearch`: outside context comes only through `agent-factory fetch` (ADR-0012 S18). Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,

@@ -18,13 +18,13 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 - You never run `agent-factory approve`, `start`, `waive`, `door`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
   to you, and a person runs them (#227, #231, #215, #235, #369, #488). The AI never approves, and nothing starts unless a person starts it
   (P6, P8). Even if you could run them, the door seam refuses a person's word from inside a model run (ADR-0023).
+- You never run `agent-factory dispatch`, `review` or `setup` either: the orchestrator loop starts every run, and a
+  person writes the settings. When `status` says no loop runs, tell the person.
 - Raw `gh`, `glab`, `git push`, `curl`, a second shell, `sudo`, `WebFetch` and `WebSearch` are denied to you; outside
   context comes through `agent-factory fetch`. You edit only spec drafts under `$FACTORY_HOME/specs/`; any other edit,
   your own settings included, is refused.
 - **Today:** the coordinator holds no git host login only by these settings; running as its own user on the VM is
   #493.
-- **Today:** you still run `agent-factory block`, `reconcile`, `claim` and `release` by hand where the orchestrator
-  does not yet, each only with the person's yes, until #497 removes them.
 - What each command you run does and refuses is in [The coordinator runs these](../docs/reference/cli.md#the-coordinator-runs-these);
   the read commands above sit under its **You run these**. Read it before you run one you have not used.
 

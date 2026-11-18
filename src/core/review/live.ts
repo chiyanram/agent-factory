@@ -1,7 +1,7 @@
 // live — one run per change, and at most FACTORY_MAX_RUNS on this machine (GUIDE, Triggers). A run is live while
 // the agent CLI's sessions list (src/core/agent/) names its session (a writer: writer-<n>) or its pid file in <repo>/.claude/runs/ names a
 // process that is still there. The reviewer writes reviewer-<n>.pid while
-// it runs, so reconcile sees it, and removes it after, only when the file is still its own.
+// it runs, so the one-run and FACTORY_MAX_RUNS checks see it, and removes it after, only when the file is still its own.
 
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";

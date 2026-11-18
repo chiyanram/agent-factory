@@ -185,7 +185,7 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(claudeSettings(PLACES).permissions.deny).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
   });
 
-  it("runs the read commands, status and request with no prompt; confirm and every old loop command ask", () => {
+  it("runs the read commands, status and request with no prompt; only confirm asks", () => {
     for (const command of [
       "agent-factory poll",
       "agent-factory poll --json",
@@ -212,19 +212,29 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     for (const command of [
       "agent-factory confirm ledger/PROJ-1/tracker.create/0123456789ab '[coordinator] a follow-up'",
       "agent-factory request notify --file d.json && agent-factory confirm ledger/PROJ-1/notify/0123456789ab x",
-      "agent-factory claim 12",
-      "agent-factory release 12",
-      "agent-factory block 12 why",
-      "agent-factory reconcile",
-      "agent-factory claim ledger 12",
-      "agent-factory release ledger 12",
-      "agent-factory block ledger 12 why",
-      "agent-factory reconcile ledger",
-      "agent-factory review ledger 12",
-      "agent-factory dispatch ledger --once",
-      "agent-factory setup claude",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "ask" });
+    }
+    expect(claudeSettings(PLACES).permissions.ask).toEqual([
+      "Bash(agent-factory confirm)",
+      "Bash(agent-factory confirm *)",
+    ]);
+  });
+
+  it("denies dispatch, review and setup: the coordinator starts no runs and writes no settings (#766)", () => {
+    for (const command of [
+      "agent-factory dispatch ledger --once",
+      "agent-factory dispatch ledger --dry-run",
+      "agent-factory review ledger 12",
+      "agent-factory setup claude",
+      "agent-factory setup coordinator",
+      "agent-factory setup",
+    ]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    const args = copilotArgs(PLACES);
+    for (const name of ["dispatch", "review", "setup"]) {
+      expect(args[args.indexOf(`shell(agent-factory ${name})`) - 1]).toBe("--deny-tool");
     }
   });
 
@@ -409,6 +419,14 @@ describe("the wall's check (#105, #227)", () => {
           `Edit(//home/ram/.factory/${tail}) is missing`,
         ],
       ),
+      // the runs and the settings: the coordinator starts none
+      [(p) => p.ask.push("Bash(agent-factory dispatch *)"), "lets the coordinator run agent-factory dispatch PROJ"],
+      [(p) => p.allow.push("Bash(agent-factory review *)"), "lets the coordinator run agent-factory review PROJ 1"],
+      [(p) => p.ask.push("Bash(agent-factory setup *)"), "lets the coordinator run agent-factory setup coordinator"],
+      ...["dispatch", "review", "setup"].map((name): [(p: Rules & Record<string, unknown>) => void, string] => [
+        (p) => (p.deny = p.deny.filter((r) => !r.includes(`agent-factory ${name}`))),
+        `Bash(agent-factory ${name}) is missing`,
+      ]),
       [(p) => (p.disableBypassPermissionsMode = "allow"), "bypass-permissions mode is not disabled"],
       [(p) => (p.defaultMode = "bypassPermissions"), "the default mode is bypassPermissions"],
     ];

@@ -6,7 +6,7 @@ prints the same list; `test/cli-doc.test.ts` fails when a command is missing her
 
 ## You run these
 
-A person runs these, at a terminal. The coordinator's settings deny each one that records a person's word (START, approval, waiver, acceptance) or spends on its own (the eval).
+A person runs these, at a terminal. The coordinator's settings deny each one that records a person's word (START, approval, waiver, acceptance), spends on its own (the eval), or writes the settings (`setup`).
 
 `start`, `approve`, `waive` and `onboard accept` are the terminal's front door ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)): each writes through the door seam (`src/core/door/`), which names the person at the terminal (the OS user and, when set, git `user.name`) and the door (`via: terminal`). There is no `--by` or `--via` flag. The seam refuses, exit 1, where `CLAUDECODE` or `AGENT_FACTORY_MODEL_RUN` is set, so run them from a plain terminal, not as `!agent-factory …` inside Claude Code. `agent-factory door discord` is the Discord door, and the coordinator's settings deny every `door` command. **Today:** the web app's door comes last (#714, #715).
 
@@ -41,12 +41,9 @@ The coordinator runs these in its session, behind its wall; a person may run the
 | command | does |
 |---|---|
 | `agent-factory poll [<project>]` | one line per open PR: head, draft, claimed, pipeline, `needs_human`, `stop`, open asks, `conflict` (`yes`, `no`, or `unknown` while the git host has not checked); plus each merged PR that still carries the claim; `--json` prints the records |
-| `agent-factory claim [<project>] <pr>` / `agent-factory release [<project>] <pr>` | adds or removes the claim label; `claim` refuses a PR already claimed or not open; `release` of a PR with no claim says so and is not an error |
 | `agent-factory status [<project>] <pr> <sha> "<line>"` | posts one `[coordinator]` note through the posting template; refuses when the head is no longer `<sha>`, and a line that is not one line of text. The line it prints starts with "orchestrator last ran N min ago", flagged `LATE` after 3 poll intervals while any change is claimed (#103) |
 | `agent-factory grill [<project>] <pr> <sha> <questions file>` | posts the coordinator's round of questions (#517): one `[coordinator] OPEN: N questions` note with an item per question, in the same form as the implementer's round, so it stays open until a project member's replies answer every one (`1A 2C`, `1: A`, `accept all`). The file must be under `$FACTORY_HOME/specs`, the one folder the coordinator writes, and holds a JSON list of 1 to 20 `{question, choices (2 to 4), recommended (the index)}`; anything else exits 2, naming the problem, and posts nothing. Refused when the head is no longer `<sha>`, as `status` is. The coordinator's settings allow it |
 | `agent-factory ask -- [<project>] <pr> <sha> "<question>"` | posts one `[writer] OPEN:` note; refuses when the head is no longer `<sha>`. `--` keeps a question that starts with `-` a question. The implementer does not run it: it writes its question to `report.json`, and the host posts it |
-| `agent-factory block [<project>] <pr> "<reason>" [<log>]` | labels `needs-human`, posts one `[coordinator] blocked: <reason>` note with the log as a field, then releases the claim; the label goes first |
-| `agent-factory reconcile [<project>]` | removes each claim and run worktree with no live run, and each claim left on a merged PR; a live-run list it cannot read releases nothing. It never removes an implementer's worktree that holds unlanded work (#189): commits no remote branch holds, after a fetch, or uncommitted files. For an open PR it labels `needs-human` before any claim is released, pushes the commits on top of the PR's branch through the host push, with a blocked run's guards (fast-forward only, no `.factory`, no CI file), and posts one note naming the commits, the push and every uncommitted file, which it never commits. It tells you once for what the worktree holds, until that changes. A merged or closed PR gets no label and no push. A folder that is not one of the clone's worktrees, or a worktree it cannot fetch for, is kept and labels nothing. An automated review's worktree is removed as before. `FACTORY_DRY_RUN=1` fetches nothing and says which it would keep |
 | `agent-factory handoff [<project>]` | the project coordinator's reset note, built by code from the records with no model summary, read-only, times in UTC. It opens with the line `factory handoff: <project> at <time>; this note replaces the earlier conversation`, then four sections: **Waits on you** (the board's **needs you** lane, waiting sessions included; never cut), **In flight** (**ready to merge** and **factory**), **Open maps** (each open `wayfinder:map` issue's title and its table lines, verbatim, with no prose; `no table` when it has none) and **Read more**. It stays under 32,000 characters: the maps' table lines are cut first, from the last map back and never leaving a table's head alone, then the in-flight tickets from the last one back, each cut naming how much it left out. Only what it never cuts (what waits on you and the headings) can take it over. A board, a map list or a map that cannot be read is one line in its section, the note is still printed, and it exits 1. A fresh coordinator runs it first, in any host; a hook may print it after a compaction. The coordinator's settings allow it |
 | `agent-factory approval <project> <ticket>` | whether work may start: `approved` (exit 0), `stale` when the spec changed after approval (3; with the issue store, an edit to the issue's body), `missing` (4), or a broken record or spec (1); `dispatch` reads the same record |
 | `agent-factory request <capability> --file <draft.json>` | asks for a `tracker.comment`, `tracker.create` or `notify` write on an approved ticket; the project's policy performs it at once (0), keeps it for `confirm` and prints that command (3), or refuses it (1) ([Writes](connectors.md#writes)). `request spec.body --file $FACTORY_HOME/specs/<project>/<issue>/spec.md` keeps a spec change, the issue's whole new body, for `confirm` (3), or refuses it (1); with `"specStore": "issue"` only ([A spec change in the issue store](connectors.md#a-spec-change-in-the-issue-store), #542) |
@@ -54,7 +51,9 @@ The coordinator runs these in its session, behind its wall; a person may run the
 
 ## The orchestrator and the host run these
 
-Started by `start` or `approve` (the loop), by a person, or by the host itself.
+Started by `start` or `approve` (the loop), by a person, or by the host itself. The coordinator's settings deny
+`dispatch` and `review`: it starts no runs. The loop claims a change, releases a quiet one, labels `needs-human` and
+reconciles a merged one itself ([The table](orchestrator.md#the-table)).
 
 | command | does |
 |---|---|
@@ -70,12 +69,15 @@ Started by `start` or `approve` (the loop), by a person, or by the host itself.
 
 ## Notes
 
-`poll`, `claim`, `release`, `status`, `ask`, `block` and `reconcile` act on the project they name first, else on the
+`poll`, `status`, `ask` and `grill` act on the project they name first, else on the
 one the coordinator's session was started for (`agent-factory coordinator <project>` sets `FACTORY_DEFAULT_PROJECT`),
 else on the only project in `$FACTORY_HOME/projects`; with several and none named they refuse and list them (#382).
 Each reads the project's `gitHost`, `gitHostProject` and `clone` from its project file through the settings layers;
 an exported `FACTORY_FORGE`, `FACTORY_PROJECT` or `FACTORY_REPO` still wins, and with `FACTORY_PROJECT` exported and no
 project named, a command reads the variables alone.
+
+**Today:** a claim label this loop did not add holds its PR until a person removes the label on the git host (#497
+item 7).
 
 `poll` keeps no state, so a restart re-reads everything. It reads the git host through its CLI (`gh api`, `glab api`),
 pages every list to its end, and waits out a short rate limit; a longer one fails with the time it lasts until. It does not read approvals: an approval is the local

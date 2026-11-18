@@ -84,7 +84,7 @@ describe("status: when the orchestrator last ran, while a loop is meant to be ru
   it("flags the line when the last poll is older than three intervals while a ticket is claimed", async () => {
     expect((await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(16) } })).kind).toBe("ok");
     expect(await status([12])).toBe(
-      "LATE: orchestrator last ran 16 min ago, over 3 poll intervals of 5 min, while 1 change is claimed; the loop has stopped: run `agent-factory dispatch ledger`; posted #12 at aaaa1111",
+      "LATE: orchestrator last ran 16 min ago, over 3 poll intervals of 5 min, while 1 change is claimed; the loop has stopped: a person runs `agent-factory dispatch ledger`; posted #12 at aaaa1111",
     );
   });
 
@@ -127,15 +127,17 @@ describe("status: with no orchestrator loop meant to be running (#305)", () => {
   it("is never LATE: it says no loop runs, and names the command while a change is claimed", async () => {
     await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(600) } });
     expect(await status([12])).toBe(
-      "no orchestrator loop running; run `agent-factory dispatch ledger`; posted #12 at aaaa1111",
+      "no orchestrator loop running; a person runs `agent-factory dispatch ledger`; posted #12 at aaaa1111",
     );
-    expect(await status("down")).toMatch(/^no orchestrator loop running; run `agent-factory dispatch ledger`; /);
+    expect(await status("down")).toMatch(
+      /^no orchestrator loop running; a person runs `agent-factory dispatch ledger`; /,
+    );
     expect(await status([])).toBe("no orchestrator loop running; posted #12 at aaaa1111");
   });
 
   it("names no project when no pass has run here, and reads another repository's loop as none", async () => {
     expect(await status([12])).toBe(
-      "no orchestrator loop running; run `agent-factory dispatch <project>`; posted #12 at aaaa1111",
+      "no orchestrator loop running; a person runs `agent-factory dispatch <project>`; posted #12 at aaaa1111",
     );
     await writeLastPoll({ home, project: "other", poll: { ...POLL, repo: "chiyanram/other" } });
     loopFor("other");
@@ -172,7 +174,7 @@ describe("status: the newest pass", () => {
         loop: { meant: true, project: "ledger" },
       }),
     ).toBe(
-      "LATE: the orchestrator loop has never run here, while 1 change is claimed; run `agent-factory dispatch ledger`",
+      "LATE: the orchestrator loop has never run here, while 1 change is claimed; a person runs `agent-factory dispatch ledger`",
     );
     expect(
       livenessLine({

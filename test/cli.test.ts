@@ -341,9 +341,9 @@ describe("commands read the project's git host and clone from the project file (
     });
     writeProject("ledger", "aruvii/agent-platform");
     writeProject("shop", "aruvii/shop");
-    const many = await cli(["claim", "12"], bare());
+    const many = await cli(["status", "12", "aaaa1111", "line"], bare());
     expect(many).toMatchObject({ code: 1, out: "" });
-    expect(many.err).toContain("holds 2 projects (ledger, shop); name one: agent-factory claim <project> <number>");
+    expect(many.err).toContain("holds 2 projects (ledger, shop); name one: agent-factory status <project> <number>");
     const unknown = await cli(["poll", "nope"], bare());
     expect(unknown).toMatchObject({ code: 1 });
     expect(unknown.err).toContain("or name one of ledger, shop");
@@ -359,9 +359,9 @@ describe("commands read the project's git host and clone from the project file (
     expect(old).toMatchObject({ code: 0, out: expect.stringContaining(POLLED) });
   });
 
-  it("reconcile reads the clone from the project file", async () => {
+  it("a command reads the clone from the project file", async () => {
     writeProject("ledger", "aruvii/agent-platform", "clone");
-    const run = await cli(["reconcile", "ledger"], bare());
+    const run = await cli(["poll", "ledger"], bare());
     expect(run).toMatchObject({
       code: 1,
       err: expect.stringContaining(`clone in ${join(home, "projects", "ledger.json")}:1 must be an absolute file path`),
@@ -468,6 +468,30 @@ describe("commands read the project's git host and clone from the project file (
     expect(readFileSync(join(home, ".local", "state", "agent-factory", "coordinator-none.jsonl"), "utf8")).toContain(
       '"kind":"compaction"',
     );
+  });
+});
+
+describe("the old loop commands are gone: the orchestrator claims, releases and reconciles (#766)", () => {
+  it("claim, release, block and reconcile are unknown commands: the help, exit 64", async () => {
+    const help = (await cli(["--help"])).out;
+    for (const argv of [["claim", "12"], ["release", "ledger", "12"], ["block", "12", "why"], ["reconcile"]]) {
+      const run = await cli(argv);
+      expect({ argv, code: run.code, help: run.out === help }).toEqual({ argv, code: 64, help: true });
+    }
+    expect(help).not.toMatch(/^ {2}(claim|release|block|reconcile)\b/m);
+  });
+
+  it("no reference page or how-to names them as a command", () => {
+    for (const page of ["docs/reference/cli.md", "docs/reference/settings.md", "docs/how-to/set-up-coordinator.md"]) {
+      const text = readFileSync(page, "utf8");
+      expect({
+        page,
+        named: /agent-factory (claim|release|block|reconcile)\b|`(claim|release|block|reconcile)`/.test(text),
+      }).toEqual({
+        page,
+        named: false,
+      });
+    }
   });
 });
 
@@ -924,16 +948,11 @@ describe("agent-factory review", () => {
 describe("agent-factory loop commands (#138)", () => {
   it("print their usage on wrong arguments (64)", async () => {
     const cases: readonly (readonly string[])[] = [
-      ["claim"],
-      ["claim", "abc"],
-      ["release", "1", "2"],
       ["status", "12", "aaaa1111"],
       ["ask", "x", "aaaa1111", "q"],
-      ["block", "12"],
-      ["reconcile", "a", "b"],
-      ["claim", "ledger"],
+      ["grill", "12", "aaaa1111"],
       ["status", "ledger", "12", "aaaa1111"],
-      ["block", "../x", "12", "why"],
+      ["ask", "../x", "12", "aaaa1111", "q"],
       ["lint-edit"],
       ["edit-scope"],
       ["edit-scope", "a", "b"],
@@ -952,14 +971,6 @@ describe("agent-factory loop commands (#138)", () => {
     });
     expect(run.code).toBe(1);
     expect(run.err).toContain("FACTORY_PROJECT must be owner/name");
-  });
-
-  it("reconcile refuses a relative FACTORY_REPO before it reads the forge", async () => {
-    const run = await cli(["reconcile"], { FACTORY_HOME: home, FACTORY_PROJECT: "a/b", FACTORY_REPO: "clone" });
-    expect(run).toMatchObject({
-      code: 1,
-      err: expect.stringContaining("(clone in the project file, or FACTORY_REPO) must be an absolute path"),
-    });
   });
 
   it("lint-edit reads the tool call on stdin and skips a file outside the session's folder", async () => {
