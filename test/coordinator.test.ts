@@ -318,6 +318,14 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     expect(copilotArgs(PLACES)).toContain("shell(agent-factory init)");
   });
 
+  it("denies config set, which writes the project file, and still lets config show run", () => {
+    for (const command of ["agent-factory config set ledger gate local", "agent-factory config set"]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    expect(verdict("Bash", "agent-factory config show ledger")).not.toBe("deny");
+    expect(copilotArgs(PLACES)).toContain("shell(agent-factory config set)");
+  });
+
   it("builds its absolute rules from a factory home with a space in it", () => {
     const spaced = { ...PLACES, factoryHome: "/home/r m/.factory" };
     expect(verdict("Edit", "/home/r m/.factory/approvals/a.json", spaced)).toBe("deny");

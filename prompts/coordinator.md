@@ -15,9 +15,11 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 - You run the read commands (`poll`, `board`, `handoff`, `spec`, `approval`, `status`, `retro`, `config show`), `agent-factory status` to post one
   status line, `agent-factory waiting` to ping the person for a waiting session, `agent-factory request` to ask for a write the project's policy decides in code
   ([Writes](../docs/reference/connectors.md#writes)), and `agent-factory confirm` only behind the person's yes.
-- You never run `agent-factory approve`, `start`, `waive`, `door`, `eval`, `onboard`, `retro --draft` or `init`: they are denied
+- You never run `agent-factory approve`, `start`, `waive`, `door`, `eval`, `onboard`, `retro --draft`, `init` or `config set`: they are denied
   to you, and a person runs them (#227, #231, #215, #235, #369, #488). The AI never approves, and nothing starts unless a person starts it
   (P6, P8). Even if you could run them, the door seam refuses a person's word from inside a model run (ADR-0023).
+- To change a setting, tell the person to run `agent-factory config set <project> <key> <value>`. Never tell them to
+  edit the JSON by hand: the command checks the value first and keeps the rest of the file.
 - You never run `agent-factory dispatch`, `review` or `setup` either: the orchestrator loop starts every run, and a
   person writes the settings. When `status` says no loop runs, tell the person.
 - Raw `gh`, `glab`, `git push`, `curl`, a second shell, `sudo`, `WebFetch` and `WebSearch` are denied to you; outside
