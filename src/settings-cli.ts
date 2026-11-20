@@ -1,4 +1,4 @@
-// settings-cli — `agent-factory config show | check <project>` and `agent-factory team update <project> [<commit>]`
+// settings-cli — `agent-factory config show | check | set <project>` and `agent-factory team update <project> [<commit>]`
 // (#229; docs/DESIGN.md section 5 "Settings"). The settings live in the factory home, never in the product repo, and
 // these commands are for the human: the coordinator's deny list covers the user and team settings (#227).
 //
@@ -9,7 +9,7 @@
 //                  Claude Code plugin the factory knows read back: its state, a warning when it is not on
 //   team update    the resolved values at the team's new commit against the pinned one, a check, then the pin moved
 
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { KNOWN_PLUGINS, pluginState, stateLine } from "./core/agent/claude-plugins.js";
 import { coordinatorDir } from "./core/coordinator.js";
 import { codeOf } from "./core/dispatch/records.js";
@@ -23,7 +23,10 @@ import { findProcess } from "./core/process/read.js";
 import { projectPath, readyFieldsOf } from "./core/project.js";
 import { layered, readTeamAt, teamDir, type Layered, type Pin, type Read } from "./core/settings/layers.js";
 import { runEnv, settingOf } from "./core/settings/machine.js";
-import { canonical, where, type Problem, type Resolved } from "./core/settings/resolve.js";
+import { keyById, PROJECT_META, type Key } from "./core/settings/keys.js";
+import { canonical, didYouMean, where, type Problem, type Resolved } from "./core/settings/resolve.js";
+import { pathKey } from "./core/settings/lines.js";
+import { partnerOf, valueAt, withValues, type Change } from "./core/settings/write.js";
 import { plainName } from "./core/spec.js";
 
 export type SettingsIo = {
@@ -285,16 +288,26 @@ export function changes(before: readonly Resolved[], after: readonly Resolved[])
 
 const PIN_FIELD = /("team"\s*:\s*")[^"]*(")/;
 
-async function movePin(path: string, text: string, pin: Pin): Promise<Result<string>> {
-  const next = text.replace(PIN_FIELD, `$1${pin.team}@${pin.commit}$2`);
+// saveFile : the new text over a settings file, through a temporary file and a rename. It is refused when the file no
+// longer holds the text that was checked, so an edit made in between is never lost without a word.
+export async function saveFile(path: string, checked: string, next: string): Promise<Result<string>> {
   const temp = `${path}.${process.pid}.tmp`;
   try {
     await writeFile(temp, next, { mode: 0o600 });
+    if ((await readFile(path, "utf8")) !== checked) {
+      await rm(temp, { force: true });
+      return { kind: "failed", reason: `${path}: the file changed; run it again` };
+    }
     await rename(temp, path);
     return { kind: "ok", value: path };
   } catch {
+    await rm(temp, { force: true });
     return { kind: "failed", reason: `cannot write ${path}` };
   }
+}
+
+function movePin(path: string, text: string, pin: Pin): Promise<Result<string>> {
+  return saveFile(path, text, text.replace(PIN_FIELD, `$1${pin.team}@${pin.commit}$2`));
 }
 
 type Update = { readonly loaded: Loaded; readonly pin: Pin; readonly commit: string };
@@ -357,18 +370,143 @@ async function update(io: SettingsIo, project: string, given: string | undefined
   return updateTo(io, plan.value);
 }
 
-const CONFIG: Readonly<Record<string, (io: SettingsIo, project: string) => Promise<number>>> = { show, check };
+// ---- config set
 
-function configRun(sub: string): ((io: SettingsIo, project: string) => Promise<number>) | undefined {
-  return Object.hasOwn(CONFIG, sub) ? CONFIG[sub] : undefined;
+// valueOf : the value as JSON, else the text itself, so `30` is a number and `claude-sonnet-5-5` a string
+function valueOf(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
-// configCommand : config show <project> [--json] | config check <project>
+function keyOf(id: string): Result<Key> {
+  if (id === PROJECT_META) {
+    return { kind: "failed", reason: "the team pin moves only through agent-factory team update" };
+  }
+  const key = keyById(id);
+  return key === undefined
+    ? { kind: "failed", reason: `${id} is not a settings key${didYouMean(id)}` }
+    : { kind: "ok", value: key };
+}
+
+type Target = { readonly key: Key; readonly loaded: Loaded; readonly value: unknown };
+
+async function setTarget(io: SettingsIo, project: string, id: string, text: string): Promise<Result<Target>> {
+  const key = keyOf(id);
+  if (key.kind === "failed") {
+    return key;
+  }
+  const loaded = await loadProject(io.home, project);
+  return loaded.kind === "ok"
+    ? { kind: "ok", value: { key: key.value, loaded: loaded.value, value: valueOf(text) } }
+    : loaded;
+}
+
+type Planned = { readonly edits: readonly Change[]; readonly next: string };
+
+// plannedSet : the project file's new text, with the key and, for half a policy point, its other half
+async function plannedSet(io: SettingsIo, t: Target): Promise<Result<Planned>> {
+  const before = await resolved(io, t.loaded);
+  const resolvedOf = (id: string): unknown => before.values.find((r) => r.key.id === id)?.value;
+  const partner = partnerOf(t.key, t.loaded.value, resolvedOf);
+  const edits = [{ path: t.key.path, value: t.value }, ...(partner === undefined ? [] : [partner])];
+  const next = withValues(t.loaded.text, edits);
+  return next.kind === "ok" ? { kind: "ok", value: { edits, next: next.value } } : next;
+}
+
+// checkedSet : the plan, refused on an error the new text has that the current text does not; an error the current
+// text already has is printed as a warning
+async function checkedSet(io: SettingsIo, t: Target): Promise<Result<Planned>> {
+  const plan = await plannedSet(io, t);
+  if (plan.kind === "failed") {
+    return plan;
+  }
+  const was = await candidateProblems(io, t.loaded.path, t.loaded.text);
+  const known = new Set(was.filter((p) => p.level === "error").map((p) => p.text));
+  const now = await candidateProblems(io, t.loaded.path, plan.value.next);
+  const fresh = now.filter((p) => p.level === "error" && !known.has(p.text));
+  const rest = now.filter((p) => !fresh.includes(p)).map((p) => ({ level: "warning" as const, text: p.text }));
+  printProblems(io, [...fresh, ...rest]);
+  return fresh.length === 0 ? plan : { kind: "failed", reason: `refused; ${t.loaded.path} is unchanged` };
+}
+
+// shadowedWarnings : a key whose resolved value the project file no longer sets, because another layer wins
+function shadowedWarnings(values: readonly Resolved[]): readonly Problem[] {
+  return values
+    .filter((r) => !r.sources.some((s) => s.layer === "project"))
+    .map((r) => ({
+      level: "warning" as const,
+      text: `${r.key.id}: ${r.sources.map(where).join(", ")} wins over the project file; the value in use is ${valueText(r)}`,
+    }));
+}
+
+async function setKey(io: SettingsIo, project: string, id: string, text: string): Promise<number> {
+  const fail = (reason: string): number => {
+    io.err(`agent-factory config set: ${reason}\n`);
+    return 1;
+  };
+  const t = await setTarget(io, project, id, text);
+  if (t.kind === "failed") {
+    return fail(t.reason);
+  }
+  const { loaded, key, value } = t.value;
+  if (canonical(valueAt(loaded.value, key.path)) === canonical(value)) {
+    io.out(`unchanged: ${id} is already ${JSON.stringify(value)} in ${loaded.path}\n`);
+    return 0;
+  }
+  const plan = await checkedSet(io, t.value);
+  if (plan.kind === "failed") {
+    return fail(plan.reason);
+  }
+  const saved = await saveFile(loaded.path, loaded.text, plan.value.next);
+  return saved.kind === "failed" ? fail(saved.reason) : printSet(io, project, plan.value.edits);
+}
+
+// printSet : config show's line for each key written, and a warning for one that another layer wins over
+async function printSet(io: SettingsIo, project: string, edits: readonly Change[]): Promise<number> {
+  const loaded = await loadProject(io.home, project);
+  if (loaded.kind === "failed") {
+    io.err(`agent-factory config set: ${loaded.reason}\n`);
+    return 1;
+  }
+  const ids = new Set(edits.map((c) => pathKey(c.path)));
+  const values = (await resolved(io, loaded.value)).values.filter((r) => ids.has(pathKey(r.key.path)));
+  io.out(table([["key", "value", "layer", "where", "class"], ...values.map(rowOf)]));
+  printProblems(io, shadowedWarnings(values));
+  return 0;
+}
+
+const CONFIG: Readonly<Record<string, (io: SettingsIo, project: string) => Promise<number>>> = { show, check };
+
+function configRun(sub: string | undefined): ((io: SettingsIo, project: string) => Promise<number>) | undefined {
+  return sub !== undefined && Object.hasOwn(CONFIG, sub) ? CONFIG[sub] : undefined;
+}
+
+const CONFIG_USAGE =
+  "usage: agent-factory config show <project> [--json] | config check <project> | config set <project> <key> [--] <value>\n";
+
+function isThree(list: readonly string[]): list is readonly [string, string, string] {
+  return list.length === 3;
+}
+
+// setArgs : config set's three arguments, when the positionals are exactly them
+function setArgs(positionals: readonly string[]): readonly [string, string, string] | undefined {
+  const args = positionals.slice(1);
+  return positionals[0] === "set" && isThree(args) ? args : undefined;
+}
+
+// configCommand : config show <project> [--json] | config check <project> | config set <project> <key> <value>
 export function configCommand(positionals: readonly string[], io: SettingsIo): Promise<number> {
-  const [sub = "", project, ...rest] = positionals;
+  const set = setArgs(positionals);
+  if (set !== undefined) {
+    return setKey(io, ...set);
+  }
+  const [sub, project, ...rest] = positionals;
   const run = configRun(sub);
   if (run === undefined || project === undefined || rest.length > 0) {
-    io.err("usage: agent-factory config show <project> [--json] | config check <project>\n");
+    io.err(CONFIG_USAGE);
     return Promise.resolve(64);
   }
   return run(io, project);

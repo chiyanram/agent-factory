@@ -242,13 +242,15 @@ function checkedHere(key: Key, layer: LayerName): boolean {
   return layer === "machine" ? false : layer !== "project" || !readerChecks;
 }
 
-function teamValueOf(entries: readonly Entry[]): string {
-  const team = entries.find((e) => e.source.layer === "team");
-  return team === undefined ? "the team sets none" : `the team value is ${show(team.value)}`;
+// higherOf : the value a refused entry must not loosen, and where it comes from: a layer's file:line, or the engine
+function higherOf(state: State | undefined): string {
+  return state === undefined
+    ? "no higher layer sets it"
+    : `${show(state.value)} comes from ${state.sources.map(where).join(", ")}`;
 }
 
-function refusal(key: Key, entry: Entry, why: string, entries: readonly Entry[]): string {
-  return `${key.id}: the ${entry.source.layer} layer (${where(entry.source)}) ${why}; a ${key.class} key only gets stricter in a lower layer, and ${teamValueOf(entries)}`;
+function refusal(key: Key, entry: Entry, why: string, state: State | undefined): string {
+  return `${key.id}: the ${entry.source.layer} layer (${where(entry.source)}) ${why}; a ${key.class} key only gets stricter in a lower layer, and ${higherOf(state)}`;
 }
 
 function lockedByTeam(entry: Entry, mode: TeamMode, state: State | undefined): boolean {
@@ -268,7 +270,7 @@ function refusedEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold:
   if (bad !== "") {
     return bad;
   }
-  return lockedByTeam(entry, mode, fold.state) ? refusal(key, entry, "sets a key the team locked", entries) : "";
+  return lockedByTeam(entry, mode, fold.state) ? refusal(key, entry, "sets a key the team locked", fold.state) : "";
 }
 
 function foldEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): Fold {
@@ -280,7 +282,8 @@ function foldEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fo
     return { state: { value: entry.value, sources: [entry.source] }, problems: fold.problems };
   }
   const next = step(key, fold.state, entry, mode);
-  const problems = next.problem === "" ? fold.problems : [...fold.problems, refusal(key, entry, next.problem, entries)];
+  const problems =
+    next.problem === "" ? fold.problems : [...fold.problems, refusal(key, entry, next.problem, fold.state)];
   return { state: next.state, problems };
 }
 
