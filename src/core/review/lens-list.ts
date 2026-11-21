@@ -10,9 +10,9 @@
 // file in the repo on the default branch. "paths" and "lanes" are optional; empty or left out matches every file and
 // every lane. A name is a plain word and given once.
 
-import { prop } from "../dispatch/records.js";
 import { LANES } from "../spec.js";
 import type { Lens, Rubric } from "./lenses.js";
+import { prop } from "../field.js";
 
 const NAME = /^[A-Za-z0-9_-]+$/;
 const PLUGIN = /^[A-Za-z0-9_.@-]+$/;

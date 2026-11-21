@@ -19,8 +19,8 @@
 // expires, which is why the time cap is short.
 
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
 import { readProjectRaw } from "../project.js";
+import { prop } from "../field.js";
 
 export const QUARANTINE_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;

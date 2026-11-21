@@ -90,7 +90,7 @@ import type { Evidence } from "../report.js";
 export type ApprovalView =
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane; readonly testFirst: boolean }
   | { readonly kind: "started"; readonly at: string; readonly lane: Lane; readonly testFirst: boolean }
-  | { readonly kind: "stale" }
+  | { readonly kind: "stale"; readonly started: boolean }
   | { readonly kind: "missing" }
   | { readonly kind: "unapproved"; readonly lane: Lane }
   | { readonly kind: "unwritten" }
@@ -223,10 +223,14 @@ function designAs<K extends keyof DesignMap>(kind: K, d: DesignMap[K]): Action |
   return DESIGN[kind](d);
 }
 
-const STARTED: ReadonlySet<ApprovalView["kind"]> = new Set(["approved", "started", "unapproved", "raised", "stale"]);
+const STARTED: ReadonlySet<ApprovalView["kind"]> = new Set(["approved", "started", "unapproved", "raised"]);
+
+export function startedIn(view: ApprovalView): boolean {
+  return view.kind === "stale" ? view.started : STARTED.has(view.kind);
+}
 
 const designReview: Rule = (s) =>
-  s.design.kind === "run" && !STARTED.has(s.approval.kind) ? "next" : designAs(s.design.kind, s.design);
+  s.design.kind === "run" && !startedIn(s.approval) ? "next" : designAs(s.design.kind, s.design);
 
 const approval: Rule = (s) => {
   const why = heldWhy(s.approval);

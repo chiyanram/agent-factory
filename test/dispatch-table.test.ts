@@ -101,7 +101,7 @@ describe("decide: one row each", () => {
   });
 
   it("no approval or a stale one: a claim is released, an unclaimed change waits", () => {
-    expect(decide(state({ approval: { kind: "stale" } }))).toMatchObject({
+    expect(decide(state({ approval: { kind: "stale", started: true } }))).toMatchObject({
       kind: "release",
       why: expect.stringContaining("changed after"),
     });
@@ -844,7 +844,7 @@ describe("inFlight: whether the orchestrator loop carries the ticket on (#305)",
     expect(inFlight(state({ change: { kind: "open", line: line({ asks: 1 }) } }))).toBe(false);
     expect(inFlight(state({ change: { kind: "open", line: line({ needsHuman: true }) } }))).toBe(false);
     expect(inFlight(state({ change: { kind: "none" } }))).toBe(false);
-    expect(inFlight(state({ approval: { kind: "stale" } }))).toBe(false);
+    expect(inFlight(state({ approval: { kind: "stale", started: true } }))).toBe(false);
     expect(inFlight(state({ approval: { kind: "unapproved", lane: "feature" } }))).toBe(false);
     expect(inFlight(state({ approval: { kind: "unstarted" } }))).toBe(false);
     expect(inFlight(state({ approval: { kind: "missing" } }))).toBe(false);
@@ -1021,7 +1021,7 @@ describe("can it get stuck? (#485)", () => {
   const approvals: readonly TicketState["approval"][] = [
     { kind: "approved", at: APPROVED_AT, lane: "feature", testFirst: false },
     { kind: "started", at: APPROVED_AT, lane: "tiny", testFirst: false },
-    { kind: "stale" },
+    { kind: "stale", started: true },
     { kind: "missing" },
     { kind: "unapproved", lane: "feature" },
     { kind: "unwritten" },

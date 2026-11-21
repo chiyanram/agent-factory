@@ -41,7 +41,6 @@ import { keepActOn } from "./act-on.js";
 import { actedSince, foundOf, keepTracked, type Acted, type FoundByRule } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
-import { prop } from "../dispatch/records.js";
 import { BASELINE, lensPack, lensSetupOf, roundLenses, rubricText, touchedOf, type LensSetup } from "./finders.js";
 import {
   mergeFindings,
@@ -78,6 +77,7 @@ import {
   type Sorted,
   type Verdict,
 } from "./verdicts.js";
+import { prop } from "../field.js";
 
 export const NEEDS_HUMAN = "needs-human";
 export const MAX_ROUNDS = 3;

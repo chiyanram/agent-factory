@@ -5,8 +5,8 @@ import { runCli } from "../src/app.js";
 import type { FolderCall } from "../src/core/agent/folder.js";
 import { LOGIN_ARGS } from "../src/core/agent/login.js";
 import { specHash } from "../src/core/spec.js";
-import { field } from "../src/core/human-record.js";
 import { tempDir } from "./temp.js";
+import { prop } from "../src/core/field.js";
 
 const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
@@ -444,7 +444,7 @@ describe("commands read the project's git host and clone from the project file (
         .trim()
         .split("\n")
         .map((l): unknown => JSON.parse(l))
-        .map((l) => field(l, "kind")),
+        .map((l) => prop(l, "kind")),
     ).toEqual(["turn", "turn", "reset"]);
     expect(await cli(["coordinator-turn"], env, "not json")).toMatchObject({ code: 0 });
   });

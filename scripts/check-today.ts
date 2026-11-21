@@ -19,6 +19,9 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type * as DocNotes from "./doc-notes.js";
+
+const { cellEnd, ends, MARK }: typeof DocNotes = await import(new URL("./doc-notes.ts", import.meta.url).href);
 
 export const SAFETY_PAGES: readonly string[] = [
   "docs/explanation/safety.md",
@@ -27,7 +30,6 @@ export const SAFETY_PAGES: readonly string[] = [
   "docs/constitution",
 ];
 
-const MARK = "**Today:**";
 const TICKET = /(^|[\s([,;:])([\w.-]+\/[\w.-]+)?#\d+\b/;
 const TICKETS = /(^|[\s([,;:])([\w.-]+\/[\w.-]+)?#(\d+)\b/g;
 
@@ -71,15 +73,6 @@ const COMMENT = /^\s*\/\//;
 
 function uncomment(line: string): string {
   return line.replace(/^\s*\/\/\s?/, "");
-}
-
-function ends(line: string): boolean {
-  return /^\s*$|^\s*\||^#{1,6}\s|^\s*([-*+]|\d+\.)\s|^\s*```/.test(line);
-}
-
-function cellEnd(line: string, from: number): number {
-  const at = line.slice(from).search(/(?<!\\)\|/);
-  return at < 0 ? line.length : from + at;
 }
 
 function cut(text: string): string {

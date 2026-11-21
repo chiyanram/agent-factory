@@ -11,7 +11,7 @@
 
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
-import { prop } from "./dispatch/records.js";
+import { prop } from "./field.js";
 
 export type Scoped = { readonly code: 0 | 2; readonly out: string; readonly err: string };
 

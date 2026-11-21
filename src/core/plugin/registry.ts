@@ -12,7 +12,6 @@ import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Done, Result } from "../forge/api.js";
-import { codeOf, prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
 import {
   isPoint,
@@ -27,6 +26,7 @@ import {
 import { DEFAULT_LIMITS, runPlugin, type Exec, type Limits, type Ran } from "./exec.js";
 import { sourceOf, store, treeHash, type Source } from "./pin.js";
 import type { Secret } from "../token/rules.js";
+import { codeOf, prop } from "../field.js";
 
 export type Entry = Described & { readonly source: string; readonly path: string; readonly sha256: string };
 export type Registry = Readonly<Record<string, Entry>>;

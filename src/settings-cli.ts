@@ -12,7 +12,6 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { KNOWN_PLUGINS, pluginState, stateLine } from "./core/agent/claude-plugins.js";
 import { coordinatorDir } from "./core/coordinator.js";
-import { codeOf } from "./core/dispatch/records.js";
 import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { originProblem } from "./core/origin.js";
@@ -25,6 +24,7 @@ import { layered, readTeamAt, teamDir, type Layered, type Pin, type Read } from 
 import { runEnv, settingOf } from "./core/settings/machine.js";
 import { canonical, where, type Problem, type Resolved } from "./core/settings/resolve.js";
 import { plainName } from "./core/spec.js";
+import { codeOf } from "./core/field.js";
 
 export type SettingsIo = {
   readonly env: NodeJS.ProcessEnv;

@@ -20,11 +20,11 @@ import type { Stats } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
-import { field } from "./human-record.js";
 import type { Argv } from "./project.js";
 import { SNOWFLAKE } from "./door/discord/files.js";
 import { AUTOCOMPACT } from "./coordinator-turns.js";
 import { DISCORD_PLUGIN } from "./agent/claude-plugins.js";
+import { prop } from "./field.js";
 
 export { DISCORD_PLUGIN };
 
@@ -76,7 +76,7 @@ function channelProblems(id: string, group: unknown, people: readonly string[] |
   if (!SNOWFLAKE.test(id)) {
     return [`groups holds ${JSON.stringify(id)}, which is not a channel id`];
   }
-  const allowed = snowflakes(field(group, "allowFrom")) ?? [];
+  const allowed = snowflakes(prop(group, "allowFrom")) ?? [];
   if (allowed.length === 0) {
     return [`groups.${id}.allowFrom must list the mapped people: empty, anyone in the channel can allow a tool call`];
   }
@@ -94,9 +94,9 @@ function groupProblems(groups: unknown, people: readonly string[] | undefined): 
 }
 
 function policyProblems(access: unknown): readonly string[] {
-  const people = snowflakes(field(access, "allowFrom")) ?? [];
+  const people = snowflakes(prop(access, "allowFrom")) ?? [];
   return [
-    ...(field(access, "dmPolicy") === "allowlist" ? [] : ["dmPolicy must be allowlist"]),
+    ...(prop(access, "dmPolicy") === "allowlist" ? [] : ["dmPolicy must be allowlist"]),
     ...(people.length === 0 ? ["allowFrom must list the mapped people's user ids"] : []),
   ];
 }
@@ -114,8 +114,8 @@ export function accessProblems(access: unknown): readonly string[] {
   }
   return [
     ...policyProblems(access),
-    ...groupProblems(field(access, "groups"), snowflakes(field(access, "allowFrom"))),
-    ...pendingProblems(field(access, "pending")),
+    ...groupProblems(prop(access, "groups"), snowflakes(prop(access, "allowFrom"))),
+    ...pendingProblems(prop(access, "pending")),
   ];
 }
 

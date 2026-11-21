@@ -16,7 +16,6 @@ import {
   CORE_PROPERTIES,
   CORE_REQUIRED,
   coreOf,
-  get,
   oneOf,
   settle,
   type Bucket,
@@ -24,6 +23,7 @@ import {
   type Verdict,
 } from "../finding.js";
 import type { Result } from "../forge/api.js";
+import { prop } from "../field.js";
 
 export {
   GRADES,
@@ -71,10 +71,10 @@ export const FIND_SCHEMA = JSON.stringify({
 type Own = Pick<Finding, "axis" | "kind" | "category" | "evidence">;
 
 function ownOf(raw: unknown): Own | undefined {
-  const axis = oneOf(get(raw, "axis"), ["standards", "spec"] as const);
-  const kind = oneOf(get(raw, "kind"), ["rule", "logic"] as const);
-  const category = oneOf(get(raw, "category"), CATEGORIES);
-  const evidence = get(raw, "evidence");
+  const axis = oneOf(prop(raw, "axis"), ["standards", "spec"] as const);
+  const kind = oneOf(prop(raw, "kind"), ["rule", "logic"] as const);
+  const category = oneOf(prop(raw, "category"), CATEGORIES);
+  const evidence = prop(raw, "evidence");
   return axis === undefined || kind === undefined || category === undefined || typeof evidence !== "string"
     ? undefined
     : { axis, kind, category, evidence };
@@ -92,12 +92,14 @@ function styleNit(f: Finding): Finding {
 
 function categoryNote(list: unknown): string {
   const all: readonly unknown[] = Array.isArray(list) ? list : [];
-  const bad = all.map((raw) => get(raw, "category")).find((c) => c !== undefined && oneOf(c, CATEGORIES) === undefined);
+  const bad = all
+    .map((raw) => prop(raw, "category"))
+    .find((c) => c !== undefined && oneOf(c, CATEGORIES) === undefined);
   return bad === undefined ? "" : `: the category ${JSON.stringify(bad)} is not one of ${CATEGORIES.join(", ")}`;
 }
 
 export function readFindings(output: unknown, lens: string): Result<readonly Finding[]> {
-  const list = get(output, "findings");
+  const list = prop(output, "findings");
   const found = Array.isArray(list) ? list.map((raw, i) => findingOf(raw, i, lens)) : [undefined];
   const good = found.filter((f): f is Finding => f !== undefined);
   return good.length === found.length

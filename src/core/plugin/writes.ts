@@ -8,9 +8,9 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Done, Result } from "../forge/api.js";
-import { codeOf, prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
 import { isPolicyPoint, type PolicyPoint } from "./config.js";
+import { codeOf, prop } from "../field.js";
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 

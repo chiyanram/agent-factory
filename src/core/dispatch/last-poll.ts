@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge, ForgeName } from "../forge/types.js";
 import { plainName } from "../spec.js";
-import { codeOf, prop } from "./records.js";
+import { codeOf, prop } from "../field.js";
 
 export const LAST_POLL_FILE = "last-poll.json";
 export const LATE_INTERVALS = 3;

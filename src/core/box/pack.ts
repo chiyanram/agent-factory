@@ -3,9 +3,9 @@
 // never builds: a checkout with no dist/cli.js is refused with what to run.
 
 import { join } from "node:path";
-import { prop } from "../dispatch/records.js";
 import type { Result, Runner } from "../forge/api.js";
 import type { Packer } from "./built.js";
+import { prop } from "../field.js";
 
 const CLI = "dist/cli.js";
 

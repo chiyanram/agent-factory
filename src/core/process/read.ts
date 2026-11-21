@@ -14,10 +14,10 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
 import { DEFAULT_LANES, lanesOf, type LaneProps } from "../lane.js";
 import { BASELINE, type Pointer } from "../review/rules.js";
 import { packProblem, readPackSchemas } from "./pack-schema.js";
+import { prop } from "../field.js";
 
 export type Process = {
   readonly from: string;

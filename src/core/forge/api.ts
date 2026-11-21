@@ -20,6 +20,7 @@
 // group, so the stop reaches every process the CLI started.
 
 import { execFile, spawn } from "node:child_process";
+import { codeOf } from "../field.js";
 
 export type Failed = { readonly kind: "failed"; readonly reason: string };
 export type Result<T> = { readonly kind: "ok"; readonly value: T } | Failed;
@@ -67,8 +68,6 @@ export const LIMITS: Limits = { maxBuffer: 64 * 1024 * 1024, tailChars: 64 * 102
 
 type Child = ReturnType<typeof spawn>;
 
-const KILL_GRACE_MS = 10_000;
-
 function optionsOf(call: Call): { readonly env: NodeJS.ProcessEnv; readonly cwd?: string; readonly detached?: true } {
   return {
     env: call.env,
@@ -77,32 +76,38 @@ function optionsOf(call: Call): { readonly env: NodeJS.ProcessEnv; readonly cwd?
   };
 }
 
-function signalGroup(child: Child, signal: NodeJS.Signals): boolean {
-  if (child.pid === undefined) {
-    return false;
+export const KILL_GRACE_MS = 10_000;
+
+export function signalGroup(pid: number | undefined, signal: NodeJS.Signals): string {
+  if (pid === undefined) {
+    return "";
   }
   try {
-    return process.kill(-child.pid, signal);
-  } catch {
-    return false;
+    process.kill(-pid, signal);
+    return "";
+  } catch (error: unknown) {
+    return codeOf(error) === "ESRCH" ? "" : `cannot send ${signal} to process group ${pid}: ${String(error)}\n`;
   }
 }
 
-function stoppable(child: Child, call: Call): void {
-  const { stop } = call;
-  if (stop === undefined) {
-    return;
-  }
+export type GroupStop = { readonly failures: () => string };
+
+export function stopGroupOn(pid: number | undefined, stop: AbortSignal, done: Promise<unknown>): GroupStop {
+  let failed = "";
+  const signalled = (signal: NodeJS.Signals): void => {
+    failed += signalGroup(pid, signal);
+  };
   const end = (): void => {
-    signalGroup(child, "SIGTERM");
-    setTimeout(() => signalGroup(child, "SIGKILL"), KILL_GRACE_MS).unref();
+    signalled("SIGTERM");
+    setTimeout(() => signalled("SIGKILL"), KILL_GRACE_MS).unref();
   };
   if (stop.aborted) {
     end();
-    return;
+  } else {
+    stop.addEventListener("abort", end, { once: true });
+    void done.then(() => stop.removeEventListener("abort", end));
   }
-  stop.addEventListener("abort", end, { once: true });
-  child.once("close", () => stop.removeEventListener("abort", end));
+  return { failures: () => failed };
 }
 
 function fed(child: Child, call: Call): void {
@@ -129,11 +134,34 @@ function keptAll(call: Call, limits: Limits): Promise<Exit> {
   });
 }
 
+function closedExit(
+  code: number | null,
+  kept: { readonly stdout: string; readonly stderr: string },
+  over: boolean,
+  failures: string,
+): Exit {
+  return over
+    ? { ...kept, code: 1, stderr: `stdout maxBuffer length exceeded\n${failures}` }
+    : { code: code ?? 1, stdout: kept.stdout, stderr: kept.stderr + failures };
+}
+
+const NO_STOP: GroupStop = { failures: () => "" };
+
+function groupOf(child: Child, call: Call): GroupStop {
+  if (call.stop === undefined) {
+    return NO_STOP;
+  }
+  const closed = new Promise<void>((done) => child.once("close", () => done()));
+  return stopGroupOn(child.pid, call.stop, closed);
+}
+
 function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
   return new Promise((resolve) => {
     const child = spawn(call.bin, [...call.args], optionsOf(call));
     const kept = { stdout: "", stderr: "" };
     let over = false;
+    let failed = "";
+    const group = groupOf(child, call);
     const keep = (name: "stdout" | "stderr") => (chunk: unknown) => {
       const text = kept[name] + String(chunk);
       if (!keepAll) {
@@ -143,7 +171,7 @@ function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
       kept[name] = text.slice(0, limits.maxBuffer);
       if (text.length > limits.maxBuffer) {
         over = true;
-        signalGroup(child, "SIGKILL");
+        failed += signalGroup(child.pid, "SIGKILL");
         child.kill("SIGKILL");
       }
     };
@@ -152,11 +180,8 @@ function spawned(call: Call, limits: Limits, keepAll: boolean): Promise<Exit> {
     child.stdout?.on("data", keep("stdout"));
     child.stderr?.on("data", keep("stderr"));
     child.on("error", (error) => resolve({ code: 1, stdout: kept.stdout, stderr: error.message }));
-    child.on("close", (code) =>
-      resolve(over ? { ...kept, code: 1, stderr: "stdout maxBuffer length exceeded" } : { code: code ?? 1, ...kept }),
-    );
+    child.on("close", (code) => resolve(closedExit(code, kept, over, failed + group.failures())));
     fed(child, call);
-    stoppable(child, call);
   });
 }
 

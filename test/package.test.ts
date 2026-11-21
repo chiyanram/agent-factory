@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prop } from "../src/core/dispatch/records.js";
+import { prop } from "../src/core/field.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 

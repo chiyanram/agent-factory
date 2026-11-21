@@ -7,10 +7,10 @@
 // IDENTIFY after a backoff. A throw in any of it is logged and answered, never left to end the process. A log line
 // writes out every control character, so no input can start a forged line.
 
-import { field } from "../../human-record.js";
 import { SCRUBBED, scrubSecrets } from "../../scrub.js";
 import type { Reply } from "./door.js";
 import type { RestAnswer, RestCall, Socket, Timers, Transport } from "./transport.js";
+import { prop } from "../../field.js";
 
 // GUILDS (1 << 0) alone: no GUILD_MESSAGES, no DIRECT_MESSAGES, no MESSAGE_CONTENT
 // https://docs.discord.com/developers/events/gateway
@@ -76,10 +76,10 @@ function textMatching(value: unknown, pattern: RegExp): string | undefined {
 type Route = { readonly id: string; readonly token: string; readonly app: string; readonly button: boolean };
 
 function routeOf(raw: unknown): Route | undefined {
-  const id = textMatching(field(raw, "id"), SNOWFLAKE);
-  const app = textMatching(field(raw, "application_id"), SNOWFLAKE);
-  const token = textMatching(field(raw, "token"), INTERACTION_TOKEN);
-  const type = field(raw, "type");
+  const id = textMatching(prop(raw, "id"), SNOWFLAKE);
+  const app = textMatching(prop(raw, "application_id"), SNOWFLAKE);
+  const token = textMatching(prop(raw, "token"), INTERACTION_TOKEN);
+  const type = prop(raw, "type");
   return id !== undefined && app !== undefined && token !== undefined && ANSWERED.has(type)
     ? { id, token, app, button: type === 3 }
     : undefined;
@@ -95,12 +95,12 @@ function frameOf(text: string): unknown {
 }
 
 function gatewayUrl(found: RestAnswer): string | undefined {
-  const url = found.kind === "ok" ? field(found.value, "url") : undefined;
+  const url = found.kind === "ok" ? prop(found.value, "url") : undefined;
   return typeof url === "string" && url.startsWith("wss://") ? url : undefined;
 }
 
 function intervalOf(d: unknown): number {
-  const every = field(d, "heartbeat_interval");
+  const every = prop(d, "heartbeat_interval");
   return typeof every === "number" && every > 0 ? every : 41250;
 }
 
@@ -182,7 +182,7 @@ export function openGateway(setup: GatewaySetup): Gateway {
   const send = (op: number, d: unknown): void => session.socket?.send(JSON.stringify({ op, d }));
 
   const register = async (d: unknown): Promise<void> => {
-    const app = textMatching(field(field(d, "application"), "id"), SNOWFLAKE);
+    const app = textMatching(prop(prop(d, "application"), "id"), SNOWFLAKE);
     if (app === undefined) {
       log("READY carried no application id; the slash commands were not registered");
       return;
@@ -247,11 +247,11 @@ export function openGateway(setup: GatewaySetup): Gateway {
   };
 
   const OPS: Readonly<Record<number, (frame: unknown) => void>> = {
-    0: (frame) => dispatched(field(frame, "t"), field(frame, "d")),
+    0: (frame) => dispatched(prop(frame, "t"), prop(frame, "d")),
     1: () => send(1, session.seq),
     7: () => session.socket?.close(4000),
     9: () => session.socket?.close(4000),
-    10: (frame) => hello(field(frame, "d")),
+    10: (frame) => hello(prop(frame, "d")),
     11: () => {
       session.acked = true;
     },
@@ -259,11 +259,11 @@ export function openGateway(setup: GatewaySetup): Gateway {
 
   const message = (text: string): void => {
     const frame = frameOf(text);
-    const seq = field(frame, "s");
+    const seq = prop(frame, "s");
     if (typeof seq === "number") {
       session.seq = seq;
     }
-    const op = field(frame, "op");
+    const op = prop(frame, "op");
     const run = typeof op === "number" && Object.hasOwn(OPS, op) ? OPS[op] : undefined;
     run?.(frame);
   };

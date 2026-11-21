@@ -8,7 +8,7 @@
 // name of "connectors" (plugin/config.ts reads it); it lists no plugin.
 
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
+import { prop } from "../field.js";
 
 export function isOldConnectors(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -17,10 +17,10 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
-import { field, readRecordFile, writeRecordFile, type Via } from "../human-record.js";
+import { readRecordFile, writeRecordFile, type Via } from "../human-record.js";
 import { plainName, specHash, type Refused } from "../spec.js";
 import type { KeptCite, Written } from "./brief.js";
-import { prop } from "../dispatch/records.js";
+import { prop } from "../field.js";
 
 const FILES = ["brief.md", "glossary.md", "cites.json"] as const;
 
@@ -170,7 +170,7 @@ function citesOf(text: string): readonly KeptCite[] {
 async function acceptedHashes(dir: string): Promise<Hashes | "none"> {
   const record = await readRecordFile(join(dir, "knowledge.json"));
   return record.kind === "json"
-    ? { brief: String(field(record.value, "brief_hash")), glossary: String(field(record.value, "glossary_hash")) }
+    ? { brief: String(prop(record.value, "brief_hash")), glossary: String(prop(record.value, "glossary_hash")) }
     : "none";
 }
 

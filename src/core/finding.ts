@@ -6,8 +6,9 @@
 // checked.
 
 import type { Result } from "./forge/api.js";
+import { prop } from "./field.js";
+import { SEVERITIES } from "./eval/golden.js";
 
-export const SEVERITIES = ["blocker", "warning", "nit"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 export const GRADES = ["cited", "walked", "ran"] as const;
 export type Grade = (typeof GRADES)[number];
@@ -38,10 +39,6 @@ export const CORE_PROPERTIES = {
   fix: { type: "string" },
 };
 
-export function get(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}
-
 export function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return allowed.find((a) => a === value);
 }
@@ -51,12 +48,12 @@ function textOf(value: unknown, clean: (text: string) => string): string | undef
 }
 
 function lineOf(raw: unknown): number | undefined {
-  const n = firstLine(get(raw, "line"));
+  const n = firstLine(prop(raw, "line"));
   return Number.isSafeInteger(n) && Number(n) >= 0 ? Number(n) : undefined;
 }
 
 function lineEndOf(raw: unknown): number | undefined {
-  const line = get(raw, "line");
+  const line = prop(raw, "line");
   const end = typeof line === "string" ? /^(\d+)-(\d+)$/.exec(line) : null;
   const [from, to] = end === null ? [0, 0] : [Number(end[1]), Number(end[2])];
   return to === from ? undefined : to;
@@ -68,25 +65,25 @@ function firstLine(line: unknown): unknown {
 }
 
 function ruleOf(raw: unknown): unknown {
-  const rule = get(raw, "rule");
+  const rule = prop(raw, "rule");
   return rule === null ? "" : rule;
 }
 
 type Texts = Pick<FindingCore, "file" | "rule" | "finding" | "fix">;
 
 function textsOf(raw: unknown, clean: (text: string) => string): Texts | undefined {
-  const file = textOf(get(raw, "file"), clean);
+  const file = textOf(prop(raw, "file"), clean);
   const rule = textOf(ruleOf(raw), clean);
-  const finding = textOf(get(raw, "finding"), clean);
-  const fix = textOf(get(raw, "fix"), clean);
+  const finding = textOf(prop(raw, "finding"), clean);
+  const fix = textOf(prop(raw, "fix"), clean);
   return file === undefined || rule === undefined || finding === undefined || fix === undefined
     ? undefined
     : { file: file.replace(/^(\.\/)?code\//, ""), rule, finding, fix };
 }
 
 function weightOf(raw: unknown): Pick<FindingCore, "severity" | "grade"> | undefined {
-  const severity = oneOf(get(raw, "severity"), SEVERITIES);
-  const grade = oneOf(get(raw, "grade"), GRADES);
+  const severity = oneOf(prop(raw, "severity"), SEVERITIES);
+  const grade = oneOf(prop(raw, "grade"), GRADES);
   return severity === undefined || grade === undefined ? undefined : { severity, grade };
 }
 
@@ -130,7 +127,7 @@ export const VERIFY_SCHEMA = JSON.stringify({
 });
 
 function optional<T extends string>(raw: unknown, name: string, allowed: readonly T[]): T | undefined | "bad" {
-  const value = get(raw, name);
+  const value = prop(raw, name);
   return value === undefined ? undefined : (oneOf(value, allowed) ?? "bad");
 }
 
@@ -146,16 +143,16 @@ function loweredOf(raw: unknown): Lowered | "bad" {
 }
 
 function verdictOf(raw: unknown): Verdict | undefined {
-  const id = get(raw, "id");
-  const bucket = oneOf(get(raw, "bucket"), BUCKETS);
-  const why = get(raw, "why");
+  const id = prop(raw, "id");
+  const bucket = oneOf(prop(raw, "bucket"), BUCKETS);
+  const why = prop(raw, "why");
   const lowered = loweredOf(raw);
   const named = typeof id === "string" && bucket !== undefined && typeof why === "string";
   return named && lowered !== "bad" ? { id, bucket, why, ...lowered } : undefined;
 }
 
 export function readVerdicts(output: unknown): Result<readonly Verdict[]> {
-  const list = get(output, "verdicts");
+  const list = prop(output, "verdicts");
   const read = Array.isArray(list) ? list.map(verdictOf) : [undefined];
   const good = read.filter((v): v is Verdict => v !== undefined);
   return good.length === read.length

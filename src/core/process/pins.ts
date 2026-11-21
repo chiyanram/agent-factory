@@ -13,11 +13,11 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
 import { readProjectRaw, sidePath } from "../project.js";
 import { attempt } from "../review/safe.js";
 import { pluginListOf, refText, type PluginRef } from "./plugins.js";
 import type { PluginDir } from "./read.js";
+import { prop } from "../field.js";
 
 export type Pin = { readonly commit: string; readonly version: string; readonly sha256: string };
 export type Pins = Readonly<Record<string, Pin>>;

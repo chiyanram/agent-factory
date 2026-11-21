@@ -9,10 +9,7 @@
 // RunKind and RUN_KINDS live here, a leaf, so the records parser can import them with no import cycle.
 
 import { NO_WINDOWS, windowsOf, type Windows } from "../agent/usage-limit.js";
-
-function prop(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}
+import { prop } from "../field.js";
 
 export type Spend = { readonly usd: number; readonly tokens: number };
 

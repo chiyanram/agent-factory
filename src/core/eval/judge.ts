@@ -4,14 +4,14 @@
 // embedding similarity: it cannot tell the same bug from a similar bug elsewhere. Each finding matches one seed at
 // most, and only the nearest few findings at a seed are judged, so the judge's spend has a bound (budget.ts).
 
-import { prop } from "../dispatch/records.js";
 import type { Result } from "../forge/api.js";
 import type { ActOn } from "../review/act-on.js";
 import { fence } from "../review/fence.js";
 import type { Model, RunLimit } from "../review/model.js";
 import type { GoldenFinding } from "./golden.js";
+import { prop } from "../field.js";
+import { REGION } from "../review/acted-on.js";
 
-export const LINE_WINDOW = 5;
 export const MIN_CONFIDENCE = 0.7;
 export const MAX_JUDGED = 3;
 
@@ -77,7 +77,7 @@ export function modelJudge(input: {
 export function nearby(seed: GoldenFinding, findings: readonly ActOn[], taken: ReadonlySet<string>): readonly ActOn[] {
   const distance = (f: ActOn): number => Math.abs(f.line - seed.line);
   return findings
-    .filter((f) => f.file === seed.file && distance(f) <= LINE_WINDOW && !taken.has(f.id))
+    .filter((f) => f.file === seed.file && distance(f) <= REGION && !taken.has(f.id))
     .toSorted((a, b) => distance(a) - distance(b))
     .slice(0, MAX_JUDGED);
 }

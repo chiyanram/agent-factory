@@ -14,7 +14,6 @@
 // What the file leaves out keeps the defaults (policy.ts); a field that is there but not valid is refused.
 
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
 import { isOldConnectors } from "../process/plugins.js";
 import { readProjectRaw } from "../project.js";
 import { isPoint, PLUGIN_NAME, type ExtensionPoint } from "./contract.js";
@@ -30,6 +29,7 @@ import {
   type PostPoint,
   type Rule,
 } from "./policy.js";
+import { prop } from "../field.js";
 
 export {
   DEFAULT_POLICY,

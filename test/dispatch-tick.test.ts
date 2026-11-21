@@ -11,7 +11,8 @@ import { readRecords, record, summarize, tornPath, type Event } from "../src/cor
 import type { Evidence } from "../src/core/report.js";
 import { waive } from "../src/core/waiver.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
-import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
+import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
+import { ticketCapped } from "../src/core/dispatch/ticket-cap.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
 import { traceName } from "../src/core/dispatch/trace.js";

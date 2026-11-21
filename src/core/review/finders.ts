@@ -13,7 +13,6 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { prop } from "../dispatch/records.js";
 import type { Result } from "../forge/api.js";
 import { hostGit } from "../git.js";
 import { oneWayDoorPathsOf } from "../lane.js";
@@ -23,6 +22,7 @@ import { TEST_FILES } from "../ready/floor.js";
 import { fence } from "./fence.js";
 import { BASELINE_LENS, TEST_INTEGRITY, type Lens, type Rubric, type Touched } from "./lenses.js";
 import { LENSES_HINT, lensListOf } from "./lens-list.js";
+import { prop } from "../field.js";
 
 export type LensSetup = {
   readonly lenses: readonly Lens[];

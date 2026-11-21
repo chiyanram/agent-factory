@@ -10,11 +10,11 @@
 
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
-import { prop } from "./dispatch/records.js";
 import { CANNOT_START, type FolderRunner } from "./agent/folder.js";
 import { commandWords } from "./ready/command.js";
 import type { Result } from "./forge/api.js";
 import type { Argv } from "./project.js";
+import { prop } from "./field.js";
 
 export type Hooked = { readonly code: 0 | 1 | 2; readonly err: string };
 

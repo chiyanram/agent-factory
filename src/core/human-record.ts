@@ -52,7 +52,3 @@ export async function readRecordFile(path: string): Promise<RecordFile> {
     return missing ? { kind: "missing" } : { kind: "refused", reason: `cannot read ${path}: ${String(error)}` };
   }
 }
-
-export function field(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}

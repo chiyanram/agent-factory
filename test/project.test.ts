@@ -12,6 +12,7 @@ import {
 } from "../src/core/project.js";
 import { commandArgv, evidencePrograms, GIT_READS, READ_ONLY_PROGRAMS } from "../src/core/ready/command.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
+import { fileKeys } from "../src/core/settings/keys.js";
 import { tempDir } from "./temp.js";
 
 let home = "";
@@ -99,13 +100,13 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       [{ gate: "local", ready: { programs: ["make"] } }, '"verify" must be'],
       [{ gate: "local", verify: "make verify", ready: { programs: ["make"] } }, '"verify" must be'],
       [{ gate: "local", verify: [], ready: { programs: ["make"] } }, '"verify" must be'],
-      [{ gate: "forge-ci" }, '"ready.programs" must list'],
-      [{ gate: "forge-ci", ready: { programs: [] } }, '"ready.programs" must list'],
-      [{ gate: "forge-ci", ready: { programs: ["make", ""] } }, '"ready.programs" must list'],
+      [{ gate: "forge-ci" }, '"ready.programs" must be a list'],
+      [{ gate: "forge-ci", ready: { programs: [] } }, '"ready.programs" must be a list'],
+      [{ gate: "forge-ci", ready: { programs: ["make", ""] } }, '"ready.programs" must be a list'],
       [{ gate: "forge-ci", ready: { programs: ["make"], timeoutMinutes: 0 } }, '"ready.timeoutMinutes"'],
       [{ gate: "forge-ci", ready: { programs: ["make"], timeoutMinutes: 241 } }, '"ready.timeoutMinutes"'],
-      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: ["a.com"] }, '"egress.allow" must list'],
-      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: [1] } }, '"egress.allow" must list'],
+      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: ["a.com"] }, '"egress.allow" must be a list'],
+      [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: [1] } }, '"egress.allow" must be a list'],
       [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: [] } }, "the egress allowlist is empty"],
       [{ gate: "forge-ci", ready: { programs: ["make"] }, egress: { allow: ["*.a.com"] } }, "a wildcard"],
     ];
@@ -115,6 +116,28 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
     }
     expect(await readProjectFile({ home, project: "../x" })).toMatchObject({ kind: "failed" });
   });
+
+  const ready = (extra: object): object => ({ gate: "forge-ci", ready: { programs: ["make"], ...extra } });
+  it.each([
+    { id: "ready.judgeFiles", value: [], file: ready({ judgeFiles: [] }) },
+    { id: "ready.judgeFiles", value: ["ci/**"], file: ready({ judgeFiles: ["ci/**"] }) },
+    { id: "ready.judgeFiles", value: [1], file: ready({ judgeFiles: [1] }) },
+    { id: "ready.testFiles", value: [], file: ready({ testFiles: [] }) },
+    { id: "ready.timeoutMinutes", value: 240, file: ready({ timeoutMinutes: 240 }) },
+    { id: "ready.timeoutMinutes", value: 241, file: ready({ timeoutMinutes: 241 }) },
+    { id: "egress.allow", value: [1], file: { ...ready({}), egress: { allow: [1] } } },
+  ])(
+    "should give the same result for every project key value when it is set in a project file or in a team or user file: $id $value",
+    async ({ id, value, file }) => {
+      write(file);
+      const refused = JSON.stringify(await read()).includes(`\\"${id}\\" must be`);
+      expect(refused).toBe(
+        fileKeys()
+          .find((k) => k.id === id)
+          ?.check(value) !== "",
+      );
+    },
+  );
 });
 
 describe("commandArgv: an evidence row with no shell (#91)", () => {

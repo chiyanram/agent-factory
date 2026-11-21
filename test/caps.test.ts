@@ -8,8 +8,8 @@ import {
   overCaps,
   projectStop,
   roomAt,
-  ticketCapped,
 } from "../src/core/dispatch/caps.js";
+import { ticketCapped } from "../src/core/dispatch/ticket-cap.js";
 import { hoursOf, openAt, within } from "../src/core/dispatch/hours.js";
 import { keyById } from "../src/core/settings/keys.js";
 import { settingName } from "../src/core/settings/machine.js";

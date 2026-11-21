@@ -140,7 +140,8 @@ const APPROVALS: readonly ApprovalView[] = [
   { kind: "approved", at: AT, lane: "feature", testFirst: false },
   { kind: "started", at: AT, lane: "tiny", testFirst: false },
   { kind: "approved", at: AT, lane: "bug", testFirst: true },
-  { kind: "stale" },
+  { kind: "stale", started: true },
+  { kind: "stale", started: false },
   { kind: "missing" },
   { kind: "unapproved", lane: "feature" },
   { kind: "unwritten" },
@@ -276,8 +277,13 @@ describe("P7: every loop has a cap and a stop", () => {
 });
 
 describe("P8: a person starts everything", () => {
-  it("with no START (none at all, or an approval alone), no state starts a run", () => {
-    const unstarted = states().filter((s) => s.approval.kind === "missing" || s.approval.kind === "unstarted");
+  it("with no START (none at all, an approval alone, or a changed spec), no state starts a run", () => {
+    const unstarted = states().filter(
+      (s) =>
+        s.approval.kind === "missing" ||
+        s.approval.kind === "unstarted" ||
+        (s.approval.kind === "stale" && !s.approval.started),
+    );
     expect(unstarted.length).toBeGreaterThan(0);
     const ran = unstarted.filter((s) => RUNS_A_STEP.has(decide(s).kind));
     expect(ran.map((s) => [s.approval.kind, s.change.kind, s.design.kind, decide(s)])).toEqual([]);

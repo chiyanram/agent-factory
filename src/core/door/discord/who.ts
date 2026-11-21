@@ -3,10 +3,10 @@
 // project. It refuses a bot, an unmapped id, a direct message, an unknown guild and any other channel, and makes the
 // person through vouch, so the records say via discord.
 
-import { field } from "../../human-record.js";
 import type { Refused } from "../../spec.js";
 import { vouch, type Person } from "../person.js";
 import type { DoorConfig } from "./files.js";
+import { prop } from "../../field.js";
 
 export type Interaction = {
   // 2 a slash command, 3 a button
@@ -29,30 +29,30 @@ export type Asker = { readonly person: Person; readonly user: string; readonly p
 const THREAD_TYPES: ReadonlySet<unknown> = new Set([10, 11, 12]);
 
 function text(value: unknown, ...path: readonly string[]): string | undefined {
-  const found = path.reduce((at, name) => field(at, name), value);
+  const found = path.reduce((at, name) => prop(at, name), value);
   return typeof found === "string" ? found : undefined;
 }
 
 function userOf(raw: unknown): unknown {
-  return field(field(raw, "member"), "user") ?? field(raw, "user");
+  return prop(prop(raw, "member"), "user") ?? prop(raw, "user");
 }
 
 function parentOf(raw: unknown): string | undefined {
-  const channel = field(raw, "channel");
-  return THREAD_TYPES.has(field(channel, "type")) ? text(channel, "parent_id") : undefined;
+  const channel = prop(raw, "channel");
+  return THREAD_TYPES.has(prop(channel, "type")) ? text(channel, "parent_id") : undefined;
 }
 
 function ticketOption(raw: unknown): string | undefined {
-  const options = field(field(raw, "data"), "options");
+  const options = prop(prop(raw, "data"), "options");
   const list: readonly unknown[] = Array.isArray(options) ? options : [];
   return text(
-    list.find((o) => field(o, "name") === "ticket"),
+    list.find((o) => prop(o, "name") === "ticket"),
     "value",
   );
 }
 
 function typeOf(raw: unknown): number {
-  const type = field(raw, "type");
+  const type = prop(raw, "type");
   return typeof type === "number" ? type : 0;
 }
 
@@ -64,7 +64,7 @@ export function parse(raw: unknown): Interaction {
     channel: text(raw, "channel", "id") ?? text(raw, "channel_id"),
     parent: parentOf(raw),
     user: text(user, "id"),
-    bot: field(user, "bot") === true,
+    bot: prop(user, "bot") === true,
     command: text(raw, "data", "name") ?? "",
     ticket: ticketOption(raw) ?? "",
     customId: text(raw, "data", "custom_id") ?? "",

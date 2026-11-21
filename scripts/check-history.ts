@@ -28,6 +28,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type * as DocNotes from "./doc-notes.js";
+
+const { cellEnd, isRow, noteCut }: typeof DocNotes = await import(new URL("./doc-notes.ts", import.meta.url).href);
 
 export type Rule = "ticket" | "decided-by" | "person-date";
 
@@ -113,8 +116,6 @@ function mdLines(text: string): readonly Line[] {
   });
 }
 
-const isRow = (text: string): boolean => text.trimStart().startsWith("|");
-
 function withoutFrom(file: string, text: string): string {
   return ADR.test(file) && isRow(text) ? text.replace(/\|[^|]*\|\s*$/, "|") : text;
 }
@@ -126,8 +127,7 @@ function beforeToday(text: string): string {
   if (at < 0) {
     return text;
   }
-  const cellEnd = text.indexOf("|", at);
-  return isRow(text) && cellEnd >= 0 ? text.slice(0, at) + text.slice(cellEnd) : text.slice(0, at);
+  return isRow(text) ? text.slice(0, at) + text.slice(cellEnd(text, at)) : text.slice(0, at);
 }
 
 // opensNote : whether a Today: note starts on a line and runs on to the end of its paragraph
@@ -173,26 +173,6 @@ function rulesOf(text: string, ticketed: boolean): readonly Rule[] {
 
 const statusLine = (file: string, text: string): boolean => ADR.test(file) && text.startsWith("Status:");
 
-// MARK : a Today: note's marker, as check-adrs reads it in an ADR's body
-const MARK = "**Today:**";
-
-type Cut = { readonly frozen: string; readonly note: string };
-
-function noteOf(raw: string): Cut {
-  const line = raw.trimEnd();
-  const at = line.indexOf(MARK);
-  if (at < 0) {
-    return { frozen: line, note: "" };
-  }
-  const before = line.slice(0, at).trimEnd();
-  if (!isRow(line)) {
-    return { frozen: before, note: line.slice(at) };
-  }
-  const end = line.slice(at).search(/(?<!\\)\|/);
-  const cut = end < 0 ? line.length : at + end;
-  return { frozen: `${before} ${line.slice(cut).trimStart()}`, note: line.slice(at, cut) };
-}
-
 function bodyStart(raws: readonly string[]): number {
   const at = raws.findIndex((r) => r.startsWith("## "));
   return at < 0 ? raws.length : at;
@@ -201,7 +181,7 @@ function bodyStart(raws: readonly string[]): number {
 type Frozen = { readonly counts: ReadonlyMap<string, number>; readonly noted: ReadonlySet<string> };
 
 function frozenIn(raws: readonly string[]): Frozen {
-  const cuts = raws.slice(bodyStart(raws)).map(noteOf);
+  const cuts = raws.slice(bodyStart(raws)).map(noteCut);
   const counts = new Map<string, number>();
   for (const c of cuts) {
     counts.set(c.frozen, (counts.get(c.frozen) ?? 0) + 1);
@@ -209,8 +189,8 @@ function frozenIn(raws: readonly string[]): Frozen {
   return { counts, noted: new Set(cuts.filter((c) => c.note !== "").map((c) => c.frozen)) };
 }
 
-function keptCut(raw: string, was: Frozen, now: Frozen): Cut | undefined {
-  const cut = noteOf(raw);
+function keptCut(raw: string, was: Frozen, now: Frozen): DocNotes.NoteCut | undefined {
+  const cut = noteCut(raw);
   const held = cut.note !== "" || was.noted.has(cut.frozen);
   const copied = countOf(now, cut.frozen) > countOf(was, cut.frozen);
   return held && !copied ? cut : undefined;
@@ -220,14 +200,14 @@ const countOf = (f: Frozen, frozen: string): number => f.counts.get(frozen) ?? 0
 
 const dateBy = (dates: string, people: string): boolean => DATE.test(dates) && PERSON.test(people);
 
-function noteRules(cut: Cut): readonly Rule[] {
+function noteRules(cut: DocNotes.NoteCut): readonly Rule[] {
   const note = plain(cut.note);
   const line = `${plain(cut.frozen)} ${note}`;
   const dated = dateBy(note, line) || dateBy(line, note);
   return [...(DECIDED_BY.test(note) ? (["decided-by"] as const) : []), ...(dated ? (["person-date"] as const) : [])];
 }
 
-function rulesOn(l: Read, cut: Cut | undefined, pointed: boolean): readonly Rule[] {
+function rulesOn(l: Read, cut: DocNotes.NoteCut | undefined, pointed: boolean): readonly Rule[] {
   if (cut !== undefined) {
     return noteRules(cut);
   }
@@ -244,7 +224,7 @@ export function scan(file: string, text: string, added: ReadonlySet<number>, bas
     ADR.test(file) && base !== undefined ? ([frozenIn(base.split("\n")), frozenIn(raws)] as const) : undefined;
   const lines = withLoose(file, CODE.test(file) ? codeLines(text) : mdLines(text));
   const scopes = ticketsBy(lines);
-  const cutAt = (i: number): Cut | undefined =>
+  const cutAt = (i: number): DocNotes.NoteCut | undefined =>
     both === undefined || i < body ? undefined : keptCut(raws[i] ?? "", ...both);
   return lines.flatMap((l, i) => {
     if (!added.has(i + 1) || l.text === undefined || statusLine(file, l.text)) {

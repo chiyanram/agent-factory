@@ -57,6 +57,8 @@ export type Key = FileKey | MachineKey;
 const hosts: Check = (value) =>
   Array.isArray(value) && value.every(word) ? "" : 'a list of host names, such as ["api.anthropic.com"]';
 
+const globs: Check = (value) => (Array.isArray(value) && value.every(word) ? "" : 'a list of globs, such as ["ci/**"]');
+
 const flag: Check = (value) => (typeof value === "boolean" ? "" : "true or false");
 
 const map: Check = (value) =>
@@ -136,7 +138,7 @@ const FILE_KEYS: readonly FileKey[] = [
     where: "file",
     path: ["ready", "judgeFiles"],
     class: "deny-list",
-    check: list,
+    check: globs,
     fallback: [],
     about: "the judge files this project adds to the built-in ones (read by ready/judge.ts judgeFiles, #231)",
   },

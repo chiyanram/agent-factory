@@ -49,6 +49,7 @@ import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js"
 import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
 import type { Lane as TurnLane } from "./next-step.js";
+import { prop, codeOf } from "../field.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
 export type DesignStep = "review" | "verify";
@@ -271,15 +272,6 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   } catch {
     return { kind: "failed", reason: `cannot write ${path.value}` };
   }
-}
-
-export function prop(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}
-
-export function codeOf(error: unknown): string {
-  const code = prop(error, "code");
-  return typeof code === "string" ? code : "";
 }
 
 const BAD: unique symbol = Symbol("bad");

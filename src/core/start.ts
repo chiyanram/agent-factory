@@ -14,10 +14,11 @@
 // edit of the starts folder, and on the VM the folder belongs to the separate `factory` OS user.
 
 import { join } from "node:path";
-import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
+import { isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import { approvalState, currentSpec } from "./approval.js";
 import { needsApproval, plannedCheck, raisedWhy, type LaneProps } from "./lane.js";
 import { plainName, type Refused, type Spec, type SpecStore, type Ticket } from "./spec.js";
+import { prop } from "./field.js";
 
 export type StartRecord = {
   readonly version: 1;
@@ -88,13 +89,13 @@ export async function start(request: StartRequest): Promise<Start> {
 
 function isStart(value: unknown, where: Where): value is StartRecord {
   return [
-    field(value, "version") === 1,
-    field(value, "kind") === "start",
-    field(value, "project") === where.project,
-    field(value, "ticket") === where.ticket,
-    typeof field(value, "by") === "string",
-    isVia(field(value, "via")),
-    !Number.isNaN(Date.parse(String(field(value, "at")))),
+    prop(value, "version") === 1,
+    prop(value, "kind") === "start",
+    prop(value, "project") === where.project,
+    prop(value, "ticket") === where.ticket,
+    typeof prop(value, "by") === "string",
+    isVia(prop(value, "via")),
+    !Number.isNaN(Date.parse(String(prop(value, "at")))),
   ].every(Boolean);
 }
 

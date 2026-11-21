@@ -13,8 +13,9 @@
 // edit of the waivers folder, and on the VM the folder belongs to the separate `factory` OS user.
 
 import { join } from "node:path";
-import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
+import { isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import { plainName, type Refused, type Ticket } from "./spec.js";
+import { prop } from "./field.js";
 
 export type WaiverRecord = {
   readonly version: 1;
@@ -82,14 +83,14 @@ export async function waive(request: WaiveRequest): Promise<Waive> {
 
 function isWaiver(value: unknown, where: Where): value is WaiverRecord {
   return [
-    field(value, "version") === 1,
-    field(value, "kind") === "test-change",
-    field(value, "project") === where.project,
-    field(value, "ticket") === where.ticket,
-    FULL_HEAD.test(String(field(value, "head"))),
-    typeof field(value, "by") === "string",
-    isVia(field(value, "via")),
-    !Number.isNaN(Date.parse(String(field(value, "at")))),
+    prop(value, "version") === 1,
+    prop(value, "kind") === "test-change",
+    prop(value, "project") === where.project,
+    prop(value, "ticket") === where.ticket,
+    FULL_HEAD.test(String(prop(value, "head"))),
+    typeof prop(value, "by") === "string",
+    isVia(prop(value, "via")),
+    !Number.isNaN(Date.parse(String(prop(value, "at")))),
   ].every(Boolean);
 }
 

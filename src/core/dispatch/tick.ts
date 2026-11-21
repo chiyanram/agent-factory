@@ -67,7 +67,6 @@ import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
 import type { Evidence } from "../report.js";
 import {
-  codeOf,
   modeOf,
   nextTryOf,
   parkedTaskOf,
@@ -82,6 +81,7 @@ import {
   type Task,
   type Where,
 } from "./records.js";
+import { codeOf } from "../field.js";
 import { writeLastPoll } from "./last-poll.js";
 import { shownAt, UTC } from "../zone.js";
 import { timelineOf } from "./timeline.js";
@@ -109,6 +109,7 @@ import {
   type Gate,
   type TicketState,
   type WaiverView,
+  startedIn,
 } from "./table.js";
 
 export type Logged = { readonly kind: "ok"; readonly said?: string } | Extract<Done, { kind: "failed" }>;
@@ -186,7 +187,7 @@ async function startedView(
   if (!needsApproval(lane, setup.lanes)) {
     return { kind: "started", at: started.at, lane, testFirst: needsTestFirst(lane, setup.lanes) };
   }
-  return stale ? { kind: "stale" } : { kind: "unapproved", lane };
+  return stale ? { kind: "stale", started: true } : { kind: "unapproved", lane };
 }
 
 async function startOf(setup: TickSetup, ticket: string): Promise<Result<StartRecord | "none">> {
@@ -204,7 +205,11 @@ async function unapprovedSaid(
   stale: boolean,
 ): Promise<Result<Said>> {
   const view: ApprovalView =
-    started === "none" ? { kind: stale ? "stale" : "missing" } : await startedView(setup, ticket, started, stale);
+    started === "none"
+      ? stale
+        ? { kind: "stale", started: false }
+        : { kind: "missing" }
+      : await startedView(setup, ticket, started, stale);
   return { kind: "ok", value: { view, record: "none" } };
 }
 
@@ -306,13 +311,8 @@ function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none
 
 const DESIGN_KINDS: ReadonlySet<ApprovalView["kind"]> = new Set(["unapproved", "stale", "approved"]);
 
-async function hasStart(setup: TickSetup, ticket: string): Promise<boolean> {
-  const started = await startOf(setup, ticket);
-  return started.kind === "ok" && started.value !== "none";
-}
-
 async function designDue(setup: TickSetup, ticket: string, said: Said): Promise<Current | "off"> {
-  if (!DESIGN_KINDS.has(said.view.kind) || !(await hasStart(setup, ticket))) {
+  if (!DESIGN_KINDS.has(said.view.kind) || !startedIn(said.view)) {
     return "off";
   }
   const spec = await currentSpec(ticketAt(setup, ticket));

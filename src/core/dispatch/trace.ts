@@ -12,7 +12,8 @@ import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { scrubbedJson, scrubSecrets } from "../scrub.js";
 import { plainName } from "../spec.js";
-import { codeOf, prop, readRecords, recordPath, type Event, type Where } from "./records.js";
+import { codeOf, prop } from "../field.js";
+import { readRecords, recordPath, type Event, type Where } from "./records.js";
 
 export type TraceKind = "writer" | "finder" | "verify" | "design-review" | "design-verify" | "onboard" | "retro";
 export type TraceName = string;
