@@ -370,4 +370,26 @@ describe("hostGit is hermetic against the operator's global config (#485)", () =
       "refs/heads/main",
     );
   });
+
+  it("names each path a/ and b/ in a diff under a global diff.srcPrefix and diff.dstPrefix", async () => {
+    writeFileSync(join(repo, "c.txt"), "one\n");
+    git(["add", "."]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"]);
+    writeFileSync(join(base, "global.gitconfig"), "[diff]\n\tsrcPrefix = old/\n\tdstPrefix = new/\n");
+    const diff = ok(await hostGit(request(["diff", "HEAD~1", "HEAD"])));
+    expect(diff).toContain("+++ b/c.txt");
+    expect(diff).not.toContain("new/");
+  });
+
+  it("shows a rename as a rename under a global diff.renames = false", async () => {
+    writeFileSync(join(repo, "c.txt"), "one\ntwo\nthree\n");
+    git(["add", "."]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c"]);
+    git(["mv", "c.txt", "d.txt"]);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "d"]);
+    writeFileSync(join(base, "global.gitconfig"), "[diff]\n\trenames = false\n");
+    const diff = ok(await hostGit(request(["diff", "HEAD~1", "HEAD"])));
+    expect(diff).toContain("rename from c.txt");
+    expect(diff).not.toContain("deleted file");
+  });
 });
