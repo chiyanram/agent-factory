@@ -104,8 +104,13 @@ export async function storeDoorToken(home: string, pasted: string): Promise<Resu
     await rename(temp, path);
     return { kind: "ok", value: path };
   } catch (error: unknown) {
-    await rm(temp, { force: true }).catch(() => undefined);
-    return failed(`cannot store the token in ${dir}: ${error instanceof Error ? error.name : "the write failed"}`);
+    const left = await rm(temp, { force: true }).then(
+      () => "",
+      (removing: unknown) => `; ${temp} is left: ${removing instanceof Error ? removing.name : "it cannot be removed"}`,
+    );
+    return failed(
+      `cannot store the token in ${dir}: ${error instanceof Error ? error.name : "the write failed"}${left}`,
+    );
   }
 }
 

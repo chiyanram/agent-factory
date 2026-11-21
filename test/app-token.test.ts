@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createVerify, generateKeyPairSync } from "node:crypto";
-import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { jwt, mint, readAppConfig, type AppConfig, type Http, type HttpRequest } from "../src/core/app-token.js";
 import { tempDir } from "./temp.js";
@@ -59,12 +59,14 @@ describe("jwt", () => {
 });
 
 describe("mint", () => {
+  const warned: string[] = [];
   const setup = (http: Http, now = NOW) => ({
     config,
     project: "chiyanram/ledger",
     http,
     now,
     cacheDir: join(home, "cache"),
+    warn: (line: string) => warned.push(line),
   });
 
   it("mints a token scoped to the one repository, with the App's [bot] login, and caches it mode 600", async () => {
@@ -76,6 +78,24 @@ describe("mint", () => {
     expect(JSON.parse(gh.seen[2]!.body)).toEqual({ repositories: ["ledger"] });
     expect(gh.seen[0]!.headers.Authorization).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
     expect(statSync(join(home, "cache", "123-chiyanram%2Fledger.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("should report a failure to write the app token cache when the write fails, and still return the minted token", async () => {
+    const cache = join(home, "cache");
+    mkdirSync(join(cache, "123-chiyanram%2Fledger.json", "held"), { recursive: true });
+    warned.length = 0;
+    expect(await mint(setup(fakeGithub(GITHUB).http))).toMatchObject({
+      kind: "ok",
+      value: { token: "ghs_minted0123456789abcd" },
+    });
+    expect(warned).toEqual([expect.stringContaining("the minted token is not cached, so the next call mints again")]);
+  });
+
+  it("should leave no temporary token file when the app token cache write fails", async () => {
+    const cache = join(home, "cache");
+    mkdirSync(join(cache, "123-chiyanram%2Fledger.json", "held"), { recursive: true });
+    await mint(setup(fakeGithub(GITHUB).http));
+    expect(readdirSync(cache)).toEqual(["123-chiyanram%2Fledger.json"]);
   });
 
   it("reuses the cached token while it has more than 15 minutes left, then mints again", async () => {

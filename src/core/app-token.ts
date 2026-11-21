@@ -23,8 +23,8 @@
 // The cache is written to a new file and then renamed, so a reader never sees half a token. A cache that cannot be
 // written only costs a new token next time.
 
-import { createSign } from "node:crypto";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { createSign, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 
@@ -119,6 +119,7 @@ export type MintSetup = {
   readonly http: Http;
   readonly now: number;
   readonly cacheDir: string;
+  readonly warn: (line: string) => void;
 };
 
 const API = "https://api.github.com";
@@ -192,12 +193,16 @@ async function cached(setup: MintSetup): Promise<Minted | "none"> {
 }
 
 async function remember(setup: MintSetup, minted: Minted): Promise<void> {
+  const temp = `${cacheFile(setup)}.${randomUUID()}.new`;
   try {
     await mkdir(setup.cacheDir, { recursive: true, mode: 0o700 });
     const entry: Cached = { ...minted, project: setup.project };
-    await writeFile(`${cacheFile(setup)}.new`, JSON.stringify(entry), { mode: 0o600 });
-    await rename(`${cacheFile(setup)}.new`, cacheFile(setup));
-  } catch {}
+    await writeFile(temp, JSON.stringify(entry), { mode: 0o600, flag: "wx" });
+    await rename(temp, cacheFile(setup));
+  } catch (error: unknown) {
+    await rm(temp, { force: true });
+    setup.warn(`the minted token is not cached, so the next call mints again: ${String(error)}`);
+  }
 }
 
 function grant(minted: Record<string, unknown>, slug: unknown, project: string): Result<Minted> {

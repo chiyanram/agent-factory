@@ -1262,6 +1262,7 @@ async function appTokenCommand({ positionals, io }: Args): Promise<number> {
           http: realHttp,
           now: Math.floor(Date.now() / 1000),
           cacheDir: join(me.homedir, ".cache", "agent-factory"),
+          warn: (line) => io.err(`agent-factory app-token: ${line}\n`),
         })
       : config;
   if (minted.kind === "failed") {
