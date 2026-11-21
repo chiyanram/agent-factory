@@ -19,13 +19,9 @@ export type BoardIo = {
   readonly now: () => number;
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
-  // the change's prefix on the project's git host: # or !
   readonly mark: string;
-  // every ticket of the project, decided as a pass would, read-only (tick.ts decideAll)
   readonly decided: () => Promise<Result<readonly Decided[]>>;
-  // the open issues whose session waits for the operator (waiting.ts WAITING_LABEL), on the read-only git host
   readonly waiting: () => Promise<Result<readonly Waiting[]>>;
-  // the project keeps its specs in issues, so a ticket's name is its issue's number
   readonly ticketsAreIssues: boolean;
 };
 
@@ -35,7 +31,6 @@ export const BOARD_HELP = `  board [<project>] [--json]   one line per ticket in
                                needs you; read-only. --json: the same with each line's lane, times in UTC
 `;
 
-// boardCommand : the board on stdout; a project the pass cannot read fails on stderr, and exits 1
 export async function boardCommand(project: string, json: boolean, io: BoardIo): Promise<number> {
   const lines = await doorBoard({
     home: io.home,

@@ -14,12 +14,10 @@ export type NextStep = { readonly who: "factory" | "person"; readonly does: stri
 
 export type Lane = "needs-you" | "ready-to-merge" | "factory";
 
-// the lanes in the order a person reads them: what needs them first
 export const LANES: readonly Lane[] = ["needs-you", "ready-to-merge", "factory"];
 
 export type Turn =
   | { readonly lane: "needs-you" | "ready-to-merge"; readonly step: NextStep }
-  // run: a step the factory starts itself; gate: CI, a backoff, the blockers or a quiet claim given back
   | { readonly lane: "factory"; readonly on: "run" | "gate"; readonly step: NextStep };
 
 const FACTORY_RUNS: ReadonlySet<Action["kind"]> = new Set([
@@ -34,15 +32,12 @@ const FACTORY_RUNS: ReadonlySet<Action["kind"]> = new Set([
   "blockers-unread",
 ]);
 
-// the person's step once the gate is green: the only step in the ready-to-merge lane
 const MERGE: NextStep = { who: "person", does: "reviews and merges the change" };
 
-// a person's step for a wait this module does not know (the generated-state test keeps this from happening)
 const NO_STEP: NextStep = { who: "person", does: "looks at the ticket: the factory names no next step for this wait" };
 
 const AGAIN = "STARTs the ticket again (tiny) or approves its spec again: agent-factory start | approve";
 
-// each why the table gives a wait, a release or a hand-over, and the step that follows it
 const STEPS: readonly (readonly [RegExp, NextStep])[] = [
   [
     /^CI is running at this head$|^no CI result at this head yet$|^waiting for CI$/,
@@ -113,29 +108,23 @@ const STEPS: readonly (readonly [RegExp, NextStep])[] = [
   ],
 ];
 
-// a held ticket's stop when the git host did not answer for its blockers (#494): it has no change to label, and it goes
-// on by itself once the git host answers, so the person's step is to look at the git host, not to START again
 const UNANSWERED = /^the git host did not answer for the ticket's blockers on \d+ passes in a row/;
 const UNANSWERED_STEP: NextStep = {
   who: "person",
   does: "checks the git host's login and the tickets the spec is blocked by; the ticket goes on by itself once the git host answers",
 };
 
-// handOverStep : what the person does after a hand-over: look at the git host for an unanswered blocker read, else decide
-// and go on by START or approval
 function handOverStep(why: string): NextStep {
   return UNANSWERED.test(why)
     ? UNANSWERED_STEP
     : { who: "person", does: `decides; to go on, removes needs-human and ${AGAIN}` };
 }
 
-// stepOf : the step a why names, or undefined for one this module does not know
 function stepOf(why: string): NextStep | undefined {
   const plain = why.replace(/^quiet for over \d+ minutes: /, "");
   return STEPS.find(([pattern]) => pattern.test(plain))?.[1];
 }
 
-// nextStep : who acts next on the ticket, and what they do; undefined for a wait this module does not know
 export function nextStep(action: Action): NextStep | undefined {
   if (FACTORY_RUNS.has(action.kind)) {
     return { who: "factory", does: `starts the ${action.kind} step` };
@@ -149,8 +138,6 @@ export function nextStep(action: Action): NextStep | undefined {
   return "why" in action ? stepOf(action.why) : undefined;
 }
 
-// announced : the person's step a notice tells them of, for a notice the factory sends: the ping on a green gate
-// announces the merge; a design note announces a decision the person makes on the spec. Pure.
 function announced(action: Action): Turn | undefined {
   if (action.kind === "ping") {
     return { lane: "ready-to-merge", step: MERGE };
@@ -163,16 +150,13 @@ function announced(action: Action): Turn | undefined {
     : undefined;
 }
 
-// turnOf : the lane a next step puts the ticket in: the factory's run or gate, the merge, or a person's other step. Pure.
 function turnOf(action: Action, step: NextStep): Turn {
   if (step.who === "factory") {
-    // a run the factory starts itself (the table's RUNS); every other factory step waits on the gate
     return { lane: "factory", on: RUNS.has(action.kind) ? "run" : "gate", step };
   }
   return { lane: step === MERGE ? "ready-to-merge" : "needs-you", step };
 }
 
-// whoseTurn : the lane the ticket is in, from its next step: exactly one of needs you, ready to merge and factory. Pure.
 export function whoseTurn(action: Action): Turn {
   return announced(action) ?? turnOf(action, nextStep(action) ?? NO_STEP);
 }

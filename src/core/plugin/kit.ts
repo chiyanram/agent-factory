@@ -55,7 +55,6 @@ function runOnce(setup: Setup, entry: Entry, stdin: string, path: string): Promi
   });
 }
 
-// call : one request; with the kit's fakes first on the PATH when the plugin names a cli, and what they were sent
 async function call(setup: Setup, entry: Entry, stdin: string, answers: readonly FakeAnswer[] = []): Promise<Answer> {
   if (entry.cli.length === 0) {
     return { ran: await runOnce(setup, entry, stdin, setup.path), request: stdin, calls: [] };
@@ -82,7 +81,6 @@ function kindOf(answer: Answer): string {
   return result.kind === "ok" ? result.value.kind : `not one JSON object with a kind`;
 }
 
-// soft : a refusal the plugin gave, exiting 0, for every capability
 function soft(name: string, answers: readonly Answer[]): Check {
   const kinds = answers.map(kindOf);
   const bad = kinds.find((k) => !SOFT.has(k));
@@ -141,7 +139,6 @@ function field(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }
 
-// subset : every field the expected result names has the same JSON in the actual one
 function subset(expected: unknown, actual: unknown): boolean {
   return typeof expected === "object" && expected !== null
     ? Object.entries(expected).every(([k, v]) => JSON.stringify(field(actual, k)) === JSON.stringify(v))
@@ -176,7 +173,6 @@ function outputs(answers: readonly Answer[]): string {
   return answers.map((a) => (a.ran.kind === "exited" ? `${a.ran.stdout}\n${a.ran.stderr}` : "")).join("\n");
 }
 
-// canaried : the parent env with a canary in every name the plugin declares and in the model's logins
 function canaried(base: Setup, names: readonly string[], canary: string): Setup {
   const marks = Object.fromEntries(
     [...names, "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"].map((n) => [n, `${canary}-${n}`]),
@@ -197,12 +193,8 @@ function leakedIn(setup: Setup, text: string): boolean {
   return Object.values(setup.env).some((v) => typeof v === "string" && v.startsWith("canary-") && text.includes(v));
 }
 
-// a text no quoting, escaping or encoding step may change: quotes, a $, a backtick, a backslash, letters outside ASCII,
-// an emoji, a mention, a reference, a link and a line that would be a quick action
 const TRICKY = 'it\'s "q" $HOME `x` \\ ünï 😀 @team #1 www.example.com\n/approve';
 
-// rendered : a post as post.ts renders it (a PR body with its cleaned Markdown, #335), or none when the value is not a
-// post
 function rendered(value: unknown): readonly string[] {
   const r = reader("post");
   const post = r.done(bodyPostOf(r, value));
@@ -210,7 +202,6 @@ function rendered(value: unknown): readonly string[] {
   return text?.kind === "ok" ? [text.text] : [];
 }
 
-// textsOf : the texts a write's input carries, as the CLI must get them
 function textsOf(input: unknown): readonly string[] {
   const text = field(input, "text");
   return [
@@ -226,7 +217,6 @@ function swapped(value: unknown, key: string, swap: (v: unknown) => unknown): un
     : value;
 }
 
-// tricky : the input with every text it carries replaced by TRICKY
 function tricky(input: unknown): unknown {
   const title = (post: unknown) => swapped(post, "title", () => TRICKY);
   return swapped(
@@ -240,13 +230,10 @@ function tricky(input: unknown): unknown {
   );
 }
 
-// got : a text the CLI got whole: an argv word, stdin, or a string in JSON on either that is the text itself, so text
-// sent with more around it (a line added after it) does not count
 function got(calls: readonly FakeCall[], text: string): boolean {
   return calls.some((c) => stringsIn(c).includes(text));
 }
 
-// fidelityProblem : what the CLI got wrong: a call the fixture did not plan for, or a text it never got whole
 function fidelityProblem(answer: Answer, f: Fixture, texts: readonly string[]): string {
   if (answer.calls.length > f.answers.length) {
     return `the CLI was called ${answer.calls.length} times; ${f.name}.cli.json lists ${f.answers.length} answers`;
@@ -266,14 +253,11 @@ async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown
   );
 }
 
-// isFidelityCase : a write fixture that carries a text and lists the CLI's answers in its .cli.json, so it reaches the
-// CLI; one that lists none (a refusal before any call: no webhook, a bad input) has no text to check
 function isFidelityCase(entry: Entry, f: Fixture): boolean {
   const writes = entry.writes.some((w) => w === f.capability);
   return writes && f.answers.length > 0 && textsOf(field(parsed(f.input), "input")).length > 0;
 }
 
-// fidelity : each write fixture that carries a text, and the first once more with TRICKY
 async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]): Promise<readonly Check[]> {
   if (entry.writes.length === 0) {
     return [];
@@ -320,7 +304,6 @@ async function run(setup: Setup, entry: Entry, dir: string): Promise<readonly Ch
   ];
 }
 
-// testPlugin : every check, in order; the handshake failing stops the rest. Fixtures sit next to the real file.
 export async function testPlugin(base: Setup, path: string): Promise<readonly Check[]> {
   const first = await inspect(base, path);
   if (first.kind === "failed") {

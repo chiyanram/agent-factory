@@ -7,18 +7,13 @@ import { doorDir } from "../src/core/door/discord/files.js";
 import { FakeDiscord, timersOf } from "./fake-discord.js";
 import { tempDir } from "./temp.js";
 
-// agent-factory door discord and setup door-discord: the command reads its token and people.json once, refuses
-// a token file group or others can read before it reaches Discord, and prints nothing that holds the token.
-
 const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
-// a planted bot token in the shape Discord gives one, joined at run time so the source holds no token-shaped string
 const TOKEN = ["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GaBcDe", "abcdefghijklmnopqrstuvwxyz0123456789AB"].join(".");
 const GUILD = "100000000000000001";
 const CHANNEL = "200000000000000002";
 const RAM = "300000000000000003";
 
-// this test's own ids: a test never runs as root
 const ME = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 
 let home = "";

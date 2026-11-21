@@ -8,7 +8,8 @@
 // The finding contract is docs/DESIGN.md's (decided on #237, 2026-11-09): the finder gives its grade, cited, walked or
 // ran, and the evidence behind it; the engine adds the lens, the one the finder run was for, never the model's word.
 // The finding is ADR-0017's shared record (finding.ts): the core every finding has, and the review's own part here.
-// The verify pass's verdict and its schema are shared with the design review, and live there too.
+// The verify pass's verdict and its schema are shared with the design review, and live there too. The engine only
+// lowers a severity (a style finding is always a nit), never raises one.
 
 import { CATEGORIES, type Category } from "../eval/golden.js";
 import {
@@ -38,8 +39,6 @@ export type Axis = "standards" | "spec";
 export type Kind = "rule" | "logic";
 export type { Category };
 
-// a finder's finding: the shared core, and what the review adds: which lens found it (the engine's word), its axis,
-// kind and category, and the evidence behind its grade
 export type Finding = FindingCore & {
   readonly source: "review";
   readonly lens: string;
@@ -71,7 +70,6 @@ export const FIND_SCHEMA = JSON.stringify({
 
 type Own = Pick<Finding, "axis" | "kind" | "category" | "evidence">;
 
-// ownOf : the review's own part of one finding, or undefined when a field is missing or not what it should be. Pure.
 function ownOf(raw: unknown): Own | undefined {
   const axis = oneOf(get(raw, "axis"), ["standards", "spec"] as const);
   const kind = oneOf(get(raw, "kind"), ["rule", "logic"] as const);
@@ -88,21 +86,16 @@ function findingOf(raw: unknown, i: number, lens: string): Finding | undefined {
   return core === undefined || own === undefined ? undefined : styleNit({ ...core, source: "review", lens, ...own });
 }
 
-// styleNit : a style finding is always a nit, as the rules pack's finding format says; the engine only ever lowers a
-// severity, never raises one (#484). Pure.
 function styleNit(f: Finding): Finding {
   return f.category === "style" && f.severity !== "nit" ? { ...f, severity: "nit" } : f;
 }
 
-// categoryNote : the first category no finding may have, named, so it is never read as another (#484). Pure.
 function categoryNote(list: unknown): string {
   const all: readonly unknown[] = Array.isArray(list) ? list : [];
   const bad = all.map((raw) => get(raw, "category")).find((c) => c !== undefined && oneOf(c, CATEGORIES) === undefined);
   return bad === undefined ? "" : `: the category ${JSON.stringify(bad)} is not one of ${CATEGORIES.join(", ")}`;
 }
 
-// readFindings : one finder run's output, renumbered, each finding stamped with the lens the run was for; one malformed
-// finding fails the run
 export function readFindings(output: unknown, lens: string): Result<readonly Finding[]> {
   const list = get(output, "findings");
   const found = Array.isArray(list) ? list.map((raw, i) => findingOf(raw, i, lens)) : [undefined];
@@ -112,7 +105,6 @@ export function readFindings(output: unknown, lens: string): Result<readonly Fin
     : { kind: "failed", reason: `the find pass gave a finding that is not well formed${categoryNote(list)}` };
 }
 
-// sortFindings : every finding in exactly one bucket, settled by its verdict (finding.ts settle)
 export function sortFindings<F extends Finding>(
   findings: readonly F[],
   verdicts: readonly Verdict[],
@@ -141,14 +133,11 @@ export function counts(sorted: readonly Sorted[]): Counts {
 
 const CRITERION = /^AC(\d+)$/;
 
-// criterionOf : the number of the criterion a Spec finding's rule names; 0 for none
 function criterionOf(f: Finding): number {
   const n = CRITERION.exec(f.rule.trim())?.[1];
   return f.axis === "spec" && n !== undefined ? Number(n) : 0;
 }
 
-// quoteOf : the criterion line a Spec finding fails, quoted from the approved spec, or why there is none to quote;
-// "" for a Standards finding or a rule that names no criterion. Pure.
 export function quoteOf(f: Finding, criteria: readonly string[]): string {
   const n = criterionOf(f);
   if (n === 0) {

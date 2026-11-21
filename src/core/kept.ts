@@ -9,30 +9,23 @@ import { join } from "node:path";
 import type { Result } from "./forge/api.js";
 import { attempt } from "./review/safe.js";
 
-// the lines kept of a log: enough to see a failure, never a whole build (#171 Q2)
 export const MAX_LOG_LINES = 200;
-// and the characters kept of those lines, so a log of a few huge lines is bounded too (#199)
 export const MAX_LOG_CHARS = 20_000;
 
 export type At = { readonly recordsDir: string; readonly change: number; readonly head: string };
 
-// recordsDirOf : where a project's clone keeps its records; the review, the verifier and the writer share it. Pure.
 export function recordsDirOf(repo: string): string {
   return join(repo, ".claude", "runs");
 }
 
-// keptPath : one kept file of a change at a head. Pure.
 export function keptPath(at: At, file: string): string {
   return join(at.recordsDir, String(at.change), at.head, file);
 }
 
-// keepText : one plain-text file kept with the head, private to this user; a kept file is a record too, so no secret
-// stays in it (P4, #485)
 export async function keepText(at: At, file: string, text: string): Promise<Result<string>> {
   return keepRaw(at, file, scrubSecrets(text));
 }
 
-// keepJson : one JSON file kept with the head, each string in it scrubbed, so it still reads back (P4, #485)
 export async function keepJson(at: At, file: string, value: unknown): Promise<Result<string>> {
   return keepRaw(at, file, `${scrubbedJson(value, 2)}\n`);
 }
@@ -46,20 +39,16 @@ async function keepRaw(at: At, file: string, text: string): Promise<Result<strin
   }, `cannot keep ${path}`);
 }
 
-// readKept : one kept file; a missing or empty one fails with where it looked
 export async function readKept(at: At, file: string): Promise<Result<string>> {
   const path = keptPath(at, file);
   const text = await readFile(path, "utf8").catch(() => "");
   return text === "" ? { kind: "failed", reason: `nothing kept at ${path}` } : { kind: "ok", value: text };
 }
 
-// a terminal colour or cursor code, which a log carries and a reader never needs
 export const ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "g");
 
-// any character that is not a line break, a tab, or printable: the other control codes a log carries
 const UNSEEN = /[^\n\t -~\u0080-￿]/g;
 
-// tailOf : the last lines of a log, plain. Pure.
 export function tailOf(log: string): string {
   const plain = log.replace(/\r\n?/g, "\n").replace(ESCAPE, "").replace(UNSEEN, "");
   const tail = plain.trimEnd().split("\n").slice(-MAX_LOG_LINES).join("\n");

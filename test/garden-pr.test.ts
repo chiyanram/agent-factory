@@ -5,13 +5,11 @@ import { dirname, join } from "node:path";
 import { parseArgs, report, touchedOf } from "../scripts/garden-pr.js";
 import { tempDir } from "./temp.js";
 
-// planted text, split so that gardener's own text match does not count it in this test file
 const ESCAPE = ["export const x = 1 as", "any;"].join(" ");
 const MOCKED = ["vi.mock", '("x");\nit("a", () => { expect(f).toHaveBeenCalled', "(); });\n"].join("");
 
 const SCRIPT = join(import.meta.dirname, "..", "scripts", "garden-pr.ts");
 
-// a throwaway repository with a main branch and a change branch made from it
 function repo(): {
   readonly dir: string;
   readonly write: (path: string, text: string) => void;

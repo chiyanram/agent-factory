@@ -23,7 +23,6 @@ function at(forge: Forge, number: number): string {
 
 const SHA = /^[0-9a-f]{7,40}$/;
 
-// oneLine : the text, when it is one line that says something
 function oneLine(text: string): boolean {
   return text.trim() !== "" && !/[\r\n]/.test(text);
 }
@@ -31,7 +30,6 @@ function oneLine(text: string): boolean {
 export type AtHead = {
   readonly forge: Forge;
   readonly number: number;
-  // the head the run started at: 7 to 40 hex characters
   readonly sha: string;
   readonly text: string;
 };
@@ -41,7 +39,6 @@ type Note = {
   readonly title: (text: string) => string;
   readonly what: string;
   readonly verb: string;
-  // the note's fields and items, for a round of questions (grill); none for a one-line note
   readonly fields?: Post["fields"];
   readonly items?: Post["items"];
 };
@@ -76,8 +73,6 @@ async function postAt(input: AtHead, note: Note, change: Change): Promise<Result
     : posted;
 }
 
-// noteAtHead : one note, when the change's head is still the one the run started at; a note about an old head once
-// went out in public
 async function noteAtHead(input: AtHead, note: Note): Promise<Result<string>> {
   const refused = checkAtHead(input, note);
   if (refused !== "") {
@@ -95,9 +90,6 @@ export function ask(input: AtHead): Promise<Result<string>> {
   return noteAtHead(input, { seat: "writer", title: (t) => `OPEN: ${t}`, what: "a question", verb: "asked" });
 }
 
-// grill : the coordinator's round of questions (#517), one [coordinator] OPEN: N questions note with an item per
-// question in the writer's form (finish.ts questionRound), so it stays open until a member answers each; the same head
-// rule as status
 export function grill(
   input: Omit<AtHead, "text"> & { readonly questions: readonly Question[] },
 ): Promise<Result<string>> {

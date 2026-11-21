@@ -11,11 +11,9 @@ const BASE_ID = `sha256:${"a".repeat(64)}`;
 const LAYER_ID = `sha256:${"b".repeat(64)}`;
 const OK: Exit = { code: 0, stdout: "", stderr: "" };
 
-// a fake docker: a build writes the next ID to its --iidfile; `fail` makes the call whose first word matches fail
 function fakeDocker(ids: readonly string[], fail = ""): { readonly calls: Call[]; readonly run: Runner } {
   const calls: Call[] = [];
   const left = [...ids];
-  // every build here has --iidfile: its path is the next argument
   const writeId = (args: readonly string[]): void =>
     writeFileSync(args[args.indexOf("--iidfile") + 1] ?? "", `${left.shift() ?? ""}\n`);
   const run: Runner = async (c) => {
@@ -39,7 +37,6 @@ afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 const docker = (run: Runner) => ({ run, bin: "docker", env: {} });
 
-// a fake npm pack: writes a tarball into the folder it is given, and records each folder
 function packer(packed: string[] = [], fail = ""): Packer {
   return async (dest) => {
     if (fail !== "") {
@@ -54,7 +51,6 @@ function packer(packed: string[] = [], fail = ""): Packer {
 
 const build = (run: Runner, project = "ledger", pack: Packer = packer()) =>
   buildBox({ docker: docker(run), home, project, baseDir: "/pkg/images/factory-box", pack });
-// a build's scratch folder changes each run: name it <base>
 const argv = (calls: readonly Call[]): string[] =>
   calls.map((c) =>
     c.args

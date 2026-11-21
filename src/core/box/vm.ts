@@ -27,21 +27,16 @@ export type Docker = { readonly run: Runner; readonly bin: string; readonly env:
 
 export type VmBoxSetup = {
   readonly docker: Docker;
-  // the image the probe looks for; each start runs BoxSpec.image
   readonly image: string;
   readonly owner: Owner;
-  // a new container name; a test passes its own
   readonly newName?: () => string;
-  // milliseconds; a test passes its own
   readonly now?: () => number;
 };
 
 type Failed = { readonly kind: "failed"; readonly reason: string };
 
-// what a run's output is handed to, and how much of it is kept (#228)
 type Output = Pick<Call, "watch" | "keep">;
 
-// outputOf : the command's watcher and keep, only those it set. Pure.
 function outputOf(command: Command): Output {
   return {
     ...(command.watch === undefined ? {} : { watch: command.watch }),
@@ -53,7 +48,6 @@ export function vmBox(setup: VmBoxSetup): Box {
   const { docker, owner } = setup;
   const newName = setup.newName ?? (() => `factory-box-${randomUUID()}`);
   const now = setup.now ?? Date.now;
-  // the boxes this Box started and has not stopped, with the variables each run sees
   const live = new Map<string, BoxSpec>();
 
   const call = (
@@ -76,7 +70,6 @@ export function vmBox(setup: VmBoxSetup): Box {
     return removed.kind === "ok" ? removed : { kind: "failed", reason: removed.reason };
   };
 
-  // the steps after `docker run`; the first that fails removes the box
   const prepare = async (name: string): Promise<Done> => {
     for (const args of setupArgs(name, owner)) {
       const done = await step(args);
@@ -146,7 +139,6 @@ export function vmBox(setup: VmBoxSetup): Box {
     copyIn: (c) => copy(c, (inBox) => ["cp", "--archive", c.host, inBox]),
     copyOut: (c) => copy(c, (inBox) => ["cp", inBox, c.host]),
 
-    // a box this Box never started, or already stopped, is not its to remove
     stop: async (session): Promise<Done> => (live.has(session.id) ? remove(session.id) : { kind: "ok" }),
   };
 }

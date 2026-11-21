@@ -1,14 +1,17 @@
 // plan — what `agent-factory init` asks and what it writes (#369): the round's questions, built from what detect found
 // and what the files already hold, and the settings each answer becomes, compared with the files key by key. A key
-// the files already set is not asked again. A list key only grows: the file's own entries stay. A value that would
-// replace one the file holds is a change the person sees as a diff and says yes to first. Pure.
+// the files already set is not asked again. A list key only grows: the file's own entries stay, except in plugins,
+// whose order and members are the person's choice. A value that would replace one the file holds is a change the
+// person sees as a diff and says yes to first. Pure.
+//
+// A project on a company's own git host is likely work, so init recommends local specs there. A work project is not
+// asked: its spec stays local.
 
 import { settingName } from "../settings/machine.js";
 import { canonical } from "../settings/resolve.js";
 import { MODEL_HOST, type Detected } from "./detect.js";
 import { valueOf, type Question } from "./round.js";
 
-// the process plugin init recommends, and the marketplace it comes from (GUIDE "The project file")
 export const DEFAULT_PLUGIN = "rulebook@chiyanram";
 
 export type Entry = { readonly path: readonly string[]; readonly value: unknown };
@@ -22,7 +25,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// at : the value at a path of a JSON object, or undefined
 export function at(value: unknown, path: readonly string[]): unknown {
   let here: unknown = value;
   for (const part of path) {
@@ -117,14 +119,10 @@ function doorsQuestion(d: Detected): Question {
   };
 }
 
-// atWork : the project or the user file marks it work (the work key, a ladder: true in either holds)
 function atWork(existing: Existing): boolean {
   return at(existing.project, ["work"]) === true || at(existing.user, ["work"]) === true;
 }
 
-// specStoreQuestion : where the specs live (#381). A personal project on github.com or gitlab.com keeps its spec on the
-// issue; one on a company's own git host is likely work, so local is recommended there. A work project is not asked:
-// the spec stays local, and the settings refuse the issue store.
 function specStoreQuestion(d: Detected): Question {
   const personal = d.hostName === "";
   return {
@@ -144,7 +142,6 @@ function specStoreQuestion(d: Detected): Question {
   };
 }
 
-// questionsFor : the round, without the questions whose key the files already set
 export function questionsFor(d: Detected, existing: Existing): readonly Question[] {
   const all: readonly (readonly [Question, object, readonly string[]])[] = [
     [projectQuestion(d), existing.project, ["gitHostProject"]],
@@ -161,12 +158,10 @@ function union(lists: readonly (readonly string[])[]): readonly string[] {
   return [...new Set(lists.flat())];
 }
 
-// asked : a question's answer, else what the file already holds
 function asked(questions: readonly Question[], picks: readonly number[], id: string, held: unknown): unknown {
   return valueOf(questions, picks, id) ?? held;
 }
 
-// only : the entry when the condition holds, else none
 function only(holds: boolean, entry: Entry): readonly Entry[] {
   return holds ? [entry] : [];
 }
@@ -180,7 +175,6 @@ function nonEmpty(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
 
-// projectEntries : the project file's settings from the clone and the answers
 export function projectEntries(
   d: Detected,
   answered: { readonly questions: readonly Question[]; readonly picks: readonly number[]; readonly project: object },
@@ -210,14 +204,11 @@ function strings(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((v) => typeof v === "string") ? value : undefined;
 }
 
-// listsOf : the file's list and the wanted one, when both are lists of words and the key is not plugins
 function listsOf(entry: Entry, was: unknown): readonly [readonly string[], readonly string[]] | undefined {
   const [held, wanted] = [strings(was), strings(entry.value)];
   return held === undefined || wanted === undefined || entry.path[0] === "plugins" ? undefined : [held, wanted];
 }
 
-// grown : a list key's change: the same when the file's entries cover the wanted ones, else the file's own entries
-// with the missing ones after them
 function grown(entry: Entry, was: unknown, held: readonly string[], wanted: readonly string[]): Change {
   const missing = wanted.filter((w) => !held.includes(w));
   return missing.length === 0
@@ -225,8 +216,6 @@ function grown(entry: Entry, was: unknown, held: readonly string[], wanted: read
     : { kind: "replace", entry: { ...entry, value: [...held, ...missing] }, was };
 }
 
-// changeOf : one entry against the file: new, the same, or a replacement; a list grows by the entries it lacks and
-// keeps its own, but for plugins, whose order and members are the person's choice
 export function changeOf(file: object, entry: Entry): Change {
   const was = at(file, entry.path);
   if (was === undefined) {
@@ -239,7 +228,6 @@ export function changeOf(file: object, entry: Entry): Change {
   return canonical(was) === canonical(entry.value) ? { kind: "same", entry } : { kind: "replace", entry, was };
 }
 
-// diffLines : the changes as config show names the keys: + new, ~ replaced
 export function diffLines(changes: readonly Change[]): readonly string[] {
   return changes.flatMap((c) => {
     const key = c.entry.path.join(".");
@@ -264,7 +252,6 @@ function setAt(target: Record<string, unknown>, path: readonly string[], value: 
   setAt(next, rest, value);
 }
 
-// applied : the file with each change it takes in place; `replace` false keeps every value it holds
 export function applied(file: object, changes: readonly Change[], replace: boolean): object {
   const out: Record<string, unknown> = structuredClone({ ...file });
   for (const c of changes) {

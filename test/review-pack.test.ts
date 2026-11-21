@@ -15,7 +15,6 @@ afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
 const home = (): string => join(p.root, "factory");
 
-// the spec of ledger/PROJ-1 in the local store, approved with the hash of `approved`
 function spec(approved: string = specText()): PackInput["spec"] {
   return {
     store: { kind: "local", root: join(home(), "specs") },
@@ -48,7 +47,6 @@ async function pack(over: Partial<PackInput> = {}): Promise<string> {
   return readFileSync(built.value.path, "utf8");
 }
 
-// one section's text: from "## n " to the next "## "
 function section(text: string, n: number): string {
   const start = text.indexOf(`\n## ${n} `);
   const end = text.indexOf("\n## ", start + 4);

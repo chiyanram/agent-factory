@@ -19,7 +19,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type * as Golden from "../src/core/eval/golden.js";
 
-// the golden set's shapes live in src/ (the eval harness reads them too, #215); loaded on Node's type stripping
 const shapes: typeof Golden = await import(new URL("../src/core/eval/golden.ts", import.meta.url).href);
 const { KINDS, STATUSES, oneOf, readGolden, tableRows } = shapes;
 
@@ -30,16 +29,13 @@ export type Result<T> = Golden.Result<T>;
 const CASES = join("evals", "reviewer");
 const REQUIRED = ["base.sha", "change.patch", "golden.json"] as const;
 const OPTIONAL = ["pr.md"] as const;
-// folders under evals/reviewer/ that are not cases: the harness's results (ADR-0015)
 const NOT_CASES = ["results"] as const;
 const SHA = /^[0-9a-f]{40}$/;
 
-// shaProblem : why base.sha's text is not one full commit hash, or "". Pure.
 export function shaProblem(raw: string): string {
   return SHA.test(raw.trim()) ? "" : "base.sha must hold one 40-hex commit hash";
 }
 
-// fileProblems : the required files a case folder lacks and the files it should not hold. Pure.
 export function fileProblems(names: readonly string[]): readonly string[] {
   const missing = REQUIRED.filter((f) => !names.includes(f)).map((f) => `no ${f}`);
   const extra = names.filter((n) => !oneOf(REQUIRED, n) && !oneOf(OPTIONAL, n)).map((n) => `an unknown file ${n}`);
@@ -54,7 +50,6 @@ function rowProblems(row: Row): readonly string[] {
   return [...kind, ...status].map((w) => `${row.name}: cases.md: ${w}`);
 }
 
-// tableProblems : the cases with no row, the rows with no case or with a bad kind or status, and the repeats. Pure.
 export function tableProblems(folders: readonly string[], rows: readonly Row[]): readonly string[] {
   const names = rows.map((r) => r.name);
   const noRow = folders.filter((f) => !names.includes(f)).map((f) => `${f}: no row in cases.md`);
@@ -63,9 +58,6 @@ export function tableProblems(folders: readonly string[], rows: readonly Row[]):
   return [...noRow, ...noCase, ...twice, ...rows.flatMap(rowProblems)];
 }
 
-// kindProblem : a clean case expects no finding, and a seeded or found-by-eval one at least one; a rulebook copy may be
-// either. Pure.
-// the kinds whose golden.json must name at least one seed
 const SEEDED_KINDS: ReadonlySet<string> = new Set(["seeded", "found-by-eval"]);
 
 export function kindProblem(kind: string, findings: readonly Finding[]): string {
@@ -92,7 +84,6 @@ function lineTotal(content: string): number {
   return content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
 }
 
-// Applied : the files the patch changes, each with its line count once the patch is applied
 type Applied = ReadonlyMap<string, number>;
 
 function changedFiles(root: string, sha: string, index: string): Applied {
@@ -117,7 +108,6 @@ function inScratchIndex(root: string, sha: string, patch: string, index: string)
   return { kind: "ok", value: changedFiles(root, sha, index) };
 }
 
-// applied : the patch applied to the commit in a scratch index, so the checkout and the real index are never touched
 export function applied(root: string, sha: string, patch: string): Result<Applied> {
   if (git(root, ["cat-file", "-e", `${sha}^{commit}`], "").code !== 0) {
     return { kind: "failed", reason: `base.sha ${sha} is not a commit in this history (a shallow clone?)` };
@@ -128,7 +118,6 @@ export function applied(root: string, sha: string, patch: string): Result<Applie
   return result;
 }
 
-// placeProblems : each finding must sit in a file the patch changes, on a line that file has after it. Pure.
 export function placeProblems(findings: readonly Finding[], files: Applied): readonly string[] {
   return findings.flatMap((f, i) => {
     const lines = files.get(f.file);
@@ -152,7 +141,6 @@ function goldenOf(dir: string, sha: string, root: string): readonly string[] {
   return files.kind === "failed" ? [files.reason] : placeProblems(golden.value, files.value);
 }
 
-// complete : what is wrong with a case that has all its files: its hash, its golden.json and patch, and its kind
 function complete(root: string, dir: string, kind: string): readonly string[] {
   const sha = read(dir, "base.sha").trim();
   const shaWhy = shaProblem(sha);
@@ -162,7 +150,6 @@ function complete(root: string, dir: string, kind: string): readonly string[] {
   return [shaWhy, ...deep, kindWhy].filter((w) => w !== "");
 }
 
-// caseProblems : what is wrong with one case folder, each line prefixed with its name
 export function caseProblems(root: string, name: string, kind: string): readonly string[] {
   const dir = join(root, CASES, name);
   const missing = fileProblems(readdirSync(dir));
@@ -177,7 +164,6 @@ function caseFolders(root: string): readonly string[] {
     .toSorted();
 }
 
-// problems : every problem in ROOT's golden set, as "evals/reviewer/<case>: …"; none when there is no golden set
 export function problems(root: string): readonly string[] {
   if (!existsSync(join(root, CASES))) {
     return [];

@@ -6,7 +6,6 @@
 
 import type { Role } from "./cards.js";
 
-// each ID, and the code that enforces it
 export const GUARDRAILS = {
   "read-only": "the run gets Read, Grep and Glob alone (agent/claude.ts claudeArgs, process/cards.ts ROLE_TOOLS)",
   "no-push": "git push is denied to the run; the host pushes (agent/claude-writer.ts writerDenies, finish.ts)",
@@ -22,7 +21,6 @@ export type GuardrailId = keyof typeof GUARDRAILS;
 
 const WRITER: readonly GuardrailId[] = ["no-push", "no-web", "no-credentials"];
 
-// the IDs that always apply to a role's run
 export const GUARDRAIL_FLOOR: Readonly<Record<Role, readonly GuardrailId[]>> = {
   implementer: [...WRITER, "judge-files-locked"],
   "test-first": [...WRITER, "edit-scope"],
@@ -33,23 +31,17 @@ export const GUARDRAIL_FLOOR: Readonly<Record<Role, readonly GuardrailId[]>> = {
   retro: ["read-only"],
 };
 
-// testFilesOnly : whether the role may edit only the project's test files (ready.testFiles), whatever its card says:
-// edit-scope in a role's floor names no globs of its own, so it means the test files, and the role's card needs no
-// Edit(…) path (writer/scope.ts scopesOf). Pure.
 export function testFilesOnly(role: Role): boolean {
   return GUARDRAIL_FLOOR[role].includes("edit-scope");
 }
 
-// the roles whose runs edit the clone
 const EDITS: ReadonlySet<Role> = new Set(["implementer", "test-first", "cleanup"]);
 
-// allowedGuardrails : the IDs a card may name for its role: its floor, and edit-scope for a role that edits. Pure.
 export function allowedGuardrails(role: Role): readonly GuardrailId[] {
   const floor = GUARDRAIL_FLOOR[role];
   return EDITS.has(role) ? [...new Set<GuardrailId>([...floor, "edit-scope"])] : floor;
 }
 
-// isGuardrail : whether a name is an ID on the list. Pure.
 export function isGuardrail(name: string): name is GuardrailId {
   return Object.hasOwn(GUARDRAILS, name);
 }

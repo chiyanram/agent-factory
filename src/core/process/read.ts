@@ -20,9 +20,7 @@ import { BASELINE, type Pointer } from "../review/rules.js";
 import { packProblem, readPackSchemas } from "./pack-schema.js";
 
 export type Process = {
-  // where it came from, as a person reads it
   readonly from: string;
-  // the folder of the plugin that holds it, where its references are; "" for the built-in process
   readonly dir: string;
   readonly lanes: readonly LaneProps[];
   readonly baseline: readonly Pointer[];
@@ -30,17 +28,14 @@ export type Process = {
 
 export const BUILT_IN: Process = { from: "the built-in process", dir: "", lanes: DEFAULT_LANES, baseline: BASELINE };
 
-// one plugin on disk: what to call it, and its folder
 export type PluginDir = { readonly label: string; readonly dir: string };
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
 }
 
-// a skill or reference name the pack can join into a path: no slash, no dot
 const NAME = /^[A-Za-z0-9_-]+$/;
 
-// processDir : the plugin's first skills/<skill>/process folder with a lanes file, by skill name; "" when none
 export async function processDir(dir: string): Promise<string> {
   const skills = await readdir(join(dir, "skills")).catch((): string[] => []);
   for (const skill of skills.toSorted()) {
@@ -70,9 +65,6 @@ async function jsonAt(path: string): Promise<Result<unknown> | { readonly kind: 
   }
 }
 
-// the plugin's lane shape, {"lane", "approval", "lenses", "design_review", "test_first", …}, as lanesOf reads it,
-// {"name", "approval", "lenses", "designReview", "testFirst"}; a lane that leaves either flag out keeps the default
-// lane's (#236, #417)
 function engineLanes(raw: unknown): unknown {
   const lanes = prop(raw, "lanes");
   return Array.isArray(lanes)
@@ -92,7 +84,6 @@ async function lanesAt(dir: string): Promise<Result<readonly LaneProps[]>> {
   if (raw.kind !== "ok") {
     return raw.kind === "none" ? failed(`${path}: cannot be read`) : raw;
   }
-  // the rules pack's own lanes format first, when it ships one (#484), then the engine's floor
   const schemas = await readPackSchemas(dir);
   const problem = schemas.kind === "ok" ? packProblem(schemas.value, "lanes", raw.value, path) : schemas.reason;
   return problem === "" ? lanesOf(engineLanes(raw.value), path) : failed(problem);
@@ -134,13 +125,10 @@ async function processAt(label: string, plugin: string, dir: string): Promise<Re
     : baseline;
 }
 
-// one plugin that holds a process, and its process folder
 export type Holder = { readonly plugin: PluginDir; readonly dir: string };
 
-// the plugin that holds the project's process; "none" when no plugin holds one
 export type Found = Result<Holder> | { readonly kind: "none" };
 
-// oneHolder : the one plugin among those that hold a process; refused when two or more do, naming each one (#426). Pure.
 export function oneHolder(holders: readonly Holder[]): Found {
   const [first, second] = holders;
   if (first === undefined) {
@@ -153,14 +141,11 @@ export function oneHolder(holders: readonly Holder[]): Found {
       );
 }
 
-// findProcess : the plugin, among the project's, that holds the process; refused when two or more hold one
 export async function findProcess(plugins: readonly PluginDir[]): Promise<Found> {
   const dirs = await Promise.all(plugins.map(async (plugin) => ({ plugin, dir: await processDir(plugin.dir) })));
   return oneHolder(dirs.filter((h) => h.dir !== ""));
 }
 
-// readProcess : the process of the one plugin that holds one; the built-in process when none does. A process that is
-// there but does not read is refused, and so is a second process plugin (#426).
 export async function readProcess(plugins: readonly PluginDir[]): Promise<Result<Process>> {
   const found = await findProcess(plugins);
   if (found.kind !== "ok") {

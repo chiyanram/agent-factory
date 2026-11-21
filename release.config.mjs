@@ -4,6 +4,8 @@
 // A release is a tag vX.Y.Z, a GitHub release and a CHANGELOG.md entry; nothing is published to npm (package.json is
 // private). Each release attaches the packed package (`npm pack`), so a colleague installs a pinned version with one
 // line: docs/how-to/install.md
+//
+// The build runs in prepack, not prepare, so the packed package declares no script an install runs.
 import { releaseNotes } from './scripts/release_notes.mjs'
 
 export default {
@@ -20,9 +22,6 @@ export default {
           '# Changelog\n\nWhat agent-factory ships, by version. semantic-release writes this file from the commit messages on `main`;\ndo not edit it by hand.',
       },
     ],
-    // sets "version" in package.json and package-lock.json, then packs the package into dist-release/ (npm pack runs
-    // the prepack script, which builds dist/); publishes nothing, because the package is private. The build is prepack,
-    // not prepare, so the packed package declares no script an install runs (#482)
     ['@semantic-release/npm', { npmPublish: false, tarballDir: 'dist-release' }],
     [
       '@semantic-release/git',
@@ -31,14 +30,9 @@ export default {
         message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}',
       },
     ],
-    // no "released in" comments or labels on each closed issue and PR: they spent the account's hourly API limit and
-    // failed the v0.29.0 run after the release was out. The release page and CHANGELOG.md list what shipped.
-    // successCommentCondition: false skips the comments without the deprecated successComment: false (#384), and
-    // failCommentCondition: false skips the success step's search for semantic-release's own failure issues, which
-    // went red with graphql_rate_limit after two releases were out (#483; @semantic-release/github 12.0.10,
-    // lib/success.js lines 68 and 271). With it no failure issue is opened either: a failed release stays visible as
-    // the red run.
-    // The packed package goes on the release page as chiyanram-agent-factory-<version>.tgz for the one-line install.
+    // successCommentCondition false posts no comment on an issue or PR; failCommentCondition false opens no failure
+    // issue. Those calls spent the hourly API limit and failed a release, so a failed release shows as the red run.
+    // https://github.com/semantic-release/github/blob/v12.0.10/README.md#options
     [
       '@semantic-release/github',
       {

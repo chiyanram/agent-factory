@@ -15,7 +15,6 @@ import { plainName } from "../spec.js";
 import { codeOf, prop, readRecords, recordPath, type Event, type Where } from "./records.js";
 
 export type TraceKind = "writer" | "finder" | "verify" | "design-review" | "design-verify" | "onboard" | "retro";
-// a plain file name in the ticket's folder, never a path
 export type TraceName = string;
 export type TraceAt = Where & { readonly kind: TraceKind; readonly lens?: string; readonly at: number };
 export type TraceKept = { readonly name: TraceName; readonly bytes: number; readonly cut: boolean };
@@ -25,7 +24,6 @@ export type TraceListed = {
   readonly at: string;
   readonly kind: TraceKind;
   readonly bytes: number;
-  // the record line that names the trace, in a few words; none when no line names it
   readonly line?: string;
 };
 
@@ -33,7 +31,6 @@ export const TRACE_DAYS = 30;
 export const TRACE_MAX_BYTES = 50 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60_000;
 
-// a sink for a run that keeps no trace: it takes every chunk and keeps none
 export const NO_TRACE: TraceSink = {
   write: () => undefined,
   close: async () => ({ kind: "failed", reason: "no trace was opened" }),
@@ -48,18 +45,15 @@ const KINDS: readonly TraceKind[] = [
   "onboard",
   "retro",
 ];
-// <kind>[-<lens>]-<YYYY-MM-DDTHH-MM-SS-mmmZ>.jsonl: the kind, a lens of plain words, and the time
 const NAME = new RegExp(
   `^(${KINDS.join("|")})(?:-([a-z0-9][a-z0-9-]*))?-(\\d{4}-\\d\\d-\\d\\dT\\d\\d-\\d\\d-\\d\\d-\\d{3}Z)\\.jsonl$`,
 );
 
-// traceName : the file name of a trace, the time with no ":" or ".", so it is a plain name everywhere. Pure.
 export function traceName(at: Pick<TraceAt, "kind" | "lens" | "at">): TraceName {
   const time = new Date(at.at).toISOString().replace(/[:.]/g, "-");
   return `${at.kind}${at.lens === undefined ? "" : `-${at.lens}`}-${time}.jsonl`;
 }
 
-// nameParts : a trace's kind and time, from its name; none for a name that is not a trace's. Pure.
 function nameParts(name: string): { readonly kind: TraceKind; readonly at: string } | undefined {
   const m = NAME.exec(name);
   const kind = KINDS.find((k) => k === m?.[1]);
@@ -71,8 +65,6 @@ function nameParts(name: string): { readonly kind: TraceKind; readonly at: strin
   return Number.isNaN(Date.parse(iso)) ? undefined : { kind, at: iso };
 }
 
-// traceLine : one output line as a trace keeps it: a JSON event with every string scrubbed, any other text scrubbed.
-// Pure.
 export function traceLine(line: string): string {
   try {
     return scrubbedJson(JSON.parse(line) as unknown);
@@ -81,23 +73,19 @@ export function traceLine(line: string): string {
   }
 }
 
-// control : whether a character is one a terminal acts on: a C0 or C1 control character but the tab, or DEL (ESC starts
-// CSI and OSC sequences). Pure.
+// control : a C0 or C1 control character but the tab, or DEL: a terminal acts on it, and ESC starts CSI and OSC
+// sequences, so printing it can move the cursor or set the title.
+// https://www.man7.org/linux/man-pages/man4/console_codes.4.html
 function control(code: number): boolean {
   return code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f));
 }
 
-// inert : a text line with each control character escaped as \u00XX, so printing a trace moves no cursor and sets no
-// title; a JSON line needs none, since serializing escapes them. Pure.
 function inert(text: string): string {
   return Array.from(text, (c) =>
     control(c.charCodeAt(0)) ? `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}` : c,
   ).join("");
 }
 
-// inertText : a whole text as a terminal may print it (#542: `spec --show`): each control character escaped as in a
-// trace line, but the tab, the newline, and a carriage return that ends a line before its newline; a lone carriage
-// return would rewrite the line on screen, so it is escaped. Pure.
 export function inertText(text: string): string {
   const keep = (i: number): boolean => text[i] === "\n" || (text[i] === "\r" && text[i + 1] === "\n");
   return text
@@ -106,13 +94,11 @@ export function inertText(text: string): string {
     .join("");
 }
 
-// ticketDir : the ticket's folder beside its record file
 function ticketDir(where: Where): Result<string> {
   const path = recordPath(where);
   return path.kind === "ok" ? { kind: "ok", value: path.value.slice(0, -".jsonl".length) } : path;
 }
 
-// Held : what a trace holds while the run prints: the line still being printed, the bytes written, whether it was cut
 export type Held = { readonly partial: string; readonly bytes: number; readonly cut: boolean };
 
 export const NOTHING_HELD: Held = { partial: "", bytes: 0, cut: false };
@@ -121,8 +107,6 @@ function cutLine(max: number): string {
   return `${JSON.stringify({ type: "trace", cut: true, bytes: max })}\n`;
 }
 
-// put : complete lines added, each scrubbed, and the text they add to the file; at the cap, one last line that says it
-// was cut. Pure.
 function put(held: Held, lines: readonly string[], max: number): { readonly held: Held; readonly text: string } {
   let bytes = held.bytes;
   let text = "";
@@ -138,9 +122,6 @@ function put(held: Held, lines: readonly string[], max: number): { readonly held
   return { held: { partial: held.partial, bytes, cut: held.cut }, text };
 }
 
-// traceStep : one more piece of output, and the text it adds to the file. Once the trace is cut, every piece is
-// dropped; a line still being printed that is already past the room left cuts the trace at once, so a long line with
-// no newline never grows in memory. Pure.
 export function traceStep(held: Held, chunk: string, max: number): { readonly held: Held; readonly text: string } {
   if (held.cut) {
     return { held, text: "" };
@@ -153,11 +134,8 @@ export function traceStep(held: Held, chunk: string, max: number): { readonly he
     : { held: { ...after.held, partial: "", cut: true }, text: after.text + cutLine(max) };
 }
 
-// the trace being written: what it holds, and the first error
 type Open = { held: Held; error: string };
 
-// closed : the trace's file ended, then what it kept; a run that printed nothing, such as one whose box never started,
-// keeps no trace, and its empty file is removed
 async function closed(file: WriteStream, open: Open, path: string, max: number): Promise<Result<TraceKept>> {
   const last = put(open.held, open.held.partial.trim() === "" ? [] : [open.held.partial], max);
   file.write(last.text);
@@ -173,7 +151,6 @@ async function closed(file: WriteStream, open: Open, path: string, max: number):
   return { kind: "ok", value: { name: basename(path), bytes, cut } };
 }
 
-// sinkOf : the sink that writes a new trace file at path, as the run prints
 function sinkOf(path: string, max: number): TraceSink {
   const file = createWriteStream(path, { flags: "wx", mode: 0o600 });
   const open: Open = { held: NOTHING_HELD, error: "" };
@@ -192,7 +169,6 @@ function sinkOf(path: string, max: number): TraceSink {
   };
 }
 
-// openTrace : a new trace file for a run, written as the run prints; the cap is a parameter for the tests
 export async function openTrace(at: TraceAt, max: number = TRACE_MAX_BYTES): Promise<Result<TraceSink>> {
   const dir = ticketDir(at);
   if (dir.kind === "failed") {
@@ -201,7 +177,6 @@ export async function openTrace(at: TraceAt, max: number = TRACE_MAX_BYTES): Pro
   return openIn(dir.value, at, max);
 }
 
-// openIn : a new trace file in a folder
 async function openIn(dir: string, at: Pick<TraceAt, "kind" | "lens" | "at">, max: number): Promise<Result<TraceSink>> {
   const made = await mkdir(dir, { recursive: true, mode: 0o700 }).then(
     () => true,
@@ -212,8 +187,6 @@ async function openIn(dir: string, at: Pick<TraceAt, "kind" | "lens" | "at">, ma
     : { kind: "failed", reason: `cannot make ${dir}` };
 }
 
-// keepTraceIn : a run's whole output kept as its trace in a folder of its own, scrubbed and capped as every trace is:
-// the retro's run, whose trace sits beside its drafts (#488)
 export async function keepTraceIn(
   dir: string,
   at: Pick<TraceAt, "kind" | "at">,
@@ -227,7 +200,6 @@ export async function keepTraceIn(
   return opened.value.close();
 }
 
-// keepTrace : a run's whole output, printed already, kept as its trace at once: a model run's stream (#487)
 export async function keepTrace(at: TraceAt, stdout: string): Promise<Result<TraceKept>> {
   const opened = await openTrace(at);
   if (opened.kind === "failed") {
@@ -237,13 +209,11 @@ export async function keepTrace(at: TraceAt, stdout: string): Promise<Result<Tra
   return opened.value.close();
 }
 
-// lineOf : the record line that names a trace, in a few words, as a field to spread; none when no line names it. Pure.
 function lineOf(events: readonly Event[], name: TraceName): { readonly line?: string } {
   const e = events.find((x) => traceNames(x).includes(name));
   return e === undefined ? {} : { line: wordsOf(e) };
 }
 
-// traceNames : the traces a record line names: a run's trace, or a round's or a failed run's traces. Pure.
 function traceNames(e: Event): readonly string[] {
   const one = prop(e, "trace");
   const many = prop(e, "traces");
@@ -251,16 +221,13 @@ function traceNames(e: Event): readonly string[] {
   return [...(typeof one === "string" ? [one] : []), ...list.filter((n): n is string => typeof n === "string")];
 }
 
-// the fields that say, after a line's kind, what the run was and how it ended
 const WORD_FIELDS = ["mode", "step", "phase", "outcome"] as const;
 
-// wordsOf : a record line in a few words: its kind, then what the run was and how it ended. Pure.
 function wordsOf(e: Event): string {
   const words = WORD_FIELDS.map((f) => prop(e, f)).filter((v): v is string => typeof v === "string");
   return [e.kind, ...words].join(" ");
 }
 
-// listedOf : one file of the ticket's folder as the list shows it; none for a file that is not a trace
 async function listedOf(dir: string, name: string, events: readonly Event[]): Promise<readonly TraceListed[]> {
   const parts = nameParts(name);
   const size = parts === undefined ? undefined : await stat(join(dir, name)).catch(() => undefined);
@@ -269,7 +236,6 @@ async function listedOf(dir: string, name: string, events: readonly Event[]): Pr
     : [{ name, ...parts, bytes: size.size, ...lineOf(events, name) }];
 }
 
-// listTraces : the ticket's traces, newest first, each with the record line that names it
 export async function listTraces(where: Where): Promise<Result<readonly TraceListed[]>> {
   const dir = ticketDir(where);
   if (dir.kind === "failed") {
@@ -282,12 +248,10 @@ export async function listTraces(where: Where): Promise<Result<readonly TraceLis
   return { kind: "ok", value: listed.toSorted((a, b) => b.at.localeCompare(a.at)) };
 }
 
-// old : whether a trace's time is past TRACE_DAYS at now. Pure.
 function old(at: string, now: number): boolean {
   return now - Date.parse(at) > TRACE_DAYS * DAY_MS;
 }
 
-// readTrace : one trace's text; "deleted" when its time is past TRACE_DAYS and the file is gone
 export async function readTrace(
   where: Where,
   name: string,
@@ -304,14 +268,12 @@ export async function readTrace(
   );
 }
 
-// unread : why a trace was not read: deleted when it is gone and past TRACE_DAYS, else the error. Pure.
 function unread(name: string, code: string, past: boolean): Result<string> | { readonly kind: "deleted" } {
   return code === "ENOENT" && past
     ? { kind: "deleted" }
     : { kind: "failed", reason: `cannot read the trace ${name}: ${code || "error"}` };
 }
 
-// prunedIn : one folder's traces past TRACE_DAYS deleted; each that could not be deleted, by its path
 export async function prunedIn(dir: string, now: number): Promise<{ deleted: number; problems: string[] }> {
   const names = await readdir(dir).catch(() => [] as string[]);
   const due = names.filter((n) => {
@@ -330,7 +292,6 @@ export async function prunedIn(dir: string, now: number): Promise<{ deleted: num
   return { deleted: due.length - problems.length, problems };
 }
 
-// pruneTraces : every trace of the project older than TRACE_DAYS deleted; what could not be deleted is named
 export async function pruneTraces(input: {
   readonly home: string;
   readonly project: string;

@@ -8,6 +8,10 @@
 // run, review and judge, goes through the $100 purse (budget.ts): a pass whose worst case is over the cap still
 // starts, and stops before any run that would not fit under it, marked partial (#483). It runs on the host, as
 // the production review does, never in CI.
+//
+// The operator's approval of a case in cases.md stands for the approval of its spec, so the pass writes that approval
+// in its own home, never the real factory home. Its clones and run folders live in a private folder, never under a
+// world-writable /tmp.
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -43,7 +47,6 @@ import type { Row } from "./golden.js";
 import { matchRun, modelJudge, type Judge } from "./judge.js";
 import { blobSha, document, type CaseRecord, type Inputs, type RunRecord } from "./results.js";
 
-// three runs per case (ADR-0015 E5)
 export const RUNS = 3;
 export const PROJECT = "eval";
 export const LOGIN = "agent-factory-eval";
@@ -51,26 +54,20 @@ const LABEL = "agent::claimed";
 const PROMPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts");
 
 export type EvalSettings = {
-  // each review model run's cap and each judge run's, in US dollars, as text ("2", "0.50")
   readonly runUsd: string;
   readonly judgeUsd: string;
   readonly judgeModel: string;
   readonly judgePrompt: string;
-  // each run's time limit, as in production for the review's runs
   readonly limits: RunLimits & { readonly judge: RunLimit };
   readonly drafts: boolean;
-  // what the change this pass proves aims at (ADR-0021), recorded in the results file; none for a baseline
   readonly aim: Aim | "none";
 };
 
 export type EvalInput = {
-  // this repository's checkout: the golden set, and the history its base.sha commits are in
   readonly root: string;
   readonly env: NodeJS.ProcessEnv;
-  // a private folder for the pass's clones and run folders, never under a world-writable /tmp; removed after
   readonly work: string;
   readonly rulebook: string;
-  // the agent CLI behind every review and judge run
   readonly model: Model;
   readonly settings: EvalSettings;
   readonly now: Date;
@@ -79,8 +76,6 @@ export type EvalInput = {
 
 export type Written = { readonly path: string; readonly partial: boolean; readonly proof: boolean };
 
-// evalSettings : the eval's own settings from the environment; a review run with no cap is given one, since an
-// uncapped run could spend anything (budget.ts). A time limit that is set but not valid is refused.
 export function evalSettings(
   env: NodeJS.ProcessEnv,
   flags: { readonly drafts: boolean; readonly aim: Aim | "none" },
@@ -89,7 +84,6 @@ export function evalSettings(
   return limits.kind === "ok" ? { kind: "ok", value: { ...evalCaps(env), limits: limits.value, ...flags } } : limits;
 }
 
-// evalCaps : each run's cap, the judge's model and its instructions
 function evalCaps(env: NodeJS.ProcessEnv): Pick<EvalSettings, "runUsd" | "judgeUsd" | "judgeModel" | "judgePrompt"> {
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
@@ -99,7 +93,6 @@ function evalCaps(env: NodeJS.ProcessEnv): Pick<EvalSettings, "runUsd" | "judgeU
   };
 }
 
-// evalLimits : the review runs' time limits, as in production, and the judge's
 function evalLimits(env: NodeJS.ProcessEnv): Result<EvalSettings["limits"]> {
   const review = runLimitsOf(env);
   if (review.kind === "failed") {
@@ -132,8 +125,6 @@ function planOf(list: readonly Case[], s: EvalSettings): Plan {
   };
 }
 
-// afford : says what the pass could spend against the cap. A worst case over the cap is no reason to refuse: the purse
-// stops spending at the cap while the pass runs, and a pass stopped there is partial, never proof (#483)
 function afford(list: readonly Case[], input: EvalInput): void {
   const plan = planOf(list, input.settings);
   const worst = worstCase(plan);
@@ -178,7 +169,6 @@ async function inputsOf(ctx: Ctx, setup: ReviewSetup): Promise<Result<Inputs>> {
   };
 }
 
-// setupFor : the production review's setup for one run of a case, on its clone, with the fake git host
 function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, description: string): ReviewSetup {
   const change = evalChange({ number: run, head: cloned.head, branch: cloned.branch, label: LABEL, description });
   const setup = reviewSetup({
@@ -202,8 +192,6 @@ function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, descripti
   return { ...setup, label: LABEL };
 }
 
-// specHome : the case's spec and its approval in the pass's own home: the operator's approval of the case in cases.md
-// stands for the approval of its spec; nothing is written to the real factory home
 async function specHome(home: string, c: Case): Promise<void> {
   const text = specOf(c);
   const specs = join(home, "specs", PROJECT, c.name);
@@ -236,7 +224,6 @@ async function actOn(setup: ReviewSetup, head: string): Promise<readonly ActOn[]
   return Array.isArray(raw) ? raw.filter(isActOn) : [];
 }
 
-// roundOf : what the round did, and why it is an error when it did not post. Pure.
 function roundOf(round: Result<Outcome>): { readonly outcome: string; readonly error: string } {
   if (round.kind === "failed") {
     return { outcome: "failed", error: round.reason };
@@ -320,7 +307,6 @@ async function resultsPath(root: string, date: string, head: string): Promise<st
 
 type Started = { readonly ctx: Ctx; readonly list: readonly Case[]; readonly skipped: readonly Row[] };
 
-// chosenCases : the rows to run, read; none is refused
 async function chosenCases(
   input: EvalInput,
 ): Promise<Result<{ readonly list: readonly Case[]; readonly skipped: readonly Row[] }>> {
@@ -358,7 +344,6 @@ async function start(input: EvalInput): Promise<Result<Started>> {
   return { kind: "ok", value: { ctx, ...chosen.value } };
 }
 
-// evalReviewer : one eval pass, written to the results file; refused before it spends when it could exceed the cap
 export async function evalReviewer(input: EvalInput): Promise<Result<Written>> {
   const started = await start(input);
   if (started.kind === "failed") {

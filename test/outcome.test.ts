@@ -6,9 +6,6 @@ import { addedOf, fetchDefault, outcomeLines, outcomeOf, verdict, type Commit } 
 import { usageCommand } from "../src/usage-cli.js";
 import { tempDir } from "./temp.js";
 
-// What became of a merged ticket's change, from the project's clone: watched to 2 weeks, then clean, reverted or fixed
-// on the same lines, updated up to 30 days (#487 AC-3).
-
 const DAY = 86_400_000;
 const MERGED = Date.parse("2026-10-01T12:00:00Z");
 
@@ -25,7 +22,6 @@ const git = (dir: string, args: readonly string[], when?: number): string => {
   return execFileSync("git", [...args], { cwd: dir, env: { ...env, ...date }, encoding: "utf8" }).trim();
 };
 
-// commit : one commit on main in the working repo, at a day after the merge, pushed to origin; its SHA
 function commit(file: string, text: string, message: string, day: number): string {
   writeFileSync(join(work(), file), text);
   git(work(), ["add", "-A"]);
@@ -55,7 +51,6 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// the ticket's merge: two lines added to loan.ts
 const merge = () => commit("loan.ts", "a\nb\nrenew\nrefuse\nc\n", "feat: refuse a reserved loan (#12)", 0);
 const read = (sha: string, day: number) =>
   outcomeOf({ repo: clone(), env, merged: { at: new Date(MERGED).toISOString(), sha }, now: MERGED + day * DAY });
@@ -168,7 +163,6 @@ describe("agent-factory usage <project> shows a merged ticket's outcome (#487 AC
     expect(text).toContain(`      touched by ${feature.slice(0, 8)} feat: renew now\n`);
   });
 
-  // usage over two merged tickets, with git's trace written to a file; the lines it printed
   async function twoMerged(env2: NodeJS.ProcessEnv): Promise<{ readonly text: string; readonly trace: string }> {
     const first = merge();
     const second = commit("other.ts", "x\n", "feat: other (#13)", 1);

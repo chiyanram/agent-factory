@@ -10,28 +10,21 @@ import type { Done, Result } from "./forge/api.js";
 import { hostGit } from "./git.js";
 import type { Guard, GuardInput } from "./push.js";
 
-// path → "<mode> <blob>": a mode or content change both count
 export type Tree = ReadonlyMap<string, string>;
 
-// the trees one push is judged on: the commit sent, the default branch, and the branch before the push
 export type Heads = { readonly commit: Tree; readonly base: Tree; readonly lease: Tree | "none" };
 
 export type Found = Result<readonly string[]>;
 
 export type ProtectedSetup = {
   readonly env: NodeJS.ProcessEnv;
-  // the project's default branch, fetched fresh as the base a protected file may equal
   readonly defaultBranch: string;
 };
 
 export type FileSet = {
-  // where the default branch is fetched to, one ref per set: refs/factory/<name>-base
   readonly name: string;
-  // what the set is called in a refusal: "the CI files"
   readonly what: string;
-  // the set's files in any of the trees
   readonly filesIn: (heads: Heads, repo: string) => Promise<Found>;
-  // the refusal, naming the files changed
   readonly refusal: (changed: readonly string[]) => string;
 };
 
@@ -52,7 +45,6 @@ export function why(ran: Awaited<ReturnType<typeof hostGit>>): string {
   return ran.kind === "refused" ? ran.reason : ran.kind === "failed" ? ran.stderr.trim() : "";
 }
 
-// treeOf : `git ls-tree -r -z` as a map. Pure.
 export function treeOf(listing: string): Tree {
   const entries = listing
     .split("\u0000")
@@ -107,14 +99,12 @@ async function heads(setup: ProtectedSetup, set: FileSet, input: GuardInput): Pr
     : failedOf(lease);
 }
 
-// changedFiles : the files whose version at the commit is neither the lease's nor the base's. Pure.
 export function changedFiles(h: Heads, files: readonly string[]): readonly string[] {
   const now = (p: string) => h.commit.get(p) ?? "";
   const kept = (p: string) => h.lease !== "none" && (h.lease.get(p) ?? "") === now(p);
   return [...new Set(files)].filter((p) => now(p) !== (h.base.get(p) ?? "") && !kept(p)).toSorted();
 }
 
-// the trees of one push: the lease's only when there is one
 export function treesOf(h: Heads): readonly Tree[] {
   return h.lease === "none" ? [h.commit, h.base] : [h.commit, h.base, h.lease];
 }
@@ -132,7 +122,6 @@ async function check(setup: ProtectedSetup, set: FileSet, input: GuardInput): Pr
   return changed.length === 0 ? { kind: "ok" } : failed(set.refusal(changed));
 }
 
-// protectedFiles : refuses a push that changes a file of the set; the work is then blocked with the files named
 export function protectedFiles(setup: ProtectedSetup, set: FileSet): Guard {
   return (input) => check(setup, set, input);
 }

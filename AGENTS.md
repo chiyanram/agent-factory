@@ -14,7 +14,7 @@ holds the rest.
 ## Check
 
 ```bash
-make lint   # links resolve; AGENTS.md under 200 lines; the MUSTs below (check-musts); no old words (check-words); no new history notes (check-history); tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
+make lint   # links resolve; AGENTS.md under 200 lines; the MUSTs below (check-musts); no old words (check-words); no new history notes (check-history); no comment outside the keep list (check-comments); tsc; Biome format (biome ci); oxlint rules (lint-ratchet)
 make test   # build, then the vitest suite; no network, glab, gh or claude needed
 ```
 
@@ -41,6 +41,9 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   **Today:** note name the ticket that closes it. A note on each line goes stale and buries the reason, so `make lint`
   fails one that a change adds (`scripts/check-history.ts`).
 - Give no model run a git host token or a skip-permissions flag in new code, because ADR-0012 S2, S6 and S11 forbid it.
+- Write no code comment outside the four kinds that `scripts/check-comments.ts` keeps: the module header, a **Today:**
+  note, an outside link and a tool directive. Say the rest in code: a name, a type or a test. Never raise
+  `scripts/comment-baseline.json`, because a comment is where a hack hides, and the next run copies the hack.
 - Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
   comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.

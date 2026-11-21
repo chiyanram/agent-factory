@@ -2,6 +2,7 @@
 // On macOS tmpdir() sits behind a symlink (/var is /private/var), so code that builds a path from it passes on Linux and
 // fails on a Mac; test/temp.ts's tempDir() answers the real path, and it is the one file allowed to call tmpdir() bare.
 // A script may call it only as realpathSync(tmpdir()), which answers the real path too.
+// A string literal calls nothing, but a template literal is still read, because its ${…} runs code.
 //
 //   node scripts/check-temp-dirs.ts [ROOT]     (make lint)
 //
@@ -14,19 +15,14 @@ import { join } from "node:path";
 
 const HELPER = "test/temp.ts";
 const CALL = /\btmpdir\s*\(/;
-// the one form a script may use: the real path of the temp folder
 const REAL = /\brealpathSync\(\s*tmpdir\(\s*\)\s*\)/g;
 
-// a "…" or '…' string literal: text in one, such as a test's sample line, calls nothing. A template literal is kept,
-// since its ${…} runs code.
 const QUOTED = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g;
 
-// code : a line with its string literals emptied and the allowed realpathSync(tmpdir()) form taken out
 function code(line: string): string {
   return line.replace(QUOTED, '""').replace(REAL, "");
 }
 
-// bareCalls : "file:line" for each line of the text that calls tmpdir()
 export function bareCalls(file: string, text: string): readonly string[] {
   return text
     .split("\n")

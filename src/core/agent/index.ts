@@ -21,21 +21,14 @@ import { runInFolder, type FolderRunner } from "./folder.js";
 
 export type AgentCli = {
   readonly name: "claude";
-  // one fresh, read-only run, stopped at its limit
   readonly readOnly: Model;
-  // the CLI's live background sessions
   readonly sessions: Sessions;
-  // the writer run's argv and settings file, built from its role card; the box runs them (writer/run.ts)
   readonly writer: ClaudeWriter;
-  // whether a login works, by one real call (login.ts): with a token, that token alone, as a writer's box gets it;
-  // without, this shell's login, as the read-only runs get it
   readonly login: (token?: Readonly<Record<string, string>>) => Promise<Login>;
 };
 
-// how long `claude agents --json` may take before the list is read as unknown
 export const SESSIONS_MS = 60_000;
 
-// openAgentCli : the agent CLI from the settings; a test passes its own runner and shorter times
 export function openAgentCli(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly run?: FolderRunner;
@@ -59,13 +52,11 @@ export function openAgentCli(input: {
   };
 }
 
-// the Copilot adapter: its read-only kind only; it has no writer kind and no sessions list (-p runs end)
 export type CopilotCli = {
   readonly name: "copilot";
   readonly readOnly: CopilotModel;
 };
 
-// openCopilotCli : the copilot CLI from the settings, with the run's login read before each run
 export function openCopilotCli(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly login: () => Promise<BoxToken>;

@@ -19,6 +19,9 @@
 //
 // No CLI can sign as an App, so this is the one place the package calls GitHub over HTTP (ADR-0013); the key is read at
 // call time and never leaves this process. Nothing here throws: every outcome is a sealed result.
+//
+// The cache is written to a new file and then renamed, so a reader never sees half a token. A cache that cannot be
+// written only costs a new token next time.
 
 import { createSign } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -53,7 +56,6 @@ export const realHttp: Http = async (request) => {
 
 type Owned = { readonly uid: number };
 
-// private : a file this user owns and no one else can read or write.
 async function privateFile(path: string, me: Owned): Promise<Result<string>> {
   try {
     const s = await stat(path);
@@ -82,7 +84,6 @@ function parseConfig(text: string, where: string): Result<{ readonly appId: stri
   }
 }
 
-// readAppConfig : the App's ID and private key, from the factory user's own files.
 export async function readAppConfig(input: { readonly home: string; readonly me: Owned }): Promise<Result<AppConfig>> {
   const where = join(input.home, ".config", "agent-factory", "github-app.json");
   const text = await privateFile(where, input.me);
@@ -98,7 +99,9 @@ function b64url(data: string | Buffer): string {
   return Buffer.from(data).toString("base64url");
 }
 
-// jwt : a JSON Web Token signed with the App's key, valid 9 minutes (GitHub allows 10), back-dated 60 s for clock skew.
+// GitHub refuses an App JWT whose exp is more than 10 minutes ahead, and advises an iat 60 s in the past
+// for clock drift.
+// https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app
 export function jwt(input: { readonly config: AppConfig; readonly now: number }): Result<string> {
   const head = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const body = b64url(JSON.stringify({ iat: input.now - 60, exp: input.now + 540, iss: input.config.appId }));
@@ -112,10 +115,8 @@ export function jwt(input: { readonly config: AppConfig; readonly now: number })
 
 export type MintSetup = {
   readonly config: AppConfig;
-  // owner/name
   readonly project: string;
   readonly http: Http;
-  // seconds since the epoch
   readonly now: number;
   readonly cacheDir: string;
 };
@@ -131,7 +132,6 @@ function headers(bearer: string): Record<string, string> {
   };
 }
 
-// call : one GitHub REST call, its JSON on a 2xx; a 401 names the likely causes.
 async function call(
   setup: MintSetup,
   bearer: string,
@@ -171,12 +171,10 @@ async function call(
   }
 }
 
-// one file per App and project; the name is encoded so no two projects share one ("a_b/c" and "a/b_c")
 function cacheFile(setup: MintSetup): string {
   return join(setup.cacheDir, `${setup.config.appId}-${encodeURIComponent(setup.project)}.json`);
 }
 
-// cached : the cached token for this very project while it has more than 15 minutes left; else none.
 async function cached(setup: MintSetup): Promise<Minted | "none"> {
   try {
     const raw = JSON.parse(await readFile(cacheFile(setup), "utf8")) as Partial<Cached>;
@@ -196,16 +194,12 @@ async function cached(setup: MintSetup): Promise<Minted | "none"> {
 async function remember(setup: MintSetup, minted: Minted): Promise<void> {
   try {
     await mkdir(setup.cacheDir, { recursive: true, mode: 0o700 });
-    // a new file, then a rename: a reader never sees half a token
     const entry: Cached = { ...minted, project: setup.project };
     await writeFile(`${cacheFile(setup)}.new`, JSON.stringify(entry), { mode: 0o600 });
     await rename(`${cacheFile(setup)}.new`, cacheFile(setup));
-  } catch {
-    // a cache that cannot be written only costs a new token next time
-  }
+  } catch {}
 }
 
-// grant : the token GitHub minted, with the App's name.
 function grant(minted: Record<string, unknown>, slug: unknown, project: string): Result<Minted> {
   const { token, expires_at: expiresAt } = minted;
   if (typeof token !== "string" || typeof expiresAt !== "string" || typeof slug !== "string") {
@@ -227,13 +221,11 @@ async function fresh(setup: MintSetup, bearer: string): Promise<Result<Minted>> 
   if (typeof id !== "number" || !Number.isSafeInteger(id)) {
     return { kind: "failed", reason: `GitHub gave no installation id for ${setup.project}` };
   }
-  // scoped to the one repository: the token cannot touch the App's other installations' repositories
   const name = setup.project.split("/")[1]!;
   const minted = await call(setup, bearer, "POST", `app/installations/${id}/access_tokens`, { repositories: [name] });
   return minted.kind === "ok" ? grant(minted.value, app.value.slug, setup.project) : minted;
 }
 
-// mint : a token for the one repository, from the cache while it lasts.
 export async function mint(setup: MintSetup): Promise<Result<Minted>> {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(setup.project)) {
     return { kind: "failed", reason: `the project must be owner/name, got ${JSON.stringify(setup.project)}` };

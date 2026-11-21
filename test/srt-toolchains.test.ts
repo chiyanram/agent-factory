@@ -19,7 +19,6 @@ import { tempDir } from "./temp.js";
 const ROOT = tempDir("srt-toolchains-");
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 
-// a planted home with each manager's folders, a credential folder and a plain tool folder
 function plantHome(name: string): string {
   const home = join(ROOT, name);
   for (const dir of [
@@ -64,7 +63,6 @@ describe("srt toolchains: the pure parts (#371)", () => {
     for (const [name, entry, dir] of cases) {
       expect(managersOn(["/usr/bin", entry], H)).toEqual([{ dir, from: name }]);
     }
-    // none on PATH, or only the manager's own bin or shims: nothing comes back
     expect(managersOn(["/usr/bin", `${H}/.local/bin`, `${H}/.local/share/mise/shims`, `${H}/.asdf/shims`], H)).toEqual(
       [],
     );
@@ -83,7 +81,6 @@ describe("srt toolchains: the pure parts (#371)", () => {
     expect(folderProblem(`${H}/.config/mise`, H, F)).toContain("mise's config");
     expect(folderProblem(`${H}/.local/share/mise`, H, F)).toContain("mise's shims");
     expect(folderProblem(`${H}/.asdf`, H, F)).toContain("asdf's shims");
-    // a manager's install folder and a plain tool folder may come back
     for (const m of MANAGERS) {
       expect(folderProblem(join(H, m.installs), H, F)).toBe("");
     }
@@ -104,7 +101,6 @@ describe("srt toolchains: the pure parts (#371)", () => {
     expect(warning).toContain("PATH reaches mise only through its shims (~/.local/share/mise/shims)");
     expect(warning).toContain("mise activate");
     expect(shimWarnings([`${H}/.asdf/shims`], H)[0]).toContain("~/.asdf/installs/java/<version>/bin");
-    // with the real install folder on PATH too, there is no warning
     expect(shimWarnings([`${H}/.local/share/mise/shims`, `${H}/.local/share/mise/installs/java/25/bin`], H)).toEqual(
       [],
     );
@@ -172,7 +168,6 @@ describe("srt toolchains: on a planted home (#371)", () => {
       'srt.readOnly ".cargo" must be ~/<folder> or an absolute path',
       `srt.readOnly "~/.local/share/mise/shims" is or holds ~/.local/share/mise/shims, mise's shims, which no run may read`,
     ]);
-    // a PATH-style list works too; a broken JSON list is refused whole
     const colon = await locateToolchains({
       env: { FACTORY_SRT_READ_ONLY: "~/.cargo:~/Documents" },
       home,

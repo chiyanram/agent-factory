@@ -7,7 +7,6 @@ import { project, type Project } from "./review-repo.js";
 let p: Project;
 beforeEach(() => {
   p = project("feat/x");
-  // main holds a test with assertions, a Spock spec and a test the change may move
   p.write(
     "src/test/java/OrderTest.java",
     "class OrderTest {\n  void total() {\n    assertThat(total()).isEqualTo(3);\n    assertThat(count()).isEqualTo(2);\n  }\n}\n",
@@ -95,7 +94,6 @@ describe("the floor guard (#190)", () => {
     );
   });
 
-  // AC-2 of #485: the weakened assertion of the ticket's own example, as many lines as before
   it("finds an assertion weakened from a value check to a presence check", async () => {
     p.write(
       "src/test/java/OrderTest.java",
@@ -108,7 +106,6 @@ describe("the floor guard (#190)", () => {
     expect(forHuman(found)).toBe(true);
   });
 
-  // #485 review: a comparison with null is a presence check, in an assertTrue and in a Spock then: block
   it("finds assertEquals turned into assertTrue(x != null), and a Spock comparison turned into != null", async () => {
     p.write(
       "src/test/java/OrderTest.java",
@@ -276,7 +273,6 @@ describe("the floor guard (#190)", () => {
     p.git("merge", "-q", "--ff-only", "factory/PROJ-1");
     p.git("push", "-q", "origin", "main");
     p.git("checkout", "-q", "factory/PROJ-1");
-    // the then: line goes, a helper's lines come: they are no assertions; the CartTest spec loses its expect: line
     p.write(
       "src/test/groovy/OrderSpec.groovy",
       "class OrderSpec extends Specification {\n  def 'totals'() {\n    when:\n    def t = order.total()\n    then:\n  }\n\n  def helper() {\n    return 1\n  }\n\n  def other() {\n    return 2\n  }\n}\n",
@@ -347,7 +343,6 @@ describe("the floor guard (#190)", () => {
   });
 });
 
-// the guard with the judge files a project with a local gate of `make verify` has, and a waiver at a head or none
 async function judgedAt(head: string, waived = "none"): Promise<readonly Hit[]> {
   const out = await floorGuard({
     repo: p.clone,
@@ -447,11 +442,9 @@ describe("a human's waiver at a head (#231)", () => {
       "build.gradle:0 adds a judge file",
       "src/main/Pay.java:3 leaves an empty catch",
     ]);
-    // the waiver clears the test check at its head; a code check still goes to the writer
     expect(lines(await judgedAt(first, first))).toEqual(["src/main/Pay.java:3 leaves an empty catch"]);
     p.write("src/main/Pay.java", "class Pay {\n  void a() {\n    go();\n  }\n}\n");
     const second = pushed("fix the catch");
-    // only the new interdiff is checked: build.gradle did not change again, so it stays cleared
     expect(await judgedAt(second, first)).toEqual([]);
     p.write("build.gradle", "plugins { id 'java'; id 'groovy' }\n");
     p.write("svc/test_cart.py", "@pytest.mark.skip\ndef test_cart():\n    pass\n");

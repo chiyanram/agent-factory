@@ -35,7 +35,6 @@ function write(path: string, text: string): void {
 
 const LINES = Array.from({ length: 20 }, (_, i) => `export const v${i + 1} = ${i + 1};`).join("\n");
 
-// a case: the change made on base and saved as change.patch, then undone
 function addCase(name: string, edit: () => void, golden: readonly unknown[], pr: string): void {
   edit();
   const patch = git("diff");
@@ -105,7 +104,6 @@ afterEach(() => {
 });
 
 type Fake = {
-  // the line the finder reports on each case's file, by the marker in the diff; none for a marker not listed
   readonly lines: Readonly<Record<string, number>>;
   readonly confidence: number;
   readonly cost: number;
@@ -126,8 +124,6 @@ const finding = (file: string, line: number) => ({
   fix: "set it to 10",
 });
 
-// A fake model: the find pass reports one finding per marker in the pack's diff, the verify pass puts every finding in
-// Act on, and the judge says same with the fake's confidence. Every run is recorded.
 function fakeModel(f: Fake, seen: ModelRun[]): Model {
   return async (run): Promise<ModelResult> => {
     seen.push(run);
@@ -151,13 +147,11 @@ function fakeModel(f: Fake, seen: ModelRun[]): Model {
   };
 }
 
-// the ids in a findings.json the review wrote
 function ids(text: string): readonly string[] {
   const list: unknown = JSON.parse(text);
   return Array.isArray(list) ? list.map((f: unknown) => String(Reflect.get(Object(f), "id"))) : [];
 }
 
-// one recorded argv of the fake agent CLI
 function words(line: string): readonly string[] {
   const list: unknown = JSON.parse(line);
   return Array.isArray(list) ? list.map(String) : [];
@@ -218,7 +212,6 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     expect(r.cases.skipped).toEqual([{ case: "draft-one", status: "draft" }]);
     expect(r.partial).toBe(false);
     expect(r.proof).toBe(true);
-    // a pass run with no --aim proves no change, such as a baseline (ADR-0021)
     expect(r.aim).toBeNull();
     expect(r.inputs.head).toBe(head);
     expect(r.inputs.prompts.find).toBe(
@@ -232,11 +225,9 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
       logic: "claude-opus-5-5",
       judge: "claude-sonnet-5-5",
     });
-    // per run: find, verify (rule); the seeded case's run also judges once
     expect(seen.filter((s) => s.schema.includes("confidence"))).toHaveLength(RUNS);
     expect(seen).toHaveLength(RUNS * 2 * 2 + RUNS);
     expect(seen.every((s) => s.maxUsd !== "")).toBe(true);
-    // the judge runs under its own time limit, the review runs under the finder's and the verify pass's (P7)
     expect(seen.filter((s) => s.schema.includes("confidence")).map((s) => s.limit.setting)).toEqual(
       Array(RUNS).fill("FACTORY_JUDGE_MINUTES"),
     );
@@ -245,7 +236,6 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     );
     expect(r.cost_usd).toBeCloseTo(seen.length * 0.1);
     expect(log.join("\n")).toContain("1 draft");
-    // the pass's clones and run folders are gone
     expect(existsSync(join(env.HOME ?? "", ".factory", "eval-x"))).toBe(false);
   });
 
@@ -290,7 +280,6 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     );
     const r = results(out.kind === "ok" ? out.value.path : "");
     expect(out).toMatchObject({ kind: "ok", value: { partial: true, proof: false } });
-    // run 1 spent $45 (find, verify, judge at $15 each); run 2 might spend $60 more, so it never starts
     expect(r.cost_usd).toBe(45);
     expect(r.per_case.map((c) => [c.case, c.runs.length])).toEqual([["seeded-one", 1]]);
     expect(r.partial_why[0]).toContain("stopped at the $100 cap");

@@ -16,8 +16,6 @@ import { settingName } from "../src/core/settings/machine.js";
 import { writerArgv } from "../src/core/agent/claude-writer.js";
 import type { Spent } from "../src/core/dispatch/usage.js";
 
-// The caps on spend (#131): per run, per ticket, per project-day, and the share of a window with its stop line.
-
 describe("the caps are cap-class settings keys", () => {
   it("every cap is a cap, so the lowest layer wins", () => {
     for (const id of [
@@ -172,7 +170,6 @@ describe("the project's stop: the day cap, then the window share, then the machi
       "the project-day cap is reached: today (2026-11-09, UTC) the project spent $5.00 and 0 tokens, at the cap of $5 (FACTORY_MAX_USD_DAY); run `agent-factory dispatch ledger` again tomorrow",
     );
     const share = { ...NO_CAPS, window: { tokens: 100, machineTokens: "none" as const }, windowHours: 2 };
-    // 60 + 50 + 30 in the window: it has room (80 under 100) once the first has left it, at 10:20 + 2 h
     const runs = [
       run("2026-11-09T10:20:00Z", 0, 60),
       run("2026-11-09T10:40:00Z", 0, 50),

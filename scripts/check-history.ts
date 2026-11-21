@@ -33,7 +33,6 @@ export type Rule = "ticket" | "decided-by" | "person-date";
 
 const WHY = "say what and why; history goes in the commit, the PR or an ADR";
 
-// the files that record or list history, or hold planted input
 const SKIP: readonly RegExp[] = [
   /^CHANGELOG\.md$/,
   /^\.github\//,
@@ -55,16 +54,12 @@ const TODAY = /\bToday:/;
 const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
 const ITEM = /^\s*(?:[-*+]|\d+\.)\s/;
 
-// applies : whether a file is judged at all
 export function applies(file: string): boolean {
   return (CODE.test(file) || file.endsWith(".md")) && !SKIP.some((s) => s.test(file));
 }
 
-// a line as the check reads it: its judged text (undefined when not judged), its scope for the one-pointer rule
-// (undefined when no ticket may stand outside a Today note) and whether it ends a paragraph
 type Line = { readonly text: string | undefined; readonly scope: number | undefined; readonly breaks: boolean };
 
-// plain : what names a path, a link, a URL or code taken out of a line, as check-words does
 function plain(text: string): string {
   return text
     .replace(/`[^`]*`/g, " ")
@@ -72,8 +67,6 @@ function plain(text: string): string {
     .replace(/https?:\/\/\S+/g, " ");
 }
 
-// commentOf : the comment text of one code line: the whole line for a comment line, else what follows a trailing //
-// once the line's string literals are taken out; undefined when there is none. Pure.
 export function commentOf(line: string): string | undefined {
   if (COMMENT_LINE.test(line)) {
     return line;
@@ -83,7 +76,6 @@ export function commentOf(line: string): string | undefined {
   return at < 0 ? undefined : code.slice(at);
 }
 
-// codeLine : one code line as the check reads it; HEADER says whether it is in the file's leading comment block
 function codeLine(raw: string, header: boolean): Line {
   const comment = commentOf(raw);
   const scope = header ? 0 : undefined;
@@ -123,7 +115,6 @@ function mdLines(text: string): readonly Line[] {
 
 const isRow = (text: string): boolean => text.trimStart().startsWith("|");
 
-// withoutFrom : an ADR's table row without its last cell, the "from" column; any other line as it is
 function withoutFrom(file: string, text: string): string {
   return ADR.test(file) && isRow(text) ? text.replace(/\|[^|]*\|\s*$/, "|") : text;
 }
@@ -142,7 +133,6 @@ function beforeToday(text: string): string {
 // opensNote : whether a Today: note starts on a line and runs on to the end of its paragraph
 const opensNote = (text: string | undefined): boolean => text !== undefined && TODAY.test(text) && !isRow(text);
 
-// a line with the part of it that may not hold a ticket
 type Read = Line & { readonly loose: string };
 
 // withLoose : each line with the part that may not hold a ticket: none while it goes on a Today: note
@@ -159,7 +149,6 @@ function tickets(text: string): readonly string[] {
   return [...text.matchAll(TICKET)].map((m) => m[1] ?? "");
 }
 
-// ticketsBy : the distinct tickets of each scope, a header block or a doc section
 function ticketsBy(lines: readonly Read[]): ReadonlyMap<number, ReadonlySet<string>> {
   const out = new Map<number, ReadonlySet<string>>();
   for (const l of lines) {
@@ -170,7 +159,6 @@ function ticketsBy(lines: readonly Read[]): ReadonlyMap<number, ReadonlySet<stri
   return out;
 }
 
-// pointer : whether a ticket on a line in this scope is the scope's one pointer
 function pointer(scopes: ReadonlyMap<number, ReadonlySet<string>>, scope: number | undefined): boolean {
   return scope !== undefined && (scopes.get(scope)?.size ?? 0) <= 1;
 }
@@ -188,11 +176,8 @@ const statusLine = (file: string, text: string): boolean => ADR.test(file) && te
 // MARK : a Today: note's marker, as check-adrs reads it in an ADR's body
 const MARK = "**Today:**";
 
-// a raw ADR line cut as check-adrs cuts it: the frozen text, which carries the decision, and the note ("" for none)
 type Cut = { readonly frozen: string; readonly note: string };
 
-// noteOf : a raw line cut at the note that starts on it: the text before the marker, and in a table row the cells
-// after the note's own, which ends at its next "|" no backslash escapes, are frozen. Pure.
 function noteOf(raw: string): Cut {
   const line = raw.trimEnd();
   const at = line.indexOf(MARK);
@@ -208,16 +193,13 @@ function noteOf(raw: string): Cut {
   return { frozen: `${before} ${line.slice(cut).trimStart()}`, note: line.slice(at, cut) };
 }
 
-// bodyStart : the index of an ADR's first "## " line, where check-adrs starts to freeze it. Pure.
 function bodyStart(raws: readonly string[]): number {
   const at = raws.findIndex((r) => r.startsWith("## "));
   return at < 0 ? raws.length : at;
 }
 
-// how often each frozen text stands in an ADR's body, and the frozen texts of the lines that held a note
 type Frozen = { readonly counts: ReadonlyMap<string, number>; readonly noted: ReadonlySet<string> };
 
-// frozenIn : the frozen text of an ADR's body. Pure.
 function frozenIn(raws: readonly string[]): Frozen {
   const cuts = raws.slice(bodyStart(raws)).map(noteOf);
   const counts = new Map<string, number>();
@@ -227,9 +209,6 @@ function frozenIn(raws: readonly string[]): Frozen {
   return { counts, noted: new Set(cuts.filter((c) => c.note !== "").map((c) => c.frozen)) };
 }
 
-// keptCut : an ADR body line whose frozen text is on the default branch already, so the change wrote its note alone:
-// a note added or edited beside a frozen text there, or taken out of a line that held one. A frozen text standing
-// more often now than on the default branch was copied, so none of its lines is kept. undefined for any other line
 function keptCut(raw: string, was: Frozen, now: Frozen): Cut | undefined {
   const cut = noteOf(raw);
   const held = cut.note !== "" || was.noted.has(cut.frozen);
@@ -239,11 +218,8 @@ function keptCut(raw: string, was: Frozen, now: Frozen): Cut | undefined {
 
 const countOf = (f: Frozen, frozen: string): number => f.counts.get(frozen) ?? 0;
 
-// dateBy : whether a date in one text stands with a person or a decision in another
 const dateBy = (dates: string, people: string): boolean => DATE.test(dates) && PERSON.test(people);
 
-// noteRules : the rules a note the change wrote breaks: a ticket is allowed in it; a date or a person in it counts
-// with a person or a date anywhere on its line, since together they make a new dated decision
 function noteRules(cut: Cut): readonly Rule[] {
   const note = plain(cut.note);
   const line = `${plain(cut.frozen)} ${note}`;
@@ -251,7 +227,6 @@ function noteRules(cut: Cut): readonly Rule[] {
   return [...(DECIDED_BY.test(note) ? (["decided-by"] as const) : []), ...(dated ? (["person-date"] as const) : [])];
 }
 
-// rulesOn : the rules one judged line breaks: the note's alone on a line whose frozen text is kept, else the line's
 function rulesOn(l: Read, cut: Cut | undefined, pointed: boolean): readonly Rule[] {
   if (cut !== undefined) {
     return noteRules(cut);
@@ -259,9 +234,6 @@ function rulesOn(l: Read, cut: Cut | undefined, pointed: boolean): readonly Rule
   return rulesOf(l.text ?? "", tickets(l.loose).length > 0 && !pointed);
 }
 
-// scan : file:line, the rule and the reason, for each history note on an added line of one file's text. The context
-// (Today notes, the header block, a section's pointer, fences) is read from the whole text; only lines whose number
-// is in ADDED are reported. BASE is the file's text on the default branch, when it is there. Pure.
 export function scan(file: string, text: string, added: ReadonlySet<number>, base?: string): readonly string[] {
   if (!applies(file)) {
     return [];
@@ -284,7 +256,6 @@ export function scan(file: string, text: string, added: ReadonlySet<number>, bas
 
 const HUNK = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
-// hunkLines : the line numbers a -U0 hunk header adds; none when the line is not a hunk header. Pure.
 function hunkLines(line: string): readonly number[] {
   const hunk = HUNK.exec(line);
   if (hunk === null) {
@@ -294,7 +265,6 @@ function hunkLines(line: string): readonly number[] {
   return Array.from({ length: hunk[2] === undefined ? 1 : Number(hunk[2]) }, (_, k) => from + k);
 }
 
-// fileOf : the set that collects a file's added lines, from a "+++ " path; none for a deleted file
 function fileOf(out: Map<string, Set<number>>, path: string): Set<number> | undefined {
   if (path === "/dev/null") {
     return undefined;
@@ -304,7 +274,6 @@ function fileOf(out: Map<string, Set<number>>, path: string): Set<number> | unde
   return lines;
 }
 
-// addedLines : the added line numbers of each file in a -U0 diff's output. Pure.
 export function addedLines(diff: string): ReadonlyMap<string, ReadonlySet<number>> {
   const out = new Map<string, Set<number>>();
   let current: Set<number> | undefined;
@@ -320,7 +289,6 @@ export function addedLines(diff: string): ReadonlyMap<string, ReadonlySet<number
   return out;
 }
 
-// baseRef : the default branch to compare with
 export function baseRef(env: NodeJS.ProcessEnv): string {
   const pr = env.GITHUB_BASE_REF ?? "";
   return env.FACTORY_BASE_REF || (pr === "" ? "origin/main" : `origin/${pr}`);
@@ -334,7 +302,6 @@ function git(root: string, args: readonly string[]): { readonly code: number; re
   return { code: r.status ?? -1, out: r.stdout };
 }
 
-// problems : each history note on a line the working tree adds against the merge base, or why it cannot tell
 function problems(root: string, env: NodeJS.ProcessEnv): readonly string[] {
   const ref = baseRef(env);
   const base = git(root, ["merge-base", ref, "HEAD"]);

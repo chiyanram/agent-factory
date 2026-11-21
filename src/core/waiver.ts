@@ -21,7 +21,6 @@ export type WaiverRecord = {
   readonly kind: "test-change";
   readonly project: string;
   readonly ticket: string;
-  // the full commit id the human saw the hits at
   readonly head: string;
   readonly by: string;
   readonly via: Via;
@@ -45,7 +44,6 @@ export type StoredWaiver =
   | { readonly kind: "missing" }
   | Refused;
 
-// a full commit id: SHA-1 or SHA-256, never a prefix another commit could match
 const FULL_HEAD = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 type PathResult = { readonly kind: "path"; readonly path: string } | Refused;
@@ -59,7 +57,6 @@ export function waiverPath(where: Where): PathResult {
       };
 }
 
-// waive : records the human's waiver of the test checks at the head they saw
 export async function waive(request: WaiveRequest): Promise<Waive> {
   const path = waiverPath(request.where);
   if (path.kind === "refused") {
@@ -96,7 +93,6 @@ function isWaiver(value: unknown, where: Where): value is WaiverRecord {
   ].every(Boolean);
 }
 
-// readWaiver : the ticket's waiver as it is on disk
 export async function readWaiver(where: Where): Promise<StoredWaiver> {
   const path = waiverPath(where);
   if (path.kind === "refused") {

@@ -2,17 +2,17 @@
 // said: its START and its approval; its change on the git host as poll reports it; and the run records) and gives one
 // action. Every row that can repeat has a stop, after which a person decides.
 //
-// Nothing starts unless a human starts it (P8, #227). A ticket's build may begin only after a human's word:
+// Nothing starts unless a human starts it (P8). A ticket's build may begin only after a human's word:
 //   tiny                          its START
 //   bug, feature, one-way door    its START and its approval, bound to the spec's and the design's hashes (the
 //                                 approval floor); an approval with no START waits, since nothing runs without one
-// In a lane with a design review (#236; design.ts), the spec and its design get one before the human's approval: a
+// In a lane with a design review (design.ts), the spec and its design get one before the human's approval: a
 // design-reviewer run, then a verify pass, both read-only. What the verify pass kept goes to the front doors, and the
 // build waits for an approval given after it.
 // A START in a lane that needs an approval, or a START whose spec the coordinator has not written yet, waits. So does a
-// spec whose planned files need a heavier lane than its own (#230; lane.ts): the engine only ever raises a lane.
+// spec whose planned files need a heavier lane than its own (lane.ts): the engine only ever raises a lane.
 //
-//   the change is merged and still claimed                     reconcile (remove the claim)
+//   the change is merged                                       reconcile (record the merge, take the claim off)
 //   more than one change on factory/<ticket>                   needs-human (forks are never the ticket's change)
 //   needs-human on the change                                  wait: a person decides
 //   a run started and never ended (the dispatcher died)        needs-human: a writer's folder's work pushed and named;
@@ -27,7 +27,7 @@
 //   a pipeline state the factory does not know                 needs-human
 //   claimed, but this dispatcher never ran on it               wait: someone else holds it
 //   a run ended and its change is gone (closed)                needs-human
-//   approved, no writer run yet                                writer (a bug: the test-first writer first)
+//   approved, no writer run yet                                writer (a test-first lane: the test-first writer first)
 //   the test-first run is done                                 writer for the fix
 //   the writer asked and a person answered                     writer again
 //   the writer was blocked and a person removed needs-human    writer again
@@ -41,36 +41,40 @@
 //                                                              1 failure → needs-human (still conflicting after the
 //                                                              merge run); nothing rebases or force-pushes
 //   writer done, no ready check at this head                   ready check
-//   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it (#230);
+//   the ready check read a diff that needs a heavier lane       needs-human: raise the spec's lane, approve it;
 //   than the one a human approved or STARTed                   a test check's stop at the same check is named too
-//   ready check stopped by a test check (#231)                 needs-human, the hits listed; a human's waiver at
+//   ready check stopped by a test check                        needs-human, the hits listed; a human's waiver at
 //                                                              this head, newer than that check, runs it again
 //   ready check failed                                         writer again        3 failures → needs-human
-//   ready check failed at this head, and what it ran is not     ready check again (#444): the writer's rework changed
+//   ready check failed at this head, and what it ran is not     ready check again: the writer's rework changed
 //   what it would run now: other evidence rows, or other        its rows, not its code, or the project file changed
 //   allowed programs                                           the programs; each run counts towards the 3 failures
 //   ready check passed, no review at this head                 reviewer            3 rounds → needs-human
 //   Act on findings                                            writer again        3 rounds → needs-human
 //   CI red                                                     writer again        2 CI rounds → needs-human
-//   local gate (#91), no verifier run at this head             local verifier (it also posts a commit status)
+//   local gate, no verifier run at this head                   local verifier (it also posts a commit status)
 //   local gate, the verifier failed, or a forge check is red   writer again        2 CI rounds → needs-human
 //   local gate, the verifier passed                            ping the human once
 //   CI running, none yet, or a manual job                      wait
 //   gate green                                                 ping the human once; never undraft
 //
 // A writer run that retries a failed check (the ready check, a review's Act on findings, the local verifier) waits
-// until the nextTry that check recorded (#228; records.ts): 10 s after its first failure, doubling, at most 5 minutes.
+// until the nextTry that check recorded (records.ts): 10 s after its first failure, doubling, at most 5 minutes.
 // The caps above still hold: a step out of tries goes to a person, whatever its next try.
 //
 // Two rules hold over every row. A wait on a claimed change that has been quiet (no record, no comment) for
 // FACTORY_QUIET_MINUTES releases the claim, so a stuck change goes back to the queue. A stop the dispatcher already
-// handed to a person is not handed over again: removing needs-human does not lift it. The way back from needs-human
-// (#227, #151 gap 1): a person removes the label and STARTs again (tiny) or approves the spec again (the other lanes);
-// the newer record starts every count afresh, and the next pass picks the ticket up. A hold whose reason no longer
-// holds (the ready check would now run other rows or programs, #444) needs only the label removed.
+// handed to a person is not handed over again: removing needs-human does not lift it. The way back from needs-human:
+// a person removes the label and STARTs again (tiny) or approves the spec again (the other lanes); the newer record
+// starts every count afresh, and the next pass picks the ticket up. A hold whose reason no longer holds (the ready
+// check would now run other rows or programs) needs only the label removed.
 //
-// The ticket's cap (#131; caps.ts) holds over every run: a ticket whose runs since the approval spent its cap goes to
+// The ticket's cap (caps.ts) holds over every run: a ticket whose runs since the approval spent its cap goes to
 // needs-human, with the spend shown, instead of starting another.
+//
+// A local gate reads the verifier's result from the dispatcher's own record, never from the forge, where any other
+// check or status (a bot, a preview) could read as green. A park keeps its claim when it goes quiet, since its wait is
+// the factory's until a reset hours away.
 
 import { above, raisedWhy, type Lane } from "../lane-order.js";
 import type { OpenLine, MergedLine } from "../poll.js";
@@ -83,25 +87,16 @@ import type { DesignStep } from "./records.js";
 import type { Answer } from "../answers.js";
 import type { Evidence } from "../report.js";
 
-// what a human said that lets the build begin (#227): a START and an approval, or a START alone in the tiny lane; at
-// is the newer of the two records, and the run records count from then
 export type ApprovalView =
-  // testFirst: the lane's build starts with a failing test (its lanes entry, #417)
   | { readonly kind: "approved"; readonly at: string; readonly lane: Lane; readonly testFirst: boolean }
-  // a START alone, in a lane that needs no approval
   | { readonly kind: "started"; readonly at: string; readonly lane: Lane; readonly testFirst: boolean }
   | { readonly kind: "stale" }
   | { readonly kind: "missing" }
-  // a START, and a spec whose lane needs an approval the ticket does not have
   | { readonly kind: "unapproved"; readonly lane: Lane }
-  // a START, and no spec ready yet: the coordinator writes it
   | { readonly kind: "unwritten" }
-  // an approval, and no START: nothing runs without one
   | { readonly kind: "unstarted" }
-  // a START (and an approval), and the spec's planned files need a heavier lane than the spec's (#230)
   | { readonly kind: "raised"; readonly from: Lane; readonly to: Lane; readonly why: string };
 
-// a human's waiver of the test checks (#231; waiver.ts): the head it was given at, and when
 export type WaiverView =
   | { readonly kind: "none" }
   | { readonly kind: "waived"; readonly head: string; readonly at: string };
@@ -110,10 +105,8 @@ export type ChangeView =
   | { readonly kind: "none" }
   | { readonly kind: "open"; readonly line: OpenLine }
   | { readonly kind: "merged"; readonly line: MergedLine }
-  // more than one change of this repository on the ticket's branch: none of them can be trusted to be the one
   | { readonly kind: "many"; readonly numbers: readonly number[] };
 
-// where the gate's result comes from: the forge's own CI, or the local verifier's commit status (#91; the project file)
 export type Gate = "forge-ci" | "local";
 
 export type TicketState = {
@@ -123,17 +116,11 @@ export type TicketState = {
   readonly waiver: WaiverView;
   readonly change: ChangeView;
   readonly runs: Summary;
-  // milliseconds since the epoch
   readonly now: number;
   readonly quietMinutes: number;
-  // the ticket's cap (#131)
   readonly caps: Caps;
-  // where the design review of the current spec and design stands (#236)
   readonly design: DesignView;
-  // where the spec's "Blocked by" tickets stand (#494; blockers.ts); none when it names none
   readonly blockers?: BlockersView;
-  // every program an evidence row may start with this pass (#444; ready/command.ts evidencePrograms); none when the
-  // ready check has no project file
   readonly programs?: readonly string[];
 };
 
@@ -143,13 +130,9 @@ export type Action =
   | { readonly kind: "ready"; readonly head: string }
   | { readonly kind: "review"; readonly head: string }
   | { readonly kind: "verify"; readonly head: string }
-  // a design review run at the spec's and design's hashes (#236)
   | { readonly kind: "design"; readonly step: DesignStep; readonly spec: string; readonly design: string }
-  // the build held by the spec's "Blocked by": recorded, and a person pinged when what it waits on changed (#494)
   | { readonly kind: "held"; readonly why: string; readonly ping: boolean }
-  // the git host did not answer for a blocker this pass: recorded, so repeated passes go to a person (#494 AC-7)
   | { readonly kind: "blockers-unread"; readonly why: string }
-  // a person told, once, why the design review holds or ends at these hashes: a raised lane, the round cap (#489)
   | { readonly kind: "design-note"; readonly spec: string; readonly design: string; readonly why: string }
   | { readonly kind: "needs-human"; readonly why: string; readonly run?: RunFolder }
   | { readonly kind: "release"; readonly why: string }
@@ -159,7 +142,6 @@ export type Action =
 export const MAX_READY_FAILURES = 3;
 export const MAX_REVIEW_ROUNDS = 3;
 export const MAX_CI_ROUNDS = 2;
-// merge runs for a conflict at one head: the first that leaves the change still conflicting goes to a person
 export const MAX_CONFLICT_RUNS = 1;
 
 type Rule = (s: TicketState) => Action | "next";
@@ -175,7 +157,6 @@ const many: Rule = (s) =>
     ? { kind: "needs-human", why: `${s.change.numbers.length} changes use factory/${s.ticket}` }
     : "next";
 
-// the wait on the needs-human label, which names no reason of its own: a ping reads the hand-over's (turn-ping.ts)
 export const LABEL_WAIT = "needs-human: a person decides";
 
 const needsHuman: Rule = (s) => {
@@ -183,10 +164,8 @@ const needsHuman: Rule = (s) => {
   return line !== "none" && line.needsHuman ? { kind: "wait", why: LABEL_WAIT } : "next";
 };
 
-// a design run pushes nothing, so its lost start is a failed try (design.ts), never a person's to check
 const DESIGN_PHASES: ReadonlySet<string> = new Set(["design-review", "design-verify"]);
 
-// a writer start that names its folder hands its work over, saved first; an older start, or a check's, names none
 const interrupted: Rule = (s) => {
   const i = s.runs.interrupted;
   if (i.kind !== "interrupted" || DESIGN_PHASES.has(i.phase)) {
@@ -198,7 +177,6 @@ const interrupted: Rule = (s) => {
     : { kind: "needs-human", why: `${ended}; its run folder is ${i.run.folder}`, run: i.run };
 };
 
-// goAt : when a human's START or approval let the build begin, or "" while nothing does
 export function goAt(view: ApprovalView): string {
   return view.kind === "approved" || view.kind === "started" ? view.at : "";
 }
@@ -219,7 +197,6 @@ function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): string {
   return HELD[kind](view);
 }
 
-// heldWhy : why nothing a human said lets the build begin, or "" when something does
 function heldWhy(view: ApprovalView): string {
   return view.kind === "approved" || view.kind === "started" ? "" : heldAs(view.kind, view);
 }
@@ -246,11 +223,8 @@ function designAs<K extends keyof DesignMap>(kind: K, d: DesignMap[K]): Action |
   return DESIGN[kind](d);
 }
 
-// the approvals that carry a person's START: only these may start a design run (P8)
 const STARTED: ReadonlySet<ApprovalView["kind"]> = new Set(["approved", "started", "unapproved", "raised", "stale"]);
 
-// designReview : the design review before the approval (#236); "next" when none is due or it is done. design.ts gives
-// none without a START; the table holds it too, so no reader's slip starts a run nobody started (P8, #485)
 const designReview: Rule = (s) =>
   s.design.kind === "run" && !STARTED.has(s.approval.kind) ? "next" : designAs(s.design.kind, s.design);
 
@@ -263,7 +237,6 @@ const approval: Rule = (s) => {
   return line !== "none" && line.claimed ? { kind: "release", why } : { kind: "wait", why };
 };
 
-// newerStop : a /stop that is newer than the START or approval; an undated one counts as newer
 function newerStop(line: OpenLine, at: string): boolean {
   return line.stop.kind === "stopped" ? Date.parse(line.stop.at) > Date.parse(at) : line.stop.kind === "undated";
 }
@@ -280,7 +253,6 @@ const stopped: Rule = (s) => {
     : "next";
 };
 
-// quiet : nothing on the change since the newest of our record, its last comment and the START or approval
 function quiet(s: TicketState, line: OpenLine): boolean {
   const times = [s.runs.lastAt, line.lastNoteAt, goAt(s.approval)].map(Date.parse).filter(Number.isFinite);
   return times.length > 0 && s.now - Math.max(...times) > s.quietMinutes * 60_000;
@@ -310,8 +282,6 @@ const noChange: Rule = (s) =>
     ? { kind: "needs-human", why: `a run ended, but no change is open on factory/${s.ticket} (closed?)` }
     : "next";
 
-// in a test-first lane the fix waits for its failing test, however the test-first run ended (#417: the lane's
-// property, never its name)
 function nextTask(s: TicketState): Task {
   const said = s.approval.kind === "approved" || s.approval.kind === "started";
   const testFirst = said && s.approval.testFirst;
@@ -323,22 +293,17 @@ const AGAIN: Readonly<Record<"asked" | "blocked", string>> = {
   blocked: "a person removed needs-human",
 };
 
-// answered : the next task with the person's answers in it, when the run follows an answered round (#486, P13)
 function answered(s: TicketState, task: Task): Task {
   const answers = answersOn(s);
   return answers.length === 0 || (task.kind !== "fix" && task.kind !== "test-first") ? task : { ...task, answers };
 }
 
-// answersOn : the answers the ticket's change holds, none with no open change
 function answersOn(s: TicketState): readonly Answer[] {
   const line = open(s);
   return line === "none" ? [] : (line.answers ?? []);
 }
 
-// after : the writer's next run once the last one ended; "next" when it finished its work
 function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): Action | "next" {
-  // the answers ride on every run until one finishes done: a run that asked, or one that was blocked after the answer,
-  // gets them again, and a test-first run that ended done hands them to the fix run after it (#486 review)
   if (w.outcome !== "done") {
     return { kind: "writer", task: answered(s, nextTask(s)), why: AGAIN[w.outcome] };
   }
@@ -347,15 +312,11 @@ function after(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended"
     : "next";
 }
 
-// blocked : a ticket with no run yet and no change open waits until each ticket its spec's "Blocked by" names is
-// merged; a blocker closed with no merge, the ticket itself, or a cycle goes to a person (#494). A new approval or START
-// starts the run counts afresh, so the open change, not the counts, says a build began.
 const blocked: Rule = (s) => {
   const b = s.blockers ?? { kind: "none" };
   return begun(s) || b.kind === "none" ? "next" : blockedAs(b.kind, s, b);
 };
 
-// the passes in a row on which the git host may not answer for a blocker before a person looks (#494 AC-7)
 export const MAX_UNREAD_PASSES = 3;
 
 type BlockedMap = { readonly [V in Exclude<BlockersView, { kind: "none" }> as V["kind"]]: V };
@@ -366,8 +327,6 @@ const BLOCKED: { readonly [K in keyof BlockedMap]: (s: TicketState, b: BlockedMa
   waiting: (s, b) => holdAs(s, waitingWhy(b.on)),
 };
 
-// unreadAs : a pass the git host did not answer for a blocker: counted; on the third in a row a person is told, once
-// per outage (the why names when it began), and the passes after it keep counting quietly until the git host answers
 function unreadAs(s: TicketState, why: string): Action {
   if (s.runs.unreadPasses + 1 < MAX_UNREAD_PASSES) {
     return { kind: "blockers-unread", why };
@@ -381,8 +340,6 @@ function blockedAs<K extends keyof BlockedMap>(kind: K, s: TicketState, b: Block
   return BLOCKED[kind](s, b);
 }
 
-// holdAs : the wait on the blockers; a hold not recorded yet (new, changed, or after unread passes) is recorded first,
-// and the person is pinged when what it waits on changed (#494 AC-10)
 function holdAs(s: TicketState, why: string): Action {
   if (s.runs.heldWhy === why && s.runs.unreadPasses === 0) {
     return { kind: "wait", why };
@@ -390,18 +347,14 @@ function holdAs(s: TicketState, why: string): Action {
   return { kind: "held", why, ping: s.runs.heldWhy !== why };
 }
 
-// begun : the ticket's build began: a run since the newest approval or START, or its change open
 function begun(s: TicketState): boolean {
   return s.runs.lastWriter.kind !== "none" || s.change.kind !== "none";
 }
 
-// the waits and hand-overs a park gives; next-step.ts reads the wait's words
 export const PARK_WAIT = "the provider's usage limit lasts until";
 
 type ParkedRun = Extract<Summary["parked"], { kind: "parked" }>;
 
-// parkHandedOver : a park that goes to a person: its reset is unknown, or the provider refused again at a reset no
-// later than the one before; undefined for a park the factory carries on
 function parkHandedOver(p: ParkedRun): Action | undefined {
   if (p.until === "unknown") {
     return { kind: "needs-human", why: `the provider's usage limit; its reset time is unknown: ${p.said}` };
@@ -411,8 +364,6 @@ function parkHandedOver(p: ParkedRun): Action | undefined {
     : undefined;
 }
 
-// parked : a writer run the provider's usage limit refused: wait for the reset, then run the same task again,
-// from the head the parked run pushed; a reset that is unknown, or a refusal again at a reset no later, goes to a person
 const parked: Rule = (s) => {
   const p = s.runs.parked;
   if (p.kind !== "parked" || p.phase !== "writer" || p.task === undefined) {
@@ -421,18 +372,15 @@ const parked: Rule = (s) => {
   return parkHandedOver(p) ?? afterReset(s, p, p.task);
 };
 
-// afterReset : the wait until the reset, then the parked task again
 function afterReset(s: TicketState, p: ParkedRun, task: Task): Action {
   return s.now < Date.parse(p.until)
     ? { kind: "wait", why: `${PARK_WAIT} ${p.until}` }
     : { kind: "writer", task: answered(s, task), why: `the provider's usage limit reset at ${p.until}` };
 }
 
-// the writer's next run, when the last one ended in a way that calls for one
 const writerAgain: Rule = (s) => {
   const w = s.runs.lastWriter;
   const said = s.approval.kind === "started" ? "started" : "approved";
-  // a ticket STARTed again after a hand-over starts its counts afresh; the change's answered round still holds
   return w.kind === "none"
     ? { kind: "writer", task: answered(s, nextTask(s)), why: `${said}; no run yet` }
     : after(s, w);
@@ -451,7 +399,6 @@ const headMoved: Rule = (s) => {
 
 type LastReadyEnded = Extract<Summary["lastReady"], { kind: "ended" }>;
 
-// sameList : two lists with the same items in the same order. Pure.
 function sameList<T>(a: readonly T[], b: readonly T[], same: (x: T, y: T) => boolean): boolean {
   return a.length === b.length && a.every((x, i) => i in b && same(x, b[i] ?? x));
 }
@@ -460,9 +407,6 @@ function sameRow(a: Evidence, b: Evidence): boolean {
   return a.criterion === b.criterion && a.command === b.command && a.result === b.result;
 }
 
-// readyInputsChanged : what the ready check would run now is not what it ran: the last writer gave other rows, or the
-// allowed programs changed (#444). A line that does not say what it ran (built by hand, or older than #444) counts as
-// unchanged, so no ticket re-runs a check it already failed. Pure.
 function readyInputsChanged(s: TicketState, r: LastReadyEnded): boolean {
   return rowsChanged(s, r) || programsChanged(s, r);
 }
@@ -479,52 +423,36 @@ function programsChanged(s: TicketState, r: LastReadyEnded): boolean {
   return then !== "unknown" && now !== "unknown" && !sameList(then, now, (a, b) => a === b);
 }
 
-// recheck : the last ready check failed for the writer at this head, and it would now run other rows or programs: it
-// runs again rather than send the writer back, or hand a rework that changed no code to a person (#444)
 function recheck(s: TicketState, head: string): boolean {
   const r = s.runs.lastReady;
   return r.kind === "ended" && r.head === head && !r.passed && !r.human && readyInputsChanged(s, r);
 }
 
-// checkedSince : the last ready check at the writer's head ran after the writer's run ended, so it judged that run's
-// rows (#444). Pure.
 function checkedSince(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
   const r = s.runs.lastReady;
   const ended = Date.parse(w.at ?? "");
   return r.kind === "ended" && r.head === w.head && !(Date.parse(r.at) < ended);
 }
 
-// notCheckedAt : no ready check has ended at this head in the runs being read: after a new START or approval the runs
-// before it are not read, so a branch that already holds the work has rows no check judged yet (#62). Pure.
 function notCheckedAt(s: TicketState, head: string): boolean {
   const r = s.runs.lastReady;
   return r.kind !== "ended" || r.head !== head;
 }
 
-// the writer modes whose run may change no code and still give rows to judge: a rework whose evidence was the problem
-// (#444), and the fix run after a new START on a branch that already holds the work (ledger#5, #62)
 const EVIDENCE_MODES: ReadonlySet<WriterMode> = new Set(["rework", "fix"]);
 
-// evidenceRework : a run that changed no code but gave rows the ready check judges: it has run them since, would now
-// run other rows or programs than it last did (#444), or has not run at this head yet (#62)
 function evidenceRework(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
   return rowsOnly(w) && judges(s, w);
 }
 
-// rowsOnly : a run of a mode that may change no code, which changed none and gave rows. Pure.
 function rowsOnly(w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
   return w.patch === "" && EVIDENCE_MODES.has(w.mode) && w.evidence.length > 0;
 }
 
-// judges : the ready check judges the run's rows: it has run them, would run other rows or programs, or has not run
-// at this head yet. Pure.
 function judges(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
   return checkedSince(s, w) || recheck(s, w.head) || notCheckedAt(s, w.head);
 }
 
-// patchChecked : a run whose patch the same-patch check leaves alone: a cleanup run in an older ledger, which commits
-// nothing when it left nothing to tidy; a rework whose evidence, not its code, was the problem changes no
-// code, and the ready check judges its new rows (#444)
 function patchChecked(s: TicketState, w: Extract<Summary["lastWriter"], { kind: "ended" }>): boolean {
   return w.mode !== "cleanup" && !evidenceRework(s, w);
 }
@@ -542,8 +470,6 @@ const samePatch: Rule = (s) => {
     : "next";
 };
 
-// conflict : a change that does not merge into its target sends the implementer to merge the default branch in. The
-// head is the writer's (headMoved stands off otherwise), so a conflict right after a merge run is that run's failure.
 const conflict: Rule = (s) => {
   const line = open(s);
   if (line === "none" || line.mergeable !== "conflict") {
@@ -562,14 +488,10 @@ const conflict: Rule = (s) => {
       };
 };
 
-// saidLane : the lane a human said yes to: approved, or STARTed in a lane that needs no approval
 function saidLane(view: ApprovalView): Lane | "none" {
   return view.kind === "approved" || view.kind === "started" ? view.lane : "none";
 }
 
-// raisedLaneWhy : why the ready check's diff stops the change, when it needs a heavier lane than the one a human said
-// yes to (#230); "" when it does not. A raise stops for a person, never for the writer: only a raised spec and a new
-// approval let it go on, and a waiver does not.
 function raisedLaneWhy(s: TicketState, lane: Lane | undefined): string {
   const said = saidLane(s.approval);
   return lane !== undefined && said !== "none" && above(lane, said)
@@ -579,13 +501,11 @@ function raisedLaneWhy(s: TicketState, lane: Lane | undefined): string {
 
 type LastReady = LastReadyEnded;
 
-// alsoStopped : the test checks' own stop at the same check, when they stopped it too and no waiver lifted it (#231)
 function alsoStopped(s: TicketState, head: string, r: LastReady): string {
   const tests = r.human && !r.passed ? testChecksStopped(s, head, r) : { kind: "ready" as const, head };
   return tests.kind === "needs-human" ? `; and ${tests.why}` : "";
 }
 
-// laneRaised : a lane raise goes to a person, naming the test checks' stop as well when both hit
 const laneRaised: Rule = (s) => {
   const r = s.runs.lastReady;
   const head = writerHead(s);
@@ -593,13 +513,10 @@ const laneRaised: Rule = (s) => {
   return why === "" || r.kind !== "ended" ? "next" : { kind: "needs-human", why: `${why}${alsoStopped(s, head, r)}` };
 };
 
-// waivedSince : a waiver given at this head after the ready check that stopped it
 function waivedSince(waiver: WaiverView, head: string, checkedAt: string): boolean {
   return waiver.kind === "waived" && waiver.head === head && Date.parse(waiver.at) > Date.parse(checkedAt);
 }
 
-// due : no ready check stands at this head: none yet, one at another head, or a failed one that would now run other
-// rows or programs (#444)
 function due(s: TicketState, head: string): boolean {
   const r = s.runs.lastReady;
   return r.kind === "none" || r.head !== head || recheck(s, head);
@@ -617,7 +534,6 @@ const ready: Rule = (s) => {
   return r.human ? testChecksStopped(s, head, r) : readyFailed(s, head, r.why);
 };
 
-// testChecksStopped : a test check hit is a person's to decide, until their waiver at this head runs the check again
 function testChecksStopped(s: TicketState, head: string, r: { readonly at: string; readonly why: string }): Action {
   return waivedSince(s.waiver, head, r.at)
     ? { kind: "ready", head }
@@ -634,7 +550,6 @@ function readyFailed(s: TicketState, head: string, why: string): Action {
       };
 }
 
-// the review at this head, or "none" when there is none yet
 function reviewHere(s: TicketState): number | "none" {
   const r = s.runs.lastReview;
   return r.kind === "ended" && r.head === writerHead(s) ? r.actOn : "none";
@@ -669,7 +584,6 @@ const WAITS: Readonly<Record<string, string>> = {
 
 const RED = new Set(["failed", "canceled"]);
 
-// red : the writer's CI run, for the check that failed, or a person after the last round
 function red(s: TicketState, failed: "forge" | "verifier"): Action {
   const head = writerHead(s);
   if (s.runs.ciRounds >= MAX_CI_ROUNDS) {
@@ -687,14 +601,11 @@ function green(s: TicketState): Action {
     : { kind: "ping", head };
 }
 
-// verifiedHere : the local verifier's result at the writer's head, from the dispatcher's own record; never from the
-// forge, where any other check or status (a bot, a preview) could read as green (#91)
 function verifiedHere(s: TicketState): boolean | "none" {
   const v = s.runs.lastVerify;
   return v.kind === "ended" && v.head === writerHead(s) ? v.passed : "none";
 }
 
-// localGate : with a local gate the verifier's own run decides; a red forge check still sends the writer back
 const localGate: Rule = (s) => {
   if (s.gate !== "local") {
     return "next";
@@ -709,7 +620,6 @@ const localGate: Rule = (s) => {
   return forgeRed(s) ? red(s, "forge") : green(s);
 };
 
-// forgeRed : a check on the forge is red at this head, whatever the gate
 function forgeRed(s: TicketState): boolean {
   const line = open(s);
   return line !== "none" && RED.has(line.pipeline.kind);
@@ -759,7 +669,6 @@ function first(state: TicketState): Action {
   return { kind: "wait", why: "nothing to do" };
 }
 
-// the check whose failure each retrying task answers
 const RETRIES: Readonly<Partial<Record<Task["kind"], Retried>>> = {
   "ready-failed": "ready",
   "act-on": "review",
@@ -772,7 +681,6 @@ const STEP_NAMES: Readonly<Record<Retried, string>> = {
   verify: "local verifier",
 };
 
-// backedOff : a writer run that retries a failed check waits until that check's next try (#228)
 function backedOff(state: TicketState, action: Action): Action {
   const next = state.runs.nextTry;
   const retries = action.kind === "writer" ? RETRIES[action.task.kind] : undefined;
@@ -780,7 +688,6 @@ function backedOff(state: TicketState, action: Action): Action {
   return early ? { kind: "wait", why: `the ${STEP_NAMES[next.step]} failed; the next try is at ${next.at}` } : action;
 }
 
-// once : a stop already handed to a person waits; removing needs-human does not lift it
 function once(state: TicketState, action: Action): Action {
   return action.kind === "needs-human" && state.runs.blocked.includes(action.why)
     ? {
@@ -790,13 +697,10 @@ function once(state: TicketState, action: Action): Action {
     : action;
 }
 
-// releasable : a wait a quiet claim gives back; a park's is not. Pure.
 function releasable(action: Action): action is Extract<Action, { kind: "wait" }> {
   return action.kind === "wait" && !action.why.startsWith(PARK_WAIT);
 }
 
-// released : a wait on a claimed change that has gone quiet gives the claim back; a park keeps it, since its wait is
-// the factory's until a reset hours away, and it was told once already
 function released(state: TicketState, action: Action): Action {
   const line = open(state);
   const quietClaim = line !== "none" && line.claimed && quiet(state, line);
@@ -807,43 +711,30 @@ function released(state: TicketState, action: Action): Action {
 
 export const RUNS: ReadonlySet<Action["kind"]> = new Set(["writer", "ready", "review", "verify", "design"]);
 
-// capped : a run of a ticket at its cap goes to a person instead, with what the ticket spent (#131)
 function capped(state: TicketState, action: Action): Action {
   const why = RUNS.has(action.kind) ? ticketCapped(state.runs.spent, state.caps) : "";
   return why === "" ? action : { kind: "needs-human", why };
 }
 
-// decide : the one action for this ticket now, with the rules that hold over every row.
 export function decide(state: TicketState): Action {
   return released(state, once(state, capped(state, backedOff(state, first(state)))));
 }
 
-// the waits on the machine, not on a person: CI that has not finished at this head
 const MACHINE_WAITS: ReadonlySet<string | undefined> = new Set([WAITS.running, WAITS.none]);
 
-// inFlight : whether the orchestrator loop carries the ticket on (#305): a run to start, a ping to send, a run that
-// backs off before its next try, or CI still running. A ticket is not in flight once it is finished (merged or
-// closed), has asked a person, has stopped at needs-human, waits on a human's START or approval, or waits on a person
-// in any other way (a green gate before the merge, a person's push, a /stop). It reads only the ticket's state, as
-// decide does, so the loop and the pass never disagree.
 export function inFlight(state: TicketState): boolean {
   const action = decide(state);
   return RUNS.has(action.kind) || TELLS.has(action.kind) || (HELD_KINDS.has(action.kind) && carried(first(state)));
 }
 
-// the actions that tell a person something, which the loop carries on by itself
 const TELLS: ReadonlySet<Action["kind"]> = new Set(["ping", "design-note", "held", "blockers-unread"]);
 
-// the actions decide makes of a row it holds back: a wait (a backoff, CI) or the claim given back on a quiet change
 const HELD_KINDS: ReadonlySet<Action["kind"]> = new Set(["wait", "release"]);
 
-// a design run that backs off before its next try (#236): the engine carries it on by itself
 function designLater(why: string): boolean {
   return Object.values(DESIGN_STEP).some((step) => why.startsWith(`the ${step} failed; the next try is at`));
 }
 
-// carried : a row the engine carries on by itself: a run, a wait on CI, a design run's backoff, or a park until the
-// provider's reset
 function carried(row: Action): boolean {
   return (
     RUNS.has(row.kind) ||

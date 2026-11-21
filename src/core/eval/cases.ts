@@ -15,16 +15,13 @@ export type Case = {
   readonly kind: string;
   readonly status: string;
   readonly base: string;
-  // the absolute path of change.patch
   readonly patch: string;
   readonly golden: readonly GoldenFinding[];
-  // pr.md as it is, or ""
   readonly pr: string;
 };
 
 export type Chosen = { readonly run: readonly Row[]; readonly skipped: readonly Row[] };
 
-// choose : the rows to run: approved ones, and drafts too only when asked. Pure.
 export function choose(rows: readonly Row[], drafts: boolean): Chosen {
   const runs = (r: Row): boolean => r.status === "approved" || (drafts && r.status === "draft");
   return { run: rows.filter(runs), skipped: rows.filter((r) => !runs(r)) };
@@ -40,7 +37,6 @@ async function optional(path: string): Promise<string> {
   return readFile(path, "utf8").catch(() => "");
 }
 
-// readCase : one case's files; a case that is not well-formed fails with its name (make lint says more)
 export async function readCase(root: string, row: Row): Promise<Result<Case>> {
   const dir = join(root, CASES_DIR, row.name);
   const files = await attempt(
@@ -74,7 +70,6 @@ export async function readCase(root: string, row: Row): Promise<Result<Case>> {
 
 type PrText = { readonly title: string; readonly body: string };
 
-// prText : pr.md's title (its first line, after "# ") and the rest. Pure.
 export function prText(pr: string): PrText {
   const [first = "", ...rest] = pr.replace(/\r\n?/g, "\n").split("\n");
   const title = /^#\s+(.*\S)\s*$/.exec(first)?.[1] ?? "";
@@ -97,8 +92,6 @@ function split(body: string): { readonly intent: string; readonly criteria: read
   return { intent, criteria };
 }
 
-// specOf : the spec the review reads for a case: pr.md's title, its text before "## Acceptance criteria" as the
-// intent, and its numbered criteria; a case with none gets one plain criterion, so a spec is never empty. Pure.
 export function specOf(c: Case): string {
   const pr = prText(c.pr);
   const { intent, criteria } = split(pr.body);

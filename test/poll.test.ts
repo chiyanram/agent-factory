@@ -3,7 +3,6 @@ import { decide, format, poll, stop, type OpenLine } from "../src/core/poll.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
 import { renderPost } from "../src/core/post.js";
 
-// At work the factory posts as the developer: "ram" writes both the agents' notes and their own replies.
 const team = [
   { name: "ram", level: "maintainer", bot: false },
   { name: "lee", level: "developer", bot: false },

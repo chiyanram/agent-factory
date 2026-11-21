@@ -6,6 +6,10 @@
 // may only make a safety key stricter. An attempt to loosen one is an error that names the key, the layer, the file
 // and the team value, and the run does not start. A key no class knows is a warning with "did you mean", for one
 // release, before it becomes an error (#229).
+//
+// A project-only key's variable that differs from the project file is a warning, so a variable set for one project
+// never quietly points another at the wrong place. A work project may not opt in to commits to its product repo (P9),
+// nor keep its specs on the git host.
 
 import { isOldConnectors, OLD_CONNECTORS } from "../process/plugins.js";
 import { pathKey } from "./lines.js";
@@ -16,10 +20,8 @@ export type LayerName = "engine" | "team" | "project" | "user" | "machine" | "de
 export const TEAM_MODES = ["locked", "default", "open"] as const;
 export type TeamMode = (typeof TEAM_MODES)[number];
 
-// one settings file, read and parsed
 export type FileLayer = {
   readonly name: "team" | "project" | "user";
-  // the file as config show names it: its path, and for the team the commit it is pinned at
   readonly file: string;
   readonly value: object;
   readonly lines: ReadonlyMap<string, number>;
@@ -29,7 +31,6 @@ export type Source = { readonly layer: LayerName; readonly file: string; readonl
 
 export type Resolved = {
   readonly key: Key;
-  // absent when no layer sets it and it has no fallback
   readonly value: unknown;
   readonly set: boolean;
   readonly sources: readonly Source[];
@@ -41,7 +42,6 @@ export type Problem = { readonly level: "error" | "warning"; readonly text: stri
 export type Resolution = {
   readonly values: readonly Resolved[];
   readonly problems: readonly Problem[];
-  // the project file's object with every resolved file key in place, for the project file's readers
   readonly effective: object;
 };
 
@@ -64,7 +64,6 @@ function at(value: unknown, path: readonly string[]): { readonly found: boolean;
   return { found: true, value: here };
 }
 
-// canonical : a value as text with its keys sorted, so two equal values compare equal
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonical).join(",")}]`;
@@ -95,7 +94,6 @@ function rankStep(state: State, entry: Entry, was: number, now: number): Step {
   return now > was ? { state: { value: entry.value, sources: [entry.source] }, problem: "" } : { state, problem: "" };
 }
 
-// ladderStep : the strictest wins; a looser value is refused
 function ladderStep(key: Key, state: State, entry: Entry): Step {
   const ladder = key.ladder ?? [];
   const [was, now] = [ladder.indexOf(String(state.value)), ladder.indexOf(String(entry.value))];
@@ -104,7 +102,6 @@ function ladderStep(key: Key, state: State, entry: Entry): Step {
     : rankStep(state, entry, was, now);
 }
 
-// withinStep : a cap that is not a number (the run hours): a value within the one above wins; any other is refused
 function withinStep(inside: (lower: unknown, upper: unknown) => boolean, state: State, entry: Entry): Step {
   if (!inside(entry.value, state.value)) {
     return { state, problem: `${show(entry.value)} is not within ${show(state.value)}` };
@@ -114,7 +111,6 @@ function withinStep(inside: (lower: unknown, upper: unknown) => boolean, state: 
     : { state: { value: entry.value, sources: [entry.source] }, problem: "" };
 }
 
-// capStep : the lowest wins; a higher value is refused
 function capStep(state: State, entry: Entry): Step {
   const [was, now] = [state.value, entry.value];
   if (typeof was !== "number" || typeof now !== "number") {
@@ -139,7 +135,6 @@ function joined(state: State, entry: Entry, extra: readonly string[]): State {
     : { value: [...(strings(state.value) ?? []), ...extra], sources: [...state.sources, entry.source] };
 }
 
-// allowStep : the entries above stay; a lower layer adds only where the team marks the key open
 function allowStep(state: State, entry: Entry, mode: TeamMode): Step {
   const { extra, ok } = added(state, entry);
   if (!ok) {
@@ -150,7 +145,6 @@ function allowStep(state: State, entry: Entry, mode: TeamMode): Step {
     : { state: joined(state, entry, extra), problem: "" };
 }
 
-// denyStep : every layer adds
 function denyStep(state: State, entry: Entry): Step {
   const { extra, ok } = added(state, entry);
   return ok
@@ -175,7 +169,6 @@ const STEPS: Readonly<Record<KeyClass, ClassStep>> = {
   preference: (_key, _state, entry) => ({ state: { value: entry.value, sources: [entry.source] }, problem: "" }),
 };
 
-// step : one lower layer's value against what the layers above resolved to
 function step(key: Key, state: State, entry: Entry, mode: TeamMode): Step {
   const team = state.sources.find((s) => s.layer === "team");
   return mode === "locked" && team !== undefined ? lockedStep(state, entry) : STEPS[key.class](key, state, entry, mode);
@@ -189,8 +182,6 @@ type Context = {
 
 const NUMBER = /^\d+(\.\d+)?$/;
 
-// machineEntry : a machine key's variable, the lowest layer; a cap's number is compared as a number, a list key's
-// list as a list (listText), any other text is left as it is, for the module's own check
 function machineEntry(key: Key, env: NodeJS.ProcessEnv): readonly Entry[] {
   const text = key.where === "machine" ? env[key.env] : undefined;
   return key.where === "machine" && text !== undefined
@@ -221,9 +212,6 @@ function entriesOf(key: Key, context: Context): readonly Entry[] {
   return [...files, ...machineEntry(key, context.env)];
 }
 
-// checked : a team or user value that is not what the key holds is an error; a project value of a file key is left to
-// the project file's readers, so their refusals read as they do today, unless the key has no reader there; a machine
-// variable is left to its module's own check
 function checked(key: Key, entry: Entry): string {
   if (sharedLayer(key, entry.source.layer)) {
     return `${key.id} in ${where(entry.source)} names one project's own place, which every project would read; set it in the project file (agent-factory init does)`;
@@ -232,7 +220,6 @@ function checked(key: Key, entry: Entry): string {
   return why === "" ? "" : `${key.id} in ${where(entry.source)} must be ${why}`;
 }
 
-// sharedLayer : a project-only key set in a layer every project reads (#369)
 function sharedLayer(key: Key, layer: LayerName): boolean {
   return key.projectOnly === true && (layer === "team" || layer === "user");
 }
@@ -294,8 +281,6 @@ function resolveKey(key: Key, context: Context): { readonly resolved: Resolved; 
   return { resolved: { key, value: state.value, set, sources: state.sources, mode }, problems: [...fold.problems] };
 }
 
-// setAt : puts a value at a path, making the objects on the way; a part that is there but not an object is left, so
-// the project file's readers refuse it as they do today
 function setAt(target: Record<string, unknown>, path: readonly string[], value: unknown): void {
   const [head, ...rest] = path;
   if (head === undefined) {
@@ -312,7 +297,6 @@ function setAt(target: Record<string, unknown>, path: readonly string[], value: 
   }
 }
 
-// a value only the project file set is left exactly as the file has it
 function fromOthers(resolved: Resolved): boolean {
   return resolved.set && resolved.sources.some((s) => s.layer === "team" || s.layer === "user");
 }
@@ -331,11 +315,9 @@ export type Input = {
   readonly layers: readonly FileLayer[];
   readonly modes: ReadonlyMap<string, TeamMode>;
   readonly env: NodeJS.ProcessEnv;
-  // problems found while reading the files (layers.ts)
   readonly problems: readonly Problem[];
 };
 
-// resolve : every key's value, the problems, and the project file's object with the layers in place
 export function resolve(input: Input): Resolution {
   const context: Context = { layers: input.layers, modes: input.modes, env: input.env };
   const each = KEYS.map((k) => resolveKey(k, context));
@@ -351,8 +333,6 @@ export function resolve(input: Input): Resolution {
   return { values, problems, effective: effectiveOf(project, values) };
 }
 
-// overridden : a project-only key whose variable wins over a different project file value (#369), so a variable
-// exported in a shell profile for one project never quietly points another project at the wrong place
 function overridden(key: Key, context: Context): readonly Problem[] {
   return key.projectOnly === true && key.where === "machine" ? shadowed(key.id, key.env, entriesOf(key, context)) : [];
 }
@@ -373,15 +353,12 @@ function shadowed(id: string, env: string, entries: readonly Entry[]): readonly 
       ];
 }
 
-// oldNames : a key still read under its old name, for one release, with a warning (#232)
 function oldNames(layer: FileLayer): readonly Problem[] {
   const plugins: unknown = Reflect.get(layer.value, "plugins");
   const place = where({ layer: layer.name, file: layer.file, line: layer.lines.get(pathKey(["plugins"])) ?? 0 });
   return isOldConnectors(plugins) ? [{ level: "warning", text: `${place}: ${OLD_CONNECTORS}` }] : [];
 }
 
-// atWork : P9, nothing is committed to a work project's product repo, so its opt-in is refused; and a work project's
-// spec stays on this machine, so the issue spec store is refused too (#381)
 function atWork(values: readonly Resolved[]): readonly string[] {
   const on = (id: string, value: unknown): Resolved | undefined =>
     values.find((r) => r.key.id === id && r.value === value);
@@ -403,8 +380,6 @@ function atWork(values: readonly Resolved[]): readonly string[] {
         ]),
   ];
 }
-
-// ---- unknown keys
 
 const ALL_PATHS = KEYS.map((k) => k.path);
 
@@ -433,7 +408,6 @@ function nextRow(a: string, i: number, b: string, row: readonly number[]): reado
   return next;
 }
 
-// distance : the edit distance between two words, for "did you mean"
 export function distance(a: string, b: string): number {
   let row: readonly number[] = Array.from({ length: b.length + 1 }, (_v, j) => j);
   for (let i = 1; i <= a.length; i += 1) {
@@ -442,8 +416,6 @@ export function distance(a: string, b: string): number {
   return row[b.length] ?? 0;
 }
 
-// didYouMean : the nearest key name, when one is near
-// every key name and each dotted part it starts with ("egress" for "egress.allow")
 const NAMES = [...new Set(KEYS.flatMap((k) => k.id.split(".").map((_p, i, all) => all.slice(0, i + 1).join("."))))];
 
 export function didYouMean(name: string): string {
@@ -475,8 +447,6 @@ function walk(layer: FileLayer, value: unknown, path: readonly string[]): readon
   });
 }
 
-// partOf : a part of a key's path; one that is not an object is left to the project file's readers, and refused in a
-// team or user file
 function partOf(layer: FileLayer, value: unknown, path: readonly string[]): readonly Problem[] {
   if (isObject(value)) {
     return walk(layer, value, path);

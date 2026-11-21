@@ -14,7 +14,6 @@ const test = (lines: number, more: Partial<FileNumbers> = {}): Side => ({
 const ABSENT: Side = { kind: "absent" };
 const row = (path: string, before: Side, after: Side): Row => ({ path, before, after });
 
-// the shape gardener 0.1.2 prints for `snapshot --json`, with a config whose code list is one file
 type Over = { source: number; test: number; lines: number; escapes: number; mocks: number };
 const DEFAULTS: Over = { source: 1, test: 0, lines: 10, escapes: 0, mocks: 0 };
 const snapshot = (over: Partial<Over>) => {
@@ -29,7 +28,6 @@ const snapshot = (over: Partial<Over>) => {
     suppressions: { source: {}, test: {}, total: 1 },
     tests: { cases: 3, mockModules: o.mocks, callAssertions: 2, assertions: 5 },
     sql: null,
-    // a history number gardener may add: never read here
     fixes: 9,
   };
 };

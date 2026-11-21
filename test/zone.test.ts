@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { atWall, dayStart, monthStart, readerZone, shownAt, shownFor, UTC } from "../src/core/zone.js";
 
-// The views show the reader's zone; the records stay in UTC (#487, Q8).
-
 const TOKYO = { name: "Asia/Tokyo" };
 const LA = { name: "America/Los_Angeles" };
 
@@ -23,9 +21,7 @@ describe("the reader's zone (#487)", () => {
 
   it("starts the day and the month at the zone's midnight", () => {
     const now = Date.parse("2026-11-13T06:07:15Z");
-    // 15:07 in Tokyo, so the day began at 00:00 there, 15:00 UTC the day before
     expect(new Date(dayStart(now, TOKYO)).toISOString()).toBe("2026-11-12T15:00:00.000Z");
-    // 22:07 on the 12th in Los Angeles (UTC-8)
     expect(new Date(dayStart(now, LA)).toISOString()).toBe("2026-11-12T08:00:00.000Z");
     expect(new Date(monthStart(now, TOKYO)).toISOString()).toBe("2026-10-31T15:00:00.000Z");
     expect(new Date(dayStart(now, UTC)).toISOString()).toBe("2026-11-13T00:00:00.000Z");
@@ -52,7 +48,6 @@ describe("a clock time in a zone, as a moment (#707)", () => {
   });
 
   it("is refused when daylight saving skips or repeats the clock", () => {
-    // New York skips 02:30 on 2026-03-08 and shows 01:30 twice on 2026-11-01
     expect(atWall({ year: 2026, month: 3, day: 8, hour: 2, minute: 30 }, NY)).toBe("skipped");
     expect(atWall({ year: 2026, month: 11, day: 1, hour: 1, minute: 30 }, NY)).toBe("repeated");
   });

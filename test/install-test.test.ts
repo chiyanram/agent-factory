@@ -78,7 +78,6 @@ describe("the install test's verdict", () => {
     for (const err of [
       "Error: boom\n    at file:///a/b.js:1:2\n",
       "TypeError: x\n    at main (/a/b.js:1:2)\n",
-      // a frame with no parentheses, and no error name before it
       "something went wrong\n    at file:///a/b.js:1:2\n",
     ]) {
       const crashed = problems(seen({ start: ran({ code: 1, err }) }), "0.34.1");

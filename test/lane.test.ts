@@ -98,10 +98,8 @@ describe("the approval floor (#230)", () => {
     ];
     for (const shape of shapes) {
       const read = lanesOf(shape, "plugin");
-      // a refused lanes file stops the run (process/read.ts), so no lane runs on it at all
       expect(read.kind).toBe("failed");
     }
-    // a lanes file that is read: a lane it leaves out needs an approval, in any order
     for (const kept of [[{ name: "tiny", approval: false, lenses: 1 }], DEFAULT_LANES.toReversed()]) {
       const read = lanesOf(kept, "plugin");
       expect(read.kind).toBe("ok");
@@ -253,7 +251,6 @@ describe("the lane a file's lines need", () => {
     expect(contentLane(["app.yaml"], diff("-retries: 3\n+retries: 5\n"))).toBe("tiny");
     expect(contentLane(["app.yaml"], diff("+cache: true\n"))).toBe("bug");
     expect(contentLane(["app.yaml"], diff("-retries: 3\n+attempts: 3\n"))).toBe("bug");
-    // the same lines in a code file are code
     expect(contentLane(["app.ts"], diff("-retries: 3\n+retries: 5\n"))).toBe("bug");
   });
 

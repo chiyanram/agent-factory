@@ -4,7 +4,8 @@
 // answer is deferred, ephemeral, then edited in place, so a slow spec read never misses Discord's three seconds. Every
 // log line and every reply leaves through the scrub, with the door's own token cut out literally as well. A refused
 // token or intent ends the door; any other close, or a failed look-up of the Gateway, reconnects with a fresh
-// IDENTIFY after a backoff. A throw in any of it is logged and answered, never left to end the process.
+// IDENTIFY after a backoff. A throw in any of it is logged and answered, never left to end the process. A log line
+// writes out every control character, so no input can start a forged line.
 
 import { field } from "../../human-record.js";
 import { SCRUBBED, scrubSecrets } from "../../scrub.js";
@@ -12,18 +13,23 @@ import type { Reply } from "./door.js";
 import type { RestAnswer, RestCall, Socket, Timers, Transport } from "./transport.js";
 
 // GUILDS (1 << 0) alone: no GUILD_MESSAGES, no DIRECT_MESSAGES, no MESSAGE_CONTENT
+// https://docs.discord.com/developers/events/gateway
 export const INTENTS = 1;
 
 const EPHEMERAL = 64;
-// interaction callback types: a deferred ephemeral answer to a command, and a deferred update of a button's message
+// interaction callback types 5 and 6: a deferred answer to a command, and a deferred update of a button's message
+// https://docs.discord.com/developers/interactions/receiving-and-responding
 const DEFER_ANSWER = 5;
 const DEFER_UPDATE = 6;
-// close codes after which a reconnect cannot help: a refused token, sharding, the API version, the intents
+// the close codes after which Discord says not to reconnect
+// https://docs.discord.com/developers/topics/opcodes-and-status-codes
 const FATAL: ReadonlySet<number> = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
-// the interaction types the door answers: a slash command and a button
+// interaction types 2 and 3: a slash command and a button
+// https://docs.discord.com/developers/interactions/receiving-and-responding
 const ANSWERED: ReadonlySet<unknown> = new Set([2, 3]);
 const RECONNECT_MS = 5000;
-// Discord's limit on a message's text
+// Discord's limit on a message's content
+// https://docs.discord.com/developers/resources/message
 const MAX_TEXT = 2000;
 const SNOWFLAKE = /^\d{17,20}$/;
 const INTERACTION_TOKEN = /^[\w.-]{1,500}$/;
@@ -49,33 +55,26 @@ export type GatewaySetup = {
   readonly token: string;
   readonly guild: string;
   readonly handle: (raw: unknown) => Promise<Reply>;
-  // a log line, already scrubbed
   readonly log: (line: string) => void;
   readonly timers: Timers;
 };
 
 export type Gateway = {
-  // a refused token or intent: the reason the door stopped
   readonly ended: Promise<{ readonly kind: "failed"; readonly reason: string }>;
-  // every answer under way, finished
   readonly drain: () => Promise<void>;
   readonly stop: () => Promise<void>;
 };
 
-// scrubberOf : the scrub, with this token cut out whatever its shape. Pure.
 export function scrubberOf(token: string): (text: string) => string {
   return (text) => scrubSecrets(text).split(token).join(SCRUBBED);
 }
 
-// textMatching : the value when it is a string the pattern matches, else undefined. Pure.
 function textMatching(value: unknown, pattern: RegExp): string | undefined {
   return typeof value === "string" && pattern.test(value) ? value : undefined;
 }
 
-// where an interaction's answers go: its id and token, the application's id, and whether it is a button
 type Route = { readonly id: string; readonly token: string; readonly app: string; readonly button: boolean };
 
-// routeOf : the route of a slash command or a button, checked before any of it becomes part of a path. Pure.
 function routeOf(raw: unknown): Route | undefined {
   const id = textMatching(field(raw, "id"), SNOWFLAKE);
   const app = textMatching(field(raw, "application_id"), SNOWFLAKE);
@@ -86,7 +85,6 @@ function routeOf(raw: unknown): Route | undefined {
     : undefined;
 }
 
-// frameOf : one Gateway frame, or undefined when it is not JSON. Pure.
 function frameOf(text: string): unknown {
   try {
     const frame: unknown = JSON.parse(text);
@@ -96,19 +94,16 @@ function frameOf(text: string): unknown {
   }
 }
 
-// gatewayUrl : the wss:// address /gateway/bot answered, or undefined. Pure.
 function gatewayUrl(found: RestAnswer): string | undefined {
   const url = found.kind === "ok" ? field(found.value, "url") : undefined;
   return typeof url === "string" && url.startsWith("wss://") ? url : undefined;
 }
 
-// intervalOf : HELLO's heartbeat interval, or Discord's usual one. Pure.
 function intervalOf(d: unknown): number {
   const every = field(d, "heartbeat_interval");
   return typeof every === "number" && every > 0 ? every : 41250;
 }
 
-// payloadOf : the reply as Discord's message edit: its text cut to the limit, and the Confirm button or none. Pure.
 function payloadOf(reply: Reply, scrub: (text: string) => string): Pick<RestCall, "json" | "files"> {
   const text = scrub(reply.text);
   const content = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text;
@@ -131,23 +126,19 @@ type Session = {
   seq: number | null;
   acked: boolean;
   stopBeat: () => void;
-  // cancels a reconnect that is waiting its turn
   stopRetry: () => void;
   socket: Socket | undefined;
 };
 
-// oneLine : the text with every control character written out, so no input can start a forged log line. Pure.
 export function oneLine(text: string): string {
   const control = (c: string): boolean => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f;
   return Array.from(text, (c) => (control(c) ? JSON.stringify(c).slice(1, -1) : c)).join("");
 }
 
-// failure : what a throw says, for the log; the log line is scrubbed. Pure.
 function failure(error: unknown): string {
   return error instanceof Error ? error.message : "an unknown error";
 }
 
-// the answer when the door itself fails on an interaction: the person is told, and the door keeps running
 function broken(error: unknown): Reply {
   return {
     text: "refused: the door could not answer; nothing was written, try again",
@@ -182,7 +173,6 @@ export function openGateway(setup: GatewaySetup): Gateway {
     return answer;
   };
 
-  // track : work under way, kept for drain; a throw in it is logged, never left to end the process
   const track = (started: Promise<void>): void => {
     const work = started.catch((error: unknown) => log(`failed: ${failure(error)}`));
     busy.add(work);
@@ -223,7 +213,6 @@ export function openGateway(setup: GatewaySetup): Gateway {
     }
   };
 
-  // DISPATCH : the only events the door acts on
   const DISPATCH: Readonly<Record<string, (d: unknown) => Promise<void>>> = {
     READY: register,
     INTERACTION_CREATE: answer,
@@ -250,7 +239,6 @@ export function openGateway(setup: GatewaySetup): Gateway {
     });
   };
 
-  // dispatched : an event in the table, run and tracked; any other event is dropped
   const dispatched = (t: unknown, d: unknown): void => {
     const run = typeof t === "string" && Object.hasOwn(DISPATCH, t) ? DISPATCH[t] : undefined;
     if (run !== undefined) {
@@ -258,8 +246,6 @@ export function openGateway(setup: GatewaySetup): Gateway {
     }
   };
 
-  // OPS : what each Gateway opcode does: a dispatch, a heartbeat asked for, a reconnect asked for, an invalid
-  // session, HELLO, and a heartbeat's ack
   const OPS: Readonly<Record<number, (frame: unknown) => void>> = {
     0: (frame) => dispatched(field(frame, "t"), field(frame, "d")),
     1: () => send(1, session.seq),
@@ -282,15 +268,12 @@ export function openGateway(setup: GatewaySetup): Gateway {
     run?.(frame);
   };
 
-  // retry : connect again after the backoff, unless the door has stopped
   const retry = (): void => {
     if (!stopped) {
       session.stopRetry = setup.timers.after(RECONNECT_MS, () => track(connect()));
     }
   };
 
-  // connect : find the Gateway and open a socket to it; only a refused token ends the door, and any other failure,
-  // a network blip or a 5xx, is tried again
   const connect = async (): Promise<void> => {
     const found = await call({ method: "GET", path: "/gateway/bot", route: "find the gateway" });
     if (found.kind === "failed" && found.status === 401) {

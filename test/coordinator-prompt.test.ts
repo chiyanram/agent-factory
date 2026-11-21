@@ -21,7 +21,6 @@ describe("prompts/coordinator.md (#486)", () => {
     expect(prompt).toContain("Name the source of every fact.");
   });
 
-  // one long coordinator per project, reset from a note built by code; ticket work in fresh ticket sessions
   it("is the project coordinator, which resets from the handoff note and never from a model's summary", () => {
     const flat = prompt.replace(/\s+/g, " ");
     expect(prompt).not.toContain("One short session per topic or ticket.");
@@ -95,9 +94,7 @@ describe("prompts/coordinator.md (#486)", () => {
   });
 });
 
-// #517 AC-4: every command the prompt tells the coordinator to run parses: none exits 64 (usage)
 describe("the commands prompts/coordinator.md names (#517)", () => {
-  // a sample value for each placeholder the prompt writes
   const SAMPLES: Readonly<Record<string, string>> = {
     "<project>": "ledger",
     "<ticket>": "PROJ-1",
@@ -108,8 +105,6 @@ describe("the commands prompts/coordinator.md names (#517)", () => {
     "<spec hash>": "a".repeat(64),
   };
 
-  // commands : each `agent-factory …` the prompt writes with its words, placeholders filled, an optional [<…>] left out;
-  // a bare command name in prose ("`agent-factory status` to post one status line") names a command, not a form to run
   function commands(text: string): readonly (readonly string[])[] {
     return [...text.matchAll(/`agent-factory ([^`]+)`/g)]
       .map((m) =>
@@ -155,7 +150,6 @@ describe("the commands prompts/coordinator.md names (#517)", () => {
   it("finds the forms the prompt names, grill and the session start among them", () => {
     const named = commands(prompt).map((w) => w.join(" "));
     expect(named).toContain("grill ledger 12 aaaa1111 /nonexistent/questions.json");
-    // the session starts with the reset note, which holds the board
     expect(named).toContain("handoff ledger");
     expect(named.length).toBeGreaterThanOrEqual(8);
   });

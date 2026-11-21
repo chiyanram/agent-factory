@@ -21,6 +21,8 @@
 // minItems, items (a schema or false), prefixItems, required, properties, additionalProperties (false), allOf and anyOf.
 // A schema that uses any other keyword is refused, so it never asks for a check this file does not run. The finding
 // schema is read and kept for the finder's run from its card (#438); today the finder runs from the built-in prompt.
+// A pack's card schema may allow no role or guardrail ID the engine does not know, so a pack never names a guardrail the
+// engine would skip.
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,15 +30,12 @@ import type { Result } from "../forge/api.js";
 
 export type PackPart = "card" | "lanes" | "finding";
 
-// each part's newest format version this engine reads
 export const PACK_FORMAT: Readonly<Record<PackPart, number>> = { card: 2, lanes: 1, finding: 1 };
 
-// andBefore : a version and the one before it, newest first (P18). Pure.
 function andBefore(version: number): readonly number[] {
   return [version, version - 1];
 }
 
-// the versions this engine reads of each part
 export const PACK_SUPPORTED: Readonly<Record<PackPart, readonly number[]>> = {
   card: andBefore(PACK_FORMAT.card),
   lanes: andBefore(PACK_FORMAT.lanes),
@@ -44,7 +43,6 @@ export const PACK_SUPPORTED: Readonly<Record<PackPart, readonly number[]>> = {
 };
 export type Schema = boolean | { readonly [key: string]: unknown };
 export type PackSchemas = {
-  // each part's version in use: the highest this engine reads among those the pack ships for it
   readonly versions: Readonly<Partial<Record<PackPart, number>>>;
   readonly parts: Readonly<Partial<Record<PackPart, Schema>>>;
 };
@@ -89,9 +87,6 @@ function objectAt(schema: Schema, key: string): { readonly [key: string]: unknow
   return isObject(value) ? value : {};
 }
 
-// ---- the keywords a schema uses
-
-// unknownKeywords : every keyword the checker does not run, anywhere in the schema. Pure.
 export function unknownKeywords(schema: Schema, where = "#"): readonly string[] {
   if (typeof schema === "boolean") {
     return [];
@@ -115,8 +110,6 @@ function nestedUnknown(schema: { readonly [key: string]: unknown }, where: strin
   return [...single, ...named, ...lists];
 }
 
-// ---- checking a value
-
 type Obj = { readonly [key: string]: unknown };
 
 const TYPE_TESTS: Readonly<Record<string, (value: unknown) => boolean>> = {
@@ -138,7 +131,6 @@ function shown(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
-// only : the line when the problem holds, else none. Pure.
 function only(holds: boolean, line: string): readonly string[] {
   return holds ? [line] : [];
 }
@@ -237,7 +229,6 @@ function combinedProblems(value: unknown, schema: Obj, where: string): readonly 
   return [...all, ...only(none, `${placeOf(where)}: matches no allowed form (${firsts})`)];
 }
 
-// validate : each way a value breaks a schema, as one line naming where. Pure.
 export function validate(value: unknown, schema: Schema, where = ""): readonly string[] {
   if (typeof schema === "boolean") {
     return only(!schema, `${placeOf(where)}: not allowed`);
@@ -257,9 +248,6 @@ export function validate(value: unknown, schema: Schema, where = ""): readonly s
   ];
 }
 
-// ---- a card's frontmatter as the pack's schema reads it
-
-// frontValue : a frontmatter value: "[a, b]" is a list, anything else a string. Pure.
 function frontValue(raw: string): string | readonly string[] {
   return raw.startsWith("[") && raw.endsWith("]")
     ? raw
@@ -270,7 +258,6 @@ function frontValue(raw: string): string | readonly string[] {
     : raw;
 }
 
-// frontmatterOf : a card's frontmatter fields, each a string or a [list], as the pack's own check reads them. Pure.
 export function frontmatterOf(text: string): Readonly<Record<string, string | readonly string[]>> {
   const head = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] ?? "";
   return Object.fromEntries(
@@ -281,8 +268,6 @@ export function frontmatterOf(text: string): Readonly<Record<string, string | re
   );
 }
 
-// ---- reading the pack's schemas
-
 const PARTS: ReadonlySet<string> = new Set(["card", "lanes", "finding"]);
 
 function isPart(name: string | undefined): name is PackPart {
@@ -291,14 +276,12 @@ function isPart(name: string | undefined): name is PackPart {
 
 type SchemaFile = { readonly part: PackPart; readonly version: number; readonly file: string };
 
-// schemaFileOf : a file of the schema folder, when it is a part's schema at a version. Pure.
 function schemaFileOf(file: string): readonly SchemaFile[] {
   const m = FILE.exec(file);
   const part = m?.[1];
   return isPart(part) ? [{ part, version: Number(m?.[2]), file }] : [];
 }
 
-// versionsIn : the schema files in the pack's schema folder, by part. Pure.
 function versionsIn(files: readonly string[]): ReadonlyMap<PackPart, readonly SchemaFile[]> {
   const found = new Map<PackPart, SchemaFile[]>();
   for (const entry of files.flatMap(schemaFileOf)) {
@@ -307,7 +290,6 @@ function versionsIn(files: readonly string[]): ReadonlyMap<PackPart, readonly Sc
   return found;
 }
 
-// inUse : the part's schema file this engine uses, the highest version it reads, or why none. Pure.
 function inUse(dir: string, part: PackPart, shipped: readonly SchemaFile[]): Result<SchemaFile> {
   const newestFirst = shipped.toSorted((a, b) => b.version - a.version);
   const supported = PACK_SUPPORTED[part];
@@ -346,14 +328,10 @@ async function schemaAt(path: string): Promise<Result<Schema>> {
   return unknown.length === 0 ? { kind: "ok", value: parsed } : failed(`${path}: ${unknown.join("; ")}`);
 }
 
-// readPackSchemas : the pack's format from its process folder: each part's schema at the highest version this engine
-// reads among those the pack ships; no parts when it has no schema folder. A part shipped only at versions this engine
-// does not read refuses the whole pack.
 export async function readPackSchemas(processDir: string): Promise<Result<PackSchemas>> {
   const dir = join(processDir, "schema");
   const versions: Partial<Record<PackPart, number>> = {};
   const parts: Partial<Record<PackPart, Schema>> = {};
-  // sorted, so the part a refusal names does not depend on the file system's order
   const files = (await readdir(dir).catch((): string[] => [])).toSorted();
   for (const [part, shipped] of versionsIn(files)) {
     const use = inUse(dir, part, shipped);
@@ -370,7 +348,6 @@ export async function readPackSchemas(processDir: string): Promise<Result<PackSc
   return { kind: "ok", value: { versions, parts } };
 }
 
-// enumsUnder : every value an enum lists anywhere under a schema. Pure.
 function enumsUnder(schema: unknown): readonly unknown[] {
   if (Array.isArray(schema)) {
     return schema.flatMap(enumsUnder);
@@ -382,8 +359,6 @@ function enumsUnder(schema: unknown): readonly unknown[] {
   return [...own, ...Object.entries(schema).flatMap(([k, v]) => (k === "enum" ? [] : enumsUnder(v)))];
 }
 
-// unknownToEngine : each role and guardrail ID the pack's card schema allows that this engine does not know, so a pack
-// can never name a guardrail the engine would silently skip (#484). The engine may know more than the pack names. Pure.
 export function unknownToEngine(
   schemas: PackSchemas,
   known: { readonly roles: readonly string[]; readonly guardrails: readonly string[] },
@@ -403,8 +378,6 @@ export function unknownToEngine(
   ];
 }
 
-// packProblem : why a pack's file breaks the pack's own schema for its part, or "" (none for that part, or it holds).
-// Pure.
 export function packProblem(schemas: PackSchemas, part: PackPart, value: unknown, from: string): string {
   const schema = schemas.parts[part];
   const found = schema === undefined ? [] : validate(value, schema);

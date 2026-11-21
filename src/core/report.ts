@@ -17,8 +17,9 @@
 // The writer controls its worktree, so the read is careful: .factory and the report must be a real folder and a real
 // regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Decide from it only once the
 // box has stopped: nothing of the writer's may still run and swap .factory between the checks and the open. A read
-// while the writer runs only starts the completion window (#182). A reason never
-// quotes the file, not even a key name, since it is posted on the change and a report could hold anything.
+// while the writer runs only starts the completion window. The open never follows a symlink, and it does not block,
+// so a FIFO cannot hang the host. A reason never quotes the file, not even a key name, since it is posted on the
+// change and a report could hold anything.
 
 import { constants } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
@@ -30,26 +31,19 @@ export const REPORT_PATH = ".factory/report.json";
 export const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_TEXT = 2000;
 const MAX_EVIDENCE = 50;
-// every open question in one round (#486): the whole frontier, up to what one round can hold
 const MAX_QUESTIONS = MOST_QUESTIONS;
 const MAX_DEFERRED = 20;
 const MAX_DEVIATIONS = 10;
-// a question's choices: 2 to 4 short ones, so a person answers with a letter (#320)
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 4;
 const MAX_CHOICE = 200;
 
 export type Evidence = { readonly criterion: string; readonly command: string; readonly result: string };
 
-// one way the build left the approved design (ADR-0018): what changed, why, and where; the design is never edited
 export type Deviation = { readonly what: string; readonly why: string; readonly file: string; readonly line: number };
 
-// DEVIATION : the title every deviation note starts with, after its [writer] seat; the review pack looks for it
-// (review/deviations.ts)
 export const DEVIATION = "DEVIATION:";
 
-// One open question (#320). With choices, a person answers with a letter, and recommended is the index of the one the
-// writer recommends. A plain question is the old report's string: read for one release, with no choices, then refused.
 export type Question =
   | {
       readonly kind: "choices";
@@ -60,8 +54,6 @@ export type Question =
   | { readonly kind: "plain"; readonly question: string };
 
 export type Outcome =
-  // deferred: what a cleanup run left for a person, as each would change behaviour (#236); none when the report has none
-  // deviations: how the build left the approved design (ADR-0018, #430); none when the report has none
   | {
       readonly kind: "done";
       readonly evidence: readonly Evidence[];
@@ -69,26 +61,17 @@ export type Outcome =
       readonly deviations?: readonly Deviation[];
     }
   | { readonly kind: "asked"; readonly questions: readonly Question[] }
-  // by: the writer said so, or the host decided it from how the run ended
   | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" }
-  // the provider's usage limit refused the run (agent/usage-limit.ts): the host decides it from what the CLI
-  // printed, never from the report. until: the reset, ISO 8601 UTC, or "unknown"; said: the CLI's refusal
   | { readonly kind: "parked"; readonly until: string; readonly said: string };
 
-// How the run ended, as the box (src/core/box) and the dispatcher's caps saw it.
 export type RunEnd =
   | { readonly kind: "exited"; readonly code: number }
-  // the writer wrote a valid report, then kept running past the completion window, and the host stopped its box
-  // (#182): decided from the report, like a clean exit
   | { readonly kind: "hungAfterReport"; readonly windowSeconds: number }
   | { readonly kind: "timedOut"; readonly seconds: number }
-  // the run printed nothing for the stall time and the host stopped its box (#228); last: its last output lines
   | { readonly kind: "stalled"; readonly seconds: number; readonly last: readonly string[] }
   | { readonly kind: "cap"; readonly what: string }
   | { readonly kind: "failed"; readonly reason: string };
 
-// how a run ended, for the post: on its own; stopped by the host after the completion window, and decided from its
-// report; or stopped by the host for printing nothing, with the last lines it printed (#228)
 export type Ending =
   | { readonly kind: "clean" }
   | { readonly kind: "hung"; readonly windowSeconds: number }
@@ -96,7 +79,6 @@ export type Ending =
 
 export const CLEAN: Ending = { kind: "clean" };
 
-// endingOf : the ending a run end gives the outcome. Pure.
 export function endingOf(end: RunEnd): Ending {
   if (end.kind === "hungAfterReport") {
     return { kind: "hung", windowSeconds: end.windowSeconds };
@@ -104,14 +86,12 @@ export function endingOf(end: RunEnd): Ending {
   return end.kind === "stalled" ? { kind: "stalled", last: end.last } : CLEAN;
 }
 
-// hungLine : what a person reads about a hung run. Pure.
 export function hungLine(ending: Ending): string {
   return ending.kind === "hung"
     ? `the writer hung after its report; the host stopped it after the ${ending.windowSeconds} s completion window`
     : "";
 }
 
-// validReport : a report the schema accepts, as the writer wrote it; the host's own refusals are not one
 export function validReport(file: ReportFile): boolean {
   if (file.kind !== "text") {
     return false;
@@ -125,7 +105,6 @@ export type ReportFile =
   | { readonly kind: "missing" }
   | { readonly kind: "unreadable"; readonly reason: string };
 
-// The words the writer's prompt carries, so the writer knows the schema it is held to.
 export const REPORT_INSTRUCTIONS = `When you stop, write ${REPORT_PATH} in the worktree and exit. Never commit it. It is JSON with one "status":
 - "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed. Start each "criterion" with the criterion's id, AC-1 for the first, AC-2 for the second, and so on: a criterion with no row fails the ready check.
   When the code leaves the approved design (a changed type, signature or file placement), add "deviations", a list of {"what", "why", "file", "line"}, at most ten; never edit the design. A change to what an acceptance criterion observes is no deviation: stop with "asked".
@@ -139,7 +118,6 @@ function hostBlocked(reason: string): Outcome {
   return { kind: "blocked", reason, by: "host" };
 }
 
-// One checked part of a report. A problem names the part, never its content: the reason is posted on the change.
 export type Check<T> = { readonly kind: "ok"; readonly value: T } | { readonly kind: "bad"; readonly problem: string };
 
 function ok<T>(value: T): Check<T> {
@@ -150,7 +128,6 @@ function bad<T>(problem: string): Check<T> {
   return { kind: "bad", problem };
 }
 
-// text : non-empty once every control and invisible character is gone, as the posting template removes them
 function text(value: unknown, what: string): Check<string> {
   if (typeof value !== "string" || cleanField(value) === "") {
     return bad(`${what} must be non-empty text`);
@@ -162,7 +139,6 @@ function isRecord(value: unknown): value is Field {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// extras : how many keys the schema does not name; counted, never quoted
 function extras(record: Field, named: readonly string[]): number {
   return Object.keys(record).filter((k) => !named.includes(k)).length;
 }
@@ -192,7 +168,6 @@ function evidenceRow(row: unknown, i: number): Check<Evidence> {
   return ok({ criterion, command, result });
 }
 
-// choiceText : one choice, short enough to read as a tap or a letter
 function choiceText(value: unknown, what: string): Check<string> {
   const read = text(value, what);
   return read.kind === "ok" && read.value.length > MAX_CHOICE
@@ -209,7 +184,6 @@ function choicesOf(value: unknown, what: string): Check<readonly string[]> {
   return all(value.map((c, i) => choiceText(c, `${what} choice ${i + 1}`)));
 }
 
-// recommendedOf : the question when its recommended is the index of one of its choices
 function recommendedOf(pick: unknown, question: string, choices: readonly string[], what: string): Check<Question> {
   const index = Number(pick);
   return Number.isSafeInteger(pick) && index >= 0 && index < choices.length
@@ -228,13 +202,11 @@ function choiceQuestion(item: Field, what: string): Check<Question> {
     : recommendedOf(item.recommended, question.value, choices.value, what);
 }
 
-// plainQuestion : the old report's string, read for one release as a question with no choices (#320)
 function plainQuestion(item: string, what: string): Check<Question> {
   const plain = text(item, what);
   return plain.kind === "ok" ? ok({ kind: "plain", question: plain.value }) : bad(plain.problem);
 }
 
-// questionOf : one question with its choices and the recommended one, or a plain string, read for one release (#320)
 function questionOf(item: unknown, i: number): Check<Question> {
   const what = `question ${i + 1}`;
   if (typeof item === "string") {
@@ -259,8 +231,6 @@ function listOf<T>(
   return value.length > max ? bad(`${what} has more than ${max} entries`) : all(value.map(each));
 }
 
-// questionsIn : a list of questions, each with its choices and the recommended one, checked as a report's are; a plain
-// string is refused here, since it is read only from an old report (#517: the coordinator's round, loop.ts grill)
 export function questionsIn(value: unknown): Check<readonly Question[]> {
   return listOf<Question>(value, "questions", MAX_QUESTIONS, (item, i) =>
     typeof item === "string" ? bad(`question ${i + 1} must be {question, choices, recommended}`) : questionOf(item, i),
@@ -271,15 +241,12 @@ function malformed(problem: string): Outcome {
   return hostBlocked(`the report is malformed: ${problem}`);
 }
 
-// the fields each status may hold, the one it requires first; a Map, so "constructor" or "__proto__" is never a status.
-// done may add "deferred", the cleanup run's list (#236).
 const FIELDS: ReadonlyMap<string, readonly string[]> = new Map([
   ["done", ["evidence", "deferred", "deviations"]],
   ["asked", ["questions"]],
   ["blocked", ["blocker"]],
 ]);
 
-// deferredOf : a done report's deferred list, as a field to spread: none when it has none, and an empty list is none
 function deferredOf(value: unknown): Check<{ readonly deferred?: readonly string[] }> {
   if (value === undefined || (Array.isArray(value) && value.length === 0)) {
     return ok({});
@@ -305,7 +272,6 @@ function deviationRow(row: unknown, i: number): Check<Deviation> {
   return extra > 0 ? bad(`${what} has ${extra} field(s) the schema does not name`) : deviationCells(row, what);
 }
 
-// deviationCells : one deviation's texts and line, each checked
 function deviationCells(row: Field, what: string): Check<Deviation> {
   const texts = deviationTexts(row, what);
   const line = lineOf(row.line, what);
@@ -328,7 +294,6 @@ function deviationTexts(row: Field, what: string): Check<Omit<Deviation, "line">
   return file.kind === "bad" ? bad(file.problem) : ok({ what: said.value, why: why.value, file: file.value });
 }
 
-// deviationsOf : a done report's deviations, as a field to spread: none when it has none, and an empty list is none
 function deviationsOf(value: unknown): Check<{ readonly deviations?: readonly Deviation[] }> {
   if (value === undefined || (Array.isArray(value) && value.length === 0)) {
     return ok({});
@@ -337,7 +302,6 @@ function deviationsOf(value: unknown): Check<{ readonly deviations?: readonly De
   return list.kind === "ok" ? ok({ deviations: list.value }) : list;
 }
 
-// doneOf : a done report's outcome, every list checked
 function doneOf(body: Field): Outcome {
   const evidence = listOf(body.evidence, "evidence", MAX_EVIDENCE, evidenceRow);
   const deferred = deferredOf(body.deferred);
@@ -353,7 +317,6 @@ function doneOf(body: Field): Outcome {
     : malformed(evidence.problem);
 }
 
-// REPORT_FIELDS : every field the report's schema names, at any depth: what a role card's hand-off may name (#232)
 export const REPORT_FIELDS: readonly string[] = [
   "status",
   ...[...FIELDS.values()].flat(),
@@ -378,14 +341,12 @@ const READ: Readonly<Record<string, (body: Field) => Outcome>> = {
 
 function json(text: string): Check<unknown> {
   try {
-    // a byte-order mark is no reason to block a run
     return ok(JSON.parse(text.replace(/^\uFEFF/, "")));
   } catch {
     return bad("the report is not JSON");
   }
 }
 
-// parseReport : the outcome a report's text says, or blocked with the reason it cannot be trusted.
 export function parseReport(text: string): Outcome {
   const raw = json(text);
   if (raw.kind === "bad" || !isRecord(raw.value)) {
@@ -403,7 +364,6 @@ export function parseReport(text: string): Outcome {
     : READ[status]!(body);
 }
 
-// spoken : a stall time in minutes when it is whole minutes, else in seconds. Pure.
 function spoken(seconds: number): string {
   return seconds > 0 && seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`;
 }
@@ -425,13 +385,10 @@ function ended(end: RunEnd): string {
   }
 }
 
-// cleanEnd : a run decided from its report: it exited 0, or it hung after a valid report (#182; ADR-0012 S13)
 function cleanEnd(end: RunEnd): boolean {
   return (end.kind === "exited" && end.code === 0) || end.kind === "hungAfterReport";
 }
 
-// decide : the outcome of one writer run. A run that did not exit 0 is blocked whatever its report says, unless it
-// hung after a valid report: that one is decided from the report, read again after the box stopped.
 export function decide(input: { readonly end: RunEnd; readonly file: ReportFile }): Outcome {
   if (!cleanEnd(input.end)) {
     return hostBlocked(ended(input.end));
@@ -451,7 +408,6 @@ type Dir =
   | { readonly kind: "missing" }
   | { readonly kind: "other" };
 
-// a folder that is a real folder, not a symlink
 async function realDir(path: string): Promise<Dir> {
   try {
     const s = await lstat(path);
@@ -465,7 +421,6 @@ function sameDir(a: Dir, b: Dir): boolean {
   return a.kind === "dir" && b.kind === "dir" && a.dev === b.dev && a.ino === b.ino;
 }
 
-// readCapped : the file's text when it is a regular file of at most MAX_REPORT_BYTES, even if it grew since a check
 async function readCapped(handle: FileHandle): Promise<ReportFile> {
   const s = await handle.stat();
   if (!s.isFile()) {
@@ -485,13 +440,10 @@ function openFailure(error: unknown): ReportFile {
     : { kind: "unreadable", reason: code === "ELOOP" ? "it is a symlink" : "it cannot be opened" };
 }
 
-// openReport : the report under a .factory already checked; O_NOFOLLOW refuses a symlink in the last step, O_NONBLOCK
-// keeps a FIFO from hanging the host
 async function openReport(worktree: string, before: Dir, path: string = REPORT_PATH): Promise<ReportFile> {
   try {
     const handle = await open(join(worktree, path), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
-      // .factory is still the folder that was checked, so the file opened is the one inside it
       const after = await realDir(join(worktree, ".factory"));
       return sameDir(before, after)
         ? await readCapped(handle)
@@ -504,15 +456,10 @@ async function openReport(worktree: string, before: Dir, path: string = REPORT_P
   }
 }
 
-// loadReport : the report in a worktree, read without following a symlink and at most MAX_REPORT_BYTES. Decide a run
-// only from a read after the box has stopped: while the writer runs, a read (run.ts's poll) only starts the completion
-// window, since the writer can still change the folder between the checks and the open.
 export async function loadReport(input: { readonly worktree: string }): Promise<ReportFile> {
   return loadFactoryFile({ worktree: input.worktree, path: REPORT_PATH });
 }
 
-// loadFactoryFile : one file of the run's hand-off in .factory (the report, or the implementer's PR body, #335), read
-// as carefully as the report: no symlink, a plain file, at most MAX_REPORT_BYTES, and only after the box has stopped
 export async function loadFactoryFile(input: {
   readonly worktree: string;
   readonly path: string;

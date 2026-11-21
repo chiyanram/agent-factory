@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { cardOf, handOffFields, inputsOf, readCard, withheld, type Role } from "../src/core/process/cards.js";
 import { tempDir } from "./temp.js";
 
-// the rulebook's own role cards, as chiyanram/skills ships them (crq/process/roles/)
 const RULEBOOK_ROLES = join(import.meta.dirname, "..", "tests", "fixtures", "process", "rulebook-roles");
 const ROLES: readonly Role[] = ["implementer", "test-first", "cleanup", "design-reviewer", "verify-pass"];
 
@@ -14,7 +13,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-// a process plugin holding these role cards
 function plugin(cards: Readonly<Record<string, string>>): string {
   const dir = join(root, "rulebook", "skills", "crq", "process");
   mkdirSync(join(dir, "roles"), { recursive: true });
@@ -57,7 +55,6 @@ describe("role cards (#236)", () => {
       kind: "ok",
       value: { body: "Tidy the team's way.", from: expect.stringContaining("rulebook@chiyanram") },
     });
-    // a role the plugin holds no card for keeps the built-in one
     expect(await readCard([{ label: "rulebook@chiyanram", dir }], "verify-pass")).toMatchObject({
       kind: "ok",
       value: { from: expect.stringContaining(join("prompts", "roles")) },
@@ -122,8 +119,6 @@ describe("role card frontmatter, enforced (#232)", () => {
     expect(handOffFields("the spec, in the spec home")).toEqual([]);
   });
 
-  // The rulebook's cards (chiyanram/skills, rulebook 1.1.2) name a question's own fields since #320; the first ledger
-  // pilot run (#62) was refused on them.
   it("takes the rulebook's hand-offs, a question's fields included", () => {
     const hands: ReadonlyArray<readonly [Role, string]> = [
       [

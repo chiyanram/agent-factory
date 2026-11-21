@@ -77,12 +77,10 @@ describe("acted on, the parts", () => {
       sorted({ id: "F3", bucket: "noted" }),
       sorted({ id: "F4", bucket: "dismissed" }),
     ];
-    // each row carries its rule ID, "logic" for a logic finding with no rule (#488)
     expect(trackedOf(all)).toEqual([
       { id: "F1", lens: "rule", category: "bug", bucket: "act_on", file: "a.ts", line: 10, rule: "R1" },
       { id: "F2", lens: "logic", category: "test_gap", bucket: "consider", file: "a.ts", line: 10, rule: "logic" },
     ]);
-    // and the round's findings, every bucket, are counted per rule ID and bucket for the timeline (#488)
     expect(foundOf([...all, sorted({ id: "F5" })])).toEqual({
       R1: { act_on: 2, noted: 1, dismissed: 1 },
       logic: { consider: 1 },
@@ -213,7 +211,6 @@ describe("acted on, in the run records and usage", () => {
       actOn: 0,
       acted: { since: "1".repeat(40), rows: [{ ...rows[0], acted: "yes" }] },
     });
-    // followed by a good line: a bad last line is set aside as torn (#483), a bad middle line fails the read
     writeFileSync(join(dir, "runs", "ledger", "PROJ-1.jsonl"), `${bad}\n${bad.replace(/"yes"/, "true")}\n`, {
       flag: "a",
     });

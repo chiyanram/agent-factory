@@ -361,7 +361,6 @@ describe("the coordinator seat's own token (#550)", () => {
   });
 
   it("keeps it in the coordinator's own user's config folder, never the factory home", async () => {
-    // always the folder the coordinator's Read deny names, whatever XDG_CONFIG_HOME says
     expect(seatHome("/home/coord")).toBe("/home/coord/.config/agent-factory");
     const home = tempDir("factory-seat-");
     try {

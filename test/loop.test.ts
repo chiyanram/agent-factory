@@ -14,7 +14,6 @@ import { project, type Project } from "./review-repo.js";
 
 const SHA = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
 
-// A forge that answers change() from `change` and records every write in order.
 function forge(
   log: string[],
   over: {
@@ -120,8 +119,6 @@ describe("status and ask (#138)", () => {
   });
 });
 
-// #517 AC-1: the coordinator posts its numbered round through a command it may run, and the round stays open until a
-// member answers every question
 describe("grill (#517)", () => {
   const QUESTIONS = [
     { question: "which store?", choices: ["a file", "a table"], recommended: 1 },
@@ -247,16 +244,13 @@ describe("grill (#517)", () => {
         kind: "failed",
         reason: expect.stringContaining("question 1 would not read back as written once posted"),
       });
-      // the last choice cut, with every choice and the recommended one still there: only its text tells
       const cutLast = [{ question: "q".repeat(300), choices: ["a", "b", "c", "d".repeat(190)], recommended: 0 }];
       expect(await questionsFrom(env(), put("q.json", JSON.stringify(cutLast)))).toMatchObject({
         kind: "failed",
         reason: expect.stringContaining("would not read back"),
       });
-      // a choice that holds the separator splits it on read-back too
       const split = [{ question: "which?", choices: ["a · b", "c"], recommended: 0 }];
       expect(await questionsFrom(env(), put("q.json", JSON.stringify(split)))).toMatchObject({ kind: "failed" });
-      // text the template escapes still reads back the same
       const escaped = [{ question: "is #12 <done>?", choices: ["yes | now", "no"], recommended: 1 }];
       expect(await questionsFrom(env(), put("q.json", JSON.stringify(escaped)))).toMatchObject({ kind: "ok" });
     });
@@ -288,7 +282,6 @@ describe("lint-edit, the writer's hook (#138; ADR-0011 D17)", () => {
   afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
   const edit = (file: string) => JSON.stringify({ tool_name: "Edit", tool_input: { file_path: file } });
-  // a lint that fails on a file holding BAD
   const run = (calls: FolderCall[]) => async (call: FolderCall) => {
     calls.push(call);
     const file = call.args.at(-1) ?? "";
@@ -305,7 +298,6 @@ describe("lint-edit, the writer's hook (#138; ADR-0011 D17)", () => {
     expect(bad.code).toBe(2);
     expect(bad.err).toContain(`lint failed on ${join(p.clone, "bad.txt")} (grep -n BAD):`);
     expect(bad.err).toContain("1:BAD");
-    // no shell: the command's words, then the file as one more word, in the session's folder
     expect(calls[0]).toMatchObject({ bin: "grep", args: ["-n", "BAD", join(p.clone, "ok.txt")], cwd: p.clone });
     expect((await hook(edit(join(p.clone, "a b.txt")), calls)).code).toBe(2);
     expect(calls.at(-1)?.args.at(-1)).toBe(join(p.clone, "a b.txt"));
@@ -347,7 +339,6 @@ describe("lint-edit, the writer's hook (#138; ADR-0011 D17)", () => {
     writeFileSync(join(p.root, "secret.txt"), "BAD\n");
     symlinkSync(join(p.root, "secret.txt"), join(p.clone, "link.txt"));
     expect(await hook(edit(join(p.clone, "link.txt")), calls)).toEqual({ code: 0, err: "" });
-    // a sibling folder whose name starts with the session's is outside too
     mkdirSync(`${p.clone}-x`);
     writeFileSync(`${p.clone}-x/bad.txt`, "BAD\n");
     expect(await hook(edit(`${p.clone}-x/bad.txt`), calls)).toEqual({ code: 0, err: "" });

@@ -1,4 +1,4 @@
-// release notes (#157; ported from tests/release_notes.test.sh, #138): the notes that this repo's release.config.mjs
+// release notes (#157): the notes that this repo's release.config.mjs
 // writes for a fixed set of commits match tests/fixtures/release-notes/expected.md. No git, no network: the real
 // release-notes plugin gets the fixture commits straight from commits.json, in a child node, as a release run would
 // load the config. The date is the only part that changes, so it becomes DATE.

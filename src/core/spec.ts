@@ -12,6 +12,10 @@
 // show (control, zero-width, bidi, tag characters, a byte-order mark) or is not in Unicode NFC form, and the template
 // is read line by line outside code fences and HTML comments, with each section once. A spec with no acceptance
 // criteria, or only placeholders ("TBD", "<…>", "..."), is refused: the writer would have no contract.
+//
+// An approval binds the design file's hash as it binds the spec's. A ticket with no design file, and every issue-backed
+// spec, has the design hash "none". The PR body holds the spec inside a fence longer than any it holds, so no git host
+// runs a quick action, pings or closes from it.
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -28,12 +32,8 @@ export type Spec = {
   readonly criteria: readonly string[];
   readonly design: string;
   readonly lane: Lane;
-  // the files the change plans to touch, from the optional "## Planned files": the engine checks the lane against them
-  // before the build (lane.ts, #230)
   readonly planned: readonly string[];
-  // the tickets whose merge this one waits for, from the optional "## Blocked by": one ticket per line (#494)
   readonly blockedBy: readonly string[];
-  // the normalised text, and its hash: what an approval records and what the PR body carries
   readonly text: string;
   readonly hash: string;
 };
@@ -49,15 +49,12 @@ export type SpecRead =
   | { readonly kind: "missing"; readonly where: string }
   | Refused;
 
-// The store a project uses. "issue" reads through a function the forge seam (#102) provides, so this module knows no
-// forge.
 export type SpecStore =
   | { readonly kind: "local"; readonly root: string }
   | { readonly kind: "issue"; readonly readIssueBody: (ticket: string) => Promise<SpecRead> };
 
 export type Ticket = { readonly project: string; readonly ticket: string };
 
-// A project or ticket name becomes part of a path, so it is a plain ASCII name: no "/", no "..", no leading dot.
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
 export function plainName(name: string): boolean {
@@ -99,8 +96,6 @@ export function template(ticket: string): string {
   ].join("\n");
 }
 
-// normalise : the text an approval is bound to. CRLF and CR become LF, trailing spaces and tabs go, blank lines at the
-// end go, and the text ends with one newline.
 export function normalise(text: string): string {
   const lines = text
     .replace(/\r\n?/g, "\n")
@@ -113,8 +108,6 @@ export function specHash(text: string): string {
   return createHash("sha256").update(normalise(text), "utf8").digest("hex");
 }
 
-// Characters that do not show, or show something other than what is there: C0 and C1 controls but tab and newline,
-// zero-width and joiner characters, bidi controls, invisible operators, the byte-order mark, and the tag block.
 const HIDDEN =
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]|[\u{e0000}-\u{e007f}]/u;
 
@@ -132,8 +125,6 @@ type Step = { readonly scan: Scan; readonly hidden: boolean };
 
 const OUTSIDE: Scan = { fence: "", comment: false };
 
-// scanLine : whether one line is hidden (inside, opening or closing a code fence or an HTML comment), and the state
-// after it.
 function scanLine(scan: Scan, line: string): Step {
   if (scan.fence !== "") {
     return { scan: line.trim().startsWith(scan.fence) ? OUTSIDE : scan, hidden: true };
@@ -153,7 +144,6 @@ function scanLine(scan: Scan, line: string): Step {
 
 type Line = { readonly text: string; readonly visible: boolean };
 
-// visibleLines : each line, marked hidden when it is inside a code fence or an HTML comment, or opens or closes one.
 function visibleLines(text: string): readonly Line[] {
   let scan = OUTSIDE;
   return text.split("\n").map((line) => {
@@ -169,7 +159,6 @@ type Parsed = {
   readonly duplicates: readonly string[];
 };
 
-// parse : the title (line 1 only) and the body under each visible "## Heading", plus any heading met twice.
 function parse(text: string): Parsed {
   const lines = visibleLines(text);
   const title = /^# +(.*\S)\s*$/.exec(lines[0]?.visible === true ? lines[0].text : "")?.[1] ?? "";
@@ -212,12 +201,10 @@ type Fields = {
   readonly blocked: readonly BlockedLine[];
 };
 
-// one line of "## Blocked by": the ticket it names, or the line that names none
 type BlockedLine =
   | { readonly kind: "ticket"; readonly ticket: string }
   | { readonly kind: "bad"; readonly line: string };
 
-// blockedOf : one ticket per line: a list marker, backticks and a leading "#" dropped; a placeholder left out (#494)
 function blockedOf(body: string): readonly BlockedLine[] {
   return body
     .split("\n")
@@ -234,7 +221,6 @@ function blockedOf(body: string): readonly BlockedLine[] {
     });
 }
 
-// plannedOf : one path per line, a list marker and backticks dropped, placeholders left out
 function plannedOf(body: string): readonly string[] {
   return body
     .split("\n")
@@ -280,14 +266,11 @@ function templateProblems(f: Fields, duplicates: readonly string[]): readonly st
   ];
 }
 
-// the most a git host keeps in an issue's body: GitHub's limit, in characters; GitLab keeps more
 export const MAX_BODY = 65_536;
 
-// a line GitLab may run as a quick action (/close, /assign …), and a mention both hosts notify, outside code
 const QUICK_ACTION = /^\s*\/[A-Za-z]/;
 const MENTION = /(?:^|[^\w`@./-])@([A-Za-z0-9][\w.-]*)/;
 
-// unfenced : each line outside a code fence, with its number; an inline code span is left out of it
 function unfenced(text: string): readonly { readonly n: number; readonly text: string }[] {
   let fence = "";
   return text.split("\n").flatMap((line, i) => {
@@ -297,7 +280,6 @@ function unfenced(text: string): readonly { readonly n: number; readonly text: s
   });
 }
 
-// fenceAfter : the code fence open after this line: its opener, or "" outside one
 function fenceAfter(fence: string, line: string): string {
   if (fence !== "") {
     return line.trim().startsWith(fence) ? "" : fence;
@@ -317,11 +299,6 @@ function lineProblems(line: { readonly n: number; readonly text: string }): read
   ];
 }
 
-// postableSpec : why this text may not be sent as an issue's new body (#542); none when it may. Its characters must
-// all show, as checkSpec's must (a \r\n line end is the one carriage return allowed), it must fit the git host, and
-// no line outside code may run a GitLab quick action or notify a person, and nothing in it, code or not, may look like a
-// secret: a person confirms the text as it is, so it is refused, never scrubbed (P4). Whether it follows the template is
-// not asked: a draft may be sent before it passes `spec`. Pure.
 export function postableSpec(text: string): readonly string[] {
   return [
     ...(scrubSecrets(text) === text
@@ -333,7 +310,6 @@ export function postableSpec(text: string): readonly string[] {
   ];
 }
 
-// checkSpec : the spec, or every way it breaks the rules above.
 export function checkSpec(raw: string): SpecCheck {
   const text = normalise(raw);
   const parsed = parse(text);
@@ -386,7 +362,6 @@ async function readLocal(at: { readonly root: string } & Ticket): Promise<SpecRe
   }
 }
 
-// readSpec : a ticket's spec text from the project's store.
 export function readSpec(request: { readonly store: SpecStore } & Ticket): Promise<SpecRead> {
   const { store } = request;
   if (!plainTicket(request)) {
@@ -407,14 +382,8 @@ export function readSpec(request: { readonly store: SpecStore } & Ticket): Promi
   }
 }
 
-// said: approved, or started for a tiny ticket that needs a START only (#227); none is approved
 export type Approver = { readonly by: string; readonly at: string; readonly said?: "approved" | "started" };
 
-// prBlock : the part of a PR body that records what was approved: the spec itself, its hash and who approved it when.
-// The reviewer's pack does not read it: it reads the spec from the store and checks its hash against the approval
-// (pack section 5, #224). The spec is the person's own approved text, so it goes in as written, inside a fence longer
-// than any it holds: in a code block, GitHub and GitLab run no quick action, ping nobody and close nothing. The
-// approver line is cleaned.
 export function prBlock(request: { readonly spec: Spec; readonly approver: Approver }): string {
   const { spec, approver } = request;
   const longest = Math.max(2, ...Array.from(spec.text.matchAll(/`+/g), (m) => m[0].length));
@@ -430,10 +399,6 @@ export function prBlock(request: { readonly spec: Spec; readonly approver: Appro
   ].join("\n");
 }
 
-// The design (#227) lives beside the spec in the local store, as design.md, and an approval binds its hash as it binds
-// the spec's: an edit to either makes the approval stale. A ticket with no design file has the design hash "none" (the
-// spec's "## Design" then says none, or links a page the spec text itself binds). An issue-backed spec keeps no design
-// file, so its design is "none". The design is held to the same rule as the spec: nothing in it may be hidden.
 export const NO_DESIGN = "none";
 
 export type DesignHash = { readonly kind: "design"; readonly hash: string } | Refused;
@@ -464,7 +429,6 @@ async function localDesign(at: { readonly root: string } & Ticket): Promise<Desi
   }
 }
 
-// designHash : the hash of the ticket's design file, or "none" when it has none
 export function designHash(request: { readonly store: SpecStore } & Ticket): Promise<DesignHash> {
   return request.store.kind === "local"
     ? localDesign({ root: request.store.root, project: request.project, ticket: request.ticket })

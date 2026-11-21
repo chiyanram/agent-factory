@@ -21,7 +21,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-// a token store in memory: what was put, and what get answers
 function memoryStore(held: Record<string, string> = {}): TokenStore {
   return {
     where: "memory",
@@ -79,13 +78,11 @@ describe("the Discord webhook in the token store (#119)", () => {
     const real = realpathSync(BUNDLED);
     const given = await secrets({ plugin: "discord", capability: "notify", source: real });
     expect(given.kind === "ok" && given.value.webhook?.reveal()).toBe(HOOK);
-    // a Secret never prints
     expect(given.kind === "ok" && JSON.stringify(given.value)).toBe('{"webhook":"[secret]"}');
     expect(await secrets({ plugin: "discord", capability: "context.read", source: real })).toEqual({
       kind: "ok",
       value: {},
     });
-    // a plugin of any name added from another file is never handed it, though it calls itself discord
     expect(await secrets({ plugin: "discord", capability: "notify", source: "/home/x/discord/plugin" })).toEqual({
       kind: "ok",
       value: {},
@@ -99,7 +96,6 @@ describe("the Discord webhook in the token store (#119)", () => {
   });
 });
 
-// the ping for a writer's question: the wait's why, and the person's step
 const ASKED = {
   kind: "needs-you",
   ticket: "PROJ-1",

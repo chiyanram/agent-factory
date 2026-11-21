@@ -8,7 +8,6 @@ import type { Evidence } from "../report.js";
 import { tailOf } from "../kept.js";
 import { rowLine, type Row } from "./boxrun.js";
 
-// lastLine : the last line a row printed, stdout first, else stderr; "" when it printed nothing. Pure.
 function lastLine(row: Row): string {
   if (row.ran.kind !== "exited") {
     return "";
@@ -17,15 +16,12 @@ function lastLine(row: Row): string {
   return out !== "" ? out : (tailOf(row.ran.stderr).split("\n").at(-1) ?? "");
 }
 
-// rowItem : one row as a person reads it: the criterion, what the writer claimed, and what the host's re-run showed.
-// Pure.
 function rowItem(e: Evidence, row: Row | undefined): string {
   const ran = row === undefined ? "did not run" : rowLine(row);
   const said = row === undefined ? "" : lastLine(row);
   return `${e.criterion} · claimed: ${e.result} · re-run: ${ran}${said === "" ? "" : ` · ${said}`}`;
 }
 
-// rerunPost : the re-run of every row at the head, in the claim's order. Pure.
 export function rerunPost(head: string, evidence: readonly Evidence[], rows: readonly Row[], passed: boolean): Post {
   return {
     seat: "coordinator",

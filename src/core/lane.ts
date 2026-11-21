@@ -34,12 +34,8 @@ import { LANES, type Spec } from "./spec.js";
 
 export { above, heavier, raisedWhy } from "./lane-order.js";
 
-// how many lenses a lane's review runs: a count, or every lens on the strongest model
 export type LensCount = number | "all";
 
-// one lane's properties, in the lanes' order from the lightest
-// designReview: whether the lane's spec and design get a design review (#236); testFirst: whether a failing test is
-// committed before the fix (ADR-0007, #417). A lane that does not say keeps the default lane's
 export type LaneProps = {
   readonly name: Lane;
   readonly approval: boolean;
@@ -48,9 +44,6 @@ export type LaneProps = {
   readonly testFirst?: boolean;
 };
 
-// the default lanes: tiny needs a START only; bug, feature and one-way door need an approval as well. Tiny runs one
-// lens, bug and feature about 3, and the one-way door all; every lane but tiny gets a design review (docs/DESIGN.md
-// section 3); only bug starts with a failing test (ADR-0007)
 const DEFAULT_COUNTS: Readonly<Record<Lane, LensCount>> = { tiny: 1, bug: 3, feature: 3, "one-way door": "all" };
 
 export const DEFAULT_LANES: readonly LaneProps[] = [
@@ -66,7 +59,6 @@ export const DEFAULT_LANES: readonly LaneProps[] = [
   },
 ];
 
-// countText : a lens count as a person writes it: "all…" for every lens, else its first whole number ("~3" is 3)
 function countText(value: string): LensCount | "bad" {
   if (/^\s*all\b/i.test(value)) {
     return "all";
@@ -79,8 +71,6 @@ function wholeCount(value: number): LensCount | "bad" {
   return Number.isSafeInteger(value) && value >= 1 ? value : "bad";
 }
 
-// lensCountOf : a lanes file's lens count, "1", "~3", "all, on the strongest model" or a whole number; the default
-// lane's count when it is left out; "bad" for anything else. Pure.
 function lensCountOf(value: unknown, lane: Lane): LensCount | "bad" {
   if (value === undefined) {
     return DEFAULT_COUNTS[lane];
@@ -91,17 +81,14 @@ function lensCountOf(value: unknown, lane: Lane): LensCount | "bad" {
   return typeof value === "string" ? countText(value) : "bad";
 }
 
-// defaultDesignReview : the default lanes' designReview for a lane, for a lanes value that does not say. Pure.
 function defaultDesignReview(lane: Lane): boolean {
   return DEFAULT_LANES.find((l) => l.name === lane)?.designReview ?? true;
 }
 
-// defaultTestFirst : the default lanes' testFirst for a lane, for a lanes value that does not say. Pure.
 function defaultTestFirst(lane: Lane): boolean {
   return DEFAULT_LANES.find((l) => l.name === lane)?.testFirst ?? false;
 }
 
-// flagOf : a lane's true-or-false property, the fallback when it is left out, or "bad" when it is neither. Pure.
 function flagOf(value: unknown, key: "designReview" | "testFirst", fallback: boolean): boolean | "bad" {
   const given = prop(value, key);
   if (given === undefined) {
@@ -121,7 +108,6 @@ function propsOf(value: unknown): LaneProps | "bad" {
   return lane === undefined || typeof approval !== "boolean" ? "bad" : laneOf(value, lane, approval);
 }
 
-// laneOf : a named lane's counted and flagged properties, or "bad" when one of them is. Pure.
 function laneOf(value: unknown, lane: Lane, approval: boolean): LaneProps | "bad" {
   const lenses = lensCountOf(prop(value, "lenses"), lane);
   const designReview = flagOf(value, "designReview", defaultDesignReview(lane));
@@ -131,25 +117,18 @@ function laneOf(value: unknown, lane: Lane, approval: boolean): LaneProps | "bad
     : { name: lane, approval, lenses, designReview, testFirst };
 }
 
-// namedLanes : every lane's properties, or "bad" when the value is not a list of them. Pure.
 function namedLanes(value: unknown): readonly LaneProps[] | "bad" {
   const lanes = Array.isArray(value) ? value.map(propsOf) : [];
   const named = lanes.flatMap((l) => (l === "bad" ? [] : [l]));
   return named.length === lanes.length && named.length > 0 ? named : "bad";
 }
 
-// the one lane that may run on a START alone; the floor goes by this name, never by where a lane sits in the list
-// (#483), so a lanes file that lists bug first, or leaves tiny out, still cannot drop an approval
 const FLOOR: Lane = "tiny";
 
-// floorBreaks : each lane other than tiny that would run with no approval, wherever it is listed. Pure.
 function floorBreaks(lanes: readonly LaneProps[]): readonly string[] {
   return lanes.flatMap((l) => (l.approval || l.name === FLOOR ? [] : [l.name]));
 }
 
-// lanesOf : a lanes value as a process plugin or a settings layer gives it, every lane in order from the lightest with
-// its properties; refused when it is not one, or when it drops the approval floor. `from` names the plugin or layer.
-// Pure.
 export function lanesOf(value: unknown, from: string): Result<readonly LaneProps[]> {
   const named = namedLanes(value);
   if (named === "bad") {
@@ -165,34 +144,26 @@ export function lanesOf(value: unknown, from: string): Result<readonly LaneProps
       );
 }
 
-// needsApproval : whether a lane's build waits for a human's approval as well as a START, by the project's lanes; a
-// lane they leave out needs one. The lanes came through lanesOf, so the approval floor holds. Pure.
 export function needsApproval(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
   return lanes.find((l) => l.name === lane)?.approval ?? true;
 }
 
-// needsDesignReview : whether a lane's spec and design get a design review before the human's approval (#236). Pure.
 export function needsDesignReview(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
   return lanes.find((l) => l.name === lane)?.designReview ?? defaultDesignReview(lane);
 }
 
-// needsTestFirst : whether a lane's build starts with a failing test, from the lane's properties, never its name
-// (ADR-0007, #417). Pure.
 export function needsTestFirst(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
   return lanes.find((l) => l.name === lane)?.testFirst ?? defaultTestFirst(lane);
 }
 
-// matches : whether a path is one a glob names, from the repo's root. Pure.
 export function matches(path: string, globs: readonly string[]): boolean {
   return globs.some((g) => globRegex(g).test(path) || globRegex(g).test(`/${path}`));
 }
 
-// what a check found: the lane stays, or it is raised, and why
 export type Raise =
   | { readonly kind: "kept" }
   | { readonly kind: "raised"; readonly from: Lane; readonly to: Lane; readonly why: string };
 
-// plannedRaise : the spec's lane against its planned files. Pure.
 export function plannedRaise(spec: Spec, oneWayDoor: readonly string[]): Raise {
   const door = spec.planned.find((path) => matches(path, oneWayDoor));
   return door !== undefined && above("one-way door", spec.lane)
@@ -210,8 +181,6 @@ function globsOf(value: unknown): readonly string[] | "bad" {
   return ok ? value.filter((g): g is string => typeof g === "string") : "bad";
 }
 
-// oneWayDoorPathsOf : the project's one-way-door paths, with the team and user layers resolved in: none when the
-// project has no file or no key; refused when the key is there but not a list of globs, so a typo never drops them
 export async function oneWayDoorPathsOf(input: {
   readonly home: string;
   readonly project: string;
@@ -228,7 +197,6 @@ export async function oneWayDoorPathsOf(input: {
     : { kind: "ok", value: globs };
 }
 
-// plannedCheck : the spec's lane against its planned files and the project's one-way-door paths
 export async function plannedCheck(where: {
   readonly home: string;
   readonly project: string;

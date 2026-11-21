@@ -4,7 +4,6 @@ import { rmSync } from "node:fs";
 import { checkedSetup, originProblem } from "../src/core/origin.js";
 import { tempDir } from "./temp.js";
 
-// GIT_CONFIG_* from the caller's shell (a URL rewrite, say) would change the origin git reports
 const GIT_ENV: NodeJS.ProcessEnv = {
   ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_CONFIG"))),
   GIT_CONFIG_NOSYSTEM: "1",
@@ -16,7 +15,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-// planted : a clone at dir whose origin is the given URL, or no origin at all
 function planted(origin: string | undefined): string {
   execFileSync("git", ["-C", dir, "init", "-q"], { env: GIT_ENV, stdio: "ignore" });
   if (origin !== undefined) {

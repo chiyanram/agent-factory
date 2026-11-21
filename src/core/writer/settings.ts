@@ -17,22 +17,17 @@ import type { Claude } from "../agent/claude-writer.js";
 import { COMPLETION, STALL_MS, type Completion } from "./run.js";
 
 export type WriterSettings = {
-  // the plugins, in the project's order: each folder is copied into the run and loaded with --plugin-dir, and the
-  // process plugin's role cards start each run (#232)
   readonly plugins: readonly PluginDir[];
   readonly timeoutSeconds: number;
   readonly claude: Claude;
   readonly completion: Completion;
-  // milliseconds a run may print nothing (#228)
   readonly stallMs: number;
-  // how the host posts the run's questions (#320)
   readonly questions: Questions;
 };
 
 const DEFAULT_MINUTES = 60;
 const MAX_MINUTES = 240;
 
-// minutesOf : the run's time limit in seconds. Pure.
 export function minutesOf(env: NodeJS.ProcessEnv): Result<number> {
   const set = settingOf(env, "implementer.minutes");
   const minutes = set === undefined ? DEFAULT_MINUTES : Number(set);
@@ -44,11 +39,9 @@ export function minutesOf(env: NodeJS.ProcessEnv): Result<number> {
       };
 }
 
-// stallOf : the stall time in milliseconds; the setting may lower the default, never raise it. Pure.
 export function stallOf(env: NodeJS.ProcessEnv): Result<number> {
   const most = STALL_MS / 60_000;
   const set = settingOf(env, "implementer.stallMinutes");
-  // "" reads as 0, which is refused
   const minutes = set === undefined ? most : Number(set);
   return Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= most
     ? { kind: "ok", value: minutes * 60_000 }
@@ -58,7 +51,6 @@ export function stallOf(env: NodeJS.ProcessEnv): Result<number> {
       };
 }
 
-// questionsOf : how a run's questions are posted; unset: round, every open question at once (#320). Pure.
 export function questionsOf(env: NodeJS.ProcessEnv): Result<Questions> {
   const set = settingOf(env, "questions") ?? "round";
   const known = QUESTIONS.find((q) => q === set);
@@ -67,7 +59,6 @@ export function questionsOf(env: NodeJS.ProcessEnv): Result<Questions> {
     : { kind: "ok", value: known };
 }
 
-// timesOf : the run's time limit and its stall time. Pure.
 function timesOf(env: NodeJS.ProcessEnv): Result<{ readonly timeoutSeconds: number; readonly stallMs: number }> {
   const timeout = minutesOf(env);
   const stall = stallOf(env);

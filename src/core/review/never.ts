@@ -20,7 +20,6 @@ export const FLOOR = [
   "",
 ].join("\n");
 
-// withFloor : the floor, then the run's instructions. Pure.
 export function withFloor(instructions: string): string {
   return `${FLOOR}${instructions}`;
 }

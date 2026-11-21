@@ -9,7 +9,6 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Refused } from "./spec.js";
 
-// the front doors a human can START or approve from: the terminal, the Discord bot, a spec PR's approval
 export const VIAS = ["terminal", "discord", "pr"] as const;
 export type Via = (typeof VIAS)[number];
 
@@ -19,7 +18,6 @@ export function isVia(value: unknown): value is Via {
 
 export type Written = { readonly kind: "written"; readonly path: string } | Refused;
 
-// writeRecordFile : the record, through a temp file and a rename. A failure is a refusal, and the temp file is removed.
 export async function writeRecordFile(path: string, record: object): Promise<Written> {
   const temp = `${path}.${process.pid}.tmp`;
   try {
@@ -28,7 +26,7 @@ export async function writeRecordFile(path: string, record: object): Promise<Wri
     await rename(temp, path);
     return { kind: "written", path };
   } catch (error: unknown) {
-    await rm(temp, { force: true }).catch(() => undefined); // best effort: the temp may never have been made
+    await rm(temp, { force: true }).catch(() => undefined);
     return {
       kind: "refused",
       reason: `cannot write ${path}: ${error instanceof Error ? error.message : String(error)}`,
@@ -46,7 +44,6 @@ function parsed(text: string, path: string): RecordFile {
   }
 }
 
-// readRecordFile : the file's JSON; no file is missing, and anything else that stops the read is a refusal
 export async function readRecordFile(path: string): Promise<RecordFile> {
   try {
     return parsed(await readFile(path, "utf8"), path);
@@ -56,7 +53,6 @@ export async function readRecordFile(path: string): Promise<RecordFile> {
   }
 }
 
-// field : one property of a parsed record, or undefined
 export function field(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }

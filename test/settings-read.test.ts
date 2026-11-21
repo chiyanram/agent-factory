@@ -1,10 +1,10 @@
+// settings-read — no module reads a settings key's FACTORY_* variable itself. It reads the resolved value through
+// settingOf in src/core/settings/machine.ts, so a value from a team or user file reaches it too.
+
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { machineKeys } from "../src/core/settings/keys.js";
-
-// No module reads a settings key's FACTORY_* variable itself: it reads the resolved value through
-// src/core/settings/machine.ts settingOf, so a team or user file value reaches it too (#254).
 
 const ROOT = join(import.meta.dirname, "..");
 
@@ -19,11 +19,8 @@ function sources(dir: string): readonly string[] {
 }
 
 const NAMES = machineKeys().map((k) => k.env);
-// env.FACTORY_X, or the name as a whole string, as in env["FACTORY_X"] or a reader handed "FACTORY_X"; a message that
-// names the variable is not a read
 const READ = new RegExp(`(?:\\.(${NAMES.join("|")})\\b(?!\\s*=[^=])|["'\`](${NAMES.join("|")})["'\`])`, "g");
 
-// reads : the settings variables one source reads, by name; comments and the adapter itself do not count
 export function reads(text: string): readonly string[] {
   const code = text
     .split("\n")

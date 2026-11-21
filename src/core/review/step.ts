@@ -7,7 +7,7 @@
 //   no-progress               needs-human is on the change, which the table reads first next pass
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 // Each pass's stream is kept as its trace beside the ticket's records (dispatch/trace.ts, #487), and the round's line
-// names them.
+// names them. A trace that cannot be kept loses the trace, never the pass.
 
 import type { PluginDir } from "../process/read.js";
 import type { Result } from "../forge/api.js";
@@ -33,7 +33,6 @@ import {
 } from "../dispatch/spend.js";
 
 type OutcomeMap = { readonly [O in Outcome as O["kind"]]: O };
-// a posted round also rates the last full round's findings (#220), and names each lens's unique verified findings (#237)
 type ActOn = Result<{
   readonly actOn: number;
   readonly acted?: Acted;
@@ -68,11 +67,8 @@ function actOnOf(outcome: Outcome): ActOn {
   return mapAs(outcome.kind, outcome);
 }
 
-// Meter : what the round's model answers have spent so far, in all and per run (#337)
 type Meter = { spend: Spend; split: RoundSpend };
 
-// metered : the model, with each answer's spend added to the meter, whether the pass succeeded or not; an answer of a
-// run that names no part is in the sum only
 function metered(model: Model, meter: Meter): Model {
   return async (run) => {
     const ran: ModelResult = await model(run);
@@ -83,11 +79,8 @@ function metered(model: Model, meter: Meter): Model {
   };
 }
 
-// Traced : where the round's traces go, and the name of each kept so far (#487)
 type Traced = { readonly where: Where; readonly names: string[]; last: number };
 
-// traceAt : where one pass's trace goes: a finder's by its lens, a verify pass's; each a later time than the last, so
-// two passes that end in the same millisecond never share a name. None for a run that names no part.
 function traceAt(into: Traced, part: RoundPart | undefined): TraceAt | undefined {
   if (part === undefined) {
     return undefined;
@@ -97,7 +90,6 @@ function traceAt(into: Traced, part: RoundPart | undefined): TraceAt | undefined
   return { ...into.where, ...kind, at: into.last };
 }
 
-// keptFor : one pass's stream kept as its trace, and named; a run that streamed nothing or names no part keeps none
 async function keptFor(into: Traced, part: RoundPart | undefined, stream: string | undefined): Promise<void> {
   const at = traceAt(into, part);
   const kept = stream === undefined || at === undefined ? undefined : await keepTrace(at, stream);
@@ -106,8 +98,6 @@ async function keptFor(into: Traced, part: RoundPart | undefined, stream: string
   }
 }
 
-// traced : the model, with each pass's stream kept as its trace and named; a trace that cannot be kept loses the trace,
-// never the pass
 function traced(model: Model, into: Traced): Model {
   return async (run) => {
     const ran: ModelResult = await model(run);
@@ -116,18 +106,14 @@ function traced(model: Model, into: Traced): Model {
   };
 }
 
-// tracesOf : the round's traces, as a field to spread; none when it kept none. Pure.
 function tracesOf(into: Traced): { readonly traces?: readonly string[] } {
   return into.names.length === 0 ? {} : { traces: [...into.names] };
 }
 
-// worstCase : the most a round spends with this many finders, each run at the per-run cap ("" for none): the finders
-// and the verify passes; "unbounded" with no per-run cap. Pure.
 export function worstCase(finders: number, maxUsd: string): number | "unbounded" {
   return maxUsd === "" ? "unbounded" : (finders + VERIFY_PASSES) * Number(maxUsd);
 }
 
-// worstUsd : the worst case of a round of this project: every lens its settings let a round pick (#237)
 async function worstUsd(input: {
   readonly home: string;
   readonly project: string;
@@ -139,13 +125,10 @@ async function worstUsd(input: {
     : setup;
 }
 
-// splitOf : the round's spend per run, as a field to spread; none when the round ran no model, as when it reused a
-// verdict
 function splitOf(meter: Meter): { readonly split?: RoundSpend } {
   return meter.spend.usd === 0 && meter.spend.tokens === 0 ? {} : { split: meter.split };
 }
 
-// reviewStep : available when the reviewer's settings are there
 export function reviewStep(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: Forge;

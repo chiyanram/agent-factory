@@ -9,7 +9,6 @@ import { DEVIATION } from "../report.js";
 
 const TITLE = new RegExp(`^\\[writer\\] ${DEVIATION}`);
 
-// deviationNotes : the body of every deviation note the factory posted, oldest first. Pure.
 export function deviationNotes(notes: readonly Note[], factory: string): readonly string[] {
   return notes
     .filter((note) => {

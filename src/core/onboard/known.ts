@@ -8,18 +8,14 @@ import { staleCites } from "./cites.js";
 import { readKnowledge } from "./home.js";
 
 export type Known = {
-  // the accepted brief and glossary, or none
   readonly files:
     | { readonly kind: "none" }
     | { readonly kind: "text"; readonly brief: string; readonly glossary: string };
-  // each stale cite, or why the brief was not handed over
   readonly stale: readonly string[];
 };
 
 export const NOTHING_KNOWN: Known = { files: { kind: "none" }, stale: [] };
 
-// knownFor : the accepted brief and glossary, with each cite checked at `ref` (the default branch, fetched into the
-// project's clone)
 export async function knownFor(input: {
   readonly home: string;
   readonly project: string;

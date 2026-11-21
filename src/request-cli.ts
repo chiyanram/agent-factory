@@ -1,6 +1,8 @@
 // request-cli — `agent-factory request | confirm | project init` (#134; ADR-0014 P3, P5, P6). The coordinator may run
 // `request` with no prompt; `confirm` sits in its ask list, so the person's yes in the harness prompt, which shows the
 // text, is what lets a confirm write out; `project` is denied to it, since the project file holds the write policy.
+// `project init` copies a team's template only when its plugin and ready fields read, so the file never stops a
+// dispatcher pass; an existing project file is never replaced.
 
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, sep } from "node:path";
@@ -26,7 +28,6 @@ import type { Forge } from "./core/forge/types.js";
 import { pluginSetup, type PluginIo } from "./plugin-cli.js";
 import type { Secrets } from "./core/plugin/registry.js";
 
-// the plugin io, and the secrets a call carries (the Discord webhook for a notify request, #119)
 type Io = Omit<PluginIo, "pkg"> & { readonly secrets: Secrets };
 
 function refused(reason: string): { readonly kind: "failed"; readonly reason: string } {
@@ -80,7 +81,6 @@ const REQUEST_USAGE =
   "usage: agent-factory request <tracker.comment|tracker.create|notify> --file <draft.json>\n" +
   "       agent-factory request spec.body --file <home>/specs/<project>/<ticket>/spec.md\n";
 
-// request <capability> --file draft.json : exit 0 done, 3 waiting for confirm, 1 refused
 async function requestCommand(argv: readonly string[], io: Io): Promise<number> {
   const words = requestWords(argv);
   if (words === "bad") {
@@ -98,13 +98,10 @@ async function requestCommand(argv: readonly string[], io: Io): Promise<number> 
   return said(io, "request", await request(await requestSetup(io), words.capability, draft.value.text));
 }
 
-// specBodySetup : the project's spec store and its forge, for a spec change sent as the issue's body (#542)
 function specBodySetup(io: Io): SpecBodySetup {
   return { home: io.home, specs: (project) => specsOf(io, project), issues: (project) => forgeOf(io, project) };
 }
 
-// requestSetup : the plugin setup, and the spec store of a draft's project from its resolved settings (#381): the
-// approval a write counts against is checked against the issue's body when the project keeps its specs there
 async function requestSetup(io: Io): Promise<RequestSetup> {
   const setup = await pluginSetup(io.home, io.env, io.secrets);
   return { ...setup, specs: (project) => specsOf(io, project) };
@@ -119,7 +116,6 @@ async function specsOf(io: Io, project: string): Promise<Result<SpecStore>> {
   return specStoreOf({ env, home: io.home, open: openOnce(() => openedForge(io, project, env)) });
 }
 
-// forgeOf : the project's forge, from its resolved settings
 async function forgeOf(io: Io, project: string): Promise<Result<Forge>> {
   const settings = await runSettings({ home: io.home, project, env: io.env });
   return settings.kind === "ok" ? openedForge(io, project, settings.value.env) : settings;
@@ -135,8 +131,6 @@ async function openedForge(io: Io, project: string, env: NodeJS.ProcessEnv): Pro
 
 type DraftFile = { readonly specs: string; readonly file: string; readonly text: string };
 
-// draftText : a draft from the spec drafts folder only, where the coordinator writes, so request reads no other file;
-// with the folder's and the file's real paths
 async function draftText(home: string, file: string): Promise<Result<DraftFile>> {
   const specs = await realpath(join(home, "specs")).catch(() => "");
   const real = await realpath(file).catch(() => "");
@@ -157,7 +151,6 @@ function requestWords(argv: readonly string[]): { readonly capability: string; r
   return file === undefined || capability === undefined || rest.length > 0 ? "bad" : { capability, file };
 }
 
-// confirm <id> <text> : exit 0 done, 1 refused
 async function confirmCommand(argv: readonly string[], io: Io): Promise<number> {
   const parsed = options(argv, []);
   if (parsed === "bad" || parsed.positionals.length !== 2) {
@@ -168,7 +161,6 @@ async function confirmCommand(argv: readonly string[], io: Io): Promise<number> 
   return said(io, "confirm", await confirmed(io, id, text));
 }
 
-// confirmed : a kept spec change goes to the issue (spec-body.ts); any other kept write to its connector
 async function confirmed(io: Io, id: string, text: string): Promise<Confirmed> {
   const spec = parseId(io.home, id);
   return spec.kind === "ok" && spec.value.capability === SPEC_BODY
@@ -196,8 +188,6 @@ function parsedObject(text: string): object | "bad" {
   }
 }
 
-// checkedTemplate : a team's template, copied only when its plugin fields and its ready fields read, so the file it
-// becomes never stops a dispatcher pass; the core never reads the template again
 function checkedTemplate(path: string, text: string, env: NodeJS.ProcessEnv): Result<string> {
   const raw = parsedObject(text);
   if (raw === "bad") {
@@ -234,8 +224,6 @@ function projectWords(
     : "bad";
 }
 
-// project init <project> [--template <file>] : the project file, from a team's template or the defaults; an existing
-// file is never replaced
 async function projectCommand(argv: readonly string[], io: Io): Promise<number> {
   const words = projectWords(argv);
   if (words === "bad") {
@@ -255,7 +243,6 @@ async function projectCommand(argv: readonly string[], io: Io): Promise<number> 
   return 0;
 }
 
-// the commands that read their own options: their words are not the main command line's
 export const REQUEST_COMMANDS: Readonly<Record<string, (argv: readonly string[], io: Io) => Promise<number>>> = {
   request: requestCommand,
   confirm: confirmCommand,

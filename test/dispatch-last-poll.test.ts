@@ -31,7 +31,6 @@ const notUsed = async (): Promise<{ readonly kind: "failed"; readonly reason: st
   reason: "not used in these tests",
 });
 
-// a git host with these claimed open changes; "down" when it cannot list them
 function forge(claimed: readonly number[] | "down"): Forge {
   return {
     name: "github",
@@ -72,7 +71,6 @@ const status = (claimed: readonly number[] | "down") =>
     line: "posted #12 at aaaa1111",
   });
 
-// an orchestrator loop meant to be running for the project: its loop file (#305)
 function loopFor(project: string): void {
   mkdirSync(join(home, "runs", project), { recursive: true });
   writeFileSync(join(home, "runs", project, "loop.pid"), "999999999:x");
@@ -93,7 +91,6 @@ describe("status: when the orchestrator last ran, while a loop is meant to be ru
     expect(await status([12, 14])).toBe("orchestrator last ran 4 min ago; posted #12 at aaaa1111");
     await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(90) } });
     expect(await status([])).toBe("orchestrator last ran 90 min ago; posted #12 at aaaa1111");
-    // exactly three intervals is not late yet
     await writeLastPoll({ home, project: "ledger", poll: { ...POLL, at: ago(15) } });
     expect(await status([12])).toBe("orchestrator last ran 15 min ago; posted #12 at aaaa1111");
   });
@@ -164,7 +161,6 @@ describe("status: the newest pass", () => {
   });
 
   it("flags a loop that never ran while a ticket is claimed", async () => {
-    // a loop file with no pass yet cannot be tied to the repository, so none is meant to be running
     expect(await status([12])).toMatch(/^no orchestrator loop running; /);
     expect(
       livenessLine({

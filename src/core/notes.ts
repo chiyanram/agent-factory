@@ -13,7 +13,7 @@
 // An ask is an agent note whose first line starts "[coordinator] OPEN:" or "[writer] OPEN:". It stays open until the
 // notes of project members after it name a choice for every question it asks (answers.ts, #486): a reply that answers
 // some, a note that is itself a question, or a bot's note keeps it open. Logins are compared without case, and notes are ordered by the
-// instant they were written.
+// instant they were written. A time that does not parse never closes an ask: the ask goes last, any other note first.
 //
 // Agent commits carry an "Agent: <seat>" trailer, so the history shows which commits an agent made even under the
 // developer's own login. commitKind reads it as git reads trailers, so what it counts is what `git log` shows.
@@ -29,19 +29,15 @@ export type NoteKind =
   | { readonly kind: "person"; readonly member: boolean };
 
 export type Readers = {
-  // the login the factory posts with: the developer's own, or the project's bot
   readonly factory: string;
-  // the people who may answer an ask: the project's members
   readonly members: ReadonlySet<string>;
 };
 
-// A login is compared without case: GitHub and GitLab both treat "Ram" and "ram" as one account.
 function same(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
 const SEAT_LINE = /^\[(writer|reviewer|coordinator)\] /;
-// The reviewer's line findings were once posted as "`file:line` [reviewer] …"; a note in that form is still the factory's.
 const OLD_LINE_FINDING = /^`[^`\n]+` \[(reviewer)\] /;
 const ASK_LINE = /^\[(coordinator|writer)\] OPEN:/;
 
@@ -53,7 +49,6 @@ function seatOf(line: string): Seat | undefined {
   return (SEAT_LINE.exec(line)?.[1] ?? OLD_LINE_FINDING.exec(line)?.[1]) as Seat | undefined;
 }
 
-// classify : one note, by its author and its first line.
 export function classify(request: { readonly note: Note; readonly readers: Readers }): NoteKind {
   const { note, readers } = request;
   const line = firstLine(note.body);
@@ -73,8 +68,6 @@ function isMemberReply(kind: NoteKind): boolean {
   return kind.kind === "person" && kind.member;
 }
 
-// A note's place in time. A time the forge sent that does not parse is put where it keeps an ask open: an ask last,
-// any other note first, so a bad timestamp never closes an ask.
 function when(at: string, kind: NoteKind): number {
   const time = Date.parse(at);
   if (!Number.isNaN(time)) {
@@ -85,8 +78,6 @@ function when(at: string, kind: NoteKind): number {
 
 type Read = { readonly note: Note; readonly kind: NoteKind; readonly time: number };
 
-// inOrder : every note with its kind, by the instant it was written, not the text of its time, since a forge may
-// write "+01:00" or leave out the milliseconds
 function inOrder(request: { readonly notes: readonly Note[]; readonly readers: Readers }): readonly Read[] {
   return request.notes
     .map((note) => {
@@ -96,8 +87,6 @@ function inOrder(request: { readonly notes: readonly Note[]; readonly readers: R
     .toSorted((a, b) => a.time - b.time);
 }
 
-// rounds : each ask, in time order, with where its round stands: answered once the members' notes after it name a
-// choice for every question it asked (answers.ts, #486)
 type AskRound = { readonly writer: boolean; readonly round: Round };
 
 function rounds(request: { readonly notes: readonly Note[]; readonly readers: Readers }): readonly AskRound[] {
@@ -115,21 +104,14 @@ function rounds(request: { readonly notes: readonly Note[]; readonly readers: Re
   });
 }
 
-// openAsks : how many asks are not answered yet: a member's note after an ask closes it only when, with the members'
-// other notes after it, it names a choice for every question the ask holds (#486; answers.ts)
 export function openAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
   return rounds(request).filter((r) => r.round.kind === "open").length;
 }
 
-// malformedAsks : how many asks are malformed (answers.ts roundIn): each holds the change until a person deletes it
-// (#517)
 export function malformedAsks(request: { readonly notes: readonly Note[]; readonly readers: Readers }): number {
   return rounds(request).filter((r) => r.round.kind === "open" && r.round.malformed !== undefined).length;
 }
 
-// lastAnswers : the newest writer ask's answers, when it is answered; none while it is open, or with no writer ask at
-// all. A coordinator's OPEN is its own grill, never the writer's answers. The next writer run receives them as a typed
-// field (#486).
 export function lastAnswers(request: {
   readonly notes: readonly Note[];
   readonly readers: Readers;
@@ -140,18 +122,14 @@ export function lastAnswers(request: {
 
 const SEATS: readonly Seat[] = ["writer", "reviewer", "coordinator"];
 
-// agentTrailer : the trailer line an agent commit carries.
 export function agentTrailer(request: { readonly seat: Seat }): string {
   return `Agent: ${request.seat}`;
 }
 
 export type CommitKind = { readonly kind: "agent"; readonly seat: Seat } | { readonly kind: "person" };
 
-// A trailer line as git reads one: a key of letters, digits and "-", optional space, ":", the value. A line that
-// starts with white space continues the trailer above it.
 const TRAILER = /^([A-Za-z0-9-]+)\s*:\s*(.*)$/;
 const CONTINUED = /^\s+\S/;
-// the lines git itself writes, which let a block with other lines in it still count (git interpret-trailers)
 const GIT_WRITTEN = /^(Signed-off-by\s*:|\(cherry picked from commit )/i;
 
 type Trailer = { readonly key: string; readonly value: string };
@@ -174,8 +152,9 @@ function readBlock(lines: readonly string[]): Block {
   return { trailers, other, gitWritten: lines.some((line) => GIT_WRITTEN.test(line)) };
 }
 
-// git's rule: the last paragraph is the trailer block when every line in it is a trailer, or when a quarter of it is
-// and one of those is a line git writes. The first paragraph is the subject and never one.
+// git's rule: the trailer block ends the message, and it is all trailers, or at least 25% trailers with one
+// that git writes or the config names.
+// https://git-scm.com/docs/git-interpret-trailers
 function trailerBlock(message: string): readonly Trailer[] {
   const paragraphs = message
     .replace(/\r\n?/g, "\n")
@@ -190,8 +169,6 @@ function trailerBlock(message: string): readonly Trailer[] {
   return all || enough ? block.trailers : [];
 }
 
-// commitKind : an agent commit has an "Agent: <seat>" trailer, read as git reads trailers; the key is matched without
-// case, and an unknown seat makes it a person's commit.
 export function commitKind(request: { readonly message: string }): CommitKind {
   const agent = trailerBlock(request.message).find((t) => t.key.toLowerCase() === "agent");
   const seat = SEATS.find((s) => s === agent?.value);

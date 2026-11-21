@@ -10,7 +10,6 @@ function note(name: string, body: string): Note {
   clock += 1;
   return { author: { name }, body, at: `2026-11-07T10:${String(clock).padStart(2, "0")}:00Z` };
 }
-// a writer's round, as finish.ts posts it: each question with lettered choices, the second recommended
 function ask(n: number, seat: "writer" | "coordinator" = "writer"): string {
   const items = Array.from({ length: n }, (_, i) => `${i + 1}. which store? A) a file · B) a table (recommended)`);
   const r = renderPost({ seat, title: `OPEN: ${n === 1 ? "1 question" : `${n} questions`}`, fields: [], items });
@@ -75,7 +74,6 @@ describe("answersIn", () => {
         { question: 2, choice: "B" },
       ],
     });
-    // a plain reply answers once: a later "Thanks" never replaces it; a later "1: …" line does
     expect(roundOf(words, ["EUR", "Thanks"])).toMatchObject({ answers: [{ text: "EUR" }] });
     expect(roundOf(words, ["EUR", "Thanks", "1: GBP after all"])).toMatchObject({
       answers: [{ text: "GBP after all" }],
@@ -127,7 +125,6 @@ describe("open asks on a change (#486)", () => {
   });
 });
 
-// #517: a round whose items do not match its title never reads as answered; a numbered prose line is never a choice
 describe("malformed rounds and numbered prose (#517)", () => {
   it("AC-2: a round with no question, or not the ones its title names, stays open whatever the replies", () => {
     expect(roundOf([], [])).toMatchObject({ kind: "open", malformed: "it holds no question" });
@@ -149,7 +146,6 @@ describe("malformed rounds and numbered prose (#517)", () => {
   it("AC-2: a coordinator round posted with no items holds the change after a member's reply", () => {
     const notes = [note("ram", "[coordinator] OPEN: 2 questions"), note("lee", "1A 2B")];
     expect(openAsks({ notes, readers })).toBe(1);
-    // a round that holds one of the two questions its title names: a reply to that one does not close it
     const one = ask(2, "coordinator")
       .split("\n")
       .filter((l) => !l.startsWith("- 2."))

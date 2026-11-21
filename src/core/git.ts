@@ -23,9 +23,7 @@ export type Input = { readonly kind: "text"; readonly text: string } | { readonl
 
 export type GitRequest = {
   readonly args: readonly string[];
-  // the clone to run in; "none" runs git outside any repo
   readonly repo: RepoTarget;
-  // the environment git starts from: normally process.env
   readonly env: NodeJS.ProcessEnv;
   readonly stdin: Input;
 };
@@ -38,7 +36,6 @@ export type GitResult =
 type Override = { readonly key: string; readonly value: string };
 type Refused = { readonly kind: "refused"; readonly reason: string };
 
-// Always set: last trusted value, else this neutral one.
 const ALWAYS: readonly Override[] = [
   { key: "core.fsmonitor", value: "false" },
   { key: "core.hookspath", value: "/dev/null" },
@@ -54,9 +51,6 @@ const ALWAYS: readonly Override[] = [
   { key: "fetch.recursesubmodules", value: "false" },
 ];
 
-// Always set, whatever any config says (#485, hermetic host calls): keys that change what git prints or which refs it
-// keeps, so the operator's own global config (another default branch, a diff prefix, colour, pruning, signing) changes
-// no result the engine reads. A key here wins over the trusted value, unlike ALWAYS.
 export const FIXED: readonly Override[] = [
   { key: "init.defaultbranch", value: "main" },
   { key: "fetch.prune", value: "false" },
@@ -80,7 +74,6 @@ export const FIXED: readonly Override[] = [
   { key: "advice.detachedhead", value: "false" },
 ];
 
-// What to do with a key the repo itself sets.
 type RepoRule =
   | { readonly kind: "neutral"; readonly value: string }
   | { readonly kind: "refuse" }
@@ -122,7 +115,6 @@ function run(file: string, args: readonly string[], env: NodeJS.ProcessEnv, stdi
       const code = error === null ? 0 : typeof error.code === "number" ? error.code : 1;
       done({ code, stdout, stderr });
     });
-    // git may exit before it reads its input; that is git's answer, not a failure of ours
     child.stdin?.on("error", () => undefined);
     child.stdin?.end(stdin.kind === "text" ? stdin.text : "");
   });
@@ -130,7 +122,6 @@ function run(file: string, args: readonly string[], env: NodeJS.ProcessEnv, stdi
 
 const NO_INPUT: Input = { kind: "none" };
 
-// trustedPath : PATH without relative entries and without entries inside the repo.
 export function trustedPath(path: string, repo: RepoTarget): string {
   const outside = (p: string): boolean =>
     repo.kind === "none" || (resolve(p) !== resolve(repo.path) && !resolve(p).startsWith(resolve(repo.path) + sep));
@@ -160,7 +151,6 @@ function findGit(path: string): Found {
   return hit === undefined ? { kind: "missing" } : { kind: "found", path: hit };
 }
 
-// "key\nvalue\0" records of `git config --null --list`, in order.
 function parseList(stdout: string): readonly Override[] {
   return stdout
     .split("\0")
@@ -171,7 +161,6 @@ function parseList(stdout: string): readonly Override[] {
     });
 }
 
-// "scope\0key\0" pairs of `git config --show-scope --null --name-only --list`: the keys of local and worktree scope.
 function repoKeys(stdout: string): readonly string[] {
   const parts = stdout.split("\0");
   const pairs = parts.flatMap((scope, i) =>
@@ -188,21 +177,17 @@ export type ConfigRead =
     }
   | Refused;
 
-// readsSystem : false when GIT_CONFIG_NOSYSTEM is a true value. git then skips the system config, but an explicit
-// --system reads it anyway, so hostGit must skip it too or it adds back a value the operator turned off (#167).
 function readsSystem(env: NodeJS.ProcessEnv): boolean {
   return /^(|0|false|no|off)$/i.test(env.GIT_CONFIG_NOSYSTEM ?? "");
 }
 
-// trustedList : one trusted config file as `git config --null --list` prints it. An unreadable file reads as empty,
-// which leaves the neutral values: the safe side.
 async function trustedList(git: string, scope: "--system" | "--global", env: NodeJS.ProcessEnv): Promise<string> {
   const read = await run(git, ["config", scope, "--null", "--list"], env, NO_INPUT);
   return read.code === 0 ? read.stdout : "";
 }
 
-// readConfig : the trusted config and the keys the repo sets. A repo read that fails is a refusal, never an empty
-// list: an empty list would leave every repo key unchecked (git before 2.26 has no --show-scope).
+// git config has --show-scope only from git 2.26, so a repo read that fails is a refusal, never an empty list.
+// https://github.com/git/git/blob/v2.26.0/Documentation/RelNotes/2.26.0.txt
 async function readConfig(git: string, dir: string, env: NodeJS.ProcessEnv): Promise<ConfigRead> {
   const trusted = [
     ...parseList(readsSystem(env) ? await trustedList(git, "--system", env) : ""),
@@ -247,7 +232,6 @@ function refuseStep(ctx: Context, key: string): Step {
       };
 }
 
-// helperStep : an empty helper clears the list so far, then the trusted helpers; no helper the repo sets is kept
 function helperStep(ctx: Context, key: string): Step {
   return { kind: "add", overrides: [{ key, value: "" }, ...ctx.values(key).map((value) => ({ key, value }))] };
 }
@@ -274,7 +258,6 @@ function step(ctx: Context, key: string): Step {
 
 export type Plan = { readonly kind: "ok"; readonly overrides: readonly Override[] } | Refused;
 
-// plan : the GIT_CONFIG_COUNT entries for one call, or the first refusal.
 export function plan(trusted: readonly Override[], repoSet: readonly string[]): Plan {
   const ctx: Context = { values: (key) => trusted.filter((t) => t.key === key).map((t) => t.value) };
   const start: Plan = { kind: "ok", overrides: ALWAYS.map((o) => lastOr(ctx, o.key, o.value)) };
@@ -292,7 +275,6 @@ export function plan(trusted: readonly Override[], repoSet: readonly string[]): 
 
 type Count = { readonly kind: "count"; readonly n: number } | Refused;
 
-// callerCount : how many GIT_CONFIG_COUNT entries the caller set already; anything but a whole number is refused.
 export function callerCount(value: string | undefined): Count {
   const text = value ?? "0";
   return /^\d+$/.test(text)
@@ -309,14 +291,11 @@ function withOverrides(env: NodeJS.ProcessEnv, from: number, overrides: readonly
   return out;
 }
 
-// notCallers : the overrides, less a FIXED key the caller set itself: a caller's own GIT_CONFIG_COUNT entry is the
-// engine's choice for that call, so it wins
 function notCallers(overrides: readonly Override[], env: NodeJS.ProcessEnv, n: number): readonly Override[] {
   const own = new Set(Array.from({ length: n }, (_, i) => (env[`GIT_CONFIG_KEY_${i}`] ?? "").toLowerCase()));
   return overrides.filter((o) => !(own.has(o.key) && FIXED.includes(o)));
 }
 
-// hostGit : runs git as the request says, hardened as the header says.
 export async function hostGit(request: GitRequest): Promise<GitResult> {
   const count = callerCount(request.env.GIT_CONFIG_COUNT);
   const path = trustedPath(request.env.PATH ?? "", request.repo);

@@ -4,13 +4,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ALLOW, bashFiles, baseRef, counts, raised, scan, type Allow } from "../scripts/check-musts.js";
+import { ALLOW, bashFiles, baseRef, COMMENTS, counts, raised, scan, type Allow } from "../scripts/check-musts.js";
 import { claudeEnv } from "../src/core/agent/claude.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "scripts", "check-musts.ts");
-// built in two pieces, so this file holds no disable comment of its own
 const DISABLE = ["// oxlint", "disable-next-line no-explicit-any"].join("-");
 
 const findings = (file: string, text: string, allow: readonly Allow[] = []) =>
@@ -95,6 +94,12 @@ describe("the lint baseline", () => {
     expect(raised({ "a x": 2, "b y": 1, "c z": 0 }, { "a x": 1, "c z": 3 })).toEqual([
       "scripts/lint-baseline.json: lint-baseline: a x is 2, above 1; it only shrinks",
       "scripts/lint-baseline.json: lint-baseline: b y is 1, above 0; it only shrinks",
+    ]);
+  });
+
+  it("names the comment baseline's file and rule for a raised comment count", () => {
+    expect(raised({ "src/a.ts": 3 }, { "src/a.ts": 2 }, COMMENTS)).toEqual([
+      "scripts/comment-baseline.json: comment-baseline: src/a.ts is 3, above 2; it only shrinks",
     ]);
   });
 

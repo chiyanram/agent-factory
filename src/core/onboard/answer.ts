@@ -5,7 +5,6 @@
 import { prop } from "../dispatch/records.js";
 import type { Result } from "../forge/api.js";
 
-// a cite: a path in the repo, and a line, or 0 for the file as a whole; "" for none
 export type Cite = { readonly file: string; readonly line: number };
 
 export type Item = Cite & { readonly text: string; readonly verified: boolean };
@@ -57,7 +56,6 @@ function text(raw: unknown, name: string): string | undefined {
   return typeof v === "string" && v.trim() !== "" ? v.trim().slice(0, MOST_CHARS) : undefined;
 }
 
-// citeOf : the cite and mark every item carries, or undefined
 function citeOf(raw: unknown): (Cite & { readonly verified: boolean }) | undefined {
   const file = prop(raw, "file");
   const line = prop(raw, "line");
@@ -102,7 +100,6 @@ function each<T>(output: unknown, name: string, one: (raw: unknown) => T | undef
   return read.every((r) => r !== undefined) ? read.filter((r) => r !== undefined) : undefined;
 }
 
-// readAnswer : the onboarder's answer, every field checked, or why it is not one
 export function readAnswer(output: unknown): Result<Answer> {
   const stack = each(output, "stack", itemOf);
   const modules = each(output, "modules", moduleOf);

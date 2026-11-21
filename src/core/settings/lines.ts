@@ -4,7 +4,6 @@
 
 type Cursor = { i: number; line: number };
 
-// the path of a key as one string: its parts joined by NUL, which no key holds
 export function pathKey(path: readonly string[]): string {
   return path.join("\u0000");
 }
@@ -54,7 +53,7 @@ function readObject(text: string, at: Cursor, path: readonly string[], found: Ma
     const key = readString(text, at);
     found.set(pathKey([...path, key]), line);
     skipBlank(text, at);
-    at.i += 1; // the colon
+    at.i += 1;
     readValue(text, at, [...path, key], found);
     skipBlank(text, at);
     at.i += text.charAt(at.i) === "," ? 1 : 0;
@@ -75,7 +74,6 @@ function readArray(text: string, at: Cursor, path: readonly string[], found: Map
   at.i += 1;
 }
 
-// keyLines : the line (from 1) of every key path in a JSON text that JSON.parse accepted
 export function keyLines(text: string): ReadonlyMap<string, number> {
   const found = new Map<string, number>();
   readValue(text, { i: 0, line: 1 }, [], found);

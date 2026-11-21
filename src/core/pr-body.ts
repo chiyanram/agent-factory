@@ -29,32 +29,27 @@ import { scrubSecrets } from "./scrub.js";
 
 export const PR_BODY_PATH = ".factory/pr.md";
 
-// GitHub takes a body of 65,536 characters; this leaves room for the engine's own lines above it
 export const MAX_PR_BODY = 20_000;
 
 const JOIN = "\u2060";
-// every control character but the line end and the tab, every invisible format character and every default-ignorable
-// one, and the line and paragraph separators (post.ts's list)
 const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]|(?![\n\t])\p{Cc}/gu;
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 export type Cleaning = {
-  // the project's git host, as the forge settings name it (forgeHost): links to it stay links
   readonly host: string;
   readonly limit?: number;
 };
 
-// cutNote : what the cleaner adds when it cuts the text
 export function cutNote(limit: number): string {
   return `_The factory cut this PR body at ${limit} characters._`;
 }
 
 type Line = { readonly text: string; readonly code: boolean };
 
-// fenceOf : the fence a line opens, or none. A backtick fence's info string holds no backtick (CommonMark).
+// CommonMark: the info string after a backtick fence may not hold a backtick.
+// https://spec.commonmark.org/0.31.2/#fenced-code-blocks
 function fenceOf(line: string): string | undefined {
   const m = FENCE.exec(line);
-  // both groups always match: the run of fence characters, and the rest of the line
   return m === null ? undefined : fenceIn(String(m[1]), String(m[2]));
 }
 
@@ -62,14 +57,12 @@ function fenceIn(fence: string, info: string): string | undefined {
   return fence.startsWith("`") && info.includes("`") ? undefined : fence;
 }
 
-// closes : whether a line closes the fence opened with this run of characters
 function closes(line: string, fence: string): boolean {
   const m = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
   const run = m?.[1] ?? "";
   return run.startsWith(fence[0] ?? "") && run.length >= fence.length;
 }
 
-// linesOf : each line, and whether it is inside fenced code (its fences count as code)
 function linesOf(text: string): readonly Line[] {
   const out: Line[] = [];
   let open: string | undefined;
@@ -81,16 +74,13 @@ function linesOf(text: string): readonly Line[] {
   return out;
 }
 
-// codeSpans : a line cut into its text and its code spans: odd parts are code
 function codeSpans(line: string): readonly string[] {
   return line.split(/((`+)(?:[^`]|[^`][\s\S]*?[^`])\2(?!`))/).filter((_, i) => i % 3 !== 2);
 }
 
 const TAG = /<!--[\s\S]*?(?:-->|$)|<[!?][^<>]*>|<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
-// an autolink, <scheme:…>, keeps its address as plain text: the address rules below then decide it
 const AUTOLINK = /<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*)>/g;
 
-// noHtml : the text with its HTML dropped, outside fenced code and code spans
 function noHtml(text: string): string {
   return linesOf(text)
     .map((l) =>
@@ -103,8 +93,6 @@ function noHtml(text: string): string {
     .join("\n");
 }
 
-// onHost : whether a link's address points at the project's git host: https or http to that very host, or a path on
-// it. An address with "\" or "&" is not trusted: Markdown unescapes and decodes them, so it may mean another host.
 export function onHost(address: string, host: string): boolean {
   const a = address.trim().replace(/^<(.*)>$/, "$1");
   if (/[\\&\s]/.test(a) || /^[/\\]{2}/.test(a)) {
@@ -113,7 +101,6 @@ export function onHost(address: string, host: string): boolean {
   return /^[A-Za-z][A-Za-z0-9+.-]*:/.test(a) ? webOn(a, host) : true;
 }
 
-// webOn : whether an absolute address is https or http to that very host
 function webOn(address: string, host: string): boolean {
   try {
     const url = new URL(address);
@@ -123,7 +110,6 @@ function webOn(address: string, host: string): boolean {
   }
 }
 
-// inertAddress : an address as plain text: no forge links "x:⁠//" or "www⁠."
 function inertAddress(text: string): string {
   return text.replace(/:\/\//g, `:${JOIN}//`).replace(/\b(www)\./gi, `$1${JOIN}.`);
 }
@@ -134,22 +120,18 @@ const TITLE = String.raw`"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)`;
 const LINK = new RegExp(String.raw`(!?)${LINK_TEXT}\(\s*(${ADDRESS})(?:\s+(?:${TITLE}))?\s*\)`, "g");
 const DEFINITION = /^( {0,3})(\[[^\]\n]+\]:)[ \t]*(\S*)/;
 
-// plainDefinition : a reference definition's line, made plain unless it points at the git host
 function plainDefinition(line: string, host: string): string {
   const m = DEFINITION.exec(line);
   if (m === null) {
     return line;
   }
-  // the indent and the address groups always match, if only as ""
   const indent = String(m[1]);
   const address = String(m[3]);
   return address !== "" && onHost(address, host) ? line : `${indent}\\${line.slice(indent.length)}`;
 }
 
-// STRAY : a "](" that LINK did not read (link words nested deeper than it reads), and the address after it
 const STRAY = /\]\(\s*(<[^<>\n]*>|[^\s()<>]*)/g;
 
-// noOutsideLinks : each link and image to another host as plain text, and each reference definition to one undone
 function noOutsideLinks(text: string, host: string): string {
   const linked = text.replace(LINK, (whole, _bang: string, words: string, address: string) => {
     if (onHost(address, host)) {
@@ -167,17 +149,15 @@ function noOutsideLinks(text: string, host: string): string {
 
 const BARE = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s<>()[\]"'`]*/g;
 
-// noOutsideAddresses : each bare address, and each "www.", to another host as plain text; a link to another host whose
-// form noOutsideLinks did not read ends here too, its address broken
 function noOutsideAddresses(text: string, host: string): string {
   const bare = text.replace(BARE, (a) => (onHost(a, host) ? a : inertAddress(a)));
-  // "www." stays only before the git host itself, not before a longer name that starts with it
   const www = new RegExp(String.raw`\b(www)\.(?!${host.replace(/\./g, "\\.")}(?![\w.-]))`, "gi");
   return bare.replace(www, `$1${JOIN}.`);
 }
 
-// CLOSING : a closing keyword (GitHub's, and GitLab's default pattern, any case), with its emphasis and colon, then
-// the list of references it would close: #N, owner/repo#N, GitLab !N, or a full issue address
+// GitHub's closing keywords and GitLab's default closing pattern, in any case.
+// https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue
+// https://docs.gitlab.com/user/project/issues/managing_issues/#default-closing-pattern
 const KEYWORD = String.raw`\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)\b`;
 const REF = String.raw`(?:[\w.-]+\/[\w./-]+)?[#!]\d+|[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s<>()[\]"'\`]+`;
 const CLOSING = new RegExp(
@@ -185,8 +165,6 @@ const CLOSING = new RegExp(
   "gi",
 );
 
-// noClosing : each reference after a closing keyword broken, so only the engine's own lines can close a ticket; a
-// reference after no keyword stays
 function noClosing(text: string): string {
   return text.replace(
     CLOSING,
@@ -195,7 +173,6 @@ function noClosing(text: string): string {
   );
 }
 
-// inert : the rules that hold anywhere in the text, code or not
 function inert(text: string): string {
   return noClosing(text)
     .replace(/</g, `<${JOIN}`)
@@ -204,7 +181,6 @@ function inert(text: string): string {
     .replace(/^([ \t>]*)\//gm, "$1\\/");
 }
 
-// openFence : the fence still open at the end of the text, or none
 function openFence(text: string): string | undefined {
   let open: string | undefined;
   for (const line of text.split("\n")) {
@@ -213,8 +189,6 @@ function openFence(text: string): string | undefined {
   return open;
 }
 
-// linesWithin : the first lines that fit in room characters with their line ends; a first line longer than that is
-// cut, never after a character a rule above looks for
 function linesWithin(text: string, room: number): readonly string[] {
   const kept: string[] = [];
   let used = 0;
@@ -236,7 +210,6 @@ function linesWithin(text: string, room: number): readonly string[] {
       ];
 }
 
-// capped : the text cut at a line end within the limit, the note included, and an open fence closed
 function capped(text: string, limit: number): string {
   if (Array.from(text).length <= limit) {
     return text;
@@ -248,7 +221,6 @@ function capped(text: string, limit: number): string {
   return [...kept, ...(fence === undefined ? [] : [fence]), "", note].join("\n");
 }
 
-// cleanBody : the implementer's PR body, made inert for posting. See the header for the rules. Pure.
 export function cleanBody(text: string, cleaning: Cleaning): string {
   const host = cleaning.host.toLowerCase();
   const plain = scrubSecrets(text.replace(/\r\n?/g, "\n").replace(INVISIBLE, ""));

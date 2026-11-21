@@ -9,7 +9,6 @@ const recorded: unknown = JSON.parse(
   readFileSync(join(import.meta.dirname, "..", "evals/reviewer/baseline.json"), "utf8"),
 );
 
-// a baseline of one case with `seeds` seeds, each run matching the given count at the given cost
 function planted(matched: readonly number[], usd: readonly number[], seeds = 5): Record<string, unknown> {
   const runs = matched.map((m, i) => ({
     run: i + 1,
@@ -30,7 +29,6 @@ function planted(matched: readonly number[], usd: readonly number[], seeds = 5):
 const listed = field(field(recorded, "cases"), "ran");
 const RAN: readonly string[] = Array.isArray(listed) ? listed.map(String) : [];
 
-// a results document cut to what the bar reads, over the recorded baseline's cases
 const result = (found: number, of: number, aim: unknown = "quality", usd = 30, ran: readonly string[] = RAN) => ({
   aim,
   cost_usd: usd,
@@ -66,7 +64,6 @@ describe("the noise (ADR-0021)", () => {
     expect(baselineOf({ ...over, recall_at_act_on: { overall: { found: 11, of: 10 } } })).toBe(
       "has no recall_at_act_on.overall found and of",
     );
-    // runs that hold different numbers of seeds cannot be compared by their matched counts
     const sized = (n: number, seeds: number) => ({
       run: n,
       cost_usd: 2,
@@ -76,9 +73,7 @@ describe("the noise (ADR-0021)", () => {
     expect(noiseOf({ per_case: [{ case: "c", seeds: 5, runs: [sized(1, 5), sized(2, 5)] }] })).toMatchObject({
       spread: 1,
     });
-    // runs with no seed at all, as in a set of clean cases only, have nothing to measure by
     expect(noiseOf({ per_case: [{ case: "clean", seeds: 0, runs: [sized(1, 0), sized(2, 0)] }] })).toBeUndefined();
-    // a clean case's second run holds no seed, so it is no second run to measure by
     const clean = { case: "clean", seeds: 0, runs: [1, 2].map((run) => ({ run, cost_usd: 1, seeds: [] })) };
     expect(
       noiseOf({
@@ -111,7 +106,6 @@ describe("the bar (ADR-0021)", () => {
 
   it("keeps a cost change only under the baseline's cost less the noise, $38.2159 today, over the same cases", () => {
     expect(aimProblems(result(50, 72, "cost", 38.2158), base())).toEqual([]);
-    // on the line, which a float subtraction (41.2381 - 3.0222 = 38.215900000000005) would let through
     expect(aimProblems(result(50, 72, "cost", 38.2159), base())).toHaveLength(1);
     expect(aimProblems(result(40, 60, "cost", 30, RAN.slice(1)), base())).toEqual([
       "it aims at cost, and it ran other cases than the baseline: compare cost over the baseline's cases (ADR-0021)",

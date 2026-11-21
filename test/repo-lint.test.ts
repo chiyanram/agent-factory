@@ -12,7 +12,6 @@ afterEach(() => {
   }
 });
 
-// a fresh git repository holding tests/fixtures/<name>, as make lint sees a checkout
 function fixture(name: string): string {
   const dir = tempDir("factory-lint-");
   made.push(dir);

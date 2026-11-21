@@ -42,7 +42,6 @@ describe("noAgentSettings: the host push refuses a change to the agent's setting
   const check = (sha: string, lease: string) =>
     noAgentSettings({ env: env(), defaultBranch: "main" })({ repo, commit: sha, lease: { kind: "sha", sha: lease } });
 
-  // main holds the instructions but no .claude folder; the agent branch starts from it
   beforeEach(() => {
     root = tempDir("factory-settings-");
     execFileSync("git", ["init", "-q", "--bare", "-b", "main", join(root, "origin.git")], { env: env() });
@@ -83,7 +82,6 @@ describe("noAgentSettings: the host push refuses a change to the agent's setting
     const edited = commit("edit");
     expect(await check(edited, lease)).toMatchObject({ kind: "failed", reason: expect.stringContaining("AGENTS.md") });
     write("AGENTS.md", "# rules\n");
-    // the trees are compared: the commit sent has main's version again
     expect(await check(commit("undo"), lease)).toEqual({ kind: "ok" });
   });
 

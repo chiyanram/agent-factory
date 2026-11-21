@@ -2,7 +2,8 @@
 // and people.json, the allowlist that maps a Discord user id to a named person and a channel id to a project. Both,
 // and the folders above them, must belong to the user that runs the door (on the VM, the `factory` OS user). The
 // door refuses a token file that group or others can read, and a people.json or a folder that group or others can
-// write, since anyone who could change people.json could name themselves.
+// write, since anyone who could change people.json could name themselves. No failure carries the token file's text,
+// and a pasted text that is not a bot token is never echoed.
 
 import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -12,17 +13,12 @@ import { field } from "../../human-record.js";
 import { plainName } from "../../spec.js";
 
 export type DoorConfig = {
-  // the one server the door answers in; its commands are registered there
   readonly guild: string;
-  // channel id → project; a thread maps through its parent channel
   readonly channels: Readonly<Record<string, string>>;
-  // user id → the person's name, as the records' `by`
   readonly people: Readonly<Record<string, string>>;
 };
 
-// a Discord id (a snowflake)
 export const SNOWFLAKE = /^\d{17,20}$/;
-// a bot token as Discord gives one: three dot-separated parts of URL-safe base64
 const TOKEN = /^[\w-]{20,}\.[\w-]{4,}\.[\w-]{20,}$/;
 
 export function doorDir(home: string): string {
@@ -31,7 +27,6 @@ export function doorDir(home: string): string {
 
 const failed = (reason: string): Result<never> => ({ kind: "failed", reason });
 
-// statOf : the file's own stat (a link is not followed), or why there is none
 async function statOf(path: string): Promise<Stats | "missing" | "unreadable"> {
   try {
     return await lstat(path);
@@ -40,7 +35,6 @@ async function statOf(path: string): Promise<Stats | "missing" | "unreadable"> {
   }
 }
 
-// ownedByMe : whether the door's own OS user (on the VM, `factory`) owns it; true where the OS has no uids
 function ownedByMe(stat: Stats): boolean {
   const me = process.getuid?.();
   return me === undefined || stat.uid === me;
@@ -53,7 +47,6 @@ type Entry = {
   readonly what: string;
 };
 
-// entryProblem : why the entry is not safe for the door, or undefined. Pure.
 function entryProblem(stat: Stats, e: Entry): string | undefined {
   const mode = (stat.mode & 0o777).toString(8);
   const rules: readonly (readonly [boolean, string])[] = [
@@ -64,7 +57,6 @@ function entryProblem(stat: Stats, e: Entry): string | undefined {
   return rules.find(([bad]) => bad)?.[1];
 }
 
-// safeEntry : the entry is there, of its kind, the door's user's own, and its mode keeps the forbidden bits clear
 async function safeEntry(e: Entry): Promise<Result<true>> {
   const stat = await statOf(e.path);
   if (typeof stat === "string") {
@@ -74,8 +66,6 @@ async function safeEntry(e: Entry): Promise<Result<true>> {
   return problem === undefined ? { kind: "ok", value: true } : failed(problem);
 }
 
-// safeFile : the file, and the two folders above it (<home>/door and <home>/door/discord), each safe: a folder that
-// another user could write would let them swap the file
 async function safeFile(home: string, file: Omit<Entry, "kind">): Promise<Result<true>> {
   const folders = [join(home, "door"), doorDir(home)].map(
     (path): Entry => ({ path, kind: "folder", forbidden: 0o022, what: "writable" }),
@@ -89,8 +79,6 @@ async function safeFile(home: string, file: Omit<Entry, "kind">): Promise<Result
   return { kind: "ok", value: true };
 }
 
-// readDoorToken : the bot token; a missing file names the setup step, and a file group or others can read is refused.
-// No failure carries the file's text.
 export async function readDoorToken(home: string): Promise<Result<string>> {
   const path = join(doorDir(home), "token");
   const safe = await safeFile(home, { path, forbidden: 0o077, what: "readable" });
@@ -101,8 +89,6 @@ export async function readDoorToken(home: string): Promise<Result<string>> {
   return TOKEN.test(text) ? { kind: "ok", value: text } : failed(`${path} does not hold a Discord bot token`);
 }
 
-// storeDoorToken : the pasted token, at 0600 in a 0700 folder, through a temp file and a rename; text that is not a
-// bot token is refused and never echoed
 export async function storeDoorToken(home: string, pasted: string): Promise<Result<string>> {
   const token = pasted.trim();
   if (!TOKEN.test(token)) {
@@ -113,18 +99,16 @@ export async function storeDoorToken(home: string, pasted: string): Promise<Resu
   const temp = `${path}.${process.pid}.tmp`;
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 });
-    // a folder made earlier keeps its mode through mkdir
     await chmod(dir, 0o700);
     await writeFile(temp, `${token}\n`, { mode: 0o600, flag: "wx" });
     await rename(temp, path);
     return { kind: "ok", value: path };
   } catch (error: unknown) {
-    await rm(temp, { force: true }).catch(() => undefined); // best effort: the temp may never have been made
+    await rm(temp, { force: true }).catch(() => undefined);
     return failed(`cannot store the token in ${dir}: ${error instanceof Error ? error.name : "the write failed"}`);
   }
 }
 
-// idMap : an object of Discord id → a valid string, or the first entry that is not one
 function idMap(value: unknown, what: string, valid: (v: string) => boolean): Result<Record<string, string>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return failed(`${what} must be an object of id → name`);
@@ -137,7 +121,6 @@ function idMap(value: unknown, what: string, valid: (v: string) => boolean): Res
     : failed(`${what} holds a bad entry for ${JSON.stringify(bad[0])}`);
 }
 
-// configOf : people.json checked: a guild id, channel ids to plain project names, user ids to non-blank names
 function configOf(value: unknown, path: string): Result<DoorConfig> {
   const guild = field(value, "guild");
   if (typeof guild !== "string" || !SNOWFLAKE.test(guild)) {
@@ -153,7 +136,6 @@ function configOf(value: unknown, path: string): Result<DoorConfig> {
     : { kind: "ok", value: { guild, channels: channels.value, people: people.value } };
 }
 
-// readDoorConfig : people.json, refused when group or others can write it
 export async function readDoorConfig(home: string): Promise<Result<DoorConfig>> {
   const path = join(doorDir(home), "people.json");
   const safe = await safeFile(home, { path, forbidden: 0o022, what: "writable" });

@@ -39,7 +39,6 @@ describe("fetching a plugin version (#232)", () => {
     expect(f.files.map((l) => l.slice(67))).toEqual([".claude-plugin/plugin.json", "skills/crq/process/lanes.json"]);
     expect(readFileSync(join(f.dir, ".claude-plugin", "plugin.json"), "utf8")).toContain("rulebook");
     expect(await treeHash(f.dir)).toMatchObject({ kind: "ok", value: { sha256: f.sha256 } });
-    // a newer commit is fetched from origin; an older one can be named, and gives the same folder again
     const second = commitMarket(home, { "plugins/rulebook/NEW.md": "x" });
     expect((await fetched()).commit).toBe(second);
     expect(await fetched(first)).toMatchObject({ sha256: f.sha256, dir: f.dir });
@@ -61,9 +60,7 @@ describe("fetching a plugin version (#232)", () => {
   it("fetches a full commit the clone lacks from origin; a short commit or a word is never fetched (#607)", async () => {
     setUpMarket(home);
     const market = marketplaceDir(home, "chiyanram");
-    // a commit made on origin after the clone: the clone does not have it yet
     const later = commitMarket(home, { "plugins/rulebook/NEW.md": "x" });
-    // never fetched: the refusal is commitOf's, never a failed fetch, and an option word runs no program
     const short = await targetCommit(GIT_ENV, market, later.slice(0, 12));
     expect(short).toMatchObject({ kind: "failed", reason: expect.not.stringContaining("cannot fetch") });
     const planted = join(home, "planted");
@@ -72,7 +69,6 @@ describe("fetching a plugin version (#232)", () => {
     expect(existsSync(planted)).toBe(false);
     expect(await targetCommit(GIT_ENV, market, later)).toEqual({ kind: "ok", value: later });
     expect((await fetched(later)).commit).toBe(later);
-    // a full commit origin does not have either: refused, with the reason
     expect(await targetCommit(GIT_ENV, market, "b".repeat(40))).toEqual({
       kind: "failed",
       reason: expect.stringContaining(`cannot fetch ${"b".repeat(40)}`),
@@ -85,7 +81,6 @@ describe("fetching a plugin version (#232)", () => {
     expect([of("../r"), of("/etc"), of("."), of({ source: "github" }), of(undefined)]).toEqual(Array(5).fill("failed"));
     expect(entryOf("not json", "r").kind).toBe("failed");
     expect(changedFiles(["- a x", "- b y", "- e v"], ["- a x", "x b y", "- d z"])).toEqual(["- v", "~ y", "+ z"]);
-    // a first pin: a count per folder, two parts deep (#482)
     expect(
       folderCounts([
         "- a skills/crq/references/x.md",

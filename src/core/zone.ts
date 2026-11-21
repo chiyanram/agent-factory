@@ -6,7 +6,6 @@ export type Zone = { readonly name: string };
 
 export const UTC: Zone = { name: "UTC" };
 
-// known : whether the runtime knows a zone by this name. Pure.
 function known(name: string): boolean {
   try {
     return new Intl.DateTimeFormat("en-US", { timeZone: name }).resolvedOptions().timeZone !== "";
@@ -15,7 +14,6 @@ function known(name: string): boolean {
   }
 }
 
-// readerZone : TZ when it names a zone the runtime knows, else the system's zone, else UTC
 export function readerZone(env: NodeJS.ProcessEnv): Zone {
   const tz = env.TZ ?? "";
   if (known(tz)) {
@@ -33,7 +31,6 @@ export type Wall = {
   readonly minute: number;
 };
 
-// wallAt : the date and time on a clock in the zone at ms since the epoch. Pure.
 export function wallAt(ms: number, zone: Zone): Wall {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: zone.name,
@@ -48,7 +45,6 @@ export function wallAt(ms: number, zone: Zone): Wall {
   return { year: n("year"), month: n("month"), day: n("day"), hour: n("hour"), minute: n("minute") };
 }
 
-// offsetAt : how far the zone's clock is ahead of UTC at ms, in ms. Pure.
 function offsetAt(ms: number, zone: Zone): number {
   const w = wallAt(ms, zone);
   return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute) - Math.floor(ms / 60_000) * 60_000;
@@ -56,8 +52,6 @@ function offsetAt(ms: number, zone: Zone): number {
 
 const two = (n: number): string => String(n).padStart(2, "0");
 
-// shownAt : a time as a person reads it in the zone: "2026-11-13 14:05 Europe/Berlin"; an unreadable time as it is.
-// Pure.
 export function shownAt(iso: string, zone: Zone): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) {
@@ -67,9 +61,6 @@ export function shownAt(iso: string, zone: Zone): string {
   return `${w.year}-${two(w.month)}-${two(w.day)} ${two(w.hour)}:${two(w.minute)} ${zone.name}`;
 }
 
-// atWall : the moment the zone's clock shows this wall time, in ms since the epoch; "skipped" when daylight saving
-// jumps over it, "repeated" when the clock shows it twice. Every offset the zone has within a day of it is tried, so
-// a guess is never made. Pure.
 export function atWall(wall: Wall, zone: Zone): number | "skipped" | "repeated" {
   const naive = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute);
   const offsets = new Set([-1, 0, 1].map((d) => offsetAt(naive + d * 86_400_000, zone)));
@@ -90,19 +81,16 @@ export function atWall(wall: Wall, zone: Zone): number | "skipped" | "repeated" 
   return moments.length === 1 ? (moments[0] ?? naive) : "repeated";
 }
 
-// dayStart : the start of the zone's day that holds now, in ms since the epoch. Pure.
 export function dayStart(now: number, zone: Zone): number {
   const w = wallAt(now, zone);
   return Date.UTC(w.year, w.month - 1, w.day) - offsetAt(now, zone);
 }
 
-// monthStart : the start of the zone's month that holds now, in ms since the epoch. Pure.
 export function monthStart(now: number, zone: Zone): number {
   const w = wallAt(now, zone);
   return Date.UTC(w.year, w.month - 1, 1) - offsetAt(now, zone);
 }
 
-// shownFor : a span of ms as a person reads it: "3d 4h", "2h 05m", "7m". Pure.
 export function shownFor(ms: number): string {
   const minutes = Math.max(0, Math.round(ms / 60_000));
   const [d, h, m] = [Math.floor(minutes / 1440), Math.floor((minutes % 1440) / 60), minutes % 60];

@@ -60,7 +60,6 @@ describe("blockersView", () => {
   });
 });
 
-// #494 AC-9: a blocker that is a git host issue counts by its issue too
 describe("withIssue (AC-9)", () => {
   it("a merge on the branch stands; a closed issue decides by why; an open one leaves the branch's state", () => {
     expect(withIssue("merged", "not_planned")).toBe("merged");
@@ -94,7 +93,6 @@ describe("cycleFrom's cost", () => {
     }
     const started = performance.now();
     expect(cycleFrom("T", specs)).toEqual([]);
-    // a walk without its visited set takes 2^25 paths here
     expect(performance.now() - started).toBeLessThan(500);
   });
 });

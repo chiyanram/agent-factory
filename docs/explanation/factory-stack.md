@@ -29,7 +29,7 @@ eval baseline live in our files, not in an agent product.
 | Environments | the runner: `vm` (a runner under Sysbox) or `srt` (an OS sandbox on a laptop) | partly. **Today:** the runner and gate are not finished; #493 finishes them |
 | Code context | the onboarder's brief and glossary in the project home | partly |
 | AI registry | the pinned rules pack: skills, role cards, versions | partly: runs load no MCP server, so there is no server list |
-| AI gateway | the egress proxy and its allowlist; spend caps per run, ticket and project-day | partly. **Today:** no model routing; #562 adds it |
+| AI gateway | the egress proxy and its allowlist; spend caps per run, ticket and project-day | partly. **Today:** no model routing; #774 adds it |
 | Agent swap | the coordinator runs under Claude Code or Copilot CLI; the implementer and review run Claude Code only | partly. **Today:** the Copilot runner comes in #493 |
 | **SDLC context** (owners, deploys, incidents) | the `context.read` extension point is declared, and nothing reads it | gap |
 | **More than one line** (security, incident) | one line: a ticket to a PR | gap, later |

@@ -30,7 +30,6 @@ function git(dir: string, args: readonly string[]): void {
   execFileSync("git", ["-C", dir, ...args], { env: GIT_ENV, stdio: "ignore" });
 }
 
-// a clone with these files and this origin
 function clone(name: string, files: Readonly<Record<string, string>>, origin: string): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
@@ -43,7 +42,6 @@ function clone(name: string, files: Readonly<Record<string, string>>, origin: st
   return dir;
 }
 
-// the ledger pilot's clone: Gradle, Spock tests and ITs, Flyway, CI on GitHub, mise declares the JDK
 const LEDGER = {
   gradlew: "#!/bin/sh\n",
   "build.gradle": "plugins { id 'java' }\n",
@@ -63,8 +61,6 @@ const RULEBOOK = {
   "plugins/rulebook/skills/crq/process/lanes.json": LANES,
 };
 
-// a marketplace origin holding the rulebook plugin, which init clones into the factory home; its first commit is the
-// one the engine's rules-pack pin names in these tests
 let marketDir = "";
 let pinnedCommit = "";
 function market(): string {
@@ -76,7 +72,6 @@ function market(): string {
   return join(root, "origin");
 }
 
-// a team's own marketplace, cloned from <root>/team/origin, with one plugin, teamrules; its commit
 function teamMarket(note: string): string {
   return commitMarket(join(root, "team"), {
     ".claude-plugin/marketplace.json": JSON.stringify({
@@ -92,14 +87,12 @@ function enginePin(commit: string): Result<PackPin> {
   return { kind: "ok", value: { repo: market(), commit, tag: "rulebook--v2.0.0" } };
 }
 
-// pinOr : the engine's pin a test gives, else the pin at the marketplace's first commit
 function pinOr(given: Result<PackPin> | undefined): Result<PackPin> {
   return given ?? enginePin(pinnedCommit);
 }
 
 const USER_HOME = "/home/dev";
 
-// probes on which every check passes
 function probes(over: Partial<Probes> = {}): Probes {
   const found: Readonly<Record<string, string>> = {
     srt: "/opt/node/bin/srt",
@@ -220,7 +213,6 @@ describe("init reads the clone (#369)", () => {
         toolchain: { file: "mise.toml", manager: "mise", tools: [{ name: "java", version: "27" }] },
       },
     });
-    // the built-in test globs already hold the ITs, so the project file needs no testFiles
     expect(got).toMatchObject({ value: { integrationTests: true, testFiles: "default" } });
   });
 
@@ -320,7 +312,6 @@ describe("the round (#369)", () => {
 });
 
 describe("agent-factory init --yes on the ledger (#369)", () => {
-  // #485: setup is three commands, install, init and start; init writes the coordinator's settings itself
   it("writes the coordinator's settings itself, after the files and the pins, and says where", async () => {
     token("2027-11-01T00:00:00Z");
     let calls = 0;
@@ -374,7 +365,6 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
     expect(ran.out).toContain("agent-factory onboard ledger");
     expect(ran.out.indexOf("agent-factory onboard ledger")).toBeLessThan(ran.out.indexOf("agent-factory start ledger"));
     expect(ran.out).toContain("agent-factory coordinator ledger");
-    // its settings now resolve with no FACTORY_* variable at all
     const settings = await runSettings({ home, project: "ledger", env: {} });
     expect(settings).toMatchObject({
       kind: "ok",
@@ -496,7 +486,6 @@ describe("agent-factory init --yes on the ledger (#369)", () => {
 describe("init's login checks: the tools gate first, then a real call (#665)", () => {
   type Who = Parameters<Probes["login"]>[0];
 
-  // login probes that answer per login, and the logins asked, in order
   function logins(answers: Partial<Record<Who, Login>>): { readonly asked: Who[]; readonly login: Probes["login"] } {
     const asked: Who[] = [];
     return {
@@ -531,7 +520,6 @@ describe("init's login checks: the tools gate first, then a real call (#665)", (
       "✗ the implementer's claude token: Anthropic refused it (HTTP 401): it was revoked, or has expired early",
     );
     expect(ran.out).toContain("fix: claude setup-token, then agent-factory setup claude");
-    // the fix is the first of the next steps
     expect(ran.out).toMatch(/Next, in this order[^\n]*\n {2}1\. claude setup-token, then agent-factory setup claude/);
   });
 
@@ -608,8 +596,6 @@ describe("init's login checks: the tools gate first, then a real call (#665)", (
   });
 });
 
-// fakeGit : a git on a PATH of its own that dies in the middle of a clone, leaving a half-made folder, as a lost
-// connection or a Ctrl-C does; every other git call goes to the real git
 function fakeGit(): string {
   const bin = join(root, "fake-bin");
   mkdirSync(bin, { recursive: true });
@@ -798,8 +784,6 @@ describe("init pins chiyanram's plugins at the engine's rules-pack pin (#607)", 
   });
 });
 
-// withoutHostCa : the test's env with bin first on PATH; the host's own CA variable would win over a settings file,
-// so it is left out
 function withoutHostCa(bin: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...GIT_ENV, FACTORY_HOME: home, PATH: `${bin}:${process.env.PATH ?? ""}` };
   return Object.fromEntries(Object.entries(env).filter(([name]) => name !== "NODE_EXTRA_CA_CERTS"));
@@ -811,7 +795,6 @@ describe("agent-factory init on the command line (#369)", () => {
     const dir = ledger();
     execFileSync("git", ["clone", "-q", market(), join(home, "marketplaces", "chiyanram")], { env: GIT_ENV });
     writeFileSync(join(home, "user.json"), JSON.stringify({ runner: "srt", egress: { caCerts: "/etc/corp/ca.pem" } }));
-    // a claude on PATH for the gate; the agent fake answers the login calls, so none starts
     const bin = join(root, "bin");
     mkdirSync(bin);
     writeFileSync(join(bin, "claude"), "#!/bin/sh\n");
@@ -841,7 +824,6 @@ describe("agent-factory init on the command line (#369)", () => {
 
   it("runs no program but its probes' and no human-only command, and needs an absolute --repo", async () => {
     const dir = ledger();
-    // the marketplace is already cloned, so nothing reaches the network
     execFileSync("git", ["clone", "-q", market(), join(home, "marketplaces", "chiyanram")], { env: GIT_ENV });
     const calls: string[] = [];
     const errs: string[] = [];

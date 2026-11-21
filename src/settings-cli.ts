@@ -69,7 +69,6 @@ async function resolved(io: SettingsIo, loaded: Loaded, team?: Read): Promise<La
   return layered(team === undefined ? base : { ...base, team });
 }
 
-// readerErrors : what the project file's own readers refuse in the resolved settings
 function readerErrors(path: string, effective: object, env: NodeJS.ProcessEnv): readonly Problem[] {
   const ready = readyFieldsOf(path, effective, env);
   const connectors = pluginConfigOf(path, effective);
@@ -79,8 +78,6 @@ function readerErrors(path: string, effective: object, env: NodeJS.ProcessEnv): 
   );
 }
 
-// processProblems : a second plugin that holds a process, among the project's pinned plugins, naming each one (#426).
-// A bad plugin list is the readers' error, and a plugin not pinned yet is left out: plugin update checks it.
 async function processProblems(
   home: string,
   project: string,
@@ -96,14 +93,11 @@ async function processProblems(
   return found.kind === "failed" ? [{ level: "error", text: found.reason }] : [];
 }
 
-// cloneProblems : a clone whose origin is not the project's repo (origin.ts)
 async function cloneProblems(env: NodeJS.ProcessEnv): Promise<readonly Problem[]> {
   const why = await originProblem(env);
   return why === "" ? [] : [{ level: "error", text: why }];
 }
 
-// pluginLines : each known Claude Code plugin's state, read from the user's config, the clone and the coordinator's
-// folder: a line when it is on, a warning when it is not, because only the launch that needs it refuses
 async function pluginLines(
   env: NodeJS.ProcessEnv,
   home: string,
@@ -132,7 +126,6 @@ function valueText(r: Resolved): string {
 
 const WIDEST = 60;
 
-// shortText : a value as config show's table prints it: a long list cut, with its length (--json prints it whole)
 function shortText(r: Resolved): string {
   const full = valueText(r);
   return full.length <= WIDEST || !Array.isArray(r.value)
@@ -151,7 +144,6 @@ function rowOf(r: Resolved): readonly string[] {
   ];
 }
 
-// table : columns padded to their widest cell
 function table(rows: readonly (readonly string[])[]): string {
   const widths = (rows[0] ?? []).map((_c, i) => Math.max(...rows.map((r) => (r[i] ?? "").length)));
   return rows
@@ -200,8 +192,6 @@ function pinText(pin: Pin | "none"): string {
   return pin === "none" ? "no team" : `team ${pin.team}@${pin.commit.slice(0, 12)}`;
 }
 
-// checkProblems : what config check finds in the project's resolved settings, for a command that checks before it
-// moves a pin (plugin update)
 export async function checkProblems(
   io: Pick<SettingsIo, "home" | "env">,
   project: string,
@@ -214,7 +204,6 @@ export async function checkProblems(
   return { kind: "ok", value: allProblems(loaded.value.path, layers, io.env) };
 }
 
-// candidateProblems : what config check would find in a project file not yet written (init checks before it writes)
 export async function candidateProblems(
   io: Pick<SettingsIo, "home" | "env">,
   path: string,
@@ -250,8 +239,6 @@ async function check(io: SettingsIo, project: string): Promise<number> {
   return 0;
 }
 
-// ---- team update
-
 const COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 async function headOf(io: SettingsIo, team: string): Promise<Result<string>> {
@@ -273,7 +260,6 @@ async function targetOf(io: SettingsIo, team: string, given: string | undefined)
     : commit;
 }
 
-// changes : one line per key whose resolved value differs between the two pins
 export function changes(before: readonly Resolved[], after: readonly Resolved[]): readonly string[] {
   return after.flatMap((a) => {
     const b = before.find((r) => r.key.id === a.key.id);
@@ -363,7 +349,6 @@ function configRun(sub: string): ((io: SettingsIo, project: string) => Promise<n
   return Object.hasOwn(CONFIG, sub) ? CONFIG[sub] : undefined;
 }
 
-// configCommand : config show <project> [--json] | config check <project>
 export function configCommand(positionals: readonly string[], io: SettingsIo): Promise<number> {
   const [sub = "", project, ...rest] = positionals;
   const run = configRun(sub);
@@ -374,7 +359,6 @@ export function configCommand(positionals: readonly string[], io: SettingsIo): P
   return run(io, project);
 }
 
-// teamCommand : team update <project> [<commit>]
 export function teamCommand(positionals: readonly string[], io: SettingsIo): Promise<number> {
   const [sub, project, commit, ...rest] = positionals;
   if (sub !== "update" || project === undefined || rest.length > 0) {

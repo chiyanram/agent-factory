@@ -20,15 +20,12 @@ function folder(): string {
   return dir;
 }
 
-// What claude 2.1.326 printed for a revoked setup-token (`claude -p … --output-format stream-json --verbose`), trimmed
-// to the fields the reader looks at, its session ids zeroed: it retried the 401 twice, then ended in 4 s with exit 1
 const REFUSED = [
   '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":401,"error":"authentication_failed","session_id":"00000000-0000-0000-0000-000000000000"}',
   '{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"error_status":401,"error":"authentication_failed","session_id":"00000000-0000-0000-0000-000000000000"}',
   '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"api_error","result":"Failed to authenticate. API Error: 401 OAuth access token is invalid.","total_cost_usd":0,"session_id":"00000000-0000-0000-0000-000000000000"}',
 ].join("\n");
 
-// What the same CLI printed last for a login it accepted, trimmed the same way
 const ACCEPTED =
   '{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"ok","total_cost_usd":0.0083009,"session_id":"00000000-0000-0000-0000-000000000000"}';
 
@@ -53,7 +50,6 @@ describe("loginOf (#665: only a real call says the login works)", () => {
       kind: "unknown",
       reason: "claude exited 1 with no result",
     });
-    // exit 0 without a result event is not a yes
     expect(loginOf({ code: 0, stdout: "", stderr: "" }, false, LIMIT)).toMatchObject({ kind: "unknown" });
   });
 
@@ -90,9 +86,6 @@ describe("refusedLogin", () => {
   });
 });
 
-// fakeClaude : a FACTORY_CLAUDE stand-in, a Node script, that writes its argv, cwd and environment to seen.json and
-// then plays one fault: prints the given stream and exits with the code, or hangs (and starts a grandchild that hangs
-// with it, whose pid it writes, so a stop must reach the whole group)
 function fakeClaude(
   dir: string,
   play: { readonly stdout: string; readonly code: number } | "hang",
@@ -117,7 +110,6 @@ ${act}
   return { bin, seen, pidFile };
 }
 
-// what the fake saw: its argv, the folder it ran in, and each variable of its environment
 type Seen = { readonly argv: unknown; readonly cwd: string; readonly env: (name: string) => unknown };
 
 function seenOf(file: string): Seen {
@@ -146,7 +138,6 @@ async function gone(pid: number): Promise<boolean> {
   return !alive(pid);
 }
 
-// the host's environment, with a stale login and a git host token in it, which no login call may pass on
 const HOST: NodeJS.ProcessEnv = {
   PATH: process.env.PATH ?? "",
   HOME: "/home/dev",
@@ -193,7 +184,6 @@ describe("the Claude adapter's login call (#665, ADR-0012 S6)", () => {
     expect(seen.env("HTTPS_PROXY")).toBe("http://proxy.example:3128");
     expect(seen.env("HOME")).toBe(seen.cwd);
     expect(seen.cwd).not.toBe(dir);
-    // the folder it ran in, with the CLI's own files, is gone after the call
     expect(existsSync(seen.cwd)).toBe(false);
   });
 

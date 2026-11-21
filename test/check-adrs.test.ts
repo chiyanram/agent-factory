@@ -48,7 +48,6 @@ describe("check-adrs (#482)", () => {
     it("lets a wrapped note change or go, its second line included", () => {
       expect(changed(NOTE, NOTE.replace("the old bar, until", "the old bar, from"))).toBe("");
       expect(changed(NOTE, "The bar is bar.ts.")).toBe("");
-      // a note that is a whole paragraph goes with its blank line
       const alone = `The decision.\n\n**Today:** not built\nyet (#1).\n\nMore decision.`;
       expect(changed(alone, "The decision.\n\nMore decision.")).toBe("");
     });
@@ -81,7 +80,6 @@ describe("check-adrs (#482)", () => {
       expect(changed(row, "| N8 | **Held out.** | #488 Q6 |")).toBe("");
       expect(changed(row, row.replace("| N8 |", "| N9 |"))).toContain("its decision changed in place");
       expect(changed(row, row.replace("#488 Q6", "#488 Q7"))).toContain("its decision changed in place");
-      // the row ends the note: the next row stays frozen
       const rows = `${row}\n| N9 | the next decision | x |`;
       expect(changed(rows, rows.replace("the next decision", "another"))).toContain("its decision changed in place");
     });

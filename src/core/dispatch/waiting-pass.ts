@@ -19,21 +19,16 @@ export type WaitingSetup = {
   readonly waiting: () => Promise<Result<readonly Waiting[]>>;
 };
 
-// a waiting ticket's lane and change when it is in flight; none for either when it is not
 export type Flight = { readonly lane: Lane | "none"; readonly change: number | "none" };
 
 export const NO_FLIGHT: Flight = { lane: "none", change: "none" };
 
-// what was done for one waiting ticket: pinged; recorded but the ping did not go out (once per label, so it is not
-// tried again); recorded with no ping (its own turn already pinged); already recorded for this label time; failed (the
-// log line says why); or a dry run's, which records and pings nothing
 export type WaitingRan = {
   readonly ticket: string;
   readonly title: string;
   readonly outcome: "pinged" | "ping-failed" | "recorded" | "already" | "failed" | "dry-run";
 };
 
-// waitingLabels : the open issues with the label; one that cannot be read is logged, and fails
 export async function waitingLabels(setup: WaitingSetup): Promise<Result<readonly Waiting[]>> {
   const read = await setup.waiting();
   if (read.kind === "failed") {
@@ -43,8 +38,6 @@ export async function waitingLabels(setup: WaitingSetup): Promise<Result<readonl
   return read;
 }
 
-// waitingPinged : each waiting ticket's label time recorded, then the operator pinged, once per label. A line that
-// cannot be written, or records that cannot be read, is logged and pings nothing; the next run tries again.
 export async function waitingPinged(
   setup: WaitingSetup,
   flightOf: (ticket: string) => Flight,
@@ -61,7 +54,6 @@ export async function waitingPinged(
   return { kind: "ok", value: out };
 }
 
-// sessionPinged : one waiting ticket's label time recorded, then the operator pinged when waitingStep says so
 async function sessionPinged(setup: WaitingSetup, w: Waiting, flight: Flight): Promise<WaitingRan["outcome"]> {
   const place = { home: setup.home, project: setup.project, ticket: String(w.number) };
   const step = await sessionStep(setup, place, w.since, flight.lane);
@@ -77,7 +69,6 @@ async function sessionPinged(setup: WaitingSetup, w: Waiting, flight: Flight): P
   return step === "ping" ? pinged(setup, w, flight.change) : "recorded";
 }
 
-// pinged : the operator pinged; a ping only informs, so one that fails is logged, and the record stands
 async function pinged(setup: WaitingSetup, w: Waiting, change: number | "none"): Promise<"pinged" | "ping-failed"> {
   const sent = await setup.notify(waitingPing(w, change));
   if (sent.kind === "ok") {
@@ -87,8 +78,6 @@ async function pinged(setup: WaitingSetup, w: Waiting, change: number | "none"):
   return "ping-failed";
 }
 
-// sessionStep : what to do about a waiting ticket, from its records: record and ping, record only, or nothing, as it
-// was recorded already; records it cannot read do nothing
 async function sessionStep(
   setup: WaitingSetup,
   place: { readonly home: string; readonly project: string; readonly ticket: string },

@@ -41,7 +41,6 @@ function pinLine(pin: Pin | undefined): string {
     : `${pin.commit.slice(0, 12)} ${pin.version || "(no version)"} sha256:${pin.sha256.slice(0, 12)}`;
 }
 
-// listedRef : the plugin, when the project's resolved settings list it
 async function listedRef(io: PinIo, project: string, word: string): Promise<Result<PluginRef>> {
   if (!plainName(project)) {
     return { kind: "failed", reason: `${JSON.stringify(project)} is not a plain project name` };
@@ -70,21 +69,17 @@ async function fetched(io: PinIo, ref: PluginRef, given: string | undefined): Pr
   return commit.kind === "ok" ? fetchPlugin({ home: io.home, env: io.env, ref, commit: commit.value }) : commit;
 }
 
-// changedSince : the files a new version adds, removes and changes against the pinned one
 async function changedSince(io: PinIo, ref: PluginRef, before: Pin, after: Fetched): Promise<readonly string[]> {
   const old = await treeHash(storeDir(io.home, ref, before.sha256));
   return changedFiles(old.kind === "ok" ? old.value.files : [], after.files);
 }
 
-// showChange : the pin before and after, and the files the new version adds (+), removes (-) and changes (~); a first
-// pin shows a count per folder instead of every file (#482)
 async function showChange(io: PinIo, ref: PluginRef, before: Pin | undefined, after: Fetched): Promise<void> {
   const lines = before === undefined ? folderCounts(after.files) : await changedSince(io, ref, before, after);
   io.out(`${refText(ref)}: ${pinLine(before)} -> ${pinLine(after)}\n`);
   io.out(lines.length === 0 ? "no file changes\n" : lines.map((l) => `${l}\n`).join(""));
 }
 
-// checked : config check and the process read, with the new pins; every reason it fails
 async function checked(io: PinIo, project: string, pins: Pins): Promise<readonly string[]> {
   const problems = await checkProblems(io, project);
   const refs = await listedPlugins({ home: io.home, project, env: io.env });
@@ -132,7 +127,6 @@ async function checkedMove(io: PinIo, { project, ref, pins, before, f }: Move): 
     : fail(io, written.reason);
 }
 
-// pinUpdate : plugin update <project> <name@marketplace> [<commit>]
 export async function pinUpdate(io: PinIo, project: string, word: string, commit: string | undefined): Promise<number> {
   const ref = await listedRef(io, project, word);
   const got = ref.kind === "ok" ? await fetched(io, ref.value, commit) : ref;

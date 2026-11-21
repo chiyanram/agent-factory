@@ -22,6 +22,8 @@
 // A Copilot answer's cost is unknown: it is "unmeasured", never $0, and its type is not a ModelAnswer, so no caller
 // that sums dollars can take it until it counts it.
 //
+// A schema with a keyword the adapter's checker does not run is refused before the run, because it would pass anything.
+//
 // **Today:** this read-only run has never run against a live Copilot CLI, and nothing starts it: a project file that
 // names copilot is refused (switch.ts). #697 checks a real run, its exit code, COPILOT_GITHUB_TOKEN alone, whether
 // view, grep and glob need an allow rule in -p, what the usage file holds and what --max-ai-credits does, then turns
@@ -38,7 +40,6 @@ import type { BoxToken } from "../token/index.js";
 import { timed, type FolderRunner } from "./folder.js";
 import { MODEL_RUN_MARK } from "./mark.js";
 
-// the copilot tools each read-only card tool stands for
 const COPILOT_TOOLS: readonly (readonly [string, string])[] = [
   ["Read", "view"],
   ["Grep", "grep"],
@@ -48,13 +49,10 @@ const COPILOT_TOOLS: readonly (readonly [string, string])[] = [
 const ANSWER_LINE = "Answer with one JSON value that matches this JSON schema, and nothing else:";
 
 export type CopilotArgsInput = {
-  // the run's private home: the usage file goes there
   readonly home: string;
-  // caps.aiCreditsPerRun, "" for none
   readonly aiCredits: string;
 };
 
-// copilotArgs : the read-only run's argv after the binary. Pure.
 export function copilotArgs(run: ModelRun, input: CopilotArgsInput): readonly string[] {
   const tools = COPILOT_TOOLS.filter(([card]) => run.tools === undefined || run.tools.includes(card)).map(([, t]) => t);
   return [
@@ -76,7 +74,6 @@ export function copilotArgs(run: ModelRun, input: CopilotArgsInput): readonly st
   ];
 }
 
-// what the copilot CLI keeps from the host env: what it needs to run and reach the model through the proxy
 const COPILOT_ENV = new Set([
   "PATH",
   "USER",
@@ -88,13 +85,10 @@ const COPILOT_ENV = new Set([
   "https_proxy",
   "http_proxy",
   "no_proxy",
-  // the company CA (egress.caCerts)
   settingName("egress.caCerts"),
   "SSL_CERT_FILE",
 ]);
 
-// copilotEnv : the environment the copilot CLI gets: the allowlist, its private home, and the stored token; no git
-// host token, no host login, no COPILOT_* from the host. Pure.
 export function copilotEnv(env: NodeJS.ProcessEnv, home: string, login: BoxToken): NodeJS.ProcessEnv {
   const kept = Object.entries(env).filter(
     ([name, value]) => value !== undefined && (COPILOT_ENV.has(name) || name.startsWith("LC_")),
@@ -112,11 +106,8 @@ export function copilotEnv(env: NodeJS.ProcessEnv, home: string, login: BoxToken
 
 export type CopilotAnswer = {
   readonly output: unknown;
-  // the value the run answered, as it answered it
   readonly answer: unknown;
-  // never measured until the usage file is read: never $0
   readonly spend: "unmeasured";
-  // what the run printed, and its usage file, raw, for its trace
   readonly stream: string;
 };
 
@@ -124,14 +115,12 @@ export type CopilotResult =
   | { readonly kind: "ok"; readonly value: CopilotAnswer & { readonly seconds?: number } }
   | { readonly kind: "failed"; readonly reason: string; readonly stream?: string; readonly seconds?: number };
 
-// one read-only Copilot run; not a Model: its answer has no dollar figure
 export type CopilotModel = (run: ModelRun) => Promise<CopilotResult>;
 
 function firstLine(text: string): string {
   return (text.trim().split("\n")[0] ?? "").slice(0, 200);
 }
 
-// jsonIn : the one JSON value stdout holds, alone or in one json fence, or "none". Pure.
 function jsonIn(stdout: string): { readonly value: unknown } | "none" {
   const text = stdout.trim();
   const fenced = /^```json\n([\s\S]*)\n```$/.exec(text.replaceAll("\r\n", "\n"));
@@ -146,7 +135,6 @@ function isSchemaObject(value: unknown): value is { readonly [key: string]: unkn
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// schemaOf : the run's schema text as a schema; text that is no schema throws, as JSON.parse does. Pure.
 function schemaOf(text: string): Schema {
   const parsed: unknown = JSON.parse(text);
   if (typeof parsed === "boolean" || isSchemaObject(parsed)) {
@@ -155,7 +143,6 @@ function schemaOf(text: string): Schema {
   throw new Error("the run's schema is not a JSON schema");
 }
 
-// checkedAnswer : one JSON value the run answered, against its schema. Pure.
 function checkedAnswer(value: unknown, schema: string, stream: string): CopilotResult {
   const problems = validate(value, schemaOf(schema));
   return problems.length === 0
@@ -167,8 +154,6 @@ function checkedAnswer(value: unknown, schema: string, stream: string): CopilotR
       };
 }
 
-// readCopilotAnswer : the run's answer, checked against its schema, or why there is none; its stream is stdout, then
-// stderr. Pure.
 export function readCopilotAnswer(exit: Exit, schema: string): CopilotResult {
   const stream = exit.stderr === "" ? exit.stdout : `${exit.stdout}\n${exit.stderr}`;
   if (exit.code !== 0) {
@@ -181,24 +166,15 @@ export function readCopilotAnswer(exit: Exit, schema: string): CopilotResult {
 }
 
 export type CopilotSetup = {
-  // FACTORY_COPILOT
   readonly bin: string;
-  // the host env, which copilotEnv filters
   readonly env: NodeJS.ProcessEnv;
   readonly run: FolderRunner;
-  // how long a minute of a run's limit is; a test makes it short
   readonly minuteMs: number;
-  // the run's login, read before each run (token/index.ts copilotLoginFrom)
   readonly login: () => Promise<BoxToken>;
-  // caps.aiCreditsPerRun, "" for none
   readonly aiCredits: string;
-  // where each run's private home is made (os.tmpdir()); a test passes its own
   readonly tempRoot: string;
 };
 
-// unrunnable : why the run cannot start, or "" when it can: a card that leaves no read-only tool (an empty
-// --available-tools is untried and may mean none are held back), or a schema with a keyword the checker does not run,
-// which would pass anything. Pure.
 function unrunnable(run: ModelRun): string {
   if (!COPILOT_TOOLS.some(([card]) => run.tools === undefined || run.tools.includes(card))) {
     return "the role card leaves the run no read-only tool";
@@ -220,7 +196,6 @@ async function usageText(home: string): Promise<string> {
   }
 }
 
-// madeHome : a fresh private home (mode 0700) under root, or why none could be made
 async function madeHome(root: string): Promise<{ readonly home: string } | { readonly reason: string }> {
   try {
     return { home: await mkdtemp(join(root, "factory-copilot-")) };
@@ -229,7 +204,6 @@ async function madeHome(root: string): Promise<{ readonly home: string } | { rea
   }
 }
 
-// ended : how one run ended: its answer, or the limit that stopped it, with its usage file after its output
 function ended(
   run: ModelRun,
   ran: { readonly exit: Exit; readonly late: boolean },
@@ -245,7 +219,6 @@ function ended(
   return { kind: "failed", reason, stream, seconds };
 }
 
-// inHome : one run in a fresh private home, removed after it, however it ended
 async function inHome(setup: CopilotSetup, run: ModelRun, login: BoxToken): Promise<CopilotResult> {
   const made = await madeHome(setup.tempRoot);
   if ("reason" in made) {
@@ -267,8 +240,6 @@ async function inHome(setup: CopilotSetup, run: ModelRun, login: BoxToken): Prom
   }
 }
 
-// copilotModel : the read-only run, through the copilot CLI, stopped at its limit; nothing starts without a valid
-// copilot token or with a schema the adapter cannot check
 export function copilotModel(setup: CopilotSetup): CopilotModel {
   return async (run) => {
     const why = unrunnable(run);

@@ -15,7 +15,6 @@ import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { field } from "./human-record.js";
 
-// the Discord launch's auto-compact window, and the size the coordinator resets at, below it
 export const AUTOCOMPACT = "200k";
 export const RESET_AT = 120_000;
 
@@ -43,7 +42,6 @@ function count(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-// usageTokens : the context a turn was sent with: its input, plus the cache it wrote and read. Pure.
 function usageTokens(usage: unknown): number {
   return (
     count(field(usage, "input_tokens")) +
@@ -52,7 +50,6 @@ function usageTokens(usage: unknown): number {
   );
 }
 
-// contextTokens : the size of the last assistant turn in a transcript (JSON lines), or why there is none. Pure.
 export function contextTokens(transcript: string): number | { readonly reason: string } {
   const usages = transcript
     .split("\n")
@@ -65,7 +62,6 @@ export function contextTokens(transcript: string): number | { readonly reason: s
 }
 
 export type TurnIo = {
-  // the coordinator's OS user's home
   readonly home: string;
   readonly project: string;
   readonly now: () => Date;
@@ -95,7 +91,6 @@ async function turnTokens(input: unknown): Promise<number | { readonly reason: s
   return typeof transcript === "string" ? contextTokens(transcript) : transcript;
 }
 
-// recordTurn : the Stop hook's work: one log line with the turn's size, and at RESET_AT a reset line and the marker
 export async function recordTurn(hookInput: string, io: TurnIo, resetAt = RESET_AT): Promise<Turn> {
   const input = parsed(hookInput);
   const tokens = await turnTokens(input);
@@ -113,7 +108,6 @@ export async function recordTurn(hookInput: string, io: TurnIo, resetAt = RESET_
   return { kind: "measured", tokens, reset: true };
 }
 
-// recordStart : the SessionStart brief's log: a start from a compaction is a fault; true when it was one
 export async function recordStart(hookInput: string, io: TurnIo): Promise<boolean> {
   const input = parsed(hookInput);
   if (field(input, "source") !== "compact") {
@@ -123,7 +117,6 @@ export async function recordStart(hookInput: string, io: TurnIo): Promise<boolea
   return true;
 }
 
-// resetWanted : whether a turn asked for a reset since the marker was last cleared
 export async function resetWanted(home: string, project: string): Promise<boolean> {
   return stat(resetMarker(home, project)).then(
     () => true,

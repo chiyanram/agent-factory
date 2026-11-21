@@ -39,7 +39,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as Bar from "../src/core/eval/bar.js";
 
-// the bar a change must pass lives in src/ (the eval harness reads its aims too); loaded on Node's type stripping
 const bar: typeof Bar = await import(new URL("../src/core/eval/bar.ts", import.meta.url).href);
 const { aimProblems, baselineOf, countsOf, field, holdProblems } = bar;
 type Baseline = Bar.Baseline;
@@ -52,7 +51,6 @@ export const PROMPTS = {
 type PromptKey = keyof typeof PROMPTS;
 const PROMPT_KEYS: readonly PromptKey[] = ["find", "verify", "judge"];
 
-// the model pins: a leaf module, loaded from the checkout under check
 export const MODELS = "src/core/review/pinned.ts";
 type ModelKey = "find" | "rule" | "logic" | "judge";
 const MODEL_KEYS: readonly ModelKey[] = ["find", "rule", "logic", "judge"];
@@ -62,25 +60,18 @@ export const LABEL = "eval-baseline-approved";
 const RESULTS = /^evals\/reviewer\/results\/[^/]+\.json$/;
 const SHA = /^[0-9a-f]{40}$/;
 
-// isReviewerInput : a file whose change can change what the automated review finds (ADR-0015 E8). Pure.
 export function isReviewerInput(file: string): boolean {
   return /^prompts\/review-[^/]+\.md$/.test(file) || file === PROMPTS.judge;
 }
 
 export type Facts = {
-  // every file the change touches against the default branch, and the ones it adds
   readonly changed: readonly string[];
   readonly added: readonly string[];
-  // each added results file's text
   readonly results: ReadonlyMap<string, string>;
-  // baseline.json's text in the change, or undefined when there is none
   readonly baseline: string | undefined;
-  // each prompt's git blob SHA in the change, "" when it is not there
   readonly prompts: Readonly<Record<PromptKey, string>>;
-  // each pinned model in the change, "" when the pins cannot be read
   readonly models: Readonly<Record<ModelKey, string>>;
   readonly onBranch: (sha: string) => boolean;
-  // the pull request's labels, or undefined when this run has no pull request event
   readonly labels: readonly string[] | undefined;
 };
 
@@ -96,8 +87,6 @@ function entries(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-// errorProblems : each case and each run of a results document that has an error, named (ADR-0021 N11). The harness
-// marks such a pass partial; this holds when a file's flags do not match its runs. Pure.
 export function errorProblems(value: unknown): readonly string[] {
   return entries(field(value, "per_case")).flatMap((c) => {
     const name = String(field(c, "case"));
@@ -110,7 +99,6 @@ export function errorProblems(value: unknown): readonly string[] {
   });
 }
 
-// passProblems : why a results document is not a proof pass with a clean floor. Pure.
 export function passProblems(value: unknown): readonly string[] {
   const hits = field(field(value, "clean_floor"), "hits");
   return [
@@ -122,7 +110,6 @@ export function passProblems(value: unknown): readonly string[] {
   ];
 }
 
-// inputProblems : why the inputs a results document ran with are not the change's. Pure.
 export function inputProblems(value: unknown, facts: Facts): readonly string[] {
   const prompts = field(field(value, "inputs"), "prompts");
   const models = field(field(value, "inputs"), "models");
@@ -157,7 +144,6 @@ function proven(facts: Facts, b: Baseline): readonly string[] {
   return each.some((e) => e.why.length === 0) ? [] : each.flatMap((e) => e.why.map((w) => `${e.f}: ${w}`));
 }
 
-// proofProblems : why a change to a reviewer input is not proven. Pure.
 export function proofProblems(facts: Facts): readonly string[] {
   const touched = facts.changed.filter(isReviewerInput);
   if (touched.length === 0) {
@@ -185,8 +171,6 @@ function approval(labels: readonly string[] | undefined): readonly string[] {
   return labels.includes(LABEL) ? [] : [`only the operator may change it: the pull request has no ${LABEL} label`];
 }
 
-// shapeProblems : why a new baseline cannot be one: not a proof pass with a clean floor, no noise to measure, or an
-// aim, since a baseline proves no change (ADR-0021). Pure.
 function shapeProblems(value: unknown): readonly string[] {
   const b = baselineOf(value);
   return [
@@ -196,8 +180,6 @@ function shapeProblems(value: unknown): readonly string[] {
   ];
 }
 
-// baselineProblems : a change to baseline.json needs a proof pass with a clean floor whose noise can be measured.
-// Pure.
 export function baselineProblems(facts: Facts): readonly string[] {
   if (!facts.changed.includes(BASELINE) || facts.baseline === undefined) {
     return [];
@@ -205,25 +187,20 @@ export function baselineProblems(facts: Facts): readonly string[] {
   return shapeProblems(parse(facts.baseline)).map((why) => `${BASELINE} changed: ${why}`);
 }
 
-// approvalProblems : a change to baseline.json needs the operator's label on the pull request. Pure.
 export function approvalProblems(changed: readonly string[], labels: readonly string[] | undefined): readonly string[] {
   return changed.includes(BASELINE) ? approval(labels).map((why) => `${BASELINE} changed: ${why}`) : [];
 }
-
-// --- reading the facts from git ---
 
 function git(root: string, args: readonly string[]): { readonly code: number; readonly out: string } {
   const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return { code: r.status ?? -1, out: r.stdout };
 }
 
-// baseRef : the default branch to compare with
 export function baseRef(env: NodeJS.ProcessEnv): string {
   const pr = env.GITHUB_BASE_REF ?? "";
   return env.FACTORY_BASE_REF || (pr === "" ? "origin/main" : `origin/${pr}`);
 }
 
-// labelsOf : the labels of the pull request in a GitHub event's JSON, or undefined when it holds no pull request. Pure.
 export function labelsOf(eventText: string): readonly string[] | undefined {
   const labels = field(field(parse(eventText), "pull_request"), "labels");
   return Array.isArray(labels) ? labels.map((l) => String(field(l, "name"))) : undefined;
@@ -234,7 +211,6 @@ function eventLabels(env: NodeJS.ProcessEnv): readonly string[] | undefined {
   return path !== "" && existsSync(path) ? labelsOf(readFileSync(path, "utf8")) : undefined;
 }
 
-// nameStatus : the -z --name-status output of a diff, as [status, file] pairs. Pure.
 export function nameStatus(out: string): readonly (readonly [string, string])[] {
   const parts = out.split("\0").filter((p) => p !== "");
   return parts.flatMap((p, i) => (i % 2 === 0 ? [[p, parts[i + 1] ?? ""] as const] : []));
@@ -248,7 +224,6 @@ function blob(root: string, file: string): string {
   return existsSync(join(root, file)) ? git(root, ["hash-object", "--", file]).out.trim() : "";
 }
 
-// modelPins : the pinned models in the checkout; "" for each when its pins module is missing or not as expected
 async function modelPins(root: string): Promise<Readonly<Record<ModelKey, string>>> {
   const path = join(root, MODELS);
   const pins: unknown = existsSync(path) ? await import(pathToFileURL(path).href).catch(() => undefined) : undefined;

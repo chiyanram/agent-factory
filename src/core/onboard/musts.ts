@@ -9,7 +9,6 @@
 // A list item or paragraph that wraps is one MUST; it is cited at its first line (under a MUST heading) or at the line
 // that holds the word. Fenced code is skipped. Pure.
 
-// the root instruction files the engine reads, in the order the brief lists their MUSTs
 export const RULE_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
 
 export type Must = { readonly file: string; readonly line: number; readonly text: string };
@@ -20,8 +19,6 @@ const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const FENCE = /^\s*(?:```|~~~)/;
 
-// a run of lines the reader takes as one statement: a list item, a table row or a paragraph, and whether it sits
-// under a MUST heading
 type Unit = { readonly first: number; readonly lines: string[]; readonly bullet: boolean; readonly must: boolean };
 
 type Scan = { readonly out: Unit[]; open: Unit | undefined; fenced: boolean; mustLevel: number };
@@ -35,7 +32,6 @@ function endUnit(scan: Scan): void {
   }
 }
 
-// levelAfter : the level of the MUST heading a heading leaves the scan under, or 0 for none
 function levelAfter(current: number, heading: RegExpExecArray): number {
   const [, hashes = "", title = ""] = heading;
   if (/\bMUST[Ss]?\b/.test(title)) {
@@ -44,7 +40,6 @@ function levelAfter(current: number, heading: RegExpExecArray): number {
   return hashes.length > current ? current : 0;
 }
 
-// broken : a heading or a blank line ends the statement; a heading also sets the MUST level
 function broken(scan: Scan, line: string): boolean {
   const heading = HEADING.exec(line);
   if (heading === null && line.trim() !== "") {
@@ -79,7 +74,6 @@ function step(scan: Scan, line: string, at: number): void {
   }
 }
 
-// units : the file's statements; fenced code and headings are not statements
 function units(lines: readonly string[]): readonly Unit[] {
   const scan: Scan = { out: [], open: undefined, fenced: false, mustLevel: 0 };
   lines.forEach((line, i) => step(scan, line, i + 1));
@@ -87,13 +81,11 @@ function units(lines: readonly string[]): readonly Unit[] {
   return scan.out;
 }
 
-// oneLine : a statement as one line of the brief, its list marker gone, cut to a length a brief can hold
 function oneLine(lines: readonly string[]): string {
   const text = lines.join(" ").replace(BULLET, "").replace(/\s+/g, " ").trim();
   return text.length > MOST_CHARS ? `${text.slice(0, MOST_CHARS - 1)}…` : text;
 }
 
-// mustsIn : every MUST one instruction file states, at its line
 export function mustsIn(file: string, lines: readonly string[]): readonly Must[] {
   return units(lines).flatMap((u) => {
     const at = u.lines.findIndex((l) => WORD.test(l));
@@ -104,7 +96,6 @@ export function mustsIn(file: string, lines: readonly string[]): readonly Must[]
   });
 }
 
-// projectMusts : every MUST the root instruction files state, a MUST two files repeat word for word given once
 export function projectMusts(lines: (path: string) => readonly string[] | undefined): readonly Must[] {
   const all = RULE_FILES.flatMap((f) => {
     const text = lines(f);

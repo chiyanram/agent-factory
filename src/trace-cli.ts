@@ -19,7 +19,6 @@ export const TRACE_HELP = `  trace <project> <ticket> [<name>]
 
 const FORM = "usage: agent-factory trace <project> <ticket> [<name>]\n";
 
-// sizeOf : a size a person reads: bytes, KB or MB. Pure.
 export function sizeOf(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -27,7 +26,6 @@ export function sizeOf(bytes: number): string {
   return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// listLine : one trace as the list shows it. Pure.
 function listLine(t: TraceListed): string {
   return `${t.at}  ${t.kind}  ${sizeOf(t.bytes)}  ${t.line ?? "no record line names it"}  ${t.name}`;
 }
@@ -63,23 +61,19 @@ async function show(io: TraceIo, where: { home: string; project: string; ticket:
   }
 }
 
-// Words : the command line, read: a project and a ticket, each a plain name, and an optional trace name
 type Words = { readonly project: string; readonly ticket: string; readonly name?: string };
 
-// wordsOf : the command line's words, or none when they are not a project, a ticket and an optional name. Pure.
 function wordsOf(positionals: readonly string[]): Words | undefined {
   const [project = "", ticket = "", ...rest] = positionals;
   const plain = rest.length <= 1 && [project, ticket].every(plainName);
   return plain ? { project, ticket, ...nameOf(rest) } : undefined;
 }
 
-// nameOf : the trace's name, as a field to spread; none when the command line names none. Pure.
 function nameOf(rest: readonly string[]): { readonly name?: string } {
   const [name] = rest;
   return name === undefined ? {} : { name };
 }
 
-// traceCommand : the list, or one trace, on stdout; a problem on stderr, and exits 1
 export async function traceCommand(positionals: readonly string[], io: TraceIo): Promise<number> {
   const words = wordsOf(positionals);
   if (words === undefined) {

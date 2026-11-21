@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { editScope } from "../src/core/edit-scope.js";
 import { tempDir } from "./temp.js";
 
-// the edit-scope hook (ADR-0012 S2): Claude Code passes the tool call as JSON on stdin; an edit outside the
-// spec drafts is denied (exit 2), one inside passes on to the permission rules (exit 0, nothing printed)
 describe("edit-scope, the coordinator's PreToolUse hook (#676)", () => {
   let home = "";
   let specs = "";

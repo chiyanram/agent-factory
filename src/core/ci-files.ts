@@ -31,12 +31,9 @@ import {
 export const GITLAB_CI = ".gitlab-ci.yml";
 const FIXED_DIRS = [".github/workflows/", ".github/actions/"];
 const OUTSIDE_KEYS = ["project", "remote", "template", "component"];
-// the most CI files followed, so a loop of includes ends; past it, the push is refused
 const MAX_FILES = 200;
 
 export type CiSetup = ProtectedSetup & { readonly config: CiConfig };
-
-// --- GitLab includes ---------------------------------------------------------------------------------------------
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,7 +52,6 @@ function mapEntry(value: Readonly<Record<string, unknown>>): Found {
     : failed(`an include it cannot read: ${JSON.stringify(value)}`);
 }
 
-// one include entry: a path, a map with local:, or a map that names a file elsewhere
 function entryPaths(value: unknown): Found {
   if (typeof value === "string") {
     return stringEntry(value);
@@ -68,12 +64,10 @@ function all(results: readonly Found[]): Found {
   return bad ?? { kind: "ok", value: results.flatMap((r) => (r.kind === "ok" ? r.value : [])) };
 }
 
-// includeValue : the paths one `include:` value names, as a list or one entry
 function includeValue(value: unknown): Found {
   return all((Array.isArray(value) ? value : [value]).map(entryPaths));
 }
 
-// walk : every include, at any depth: the top, a job's trigger:, anything
 function walk(node: unknown): Found {
   if (Array.isArray(node)) {
     return all(node.map(walk));
@@ -92,7 +86,6 @@ function parsed(text: string): Result<unknown> {
   }
 }
 
-// gitlabIncludes : the repository paths a GitLab CI file includes, any depth, without a leading /; a glob stays a glob
 export function gitlabIncludes(text: string): Found {
   const doc = parsed(text);
   const paths = doc.kind === "ok" ? walk(doc.value) : doc;
@@ -105,11 +98,8 @@ export function gitlabIncludes(text: string): Found {
     : failed(`an include names a variable, so its file cannot be known: ${variable}`);
 }
 
-// --- globs, as GitLab reads them -----------------------------------------------------------------------------------
-
 const GLOB = /[*?[{]/;
 
-// globRegex : ** crosses folders, * and ? stay within one, {a,b} is a choice; everything else is literal
 export function globRegex(glob: string): RegExp {
   const parts = glob.split(/(\*\*|\*|\?|\{[^}]*\})/).map((part) => {
     if (part === "**") {
@@ -130,7 +120,6 @@ function literal(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// expand : the files a path names in the tree: itself, or every file its glob matches
 function expand(path: string, tree: Tree): readonly string[] {
   if (!GLOB.test(path)) {
     return [path];
@@ -138,8 +127,6 @@ function expand(path: string, tree: Tree): readonly string[] {
   const re = globRegex(path);
   return [...tree.keys()].filter((p) => re.test(p));
 }
-
-// --- the CI files of one tree --------------------------------------------------------------------------------------
 
 type Reader = (blob: string) => Promise<Result<string>>;
 
@@ -157,7 +144,6 @@ async function includesOf(tree: Tree, path: string, read: Reader): Promise<Found
   return found.kind === "ok" ? found : failed(`${path}: ${found.reason}`);
 }
 
-// followAll : the config file and every file it includes, followed through each included file
 async function followAll(tree: Tree, start: readonly string[], read: Reader): Promise<Found> {
   const seen = new Set<string>();
   const queue = [...start];
@@ -175,15 +161,12 @@ async function followAll(tree: Tree, start: readonly string[], read: Reader): Pr
   return { kind: "ok", value: [...seen] };
 }
 
-// ciFilesIn : every CI file of one tree
 export async function ciFilesIn(tree: Tree, config: CiConfig, read: Reader): Promise<Found> {
   const fixed = [...tree.keys()].filter((p) => FIXED_DIRS.some((d) => p.startsWith(d)));
   const roots = config.kind === "file" ? [GITLAB_CI, config.path] : [GITLAB_CI];
   const followed = await followAll(tree, [...new Set(roots)], read);
   return followed.kind === "ok" ? { kind: "ok", value: [...fixed, ...followed.value] } : followed;
 }
-
-// --- the guard -----------------------------------------------------------------------------------------------------
 
 function readerFor(setup: CiSetup, repo: string): Reader {
   return async (blob) => {
@@ -197,7 +180,6 @@ async function ciFilesOfAll(setup: CiSetup, h: Heads, repo: string): Promise<Fou
   return all(await Promise.all(treesOf(h).map((t) => ciFilesIn(t, setup.config, read))));
 }
 
-// noCiFiles : refuses a push that changes a CI file; the work is then blocked with the files named
 export function noCiFiles(setup: CiSetup): Guard {
   return protectedFiles(setup, {
     name: "ci",

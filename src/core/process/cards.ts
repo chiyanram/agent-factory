@@ -48,22 +48,18 @@ const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..",
 const WRITES = ["Read", "Grep", "Glob", "Edit", "Bash"] as const;
 const READS = ["Read", "Grep", "Glob"] as const;
 
-// the roles whose runs the engine starts from a card, and the tools it gives each one
 export const ROLE_TOOLS = {
   implementer: WRITES,
   "test-first": WRITES,
   cleanup: WRITES,
   "design-reviewer": READS,
   "verify-pass": READS,
-  // the engine lists the build tool's commands itself and hands the run the list (onboard/run.ts)
   onboarder: READS,
-  // the retro's lesson drafts, started only by a person (#488; retro/draft.ts)
   retro: READS,
 } as const;
 
 export type Role = keyof typeof ROLE_TOOLS;
 
-// the role's floor: what the engine never hands its run, whatever the card says (docs/DESIGN.md section 5)
 export const MUST_NOT_SEE: Readonly<Record<Role, readonly string[]>> = {
   implementer: ["review findings other than the act_on list", "earlier verdicts"],
   "test-first": ["any fix", "the implementer's work"],
@@ -74,7 +70,6 @@ export const MUST_NOT_SEE: Readonly<Record<Role, readonly string[]>> = {
   retro: [],
 };
 
-// fieldsOf : every property name a JSON schema names, at any depth. Pure.
 function fieldsOf(schema: string): readonly string[] {
   const found: string[] = [];
   const walk = (node: unknown): void => {
@@ -91,7 +86,6 @@ function fieldsOf(schema: string): readonly string[] {
   return found;
 }
 
-// the fields of the engine's schema for what each role's run returns
 export const HAND_OFF: Readonly<Record<Role, readonly string[]>> = {
   implementer: REPORT_FIELDS,
   "test-first": REPORT_FIELDS,
@@ -104,19 +98,12 @@ export const HAND_OFF: Readonly<Record<Role, readonly string[]>> = {
 
 export type Card = {
   readonly role: Role;
-  // what the model reads: the card without its frontmatter
   readonly body: string;
-  // the tools the run gets: the card's, each one the engine gives the role
   readonly tools: readonly string[];
-  // what the run must not see: the role's floor, then the card's own entries
   readonly mustNotSee: readonly string[];
-  // the guardrails that apply to the run: the role's floor, then the card's own IDs (guardrails.ts)
   readonly guardrails: readonly GuardrailId[];
-  // where the run may edit, as globs from its Edit(…) scopes; none is anywhere in the clone
   readonly editScope: readonly string[];
-  // the sha256 of the whole card file, for the run record
   readonly sha256: string;
-  // where it came from, as a person reads it
   readonly from: string;
 };
 
@@ -126,18 +113,15 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
 
 const FRONT = /^---\n([\s\S]*?)\n---\n/;
 
-// field : one "name: value" line of the frontmatter, or undefined when it has none. Pure.
 function field(front: string, name: string): string | undefined {
   const line = front.split("\n").find((l) => l.startsWith(`${name}:`));
   return line?.slice(name.length + 1).trim();
 }
 
-// a card's tool: its name, and its path scope in permission syntax; "" for none
 type Tool = { readonly name: string; readonly scope: string };
 
 const SCOPED = /^(\w+)\(([^()]*)\)$/;
 
-// toolOf : one entry of the tools list: Edit(src/test/**) has a scope; "Bash (on the runner)" is Bash with a note. Pure.
 function toolOf(entry: string): Tool {
   const scoped = SCOPED.exec(entry);
   return scoped === null
@@ -145,7 +129,6 @@ function toolOf(entry: string): Tool {
     : { name: scoped[1] ?? "", scope: (scoped[2] ?? "").trim() };
 }
 
-// listOf : a frontmatter list's entries, with or without its [brackets]. Pure.
 function listOf(list: string): readonly string[] {
   return list
     .replace(/^\[/, "")
@@ -161,17 +144,14 @@ function toolListOf(list: string): readonly Tool[] {
     .filter((t) => t.name !== "");
 }
 
-// toolsOf : the frontmatter's tools list, each tool by its name alone. Pure.
 function toolsOf(list: string): readonly string[] {
   return toolListOf(list).map((t) => t.name);
 }
 
-// scopeOf : the globs of the card's Edit(…) scopes; none is anywhere. Pure.
 function scopeOf(list: string): readonly string[] {
   return toolListOf(list).flatMap((t) => (t.name === "Edit" && t.scope !== "" ? [t.scope] : []));
 }
 
-// entriesOf : the must_not_see list, one entry per ";"; "none" is none. Pure.
 function entriesOf(list: string | undefined): readonly string[] {
   return (list ?? "")
     .split(";")
@@ -179,14 +159,11 @@ function entriesOf(list: string | undefined): readonly string[] {
     .filter((e) => e !== "" && e.toLowerCase() !== "none");
 }
 
-// handOffFields : each name the hand-off lists inside a {…}: the words before each top-level ":" or ",". A list in
-// [brackets] is a value, never a name. Pure.
 export function handOffFields(handOff: string): readonly string[] {
   const groups = [...handOff.matchAll(/\{([^{}]*)\}/g)].map((m) => (m[1] ?? "").replace(/\[[^\]]*\]/g, ""));
   return groups.flatMap((g) => g.split(",").map((f) => (f.split(":")[0] ?? "").trim()));
 }
 
-// toolsProblem : why the card's tools do not fit its role, or "". Pure.
 function toolsProblem(role: Role, tools: string | undefined): string {
   const allowed: readonly string[] = ROLE_TOOLS[role];
   const asked = toolsOf(tools ?? "");
@@ -199,20 +176,15 @@ function toolsProblem(role: Role, tools: string | undefined): string {
     : `the ${role} gets only ${allowed.join(", ")}; the card asks for ${extra.join(", ")}`;
 }
 
-// scopeProblem : a path scope on a tool other than Edit, or "". Pure.
 function scopeProblem(tools: string): string {
   const other = toolListOf(tools).find((t) => t.scope !== "" && t.name !== "Edit");
   return other === undefined ? "" : `only Edit takes a path scope; the card gives ${other.name}(${other.scope})`;
 }
 
-// namedGuardrails : the IDs a card's enforced_guardrails names; none for the old plain text, read for one release.
-// Pure.
 function namedGuardrails(value: string | undefined): readonly string[] {
   return value?.startsWith("[") === true ? listOf(value) : [];
 }
 
-// guardrailsProblem : an ID that is not on the list, one the role cannot have, or edit-scope with no Edit(…) scope;
-// "". Pure.
 function guardrailsProblem(role: Role, front: string): string {
   const named = namedGuardrails(field(front, "enforced_guardrails"));
   const unknown = named.find((id) => !isGuardrail(id));
@@ -222,7 +194,6 @@ function guardrailsProblem(role: Role, front: string): string {
   return roleGuardrailProblem(role, named) || scopeGuardrailProblem(role, named, field(front, "tools") ?? "");
 }
 
-// roleGuardrailProblem : an ID the role cannot have, or "". Pure.
 function roleGuardrailProblem(role: Role, named: readonly string[]): string {
   const allowed: readonly string[] = allowedGuardrails(role);
   const other = named.find((id) => !allowed.includes(id));
@@ -231,23 +202,18 @@ function roleGuardrailProblem(role: Role, named: readonly string[]): string {
     : `the ${role} cannot have the guardrail ${other} (it may have ${allowed.join(", ")})`;
 }
 
-// scopeGuardrailProblem : edit-scope named with no Edit(…) path to hold it to, or "". Test-first's scope is the
-// project's test files, so it needs no path. Pure.
 function scopeGuardrailProblem(role: Role, named: readonly string[], tools: string): string {
   return named.includes("edit-scope") && !testFilesOnly(role) && scopeOf(tools).length === 0
     ? "the card names edit-scope, but its tools give no Edit(…) path"
     : "";
 }
 
-// guardrailsOf : the guardrails that apply to the run: the role's floor, the card's IDs, and edit-scope when an Edit
-// has a scope. The card passed guardrailsProblem. Pure.
 function guardrailsOf(role: Role, front: string): readonly GuardrailId[] {
   const named = namedGuardrails(field(front, "enforced_guardrails")).filter(isGuardrail);
   const scoped: readonly GuardrailId[] = scopeOf(field(front, "tools") ?? "").length > 0 ? ["edit-scope"] : [];
   return [...new Set([...GUARDRAIL_FLOOR[role], ...named, ...scoped])];
 }
 
-// handOffProblem : the hand-off's fields that the engine's schema for the role does not have, or "". Pure.
 function handOffProblem(role: Role, handOff: string | undefined): string {
   const unknown = handOffFields(handOff ?? "").filter((f) => !HAND_OFF[role].includes(f));
   return unknown.length === 0
@@ -255,7 +221,6 @@ function handOffProblem(role: Role, handOff: string | undefined): string {
     : `the card's hand_off names ${unknown.map((f) => JSON.stringify(f)).join(", ")}, which the engine's ${role} schema does not have (it has ${HAND_OFF[role].join(", ")})`;
 }
 
-// frontProblem : why a card's frontmatter does not fit the role it is read for, or "". Pure.
 function frontProblem(role: Role, front: string): string {
   const named = field(front, "role") ?? "";
   if (named !== role) {
@@ -268,7 +233,6 @@ function frontProblem(role: Role, front: string): string {
   );
 }
 
-// cardOf : a card's text, checked against the role it is read for. Pure.
 export function cardOf(role: Role, text: string, from: string): Result<Card> {
   const front = FRONT.exec(text);
   if (front === null) {
@@ -282,7 +246,6 @@ export function cardOf(role: Role, text: string, from: string): Result<Card> {
   return { kind: "ok", value: cardFrom(role, { text, head, body: text.slice(front[0].length), from }) };
 }
 
-// cardFrom : the card a checked text gives. Pure.
 function cardFrom(
   role: Role,
   read: { readonly text: string; readonly head: string; readonly body: string; readonly from: string },
@@ -300,13 +263,8 @@ function cardFrom(
   };
 }
 
-// ---- must_not_see
-
-// one input the engine hands a run: the words a card may call it by, the first its name; needed when the run cannot do
-// its job without it
 export type Part = { readonly names: readonly [string, ...string[]]; readonly needed: boolean };
 
-// plain : words as an entry and a name are compared: lower case, one space, no leading "the" or "any". Pure.
 function plain(words: string): string {
   return words
     .toLowerCase()
@@ -315,15 +273,11 @@ function plain(words: string): string {
     .replace(/^(the|any) /, "");
 }
 
-// names : an entry names a part when it is one of the part's names, or one of them and more words ("the implementer's
-// report or account" names "the implementer's report"). Pure.
 function names(entry: string, part: Part): boolean {
   const said = plain(entry);
   return part.names.map(plain).some((n) => said === n || said.startsWith(`${n} `) || said.startsWith(`${n},`));
 }
 
-// withheld : whether the card's must_not_see leaves the part out: an entry names it, and its "other than …" does not.
-// Pure.
 export function withheld(card: Pick<Card, "mustNotSee">, part: Part): boolean {
   return card.mustNotSee.some((entry) => {
     const [what = "", but] = entry.split(/ other than /i);
@@ -331,8 +285,6 @@ export function withheld(card: Pick<Card, "mustNotSee">, part: Part): boolean {
   });
 }
 
-// inputsOf : the parts the run gets, with what the card leaves out removed; a card that leaves out a part the run
-// needs is refused, never run without it. Pure.
 export function inputsOf<P extends Part>(card: Card, parts: readonly P[]): Result<readonly P[]> {
   const needed = parts.find((p) => p.needed && withheld(card, p));
   return needed === undefined
@@ -340,14 +292,10 @@ export function inputsOf<P extends Part>(card: Card, parts: readonly P[]): Resul
     : failed(`${card.from}: its must_not_see leaves out ${needed.names[0]}, which the ${card.role} run needs`);
 }
 
-// ---- reading
-
 async function textAt(path: string): Promise<string | undefined> {
   return readFile(path, "utf8").catch(() => undefined);
 }
 
-// pluginCard : the process plugin's card for the role; "none" when no plugin holds a process, or the process holds no
-// card for the role. Two process plugins are refused (#426).
 async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Result<Card> | "none"> {
   const found = await findProcess(plugins);
   if (found.kind !== "ok") {
@@ -358,14 +306,11 @@ async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Re
   return text === undefined ? "none" : packCard(found.value.dir, role, text, `${found.value.plugin.label} (${path})`);
 }
 
-// what the engine knows of a rules pack's cards: the roles it runs from a card, the roles whose card only a person or the
-// coordinator reads, and every guardrail ID it enforces
 export const ENGINE_KNOWS = {
   roles: [...Object.keys(ROLE_TOOLS), "coordinator", "finder"],
   guardrails: Object.keys(GUARDRAILS),
 };
 
-// packCard : a plugin's card, checked against the rules pack's own card format, then by the engine (#484)
 async function packCard(processDir: string, role: Role, text: string, from: string): Promise<Result<Card>> {
   const schemas = await readPackSchemas(processDir);
   if (schemas.kind === "failed") {
@@ -376,8 +321,6 @@ async function packCard(processDir: string, role: Role, text: string, from: stri
   return problem === "" ? cardOf(role, text, from) : failed(problem);
 }
 
-// readCard : the role's card from the project's process plugin, or the built-in card when none holds one. A card that
-// is there but does not pass its check is refused, never skipped for the built-in one.
 export async function readCard(plugins: readonly PluginDir[], role: Role, builtIn = BUILT_IN): Promise<Result<Card>> {
   const found = await pluginCard(plugins, role);
   if (found !== "none") {

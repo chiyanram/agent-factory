@@ -22,10 +22,8 @@ export type DiffLane = { readonly lane: Lane; readonly why: string };
 const DOC = /\.(?:md|mdx|markdown|rst|adoc|asciidoc|txt)$/i;
 const DOC_NAME = /(?:^|\/)(?:README|LICENSE|LICENCE|NOTICE|AUTHORS|CONTRIBUTORS|CHANGELOG|COPYING)(?:\.[^/]*)?$/i;
 const CONFIG = /\.(?:json|ya?ml|toml|ini|properties|conf|cfg)$/i;
-// a line that is a comment and nothing else: //, /*, */, a leading * (Javadoc), <!--, -->, and # or -- with a space
 const COMMENT = /^(?:\/\/|\/\*|\*\/|\*(?:\s|$)|<!--|-->|#(?:\s|$)|--(?:\s|$))/;
 const CONFIG_COMMENT = /^(?:#|\/\/|;)/;
-// the key of a "key: value" or "key = value" line, quoted or not, with an optional YAML list marker
 const KEY = /^(?:-\s+)?["']?([^"'\s:=]+)["']?\s*[:=]/;
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
@@ -57,19 +55,16 @@ function isDoc(path: string): boolean {
   return DOC.test(path) || DOC_NAME.test(path);
 }
 
-// marked : the lines a -U0 diff removed or added, each with its - or + mark, from its first hunk on. Pure.
 function marked(diff: string): readonly string[] {
   const lines = diff.split("\n");
   const first = lines.findIndex((l) => l.startsWith("@@"));
   return first === -1 ? [] : lines.slice(first).filter((l) => /^[+-]/.test(l));
 }
 
-// changedLines : the lines a -U0 diff removed or added, without the mark. Pure.
 export function changedLines(diff: string): readonly string[] {
   return marked(diff).map((l) => l.slice(1).trim());
 }
 
-// commentsOnly : every changed line is blank or a comment. Pure.
 export function commentsOnly(lines: readonly string[]): boolean {
   return lines.every((l) => l === "" || COMMENT.test(l));
 }
@@ -84,8 +79,6 @@ function sameKeys(removed: readonly string[], added: readonly string[]): boolean
   return before.size === after.size && [...before].every((k) => after.has(k));
 }
 
-// valuesOnly : a config diff that only changes the values of keys that stay: every changed line that is not blank or
-// a comment is a key's line, and the keys removed are the keys added. Pure.
 export function valuesOnly(diff: string): boolean {
   const lines = marked(diff).filter((l) => !CONFIG_COMMENT.test(l.slice(1).trim()) && l.slice(1).trim() !== "");
   const removed = lines.filter((l) => l.startsWith("-")).map((l) => l.slice(1).trim());
@@ -93,7 +86,6 @@ export function valuesOnly(diff: string): boolean {
   return lines.every((l) => keyOf(l.slice(1).trim()) !== "") && sameKeys(removed, added);
 }
 
-// contentLane : the lane a file's line changes need: none changed (a move, a mode) is code. Pure.
 export function contentLane(paths: readonly string[], diff: string): Lane {
   const lines = changedLines(diff);
   if (lines.length === 0) {
@@ -142,7 +134,6 @@ async function changes(input: FloorInput, base: string): Promise<Result<readonly
 
 type FileLane = { readonly path: string; readonly lane: Lane };
 
-// heaviest : the heaviest lane the files need, named by the first file that needs it; no file is tiny. Pure.
 function heaviest(files: readonly FileLane[]): DiffLane {
   const lane = files.reduce<Lane>((a, f) => heavier(a, f.lane), "tiny");
   const first = files.find((f) => f.lane === lane);
@@ -169,7 +160,6 @@ async function lanesOfChanges(
   return { kind: "ok", value: files };
 }
 
-// diffLane : the lane the change's diff needs, and the first file that needs it
 export async function diffLane(input: FloorInput, oneWayDoor: readonly string[]): Promise<Result<DiffLane>> {
   const base = await mergeBase(input);
   const files = base.kind === "ok" ? await lanesOfChanges(input, base.value, oneWayDoor) : base;

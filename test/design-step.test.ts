@@ -27,7 +27,6 @@ const forge: Pick<Forge, "defaultBranch" | "issueBody"> = {
   issueBody: async () => ({ kind: "failed", reason: "a local-store project reads no issue" }),
 };
 
-// done : a run's finished outcome, or a test failure
 function done<T>(out: Result<DesignRan<T>>): T {
   if (out.kind !== "ok" || out.value.kind !== "done") throw new Error(JSON.stringify(out));
   return out.value;
@@ -54,7 +53,6 @@ type Seen = {
   readonly earlier: string;
 };
 
-// a model that keeps what each run saw, and answers with `outputs` in turn
 function model(seen: Seen[], outputs: readonly unknown[]): Model {
   return async (run) => {
     const findings = join(run.folder, "findings.json");
@@ -94,7 +92,6 @@ function setup(m: Model): DesignSetup {
 const DESIGN = () => specHash("# Design\n\nOne table per ticket.\n");
 const input = () => ({ ticket: "PROJ-1", spec: specHash(specText()), design: DESIGN() });
 
-// bothRuns : the review and verify runs of available steps, or a test failure
 function bothRuns(steps: ReturnType<typeof designSteps>) {
   const [review, verify] = [steps.designReview, steps.designVerify];
   if (review.kind !== "available") throw new Error("unavailable");
@@ -148,14 +145,11 @@ describe("the design review's runs (#236)", () => {
     });
     expect(done(out).findings.map((f) => f.id)).toEqual(["D1", "D2"]);
     expect(seen[0]?.files).toEqual(["code", "design.md", "spec.md"]);
-    // the code at main, with every rule file removed: the branch's edits are not there
     const prompt = String(seen[0]?.run.prompt);
     expect(prompt).toMatch(/^# Design-reviewer/);
     expect(prompt).toContain(FLOOR);
     expect(seen[0]?.run.schema).toContain('"verdict"');
-    // the design-reviewer's own time limit (P7)
     expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.review]);
-    // the folder is gone after the run
     expect(readdirSync(join(p.root, "design-runs"))).toEqual([]);
   });
 
@@ -187,7 +181,6 @@ describe("the design review's runs (#236)", () => {
     expect(out.kind === "ok" ? out.value : out).not.toHaveProperty("trace");
   });
 
-  // #489: a re-review sees every earlier round's findings and decisions, and is told to look only at what changed
   it("a first round gets no earlier.json and is not told it is a re-review", async () => {
     const seen: Seen[] = [];
     const steps = designSteps({ kind: "ok", value: setup(model(seen, [{ findings: [] }])) });
@@ -207,7 +200,6 @@ describe("the design review's runs (#236)", () => {
       ),
     });
     const { review, verify } = bothRuns(steps);
-    // round 1 keeps the text it read, by its hashes
     done(await review(input()));
     const first = input();
     writeSpec(home, specText().replace("SPEC-INTENT: an order's total", "SPEC-INTENT: an order's net total"));
@@ -276,7 +268,6 @@ describe("the design review's runs (#236)", () => {
     const out = await steps.designVerify.run({ ...input(), findings });
     expect(done(out).kept.map((k) => [k.id, k.bucket])).toEqual([["D1", "act_on"]]);
     expect(seen[0]?.files).toEqual(["code", "design.md", "findings.json", "spec.md"]);
-    // a verify pass's time limit (P7)
     expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.verify]);
     expect(JSON.parse(String(seen[0]?.findings))).toHaveLength(2);
     expect(seen[0]?.run.prompt).toMatch(/^# Verify pass/);
@@ -297,7 +288,6 @@ describe("the design review's runs (#236)", () => {
     if (steps.designVerify.kind !== "available") throw new Error("unavailable");
     const findings: readonly DesignFinding[] = [
       { ...FINDING, id: "D1" },
-      // the branch's file is not on main, and main's Main.java has one line
       { ...FINDING, id: "D2", file: "sp ace/a.txt" },
       { ...FINDING, id: "D3", line: 2 },
     ];
@@ -328,7 +318,6 @@ describe("the design review's runs (#236)", () => {
     ]);
   });
 
-  // #485 review: the cite check reads the texts and commit the run read, so an edit during the run cannot skip it
   it("checks the cites against what the run read, even when the spec is edited while the verify pass runs", async () => {
     const verdicts = { verdicts: [{ id: "D1", bucket: "act_on", why: "it holds" }] };
     const editing: Model = async (run) => {

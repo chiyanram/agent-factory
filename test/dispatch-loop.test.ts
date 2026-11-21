@@ -55,7 +55,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
-// a ticket a human STARTed and approved: the only way into the loop's ticket list (P8)
 async function approved(): Promise<void> {
   const where = { home, project: "ledger", ticket: "PROJ-1" };
   await start({ where, by: "ram", via: "terminal", at: "2026-11-07T07:00:00Z", branch: "absent", confirmed: false });
@@ -83,7 +82,6 @@ const notUsed = async (): Promise<{ readonly kind: "failed"; readonly reason: st
   reason: "not used in these tests",
 });
 
-// a git host whose changes are what `now()` says at each poll, so a test moves a ticket on between passes
 function forge(now: () => Changes | "down"): Forge {
   return {
     name: "github",
@@ -116,7 +114,6 @@ function forge(now: () => Changes | "down"): Forge {
   };
 }
 
-// a writer that ends with this outcome, and runs counted
 function writer(outcome: "done" | "asked", runs: string[]): Steps {
   return {
     ...STEPS_TODAY,
@@ -155,7 +152,6 @@ function loopWith(
     notify: NO_NOTIFY,
     dryRun: false,
     log: (l) => lines.push(l),
-    // these tests carry the build: a lanes file may leave the design review out (#236), which has its own tests
     lanes: DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.approval, lenses: l.lenses, designReview: false })),
   };
   const run = () =>
@@ -164,7 +160,6 @@ function loopWith(
       project: "ledger",
       pollMinutes: 7,
       setup: async () => ({ kind: "ok", value: setup }),
-      // the fake clock: a wait returns at once, and is counted
       sleep: async (ms) => {
         slept.push(ms);
         onSleep();
@@ -197,7 +192,6 @@ describe("the orchestrator loop (#305)", () => {
     const loop = loopWith(
       () => {
         pass += 1;
-        // each pass polls twice: once to act, once to look; the change is merged from the second pass on
         return pass <= 2
           ? { team, open: [open()], merged: [] }
           : {
@@ -208,7 +202,6 @@ describe("the orchestrator loop (#305)", () => {
       },
       writer("done", runs),
     );
-    // the writer ends done, so the next step is due after the first pass, and the loop does not sleep on it (#445)
     expect(await loop.run()).toMatchObject({ kind: "ok", value: { passes: 2 } });
     expect(runs).toEqual(["PROJ-1"]);
     expect(loop.slept).toEqual([]);
@@ -223,7 +216,6 @@ describe("the orchestrator loop (#305)", () => {
       () => ({ team, open: [open({ comments: runs.length > 0 ? [asked] : [] })], merged: [] }),
       writer("asked", runs),
     );
-    // the run's pass leaves a person's turn no pass has pinged: in flight, so the next pass pings, and the loop ends
     expect(await loop.run()).toEqual({ kind: "ok", value: { passes: 2, failedActions: false, held: [] } });
     expect(runs).toEqual(["PROJ-1"]);
     expect(loop.slept).toEqual([]);
@@ -233,7 +225,6 @@ describe("the orchestrator loop (#305)", () => {
     await approved();
     const loop = loopWith(() => ({ team, open: [open({ labels: ["needs-human"] })], merged: [] }));
     expect(await loop.run()).toMatchObject({ kind: "ok", value: { passes: 1 } });
-    // a spec edited after its approval: the approval is stale, and the ticket waits for a human's approval
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
     const waiting = loopWith(() => ({ team, open: [open()], merged: [] }));
     expect(await waiting.run()).toMatchObject({ kind: "ok", value: { passes: 1 } });
@@ -320,7 +311,6 @@ describe("the orchestrator loop (#305)", () => {
   it("ends after a pass outside the run hours, saying when they are (#299)", async () => {
     await approved();
     const runs: string[] = [];
-    // the loop's clock says 10:00 UTC; the run hours are the night
     const caps = { ...NO_CAPS, runHours: { from: 22, to: 6, text: "22-06" } };
     const loop = loopWith(() => ({ team, open: [open()], merged: [] }), writer("done", runs), caps);
     const why = "run hours are 22-06 UTC; run `agent-factory dispatch ledger` again then";
@@ -364,7 +354,6 @@ describe("the orchestrator loop (#305)", () => {
   });
 });
 
-// the writer's cleanup, the ready check and the review all ended at the head H
 async function doneAtHead(): Promise<void> {
   const where = { home, project: "ledger", ticket: "PROJ-1" };
   await record({
@@ -384,8 +373,6 @@ async function doneAtHead(): Promise<void> {
   await record({ where, event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 } });
 }
 
-// the ledger's steps (#445): a writer that ends done at the head, a ready check that passes, a review with nothing
-// to act on, each run counted by its kind
 function ledgerSteps(runs: string[], ready: () => boolean = () => true): Steps {
   return {
     ...writer("done", runs),
@@ -426,14 +413,11 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
     );
     expect(await loop.run()).toMatchObject({ kind: "ok", value: { failedActions: false } });
     expect(runs).toEqual(["writer fix", "ready", "review"]);
-    // one sleep only: after the review, when the ticket waits on CI, outside the factory
     expect(loop.slept).toEqual([7 * 60_000]);
     expect(loop.lines.filter((l) => l === "in flight: PROJ-1; next pass now")).toHaveLength(runs.length);
     expect(loop.lines).toContain("in flight: PROJ-1 (waiting on CI); next pass in 7 min");
   });
 
-  // #494 review: a pass that only recorded a hold or an unanswered blocker read waits the poll interval, so three
-  // unanswered passes are a poll interval apart, never a few seconds of git host errors back to back
   it("sleeps until the provider's reset when every ticket in flight is parked at its usage limit (#707)", async () => {
     await approved();
     let merged = false;
@@ -487,11 +471,9 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
     const failed = { ticket: "PROJ-1", action: step, result: { kind: "failed", reason: "no box" } } as const;
     expect(pace([failed], new Set())).toEqual({ kind: "now" });
     expect(pace([failed], new Set([failureOf(failed)]))).toEqual({ kind: "sleep", repeated: new Set(["PROJ-1"]) });
-    // another failure, or another step that ended, still runs the next pass at once
     expect(pace([failed], new Set(["PROJ-1 ready: the runner died"]))).toEqual({ kind: "now" });
     const ok = { ticket: "PROJ-2", action: { kind: "review", head: H }, result: { kind: "ok" } } as const;
     expect(pace([failed, ok], new Set([failureOf(failed)]))).toEqual({ kind: "now" });
-    // a wait and a run that did not start are not steps the factory ran
     const unset = { kind: "unavailable", reason: "no runner" } as const;
     expect(
       pace(
@@ -514,7 +496,6 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
       merged
         ? { team, open: [], merged: [{ number: 12, branch: "factory/PROJ-1", fork: false }] }
         : { team, open: [open({ pipeline: { kind: "success" } })], merged: [] };
-    // the gate is green, so the human is pinged; the git host refuses the note the same way each pass
     const refusing: Forge = {
       ...forge(changes),
       note: async () => ((tries += 1), { kind: "failed", reason: "the git host refused the note" }),
@@ -545,13 +526,9 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
   });
 });
 
-// the loop's clock in these tests, and the reset of the rate limit the fake gh meets: 40 minutes on
 const NOW = Date.parse("2026-11-07T10:00:00Z");
 const RESET = Date.parse("2026-11-07T10:40:00Z");
 
-// a fake gh behind the real GitHub adapter (#62): the user is ram, each GraphQL list answers from `now()`, a write
-// answers 200, and a limit, while set, answers every call with GitHub's "already exceeded" error, no requests left
-// and the reset at RESET; every call is counted
 function gh(now: () => Changes, limit: () => boolean): { readonly calls: Call[]; readonly forge: Forge } {
   const calls: Call[] = [];
   const run: Runner = async (call) => {
@@ -603,7 +580,6 @@ const openNode = (o: OpenChange) => ({
   },
 });
 
-// the answer to one call: the user, each GraphQL list by its query, else a write's label list
 const ANSWERS: readonly (readonly [(call: Call) => boolean, (c: Changes) => unknown])[] = [
   [(call) => call.args[2] === "user", () => ({ login: "ram" })],
   [
@@ -619,7 +595,6 @@ const ANSWERS: readonly (readonly [(call: Call) => boolean, (c: Changes) => unkn
       },
     }),
   ],
-  // the open issues whose session waits for the operator (waiting.ts): none here
   [
     (call) => queryOf(call).includes("issues(states: [OPEN]"),
     () => ({ data: { repository: { issues: { pageInfo: PAGE, nodes: [] } } } }),
@@ -641,11 +616,8 @@ function bodyOf(call: Call, c: Changes): unknown {
 describe("the orchestrator loop and the git host's rate limit (#62)", () => {
   it("a pass that did nothing reads the git host once: its login, 3 GraphQL lists and the waiting issues", async () => {
     await approved();
-    // the writer, the ready check and the review are done at the head, and CI runs there: the ticket waits on CI, in
-    // flight, and a pass does nothing
     await doneAtHead();
     let merged = false;
-    // a person spoke 5 minutes ago, so the claim is not quiet
     const said = { body: "go on", author: { name: "ram" }, at: "2026-11-07T09:55:00Z" };
     const host = gh(
       () =>
@@ -668,16 +640,11 @@ describe("the orchestrator loop and the git host's rate limit (#62)", () => {
     const ended = await loop.run();
     expect(ended).toMatchObject({ kind: "ok", value: { passes: 3 } });
     expect(loop.lines.filter((l) => l.startsWith("PROJ-1: wait: CI"))).toHaveLength(2);
-    // pass 1 posted the approval's shared copy, so it looked again: its login, 3 lists, the waiting issues, the note,
-    // 3 lists
     const [first = 0, second = 0] = marks;
     expect(first).toBe(9);
-    // pass 2 did nothing: its login, the 3 lists and the waiting issues, each one call, never a list read twice
     const pass2 = host.calls.slice(first, second);
     expect(pass2.map((c) => c.args[2])).toEqual(["user", "graphql", "graphql", "graphql", "graphql"]);
     expect(loop.lines.some((l) => l.includes("label was not read"))).toBe(false);
-    // no pass of this one-ticket project makes more than 10 calls: the pass that reconciles the merge reads it once
-    // (Forge.landed) before the claim comes off; a pass that did nothing still makes 5, above
     expect(host.calls.length - second).toBeLessThanOrEqual(10);
   });
 
@@ -703,13 +670,10 @@ describe("the orchestrator loop and the git host's rate limit (#62)", () => {
       /^pass 1 failed: github: rate limited until 2026-11-07T10:40:00Z: HTTP 200 after 1 try on user: API rate limit already exceeded for user ID 15411573\./,
     );
     expect(loop.lines).toContain("next pass in 40 min, when the rate limit is over");
-    // the limited pass stopped at its first call; the next pass read the user once, the three lists and the waiting
-    // issues
     expect(host.calls.length).toBe(1 + 5);
   });
 });
 
-// a ticket's earlier runs spent this much, in the project's run records (#131)
 function spent(at: string, usd: number, tokens: number): ReturnType<typeof record> {
   return record({
     where: { home, project: "ledger", ticket: "PROJ-9" },
@@ -717,7 +681,6 @@ function spent(at: string, usd: number, tokens: number): ReturnType<typeof recor
   });
 }
 
-// status's line for change 12, claimed, after the loop
 function statusLine(): Promise<string> {
   return headed({
     home: { kind: "ok", value: home },

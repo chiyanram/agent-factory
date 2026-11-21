@@ -26,25 +26,18 @@ export type Lease = { readonly kind: "sha"; readonly sha: string } | { readonly 
 export type GuardInput = { readonly repo: string; readonly commit: string; readonly lease: Lease };
 export type Guard = (input: GuardInput) => Promise<Done>;
 
-// newCommits : the git log range of the commits the push adds: after the lease, or, for a new branch, those on no remote
-// branch
 export function newCommits(input: GuardInput): readonly string[] {
   return input.lease.kind === "sha" ? [`${input.lease.sha}..${input.commit}`] : [input.commit, "--not", "--remotes"];
 }
 
 export type PushRequest = {
-  // the clone or worktree that holds the commit
   readonly repo: string;
   readonly forge: "github" | "gitlab";
-  // the forge's host: github.com, gitlab.com or the company's GitLab (FACTORY_FORGE_HOST)
   readonly host: string;
-  // owner/name on GitHub, the full path on GitLab
   readonly project: string;
   readonly branch: string;
   readonly commit: string;
-  // what the remote branch must be right now
   readonly lease: Lease;
-  // branches never pushed to: the default branch at least
   readonly protectedBranches: readonly string[];
   readonly identity: Identity;
   readonly env: NodeJS.ProcessEnv;
@@ -53,7 +46,6 @@ export type PushRequest = {
 
 const SHA = /^[0-9a-f]{40}$/;
 const TOKEN_VARIABLE = "FACTORY_PUSH_TOKEN";
-// git runs this helper with "get", "store" or "erase"; it answers only "get", from the variable above
 const HELPER = `!f() { test "$1" = get && printf 'username=x-access-token\\npassword=%s\\n' "$${TOKEN_VARIABLE}"; }; f`;
 
 export { plainBranch };
@@ -62,7 +54,6 @@ function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// pushUrlFits : whether a push URL is the project on the forge's host. An App needs https to github.com exactly.
 export function pushUrlFits(input: {
   readonly url: string;
   readonly project: string;
@@ -87,7 +78,6 @@ function failed(what: string, result: GitResult): Done {
   };
 }
 
-// pushEnv : the environment of the git push. With an App: every other helper dropped, the App's helper for github.com.
 export function pushEnv(identity: Identity, env: NodeJS.ProcessEnv): Result<NodeJS.ProcessEnv> {
   if (identity.kind === "own") {
     return { kind: "ok", value: env };
@@ -134,7 +124,6 @@ function shapeProblem(request: PushRequest): string {
   return SHA.test(request.commit) && leaseOk ? "" : "refused: the commit and the lease must be full SHAs";
 }
 
-// pushUrls : every URL git would push origin to, as git resolves them: pushurl or url, insteadOf and pushInsteadOf applied
 export async function pushUrls(request: PushRequest): Promise<Result<readonly string[]>> {
   const read = await git(request, ["remote", "get-url", "--push", "--all", "origin"]);
   if (read.kind !== "ok") {
@@ -152,8 +141,6 @@ export async function pushUrls(request: PushRequest): Promise<Result<readonly st
   };
 }
 
-// Seams : how the push URLs are read. The real one asks git; a test that pushes to a bare repository on disk passes one
-// that answers with the GitHub URL its trusted insteadOf maps from.
 export type Seams = { readonly urls: (request: PushRequest) => Promise<Result<readonly string[]>> };
 const REAL: Seams = { urls: pushUrls };
 
@@ -185,7 +172,6 @@ async function placeChecks(request: PushRequest, seams: Seams): Promise<Done> {
       };
 }
 
-// repoHelpers : refuses, with an App, a credential helper the repo's own config sets.
 async function repoHelpers(request: PushRequest, _seams: Seams): Promise<Done> {
   if (request.identity.kind === "own") {
     return { kind: "ok" };
@@ -245,7 +231,6 @@ async function send(request: PushRequest): Promise<Done> {
     : failed("git push failed", pushed);
 }
 
-// hostPush : the writer's commit onto its branch, after every check, as the project's identity.
 export async function hostPush(request: PushRequest, seams: Seams = REAL): Promise<Done> {
   const shape = shapeProblem(request);
   if (shape !== "") {

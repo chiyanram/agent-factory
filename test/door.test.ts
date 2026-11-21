@@ -7,10 +7,6 @@ import { terminalDoor } from "../src/core/door/terminal.js";
 import { acceptAs, approveAs, MODEL_RUN_MARKERS, startAs, waiveAs } from "../src/core/door/write.js";
 import { tempDir } from "./temp.js";
 
-// The door seam (ADR-0023): a front door hands the core a person only its own check vouched for, and the write
-// API fills by and via from that person. A door cannot claim a person it did not verify, and a model run cannot write
-// a person's word.
-
 const SPEC = [
   "# PROJ-1: x",
   "",
@@ -56,7 +52,6 @@ function vouched(via: string, by: string): Person {
   return person;
 }
 
-// writeAll : the three writes for one person, in one env
 async function writeAll(person: Person, env: NodeJS.ProcessEnv) {
   return [
     await startAs(person, startOf(), env),
@@ -76,7 +71,6 @@ describe("vouch: the person a door verified (#713)", () => {
   });
 
   it("refuses an empty name, a name with a newline or control character, and an unknown door", () => {
-    // a control, a line break, or a mark that turns the text around so it reads as another name
     const unseen = ["\u0007", "\u007f", "\u0085", "\u2028", "\u2029", "\u202e", "\u2066", "\u200f"];
     for (const by of ["", "   ", "ram\nmallory", ...unseen.map((c) => `ram${c}ecila`)]) {
       expect(vouch("terminal", by)).toMatchObject({ kind: "refused" });
@@ -116,7 +110,6 @@ describe("the write API fills by and via from the person (#713)", () => {
 
 describe("a door cannot claim a person it did not verify (#713)", () => {
   it("refuses a person no door vouched for, and writes no record", async () => {
-    // a structured clone has the same fields and still types as a Person; the write API refuses it at run time
     const claimed = structuredClone(vouched("discord", "alice"));
     expect(claimed).toMatchObject({ kind: "person", by: "alice", via: "discord" });
     for (const result of await writeAll(claimed, PLAIN)) {
@@ -196,7 +189,6 @@ describe("the terminal door (#713)", () => {
   });
 });
 
-// the TypeScript files under a folder, as paths relative to the repo
 function sources(dir: string): readonly string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
@@ -204,8 +196,6 @@ function sources(dir: string): readonly string[] {
   });
 }
 
-// importsOf : each import in a file: its module path, and the names it takes by value ("*" for a namespace import);
-// a type-only import takes none
 function importsOf(text: string): readonly { readonly from: string; readonly values: readonly string[] }[] {
   const named = [...text.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s*from\s*"([^"]+)"/g)].map((m) => ({
     from: String(m[3]),

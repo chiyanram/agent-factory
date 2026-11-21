@@ -6,8 +6,6 @@ import { traceName, TRACE_DAYS } from "../src/core/dispatch/trace.js";
 import { sizeOf, traceCommand } from "../src/trace-cli.js";
 import { tempDir } from "./temp.js";
 
-// agent-factory trace lists a ticket's traces, or prints one, and deletes those past 30 days first (#487).
-
 const DAY = 24 * 60 * 60_000;
 const NOW = Date.parse("2026-11-13T06:07:15.123Z");
 

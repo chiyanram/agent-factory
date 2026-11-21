@@ -23,8 +23,6 @@ function folder(): string {
   return dir;
 }
 
-// a FACTORY_CLAUDE stub that prints one stream line, starts a grandchild that never exits, writes its pid, and waits
-// for it: stopping only the stub would leave the grandchild holding stdout open
 function hangingClaude(dir: string): { readonly bin: string; readonly pidFile: string } {
   const bin = join(dir, "claude");
   const pidFile = join(dir, "grandchild.pid");
@@ -33,7 +31,6 @@ function hangingClaude(dir: string): { readonly bin: string; readonly pidFile: s
   return { bin, pidFile };
 }
 
-// statOf : a process's /proc stat line, "" once it is gone: it can end between any check and the read
 function statOf(pid: number): string {
   try {
     return readFileSync(join("/proc", String(pid), "stat"), "utf8");
@@ -42,7 +39,6 @@ function statOf(pid: number): string {
   }
 }
 
-// alive : the process is still there and not a zombie waiting to be reaped (Linux reads /proc; elsewhere a signal 0)
 function alive(pid: number): boolean {
   if (existsSync("/proc/self/stat")) {
     const stat = statOf(pid);
@@ -73,8 +69,6 @@ const RUN: ModelRun = {
   limit: { minutes: 20, setting: "FACTORY_FINDER_MINUTES" },
 };
 
-// each read-only run kind's limit key: the finder (code review and eval), the verify pass (code review, design review
-// and eval), the design-reviewer, the onboarder, the retro draft and the eval judge
 const KINDS: readonly (readonly [string, LimitId, string])[] = [
   ["finder", "review.finderMinutes", "FACTORY_FINDER_MINUTES"],
   ["verify pass", "review.verifyMinutes", "FACTORY_VERIFY_MINUTES"],
@@ -111,7 +105,6 @@ describe("the Claude adapter's read-only run", () => {
       if (limit.kind === "failed") {
         throw new Error(limit.reason);
       }
-      // a minute is 300 ms here
       const agent = openAgentCli({ env: { PATH: process.env.PATH, FACTORY_CLAUDE: stub.bin }, minuteMs: 300 });
       const began = Date.now();
       const ran = await agent.readOnly({ ...RUN, folder: dir, limit: limit.value });
@@ -184,7 +177,6 @@ describe("the Claude adapter's read-only run", () => {
     const [call] = calls;
     expect(call?.bin).toBe("/opt/claude");
     expect(call?.cwd).toBe("/x");
-    // and the model-run mark, which the door seam reads
     expect(call?.env).toEqual({ PATH: "/bin", HOME: "/h", AGENT_FACTORY_MODEL_RUN: "1" });
     expect(call?.args).toEqual([
       "-p",
@@ -289,7 +281,6 @@ describe("claudeEnv (ADR-0012 S6)", () => {
 
 describe("runInFolder", () => {
   it("runs the CLI with its stdin closed, so it never waits for input (#487)", async () => {
-    // cat reads its stdin to the end: with stdin left open it would never exit
     const ran = await runInFolder({ bin: "cat", args: [], env: { PATH: process.env.PATH }, cwd: folder() });
     expect(ran).toEqual({ code: 0, stdout: "", stderr: "" });
   }, 3000);

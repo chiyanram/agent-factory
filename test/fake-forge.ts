@@ -45,7 +45,6 @@ export function fake(name: "github" | "gitlab", script: readonly Scripted[], max
   return { calls, slept, client };
 }
 
-// the value of a -f or -F field in one recorded GraphQL call
 export function field(call: Call | undefined, name: string): string {
   const args = call?.args ?? [];
   const found = args.find((a, i) => (args[i - 1] === "-f" || args[i - 1] === "-F") && a.startsWith(`${name}=`));

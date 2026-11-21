@@ -17,6 +17,12 @@
 //   6 One thread per Act on and Consider finding at its file:line; then the status box (status.ts) labels needs-human for
 //     a protected file not listed before; then one summary note, last, since it marks the round done: a round that
 //     failed halfway runs again. No verdict ever approves or undrafts, and zero findings is not a pass (#118).
+//
+// The run folders go in a private folder (0700), never /tmp, where anyone can plant a CLAUDE.md above them. Every
+// rubric and the pack are read before any run, so a missing one spends nothing. A failed finder fails the round only
+// after all finders end, so each run's spend is metered. Each verify pass rules only on findings of its own kind, so
+// one pass cannot overrule the other. The Act on findings are kept before anything is posted, because a rework run
+// reads them. A protected file labels the change once, so a person who cleared needs-human is not stopped again.
 
 import type { LaneProps } from "../lane.js";
 import { withFloor } from "./never.js";
@@ -75,37 +81,28 @@ import {
 
 export const NEEDS_HUMAN = "needs-human";
 export const MAX_ROUNDS = 3;
-// the most verify passes a round runs: one per kind, rule and logic
 export const VERIFY_PASSES = 2;
 
 export type ReviewSetup = {
   readonly forge: Forge;
   readonly number: number;
-  // the login the factory posts as: its notes are the rounds
   readonly factory: string;
   readonly label: string;
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
-  // where specs and approvals live (<home>/specs, <home>/approvals), and the project they are kept under
   readonly home: string;
   readonly project: string;
-  // the project's plugins, in order: the one that holds a process gives the lanes, baseline and references (#232, #426)
   readonly plugins: readonly PluginDir[];
   readonly packDir: string;
-  // where each pass's answer is kept, per change and head (ADR-0011 D16)
   readonly recordsDir: string;
-  // a private folder (0700) the throwaway run folders go in; never /tmp, where anyone can plant a CLAUDE.md above them
   readonly runsDir: string;
   readonly prompts: { readonly find: string; readonly verify: string };
   readonly models: { readonly find: string; readonly rule: string; readonly logic: string };
   readonly maxUsd: string;
-  // each finder's and each verify pass's time limit
   readonly limits: RunLimits;
   readonly model: Model;
-  // the live runs on this machine, and how many may run at once (live.ts)
   readonly sessions: Sessions;
   readonly maxRuns: number;
-  // the most finder runs at once (review.maxFinders): the round counts as one run, with up to this many model runs
   readonly maxFinders: number;
 };
 
@@ -116,15 +113,10 @@ export type Outcome =
       readonly head: string;
       readonly counts: Counts;
       readonly costUsd: number;
-      // every token the round's passes spent (#131)
       readonly tokens: number;
-      // the last full round's Act on and Consider findings, each acted on or not since its head (#220)
       readonly acted: Acted | "none";
-      // per lens that ran, its verified findings no other lens reported (#237)
       readonly lenses: Readonly<Record<string, number>>;
-      // the findings the cite check noted as "cite not found" (#485)
       readonly citesNotFound: number;
-      // every finding of the round, per rule ID and bucket (#488)
       readonly found: FoundByRule;
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
@@ -132,7 +124,6 @@ export type Outcome =
   | { readonly kind: "no-progress"; readonly head: string; readonly why: string }
   | { readonly kind: "moved"; readonly from: string; readonly to: string };
 
-// deviations: the build's deviation notes, which the pack's design section carries (deviations.ts, #430)
 type Ctx = {
   readonly setup: ReviewSetup;
   readonly change: Change;
@@ -144,7 +135,6 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
   return { kind: "failed", reason };
 }
 
-// load : the change, open and claimed, and the rounds so far
 async function load(setup: ReviewSetup): Promise<Result<Ctx>> {
   const change = await setup.forge.change({ number: setup.number });
   if (change.kind === "failed") {
@@ -173,8 +163,6 @@ async function defaultBranch(ctx: Ctx): Promise<Result<string>> {
   return ctx.setup.forge.defaultBranch();
 }
 
-// specFor : the change's contract: the spec of the ticket its factory/<ticket> branch names, and that ticket's approval.
-// An approval record that cannot be read is refused, never read as no approval.
 async function specFor(ctx: Ctx, lanes: readonly LaneProps[]): Promise<Result<SpecSource>> {
   const s = ctx.setup;
   const branch = ctx.change.sourceBranch;
@@ -202,8 +190,6 @@ async function specFor(ctx: Ctx, lanes: readonly LaneProps[]): Promise<Result<Sp
       };
 }
 
-// approvalFor : the ticket's approval record; with none, a tiny ticket's START stands for it, bound to the spec as it
-// is now, since tiny needs START only (#227)
 async function approvalFor(where: {
   readonly home: string;
   readonly project: string;
@@ -226,12 +212,9 @@ async function approvalFor(where: {
     : { kind: "ok", value: { kind: "none" } };
 }
 
-// the review reads its checks from a plugin; the built-in review references are still to come (#232)
 const NO_REFERENCES =
   'the review needs a plugin that holds its review references: list one in the project\'s "plugins" and pin it';
 
-// reviewProcess : the project's process, and the folder its references are read from: the process plugin's, or with
-// no process plugin the first plugin's; none is refused
 async function reviewProcess(
   plugins: readonly PluginDir[],
 ): Promise<Result<Process & { readonly references: string }>> {
@@ -277,7 +260,6 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
 
 type Now = { readonly kind: "same" } | { readonly kind: "moved"; readonly to: string };
 
-// moved : whether the forge's head is still the reviewed one
 async function moved(ctx: Ctx): Promise<Result<Now>> {
   const now = await ctx.setup.forge.change({ number: ctx.setup.number });
   if (now.kind === "failed") {
@@ -307,7 +289,6 @@ async function guarded(ctx: Ctx, act: () => Promise<Result<Outcome>>): Promise<R
     : { kind: "ok", value: { kind: "moved", from: ctx.change.sha, to: now.value.to } };
 }
 
-// noProgress : an empty change goes to the human; the label goes before any note, so a failed label is retried
 async function empty(ctx: Ctx): Promise<Result<Outcome>> {
   const labelled = await label(ctx);
   return labelled.kind === "ok"
@@ -315,7 +296,6 @@ async function empty(ctx: Ctx): Promise<Result<Outcome>> {
     : labelled;
 }
 
-// reuseNote : needs-human first when Act on findings are still open, then the reuse line
 async function reuseNote(ctx: Ctx, pack: Pack, round: number, actOn: number): Promise<Done> {
   const labelled = actOn > 0 ? await label(ctx) : ({ kind: "ok" } as const);
   return labelled.kind === "ok"
@@ -323,7 +303,6 @@ async function reuseNote(ctx: Ctx, pack: Pack, round: number, actOn: number): Pr
     : labelled;
 }
 
-// reuse : the same patch as the last round; its verdict stands, and Act on findings mean no progress
 async function reuse(ctx: Ctx, pack: Pack, round: number): Promise<Result<Outcome>> {
   const actOn = ctx.past.actOn.get(pack.patchId) ?? 0;
   const posted = await reuseNote(ctx, pack, round, actOn);
@@ -347,11 +326,9 @@ type Pass = {
   readonly model: string;
   readonly schema: string;
   readonly prompt: string;
-  // the finder's lens or the verify pass, for the round's spend per run (#337)
   readonly part: RoundPart;
 };
 
-// keep : the pass's answer, kept with the head; a full disk loses the record, never the round
 async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
   const dir = join(ctx.setup.recordsDir, String(ctx.setup.number), ctx.change.sha);
   await attempt(async () => {
@@ -364,14 +341,12 @@ async function keep(ctx: Ctx, pass: string, answer: unknown): Promise<void> {
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/-$/, "")}.jsonl`,
       ),
-      // what a pass answered is kept as a record: every string scrubbed (P4, #485)
       `${scrubbedJson(answer)}\n`,
       { mode: 0o600 },
     );
   }, "cannot keep the pass's answer");
 }
 
-// limitFor : a finder's time limit, or a verify pass's. Pure.
 function limitFor(limits: RunLimits, part: RoundPart): RunLimit {
   return part.kind === "finder" ? limits.finder : limits.verify;
 }
@@ -391,7 +366,6 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
     limit: limitFor(ctx.setup.limits, pass.part),
     part: pass.part,
   });
-  // every answer that spent tokens is kept, a failed pass too, so the retro sees what was spent
   const spent = ran.kind === "ok" ? ran.value.answer : ran.answer;
   if (prop(spent, "usage") !== undefined) {
     await keep(ctx, pass.name, spent);
@@ -403,7 +377,6 @@ async function runPass(ctx: Ctx, folder: string, pass: Pass): Promise<Result<Mod
 
 type Spent = { readonly costUsd: number; readonly find: number; readonly verify: number };
 
-// a finding after the merge: the lens that kept it, and every lens that reported it
 type Found = Merged<Finding>;
 type FoundSorted = Found & { readonly bucket: Sorted["bucket"]; readonly why: string };
 
@@ -436,8 +409,6 @@ async function verifySubset(
   return checked(subset, ran.value);
 }
 
-// checked : the verdicts on this subset only; a verdict on a finding of the other kind is dropped, so one pass cannot
-// overrule the other
 function checked(subset: readonly Found[], answer: ModelAnswer): Result<Checked> {
   const read = readVerdicts(answer.output);
   if (read.kind === "failed") {
@@ -447,7 +418,6 @@ function checked(subset: readonly Found[], answer: ModelAnswer): Result<Checked>
   return { kind: "ok", value: { verdicts: read.value.filter((v) => ids.has(v.id)), answer } };
 }
 
-// verifyKind : one verify pass over the findings of one kind; none when there are none
 async function verifyKind(
   ctx: Ctx,
   folder: string,
@@ -470,7 +440,6 @@ function spentOf(found: readonly ModelAnswer[], verified: readonly (ModelAnswer 
   };
 }
 
-// the lenses a round runs, and whether on the strongest model
 type Plan = { readonly lenses: readonly Lens[]; readonly strongest: boolean };
 
 type Reviewed = {
@@ -499,7 +468,6 @@ async function verifyAll(
   };
 }
 
-// a folder (0700) for one run, in the private runs folder
 async function runFolder(ctx: Ctx): Promise<Result<string>> {
   const dir = ctx.setup.runsDir;
   return attempt(async () => {
@@ -508,7 +476,6 @@ async function runFolder(ctx: Ctx): Promise<Result<string>> {
   }, `cannot make a run folder in ${dir}`);
 }
 
-// placed : the code at the head, with no rule file, and this run's pack, in the folder
 async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promise<Result<void>> {
   const copied = await copyCode({
     repo: ctx.setup.repo,
@@ -524,7 +491,6 @@ async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promi
 
 type Finder = { readonly lens: string; readonly findings: readonly Finding[]; readonly answer: ModelAnswer };
 
-// findIn : one finder run for one lens, in a folder that holds its pack
 async function findIn(ctx: Ctx, folder: string, lens: Lens, model: string): Promise<Result<Finder>> {
   const found = await runPass(ctx, folder, {
     name: lens.name === BASELINE.name ? "find" : `find (${lens.name})`,
@@ -544,7 +510,6 @@ async function findIn(ctx: Ctx, folder: string, lens: Lens, model: string): Prom
 
 type Shared = { readonly pack: Pack; readonly text: string; readonly model: string };
 
-// findLens : one lens's finder, in its own fresh folder with the pack and its rubric as section 8; the folder goes after
 async function findLens(ctx: Ctx, lens: Lens, rubric: string, shared: Shared): Promise<Result<Finder>> {
   const folder = await runFolder(ctx);
   if (folder.kind === "failed") {
@@ -558,7 +523,6 @@ async function findLens(ctx: Ctx, lens: Lens, rubric: string, shared: Shared): P
   }
 }
 
-// rubrics : every picked lens's rubric, read before any finder runs, so a missing one spends nothing
 async function rubrics(ctx: Ctx, plan: Plan, pack: Pack, references: string): Promise<Result<readonly string[]>> {
   const read = await Promise.all(
     plan.lenses.map((lens) => rubricText(lens, { ...ctx.setup, references, master: pack.master })),
@@ -567,8 +531,6 @@ async function rubrics(ctx: Ctx, plan: Plan, pack: Pack, references: string): Pr
   return bad?.kind === "failed" ? bad : { kind: "ok", value: read.map((r) => (r.kind === "ok" ? r.value : "")) };
 }
 
-// findAll : every picked lens's finder, in parallel, at most review.maxFinders at once; one that fails fails the round,
-// after all have ended, so each run's spend is metered
 async function findAll(
   ctx: Ctx,
   plan: Plan,
@@ -585,10 +547,8 @@ async function findAll(
   return bad?.kind === "failed" ? bad : { kind: "ok", value: ran.flatMap((r) => (r.kind === "ok" ? [r.value] : [])) };
 }
 
-// Inputs : what every finder shares: the pack's text and each picked lens's rubric
 type Inputs = { readonly text: string; readonly rubrics: readonly string[] };
 
-// inputs : the pack's text and the rubrics, read before any run, so a missing one spends nothing
 async function inputs(ctx: Ctx, pack: Pack, plan: Plan): Promise<Result<Inputs>> {
   const own = await reviewProcess(ctx.setup.plugins);
   if (own.kind === "failed") {
@@ -602,7 +562,6 @@ async function inputs(ctx: Ctx, pack: Pack, plan: Plan): Promise<Result<Inputs>>
   return read.kind === "ok" ? { kind: "ok", value: { text: text ?? "", rubrics: read.value } } : read;
 }
 
-// throughVerify : the merged findings, through the verify pass, with each lens's unique verified findings
 async function throughVerify(ctx: Ctx, run: string, plan: Plan, finders: readonly Finder[]): Promise<Result<Reviewed>> {
   const sorted = await verifyAll(
     ctx,
@@ -629,13 +588,11 @@ async function findAndVerify(ctx: Ctx, run: string, pack: Pack, plan: Plan): Pro
   if (ready.kind === "failed") {
     return ready;
   }
-  // a one-way door runs every lens on the strongest model the review pins: the logic model (#22 Q4)
   const model = plan.strongest ? ctx.setup.models.logic : ctx.setup.models.find;
   const finders = await findAll(ctx, plan, given.value.rubrics, { pack, text: given.value.text, model });
   return finders.kind === "ok" ? throughVerify(ctx, run, plan, finders.value) : finders;
 }
 
-// lensInputs : the project's lens settings and its process, which holds each lane's lens count
 async function lensInputs(ctx: Ctx): Promise<Result<{ readonly setup: LensSetup; readonly own: Process }>> {
   const setup = await lensSetupOf(ctx.setup);
   if (setup.kind === "failed") {
@@ -645,7 +602,6 @@ async function lensInputs(ctx: Ctx): Promise<Result<{ readonly setup: LensSetup;
   return own.kind === "ok" ? { kind: "ok", value: { setup: setup.value, own: own.value } } : own;
 }
 
-// touchedFiles : the files the change touches, and whether each was there before
 async function touchedFiles(ctx: Ctx, pack: Pack): Promise<Result<readonly Touched[]>> {
   const status = await hostGit({
     args: ["diff", "--name-status", "--no-renames", "-z", pack.base, pack.head],
@@ -658,13 +614,10 @@ async function touchedFiles(ctx: Ctx, pack: Pack): Promise<Result<readonly Touch
     : failed("cannot list the files the change touches, to pick its lenses");
 }
 
-// countOf : the lane's lens count in the project's process; every lens for a lane it leaves out. Pure.
 function countOf(own: Process, lane: Pack["lane"]): LensCount {
   return own.lanes.find((l) => l.name === lane)?.lenses ?? "all";
 }
 
-// planFor : the lenses the blast radius picks: the spec's lane and its lens count from the process, the touched files,
-// the one-way-door paths and the test files; the baseline lens when none applies, so a round never runs no finder
 async function planFor(ctx: Ctx, pack: Pack): Promise<Result<Plan>> {
   const given = await lensInputs(ctx);
   if (given.kind === "failed") {
@@ -686,8 +639,6 @@ async function planFor(ctx: Ctx, pack: Pack): Promise<Result<Plan>> {
   return { kind: "ok", value: pick.lenses.length === 0 ? { ...pick, lenses: [BASELINE] } : pick };
 }
 
-// passes : the finders, then verify per kind, in fresh folders with the pack and the code at the head; the folders go
-// after
 async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
   const plan = await planFor(ctx, pack);
   if (plan.kind === "failed") {
@@ -708,8 +659,6 @@ async function passes(ctx: Ctx, pack: Pack): Promise<Result<Reviewed>> {
   }
 }
 
-// a Spec finding's thread quotes the criterion it fails, from the approved spec (#219); every thread shows the finder's
-// grade and evidence (#237)
 function threadPost(f: Sorted, criteria: readonly string[]): Post {
   const quote = quoteOf(f, criteria);
   return {
@@ -799,14 +748,10 @@ function summaryItems(sorted: readonly Sorted[], box: Box, criteria: readonly st
   ];
 }
 
-// the protected files no earlier round listed: only these label the change, so a person who cleared needs-human is not
-// stopped again for the same file
 function freshProtected(ctx: Ctx, box: Box): readonly string[] {
-  // the bash reviewer listed a protected file as its bare path
   return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)) && !ctx.past.listed.has(p));
 }
 
-// threadsAndLabel : the threads, then needs-human for a protected file not listed before
 async function threadsAndLabel(
   ctx: Ctx,
   box: Box,
@@ -817,8 +762,6 @@ async function threadsAndLabel(
   return posted.kind === "ok" && freshProtected(ctx, box).length > 0 ? label(ctx) : posted;
 }
 
-// actedOf : keeps this round's findings for the next round's rate, and rates the last full round's against this head;
-// neither can fail the round (#220)
 async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promise<Acted | "none"> {
   const at = { recordsDir: ctx.setup.recordsDir, change: ctx.setup.number, head };
   await keepTracked(at, sorted);
@@ -828,7 +771,6 @@ async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promi
     : "none";
 }
 
-// lensesLine : each lens that ran and its verified findings no other lens reported. Pure.
 function lensesLine(lenses: Readonly<Record<string, number>>): string {
   return Object.entries(lenses)
     .map(([lens, n]) => `${lens} ${n}`)
@@ -844,7 +786,6 @@ async function post(
   if (box.kind === "failed") {
     return box;
   }
-  // kept before anything is posted: a rework run reads these, so a round that cannot keep them posts nothing
   const kept = await keepActOn({
     recordsDir: ctx.setup.recordsDir,
     change: ctx.setup.number,
@@ -900,14 +841,12 @@ async function review(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
   if (result.kind === "failed") {
     return result;
   }
-  // a finding whose file:line is not at the reviewed head is noted as "cite not found", never posted (#485)
   const cited = await checkCites({ repo: ctx.setup.repo, env: ctx.setup.env, sha: pack.head }, result.value.sorted);
   return guarded(ctx, () =>
     post(ctx, pack, { ...result.value, sorted: cited.findings, citesNotFound: cited.notFound }),
   );
 }
 
-// decideRound : what this round does once the pack is built
 async function decideRound(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
   const last = ctx.past.last;
   if (pack.patchId === "") {
@@ -919,7 +858,6 @@ async function decideRound(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
   return review(ctx, pack);
 }
 
-// alreadyReviewed : the head the last round reviewed, when it is the change's head now
 function alreadyReviewed(ctx: Ctx): Outcome | "no" {
   const last = ctx.past.last;
   if (last.kind !== "round" || last.head !== ctx.change.sha) {
@@ -928,7 +866,6 @@ function alreadyReviewed(ctx: Ctx): Outcome | "no" {
   return { kind: "already", head: last.head, actOn: ctx.past.actOn.get(last.patchId) ?? 0 };
 }
 
-// reviewRound : one round on the change, or why none ran; it holds the change's run while it works (live.ts)
 export async function reviewRound(setup: ReviewSetup): Promise<Result<Outcome>> {
   const held = await holdRun({
     repo: setup.repo,

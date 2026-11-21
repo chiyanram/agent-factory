@@ -16,11 +16,8 @@ import { projectOfFile, projectPath } from "./project.js";
 import { settingOf } from "./settings/machine.js";
 import { plainName } from "./spec.js";
 
-// the variable `agent-factory coordinator` sets in its session for the project it was started for
 export const DEFAULT_PROJECT = "FACTORY_DEFAULT_PROJECT";
 
-// projectNames : the projects in <home>/projects, one per project file (projectOfFile), sorted; none when the folder
-// is missing
 export async function projectNames(home: string): Promise<readonly string[]> {
   const entries = await readdir(join(home, "projects"), { withFileTypes: true }).catch(() => []);
   return entries
@@ -49,15 +46,11 @@ function others(known: readonly string[]): string {
 
 export type Choice = {
   readonly home: string;
-  // the <project> the command line names, if any
   readonly project: string | undefined;
   readonly env: NodeJS.ProcessEnv;
-  // the command's form with a project, for the message that asks to name one: "agent-factory poll <project>"
   readonly usage: string;
 };
 
-// chosenProject : the project the command acts on, or undefined for the old form (FACTORY_PROJECT exported, no
-// project named); refused when none is named and the factory home holds no project or more than one
 export async function chosenProject(c: Choice): Promise<Result<string | undefined>> {
   const fallback = c.env[DEFAULT_PROJECT] ?? "";
   if (c.project !== undefined) {

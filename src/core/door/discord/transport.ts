@@ -1,12 +1,14 @@
 // door/discord/transport — the Discord door's one way out (ADR-0023 D4): a socket to the Gateway and one REST call at
 // a time, over Node's own WebSocket and fetch, so the door adds no dependency. The bot only connects out, and opens no
-// port. Tests pass a fake, so no test reaches Discord.
+// port. Tests pass a fake, so no test reaches Discord. A failure names the route and the status, never the URL, since
+// an interaction's path holds its token.
 
 import { field } from "../../human-record.js";
 
 export type SocketEvents = {
   readonly message: (text: string) => void;
-  // the close code; 1006 when the connection dropped with none
+  // 1006 when the connection closed abnormally, with no close frame
+  // https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1
   readonly closed: (code: number) => void;
 };
 
@@ -15,21 +17,16 @@ export type Socket = {
   readonly close: (code: number) => void;
 };
 
-// a file sent with a message, as Discord takes an attachment
 export type Attached = { readonly name: string; readonly text: string };
 
 export type RestCall = {
   readonly method: "GET" | "POST" | "PUT" | "PATCH";
-  // the path under the API's base, such as /gateway/bot
   readonly path: string;
-  // what a failure names instead of the path, since an interaction's path holds its token
   readonly route: string;
   readonly json?: unknown;
   readonly files?: readonly Attached[];
 };
 
-// a REST answer; a failure carries Discord's HTTP status when there was one, so a refused token (401) can end the door
-// while a network blip or a 5xx is tried again
 export type RestAnswer =
   | { readonly kind: "ok"; readonly value: unknown }
   | { readonly kind: "failed"; readonly reason: string; readonly status?: number };
@@ -39,7 +36,6 @@ export type Transport = {
   readonly rest: (call: RestCall) => Promise<RestAnswer>;
 };
 
-// how the gateway waits; a stop function cancels the wait
 export type Timers = {
   readonly every: (ms: number, run: () => void) => () => void;
   readonly after: (ms: number, run: () => void) => () => void;
@@ -57,10 +53,10 @@ export const REAL_TIMERS: Timers = {
 };
 
 const API = "https://discord.com/api/v10";
-// a rate-limited call is tried this many times in all, waiting what Discord asks
 const TRIES = 3;
 
-// bodyOf : JSON alone, or multipart with payload_json and each file, as Discord's upload format asks
+// Discord takes files as multipart/form-data, with the JSON in payload_json
+// https://docs.discord.com/developers/reference
 function bodyOf(call: RestCall): { readonly body?: string | FormData; readonly type?: string } {
   if (call.files === undefined || call.files.length === 0) {
     return call.json === undefined ? {} : { body: JSON.stringify(call.json), type: "application/json" };
@@ -73,7 +69,8 @@ function bodyOf(call: RestCall): { readonly body?: string | FormData; readonly t
   return { body: form };
 }
 
-// waitAsked : the seconds a 429 answer asks to wait, capped so a bad answer cannot stall the bot
+// a 429 answer carries retry_after, the seconds to wait
+// https://docs.discord.com/developers/topics/rate-limits
 async function waitAsked(response: Response): Promise<number> {
   const asked: unknown = await response.json().catch(() => undefined);
   const seconds = field(asked, "retry_after");
@@ -100,7 +97,6 @@ async function answerOf(response: Response, route: string): Promise<RestAnswer> 
   return response.status === 204 ? { kind: "ok", value: {} } : { kind: "ok", value: await response.json() };
 }
 
-// tried : the call, tried again on a 429 while tries are left
 async function tried(token: string, agent: string, call: RestCall, left: number): Promise<RestAnswer> {
   const response = await once(token, agent, call);
   if (response.status !== 429 || left <= 1) {
@@ -111,13 +107,11 @@ async function tried(token: string, agent: string, call: RestCall, left: number)
   return tried(token, agent, call, left - 1);
 }
 
-// whyFailed : a network failure's code, never its URL. Pure.
 function whyFailed(error: unknown): string {
   const code = field(field(error, "cause"), "code");
   return typeof code === "string" ? code : "the call failed";
 }
 
-// rest : one call; a failure names the route and the status, never the URL or the token
 async function rest(token: string, agent: string, call: RestCall): Promise<RestAnswer> {
   try {
     return await tried(token, agent, call, TRIES);
@@ -140,7 +134,8 @@ function connect(url: string, on: SocketEvents): Socket {
   };
 }
 
-// realTransport : Discord itself, as the bot whose token this is; agent names this software, as Discord asks
+// Discord asks for a User-Agent of the form DiscordBot ($url, $versionNumber)
+// https://docs.discord.com/developers/reference
 export function realTransport(token: string, version: string): Transport {
   const agent = `DiscordBot (agent-factory, ${version})`;
   return { connect, rest: (call) => rest(token, agent, call) };

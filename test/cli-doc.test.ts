@@ -29,7 +29,6 @@ async function help(argv: readonly string[]): Promise<{ readonly code: number; r
   return { code, out };
 }
 
-// the text between a heading line and the next line that starts at column 0
 function section(text: string, heading: string): string {
   const start = text.indexOf(`\n${heading}\n`);
   if (start === -1) {
@@ -44,7 +43,6 @@ function lists(text: string, name: string): boolean {
   return new RegExp(`^ {2}${name}(?:\\s|$)`, "m").test(text);
 }
 
-// a markdown section: from its "## " heading to the next one
 function mdSection(heading: string): string {
   const start = CLI_MD.indexOf(`\n## ${heading}\n`);
   if (start === -1) {
@@ -65,7 +63,6 @@ const INTERNAL_HEADING = "internal: the coordinator's, the orchestrator's and th
 describe("docs/reference/cli.md lists every command (#482)", () => {
   it("names each command the CLI takes as `agent-factory <command>`", () => {
     const missing = COMMAND_NAMES.filter((name) => !names(CLI_MD, name));
-    // a name here: add the command to its group in docs/reference/cli.md
     expect(missing).toEqual([]);
   });
 
@@ -75,7 +72,6 @@ describe("docs/reference/cli.md lists every command (#482)", () => {
     const misplaced = COMMAND_NAMES.filter((name) =>
       INTERNAL.has(name) ? names(you, name) || !names(others, name) : !names(you, name) || names(others, name),
     );
-    // a name here: move the command's row to its group, or move the name in or out of INTERNAL in src/app.ts
     expect(misplaced).toEqual([]);
   });
 });

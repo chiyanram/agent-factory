@@ -13,8 +13,8 @@ import type { Refused } from "../spec.js";
 import { waive, type Waive, type WaiveRequest } from "../waiver.js";
 import { isVouched, type Person } from "./person.js";
 
-// what marks a model run: Claude Code sets CLAUDECODE for every command it runs, and the agent adapter
-// (agent/claude.ts, agent/copilot.ts, agent/claude-writer.ts) sets AGENT_FACTORY_MODEL_RUN for every run it starts
+// Claude Code sets CLAUDECODE in every subprocess it spawns; the agent adapter sets AGENT_FACTORY_MODEL_RUN
+// https://code.claude.com/docs/en/env-vars
 export const MODEL_RUN_MARKERS = ["CLAUDECODE", ...Object.keys(MODEL_RUN_MARK)] as const;
 
 export type StartAs = Omit<StartRequest, "by" | "via">;
@@ -22,7 +22,6 @@ export type ApproveAs = Omit<ApproveRequest, "by" | "via">;
 export type WaiveAs = Omit<WaiveRequest, "by" | "via">;
 export type AcceptAs = Omit<AcceptRequest, "by" | "via">;
 
-// refusal : why this person's word cannot be written here, or undefined when it can
 function refusal(person: Person, env: NodeJS.ProcessEnv): Refused | undefined {
   if (!isVouched(person)) {
     return { kind: "refused", reason: "no front door verified this person: a door's own check must vouch for them" };
@@ -36,7 +35,6 @@ function refusal(person: Person, env: NodeJS.ProcessEnv): Refused | undefined {
       };
 }
 
-// signed : the person's by and via, over any the request carried
 function signed(person: Person): { readonly by: string; readonly via: Person["via"] } {
   return { by: person.by, via: person.via };
 }
@@ -53,7 +51,6 @@ export async function waiveAs(person: Person, request: WaiveAs, env: NodeJS.Proc
   return refusal(person, env) ?? waive({ ...request, ...signed(person) });
 }
 
-// acceptAs : the person's acceptance of a staged brief and glossary (onboard/home.ts); the project home it moved them to
 export async function acceptAs(person: Person, request: AcceptAs, env: NodeJS.ProcessEnv): Promise<Accept> {
   return refusal(person, env) ?? accept({ ...request, ...signed(person) });
 }

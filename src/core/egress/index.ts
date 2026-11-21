@@ -2,6 +2,8 @@
 // allowlist (ADR-0014 P3) and, at work, the corporate proxy. openEgress checks the list, writes the Squid config and
 // starts the project's own proxy, then gives back the address and the network a box joins (BoxSpec.proxy and
 // BoxSpec.network, #112). One proxy per project (decision on #30, 2026-11-07).
+//
+// The Squid image is pinned (ADR-0012 S7); FACTORY_EGRESS_IMAGE may replace it.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,7 +13,6 @@ import { parseAllowlist } from "./allowlist.js";
 import { squidConf, type Upstream } from "./squid.js";
 import { egressNames, startEgress, type Started } from "./start.js";
 
-// Canonical's Squid 6.6 on Ubuntu 24.04, the box's own base (S7: pinned); FACTORY_EGRESS_IMAGE may replace it
 export const DEFAULT_EGRESS_IMAGE =
   "ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c";
 
@@ -30,14 +31,11 @@ export {
 } from "./start.js";
 
 export type EgressSetup = {
-  // a plain project name (spec.ts): it names the proxy, its network and its config folder
   readonly project: string;
   readonly allowlist: readonly string[];
-  // the project's own git host, refused on the list besides the public ones (allowlist.ts)
   readonly gitHosts: readonly string[];
   readonly upstream: Upstream;
   readonly image: PinnedImage;
-  // where the rendered configs are kept: <factory home>/egress; each project's in its own folder
   readonly dir: string;
   readonly docker: { readonly run: Runner; readonly bin: string; readonly env: NodeJS.ProcessEnv };
 };

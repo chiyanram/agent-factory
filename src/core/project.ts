@@ -36,10 +36,8 @@ import { runEnv } from "./settings/machine.js";
 import { capsOf, copilotCapsGap } from "./dispatch/caps.js";
 import { COPILOT_ON, COPILOT_ROLES, COPILOT_TICKET, type AgentName, type AgentRole } from "./agent/switch.js";
 
-// a command with no shell: argv[0] is the program
 export type Argv = readonly [string, ...string[]];
 
-// a read: the file, none at all (the project uses no ready check or verifier yet), or one that is there but refused
 export type ProjectRead =
   | { readonly kind: "ok"; readonly value: ProjectFile }
   | { readonly kind: "missing"; readonly reason: string }
@@ -50,12 +48,9 @@ export type ProjectFile = {
   readonly ready: {
     readonly programs: readonly string[];
     readonly timeoutSeconds: number;
-    // the globs the floor guard reads as test files (#190)
     readonly testFiles: readonly string[];
-    // the judge files this project adds to the built-in ones (#231; ready/judge.ts judgeFiles); none is []
     readonly judgeFiles: readonly string[];
   };
-  // the hosts the project's boxes may reach, checked; empty when the file names none
   readonly egress: { readonly allow: readonly string[] };
 };
 
@@ -70,7 +65,6 @@ function word(value: unknown): value is string {
   return typeof value === "string" && value !== "" && !value.includes("\u0000");
 }
 
-// argvOf : a non-empty list of non-empty strings, or "bad"
 export function argvOf(value: unknown): Argv | "bad" {
   if (!Array.isArray(value) || !value.every(word)) {
     return "bad";
@@ -124,7 +118,6 @@ function readyOf(path: string, raw: unknown): Result<ProjectFile["ready"]> {
     : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles, judgeFiles } };
 }
 
-// judgeFilesOf : the project's added judge files; a deny-list key, so none adds nothing and an empty list is fine
 function judgeFilesOf(value: unknown): readonly string[] | "bad" {
   if (value === undefined) {
     return [];
@@ -144,7 +137,6 @@ function allowOf(egress: unknown): readonly string[] | "bad" {
   return Array.isArray(allow) && allow.every(word) ? allow.filter(word) : "bad";
 }
 
-// gitHostsOf : the project's own git host, refused on its allowlist: the gitHostName its settings set, or this machine's
 function gitHostsOf(raw: unknown, env: NodeJS.ProcessEnv): readonly string[] {
   const own = prop(raw, "gitHostName");
   return ownGitHostsOf([typeof own === "string" ? own : undefined, settingOf(env, "gitHostName")]);
@@ -185,7 +177,6 @@ const OFF = {
   writer: `Copilot writer runs are off until a real run is checked (${COPILOT_TICKET.writer})`,
 };
 
-// agentProblem : why one "agents" entry is refused, or "" when it is fine. Pure.
 function agentProblem(role: string, cli: unknown): string {
   const kind = ROLE_KIND.get(role);
   if (kind === undefined) {
@@ -196,12 +187,10 @@ function agentProblem(role: string, cli: unknown): string {
     : `"agents.${role}" must be "claude" or "copilot", got ${JSON.stringify(cli)}`;
 }
 
-// offProblem : why a role may not run on this CLI yet, or "": Copilot is off until each kind is turned on. Pure.
 function offProblem(role: string, kind: "readOnly" | "writer", cli: AgentName): string {
   return cli === "copilot" && !COPILOT_ON[kind] ? `"agents.${role}": ${OFF[kind]}` : "";
 }
 
-// agentsOf : the agent CLI per role a project file names; a role it does not name runs on claude. Pure.
 export function agentsOf(raw: object): Result<Agents> {
   const agents = prop(raw, "agents");
   if (agents === undefined) {
@@ -235,7 +224,6 @@ export function projectPath(home: string, project: string): string {
   return join(home, "projects", `${project}.json`);
 }
 
-// the files that sit beside a project's file in <home>/projects, each <project>.<kind>.json; none of them is a project
 const SIDE_FILES = ["plugins"] as const;
 export type SideFile = (typeof SIDE_FILES)[number];
 
@@ -243,23 +231,16 @@ export function sidePath(home: string, project: string, kind: SideFile): string 
   return join(home, "projects", `${project}.${kind}.json`);
 }
 
-// projectOfFile : the project whose project file a file name in <home>/projects is, or undefined when it is not one:
-// not *.json, not a plain name, or a side file
 export function projectOfFile(file: string): string | undefined {
   const name = file.endsWith(".json") ? file.slice(0, -".json".length) : "";
   return plainName(name) && !SIDE_FILES.some((kind) => name.endsWith(`.${kind}`)) ? name : undefined;
 }
 
-// a read of the file as JSON, not yet checked: its path and its value, none at all, or one that is refused
 export type RawRead =
   | { readonly kind: "ok"; readonly path: string; readonly value: object }
   | Missing
   | { readonly kind: "failed"; readonly reason: string };
 
-// readProjectRaw : the project's settings as one JSON object in the project file's shape, with the team and user
-// layers resolved into it on this host (#229; settings/layers.ts); `missing` says what the caller needs it for. A
-// layer that loosens a safety key refuses the read, so no run starts on it. With no team pin and no user file, the
-// value is the project file's own, as it was before the layers.
 export async function readProjectRaw(
   input: { readonly home: string; readonly project: string; readonly env?: NodeJS.ProcessEnv },
   missing: string,
@@ -296,10 +277,6 @@ async function withLayers(
 
 export type RunSettings = { readonly env: NodeJS.ProcessEnv; readonly warnings: readonly string[] };
 
-// runSettings : the layers resolved once on the host before a run (#254): the env its modules read, with each machine
-// key a file sets in place (settings/machine.ts), and the warnings to print. A layer that loosens a safety key
-// refuses the run. With no project file, the team is none and the user file still applies; a command that names no
-// project (poll, status: undefined) resolves only the user and machine layers.
 export async function runSettings(input: {
   readonly home: string;
   readonly project: string | undefined;
@@ -340,8 +317,6 @@ async function resolvedRun(
   return gap === "" ? { kind: "ok", value: { env, warnings } } : failed(path, gap);
 }
 
-// capsGap : why the caps refuse the roles this file gives Copilot, or "" (dispatch/caps.ts copilotCapsGap); a bad cap
-// is left for the caps' own reader to refuse
 function capsGap(env: NodeJS.ProcessEnv, agents: Agents): string {
   const caps = capsOf(env);
   return caps.kind === "ok" ? copilotCapsGap(caps.value, agents) : "";
@@ -378,10 +353,6 @@ export async function readProjectFile(input: {
 const NO_GATE = "write gate, verify and ready.programs before the ready check or the verifier runs";
 const READY_KEYS = ["gate", "verify", "ready", "egress"];
 
-// readyFieldsOf : the ready check's fields of one project file's JSON. A file with none of them, such as one that
-// `project init` wrote for the plugin fields alone, reads as no ready settings, the same as no file; once any is there,
-// each is checked, so a typo never turns a local gate into forge CI. env names this machine's own git host, which the
-// egress allowlist refuses besides any the file names (#485).
 export function readyFieldsOf(path: string, raw: object, env: NodeJS.ProcessEnv): ProjectRead {
   return READY_KEYS.some((k) => Object.hasOwn(raw, k))
     ? fields(path, raw, env)

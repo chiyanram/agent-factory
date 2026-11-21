@@ -108,7 +108,6 @@ describe("openBox", () => {
   });
 });
 
-// a fake box hands on only what it is given: each spec's env, and each command's argv; every run prints one line
 boxContract("fake", () => {
   const printed = { ...EXIT_0, stdout: "streamed\n" };
   const fake = fakeBox({ runs: [printed, printed, printed, printed] });

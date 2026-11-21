@@ -18,7 +18,6 @@ const INLINE = /\]\(([^)]*)\)/g;
 const REFERENCE = /^\s*\[[^\]]+\]:\s+(\S+)/;
 const SKIP = /^(#|https?:\/\/|mailto:)/;
 
-// lineLinks : the link targets on one line outside inline code
 function lineLinks(raw: string, line: number): readonly Link[] {
   const text = raw.replace(/`[^`]*`/g, "");
   const inline = Array.from(text.matchAll(INLINE), (m) => ({ line, target: m[1] ?? "" }));
@@ -26,7 +25,6 @@ function lineLinks(raw: string, line: number): readonly Link[] {
   return ref === null ? inline : [...inline, { line, target: ref[1] ?? "" }];
 }
 
-// links : every link target in the text, with its line, outside fences and inline code
 export function links(text: string): readonly Link[] {
   const out: Link[] = [];
   let fence = false;
@@ -44,7 +42,6 @@ function before(text: string, mark: string): string {
   return text.split(mark)[0] ?? "";
 }
 
-// pathOf : the file a target names, or "" for one that is not a local path
 export function pathOf(target: string): string {
   const bare = before(before(target.replace(/^</, ""), ">"), " ");
   return bare === "" || SKIP.test(bare) ? "" : before(before(bare, "#"), "?").replaceAll("%20", " ");
@@ -59,7 +56,6 @@ function tracked(root: string): readonly string[] {
   return out.split("\0").filter((f) => f !== "");
 }
 
-// brokenIn : one line per link in `file` that points at no file
 function brokenIn(root: string, file: string): readonly string[] {
   return links(readFileSync(join(root, file), "utf8")).flatMap((link) => {
     const path = pathOf(link.target);
@@ -68,7 +64,6 @@ function brokenIn(root: string, file: string): readonly string[] {
   });
 }
 
-// broken : one line per link that points at no file
 export function broken(root: string): readonly string[] {
   return tracked(root).flatMap((file) => brokenIn(root, file));
 }

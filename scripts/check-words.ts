@@ -26,7 +26,6 @@ export const OLD: readonly { readonly word: RegExp; readonly use: string }[] = [
   { word: /\bworkers?\b/i, use: "run" },
 ];
 
-// the .md files in DIR, from ROOT, sorted; none when DIR is not there
 function mdIn(root: string, dir: string): readonly string[] {
   const at = join(root, dir);
   return existsSync(at)
@@ -37,8 +36,6 @@ function mdIn(root: string, dir: string): readonly string[] {
     : [];
 }
 
-// DOCS : the files checked, from ROOT: the root docs, the how-to, reference and explanation pages (#378), the
-// coordinator's instructions and every role card
 export function docs(root: string): readonly string[] {
   const pages = ["docs/how-to", "docs/reference", "docs/explanation"].flatMap((d) => mdIn(root, d));
   return [
@@ -53,7 +50,6 @@ export function docs(root: string): readonly string[] {
   ];
 }
 
-// prose : one line with what names an identifier, a path or a link taken out
 export function prose(line: string): string {
   return line
     .replace(/`[^`]*`/g, " ")
@@ -62,7 +58,6 @@ export function prose(line: string): string {
     .replace(/https?:\/\/\S+/g, " ");
 }
 
-// findings : file:line, the old word and the word to use, for each old word in the prose of one file's text
 export function findings(file: string, text: string): readonly string[] {
   const out: string[] = [];
   let fenced = false;

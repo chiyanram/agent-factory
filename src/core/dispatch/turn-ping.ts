@@ -3,6 +3,7 @@
 // first, so the ping goes once; a change of step inside that lane pings nothing, as AO pings once on entering its
 // needs-input family and Gerrit notifies on entering the attention set. Leaving to the factory's turn is recorded and
 // re-arms the ping. There is no "resolved" ping: a webhook post cannot be taken back.
+// https://gerrit-review.googlesource.com/Documentation/user-attention-set.html
 //
 // A ticket whose records hold no "turn" line yet gets one on its next pass, with no ping for a turn its older lines say
 // a person was already pinged for (records.ts seedTurn). Held-build and day-cap pings inform and ask nothing of a
@@ -13,10 +14,8 @@ import { whoseTurn, type Lane, type Turn } from "./next-step.js";
 import type { Summary } from "./records.js";
 import { LABEL_WAIT, type Action, type TicketState } from "./table.js";
 
-// what a pass does about the ticket's turn: the lane to record ("none": nothing), and whether a person is pinged
 export type TurnStep = { readonly record: Lane | "none"; readonly ping: boolean };
 
-// turnStep : the turn to record and the ping to send, from the recorded turn and the lane the ticket is in now. Pure.
 export function turnStep(runs: Pick<Summary, "turn" | "turnRead">, lane: Lane): TurnStep {
   const moved = runs.turn !== lane;
   return {
@@ -25,14 +24,10 @@ export function turnStep(runs: Pick<Summary, "turn" | "turnRead">, lane: Lane): 
   };
 }
 
-// turnDue : whether the ticket entered a person's turn that no pass has pinged yet, so the orchestrator loop runs one
-// more pass to send it (GLOSSARY "in flight": a ping is due). Pure.
 export function turnDue(state: TicketState, action: Action): boolean {
   return turnStep(state.runs, whoseTurn(action).lane).ping;
 }
 
-// whyOf : what the person reads: the action's why, or, for the needs-human label's wait, the newest hand-over's. A
-// hand-over and the label's wait also say why the writer's run was blocked, which no other line says. Pure.
 function whyOf(action: Action, runs: Pick<Summary, "blocked" | "blockedRun">, turn: Turn): string {
   const own = ownWhy(action, turn);
   if (action.kind === "wait" && own === LABEL_WAIT) {
@@ -41,12 +36,10 @@ function whyOf(action: Action, runs: Pick<Summary, "blocked" | "blockedRun">, tu
   return action.kind === "needs-human" ? withRun(own, runs.blockedRun) : own;
 }
 
-// withRun : a hand-over's why, and the blocked run's when there is one it does not already say. Pure.
 function withRun(why: string, blockedRun: string): string {
   return blockedRun === "" || why.includes(blockedRun) ? why : `${why}; ${blockedRun}`;
 }
 
-// ownWhy : the action's own why, a design note's named as the design review's; the step for an action with none. Pure.
 function ownWhy(action: Action, turn: Turn): string {
   if (action.kind === "design-note") {
     return `design review: ${action.why}`;
@@ -54,7 +47,6 @@ function ownWhy(action: Action, turn: Turn): string {
   return "why" in action ? action.why : turn.step.does;
 }
 
-// headOf : the head a ready-to-merge ping names: the ping action's, or the open change's
 function headOf(state: TicketState, action: Action): string {
   if (action.kind === "ping") {
     return action.head;
@@ -62,7 +54,6 @@ function headOf(state: TicketState, action: Action): string {
   return state.change.kind === "open" ? state.change.line.head : "";
 }
 
-// turnPing : the ping for a ticket that entered a person's turn. Pure.
 export function turnPing(input: {
   readonly state: TicketState;
   readonly action: Action;

@@ -25,19 +25,16 @@ import { parseArgs as parse } from "node:util";
 import { type Config, classifiers, resolveConfig } from "repo-gardener/src/config.mjs";
 import type * as Numbers from "../src/core/garden/numbers.js";
 
-// the rules live in src/ (a leaf), loaded on Node's type stripping
 const numbers: typeof Numbers = await import(new URL("../src/core/garden/numbers.ts", import.meta.url).href);
 
 const GARDENER = fileURLToPath(import.meta.resolve("repo-gardener/src/cli.mjs"));
 
-// one touched file: its path at the merge base and at the head (the same unless it was renamed)
 export type Touched = { readonly before: string; readonly after: string };
 
 export type Args = { readonly base: string; readonly head: string; readonly json: boolean };
 
 type Ran = { readonly kind: "ok"; readonly stdout: string } | { readonly kind: "failed"; readonly reason: string };
 
-// parseArgs : the options, or why they are not understood
 export function parseArgs(argv: readonly string[]): Args | string {
   try {
     const { values } = parse({
@@ -56,14 +53,11 @@ export function parseArgs(argv: readonly string[]): Args | string {
   }
 }
 
-// how many fields one entry of `git diff --name-status -z` takes: a rename or a copy names two paths
 const width = (status: string | undefined): number => (/^[RC]/.test(status ?? "") ? 3 : 2);
 
-// one entry: a copy is measured as a new file, a rename at its old path before and its new path after
 const entry = ([status = "", first = "", second = first]: readonly string[]): Touched =>
   status.startsWith("C") ? { before: second, after: second } : { before: first, after: second };
 
-// touchedOf : the files of `git diff --name-status -z -M`, a rename paired with its old path
 export function touchedOf(nameStatus: string): readonly Touched[] {
   const parts = nameStatus.split("\0").filter((p) => p !== "");
   const out: Touched[] = [];
@@ -77,7 +71,6 @@ function run(cwd: string, program: string, args: readonly string[]): Ran {
   return { kind: "failed", reason: `${[program, ...args].join(" ")}: ${(r.stderr || r.error?.message || "").trim()}` };
 }
 
-// a config file's text as a JSON object, or why it is not one
 function parseConfig(text: string): Record<string, unknown> | string {
   try {
     const value: unknown = JSON.parse(text);
@@ -89,7 +82,6 @@ function parseConfig(text: string): Record<string, unknown> | string {
   }
 }
 
-// the merge base's gardener.config.json as JSON, or {} when it has none
 function baseConfig(cwd: string, mergeBase: string): Record<string, unknown> | string {
   const listed = run(cwd, "git", ["ls-tree", "--name-only", mergeBase, "--", "gardener.config.json"]);
   if (listed.kind === "failed") return listed.reason;
@@ -98,7 +90,6 @@ function baseConfig(cwd: string, mergeBase: string): Record<string, unknown> | s
   return shown.kind === "failed" ? shown.reason : parseConfig(shown.stdout);
 }
 
-// one file at one commit, measured by gardener with a config whose code list is that file
 function measure(cwd: string, dir: string, user: Record<string, unknown>, rev: string, path: string): Numbers.Read {
   const config = join(dir, "gardener.config.json");
   writeFileSync(config, JSON.stringify({ ...user, code: [path] }));
@@ -126,7 +117,6 @@ function sha(cwd: string, args: readonly string[]): string | { readonly reason: 
   return r.kind === "ok" ? r.stdout.trim() : { reason: r.reason };
 }
 
-// the head and its merge base with the base, as full SHAs
 function revs(cwd: string, args: Args): Revs | string {
   const head = sha(cwd, ["rev-parse", "--verify", `${args.head}^{commit}`]);
   if (typeof head !== "string") return head.reason;
@@ -134,7 +124,6 @@ function revs(cwd: string, args: Args): Revs | string {
   return typeof mergeBase === "string" ? { head, mergeBase } : mergeBase.reason;
 }
 
-// the code files the change touches, by the merge base's definition of code
 function touchedCode(cwd: string, at: Revs, config: Config): readonly Touched[] | string {
   const diff = run(cwd, "git", ["diff", "--name-status", "-z", "-M", at.mergeBase, at.head]);
   if (diff.kind === "failed") return diff.reason;
@@ -142,7 +131,6 @@ function touchedCode(cwd: string, at: Revs, config: Config): readonly Touched[] 
   return touchedOf(diff.stdout).filter((t) => is.isCode(t.before) || is.isCode(t.after));
 }
 
-// each touched file measured at the merge base and at the head, or the first file that could not be
 function rowsFor(
   cwd: string,
   user: Record<string, unknown>,
@@ -165,7 +153,6 @@ function rowsFor(
   }
 }
 
-// report : the module numbers of the change from base to head in the repository at cwd, or why it cannot measure
 export function report(cwd: string, args: Args): Report | string {
   const at = revs(cwd, args);
   if (typeof at === "string") return at;

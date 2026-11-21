@@ -45,7 +45,6 @@ function writeProject(value: unknown): string {
 function writeUser(value: unknown): void {
   writeFileSync(join(home, "user.json"), text(value));
 }
-// commitTeam : the team's clone with one more commit of team.json; its id
 function commitTeam(value: unknown): string {
   const dir = join(home, "teams", "acme");
   mkdirSync(dir, { recursive: true });
@@ -61,8 +60,6 @@ function commitTeam(value: unknown): string {
 const BASE = { gate: "forge-ci", ready: { programs: ["make", "npm"], timeoutMinutes: 30 } };
 
 type Run = { readonly code: number; readonly out: string; readonly err: string };
-// discordOn : the Discord plugin on at user scope, in the Claude config folder cli points at, so config check has no
-// plugin warning
 function discordOn(): string {
   const config = join(home, "claude");
   const id = "discord@claude-plugins-official";
@@ -96,8 +93,6 @@ async function cli(argv: readonly string[], env?: NodeJS.ProcessEnv): Promise<Ru
   });
   return { code, out, err };
 }
-
-// ---- golden: with no team file and no user file, every value is today's
 
 type Fixture = { readonly name: string; readonly text: string };
 
@@ -159,11 +154,9 @@ describe("settings golden: no team file and no user file resolve to today's valu
   it.each(objects.map((f) => [f.name, f.text]))("%s: read as before", async (_name, fileText) => {
     const path = writeProject(fileText);
     const raw = Object(parsedOrUndefined(fileText));
-    // what the readers made of the file before the layers
     expect(await readProjectFile({ home, project: "ledger" })).toEqual(readyFieldsOf(path, raw, process.env));
     expect(await readPluginConfig({ home, project: "ledger" })).toEqual(pluginConfigOf(path, raw));
     expect(await readProjectRaw({ home, project: "ledger" }, "")).toEqual({ kind: "ok", path, value: raw });
-    // and every file key's resolved value is the file's own, or the reader's default
     const resolution = await layered({ home, env: {}, project: { path, text: fileText, value: raw } });
     expect(resolution.problems.filter((p) => p.level === "error")).toEqual([]);
     const keys = resolution.values.filter((r) => r.key.where === "file" && r.key.fixed === undefined);
@@ -184,9 +177,6 @@ describe("settings golden: no team file and no user file resolve to today's valu
   });
 });
 
-// ---- property: no safety value is ever looser than the team value
-
-// a small seeded generator, so a failure repeats
 function rng(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
@@ -249,13 +239,10 @@ function pickOf(next: () => number): <T>(xs: readonly T[]) => T | undefined {
   return (xs) => xs[Math.floor(next() * xs.length)];
 }
 
-// a team or user file sets a policy point's mode and cap together
 function partnerSet(value: object, key: FileKey): boolean {
   return key.id.endsWith(".cap") && atPath(value, [...key.path.slice(0, -1), "mode"]).found;
 }
 
-// randomValues : random values for one layer's file keys; a project-only key goes in the project layer alone, since a
-// team or user file that sets it is refused by design (#369, #485)
 function randomValues(next: () => number, name: FileLayer["name"]): Record<string, unknown> {
   const value: Record<string, unknown> = {};
   const pick = pickOf(next);
@@ -310,7 +297,6 @@ function notLooser(key: FileKey, got: unknown, above: unknown, mode: string): bo
   return mode === "locked" ? canonical(got) === canonical(above) : NOT_LOOSER[key.class](key, got, above, mode);
 }
 
-// unread : the project file's readers would get another value (the engine's fixed keys have no reader)
 function unread(key: FileKey, got: Resolved, effective: object): boolean {
   return key.fixed === undefined && canonical(atPath(effective, key.path).value) !== canonical(got.value);
 }
@@ -331,7 +317,6 @@ function breach(
   return key.where === "file" ? fileBreach(key, team, modes.get(key.id) ?? "default", effective, got) : [];
 }
 
-// breaches : each safety key whose resolved value is looser than the team's, or that the readers would not get
 function breaches(
   team: FileLayer,
   modes: ReadonlyMap<string, string>,
@@ -354,13 +339,10 @@ describe("settings property: a safety value is never looser than the team's (#22
       found.push(...breaches(team, modes, r));
     }
     expect(found).toEqual([]);
-    // both outcomes happen, so the property is not empty
     expect(refused).toBeGreaterThan(0);
     expect(refused).toBeLessThan(2000);
   });
 });
-
-// ---- the classes, one by one
 
 function layer(name: FileLayer["name"], value: object): FileLayer {
   return { name, file: `/${name}.json`, value, lines: keyLines(text(value)) };
@@ -372,7 +354,6 @@ function resolved(layers: readonly FileLayer[]): ReturnType<typeof resolve> {
 function valueOf(r: ReturnType<typeof resolve>, id: string): Resolved | undefined {
   return r.values.find((v) => v.key.id === id);
 }
-// readOnly : one key's resolved value, srt.readOnly by default
 function readOnly(r: ReturnType<typeof resolve>, id = "srt.readOnly"): unknown {
   return valueOf(r, id)?.value;
 }
@@ -432,20 +413,17 @@ describe("resolve: each class (#229)", () => {
     const add = resolved([team, layer("user", { srt: { readOnly: ["~/.cargo", "~/tools"] } })]);
     expect(valueOf(add, "srt.readOnly")).toMatchObject({ value: ["~/.cargo"], key: { class: "allow-list" } });
     expect(errors(add)[0]).toContain('srt.readOnly: the user layer (/user.json:3) adds ["~/tools"]');
-    // the runner kind sits beside it, unchanged
     expect(readOnly(add, "runner")).toBe("srt");
     const open = layer("team", { srt: { readOnly: ["~/.cargo"] }, modes: { "srt.readOnly": "open" } });
     const widened = resolved([open, layer("user", { srt: { readOnly: ["~/tools"] } })]);
     expect(readOnly(widened)).toEqual(["~/.cargo", "~/tools"]);
     expect(errors(widened)).toEqual([]);
-    // the machine layer: a JSON list or a PATH-style list, which adds only where the team marks it open
     const env = (value: string, layers: readonly FileLayer[]) =>
       resolve({ layers, modes: modesOf(layers.at(0)).modes, env: { FACTORY_SRT_READ_ONLY: value }, problems: [] });
     expect(readOnly(env("~/a:~/b", []))).toEqual(["~/a", "~/b"]);
     expect(readOnly(env('["~/a"]', []))).toEqual(["~/a"]);
     expect(errors(env("~/.cargo:~/x", [team]))[0]).toContain('adds ["~/x"]');
     expect(readOnly(env("~/x", [open]))).toEqual(["~/.cargo", "~/x"]);
-    // a team or user file must hold a list of folders
     expect(errors(resolved([layer("user", { srt: { readOnly: "~/.cargo" } })]))[0]).toContain(
       "srt.readOnly in /user.json:3 must be a list of folders under your home",
     );

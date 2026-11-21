@@ -40,14 +40,12 @@ function testFilesOf(value: unknown): readonly string[] {
     : TEST_FILES;
 }
 
-// lensesIn : the "review.lenses" of a project's settings; none when it names none
 function lensesIn(path: string, value: object): Result<readonly Lens[]> {
   const listed = prop(prop(value, "review"), "lenses");
   const lenses = listed === undefined ? [] : lensListOf(listed);
   return lenses === "bad" ? failed(`${path}: "review.lenses" must be ${LENSES_HINT}`) : { kind: "ok", value: lenses };
 }
 
-// lensSetupOf : what the lens pick reads from the project's settings; a lens list that is not one is refused
 export async function lensSetupOf(where: {
   readonly home: string;
   readonly project: string;
@@ -68,11 +66,8 @@ export async function lensSetupOf(where: {
     : oneWayDoor;
 }
 
-// the lens a project that names none runs: one finder on the baseline review checks
 export const BASELINE: Lens = { name: BASELINE_LENS, rubric: { kind: "baseline" }, paths: [], lanes: [] };
 
-// the built-in test-integrity lens: the crq test-integrity reference of the plugin the review references come from
-// (plugin "" names that plugin; chiyanram/skills#235)
 export const BUILT_IN_TEST_INTEGRITY: Lens = {
   name: TEST_INTEGRITY,
   rubric: { kind: "skill", plugin: "", skill: "crq", reference: "test-integrity" },
@@ -80,14 +75,11 @@ export const BUILT_IN_TEST_INTEGRITY: Lens = {
   lanes: [],
 };
 
-// roundLenses : the lenses a round picks from. Pure.
 export function roundLenses(configured: readonly Lens[]): readonly Lens[] {
   const own = configured.length === 0 ? [BASELINE] : configured;
   return own.some((l) => l.name === TEST_INTEGRITY) ? own : [...own, BUILT_IN_TEST_INTEGRITY];
 }
 
-// touchedOf : the change's files from `git diff --name-status -z`, a status then a path each; added ones did not
-// exist before. Pure.
 export function touchedOf(nameStatus: string): readonly Touched[] {
   const parts = nameStatus.split("\u0000").filter((p) => p !== "");
   const touched: Touched[] = [];
@@ -97,8 +89,6 @@ export function touchedOf(nameStatus: string): readonly Touched[] {
   return touched;
 }
 
-// where a skill rubric's plugin is: "" is the plugin the review's references come from; a name matches a plugin's
-// label, with or without its @marketplace
 function pluginDir(plugin: string, references: string, plugins: readonly PluginDir[]): string | undefined {
   if (plugin === "") {
     return references;
@@ -136,7 +126,6 @@ async function fileText(
     : failed(`cannot read ${path} at ${at.master.slice(0, 8)} on the default branch`);
 }
 
-// rubricText : a lens's rubric; "" for the baseline lens, whose checks are in the pack already
 export async function rubricText(
   lens: Lens,
   from: {
@@ -157,7 +146,6 @@ export async function rubricText(
   return text.kind === "ok" ? text : failed(`the rubric of the lens ${lens.name}: ${text.reason}`);
 }
 
-// lensPack : the finder's pack: the round's pack, then the lens's rubric as section 8, fenced as data. Pure.
 export function lensPack(pack: string, lens: Lens, rubric: string): string {
   if (lens.rubric.kind === "baseline") {
     return pack;

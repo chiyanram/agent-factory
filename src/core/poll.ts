@@ -29,8 +29,6 @@ import type { Quarantined } from "./process/quarantine.js";
 import type { Result } from "./forge/api.js";
 import type { Changes, Forge, Mergeable, OpenChange, Person, Pipeline } from "./forge/types.js";
 
-// stopped: the /stop's time, as ISO 8601 UTC; undated: a /stop whose time did not parse, which holds the change until a
-// human looks, since no approval can be shown to be newer.
 export type Stop =
   | { readonly kind: "none" }
   | { readonly kind: "stopped"; readonly at: string }
@@ -41,7 +39,6 @@ export type OpenLine = {
   readonly number: number;
   readonly branch: string;
   readonly fork: boolean;
-  // the newest comment's time, "" for none: how quiet the change is
   readonly lastNoteAt: string;
   readonly head: string;
   readonly draft: boolean;
@@ -50,12 +47,9 @@ export type OpenLine = {
   readonly needsHuman: boolean;
   readonly stop: Stop;
   readonly asks: number;
-  // how many of the open asks are malformed (#517): they hold the change until a person deletes the note; none when 0
   readonly malformed?: number;
-  // the newest ask's answers once every question is answered (#486); none while it is open or with no ask
   readonly answers?: readonly Answer[];
   readonly mergeable: Mergeable;
-  // the quarantined checks that let a red head read as passed (#485; process/quarantine.ts); set by the pass, never poll
   readonly quarantined?: readonly Quarantined[];
 };
 
@@ -74,7 +68,6 @@ function names(team: readonly Person[], keep: (p: Person) => boolean): ReadonlyS
   return new Set(team.filter(keep).map((p) => p.name.toLowerCase()));
 }
 
-// A time that does not parse is taken as the newest, so a garbled /stop still stops.
 function instant(at: string): number {
   const time = Date.parse(at);
   return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
@@ -84,7 +77,6 @@ function firstLine(body: string): string {
   return (body.split(/\r?\n/, 1)[0] ?? "").trim();
 }
 
-// stop : a maintainer's last /stop. An agent note never counts: the template never starts a post with "/".
 export function stop(input: {
   readonly comments: readonly Note[];
   readonly readers: Readers;
@@ -131,7 +123,6 @@ function openLine(change: OpenChange, label: string, readers: Readers, maintaine
   };
 }
 
-// decide : the lines for what the forge answered, in change-number order.
 export function decide(input: {
   readonly changes: Changes;
   readonly label: string;
@@ -155,13 +146,11 @@ function yn(value: boolean): string {
 }
 
 function pipelineWord(p: Pipeline): string {
-  // what an unknown state said, kept to plain characters so it cannot break the line
   return p.kind === "unknown" ? `unknown:${p.raw.replace(/[^A-Za-z0-9_]/g, "_")}` : p.kind;
 }
 
 const CONFLICT_WORD: Readonly<Record<Mergeable, string>> = { conflict: "yes", clean: "no", unknown: "unknown" };
 
-// format : one line, as the coordinator and the human read it.
 export function format(input: { readonly line: PollLine; readonly mark: string }): string {
   const { line, mark } = input;
   if (line.kind === "merged") {
@@ -179,13 +168,10 @@ function malformedField(n: number): { readonly malformed?: number } {
   return n === 0 ? {} : { malformed: n };
 }
 
-// malformedWord : the malformed asks on poll's line, named so a person knows which note to delete (#517); "" for none
 function malformedWord(n: number | undefined): string {
   return n === undefined ? "" : ` malformed_asks=${n} (an OPEN round whose items do not match its title: delete it)`;
 }
 
-// poll : the forge's open and merged changes, decided. The factory's login comes from the forge, or with an App from its
-// token (src/core/identity.ts).
 export async function poll(input: {
   readonly forge: Forge;
   readonly label: string;

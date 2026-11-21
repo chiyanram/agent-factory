@@ -12,9 +12,7 @@ import { handoffNote, type MapRead } from "./core/handoff.js";
 import { UTC } from "./core/zone.js";
 
 export type HandoffIo = Omit<BoardIo, "env"> & {
-  // the open issues that carry the map label (handoff.ts MAP_LABEL), on the read-only git host
   readonly maps: () => Promise<Result<readonly Waiting[]>>;
-  // one map issue's body, on the read-only git host
   readonly mapBody: (number: number) => Promise<Result<string>>;
 };
 
@@ -24,7 +22,6 @@ export const HANDOFF_HELP = `  handoff [<project>]          the coordinator's re
                                fresh coordinator from it
 `;
 
-// mapsRead : each open map with its body, read at once; a body that cannot be read stays a failed read in the note
 async function mapsRead(io: HandoffIo): Promise<Result<readonly MapRead[]>> {
   const open = await io.maps();
   if (open.kind === "failed") {
@@ -36,9 +33,7 @@ async function mapsRead(io: HandoffIo): Promise<Result<readonly MapRead[]>> {
   return { kind: "ok", value: maps };
 }
 
-// handoffCommand : the note on stdout; exit 1, with the note still printed, when a section could not be read
 export async function handoffCommand(project: string, io: HandoffIo): Promise<number> {
-  // read once, so a failed read both shows in the note (doorBoard's needs-you line) and fails the command
   const waiting = await io.waiting();
   const lines = await doorBoard({
     home: io.home,

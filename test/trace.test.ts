@@ -16,11 +16,8 @@ import {
 } from "../src/core/dispatch/trace.js";
 import { tempDir } from "./temp.js";
 
-// A run's whole stream-json output is kept as its trace, beside the ticket's records, 30 days (#487).
-
 const DAY = 24 * 60 * 60_000;
 const AT = Date.parse("2026-11-13T06:07:15.123Z");
-// a token prefix, joined at run time, so no secret scanner reads this file as holding a token
 const TOKEN = `${["sk-ant-"].join("")}oat01-AAAAbbbbCCCCdddd`;
 
 let home = "";

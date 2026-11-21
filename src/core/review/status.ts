@@ -17,7 +17,6 @@ export type Box = {
 
 const PROTECTED =
   /^\.github\/workflows\/|^\.github\/actions\/|^\.gitlab-ci\.yml$|(^|\/)CODEOWNERS$|(^|\/)(AGENTS|CLAUDE|CLAUDE\.local)\.md$|(^|\/)\.claude\/|(^|\/)\.agents\//;
-// the build files and dependency manifests, as globs; the ready check's judge files (ready/judge.ts) start from them
 export const BUILD_FILES: readonly string[] = [
   "package.json",
   "package-lock.json",
@@ -43,7 +42,6 @@ export const BUILD_FILES: readonly string[] = [
   "Dockerfile",
 ].map((name) => `**/${name}`);
 
-// inGlobs : whether a path matches one of the globs; a glob that starts with **/ matches at the root too
 export function inGlobs(path: string, globs: readonly string[]): boolean {
   return globs.some((g) => globRegex(g).test(path) || globRegex(g).test(`/${path}`));
 }
@@ -75,7 +73,8 @@ function pomDeps(text: string): readonly string[] {
   );
 }
 
-// goDeps : the modules go.mod requires; a replace, exclude or retract block names no new dependency
+// a replace, exclude or retract directive names no new dependency
+// https://go.dev/ref/mod#go-mod-file-replace
 function goDeps(text: string): readonly string[] {
   const required = text.replace(/^\s*(?:replace|exclude|retract)\s*\([\s\S]*?^\s*\)/gm, "");
   return matches(required, /^\s*(?:require\s+)?([a-z0-9.-]+\.[a-z]+\/[^\s]+)\s+v/gm);
@@ -84,7 +83,6 @@ function goDeps(text: string): readonly string[] {
 const GRADLE =
   /\b(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testRuntimeOnly|annotationProcessor|kapt|ksp)\s*\(?\s*["']([^:"']+:[^:"']+)(?::[^"']*)?["']/g;
 
-// the dependencies one manifest names, by the kind of file it is
 const PARSERS: readonly { readonly file: RegExp; readonly read: (text: string) => readonly string[] }[] = [
   { file: /(^|\/)package\.json$/, read: jsonDeps },
   { file: /(^|\/)pom\.xml$/, read: pomDeps },
@@ -106,8 +104,6 @@ async function newIn(path: string, before: Reader, after: Reader): Promise<reado
   return [...new Set(parser.read(await after(path)))].filter((d) => !old.has(d)).map((d) => `${d} (${path})`);
 }
 
-// statusBox : the box for the files a change touches; `before` and `after` read a file at the merge-base and the head
-// ("" when it is not there)
 export async function statusBox(input: {
   readonly touched: readonly string[];
   readonly before: Reader;

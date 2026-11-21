@@ -24,7 +24,6 @@ const SECOND = "222222222222222222";
 const CHANNEL = "333333333333333333";
 const TOKEN_CANARY = "MTAx.canary-bot-token.never-printed";
 
-// the access.json the wall asks for: allowlist DMs, one project channel, its allowFrom the same mapped people
 function good(): Record<string, unknown> {
   return {
     dmPolicy: "allowlist",
@@ -53,7 +52,6 @@ describe("the --discord launch (#732 D-1)", () => {
     for (const flag of ["--continue", "-c", "--resume", "-r", "--dangerously-skip-permissions"]) {
       expect(argv).not.toContain(flag);
     }
-    // the plugin's permission relay stays off: no mode in which a prompt could reach it
     for (const mode of ["default", "auto", "acceptEdits", "bypassPermissions", "manual"]) {
       expect(argv).not.toContain(mode);
     }
@@ -109,7 +107,6 @@ describe("access.json, held to #548 S-2 (accessProblems)", () => {
 });
 
 describe("the state folder's files, by their stat", () => {
-  // a session user other than root, whatever user runs the suite
   const USER = 1000;
   const entry = (over: Partial<Entry>): Entry => ({
     mode: 0o100600,
@@ -137,7 +134,6 @@ describe("the state folder's files, by their stat", () => {
     );
     const folder = entry({ mode: 0o40700, file: false, folder: true });
     expect(stateFolderProblem("/s", folder, USER)).toBeUndefined();
-    // a folder the plugin cannot write leaves the coordinator deaf with every check green
     expect(stateFolderProblem("/s", { ...folder, uid: 0 }, USER)).toContain("belongs to another user");
     const root = entry({ mode: 0o100444, uid: 0 });
     expect(accessFileProblem("/s/access.json", root, "file")).toBeUndefined();
@@ -157,8 +153,6 @@ describe("checkDiscord and the launch, on planted files", () => {
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
-  // each plant starts from no files: a read-only access.json from an earlier plant cannot be written over by a
-  // user other than root
   const plant = (access: unknown = good(), tokenMode = 0o600): void => {
     rmSync(join(dir, ".env"), { force: true });
     rmSync(join(dir, "access.json"), { force: true });
@@ -203,7 +197,6 @@ describe("checkDiscord and the launch, on planted files", () => {
 
   const places = (): CoordinatorPlaces => ({ pkg: "/opt/agent-factory", factoryHome: home, botHome: "/home/factory" });
   const launch = { kind: "discord", project: "ledger", home: "", uid: ME } as const;
-  // the plugin in the session user's ~/.claude, as Claude Code 2.1.326 records an install at user scope
   const plugin = (enabled: boolean): void => {
     mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
     writeFileSync(
@@ -269,11 +262,9 @@ describe("checkDiscord and the launch, on planted files", () => {
         args: discordArgv().slice(1),
         cwd: join(home, "coordinator"),
         env: { PATH: "/usr/bin", DISCORD_ACCESS_MODE: "static", DISCORD_STATE_DIR: dir },
-        // the supervisor's: it ends the session at the reset size
         signal: expect.any(AbortSignal),
       },
     ]);
-    // a Discord session with no seat token of its own says the chat shares the runs' limit
     expect(err.join("")).toContain("shares the runs' limit");
     expect(err.join("")).toContain("belongs to the coordinator's own user");
   });
@@ -303,7 +294,6 @@ describe("checkDiscord and the launch, on planted files", () => {
     const calls: Parameters<Interactive>[0][] = [];
     const err: string[] = [];
     const marker = join(home, ".local", "state", "agent-factory", "coordinator-ledger.reset");
-    // a marker left from before the launch is not a reset
     mkdirSync(join(home, ".local", "state", "agent-factory"), { recursive: true });
     writeFileSync(marker, "1\n");
     const io = {
@@ -312,7 +302,6 @@ describe("checkDiscord and the launch, on planted files", () => {
       err: (t: string) => void err.push(t),
       pollMs: 5,
       seat: async () => ({ kind: "missing", reason: "none" }) as const,
-      // the first session runs until it is aborted, after its Stop hook wrote the marker; the second ends by itself
       interactive: (call: Parameters<Interactive>[0]) => {
         calls.push(call);
         if (calls.length > 1) {

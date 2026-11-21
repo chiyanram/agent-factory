@@ -10,7 +10,6 @@
 //
 // Every mode gives up after a time limit and prints {"error":"timeout"}, so a dropped packet never hangs the check.
 
-// how long one mode may take, in seconds; a scan of every port takes longer when the host drops instead of refusing
 export const PROBE_SECONDS = { connect: 20, scan: 300 } as const;
 
 export const PROBE = String.raw`

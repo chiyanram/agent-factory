@@ -5,6 +5,9 @@
 //
 // Each forge command may name its project first: `status ledger 12 <sha> "<line>"`. Its words are checked before the project's
 // settings are read (core/which-project.ts), so a wrong word prints the usage and nothing else.
+//
+// grill reads its questions file only under <home>/specs, through one handle opened with O_NOFOLLOW, and refuses a
+// hard link or a swapped path, so it reads no other file.
 
 import { homedir } from "node:os";
 import { constants } from "node:fs";
@@ -32,7 +35,6 @@ export type LoopIo = {
   readonly readStdin: () => Promise<string>;
 };
 
-// a command's words, checked: what it runs once the project's settings are resolved, or "usage"
 type Parsed = ((io: LoopIo) => Promise<number> | number) | "usage";
 
 type Act = (forge: Forge, label: string) => Promise<Result<string | readonly string[]>>;
@@ -46,19 +48,15 @@ const USAGE: Readonly<Record<string, string>> = {
   "writer-scope": "writer-scope '<JSON list of glob lists>'",
 };
 
-// loopUsage : the command's usage on stderr, exit 64
 export function loopUsage(name: string, io: { readonly err: (text: string) => void }): number {
   io.err(`usage: agent-factory ${USAGE[name] ?? name}\n`);
   return 64;
 }
 
-// the form with a project, for the message that asks to name one
 export function projectForm(name: string): string {
   return `agent-factory ${(USAGE[name] ?? name).replace("[<project>]", "<project>")}`;
 }
 
-// projectWord : the project a forge command names before its own words, if any: any first word that is not a change
-// number. poll and reconcile take no other word, so their one word is the project.
 export function projectWord(
   name: string,
   positionals: readonly string[],
@@ -80,7 +78,6 @@ function lines(value: string | readonly string[], dry: string): string {
   return (typeof value === "string" ? [value] : value).map((l) => `${l}${dry}\n`).join("");
 }
 
-// forgeOf : the project's forge and its claim label
 async function forgeOf(io: LoopIo): Promise<Result<{ readonly forge: Forge; readonly label: string }>> {
   const label = settingOf(io.env, "claimLabel") ?? DEFAULT_CLAIM_LABEL;
   if (label.trim() === "") {
@@ -90,7 +87,6 @@ async function forgeOf(io: LoopIo): Promise<Result<{ readonly forge: Forge; read
   return opened.kind === "ok" ? { kind: "ok", value: { ...opened.value, label } } : opened;
 }
 
-// onForge : the action on the project's forge; its lines on stdout, or why it failed on stderr
 async function onForge(name: string, io: LoopIo, act: Act): Promise<number> {
   const opened = await forgeOf(io);
   const done = opened.kind === "ok" ? await act(opened.value.forge, opened.value.label) : opened;
@@ -113,7 +109,6 @@ function atHead(name: "status" | "ask", positionals: readonly string[]): Parsed 
     : (io) => onForge(name, io, (forge) => ask({ forge, number, sha, text } satisfies AtHead));
 }
 
-// grillParsed : grill's words: the change, its head, and the questions file
 function grillParsed(positionals: readonly string[]): Parsed {
   const number = numberOf(positionals[0]);
   if (number === "bad" || positionals.length !== 3) {
@@ -130,8 +125,6 @@ function grillParsed(positionals: readonly string[]): Parsed {
   };
 }
 
-// questionsFrom : the round's questions, from a file under <home>/specs, the one folder the coordinator writes; a file
-// anywhere else is refused, so grill reads no other file (#517)
 export async function questionsFrom(env: NodeJS.ProcessEnv, file: string): Promise<Result<readonly Question[]>> {
   const home = homeOf(env);
   if (home.kind === "failed") {
@@ -142,12 +135,8 @@ export async function questionsFrom(env: NodeJS.ProcessEnv, file: string): Promi
   return read.kind === "ok" ? questionsOfText(read.value) : read;
 }
 
-// the most bytes a questions file may hold: 20 questions with their choices fit in far less
 export const MOST_QUESTIONS_BYTES = 64 * 1024;
 
-// readUnder : a file's text, opened once: never through a link at its end (O_NOFOLLOW), a regular file with one link
-// (a hard link to a file elsewhere is refused) and at most MOST_QUESTIONS_BYTES, whose real path is under `root` and
-// is the very file opened; read from that handle, so nothing can be swapped in between
 async function readUnder(path: string, root: string): Promise<Result<string>> {
   const refused = {
     kind: "failed",
@@ -165,8 +154,6 @@ async function readUnder(path: string, root: string): Promise<Result<string>> {
   }
 }
 
-// fileShape : "" when the opened file is a regular file with one link, small enough, at a real path under `root`;
-// else why it is refused
 async function fileShape(handle: FileHandle, path: string, root: string): Promise<string> {
   const st = await handle.stat();
   if (!plainSmallFile(st)) {
@@ -177,13 +164,10 @@ async function fileShape(handle: FileHandle, path: string, root: string): Promis
     : `the questions file must be a file under ${root}, got ${JSON.stringify(path)}`;
 }
 
-// plainSmallFile : a regular file with one link (no hard link to a file elsewhere) and at most MOST_QUESTIONS_BYTES
 function plainSmallFile(st: Stats): boolean {
   return st.isFile() && st.nlink === 1 && st.size <= MOST_QUESTIONS_BYTES;
 }
 
-// sameFileUnder : whether the path's real path is under the root's and is the very file the handle opened, so nothing
-// was swapped in between
 async function sameFileUnder(st: Stats, path: string, root: string): Promise<boolean> {
   const [real, base] = await Promise.all([realpath(path).catch(() => ""), realpath(root).catch(() => "")]);
   if (!under(real, base)) {
@@ -193,12 +177,10 @@ async function sameFileUnder(st: Stats, path: string, root: string): Promise<boo
   return at !== undefined && at.ino === st.ino && at.dev === st.dev;
 }
 
-// under : whether a real path is inside a real folder; neither may be "" (a path that did not resolve). Pure.
 function under(real: string, base: string): boolean {
   return real !== "" && base !== "" && real.startsWith(`${base}${sep}`);
 }
 
-// questionsOfText : the questions a file's JSON holds, checked as a report's are. Pure.
 function questionsOfText(text: string): Result<readonly Question[]> {
   let parsed: unknown;
   try {
@@ -210,14 +192,12 @@ function questionsOfText(text: string): Result<readonly Question[]> {
   if (read.kind === "bad") {
     return { kind: "failed", reason: read.problem };
   }
-  // a question that checks can still post damaged: refuse the file rather than post a round no reply can close (#517)
   const round = questionRound(read.value);
   const note = { seat: "coordinator", title: round.title, fields: [round.answer], items: round.items } as const;
   const back = readsBackAs(note, read.value);
   return back === "" ? { kind: "ok", value: read.value } : { kind: "failed", reason: back };
 }
 
-// homeOf : the factory's home, as dispatch reads it; a relative FACTORY_HOME is refused
 function homeOf(env: NodeJS.ProcessEnv): Result<string> {
   const home = env.FACTORY_HOME ?? join(homedir(), ".factory");
   return isAbsolute(home)
@@ -225,7 +205,6 @@ function homeOf(env: NodeJS.ProcessEnv): Result<string> {
     : { kind: "failed", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(home)}` };
 }
 
-// withLiveness : status's line, headed by when the orchestrator last ran and whether its loop runs (#103, #305)
 async function withLiveness(
   io: LoopIo,
   forge: Forge,
@@ -248,7 +227,6 @@ async function withLiveness(
     : done;
 }
 
-// lintEditCommand : the writer's lint hook; it reads no setting and names no project
 export async function lintEditCommand(positionals: readonly string[], io: LoopIo): Promise<number> {
   const [command] = positionals;
   if (command === undefined || positionals.length !== 1) {
@@ -260,7 +238,6 @@ export async function lintEditCommand(positionals: readonly string[], io: LoopIo
   return hooked.code;
 }
 
-// editScopeCommand : the coordinator's hook; it reads no setting and names no project
 export async function editScopeCommand(positionals: readonly string[], io: LoopIo): Promise<number> {
   const [specs] = positionals;
   if (specs === undefined || positionals.length !== 1) {
@@ -272,13 +249,12 @@ export async function editScopeCommand(positionals: readonly string[], io: LoopI
   return hooked.code;
 }
 
-// hookRoot : the folder Claude Code runs a hook for: the project it started in
 function hookRoot(env: NodeJS.ProcessEnv): string {
   return env.CLAUDE_PROJECT_DIR ?? env.PWD ?? "";
 }
 
-// writerScopeCommand : the writer's edit hook in the run; it reads no setting and names no project. Every refusal,
-// a bad argument too, exits 2: Claude Code lets an edit through on any other exit
+// Every refusal, a bad argument too, exits 2: a Claude Code hook blocks the edit only on exit 2.
+// https://code.claude.com/docs/en/hooks
 export async function writerScopeCommand(positionals: readonly string[], io: LoopIo): Promise<number> {
   const scopes = positionals.length === 1 ? scopesArg(positionals[0] ?? "") : "bad";
   if (scopes === "bad") {
@@ -294,7 +270,6 @@ export async function writerScopeCommand(positionals: readonly string[], io: Loo
   return hooked.code;
 }
 
-// the forge commands: each checks its words (with the project word taken off), then runs on the resolved settings
 export const LOOP_COMMANDS: Readonly<Record<string, (positionals: readonly string[]) => Parsed>> = {
   status: (p) => atHead("status", p),
   ask: (p) => atHead("ask", p),

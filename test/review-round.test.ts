@@ -21,7 +21,6 @@ beforeEach(() => {
   approveSpec(home());
 });
 
-// where specs and approvals live: ledger/PROJ-1 is approved there
 const home = (): string => join(p.root, "factory");
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
@@ -52,7 +51,6 @@ function walk(dir: string): readonly string[] {
     .map((d) => relative(dir, join(d.parentPath, d.name)));
 }
 
-// A model that answers from a script and records what each run was shown.
 function model(script: readonly unknown[], seen: Seen[]): Model {
   return async (run): Promise<ModelResult> => {
     const findings = existsSync(join(run.folder, "findings.json"))
@@ -74,7 +72,6 @@ function model(script: readonly unknown[], seen: Seen[]): Model {
 
 type Log = { posts: string[]; threads: string[]; labels: string[] };
 
-// A forge that keeps its notes: what the reviewer posts, the next round reads.
 function forge(
   log: Log,
   over: {
@@ -202,7 +199,6 @@ describe("reviewRound", () => {
     });
     expect(seen.map((s) => s.run.model)).toEqual(["sonnet", "sonnet", "opus"]);
     expect(seen.every((s) => s.run.maxUsd === "2" && s.run.name === "reviewer-12")).toBe(true);
-    // each run carries its kind's time limit (P7)
     expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.finder, LIMITS.verify, LIMITS.verify]);
     expect(log.threads).toHaveLength(2);
     expect(log.threads[0]).toMatch(
@@ -270,7 +266,6 @@ describe("reviewRound", () => {
     expect(files).toContain("code/other/untouched.txt");
     expect(files).toContain("code/secret.txt");
     expect(files.some((f) => /CLAUDE\.md|AGENTS\.md|\.claude\/|link\.md|\.gitattributes/.test(f))).toBe(false);
-    // no ident rule re-encodes what the reviewer reads
     expect(seen[0]?.plain).toBe("$Id$\n");
   });
 
@@ -311,7 +306,6 @@ describe("reviewRound", () => {
       reason: expect.stringContaining("needs a plugin that holds its review"),
     });
     expect(log.posts).toEqual([]);
-    // a plugin with no process still serves the built-in baseline's references
     const other = { label: "team@acme", dir: join(p.root, "none") };
     await reviewRound(
       setup(forge(log), model([findAnswer([])], []), { plugins: [{ label: "rulebook", dir: RULEBOOK }, other] }),
@@ -352,16 +346,13 @@ describe("reviewRound", () => {
     await reviewRound(
       setup(f, model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "x" }])], [])),
     );
-    // the same head again is left alone
     expect(await reviewRound(setup(f, model([], [])))).toMatchObject({ kind: "ok", value: { kind: "already" } });
-    // a new head with the same patch (a rebase-free amend of the message only) reuses
     p.git("checkout", "-q", "factory/PROJ-1");
     p.git("commit", "-q", "--amend", "-m", "same patch, new message");
     p.git("push", "-q", "-f", "origin", "factory/PROJ-1");
     const head = p.git("rev-parse", "HEAD");
     p.git("checkout", "-q", "main");
     const seen: Seen[] = [];
-    // the first round labelled already: the change edits svc/AGENTS.md, a protected file
     const labelsBefore = log.labels.length;
     const again = forge(log, {
       change: changeAt(head),
@@ -374,7 +365,6 @@ describe("reviewRound", () => {
     expect(log.posts.at(-1)).toMatch(new RegExp(`^\\[reviewer\\] round 1 reused · head ${head} · patch-id`));
   });
 
-  // #485: a cite that is not at the reviewed head is noted as "cite not found", never posted as a thread
   it("notes a finding that cites a missing file or a line past the end, and posts no thread for it (#485)", async () => {
     const log = fresh();
     const gone = { ...FINDING, file: "code/svc/Gone.java", finding: "cites a missing file" };
@@ -400,12 +390,10 @@ describe("reviewRound", () => {
     expect(summary).toContain("(cite not found: svc/Main.java:99 is past the end of the file (2 lines))");
   });
 
-  // P4 (#485 review): what a reviewer pass answered is kept as a record, with no secret in it
   it("a token a finder repeats in its answer never reaches the saved reviewer pass files", async () => {
     const token = "ghp_PLANTEDPLANTEDPLANTED1234";
     const leaky = { ...FINDING, finding: `the log prints GH_TOKEN=${token}`, evidence: `export GH_TOKEN=${token}` };
     const inner = model([findAnswer([leaky]), verdicts([{ id: "F1", bucket: "act_on", why: `holds: ${token}` }])], []);
-    // the CLI's answer carries the model's own words, as the real one's result event does
     const m: Model = async (run) => {
       const r = await inner(run);
       return r.kind === "ok"
@@ -609,7 +597,6 @@ describe("reviewRound", () => {
     expect(summary).toContain("- Protected · .github/workflows/ci.yml");
     expect(summary).toContain("- Build · package.json");
     expect(summary).toContain("- New dependency · left-pad (package.json)");
-    // a later round that lists the same file again does not label
     p.git("checkout", "-q", "factory/PROJ-1");
     p.write("svc/Main.java", "class Main { int total() { return 3; } }\n");
     p.commitAll("more");
@@ -678,7 +665,6 @@ describe("live runs", () => {
     expect(out).toMatchObject({ kind: "ok", value: { kind: "posted" } });
     expect(held).toEqual([String(process.pid)]);
     expect(existsSync(join(runs, "reviewer-12.pid"))).toBe(false);
-    // the live writer-3 counts: with a limit of 1 the machine is full
     expect(await reviewRound(setup(forge(fresh()), model([], []), { maxRuns: 1 }))).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("run limit"),
@@ -731,7 +717,6 @@ describe("pass records", () => {
       value: [
         {
           id: "F1",
-          // as the repo names it: the reviewer's copy sits under code/
           file: "svc/Main.java",
           line: FINDING.line,
           rule: FINDING.rule,
@@ -779,7 +764,6 @@ describe("pass records", () => {
       total_cost_usd: 0.2,
       usage: { input_tokens: 3, output_tokens: 4 },
     };
-    // a tool call before the result, and a summary event after it, as the CLI prints them
     const stdout = [
       { type: "system", subtype: "init" },
       { type: "assistant", message: { content: [{ type: "tool_use", name: "Read" }] } },
@@ -915,17 +899,14 @@ describe("reviewStep", () => {
       model: m(),
       sessions: none,
     });
-    // the round's spend goes to the run record (#131): each pass of the fake model costs $0.10 and 10 tokens
     expect(step.kind === "available" ? await step.run(input(12)) : step).toEqual({
       kind: "ok",
       value: {
         actOn: 1,
         lenses: { baseline: 1 },
         citesNotFound: 0,
-        // every finding of the round, per rule ID and bucket, for the timeline line (#488)
         found: { ERR1: { act_on: 1 } },
         spend: { usd: 0.2, tokens: 20 },
-        // and per run: the finder's by its lens, and the verify pass's (#337)
         split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.1, tokens: 10 } },
       },
     });
@@ -970,16 +951,13 @@ describe("reviewStep", () => {
       kind: "failed",
       reason: expect.stringContaining("pass failed"),
       spend: { usd: expect.closeTo(0.8, 9), tokens: 40 },
-      // the failed verify pass's spend is its own (#337)
       split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.7, tokens: 30 } },
     });
   });
 });
 
 describe("the review step keeps each pass's stream as its trace (#487)", () => {
-  // a token prefix, joined at run time, so no secret scanner reads this file as holding a token
   const token = `${["sk-ant-"].join("")}oat01-AAAAbbbbCCCCdddd`;
-  // the fake model's answers, each with the stream a real run prints: a tool call holding a token, then the result
   const streaming =
     (m: Model): Model =>
     async (run) => {
@@ -1105,7 +1083,6 @@ describe("the review step keeps each pass's stream as its trace (#487)", () => {
 });
 
 describe("one finder per lens (#237)", () => {
-  // the project's lenses, as its settings file holds them, with its one-way-door paths
   function lenses(oneWayDoor: readonly string[] = []): void {
     mkdirSync(join(home(), "projects"), { recursive: true });
     const lens = (name: string, reference: string) => ({
@@ -1128,19 +1105,16 @@ describe("one finder per lens (#237)", () => {
     );
   }
 
-  // the lens a finder run was for: its pack's section 8, or the baseline lens with none
   const lensOf = (run: ModelRun): string =>
     /## 8 · This finder's lens: (\S+)/.exec(readFileSync(join(run.folder, "pack.md"), "utf8"))?.[1] ?? "baseline";
 
   type Ran = { readonly lens: string; readonly model: string; readonly pack: string; readonly findings: string };
 
-  // the verify pass's answer: every finding it sees in Act on
   function allActOn(findings: string): unknown {
     const ids: readonly { readonly id: string }[] = JSON.parse(findings);
     return verdicts(ids.map((f) => ({ id: f.id, bucket: "act_on", why: "real" })));
   }
 
-  // a model that answers each finder by its lens, and puts every finding the verify pass sees in Act on
   function byLens(found: Readonly<Record<string, readonly unknown[]>>, ran: Ran[]): Model {
     return async (run): Promise<ModelResult> => {
       const path = join(run.folder, "findings.json");
@@ -1152,7 +1126,6 @@ describe("one finder per lens (#237)", () => {
     };
   }
 
-  // the api lens's rubric, on the default branch
   function apiRubric(): void {
     p.write("docs/review/api.md", "API-RUBRIC\n");
     p.commitAll("api rubric");
@@ -1205,7 +1178,6 @@ describe("one finder per lens (#237)", () => {
       ["smells", ["smells"], "only smells"],
     ]);
     expect(log.threads).toHaveLength(2);
-    // the run record: each lens's verified findings no other lens reported
     expect(out).toMatchObject({ kind: "ok", value: { lenses: { errors: 0, smells: 1, api: 0 } } });
     expect(log.posts.at(-1)).toContain("- Unique findings per lens: errors 0 · smells 1 · api 0");
     const kept = readFileSync(join(p.root, "records", "12", p.head2, "reviewer-lenses.jsonl"), "utf8");
@@ -1219,8 +1191,6 @@ describe("one finder per lens (#237)", () => {
     let most = 0;
     const ran: Ran[] = [];
     const inner = byLens({}, ran);
-    // each finder's run waits until two are in flight, so the overlap does not hang on a runner's speed (#354); a
-    // round that allowed only one gives up after 2 s and fails on 1
     const twoInFlight = async (): Promise<void> => {
       const until = Date.now() + 2_000;
       for (;;) {
@@ -1258,7 +1228,6 @@ describe("one finder per lens (#237)", () => {
     await reviewRound(setup(forge(fresh()), tagged));
     const lensOfPart = (x: RoundPart | undefined): readonly string[] => (x?.kind === "finder" ? [x.lens] : []);
     expect(parts.flatMap(lensOfPart).toSorted()).toEqual(["api", "errors", "smells"]);
-    // every other run is a verify pass, and there is one
     const verify = parts.filter((x) => x?.kind === "verify pass");
     expect(verify.length).toBeGreaterThan(0);
     expect(parts).toHaveLength(3 + verify.length);

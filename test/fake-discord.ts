@@ -10,14 +10,12 @@ import type {
   Transport,
 } from "../src/core/door/discord/transport.js";
 
-// a fake Discord: one socket at a time, every REST call recorded, timers run by hand
 export class FakeDiscord implements Transport {
   readonly sockets: { readonly url: string; readonly on: SocketEvents; readonly sent: string[]; closed?: number }[] =
     [];
   readonly calls: RestCall[] = [];
   readonly ticks: (() => void)[] = [];
   fail: string | undefined;
-  // what /gateway/bot answers, in turn; the found address once these run out
   readonly gateway: RestAnswer[] = [];
 
   connect(url: string, on: SocketEvents): Socket {
@@ -42,7 +40,6 @@ export class FakeDiscord implements Transport {
     return this.gateway.shift() ?? { kind: "ok", value: { url: "wss://gateway.example" } };
   }
 
-  // tick : run every timer that is waiting, once
   tick(): void {
     for (const run of this.ticks.splice(0)) {
       run();

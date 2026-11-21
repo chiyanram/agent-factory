@@ -7,7 +7,6 @@ import { settingOf } from "../settings/machine.js";
 
 export type GithubProject = { readonly owner: string; readonly name: string };
 
-// every segment starts with a letter or a digit, so "." and ".." never reach an API path
 const GITHUB_PROJECT = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9][A-Za-z0-9_.-]*)$/;
 const GITLAB_PROJECT = /^[A-Za-z0-9][A-Za-z0-9_.-]*(\/[A-Za-z0-9][A-Za-z0-9_.-]*)+$/;
 
@@ -31,7 +30,6 @@ export function gitlabProject(project: string): Result<string> {
       };
 }
 
-// forgeName : FACTORY_FORGE, checked.
 export function forgeName(env: NodeJS.ProcessEnv): Result<ForgeName> {
   const kind = settingOf(env, "gitHost") ?? "gitlab";
   return kind === "github" || kind === "gitlab"

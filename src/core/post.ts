@@ -41,11 +41,8 @@ export type Post = {
   readonly items: readonly string[];
 };
 
-// the implementer's PR body (#335): its Markdown as the run wrote it, and the project's git host, the one host its links
-// may point at
 export type PrBody = { readonly markdown: string; readonly host: string };
 
-// a PR body: the engine's own lines (the spec hash, the approval, the deferred list), then the implementer's Markdown
 export type BodyPost = Post & { readonly prBody?: PrBody };
 
 export type RenderResult =
@@ -55,13 +52,8 @@ export type RenderResult =
 export const DEFAULT_FIELD_LIMIT = 500;
 
 const JOIN = "\u2060";
-// Every control character (Cc), every invisible format character (Cf) and every default-ignorable one: zero-width
-// spaces and joiners, the bidi controls and isolates that can reorder what a person sees, the word joiner itself, the
-// soft hyphen, the BOM, the variation selectors, the blank Hangul fillers, and the tag characters that can carry text
-// no one sees; then the line and paragraph separators.
 export const CONTROL = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 const LABEL = /^[A-Za-z0-9 ()_.,'-]+$/;
-// the invisible characters alone, which a reader never sees, so a secret they split still reads whole
 const HIDDEN = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 
 function cut(text: string, limit: number): string {
@@ -70,27 +62,22 @@ function cut(text: string, limit: number): string {
     return text;
   }
   let kept = chars.slice(0, Math.max(0, limit - 1));
-  // never end on an escaping "\" or on a character whose word joiner was cut off
   while (kept.length > 0 && /[\\@#!:.]/.test(kept[kept.length - 1]!)) {
     kept = kept.slice(0, -1);
   }
   return `${kept.join("").trimEnd()}…`;
 }
 
-// flatText : the words on one line: every control and invisible character gone, white space runs one space. Pure.
 export function flatText(value: string): string {
   return value.replace(CONTROL, " ").replace(/\s+/g, " ").trim();
 }
 
-// scrubbed : the value with each secret replaced, also one a hidden character splits: then the value as a reader sees
-// it, scrubbed; otherwise the value with its hidden characters, which flatText turns into spaces
 function scrubbed(value: string): string {
   const shown = value.replace(HIDDEN, "");
   const clean = scrubSecrets(shown);
   return clean === shown ? scrubSecrets(value) : clean;
 }
 
-// cleanField : one field's words, made inert inside a template line. See the header for the rules.
 export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): string {
   const flat = flatText(scrubbed(value));
   const inert = flat
@@ -107,8 +94,6 @@ export function cleanField(value: string, limit: number = DEFAULT_FIELD_LIMIT): 
   return capped.startsWith("/") ? `\\${capped}` : capped;
 }
 
-// renderPost : the full text of one post. The first line is "[seat] title"; each field is "- label: value"; each item
-// is "- value". A label outside the factory's own plain words is refused, so no caller can pass outside text as one.
 export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): RenderResult {
   const bad = post.fields.find((f) => !LABEL.test(f.label));
   if (bad !== undefined) {
@@ -125,12 +110,8 @@ export function renderPost(post: Post, limit: number = DEFAULT_FIELD_LIMIT): Ren
   return { kind: "ok", text: [...head, ...(body.length > 0 ? ["", ...body] : [])].join("\n") };
 }
 
-// PR_BODY_RULE : the line between the engine's own lines and the implementer's Markdown
 export const PR_BODY_RULE = "---";
 
-// renderBody : the full text of a PR body: the post as renderPost renders it, then, when there is one, the
-// implementer's Markdown after a rule, cleaned by cleanBody. The engine's lines come first, so no Markdown can stand in
-// for them.
 export function renderBody(post: BodyPost, limit: number = DEFAULT_FIELD_LIMIT): RenderResult {
   const head = renderPost(post, limit);
   if (head.kind === "refused" || post.prBody === undefined) {

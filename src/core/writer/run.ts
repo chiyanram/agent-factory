@@ -56,33 +56,23 @@ import {
 } from "../dispatch/spend.js";
 import type { TraceSink } from "../dispatch/trace.js";
 
-// the completion window (#182): how often the host looks for the report while the writer runs, how long the writer may
-// keep running after a valid one, and the grace past the run's timeout and past a stop after which the host waits no
-// more: the box's own timeout stops counting once claude exits, and a grandchild that holds stdout open would keep
-// docker exec, and the dispatcher's locked pass, waiting forever
 export type Completion = { readonly pollMs: number; readonly windowMs: number; readonly graceMs: number };
 
 export const COMPLETION: Completion = { pollMs: 5000, windowMs: 60_000, graceMs: 30_000 };
 
-// the stall time (#228): the longest a run may print nothing, while the machine is awake; a setting can only lower it
 export const STALL_MS = 5 * 60_000;
 
 export type WriterRun = {
   readonly setup: BoxSetup;
   readonly clone: Clone;
   readonly prompt: string;
-  // the model-only login (#136): CLAUDE_CODE_OAUTH_TOKEN and its scrub setting
   readonly login: Readonly<Record<string, string>>;
   readonly timeoutSeconds: number;
-  // the agent CLI's writer kind, and what this run asks of it: the box starts its argv for the place it runs at, with
-  // its environment besides the login (agent/claude-writer.ts)
   readonly agent: ClaudeWriter;
   readonly call: WriterCall;
-  // where the run may edit (scope.ts scopesOf): a path must match each; none is anywhere in the clone
   readonly scopes: readonly EditScope[];
   readonly completion: Completion;
   readonly stallMs: number;
-  // where the run's whole output goes as it comes, scrubbed (dispatch/trace.ts, #487)
   readonly trace: TraceSink;
 };
 
@@ -91,21 +81,13 @@ export type Ended = {
   readonly ending: Ending;
   readonly tip: string;
   readonly patch: string;
-  // what the run spent, as its result event reported it (#131)
   readonly spend: Spend | "unmeasured";
-  // the PR body the run wrote in .factory/pr.md, as it wrote it, when it ended done (#335); the host cleans it before
-  // it posts it (renderBody)
   readonly pr?: string;
-  // what the run said last (#62): its result event's text, else its stderr's last line, else its last plain stdout
-  // line; "" when it said nothing. Raw: the host scrubs and cuts it before it records or shows it (why.ts)
   readonly said: string;
-  // the end of what the run printed (#62): its stdout's last lines, then its stderr's; raw, as said
   readonly output: readonly string[];
-  // the run's trace, once step.ts has closed it (#487); none when none was kept
   readonly trace?: string;
 };
 
-// runEnd : how the run ended, as the report reads it. Pure.
 export function runEnd(ran: Ran): RunEnd {
   switch (ran.kind) {
     case "exited":
@@ -117,29 +99,23 @@ export function runEnd(ran: Ran): RunEnd {
   }
 }
 
-// the most lines a stalled run shows, and the most characters kept of each: an event can be a whole file
 const SHOWN_LINES = 5;
 const LINE_CHARS = 300;
 
-// Tail : the last lines the run printed, and the line it is still printing
 export type Tail = { readonly lines: readonly string[]; readonly partial: string };
 
 export const NO_TAIL: Tail = { lines: [], partial: "" };
 
 function cutLine(line: string): string {
-  // never end on half of a surrogate pair
   return line.length <= LINE_CHARS ? line : line.slice(0, LINE_CHARS).replace(/[\uD800-\uDBFF]$/, "");
 }
 
-// the most lines of a run's output the host keeps for a person (#62)
 export const OUTPUT_LINES = 40;
 
-// tailOf : the tail after one more piece of output, the lines a stalled run shows. Pure.
 export function tailOf(tail: Tail, chunk: string): Tail {
   return tailUpTo(tail, chunk, SHOWN_LINES);
 }
 
-// tailUpTo : the tail after one more piece of output, at most `most` lines. Pure.
 export function tailUpTo(tail: Tail, chunk: string, most: number): Tail {
   const [first = "", ...rest] = chunk.split("\n");
   const current = cutLine(tail.partial + cutLine(first));
@@ -150,20 +126,14 @@ export function tailUpTo(tail: Tail, chunk: string, most: number): Tail {
   return { lines: [...tail.lines, ...ended].slice(-most), partial: cutLine(rest.at(-1) ?? "") };
 }
 
-// lastLines : the lines a person sees of a stalled run, oldest first. Pure.
 export function lastLines(tail: Tail, most: number = SHOWN_LINES): readonly string[] {
   return [...tail.lines, tail.partial].filter((l) => l.trim() !== "").slice(-most);
 }
 
-// Heard : what the host has heard of the run so far: when it last printed (ms; 0 for never), its tail, the longer
-// tail kept for a person (#62), and its stream-json output read for the result event (#131)
 type Heard = { at: number; tail: Tail; kept: Tail; stream: Stream };
 
-// a writer signs in with the stored token (token/rules.ts boxToken), so a refused one is renewed in the store
 const RENEW_REFUSED = `the claude token was refused (HTTP 401); ${RENEW}`;
 
-// resultText : the text of the run's result event: its last message, or the CLI's error ("Invalid API key", a budget
-// hit); "" with none. A login the provider refused (HTTP 401) names the renewal first. Pure.
 function resultText(stream: Stream): string {
   const result: unknown = stream.result;
   const text = typeof result === "object" && result !== null ? (Reflect.get(result, "result") as unknown) : undefined;
@@ -171,12 +141,10 @@ function resultText(stream: Stream): string {
   return refusedLogin(result) ? `${RENEW_REFUSED}; the CLI said: ${plain}` : plain;
 }
 
-// lastPlain : the last line that is not a stream-json event, "" for none. Pure.
 function lastPlain(lines: readonly string[]): string {
   return lines.findLast((l) => l.trim() !== "" && !l.trimStart().startsWith("{"))?.trim() ?? "";
 }
 
-// heardOf : what the run said last, and the end of its output: stdout's lines, then stderr's. Pure.
 export function heardOf(input: {
   readonly stdout: readonly string[];
   readonly stderr: string;
@@ -190,9 +158,6 @@ export function heardOf(input: {
   return { said: last, output: err.length === 0 ? input.stdout : [...input.stdout, "--- stderr ---", ...err] };
 }
 
-// quietAfter : how long the run has printed nothing, in awake time, after one more poll. Each poll adds the time since
-// the last poll, or since the last output if that came later, but never more than two polls: a poll that took longer
-// waited out a sleeping machine (or a clock that jumped), and that time does not count (#228). Pure.
 export function quietAfter(input: {
   readonly quiet: number;
   readonly last: number;
@@ -206,17 +171,14 @@ export function quietAfter(input: {
     : input.quiet + Math.min(input.now - input.last, most);
 }
 
-// InBox : how the run ended, what it spent, what it said last and the end of its output
 type InBox = {
   readonly end: RunEnd;
   readonly spend: Spend | "unmeasured";
   readonly said: string;
   readonly output: readonly string[];
-  // the provider's usage limit the run hit, read only from a run that exited
   readonly limit: UsageLimit;
 };
 
-// inBox : the agent's run, start to stop; the run's end, or why the box itself failed
 async function inBox(run: WriterRun): Promise<InBox> {
   const session = await startBox(run.setup, {
     worktree: run.clone.repo,
@@ -239,8 +201,6 @@ async function inBox(run: WriterRun): Promise<InBox> {
       argv: run.agent.argv(run.call, session.value.place),
       stdin: { kind: "text", text: run.prompt },
       timeoutSeconds: run.timeoutSeconds,
-      // nothing reads the output after the run (the report says how it ended): keep only its end, so no cap stops it;
-      // the whole output goes to the run's trace as it comes (#487)
       keep: "tail",
       watch: (chunk) => {
         heard.at = Date.now();
@@ -256,8 +216,6 @@ async function inBox(run: WriterRun): Promise<InBox> {
   return { end: stopped, spend: streamSpend(heard.stream), ...lastWords(end, heard), limit: limitOf(run, end, heard) };
 }
 
-// limitOf : the provider's usage limit a run that exited hit, read by the agent CLI from what it printed: a refusal is
-// an error result, so a run that finished its work never reads as one
 function limitOf(run: WriterRun, end: Watched, heard: Heard): UsageLimit {
   const exited = end.kind === "ran" && end.ran.kind === "exited" ? end.ran : undefined;
   return exited === undefined
@@ -270,8 +228,6 @@ function limitOf(run: WriterRun, end: Watched, heard: Heard): UsageLimit {
       });
 }
 
-// lastWords : what the run said last and the end of its output. An exit hands back its own output's end; a run the
-// host stopped has only what the watcher heard. Pure.
 function lastWords(end: Watched, heard: Heard): { readonly said: string; readonly output: readonly string[] } {
   const exited = end.kind === "ran" && end.ran.kind === "exited" ? end.ran : undefined;
   if (exited === undefined) {
@@ -281,7 +237,6 @@ function lastWords(end: Watched, heard: Heard): { readonly said: string; readonl
   return heardOf({ stdout, stderr: exited.stderr, stream: heard.stream });
 }
 
-// afterStop : the end of a run the host stopped. Pure.
 function afterStop(run: WriterRun, end: Exclude<Watched, { kind: "ran" }>, heard: Heard): RunEnd {
   switch (end.kind) {
     case "hung":
@@ -293,8 +248,6 @@ function afterStop(run: WriterRun, end: Exclude<Watched, { kind: "ran" }>, heard
   }
 }
 
-// stoppedEnd : the box stopped, then the run's end; a box that did not stop may still be writing: its report is never
-// read
 async function stoppedEnd(
   run: WriterRun,
   session: Session,
@@ -309,13 +262,10 @@ async function stoppedEnd(
   if (end.kind === "ran") {
     return runEnd(end.ran);
   }
-  // the stop ends the command; its own end says nothing more, and the host waits for it only so long
   await settled(running, run.completion.graceMs);
   return afterStop(run, end, watch.heard);
 }
 
-// Watched : the run's own end; "hung", still running after a valid report and its window; "stalled", silent for the
-// stall time with no valid report; or "overdue", still running past its timeout and the grace with no valid report
 type Watched =
   | { readonly kind: "ran"; readonly ran: Ran }
   | { readonly kind: "hung" }
@@ -334,9 +284,6 @@ async function settled(running: Promise<Ran>, ms: number): Promise<Ran | typeof 
   return Promise.race([running, after(ms)]);
 }
 
-// watched : the run, watched until it ends, a valid report's window closes, it is silent for the stall time, or the
-// host's deadline passes. A poll only starts the window: the run is decided from the report read after the box
-// stopped. A valid report wins over a stall: a writer that wrote one and went quiet gets its window.
 async function watched(run: WriterRun, running: Promise<Ran>, heard: Heard): Promise<Watched> {
   const deadline = Date.now() + run.timeoutSeconds * 1000 + run.completion.graceMs;
   let on: On = { kind: "on", quiet: 0, last: Date.now() };
@@ -356,11 +303,9 @@ async function watched(run: WriterRun, running: Promise<Ran>, heard: Heard): Pro
   }
 }
 
-// On : a run still going after a poll, with its quiet time so far and when that poll was
 type On = { readonly kind: "on"; readonly quiet: number; readonly last: number };
 type Polled = On | { readonly kind: "window" } | { readonly kind: "stalled" } | { readonly kind: "overdue" };
 
-// polled : one poll of a run still going: past the deadline, a valid report there, silent too long, or on
 async function polled(run: WriterRun, heard: Heard, on: On, deadline: number): Promise<Polled> {
   const now = Date.now();
   if (now >= deadline) {
@@ -373,8 +318,6 @@ async function polled(run: WriterRun, heard: Heard, on: On, deadline: number): P
   return quiet >= run.stallMs ? { kind: "stalled" } : { kind: "on", quiet, last: now };
 }
 
-// inWindow : the window after a valid report; the box's own timeout firing in it is a hang after that report too, so
-// the outcome never depends on when in the run the report came
 async function inWindow(run: WriterRun, running: Promise<Ran>): Promise<Watched> {
   const ran = await settled(running, run.completion.windowMs);
   return ran === TICK || ran.kind === "timedOut" ? { kind: "hung" } : { kind: "ran", ran };
@@ -396,7 +339,6 @@ async function git(run: WriterRun, args: readonly string[], stdin = ""): Promise
     : { kind: "failed", reason: `git ${args[0]}: ${said(ran)}` };
 }
 
-// patchOf : the patch-id of the run's whole change, "" when it changed nothing
 async function patchOf(run: WriterRun, tip: string): Promise<Result<string>> {
   if (tip === run.clone.start) {
     return { kind: "ok", value: "" };
@@ -406,7 +348,6 @@ async function patchOf(run: WriterRun, tip: string): Promise<Result<string>> {
   return id.kind === "ok" ? { kind: "ok", value: id.value.split(" ")[0] ?? "" } : id;
 }
 
-// committed : the branch's tip after the run, and the patch since the start
 async function committed(run: WriterRun): Promise<Result<{ readonly tip: string; readonly patch: string }>> {
   const tip = await git(run, ["rev-parse", `refs/heads/${run.clone.branch}`]);
   if (tip.kind === "failed") {
@@ -417,12 +358,10 @@ async function committed(run: WriterRun): Promise<Result<{ readonly tip: string;
   return patch.kind === "ok" ? { kind: "ok", value: { tip: sha, patch: patch.value } } : patch;
 }
 
-// reasonOf : the first of two results' reasons; "" when both are ok. Pure.
 function reasonOf(a: Result<unknown>, b: Result<unknown>): string {
   return a.kind === "failed" ? a.reason : b.kind === "failed" ? b.reason : "";
 }
 
-// changedPaths : every path the run's commits touch, a rename as both its paths; none when it changed nothing
 async function changedPaths(run: WriterRun, tip: string): Promise<Result<readonly string[]>> {
   if (tip === run.clone.start || run.scopes.length === 0) {
     return { kind: "ok", value: [] };
@@ -431,8 +370,6 @@ async function changedPaths(run: WriterRun, tip: string): Promise<Result<readonl
   return names.kind === "ok" ? { kind: "ok", value: names.value.split("\0").filter((p) => p !== "") } : names;
 }
 
-// prOf : the PR body a done run wrote, read after the box stopped, as a field to spread; none when it wrote none, or
-// one the host cannot read safely (a symlink, too large)
 async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: string }> {
   if (outcome.kind !== "done") {
     return {};
@@ -441,8 +378,6 @@ async function prOf(run: WriterRun, outcome: Outcome): Promise<{ readonly pr?: s
   return file.kind === "text" && file.text.trim() !== "" ? { pr: file.text } : {};
 }
 
-// outcomeOf : the run's outcome: parked when the provider's usage limit refused it, decided from what the CLI printed;
-// else decided from its end and its report, read after the box stopped
 async function outcomeOf(run: WriterRun, end: RunEnd, limit: UsageLimit): Promise<Outcome> {
   if (limit.kind === "limited") {
     return { kind: "parked", until: limit.until, said: limit.said };
@@ -453,8 +388,6 @@ async function outcomeOf(run: WriterRun, end: RunEnd, limit: UsageLimit): Promis
   });
 }
 
-// writerRun : the run, then its outcome, the branch's tip, the patch and the PR body it wrote. A failure here is the
-// host's, not the run's, and still says what the run spent.
 export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedSpent> {
   const { end, spend, said: words, output, limit } = await inBox(run);
   const outcome = await outcomeOf(run, end, limit);

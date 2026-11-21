@@ -48,12 +48,10 @@ function line(over: Partial<OpenLine> = {}): OpenLine {
 
 const wrote = (over: Partial<Summary> = {}): Summary => ({
   ...EMPTY,
-  // the last writer run is a done cleanup run, as an older ledger has it
   lastWriter: { kind: "ended", mode: "cleanup", head: H, outcome: "done", patch: "p1", evidence: [] },
   lastAt: "2026-11-07T09:50:00Z",
   ...over,
 });
-// the implementer's done run
 const fixDone = { kind: "ended", mode: "fix", head: H, outcome: "done", patch: "p1", evidence: [] } as const;
 const readyOk: Partial<Summary> = {
   lastReady: { kind: "ended", at: "2026-11-07T09:55:00Z", human: false, head: H, passed: true, why: "x" },
@@ -320,7 +318,6 @@ describe("decide: one row each", () => {
         }),
       ),
     ).toMatchObject({ kind: "needs-human", why: expect.stringContaining("changed nothing") });
-    // a CI run that changed nothing, whatever it reported, goes to a person too: a red check is never passed over
     const ciNothing = { kind: "ended", mode: "ci", head: H, outcome: "done", patch: "", evidence: [] } as const;
     expect(decide(state({ runs: wrote({ lastWriter: ciNothing, ciRounds: 1 }) }))).toEqual({
       kind: "needs-human",
@@ -330,15 +327,12 @@ describe("decide: one row each", () => {
 
   it("a change that conflicts with its target sends the implementer to merge the default branch in (#103)", () => {
     const conflicting = { kind: "open", line: line({ mergeable: "conflict" }) } as const;
-    // after any run but a merge run, and before the ready check, the review or the gate: they read a change that
-    // cannot merge
     expect(decide(state({ change: conflicting, runs: wrote() }))).toEqual({
       kind: "writer",
       task: { kind: "conflict", head: H },
       why: expect.stringContaining("merge the default branch in"),
     });
     expect(decide(state({ change: conflicting }))).toMatchObject({ kind: "writer", task: { kind: "conflict" } });
-    // a git host that has not checked yet, or a clean change, has no row of its own
     expect(decide(state({ change: { kind: "open", line: line({ mergeable: "unknown" }) } }))).toEqual({
       kind: "ping",
       head: H,
@@ -354,7 +348,6 @@ describe("decide: one row each", () => {
       kind: "needs-human",
       why: expect.stringContaining(`still conflicts with its target after ${MAX_CONFLICT_RUNS} merge run`),
     });
-    // a merge run that cleared the conflict goes on: the ready check at its new head
     expect(decide(state({ runs: merged }))).toEqual({ kind: "ready", head: H });
   });
 
@@ -426,7 +419,6 @@ describe("decide: one row each", () => {
     });
     const waived = (head: string, at: string) => state({ runs: wrote(stopped), waiver: { kind: "waived", head, at } });
     expect(decide(waived(H, "2026-11-07T09:58:00Z"))).toEqual({ kind: "ready", head: H });
-    // a waiver at another head, or one older than the check, does not
     expect(decide(waived("9".repeat(40), "2026-11-07T09:58:00Z"))).toMatchObject({ kind: "needs-human" });
     expect(decide(waived(H, "2026-11-07T09:50:00Z"))).toMatchObject({ kind: "needs-human" });
   });
@@ -473,13 +465,10 @@ describe("decide: one row each", () => {
 
   it("a local gate decides from the verifier's own run, never from a check on the forge (#91)", () => {
     const none = { kind: "open", line: line({ pipeline: { kind: "none" } }) } as const;
-    // no verifier run at this head: run it, even when some other check on the forge is green
     expect(decide(state({ gate: "local", change: none }))).toEqual({ kind: "verify", head: H });
     expect(decide(state({ gate: "local" }))).toEqual({ kind: "verify", head: H });
-    // a new push: the verifier's run was at another head
     const old = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: "9".repeat(40), passed: true } });
     expect(decide(state({ gate: "local", runs: old }))).toEqual({ kind: "verify", head: H });
-    // passed here: ping, whatever the forge shows, unless a check on it is red
     const passed = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H, passed: true } });
     expect(decide(state({ gate: "local", change: none, runs: passed }))).toEqual({ kind: "ping", head: H });
     const red = { kind: "open", line: line({ pipeline: { kind: "failed" } }) } as const;
@@ -487,7 +476,6 @@ describe("decide: one row each", () => {
       kind: "writer",
       task: { kind: "ci-red", head: H },
     });
-    // failed here: the writer goes back, and after 2 CI rounds a person decides
     const failed = wrote({ ...reviewed(0), lastVerify: { kind: "ended", head: H, passed: false } });
     expect(decide(state({ gate: "local", runs: failed }))).toEqual({
       kind: "writer",
@@ -497,7 +485,6 @@ describe("decide: one row each", () => {
     expect(decide(state({ gate: "local", runs: { ...failed, ciRounds: MAX_CI_ROUNDS } }))).toMatchObject({
       kind: "needs-human",
     });
-    // with forge CI as the gate, no CI result yet is a wait, never the verifier
     expect(decide(state({ change: none }))).toMatchObject({ kind: "wait" });
   });
 
@@ -559,7 +546,6 @@ describe("the lane the diff needs: raise only (#230)", () => {
       kind: "needs-human",
       why: expect.stringContaining("raised from bug to one-way door"),
     });
-    // a feature whose diff only needs tiny or bug keeps its lane and goes on
     expect(decide(state({ runs: readAs("tiny") }))).toEqual(decide(state()));
     expect(decide(state({ runs: readAs("bug") }))).toEqual(decide(state()));
   });
@@ -584,7 +570,6 @@ describe("the lane the diff needs: raise only (#230)", () => {
       kind: "needs-human",
       why: `${RAISED}; and the test checks stopped the change at ${H.slice(0, 8)}: row 1`,
     });
-    // a test check's stop alone keeps its own note
     expect(decide(state({ runs: readAs("bug", false, true) }))).toEqual({
       kind: "needs-human",
       why: `the test checks stopped the change at ${H.slice(0, 8)}: row 1`,
@@ -638,7 +623,6 @@ describe("backoff (#228)", () => {
       nextTry: { kind: "set", step: "verify", at: at(10_000) },
     });
     expect(decide(state({ gate: "local", runs: verify }))).toMatchObject({ kind: "wait" });
-    // another step's next try holds nothing back
     const other = wrote({ ...reviewed(2), nextTry: { kind: "set", step: "ready", at: at(60_000) } });
     expect(decide(state({ runs: other }))).toMatchObject({ kind: "writer" });
   });
@@ -714,7 +698,6 @@ describe("the design review before the approval, and no cleanup run after the im
       expect(decide(state({ runs: wrote({ lastWriter }) }))).toEqual({ kind: "ready", head: H });
       expect(decide(state({ runs: wrote({ lastWriter, ...readyOk }) }))).toEqual({ kind: "review", head: H });
     }
-    // an older ledger whose last writer is a cleanup run, with or without a patch, still goes on to the ready check
     for (const patch of ["", "p2"]) {
       expect(decide(state({ runs: wrote({ lastWriter: { ...fix, mode: "cleanup", patch } }) }))).toEqual({
         kind: "ready",
@@ -765,7 +748,6 @@ describe("the design review before the approval, and no cleanup run after the im
   });
 });
 
-// a writer run parked at the provider's usage limit until `until`
 function parkedAt(until: string): Extract<Summary["parked"], { kind: "parked" }> {
   return {
     kind: "parked",
@@ -838,7 +820,6 @@ describe("inFlight: whether the orchestrator loop carries the ticket on (#305)",
 
   it("is in flight with a run due, a ping to send, CI running, or a run backing off", () => {
     expect(inFlight(state({ runs: EMPTY, change: { kind: "none" } }))).toBe(true);
-    // claimed by another orchestrator: not this loop's to carry
     expect(inFlight(state({ runs: EMPTY }))).toBe(false);
     expect(inFlight(state())).toBe(true);
     const pinged = wrote({ ...reviewed(0), pingedAt: H });
@@ -867,12 +848,10 @@ describe("inFlight: whether the orchestrator loop carries the ticket on (#305)",
     expect(inFlight(state({ approval: { kind: "unapproved", lane: "feature" } }))).toBe(false);
     expect(inFlight(state({ approval: { kind: "unstarted" } }))).toBe(false);
     expect(inFlight(state({ approval: { kind: "missing" } }))).toBe(false);
-    // the gate is green and the human was pinged: the merge is theirs
     expect(inFlight(state({ runs: pinged }))).toBe(false);
     expect(
       inFlight(state({ runs: pinged, change: { kind: "open", line: line({ pipeline: { kind: "manual" } }) } })),
     ).toBe(false);
-    // a stop already handed to a person, and a ticket at its cap
     const blocked = wrote({
       ...reviewed(1, MAX_REVIEW_ROUNDS),
       blocked: [`Act on findings after ${MAX_REVIEW_ROUNDS} review rounds`],
@@ -881,8 +860,6 @@ describe("inFlight: whether the orchestrator loop carries the ticket on (#305)",
   });
 });
 
-// the ledger's ticket 4 (#444): the ready check failed at the head on a row's program, and the rework ended done at
-// the same head with new rows and no code change. Each step is the run record's own lines, summarized as tick does.
 describe("a rework at the same head after a failed ready check (#444)", () => {
   const AC = (n: number, command: string, result = "1"): Evidence => ({
     criterion: `AC-${n}: README.md says it`,
@@ -913,7 +890,6 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     ...(programs === undefined ? {} : { programs }),
     ...(passed ? {} : { nextTry: { step: "ready", at: t(minute) } }),
   });
-  // fix, cleanup, the ready check that failed, and the rework that changed no code
   const FAILED: readonly Event[] = [
     ended(10, "fix", "p1", GREP),
     ended(20, "cleanup", "", GREP),
@@ -932,7 +908,6 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
   it("ready failed → the project file allows more programs → the ready check runs again, before any writer run", () => {
     expect(decide(at(FAILED, BEFORE))).toMatchObject({ kind: "writer", task: { kind: "ready-failed" } });
     expect(decide(at(FAILED, AFTER))).toEqual({ kind: "ready", head: H });
-    // and after a rework that changed nothing, not even its rows
     const same = [...FAILED, ended(30, "rework", "", GREP)];
     expect(decide(at(same, AFTER))).toEqual({ kind: "ready", head: H });
   });
@@ -954,7 +929,6 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
   });
 
   it("the re-run that passes goes on to the review, with no cleanup run for a rework that changed no code", () => {
-    // the same rows as before, but the project file allows grep now: the check ran them and passed
     const passed = [...FAILED, ended(30, "rework", "", GREP), readyEnded(31, true, AFTER)];
     expect(decide(at(passed, AFTER))).toEqual({ kind: "review", head: H });
   });
@@ -965,8 +939,6 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     expect(decide(at([...old, ended(30, "rework", "", GATE)], AFTER))).toEqual({ kind: "ready", head: H });
   });
 
-  // ledger#5 (#62): after a new START the runs before it are not read; the fix run found the work already on the branch,
-  // changed no code and gave new rows, which went to a person as "changed nothing" instead of to the ready check
   it("a new START → the fix run changes no code but gives rows → the ready check judges them, in flight", () => {
     const blocked: Event = { at: t(41), kind: "blocked", why: `the ready check failed ${MAX_READY_FAILURES} times` };
     const quoted = [AC(1, "grep -n 'records each factory ticket' README.md", "3:ledger records each factory ticket")];
@@ -975,7 +947,6 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     const fresh = state({ runs: summarize({ events, since: restart.at }), approval: restart, programs: AFTER });
     expect(decide(fresh)).toEqual({ kind: "ready", head: H });
     expect(inFlight(fresh)).toBe(true);
-    // a fix run with no rows at all still changed nothing
     const empty = [...events.slice(0, -1), ended(50, "fix", "", [])];
     const none = state({ runs: summarize({ events: empty, since: restart.at }), approval: restart, programs: AFTER });
     expect(decide(none)).toEqual({ kind: "needs-human", why: "the writer's run changed nothing" });
@@ -983,9 +954,7 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
 
   it("a person clears the hold: with the label gone the ticket goes on; a stop already handed over waits for a new START", () => {
     const blocked: Event = { at: t(31), kind: "blocked", why: "the writer's run changed nothing" };
-    // ticket 4 on this release: the rework gave other rows, so the hold no longer applies once the label is gone
     const ledger = [...FAILED, ended(30, "rework", "", GATE), blocked];
-    // the hand-over took the claim off and put the label on
     const labelled = { change: { kind: "open" as const, line: line({ needsHuman: true, claimed: false }) } };
     const cleared = { change: { kind: "open" as const, line: line({ claimed: false }) } };
     expect(decide(at(ledger, AFTER, labelled))).toMatchObject({
@@ -994,7 +963,6 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     });
     expect(decide(at(ledger, AFTER, cleared))).toEqual({ kind: "ready", head: H });
     expect(inFlight(at(ledger, AFTER, cleared))).toBe(true);
-    // the same stop would come again: removing the label does not lift it, and a new START (or approval) does
     const same = [...FAILED, ended(30, "rework", "", GREP), blocked];
     expect(decide(at(same, BEFORE, cleared))).toMatchObject({
       kind: "wait",
@@ -1007,18 +975,13 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
   });
 });
 
-// the lanes of the notices the factory sends, and of each one who acts next
 const NOTICE: Partial<Record<Action["kind"], Lane>> = { ping: "ready-to-merge", "design-note": "needs-you" };
 const BY_WHO: Readonly<Record<NextStep["who"], Lane>> = { factory: "factory", person: "needs-you" };
 
-// laneOf : the lane a decided action belongs in, read from its kind and its next step, as the board's lanes say
 function laneOf(action: Action, step: NextStep): Lane {
   return NOTICE[action.kind] ?? (step.does === "reviews and merges the change" ? "ready-to-merge" : BY_WHO[step.who]);
 }
 
-// #485 (was #462) "can it get stuck?": over generated ticket states with an open change, the next decision is a step,
-// a wait the factory carries on by itself (inFlight), or a hand-over that says what the person does: the loop never
-// ends silently while a ticket's PR is open
 describe("can it get stuck? (#485)", () => {
   const lines: readonly OpenLine[] = [
     line(),
@@ -1050,7 +1013,6 @@ describe("can it get stuck? (#485)", () => {
     }),
     { ...EMPTY, lastWriter: fixDone },
     { ...EMPTY, interrupted: { kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" } },
-    // a writer run parked at the provider's usage limit: before its reset, after it, unknown, and a repeat
     wrote({ parked: parkedAt("2026-11-07T14:00:00Z") }),
     wrote({ parked: parkedAt("2026-11-07T09:00:00Z") }),
     wrote({ parked: parkedAt("unknown") }),
@@ -1065,7 +1027,6 @@ describe("can it get stuck? (#485)", () => {
     { kind: "unwritten" },
     { kind: "raised", from: "tiny", to: "feature", why: "a planned file needs it" },
   ];
-  // the design review's steps, as the table sees them before the build (#236)
   const designs: readonly TicketState["design"][] = [
     { kind: "off" },
     { kind: "run", step: "review", spec: "a".repeat(64), design: "none" },
@@ -1076,7 +1037,6 @@ describe("can it get stuck? (#485)", () => {
       why: "the design review failed 3 times at this spec and design; a person looks",
     },
     { kind: "early", at: "2026-11-07T09:00:00Z" },
-    // #489: a person told once why the review holds or ends, and a review held for a raised lane
     {
       kind: "note",
       spec: "a".repeat(64),
@@ -1095,7 +1055,6 @@ describe("can it get stuck? (#485)", () => {
       ),
     ),
   );
-  // a merged ticket whose START record remains: still claimed, or reconciled already and gone from poll's list
   const merged = approvals.flatMap((approval) => [
     state({
       approval,
@@ -1103,7 +1062,6 @@ describe("can it get stuck? (#485)", () => {
     }),
     state({ approval, change: { kind: "none" }, runs: wrote() }),
   ]);
-  // a ticket held by its spec's "Blocked by" (#494), before its build begins
   const blockers: readonly NonNullable<TicketState["blockers"]>[] = [
     { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] },
     { kind: "waiting", on: [{ ticket: "12", state: "none" }] },
@@ -1128,8 +1086,6 @@ describe("can it get stuck? (#485)", () => {
     expect(stuck.map((s) => [s.approval.kind, s.change.kind, s.design.kind, decide(s)])).toEqual([]);
   });
 
-  // whoseTurn gives each decided action one lane, read from its next step: a person's step needs you, the merge
-  // is ready to merge, the factory's own steps are the factory's; a notice goes in the lane of the turn it announces
   it("gives every state exactly one lane, from its next step, and reaches each lane (#671)", () => {
     const reached = new Set<Lane>();
     const off = all.flatMap((s) => {
@@ -1175,7 +1131,6 @@ describe("can it get stuck? (#485)", () => {
       does: "whoever claimed it finishes it, or gives it back by removing the claim label on the git host",
     });
     expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
-    // a held ticket's stop for an unanswered git host has no change: the person looks at the git host (#494)
     const unanswered =
       "the git host did not answer for the ticket's blockers on 3 passes in a row since t: PROJ-0: 502";
     expect(nextStep({ kind: "needs-human", why: unanswered })).toEqual({
@@ -1185,14 +1140,12 @@ describe("can it get stuck? (#485)", () => {
   });
 });
 
-// #494: a spec's "Blocked by" holds the build until each blocker is merged
 describe("blocked by (#494)", () => {
   const unbuilt = { runs: EMPTY, change: { kind: "none" } } as const;
 
   it("AC-2, AC-3: a held ticket waits on its blockers, and starts once the last one merges", () => {
     const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
     const why = "blocked by PROJ-0 (open, not merged): the build starts once each is merged";
-    // the first pass records the hold and tells the person; the next waits without a word
     expect(decide(state({ ...unbuilt, blockers: waiting }))).toEqual({ kind: "held", why, ping: true });
     const told = { ...unbuilt, runs: { ...EMPTY, heldWhy: why } };
     expect(decide(state({ ...told, blockers: waiting }))).toEqual({ kind: "wait", why });
@@ -1237,7 +1190,6 @@ describe("blocked by (#494)", () => {
   it("AC-6: holds only a ticket whose build has not begun", () => {
     const waiting = { kind: "waiting", on: [{ ticket: "PROJ-0", state: "opened" }] } as const;
     expect(decide(state({ blockers: waiting })).kind).not.toBe("wait");
-    // a new approval or START counts runs afresh, so no run is counted; the open change still says the build began
     const opened = { kind: "open", line: line({ claimed: false }) } as const;
     expect(decide(state({ runs: EMPTY, change: opened, blockers: waiting }))).not.toMatchObject({
       kind: "wait",

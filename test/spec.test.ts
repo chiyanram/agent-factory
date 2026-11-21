@@ -85,7 +85,6 @@ describe("checkSpec", () => {
   });
 });
 
-// #494: an optional "## Blocked by" names the tickets whose merge this one waits for
 describe("checkSpec: Blocked by (#494)", () => {
   const withBlocked = (body: string) => `${GOOD}\n## Blocked by\n\n${body}\n`;
   const blockedBy = (text: string): readonly string[] | string => {

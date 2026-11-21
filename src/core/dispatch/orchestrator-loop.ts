@@ -1,12 +1,12 @@
-// orchestrator-loop — the orchestrator loop (#305; design correction B on #30): a human's command starts it, and it
+// orchestrator-loop — the orchestrator loop (#305): a human's command starts it, and it
 // ends by itself. No cron and no launchd job; nothing runs when nothing is in flight.
 //
 // `agent-factory dispatch <project>` (no --once) runs one locked pass (tick.ts), then decides every ticket again, from
 // the same records and the same table the pass uses, and asks the table whether any ticket is in flight (inFlight in
 // table.ts). None is: the loop ends. One is: it runs the next pass at once after a pass that ran a step or wrote to the
-// git host, and else waits the poll interval (poll.minutes) (#445). So a
-// loop with no ticket in flight ends after its first pass, with no wait, and one whose last ticket asked a person,
-// stopped at needs-human, was merged or closed, or waits on a human's approval ends right after the pass that saw it.
+// git host, and else waits the poll interval (poll.minutes). So a loop with no ticket in flight ends after its first
+// pass, with no wait, and one whose last ticket asked a person, stopped at needs-human, was merged or closed, or waits
+// on a human's approval ends right after the pass that saw it.
 // The loop never opens a ticket (P8): the ticket list is a human's START and approval records and the factory/<ticket>
 // PRs, as in every pass. Caps, run hours and runs at once hold in each pass, as they do in a pass by hand.
 //
@@ -17,31 +17,31 @@
 //
 // A loop never waits on what only a person can change. A pass that starts no run because every run it could start is
 // held back, by a step that is not set up (the writer's runner, the ready check's) or by a cap (the project's day, the
-// window's share) or by the run hours (#299), ends the loop after that pass, with why and what to do: set the step up, or run `dispatch` again
-// tomorrow, or once the window has room. The loop writes how it ended to <home>/runs/<project>/loop-end.json, and
+// window's share) or by the run hours, ends the loop after that pass, with why and what to do: set the step up, or run `dispatch`
+// again tomorrow, or once the window has room. The loop writes how it ended to <home>/runs/<project>/loop-end.json, and
 // `status` shows a loop that ended that way.
 //
 // A pass that fails (the git host is down, a pass by hand holds the pass lock) is printed, and the loop tries again
 // after the poll interval; MAX_FAILED_PASSES failures in a row end it, so it never spins on a broken setup (P7). A pass
 // that failed on the git host's rate limit names the time the limit lasts until (api.ts), and the next pass waits for
-// that time when it is later than the poll interval, so the loop never asks a rate-limited git host again early (#62).
+// that time when it is later than the poll interval, so the loop never asks a rate-limited git host again early.
 //
 // A ticket the provider's usage limit parked is in flight: the factory runs it again after the reset. When every
 // ticket in flight is parked, the next pass waits until the earliest reset, never less than the poll interval, so the
 // loop neither ends on a wait no person has to act on nor reads the git host every poll interval for hours.
 //
-// The loop sleeps only on what is outside the factory (#445): CI running, a person, a hold. After a pass that ran a
+// The loop sleeps only on what is outside the factory: CI running, a person, a hold. After a pass that ran a
 // step itself (a writer, ready check, review, local verifier or design run) or wrote to the git host (a label, a note, a
 // ping), what it did may have made the next step due, so the next pass starts at once and reads the git host again.
 // It still sleeps the poll interval when every step the pass ran failed the same way as in the pass before, so a
-// broken step never spins, and until the git host's rate limit is over when an action met one. Caps and run hours
-// hold in each pass as before, and a pass whose runs they all held ends the loop. The log says what the loop waits on:
+// broken step never spins, and until the git host's rate limit is over when an action met one. A pass that only
+// recorded a hold or a blocker read the git host did not answer also waits the poll interval. The log says what the loop waits on:
 // "in flight: 4 (waiting on CI); next pass in 5 min", or "in flight: 4; next pass now".
 //
 // A pass reads the git host's changes once to act and once more to look (decideAll after tick). When the pass did
 // nothing (no forge action and no run started: every ticket waits or is held), nothing it did can have moved a
 // ticket, so the look reuses the first read instead of asking the git host again; the factory's login is read once a
-// pass (readOnce, #62).
+// pass (readOnce).
 
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
@@ -71,26 +71,19 @@ export const MAX_FAILED_PASSES = 3;
 export type LoopSetup = {
   readonly home: string;
   readonly project: string;
-  // how long to wait between passes (poll.minutes)
   readonly pollMinutes: number;
-  // the settings of one pass, read again before each pass, so a token or a project file that changed is seen
   readonly setup: () => Promise<Result<TickSetup>>;
-  // the wait between passes: a timer, or a test's fake clock
   readonly sleep: (ms: number) => Promise<void>;
   readonly log: (line: string) => void;
-  // milliseconds since the epoch, for the loop's end record
   readonly now: () => number;
 };
 
-// how the loop ended: the passes it ran, whether any action in them failed, and why it stopped while a ticket was
-// still in flight (none when nothing was)
 export type LoopEnd = {
   readonly passes: number;
   readonly failedActions: boolean;
   readonly held: readonly string[];
 };
 
-// the step each run kind names when it is not set up
 const STEP_NAMES: Readonly<Record<string, string>> = {
   writer: "the writer",
   ready: "the ready check",
@@ -98,8 +91,6 @@ const STEP_NAMES: Readonly<Record<string, string>> = {
   verify: "the local verifier",
 };
 
-// heldBack : why no run started in a pass that had runs to start, or none when one started or none was due: outside
-// the run hours, when they are (runHoursEnd, #299); else each step not set up and each cap. Pure.
 export function heldBack(setup: Pick<TickSetup, "project" | "caps">, ran: readonly Ran[]): readonly string[] {
   const runs = ran.filter((r) => RUN_KINDS.has(r.action.kind));
   if (runs.length === 0 || runs.some((r) => r.result.kind !== "unavailable")) {
@@ -119,12 +110,10 @@ function heldWhy(runs: readonly Ran[], project: string): readonly string[] {
   return [...new Set(why)];
 }
 
-// loopFile : where a project's loop keeps its pid while it runs
 export function loopFile(home: string, project: string): string {
   return join(home, "runs", project, LOOP_GUARD.file);
 }
 
-// loopRunning : the pid of the project's live loop, or "none" (no file, or the loop that wrote it is dead)
 export async function loopRunning(input: {
   readonly home: string;
   readonly project: string;
@@ -133,16 +122,12 @@ export async function loopRunning(input: {
   return found.kind === "alive" ? found.pid : "none";
 }
 
-// flying : the tickets still in flight, by the table, and each one that entered a person's turn no pass has pinged yet,
-// so one more pass sends that ping (turn-ping.ts). A ticket that cannot be read is a person's to fix, not in flight.
 export function flying(decided: readonly Decided[]): readonly string[] {
   return decided.flatMap((d) =>
     "kind" in d || !(inFlight(d.state) || turnDue(d.state, d.action)) ? [] : [d.state.ticket],
   );
 }
 
-// waitingOn : what each ticket in flight waits on, by ticket, as the loop's log names it: CI, or the wait's why; a
-// ticket with a run or a ping due waits on nothing. Pure.
 export function waitingOn(decided: readonly Decided[]): ReadonlyMap<string, string> {
   return new Map(
     decided.flatMap((d) =>
@@ -161,23 +146,15 @@ type Step = {
   readonly setup: TickSetup;
 };
 
-// how the loop goes on after a pass with a ticket in flight (#445): at once, after the poll interval, or when the git
-// host's rate limit an action met is over; repeated names the tickets whose steps failed as in the pass before
 export type Pace =
   | { readonly kind: "now" }
   | { readonly kind: "sleep"; readonly repeated: ReadonlySet<string> }
   | { readonly kind: "limited"; readonly until: number };
 
-// failureOf : a failed action as the next pass compares it: its ticket, its kind and its reason; "none" for the rest
 export function failureOf(r: Ran): string {
   return r.result.kind === "failed" ? `${r.ticket} ${r.action.kind}: ${r.result.reason}` : "none";
 }
 
-// pace : after a pass, whether the next pass runs at once: it does after an action the factory took itself, a step
-// it ran or a git host write, unless each one that ended failed as in the pass before (`before`, from failureOf); a
-// wait, a broken ticket and a run that did not start are not actions. A rate limit an action met wins (#62). Pure.
-// the actions that only keep a line in the ticket's record and wait (#494): a pass that did only these waits the poll
-// interval, so three passes the git host did not answer are a poll interval apart, never back to back
 const RECORD_ONLY: ReadonlySet<Ran["action"]["kind"]> = new Set(["wait", "held", "blockers-unread"]);
 
 export function pace(ran: readonly Ran[], before: ReadonlySet<string>): Pace {
@@ -195,8 +172,6 @@ export function pace(ran: readonly Ran[], before: ReadonlySet<string>): Pace {
     : { kind: "sleep", repeated: new Set(acted.filter((r) => before.has(failureOf(r))).map((r) => r.ticket)) };
 }
 
-// readOnce : the forge, with its login read once for the pass, and its changes at most once until forget() or a
-// write: what the look after an idle pass reuses (#62). A failed read is never kept.
 export function readOnce(forge: Forge): { readonly forge: Forge; readonly forget: () => void } {
   let login: Awaited<ReturnType<Forge["me"]>> | "none" = "none";
   const me: Forge["me"] = async () => {
@@ -219,7 +194,6 @@ export function readOnce(forge: Forge): { readonly forge: Forge; readonly forget
     kept = read.kind === "ok" ? read : "none";
     return read;
   };
-  // a write: what was read may be out of date after it
   const wrote =
     <I, O>(write: (input: I) => Promise<O>) =>
     (input: I): Promise<O> => {
@@ -243,7 +217,6 @@ export function readOnce(forge: Forge): { readonly forge: Forge; readonly forget
   };
 }
 
-// passAndLook : one locked pass, then the tickets still in flight; a pass that did nothing looks at what it read
 async function passAndLook(loop: LoopSetup): Promise<Result<Step>> {
   const setup = await loop.setup();
   if (setup.kind === "failed") {
@@ -271,14 +244,11 @@ type Count = {
   failedInRow: number;
   failedActions: boolean;
   held: readonly string[];
-  // the actions that failed in the last pass, by failureOf (#445)
   failed: ReadonlySet<string>;
 };
 
 type After = "end" | "failed" | { readonly wait: number };
 
-// next : after one pass, "end" when nothing is in flight, every run is held back, or too many passes failed in a row,
-// else how long to wait: the poll interval, or until a rate limit the failed pass met is over
 function next(loop: LoopSetup, count: Count, step: Result<Step>): After {
   count.passes += 1;
   if (step.kind === "failed") {
@@ -291,8 +261,6 @@ function next(loop: LoopSetup, count: Count, step: Result<Step>): After {
   return afterPass(loop, count, step.value) === "end" ? "end" : paced(loop, step.value, pace(step.value.ran, before));
 }
 
-// parkedUntil : the earliest reset when every ticket in flight waits on the provider's usage limit, in ms since
-// the epoch; "none" when any ticket waits on something else. Pure.
 export function parkedUntil(step: Pick<Step, "flying" | "waits">): number | "none" {
   const prefix = `waiting: ${PARK_WAIT} `;
   const resets = step.flying.map((t) => {
@@ -302,7 +270,6 @@ export function parkedUntil(step: Pick<Step, "flying" | "waits">): number | "non
   return resets.length > 0 && resets.every((r) => !Number.isNaN(r)) ? Math.min(...resets) : "none";
 }
 
-// paced : how long the loop waits before the next pass, logged with what it waits on (#445)
 function paced(loop: LoopSetup, step: Step, how: Pace): After {
   if (how.kind === "now") {
     loop.log(`in flight: ${step.flying.join(", ")}; next pass now`);
@@ -333,8 +300,6 @@ function paced(loop: LoopSetup, step: Step, how: Pace): After {
   return { wait: poll };
 }
 
-// failedPass : a failed pass, printed; the loop ends after too many in a row, else waits the poll interval, or until
-// the git host's rate limit is over when the pass met one and it lasts longer (#62)
 function failedPass(loop: LoopSetup, count: Count, reason: string): After {
   count.failedInRow += 1;
   const until = rateLimitedUntil(reason);
@@ -354,7 +319,6 @@ function failedPass(loop: LoopSetup, count: Count, reason: string): After {
   return { wait };
 }
 
-// afterPass : a pass that ran: it ends the loop with nothing in flight, or with every run held back
 function afterPass(loop: LoopSetup, count: Count, step: Step): "end" | "wait" {
   if (step.flying.length === 0) {
     loop.log("no ticket is in flight; the orchestrator loop ends");
@@ -384,7 +348,6 @@ async function passes(loop: LoopSetup): Promise<Result<LoopEnd>> {
   }
 }
 
-// orchestratorLoop : passes until no ticket is in flight, holding the project's loop file; a second loop is refused
 export async function orchestratorLoop(loop: LoopSetup): Promise<Result<LoopEnd>> {
   if (!plainName(loop.project)) {
     return { kind: "failed", reason: `the project must be a plain name, got ${JSON.stringify(loop.project)}` };
@@ -402,7 +365,6 @@ export async function orchestratorLoop(loop: LoopSetup): Promise<Result<LoopEnd>
   }
 }
 
-// endedOf : the end record of a loop's result. Pure.
 function endedOf(at: string, ended: Result<LoopEnd>): LoopEnded {
   if (ended.kind === "failed") {
     return { at, kind: "failed", why: ended.reason };
@@ -412,7 +374,6 @@ function endedOf(at: string, ended: Result<LoopEnd>): LoopEnded {
     : { at, kind: "done", why: "no ticket is in flight" };
 }
 
-// endRecord : how the loop ended, replaced in one rename; one that cannot be written is printed
 async function endRecord(loop: LoopSetup, ended: Result<LoopEnd>): Promise<void> {
   const dir = join(loop.home, "runs", loop.project);
   const temp = join(dir, `.${LOOP_END_FILE}.${randomUUID()}`);

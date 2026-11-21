@@ -8,7 +8,6 @@ import { specHash } from "../src/core/spec.js";
 import { REQUEST_COMMANDS } from "../src/request-cli.js";
 import { tempDir } from "./temp.js";
 
-// a spec change in the issue store, sent as the issue's new body on the person's yes (#542)
 const OLD = [
   "# 6: renewals",
   "",
@@ -58,7 +57,6 @@ function draft(text: string, ticket = "6", name = "spec.md"): string {
   return file;
 }
 
-// a glab that answers issue 6 from issue.json, and keeps what a PUT sends in put.json
 function glab(): string {
   const path = join(home, "glab");
   const [put, read] = [join(home, "put.json"), join(home, "issue.json")];
@@ -88,7 +86,6 @@ async function run(name: string, argv: readonly string[]) {
 
 const request = (file = join(home, "specs", "ledger", "6", "spec.md")) => run("request", ["spec.body", "--file", file]);
 
-// idOf : the id in the confirm command request printed
 function idOf(out: string): string {
   return /agent-factory confirm (\S+) /.exec(out)?.[1] ?? "";
 }

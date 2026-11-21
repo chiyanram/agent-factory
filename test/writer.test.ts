@@ -48,7 +48,6 @@ import { GUARDRAIL_FLOOR } from "../src/core/process/guardrails.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
 
-// the writer's argv, deny list and settings for the implementer's floor, through the agent CLI's adapter
 const claudeArgv = (
   claude: Claude,
   settings: SettingsArg,
@@ -106,7 +105,6 @@ beforeEach(async () => {
     at: "2026-11-08T08:00:00Z",
   });
   if (done.kind !== "approved") throw new Error(`the test spec was not approved: ${done.kind}`);
-  // nothing runs without a START (#227)
   const startedTicket = await startTicket({
     where: { home, project: "ledger", ticket: "PROJ-1" },
     by: "ram",
@@ -119,32 +117,26 @@ beforeEach(async () => {
 });
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
-// what a writer does in its box: what it saw, then a commit and a report
 type Seen = {
   readonly spec: string;
   readonly task: string;
   readonly files: readonly string[];
   readonly settings: string;
 };
-// skipHook: the writer commits past the trailer hook, as `git -c core.hooksPath=/dev/null commit` would
-// plant: a file the writer also commits, as a run that writes the agent's settings would (#110)
 type Act = {
   readonly commit: boolean;
   readonly report: unknown;
   readonly exit: number;
   readonly skipHook?: boolean;
   readonly plant?: string;
-  // the PR body the writer writes in .factory/pr.md (#335)
   readonly pr?: string;
 };
 
-// git as the writer runs it in the box: no author in the environment, so the clone's own author name applies
 function boxGit(dir: string, ...args: string[]): string {
   const env = { PATH: process.env.PATH, HOME: p.env.HOME, GIT_CONFIG_NOSYSTEM: "1" };
   return execFileSync("git", args, { cwd: dir, env, encoding: "utf8" }).trim();
 }
 
-// the writer's commit in the box: its code, and the planted file when there is one
 function commitWork(dir: string, act: Act): void {
   writeFileSync(join(dir, "Renewal.java"), "class Renewal {}\n");
   if (act.plant !== undefined) {
@@ -183,13 +175,9 @@ function writer(fake: FakeBox, act: Act, seen: Seen[]): Box {
   };
 }
 
-// the completion window, shortened for the tests (#182)
 const FAST = { pollMs: 20, windowMs: 150, graceMs: 200 };
-// the stall time (#228), long enough that no other test's run stalls
 const STALL_MS = 60_000;
 
-// a writer that does its work and writes its report, then never exits on its own: a child keeps its stdout open. The
-// host's stop ends it.
 function hanging(fake: FakeBox, act: Act, seen: Seen[]): Box {
   const base = writer(fake, act, seen);
   let release: (ran: Ran) => void = () => undefined;
@@ -210,7 +198,6 @@ function hanging(fake: FakeBox, act: Act, seen: Seen[]): Box {
 
 type Told = { readonly log: string[]; readonly opened: ChangeRequest[]; readonly forge: Forge };
 
-// a forge that records what the host told it, in order
 function forge(jobs: readonly FailedJob[] = []): Told {
   const log: string[] = [];
   const opened: ChangeRequest[] = [];
@@ -218,7 +205,6 @@ function forge(jobs: readonly FailedJob[] = []): Told {
     const r = renderPost(post);
     return r.kind === "ok" ? r.text.split("\n")[0] : `refused: ${r.reason}`;
   };
-  // a call the writer step must never make fails the test's run with its name
   const unused = async (what: string) => ({ kind: "failed" as const, reason: `the writer step called ${what}` });
   const f: Forge = {
     name: "github",
@@ -263,7 +249,6 @@ function forge(jobs: readonly FailedJob[] = []): Told {
   return { log, opened, forge: f };
 }
 
-// the host push, run for real against the local origin, after every guard the host passes
 function pusher(pushes: { lease: string; branch: string }[]): Pusher {
   return async (request) => {
     for (const guard of request.guards) {
@@ -346,7 +331,6 @@ const FIX: Task = { kind: "fix" };
 const origin = (ref: string): string =>
   execFileSync("git", ["rev-parse", ref], { cwd: join(p.root, "origin.git"), encoding: "utf8" }).trim();
 
-// what the host gave the box, and the command it ran there; a missing call fails the test
 function started(fake: FakeBox): BoxSpec {
   const call = fake.calls.find((c) => c.op === "start");
   if (call?.op !== "start") throw new Error("no box was started");
@@ -374,7 +358,6 @@ describe("the writer step: a ticket's first run (#113)", () => {
 
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", evidence: DONE.evidence } });
     const { head, patch } = valueOf(out);
-    // the writer saw the approved spec and the tree of main, and its commit is on the new branch on the forge
     expect(seen).toEqual([
       {
         spec: SPEC,
@@ -391,14 +374,12 @@ describe("the writer step: a ticket's first run (#113)", () => {
       encoding: "utf8",
     }).trim();
     expect(author).toBe("agent-factory writer");
-    // the clone's hook gave the writer's commit its seat (#128)
     const message = execFileSync("git", ["log", "-1", "--format=%B", head], {
       cwd: join(p.root, "origin.git"),
       encoding: "utf8",
     });
     expect(message).toBe("feat: refuse a reserved loan\n\nAgent: writer\n\n");
     expect(pushes).toEqual([{ lease: "absent", branch: "factory/PROJ-1" }]);
-    // pushed first, then opened, claimed, and the evidence posted on the new change
     expect(told.log).toEqual([
       "open factory/PROJ-1",
       "label 41 agent::claimed",
@@ -431,14 +412,12 @@ describe("the writer step: a ticket's first run (#113)", () => {
       CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-      // the door seam refuses a person's word from a model run
       AGENT_FACTORY_MODEL_RUN: "1",
       HTTPS_PROXY: "http://factory-egress-ledger:3128",
     });
     expect(Object.keys(spec.env)).not.toContain("GITHUB_TOKEN");
     expect(Object.keys(spec.env)).not.toContain("PATH");
     const ran = command(fake);
-    // the run gets the built-in implementer card's tools, and its prompt starts with the card's body
     expect(ran.argv).toEqual(
       claudeArgv(
         { maxUsd: "2", model: "" },
@@ -514,7 +493,6 @@ describe("the writer step: a ticket's first run (#113)", () => {
         evidence: [],
       },
     });
-    // a first run opens and claims its change, as every first run with work does; nothing hands it to a person
     expect(told.log.filter((l) => l.includes("needs-human") || l.startsWith("note"))).toEqual([]);
     expect(told.log).toContain("label 41 agent::claimed");
   });
@@ -553,14 +531,12 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const told = forge();
     const began = Date.now();
     const out = await run(setup(hanging(fake, { commit: true, report: DONE, exit: 0 }, []), told, []), FIX);
-    // under the stall time, so it ended by the rule under test, not the stall; no fixed bound a slow runner overruns (#527)
     expect(Date.now() - began).toBeLessThan(STALL_MS);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", evidence: DONE.evidence, hung: true } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
     expect(told.log.at(-1)).toMatch(/note 41 \[writer\] done at/);
   });
 
-  // a box whose run writes the work and the report, then does `then` with the report's folder after `ms`
   function after(fake: FakeBox, ms: number, then: (dir: string) => Ran | "never"): Box {
     const base = writer(fake, { commit: true, report: DONE, exit: 0 }, []);
     return {
@@ -610,7 +586,6 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const s = setup(silent, forge(), []);
     const began = Date.now();
     const out = await run({ ...s, settings: { ...s.settings, timeoutSeconds: 0 } }, FIX);
-    // under the stall time, so it ended by the rule under test, not the stall; no fixed bound a slow runner overruns (#527)
     expect(Date.now() - began).toBeLessThan(STALL_MS);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
@@ -640,7 +615,6 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const told = forge();
     const began = Date.now();
     const out = await run(setup(timedOut, told, []), FIX);
-    // the window never opened: the run waited for its own end
     expect(Date.now() - began).toBeGreaterThanOrEqual(390);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
   });
@@ -665,7 +639,6 @@ describe("the stall stop (#228)", () => {
   const STALL = 200;
   const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // a forge that also keeps each post in full, to read its items
   function keeping(): Told & { readonly posts: string[] } {
     const told = forge();
     const posts: string[] = [];
@@ -687,7 +660,6 @@ describe("the stall stop (#228)", () => {
         for (const line of ["line 1", "line 2", "line 3", "line 4", "line 5", "line 6"]) {
           call.command.watch?.(`{"type":"assistant","text":"${line}"}\n`);
         }
-        // a last line with no line break is still shown; an @mention in it is made inert by post.ts
         call.command.watch?.("waiting on @someone");
         return ran;
       },
@@ -697,14 +669,12 @@ describe("the stall stop (#228)", () => {
     const began = Date.now();
     const out = await run({ ...s, settings: { ...s.settings, stallMs: STALL } }, FIX);
     expect(Date.now() - began).toBeGreaterThanOrEqual(STALL);
-    // under the stall time, so it ended by the rule under test, not the stall; no fixed bound a slow runner overruns (#527)
     expect(Date.now() - began).toBeLessThan(STALL_MS);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
     expect(told.log).toContain("label 41 needs-human");
     const post = told.posts.at(-1) ?? "";
     expect(post).toMatch(/^\[coordinator\] blocked: the run printed nothing for 0 s; the host stopped it/);
-    // the last five lines, oldest first, each cleaned for the forge
     const items = post.split("\n").filter((l) => l.startsWith("- "));
     expect(items).toHaveLength(5);
     expect(items[0]).toContain("line 3");
@@ -721,7 +691,6 @@ describe("the stall stop (#228)", () => {
         await base.run(call);
         const start = fake.calls.findLast((c) => c.op === "start");
         const dir = start?.op === "start" ? start.spec.worktree : "";
-        // nothing reads the writer's output after the run: it keeps only the tail, so no cap stops a long run
         expect(call.command.keep).toBe("tail");
         for (let i = 0; i < 12; i += 1) {
           await pause(STALL / 4);
@@ -734,17 +703,13 @@ describe("the stall stop (#228)", () => {
     const s = setup(streaming, forge(), []);
     const began = Date.now();
     const out = await run({ ...s, settings: { ...s.settings, stallMs: STALL } }, FIX);
-    // the run went on for three stall times and ended on its own
     expect(Date.now() - began).toBeGreaterThanOrEqual(3 * STALL);
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", hung: false } });
   });
 
   it("does not count time the machine was asleep: a poll that took long adds at most two polls of quiet", () => {
-    // awake: each poll adds the time since the last one
     expect(quietAfter({ quiet: 0, last: 0, heard: 0, now: 5000, pollMs: 5000 })).toBe(5000);
-    // asleep for an hour between two polls: that hour is not quiet time
     expect(quietAfter({ quiet: 5000, last: 5000, heard: 0, now: 3_605_000, pollMs: 5000 })).toBe(15_000);
-    // output since the last poll starts the quiet again from it
     expect(quietAfter({ quiet: 200_000, last: 5000, heard: 8000, now: 10_000, pollMs: 5000 })).toBe(2000);
   });
 
@@ -765,16 +730,13 @@ describe("the stall stop (#228)", () => {
   });
 });
 
-// a token prefix, joined at run time, so no secret scanner reads this file as holding a token
 function fakeToken(prefix: string): string {
   return [prefix].join("");
 }
 
 describe("a writer run that stops says why, even before a change exists (#62)", () => {
-  // fake tokens, built in pieces so no secret scanner reads this file as holding one
   const TOKENS = `${fakeToken("sk-ant-")}oat01-AAAAbbbbCCCCdddd ${fakeToken("gho")}_ABCDEFGHIJKLMNOPQRSTUVWX Authorization: Bearer abc.def.ghi`;
 
-  // the agent CLI fails before it writes a report: no commit, a non-zero exit, its error on stderr
   function failing(fake: FakeBox): Box {
     return {
       ...fake.box,
@@ -812,7 +774,6 @@ describe("a writer run that stops says why, even before a change exists (#62)", 
     const out = valueOf(await run(setup(failing(fake), told, []), FIX));
     expect(out).toMatchObject({ outcome: "blocked", patch: "" });
     expect(out.why).toBe("the run exited 1; the run said: Error: Invalid API key · Please run /login");
-    // no change to post on: nothing went to the forge
     expect(told.log).toEqual([]);
     const file = out.output ?? "";
     expect(file.startsWith(join(home, "runs", "ledger", "PROJ-1", "writer-"))).toBe(true);
@@ -902,7 +863,6 @@ describe("a writer run keeps its whole output as its trace (#487)", () => {
     const stdout = '{"type":"result","total_cost_usd":0.2,"usage":{"input_tokens":5}}\n';
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
     const base = writer(fake, { commit: true, report: DONE, exit: 0 }, []);
-    // the run leaves a clone git cannot read
     const box: Box = {
       ...base,
       run: async (call) => {
@@ -1075,7 +1035,6 @@ describe("the writer step: a later run on the change", () => {
   });
 
   it("hands a merge run the default branch as origin/main, and pushes its merge as a fast-forward (#103)", async () => {
-    // main moves on after the branch was cut
     p.write("svc/Other.java", "class Other {}\n");
     const mainTip = p.commitAll("feat: other");
     p.git("push", "-q", "origin", "main");
@@ -1100,7 +1059,6 @@ describe("the writer step: a later run on the change", () => {
       kind: "text",
       text: expect.stringContaining("This run merges main into ticket PROJ-1's branch feat/x"),
     });
-    // a merge on top of the branch: its first parent the old head, its second main; the lease was the old head
     expect(origin("refs/heads/feat/x")).toBe(head);
     expect(origin(`${head}^1`)).toBe(p.head2);
     expect(origin(`${head}^2`)).toBe(mainTip);
@@ -1133,7 +1091,6 @@ describe("the writer step: a later run on the change", () => {
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "done" } });
     expect(started(fake).worktree).toBe(join(folder, "repo"));
     expect(existsSync(folder)).toBe(false);
-    // a run that stops before its clone is made still leaves no folder
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), SPEC.replace("409", "423"));
     const empty = valueOf(await step.folder());
     const refused = await step.run({ ticket: "PROJ-1", change: { kind: "none" }, head: "", task: FIX, folder: empty });
@@ -1285,7 +1242,6 @@ describe("the writer step: a CI run on a local gate (#171)", () => {
 });
 
 describe("the writer's lint hook in the box (#171 Q3)", () => {
-  // commands.md on a branch of the origin, as a person pushed it
   function commands(branch: string, text: string): void {
     p.git("checkout", "-q", branch);
     p.write("docs/agents/commands.md", text);
@@ -1316,7 +1272,6 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
       FIX,
       openLine({ head: p.git("rev-parse", "origin/feat/x") }),
     );
-    // the settings file holds only the host's allow and deny lists (#114): no hook from the branch
     expect(started(fake).readOnly).toContain(".factory/settings.json");
     expect(seen.map((s) => JSON.parse(s.settings) as unknown)).toEqual([
       { permissions: { allow: WRITER_ALLOW, deny: expect.arrayContaining(["WebFetch", "Bash(git push *)"]) } },
@@ -1351,8 +1306,6 @@ describe("the writer's lint hook in the box (#171 Q3)", () => {
 
 describe("the writer's words and settings", () => {
   it("runs claude with no settings of the branch, skip-all, each plugin with --plugin-dir, streamed output, the cap and model only when set", () => {
-    // --setting-sources user: the branch's .claude/settings.json, hooks, env, .mcp.json, CLAUDE.md and skills are not
-    // loaded (#110); a real run showed the rulebook plugin and the --settings hook still load (decision on #110)
     expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 1, ["Read", "Edit", "Bash"], "vm")).toEqual([
       "claude",
       "-p",
@@ -1367,7 +1320,6 @@ describe("the writer's words and settings", () => {
       "stream-json",
       "--verbose",
     ]);
-    // the engine runs alone with no plugin, and hands two plugins in the project's order (#232)
     expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 0, ["Read"], "vm")).not.toContain("--plugin-dir");
     expect(claudeArgv({ maxUsd: "", model: "" }, { kind: "none" }, 2, ["Read"], "vm").slice(5, 9)).toEqual([
       "--plugin-dir",
@@ -1407,7 +1359,6 @@ describe("the writer's words and settings", () => {
         "Read(//Users/op/.config/gcloud/**)",
       ]),
     );
-    // with no home known, the runner alone hides the credential paths
     expect(writerDenies("").filter((d) => d.startsWith("Read("))).toEqual([]);
   });
 
@@ -1521,7 +1472,6 @@ describe("the writer step: the cleanup run (#236)", () => {
     );
     const value = valueOf(out);
     expect(value).toMatchObject({ outcome: "done", deferred: report.deferred, evidence: [ROW] });
-    // the card's hash goes into the run record
     expect(value.card).toMatch(/^[0-9a-f]{64}$/);
     expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^# Cleanup\n/) });
     expect(command(fake).stdin).toMatchObject({ kind: "text", text: expect.stringContaining('"deferred"') });
@@ -1562,7 +1512,6 @@ describe("the writer step: the cleanup run (#236)", () => {
 });
 
 describe("the writer step: role cards from the process plugin (#232)", () => {
-  // the rulebook plugin's process, holding this implementer card
   function implementerCard(text: string): void {
     const roles = join(rulebook, "skills", "crq", "process", "roles");
     mkdirSync(roles, { recursive: true });
@@ -1581,7 +1530,6 @@ describe("the writer step: role cards from the process plugin (#232)", () => {
       "Read,Edit,Write,TodoWrite,Skill,Task",
     ]);
     expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^Build it the team's way\.\n\n/) });
-    // the card names no floor, and the run still gets it
     expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringContaining(FLOOR) });
   });
 
@@ -1658,13 +1606,11 @@ describe("test-first edits only the project's test files (#688)", () => {
     const seen: Seen[] = [];
     const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, seen), forge(), []);
     await run({ ...s, agent: openAgentCli({ env: { FACTORY_CLAUDE: "/opt/claude" } }).writer }, FIX);
-    // the fake box is a vm: the image's pinned claude runs there
     expect(command(fake).argv[0]).toBe("claude");
     expect(seen[0]?.settings).not.toContain("writer-scope");
   });
 });
 
-// the roles a ticket's flow runs from cards
 type Flow = Exclude<Role, "onboarder" | "retro">;
 
 describe("a full run on each process: no plugin, the rulebook plugin, a team plugin (#232)", () => {
@@ -1677,7 +1623,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
       .replace(/^---\n[\s\S]*?\n---\n/, "")
       .trim();
 
-  // a plugin folder with a process: its lanes, and its role cards copied from `cards`
   function processPlugin(name: string, lanes: unknown, cards: string): string {
     const dir = join(p.root, name, "skills", "crq", "process");
     mkdirSync(join(dir, "roles"), { recursive: true });
@@ -1688,7 +1633,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     return join(dir, "roles");
   }
 
-  // the team's own cards: narrower tools, no floor of their own
   function teamCards(): string {
     const dir = join(p.root, "team-cards");
     mkdirSync(dir);
@@ -1719,7 +1663,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
 
   const LIMIT = { minutes: 20, setting: "FACTORY_DESIGN_MINUTES" };
 
-  // the design review and its verify pass, with a fake model; what each run was given
   async function designRuns(plugins: readonly PluginDir[]) {
     const seen: ModelRun[] = [];
     const outputs = [{ findings: [DESIGN_FINDING] }, { verdicts: [{ id: "D1", bucket: "act_on", why: "it holds" }] }];
@@ -1754,7 +1697,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     return { seen, card: reviewed.value.card };
   }
 
-  // the implementer's first run, then cleanup on the change, in fake boxes
   async function writerRuns(plugins: readonly PluginDir[]) {
     const s = (box: Box) => ({
       ...setup(box, forge(), []),
@@ -1772,8 +1714,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
 
   const stdinOf = (c: Command) => (c.stdin.kind === "text" ? c.stdin.text : "");
 
-  // the whole flow with fake runs: the process, the design review and its verify pass, the implementer, then cleanup;
-  // each run started from the card at cards[role]
   async function fullRun(plugins: readonly PluginDir[], cards: Readonly<Record<Flow, string>>) {
     const process = await readProcess(plugins);
     if (process.kind !== "ok") throw new Error(process.reason);
@@ -1782,7 +1722,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     expect(design.card).toBe(sha(cards["design-reviewer"]));
     expect(writing.fixed).toMatchObject({ outcome: "done", card: sha(cards.implementer) });
     expect(writing.cleaned).toMatchObject({ outcome: "done", card: sha(cards.cleanup) });
-    // each run's prompt is its card's body, then the engine's own words and floor, whatever the card left out
     const prompts = [...design.seen.map((r) => r.prompt), stdinOf(writing.fix), stdinOf(writing.clean)];
     const bodies = (["design-reviewer", "verify-pass", "implementer", "cleanup"] as const).map((r) => bodyOf(cards[r]));
     expect(prompts.map((t, i) => t.startsWith(`${bodies[i]}\n\n`))).toEqual([true, true, true, true]);
@@ -1840,7 +1779,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
 });
 
 describe("the writer step: the project's brief and glossary (#235)", () => {
-  // an accepted brief, as agent-factory onboard accept leaves it: its cites keep each line's text
   function accepted(cites: readonly { readonly file: string; readonly line: number; readonly text: string }[]): void {
     const dir = join(home, "projects", "ledger");
     mkdirSync(dir, { recursive: true });

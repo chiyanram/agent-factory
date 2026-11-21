@@ -28,22 +28,18 @@ export const AUTHOR = { name: "agent-factory writer", email: "writer@agent-facto
 export const SPEC_FILE = ".factory/spec.md";
 const PLUGINS_DIR = ".factory/plugins";
 
-// pluginPaths : where the run's plugins are, relative to the clone, in order: .factory/plugins/1, 2, … Pure.
 export function pluginPaths(count: number): readonly string[] {
   return Array.from({ length: count }, (_p, i) => `${PLUGINS_DIR}/${i + 1}`);
 }
 export const TASK_FILE = ".factory/task.md";
-// the project's accepted brief and glossary (#235; onboard/known.ts)
 export const BRIEF_FILE = ".factory/brief.md";
 export const GLOSSARY_FILE = ".factory/glossary.md";
 
-// a file the host may write into .factory: the task of a rework or CI run (task.ts), the writer's settings (tools.ts)
 export type FileText = { readonly kind: "none" } | { readonly kind: "text"; readonly text: string };
 export const SETTINGS_FILE = ".factory/settings.json";
 
-// the hook git runs on every commit, merge and amend; --no-verify does not skip it. The host's own git never runs it.
-// `git merge --no-edit` hands it a message with no final newline, and interpret-trailers then puts the trailer in the
-// subject's paragraph, where git does not read it as one (#103): the hook ends the message with a newline first.
+// --no-verify does not skip the prepare-commit-msg hook
+// https://git-scm.com/docs/githooks#_prepare_commit_msg
 const TRAILER_HOOK = [
   "#!/bin/sh",
   "# agent-factory: every commit of the writer carries its seat (#128)",
@@ -52,30 +48,23 @@ const TRAILER_HOOK = [
   "",
 ].join("\n");
 
-// paths the writer may read but not change, when the checkout has them; the push refuses the rest (agent-settings.ts)
 const SETTINGS = AGENT_SETTINGS;
 const GIT_OWN = [".git/config", ".git/hooks"] as const;
 
-// where the run starts: a change's branch at its head, or a ticket's first run on the default branch
 export type Start =
   | { readonly kind: "branch"; readonly branch: string; readonly head: string }
   | { readonly kind: "new"; readonly branch: string; readonly base: string };
 
 export type CloneSetup = {
-  // the project's clone (FACTORY_REPO): only git reads it, through hostGit
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
-  // a private folder (0700) the run folders go in
   readonly runsDir: string;
 };
 
 export type Clone = {
-  // the run folder: remove it after the run
   readonly dir: string;
-  // the clone the box mounts
   readonly repo: string;
   readonly branch: string;
-  // the commit the run starts from: the push's lease on a later run, the base of the patch on every run
   readonly start: string;
   readonly readOnly: readonly string[];
 };
@@ -86,7 +75,6 @@ function reason(result: GitResult): string {
 
 const OUTSIDE: RepoTarget = { kind: "none" };
 
-// git : one hardened git call in a repo path, or outside any repo
 async function git(
   env: NodeJS.ProcessEnv,
   repo: string | RepoTarget,
@@ -103,7 +91,6 @@ async function git(
     : { kind: "failed", reason: `git ${args[0] ?? ""}: ${reason(ran)}` };
 }
 
-// atHead : on a later run, the tip must be the head the run is for. Pure.
 function atHead(start: Start, tip: string): Result<string> {
   return start.kind === "new" || tip === start.head
     ? { kind: "ok", value: tip }
@@ -113,7 +100,6 @@ function atHead(start: Start, tip: string): Result<string> {
       };
 }
 
-// fetchStart : the start's ref in the project's clone, and its commit
 async function fetchStart(setup: CloneSetup, start: Start, ref: string): Promise<Result<string>> {
   const from = start.kind === "branch" ? start.branch : start.base;
   const fetched = await git(setup.env, setup.repo, ["fetch", "-q", "origin", `+refs/heads/${from}:${ref}`]);
@@ -121,7 +107,6 @@ async function fetchStart(setup: CloneSetup, start: Start, ref: string): Promise
   return tip.kind === "ok" ? atHead(start, tip.value) : tip;
 }
 
-// fill : the new repo, at the start, on the run's branch, set up to push to the forge
 async function fill(setup: CloneSetup, repo: string, ref: string, branch: string): Promise<Result<string>> {
   const url = await git(setup.env, setup.repo, ["config", "--get", "remote.origin.url"]);
   if (url.kind === "failed") {
@@ -143,7 +128,6 @@ async function fill(setup: CloneSetup, repo: string, ref: string, branch: string
   return git(setup.env, repo, ["rev-parse", "HEAD"]);
 }
 
-// trailerHook : the clone's prepare-commit-msg hook, in .git/hooks, which the box mounts read-only
 async function trailerHook(repo: string): Promise<Result<string>> {
   const hooks = join(repo, ".git", "hooks");
   return attempt(async () => {
@@ -163,7 +147,6 @@ async function entry(path: string): Promise<Entry> {
   }
 }
 
-// readOnlyPaths : the settings and git paths the checkout has; a symlink at one is refused
 async function readOnlyPaths(repo: string): Promise<Result<readonly string[]>> {
   const paths = [...SETTINGS, ...GIT_OWN];
   const found = await Promise.all(paths.map(async (p) => ({ path: p, entry: await entry(join(repo, p)) })));
@@ -176,17 +159,13 @@ async function readOnlyPaths(repo: string): Promise<Result<readonly string[]>> {
 
 type Files = {
   readonly spec: string;
-  // the plugins' folders, in order
   readonly plugins: readonly string[];
   readonly task: FileText;
   readonly settings: FileText;
-  // a merge run's default branch, fetched in as origin/<it>
   readonly merge?: string;
-  // the project's accepted brief and glossary, which every run reads (#235)
   readonly knowledge?: { readonly brief: string; readonly glossary: string };
 };
 
-// the optional files the host writes, each by its path
 function optional(files: Files): readonly { readonly path: string; readonly text: string }[] {
   return [
     ...(files.task.kind === "text" ? [{ path: TASK_FILE, text: files.task.text }] : []),
@@ -200,7 +179,6 @@ function optional(files: Files): readonly { readonly path: string; readonly text
   ];
 }
 
-// factoryFiles : the approved spec, the plugins and the task in .factory, which the branch must not hold
 async function factoryFiles(repo: string, files: Files): Promise<Result<readonly string[]>> {
   if ((await entry(join(repo, ".factory"))).kind !== "absent") {
     return { kind: "failed", reason: "the branch holds .factory; a person removes it" };
@@ -223,7 +201,6 @@ async function factoryFiles(repo: string, files: Files): Promise<Result<readonly
   );
 }
 
-// fetchBase : the default branch, through the project's clone, into the new repo as origin/<base> (a merge run)
 async function fetchBase(setup: CloneSetup, repo: string, base: string): Promise<Result<string>> {
   if (!plainBranch(base)) {
     return { kind: "failed", reason: `the default branch is not a plain branch name: ${JSON.stringify(base)}` };
@@ -235,7 +212,6 @@ async function fetchBase(setup: CloneSetup, repo: string, base: string): Promise
     : fetched;
 }
 
-// filled : the new repo filled, and for a merge run the default branch fetched in; the start's commit
 async function filled(
   setup: CloneSetup,
   repo: string,
@@ -248,8 +224,6 @@ async function filled(
   return based.kind === "ok" ? head : based;
 }
 
-// checkedOut : the new repo in `dir`, at the start, on the run's branch, with the default branch for a merge run; the
-// start's commit
 async function checkedOut(
   setup: CloneSetup,
   dir: string,
@@ -300,7 +274,6 @@ async function prepared(
     : excluded;
 }
 
-// removeClone : the run folder gone; the box wrote its files as the host owner, so this user can remove them
 export async function removeClone(dir: string): Promise<Result<string>> {
   return attempt(async () => {
     await rm(dir, { recursive: true, force: true });
@@ -308,7 +281,6 @@ export async function removeClone(dir: string): Promise<Result<string>> {
   }, `cannot remove ${dir}`);
 }
 
-// runFolder : a new, empty run folder (writer-XXXXXX), private to this user
 export function runFolder(setup: Pick<CloneSetup, "runsDir">): Promise<Result<string>> {
   return attempt(async () => {
     await mkdir(setup.runsDir, { recursive: true, mode: 0o700 });
@@ -316,8 +288,6 @@ export function runFolder(setup: Pick<CloneSetup, "runsDir">): Promise<Result<st
   }, `cannot make a folder in ${setup.runsDir}`);
 }
 
-// makeClone : a run folder with the writer's clone in it: the folder given, which the start line names, or a
-// new one; a folder that could not be set up is removed again
 export async function makeClone(
   setup: CloneSetup,
   input: Files & { readonly start: Start; readonly dir?: string },

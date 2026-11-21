@@ -20,13 +20,11 @@ import { plainName } from "./core/spec.js";
 
 export type Merged = { readonly ticket: string; readonly at: string; readonly sha: string };
 
-// what became of each merge, by ticket
 export type Outcomes = (merged: readonly Merged[]) => Promise<ReadonlyMap<string, MergeOutcome>>;
 
 export type RetroIo = {
   readonly home: string;
   readonly outcomes: Outcomes;
-  // the lesson drafts for the project's failures: one model run (retro/draft.ts)
   readonly draft: (project: string, failures: readonly Failure[]) => Promise<Result<Drafted>>;
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
@@ -42,8 +40,6 @@ export const RETRO_HELP = `  retro <project> [--json] [--draft]
 
 const USAGE = "usage: agent-factory retro <project> [--json] [--draft]\n";
 
-// cloneOutcomes : each merge's outcome from the project's clone (outcome.ts), one fetch for all; unknown when the clone
-// is not set
 export function cloneOutcomes(env: NodeJS.ProcessEnv, now: () => number): Outcomes {
   return async (merged) => {
     const repo = settingOf(env, "clone") ?? "";
@@ -59,7 +55,6 @@ export function cloneOutcomes(env: NodeJS.ProcessEnv, now: () => number): Outcom
   };
 }
 
-// fetchedWhy : the default branch fetched once for every merge; why it could not be, or "" when it was or none is needed
 function fetchedWhy(repo: string, env: NodeJS.ProcessEnv, merges: number): Promise<string> {
   if (repo === "") {
     return Promise.resolve("the project's clone is not set");
@@ -67,8 +62,6 @@ function fetchedWhy(repo: string, env: NodeJS.ProcessEnv, merges: number): Promi
   return merges === 0 ? Promise.resolve("") : fetchDefault({ repo, env });
 }
 
-// cardDraft : the retro card's one run over the failures, with the project's plugins, the logic model and its time
-// limit, through the agent seam, whose env holds no git host token (retro/draft.ts)
 export function cardDraft(home: string, env: NodeJS.ProcessEnv): RetroIo["draft"] {
   return async (project, failures) => {
     const limit = limitOf(env, "retro.minutes");
@@ -92,15 +85,12 @@ type Read = {
   readonly problems: readonly string[];
 };
 
-// lastOf : the ticket's last line of a kind. Pure.
 function lastOf<K extends Event["kind"]>(events: readonly Event[], kind: K): Extract<Event, { kind: K }> | undefined {
   return events.findLast((e): e is Extract<Event, { kind: K }> => e.kind === kind);
 }
 
 type TicketRead = { readonly merged: readonly Merged[]; readonly timelines: readonly (readonly [string, Timeline])[] };
 
-// ticketMerge : the ticket's merge and its timeline line (none when it has not merged), or why its records cannot be
-// read
 async function ticketMerge(where: Where, warn: (line: string) => void): Promise<Result<TicketRead>> {
   const events = await readRecords(where, { warn });
   if (events.kind === "failed") {
@@ -115,8 +105,6 @@ async function ticketMerge(where: Where, warn: (line: string) => void): Promise<
   return { kind: "ok", value: { merged: [merged], timelines: t === undefined ? [] : [[where.ticket, t]] } };
 }
 
-// readMerges : each merged ticket of the project and its timeline line; a ticket whose records cannot be read is a
-// problem, and the rest are still read
 async function readMerges(home: string, project: string, warn: (line: string) => void): Promise<Read> {
   const reads: Result<TicketRead>[] = [];
   for (const ticket of await ticketsOf(home, project)) {
@@ -130,7 +118,6 @@ async function readMerges(home: string, project: string, warn: (line: string) =>
   };
 }
 
-// failureLines : one failure as the listing shows it. Pure.
 function failureLines(f: Failure): readonly string[] {
   const n = f.tickets.length;
   return [
@@ -139,7 +126,6 @@ function failureLines(f: Failure): readonly string[] {
   ];
 }
 
-// listingLines : the listing. Pure.
 export function listingLines(input: {
   readonly project: string;
   readonly merged: readonly Merged[];
@@ -156,7 +142,6 @@ export function listingLines(input: {
   return [head, ...none, ...input.failures.flatMap(failureLines), ...untimed];
 }
 
-// listingText : the listing as text, or as one JSON object with --json. Pure.
 function listingText(
   args: Args,
   l: {
@@ -176,7 +161,6 @@ function listingText(
 
 type Args = { readonly project: string; readonly json: boolean; readonly draft: boolean };
 
-// argsOf : the project and the flags asked, or none for a bad command line. Pure.
 function argsOf(positionals: readonly string[]): Args | undefined {
   const rest = positionals.filter((p) => p !== "--json" && p !== "--draft");
   const [project] = rest;
@@ -185,7 +169,6 @@ function argsOf(positionals: readonly string[]): Args | undefined {
     : undefined;
 }
 
-// drafted : the drafts' folders on stdout, or why there are none on stderr; 1 when the run failed
 async function drafted(io: RetroIo, project: string, failures: readonly Failure[]): Promise<number> {
   const made = await io.draft(project, failures);
   if (made.kind === "failed") {
@@ -199,8 +182,6 @@ async function drafted(io: RetroIo, project: string, failures: readonly Failure[
   return 0;
 }
 
-// retroCommand : the listing on stdout (JSON with --json), then with --draft the drafts' folders; each unreadable
-// ticket on stderr, and exit 1; a failed draft run exits 1; 64 for a bad command line
 export async function retroCommand(positionals: readonly string[], io: RetroIo): Promise<number> {
   const args = argsOf(positionals);
   if (args === undefined) {

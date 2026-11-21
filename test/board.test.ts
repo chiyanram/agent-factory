@@ -9,8 +9,6 @@ import type { ApprovalRecord } from "../src/core/approval.js";
 import type { Result } from "../src/core/forge/api.js";
 import type { Waiting } from "../src/core/forge/types.js";
 
-// One line per ticket in flight: its change, its step, what it waits on and for how long (#487 AC-5).
-
 const H = "1".repeat(40);
 const NOW = Date.parse("2026-11-13T12:00:00Z");
 
@@ -31,14 +29,12 @@ const line = (over: Partial<OpenLine> = {}): OpenLine => ({
   ...over,
 });
 
-// the implementer, cleanup, ready check and review are done at the head
 const done: Summary = {
   ...EMPTY,
   lastWriter: { kind: "ended", mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [] },
   lastReady: { kind: "ended", at: "2026-11-13T09:00:00Z", human: false, head: H, passed: true, why: "" },
   lastReview: { kind: "ended", head: H, actOn: 0 },
   reviewRounds: 1,
-  // recent, so no claim is quiet
   lastAt: "2026-11-13T11:50:00Z",
 };
 
@@ -76,19 +72,14 @@ const at = (iso: string): Event => ({ at: iso, kind: "pinged", head: H });
 
 describe("the board (#487 AC-5)", () => {
   const tickets: readonly Decided[] = [
-    // the gate is green and pinged: the approver reviews and merges
     decided("PROJ-1", { runs: { ...done, pingedAt: H } }),
-    // CI runs at the head: the gate
     decided("PROJ-2", { change: { kind: "open", line: line({ number: 14, pipeline: { kind: "running" } }) } }),
-    // approved, no PR yet: the factory's first run
     decided("PROJ-3", { change: { kind: "none" }, runs: EMPTY }),
-    // a START in a lane that needs approval: the STARTer approves
     decided(
       "PROJ-4",
       { change: { kind: "none" }, runs: EMPTY, approval: { kind: "unapproved", lane: "feature" } },
       "none",
     ),
-    // merged: no longer in flight
     decided("PROJ-5", {
       change: { kind: "merged", line: { kind: "merged", number: 9, branch: "factory/PROJ-5", fork: false } },
     }),
@@ -96,7 +87,6 @@ describe("the board (#487 AC-5)", () => {
   ];
   const events = new Map<string, readonly Event[]>([
     ["PROJ-1", [begun("2026-11-13T07:00:00Z", "ram"), at("2026-11-13T10:00:00Z")]],
-    // STARTed twice: the newest START names the person, whatever the file's order
     ["PROJ-4", [begun("2026-11-13T07:00:00Z", "lee"), begun("2026-11-13T11:00:00Z", "ram")]],
   ]);
   const lines = boardOf({ decided: tickets, events, now: NOW, describe: describeAction });
@@ -173,7 +163,6 @@ describe("the board (#487 AC-5)", () => {
       forMs: 2 * 3_600_000,
     });
     expect(Array.isArray(json) && json[1]).toMatchObject({ change: null, since: null, lane: "needs-you" });
-    // every row, broken or decided, keeps one key order
     expect(Array.isArray(json) ? json.map((r: object) => Object.keys(r).join(",")) : json).toEqual(
       Array(5).fill("ticket,change,lane,step,waitsOn,since,forMs"),
     );
@@ -189,20 +178,15 @@ describe("the board (#487 AC-5)", () => {
   });
 });
 
-// whose turn each ticket is: needs you, ready to merge, or the factory's, from whoseTurn (next-step.ts)
 describe("the board's lanes (#671)", () => {
   const planted: readonly Decided[] = [
-    // the factory's run: approved, no PR yet
     decided("PROJ-3", { change: { kind: "none" }, runs: EMPTY }),
-    // a person's step: a START in a lane that needs approval
     decided(
       "PROJ-4",
       { change: { kind: "none" }, runs: EMPTY, approval: { kind: "unapproved", lane: "feature" } },
       "none",
     ),
-    // the gate is green and pinged
     decided("PROJ-1", { runs: { ...done, pingedAt: H } }),
-    // the gate: CI runs at the head
     decided("PROJ-2", { change: { kind: "open", line: line({ number: 14, pipeline: { kind: "running" } }) } }),
     { kind: "broken", ticket: "PROJ-6", reason: "PROJ-6.jsonl line 2 is not a record" },
   ];
@@ -287,7 +271,6 @@ describe("the board's lanes (#671)", () => {
     expect(boardText({ lines: [parked], zone: { name: "UTC" }, mark: "#" }).at(-2)).toBe(
       "  PROJ-7  #15  wait: the provider's usage limit lasts until 2026-11-13 15:00 UTC",
     );
-    // JSON keeps the UTC time as the records have it
     expect(JSON.parse(boardJson([parked]))).toMatchObject([{ step: parked.step }]);
   });
 
@@ -303,7 +286,6 @@ describe("the board's lanes (#671)", () => {
   });
 });
 
-// the ticket sessions that wait for the operator's word, by their label (waiting.ts)
 describe("the board's waiting sessions", () => {
   const waitingSince = "2026-11-13T11:00:00Z";
   const read = (numbers: readonly number[]) => ({

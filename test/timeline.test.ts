@@ -19,7 +19,6 @@ const row = (rule: string | undefined, acted: boolean) => ({
   ...(rule === undefined ? {} : { rule }),
 });
 
-// a ticket that ran a writer, two review rounds and a failed one, was handed over and taken back, and merged
 const EVENTS: readonly Event[] = [
   { at: "2026-11-13T08:00:00Z", kind: "begun", by: "ram", via: "terminal" },
   {
@@ -51,10 +50,8 @@ const EVENTS: readonly Event[] = [
     evidence: [],
     hung: false,
   },
-  // a round reused at the same patch writes a line, and is not a round that ran
   { at: "2026-11-13T10:05:00Z", kind: "review-ended", head: H, actOn: 0, spend: { usd: 0, tokens: 0 } },
   { at: "2026-11-13T10:10:00Z", kind: "blocked", why: "the writer asked for a person" },
-  // a second hand-over line while the first is open: the wait and the why stay the first's
   { at: "2026-11-13T10:20:00Z", kind: "blocked", why: "the claim went quiet" },
   { at: "2026-11-13T11:10:00Z", kind: "begun", by: "mo", via: "terminal" },
   {
@@ -67,7 +64,6 @@ const EVENTS: readonly Event[] = [
     acted: { since: H, rows: [row("CR1", true), row("CR1", false), row("logic", true), row(undefined, false)] },
   },
   { at: "2026-11-13T11:40:00Z", kind: "spent", phase: "review", head: H, spend: { usd: 0.1, tokens: 50 } },
-  // a later hand-over no one took back: not a rescue, and not the earlier rescue's why
   { at: "2026-11-13T11:50:00Z", kind: "blocked", why: "the ready check failed twice" },
   { at: "2026-11-13T12:00:00Z", kind: "merged", number: 9, sha: "a".repeat(40), by: "mo" },
 ];

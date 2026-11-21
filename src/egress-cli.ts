@@ -21,7 +21,6 @@ export const EGRESS_HELP = `  egress check <project> [--port <n>]... [--model-ho
 export type EgressDeps = {
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
-  // runs `go` with the project's resolved settings, this host's docker and its box plan; its exit code
   readonly resolved: (
     project: string,
     go: (host: {
@@ -46,7 +45,6 @@ function portsOf(texts: readonly string[]): readonly number[] | "bad" {
   return ports.every((p) => p >= 1 && p <= MAX_PORT) ? ports : "bad";
 }
 
-// projectOf : the project of `check <project>`, or "" for any other words
 function projectOf(positionals: readonly string[]): string {
   const [what, project = "", ...rest] = positionals;
   return what === "check" && rest.length === 0 ? project : "";

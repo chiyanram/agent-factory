@@ -21,7 +21,6 @@ import type { PluginDir } from "./read.js";
 
 export type Pin = { readonly commit: string; readonly version: string; readonly sha256: string };
 export type Pins = Readonly<Record<string, Pin>>;
-// a pinned plugin, checked against its hash: what a run hands the agent CLI and writes into its records
 export type Pinned = PluginDir & { readonly ref: string; readonly pin: Pin };
 
 export const COMMIT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
@@ -43,8 +42,6 @@ export function storeDir(home: string, ref: PluginRef, sha256: string): string {
   return join(home, "plugins", ref.marketplace, ref.name, sha256);
 }
 
-// pinnedDirs : the listed plugins that hold a pin, in the list's order, each at its pinned store folder; a plugin not
-// pinned yet is left out. Its hash is not checked here: a run checks it (pinnedPlugins). Pure.
 export function pinnedDirs(home: string, refs: readonly PluginRef[], pins: Pins): readonly PluginDir[] {
   return refs.flatMap((r) => {
     const pin = pins[refText(r)];
@@ -52,9 +49,6 @@ export function pinnedDirs(home: string, refs: readonly PluginRef[], pins: Pins)
   });
 }
 
-// ---- the hash
-
-// fileLines : one line per file under dir, "<mode> <sha256> <path>", sorted by path; a symlink is refused
 async function fileLines(dir: string, under: string): Promise<readonly string[]> {
   const lines: string[] = [];
   for (const name of (await readdir(join(dir, under))).toSorted()) {
@@ -63,7 +57,6 @@ async function fileLines(dir: string, under: string): Promise<readonly string[]>
   return lines;
 }
 
-// entryLines : a folder's lines, or a plain file's one line; anything else throws, and the hash is refused
 async function entryLines(dir: string, path: string): Promise<readonly string[]> {
   const s = await lstat(join(dir, path));
   if (s.isDirectory()) {
@@ -78,7 +71,6 @@ async function entryLines(dir: string, path: string): Promise<readonly string[]>
   return [`${s.mode & 0o111 ? "x" : "-"} ${sum} ${path}`];
 }
 
-// treeHash : the plugin folder's files, each line "<mode> <sha256> <path>", and their sha256
 export async function treeHash(
   dir: string,
 ): Promise<Result<{ readonly sha256: string; readonly files: readonly string[] }>> {
@@ -87,8 +79,6 @@ export async function treeHash(
     return { sha256: createHash("sha256").update(files.join("\n")).digest("hex"), files };
   }, `cannot hash ${dir}: it must be a folder of plain files, with no symlink`);
 }
-
-// ---- the pins file
 
 export function matching(value: unknown, pattern: RegExp): string | undefined {
   return typeof value === "string" && pattern.test(value) ? value : undefined;
@@ -125,12 +115,8 @@ export async function readPins(home: string, project: string): Promise<Result<Pi
     : failed(`${path}: must map each name@marketplace to {"commit", "version", "sha256"}`);
 }
 
-// ---- the engine's rules-pack pin (#607)
-
-// the chiyanram/skills commit this engine is tested with (CI's rules-pack check); init pins chiyanram's plugins at it
 export type PackPin = { readonly repo: string; readonly commit: string; readonly tag: string };
 
-// enginePackPin : <pkg>/.github/rules-pack.json, which the npm package ships; refused when missing or bad, never HEAD
 export async function enginePackPin(pkgDir: string): Promise<Result<PackPin>> {
   const path = join(pkgDir, ".github", "rules-pack.json");
   const raw = parsedJson(await readFile(path, "utf8").catch(() => ""));
@@ -152,9 +138,6 @@ export async function writePins(home: string, project: string, pins: Pins): Prom
   }, `cannot write ${path}`);
 }
 
-// ---- before every run
-
-// verified : the pinned version of one plugin, when its stored folder still has the pin's hash
 async function verified(home: string, ref: PluginRef, pins: Pins): Promise<Result<Pinned>> {
   const text = refText(ref);
   const pin = pins[text];
@@ -169,7 +152,6 @@ async function verified(home: string, ref: PluginRef, pins: Pins): Promise<Resul
   return { kind: "ok", value: { label: text, dir, ref: text, pin } };
 }
 
-// pinnedPlugins : every plugin the project lists, in order, each checked against its pin; none when it lists none
 export async function pinnedPlugins(input: {
   readonly home: string;
   readonly project: string;
@@ -195,7 +177,6 @@ async function allVerified(home: string, refs: readonly PluginRef[], pins: Pins)
   return { kind: "ok", value: out };
 }
 
-// listedPlugins : the plugins the project's resolved settings list; none when it has no project file
 export async function listedPlugins(input: {
   readonly home: string;
   readonly project: string;

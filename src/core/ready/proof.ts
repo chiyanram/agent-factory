@@ -13,24 +13,19 @@ import type { Argv, ProjectFile } from "../project.js";
 import type { Evidence } from "../report.js";
 import { READ_ONLY_PROGRAMS } from "./command.js";
 
-// the words a gate command runs: the build's own tasks, never a filter that picks a test
 const GATE_TASKS: ReadonlySet<string> = new Set(["check", "test", "build", "verify", "lint", "clean", "all", "ci"]);
 
-// isGateRun : argv runs the project's gate: its verify command, or a listed build program with only gate tasks and
-// options. Pure.
 export function isGateRun(argv: Argv, project: ProjectFile): boolean {
   const verify = project.gate.kind === "local" ? project.gate.verify.join(" ") : "";
   return argv.join(" ") === verify || buildTasks(argv, project);
 }
 
-// buildTasks : a listed build program, never a read-only one, run with gate tasks and options alone. Pure.
 function buildTasks(argv: Argv, project: ProjectFile): boolean {
   const [program, ...rest] = argv;
   const build = project.ready.programs.includes(program) && !READ_ONLY_PROGRAMS.includes(program);
   return build && rest.some((w) => GATE_TASKS.has(w)) && rest.every((w) => GATE_TASKS.has(w) || w.startsWith("-"));
 }
 
-// gateReused : why the rows give one gate command for more than one criterion, or "" when none does. Pure.
 export function gateReused(evidence: readonly Evidence[], argvs: readonly Argv[], project: ProjectFile): string {
   const seen = new Map<string, number[]>();
   argvs.forEach((argv, i) => {
@@ -47,12 +42,10 @@ export function gateReused(evidence: readonly Evidence[], argvs: readonly Argv[]
   return `rows ${named} all give ${JSON.stringify(command)}: a gate run is never the evidence for more than one criterion, and never for what a file says. Give each criterion a command that shows it, such as grep or git diff for a file's content`;
 }
 
-// words : the words of a text that carry meaning: four letters or more, lower case. Pure.
 function words(text: string): ReadonlySet<string> {
   return new Set(text.toLowerCase().match(/[a-z][a-z0-9_]{3,}/g) ?? []);
 }
 
-// plain : a line with its blanks collapsed, lower case. Pure.
 function plain(line: string): string {
   return line.replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -64,8 +57,6 @@ function linesOf(text: string): readonly string[] {
     .filter((l) => /[a-z0-9]/.test(l));
 }
 
-// quotes : the result quotes the printed output: it holds a whole printed line, a line of it is in the output (a
-// fragment such as BUILD SUCCESSFUL, without its time), or it shares two meaningful words with it. Pure.
 export function quotes(result: string, printed: string): boolean {
   const said = plain(result);
   const out = linesOf(printed);
@@ -77,8 +68,6 @@ export function quotes(result: string, printed: string): boolean {
   return [...words(result)].filter((w) => outWords.has(w)).length >= 2;
 }
 
-// unquoted : the first row whose result is prose, not what its command printed, and why; "none" when each quotes it.
-// A command that printed nothing answers with its exit code alone, so any result stands. Pure.
 export function unquoted(
   evidence: readonly Evidence[],
   printed: readonly string[],

@@ -12,7 +12,6 @@ export const COMMANDS_FILE = "docs/agents/commands.md";
 export type Tools = { readonly lint: string; readonly quick: string };
 export const NO_TOOLS: Tools = { lint: "", quick: "" };
 
-// toolOf : the first "<name>: <command>" line's command, a code span unwrapped; "" when there is none. Pure.
 export function toolOf(text: string, name: string): string {
   const line = text
     .replace(/\r/g, "")
@@ -22,12 +21,10 @@ export function toolOf(text: string, name: string): string {
   return /^`[^`]*`$/.test(command) ? command.slice(1, -1).trim() : command;
 }
 
-// toolsOf : both tools from the file's text. Pure.
 export function toolsOf(text: string): Tools {
   return { lint: toolOf(text, "lint-file"), quick: toolOf(text, "test-touched") };
 }
 
-// toolLines : what the prompt says of the tools; none when the project names none. Pure.
 export function toolLines(tools: Tools): readonly string[] {
   return [
     ...(tools.lint === "" ? [] : [`Each file you edit is linted at once with: ${tools.lint}. Fix what it reports.`]),
@@ -37,10 +34,8 @@ export function toolLines(tools: Tools): readonly string[] {
   ];
 }
 
-// the default branch, as readTools fetches it into the project's clone before each run
 export const TARGET_REF = "refs/factory/writer-target";
 
-// readTools : the tools on the default branch of the project's clone; none when the file is not there
 export async function readTools(input: {
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;

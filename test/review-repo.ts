@@ -1,6 +1,7 @@
 // A project for the reviewer's tests: rules on main; a branch factory/PROJ-1 that changes code (also under a path with a
 // space and one with a non-ASCII name), edits two rule files and the design main holds; then a second commit on it.
 // specText, writeSpec and approveSpec put the spec of ledger/PROJ-1, and its approval, in a local store.
+// Each branch's repo is built once and each test gets a copy, because a build per test took most of the suite's time.
 
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +26,6 @@ export const RULEBOOK = join(import.meta.dirname, "..", "tests", "fixtures", "pa
 export const DESCRIPTION =
   "Intent (verbatim): totals must be right.\nAC1: total() returns the sum.\nDesign: docs/design/order.md";
 
-// the spec of ledger/PROJ-1, with its "## Design" section
 export function specText(design = "docs/design/order.md"): string {
   return [
     "# PROJ-1: totals are right",
@@ -50,13 +50,11 @@ export function specText(design = "docs/design/order.md"): string {
   ].join("\n");
 }
 
-// writeSpec : the spec of ledger/PROJ-1 in the local store under home
 export function writeSpec(home: string, text: string): void {
   mkdirSync(join(home, "specs", "ledger", "PROJ-1"), { recursive: true });
   writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text);
 }
 
-// approveSpec : the spec in the store and an approval record of its hash, as `agent-factory approve` writes them
 export function approveSpec(home: string, text: string = specText()): void {
   writeSpec(home, text);
   mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
@@ -66,8 +64,6 @@ export function approveSpec(home: string, text: string = specText()): void {
 
 export const BRANCH = "factory/PROJ-1";
 
-// the repos built so far, one per branch name: each test gets a copy, which is far cheaper than building one (#485,
-// #358: building a repo per test was most of the suite's time)
 const BUILT = new Map<string, { readonly root: string; readonly head1: string; readonly head2: string }>();
 process.on("exit", () => {
   for (const b of BUILT.values()) {
@@ -75,7 +71,6 @@ process.on("exit", () => {
   }
 });
 
-// project : a fresh copy of the branch's repo, with its own origin
 export function project(branch: string = BRANCH): Project {
   const built = BUILT.get(branch) ?? build(branch);
   BUILT.set(branch, built);
@@ -86,7 +81,6 @@ export function project(branch: string = BRANCH): Project {
   return { ...p, head1: built.head1, head2: built.head2 };
 }
 
-// handles : the env and the git, write and commit helpers of a repo folder
 function handles(root: string): Omit<Project, "head1" | "head2"> {
   const home = join(root, "home");
   const env = {
@@ -113,7 +107,6 @@ function handles(root: string): Omit<Project, "head1" | "head2"> {
   return { root, clone, env, git, write, commitAll };
 }
 
-// build : the branch's repo, built once
 function build(branch: string): { readonly root: string; readonly head1: string; readonly head2: string } {
   const root = tempDir("factory-review-base-");
   const home = join(root, "home");
@@ -165,7 +158,6 @@ function build(branch: string): { readonly root: string; readonly head1: string;
   write("naïve/AGENTS.md", "x\n");
   write("docs/design/order.md", "DESIGN-EDITED-ON-THE-BRANCH\n");
   const head1 = commitAll("change");
-  // two lines, so a finding may cite line 2 and pass the cite check (#485)
   write("svc/Main.java", "class Main { int total() { return 2; } }\n// the sum\n");
   const head2 = commitAll("change2");
   git("push", "-q", "origin", branch);
@@ -173,7 +165,6 @@ function build(branch: string): { readonly root: string; readonly head1: string;
   return { root, head1, head2 };
 }
 
-// the change as the forge would report it
 export function changeAt(sha: string, over: Partial<Change> = {}): Change {
   return {
     number: 12,

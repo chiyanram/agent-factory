@@ -8,22 +8,17 @@
 
 import type { Tally } from "./results.js";
 
-// field : one property of a parsed JSON value, or undefined
 export function field(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }
 
-// what a change aims at (ADR-0021 N4)
 export type Aim = "quality" | "cost";
 export const AIMS: readonly Aim[] = ["quality", "cost"];
 
-// a pass's recall@act_on as counts: the seed-runs it matched, of all its seed-runs (results.ts writes them)
 export type Counts = Pick<Tally, "found" | "of">;
 
-// the noise: `spread` seeds of the `seeds` one run holds; and the cost spread of a run times the `runs`
 export type Noise = { readonly seeds: number; readonly runs: number; readonly spread: number; readonly usd: number };
 
-// the baseline, as the bar reads it; cases are the names it ran, sorted
 export type Baseline = {
   readonly recall: Counts;
   readonly usd: number;
@@ -35,7 +30,6 @@ function count(v: unknown): number | undefined {
   return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined;
 }
 
-// countsOf : recall_at_act_on.overall's found and of, or undefined when they are not counts. Pure.
 export function countsOf(value: unknown): Counts | undefined {
   const overall = field(field(value, "recall_at_act_on"), "overall");
   const found = count(field(overall, "found"));
@@ -49,7 +43,6 @@ function list(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-// runTotal : one run number's matched seeds, seeds and cost, summed over the cases. Pure.
 function runTotal(perCase: readonly unknown[], n: unknown): RunTotal {
   const runs = perCase.flatMap((c) => list(field(c, "runs")).filter((r) => field(r, "run") === n));
   const seeds = runs.flatMap((r) => list(field(r, "seeds")));
@@ -57,20 +50,15 @@ function runTotal(perCase: readonly unknown[], n: unknown): RunTotal {
   return { matched: seeds.filter((x) => field(x, "matched") === true).length, seeds: seeds.length, usd };
 }
 
-// spreadOf : the largest less the smallest. Pure.
 function spreadOf(values: readonly number[]): number {
   return Math.max(...values) - Math.min(...values);
 }
 
-// comparable : two or more runs, each holding the same number of seeds, and some. Pure.
 function comparable(totals: readonly RunTotal[]): boolean {
   const seeds = new Set(totals.map((t) => t.seeds));
   return totals.length >= 2 && seeds.size === 1 && !seeds.has(0);
 }
 
-// noiseOf : the spread of a baseline's repeat runs (ADR-0021), or undefined when its per_case holds fewer than two
-// runs with seeds, or runs that hold different numbers of seeds (a run that lost a seed's result; a proof pass has
-// none), whose matched counts could not be compared. Pure.
 export function noiseOf(baseline: unknown): Noise | undefined {
   const perCase = list(field(baseline, "per_case"));
   const numbers = new Set(perCase.flatMap((c) => list(field(c, "runs")).map((r) => field(r, "run"))));
@@ -86,7 +74,6 @@ export function noiseOf(baseline: unknown): Noise | undefined {
   };
 }
 
-// baselineOf : the baseline's recall, cost and noise, or what it lacks. Pure.
 export function baselineOf(value: unknown): Baseline | string {
   const recall = countsOf(value);
   const noise = noiseOf(value);
@@ -100,8 +87,6 @@ export function baselineOf(value: unknown): Baseline | string {
   return typeof usd === "number" ? { recall, usd, noise, cases: casesOf(value) } : "has no cost_usd";
 }
 
-// beats : whether found/of is past the baseline's recall moved by the noise, up (1) or down (-1), compared in whole
-// numbers by cross-multiplying, so a pass exactly on the line is not past it. Pure.
 function beats(c: Counts, b: Baseline, sign: 1 | -1): boolean {
   const mine = c.found * b.recall.of * b.noise.seeds;
   const line = (b.recall.found * b.noise.seeds + sign * b.noise.spread * b.recall.of) * c.of;
@@ -112,7 +97,6 @@ function shown(c: Counts): string {
   return `${c.found}/${c.of}`;
 }
 
-// holdProblems : why a pass does not hold the baseline: recall below it by more than the noise (ADR-0021). Pure.
 export function holdProblems(value: unknown, b: Baseline): readonly string[] {
   const c = countsOf(value);
   return c === undefined || beats(c, b, -1)
@@ -122,7 +106,6 @@ export function holdProblems(value: unknown, b: Baseline): readonly string[] {
       ];
 }
 
-// qualityProblems : why a pass that aims at quality is not above the baseline's recall plus the noise. Pure.
 function qualityProblems(value: unknown, b: Baseline): readonly string[] {
   const c = countsOf(value);
   return c === undefined || beats(c, b, 1)
@@ -132,20 +115,16 @@ function qualityProblems(value: unknown, b: Baseline): readonly string[] {
       ];
 }
 
-// casesOf : the names of the cases a pass ran, sorted. Pure.
 function casesOf(value: unknown): readonly string[] {
   return list(field(field(value, "cases"), "ran"))
     .map(String)
     .toSorted();
 }
 
-// tenThousandths : dollars in whole hundredths of a cent, the results file's own rounding. Pure.
 function tenThousandths(usd: number): number {
   return Math.round(usd * 10_000);
 }
 
-// costProblems : why a pass that aims at cost does not cost less than the baseline less the noise, over the same
-// cases: a pass over fewer cases is cheaper without being better. Pure.
 function costProblems(value: unknown, b: Baseline): readonly string[] {
   const usd = field(value, "cost_usd");
   if (casesOf(value).join("\n") !== b.cases.join("\n")) {
@@ -160,7 +139,6 @@ function costProblems(value: unknown, b: Baseline): readonly string[] {
       ];
 }
 
-// aimProblems : why a pass does not beat the baseline by more than the noise on what it aims at (ADR-0021). Pure.
 export function aimProblems(value: unknown, b: Baseline): readonly string[] {
   const aim = field(value, "aim");
   if (!AIMS.some((a) => a === aim)) {

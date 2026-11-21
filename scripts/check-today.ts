@@ -7,6 +7,8 @@
 //               is closed, or it names the wrong ticket. The open tickets come from the JSON list FACTORY_OPEN_TICKETS
 //               names, [{"number": N}, ...], which CI writes with the workflow's own token (.github/workflows/ci.yml).
 //               make lint makes no network call, so without that file this check is skipped and says so.
+//               An empty list is refused, because this repo always has an open ticket. A note that names only another
+//               repo's ticket is not judged.
 //
 // A note runs to the end of its table cell, or of its paragraph: a blank line, a heading, a table row, a list item or
 // a code fence ends it, as check-adrs reads it. In a code comment it also ends where the comment does.
@@ -18,7 +20,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// the safety pages: the safety explanation, the safety ADR, and the constitution
 export const SAFETY_PAGES: readonly string[] = [
   "docs/explanation/safety.md",
   "docs/adr/0012-safety-design-for-unattended-runs.md",
@@ -30,10 +31,8 @@ const MARK = "**Today:**";
 const TICKET = /(^|[\s([,;:])([\w.-]+\/[\w.-]+)?#\d+\b/;
 const TICKETS = /(^|[\s([,;:])([\w.-]+\/[\w.-]+)?#(\d+)\b/g;
 
-// the folders whose notes the closed check reads, and the files in them that can hold a note
 const NOTE_DIRS: readonly string[] = ["docs", "prompts", "src"];
 const NOTE_FILE = /\.(md|ts)$/;
-// this repository, whose tickets a note may also name in full
 const THIS_REPO = "chiyanram/agent-factory";
 
 export type Note = { readonly file: string; readonly line: number; readonly text: string };
@@ -52,8 +51,6 @@ export function notesIn(file: string, text: string): readonly Note[] {
   return notes;
 }
 
-// noteAt : the note that starts at a line and column: in a table row, to the cell's end; else to the paragraph's end,
-// or to the next note. Pure.
 function noteAt(lines: readonly string[], i: number, from: number): string {
   const line = lines[i] ?? "";
   const rest = line.slice(from + MARK.length);
@@ -62,8 +59,6 @@ function noteAt(lines: readonly string[], i: number, from: number): string {
     : cut([rest, ...paragraphAfter(lines, i)].join(" "));
 }
 
-// paragraphAfter : the lines that go on a paragraph after line i, up to a line that ends it; in a code comment, up to
-// the comment's end, each line without its "//". Pure.
 function paragraphAfter(lines: readonly string[], i: number): readonly string[] {
   const inComment = COMMENT.test(lines[i] ?? "");
   const after = lines.slice(i + 1);
@@ -78,33 +73,26 @@ function uncomment(line: string): string {
   return line.replace(/^\s*\/\/\s?/, "");
 }
 
-// ends : a line that ends a running note: a blank line, a heading, a table row, a list item or a code fence. Pure.
 function ends(line: string): boolean {
   return /^\s*$|^\s*\||^#{1,6}\s|^\s*([-*+]|\d+\.)\s|^\s*```/.test(line);
 }
 
-// cellEnd : where the table cell that starts at `from` ends: its next "|" that no backslash escapes, or the line's
-// end, as check-adrs reads it. Pure.
 function cellEnd(line: string, from: number): number {
   const at = line.slice(from).search(/(?<!\\)\|/);
   return at < 0 ? line.length : from + at;
 }
 
-// cut : a note's text up to the next note. Pure.
 function cut(text: string): string {
   const next = text.indexOf(MARK);
   return (next >= 0 ? text.slice(0, next) : text).trim();
 }
 
-// problems : each safety note with no ticket, as file:line and its start. Pure.
 export function problems(notes: readonly Note[]): readonly string[] {
   return notes
     .filter((n) => !TICKET.test(n.text))
     .map((n) => `${n.file}:${n.line} a safety Today: note names no ticket: "${n.text.slice(0, 90)}"`);
 }
 
-// closedProblems : each note that names tickets of this repo, none of them open, as file:line, its tickets and its
-// start. A note that names only another repo's ticket is not judged; this repo's, written in full, is. Pure.
 export function closedProblems(notes: readonly Note[], open: ReadonlySet<number>): readonly string[] {
   return notes.flatMap((n) => {
     const own = [...n.text.matchAll(TICKETS)]
@@ -118,8 +106,6 @@ export function closedProblems(notes: readonly Note[], open: ReadonlySet<number>
   });
 }
 
-// openTickets : the ticket numbers of the CI step's JSON list, [{"number": N}, ...]; refused when it is not one, or
-// empty, since this repo always has an open ticket and an empty list is a failed read. Pure.
 export function openTickets(json: string): ReadonlySet<number> {
   const list: unknown = JSON.parse(json);
   const numbers = Array.isArray(list) ? list.map((t: { readonly number?: unknown }) => t?.number) : [];
@@ -133,7 +119,6 @@ export function openTickets(json: string): ReadonlySet<number> {
   return new Set(tickets);
 }
 
-// staleNotes : the closed check over a root's notes, or skipped when no open-tickets file is named
 export function staleNotes(
   root: string,
   openFile: string | undefined,
@@ -149,7 +134,6 @@ export function staleNotes(
   return { skipped: false, problems: closedProblems(notes, open) };
 }
 
-// noteFiles : the .md and .ts files under the note folders, as paths from the root, sorted
 function noteFiles(root: string): readonly string[] {
   return NOTE_DIRS.filter((dir) => existsSync(join(root, dir)))
     .flatMap((dir) => readdirSync(join(root, dir), { recursive: true, encoding: "utf8" }).map((f) => join(dir, f)))
@@ -157,7 +141,6 @@ function noteFiles(root: string): readonly string[] {
     .toSorted();
 }
 
-// pageFiles : the safety pages that are there; a folder stands for its .md files
 function pageFiles(root: string): readonly string[] {
   return SAFETY_PAGES.flatMap((page) => {
     const path = join(root, page);
@@ -174,7 +157,6 @@ function markdownIn(root: string, dir: string): readonly string[] {
     .map((f) => `${dir}/${f}`);
 }
 
-// closedCheck : staleNotes on FACTORY_OPEN_TICKETS, exiting with one line when its file cannot be read
 function closedCheck(root: string): ReturnType<typeof staleNotes> {
   try {
     return staleNotes(root, process.env.FACTORY_OPEN_TICKETS);

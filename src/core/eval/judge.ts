@@ -13,7 +13,6 @@ import type { GoldenFinding } from "./golden.js";
 
 export const LINE_WINDOW = 5;
 export const MIN_CONFIDENCE = 0.7;
-// the findings judged at one seed, nearest first: the bound on judge runs per seed
 export const MAX_JUDGED = 3;
 
 export type Judgment = { readonly same: boolean; readonly confidence: number; readonly why: string };
@@ -29,7 +28,6 @@ export const JUDGE_SCHEMA = JSON.stringify({
   },
 });
 
-// judgePrompt : the instructions, then the seed and the finding, each fenced as data. Pure.
 export function judgePrompt(instructions: string, seed: GoldenFinding, finding: ActOn): string {
   const s = `${seed.file}:${seed.line}\n${seed.issue}`;
   const f = `${finding.file}:${finding.line} (${finding.rule})\n${finding.finding}\nFix: ${finding.fix}`;
@@ -40,7 +38,6 @@ function isConfidence(value: unknown): value is number {
   return typeof value === "number" && value >= 0 && value <= 1;
 }
 
-// readJudgment : the judge's structured output, checked. Pure.
 export function readJudgment(output: unknown): Result<Judgment> {
   const same = prop(output, "same");
   const confidence = prop(output, "confidence");
@@ -51,12 +48,10 @@ export function readJudgment(output: unknown): Result<Judgment> {
     : { kind: "failed", reason: "the judge gave an answer that is not well formed" };
 }
 
-// isMatch : the judge said same, sure enough. Pure.
 export function isMatch(j: Judgment): boolean {
   return j.same && j.confidence >= MIN_CONFIDENCE;
 }
 
-// modelJudge : the judge as one fresh model run per pair, in a folder that holds nothing
 export function modelJudge(input: {
   readonly model: Model;
   readonly modelId: string;
@@ -79,8 +74,6 @@ export function modelJudge(input: {
   };
 }
 
-// nearby : the findings that pass the location gate at a seed and are not taken yet, nearest first, at most
-// MAX_JUDGED. Pure.
 export function nearby(seed: GoldenFinding, findings: readonly ActOn[], taken: ReadonlySet<string>): readonly ActOn[] {
   const distance = (f: ActOn): number => Math.abs(f.line - seed.line);
   return findings
@@ -90,13 +83,10 @@ export function nearby(seed: GoldenFinding, findings: readonly ActOn[], taken: R
 }
 
 export type SeedResult = {
-  // the seed's place in golden.json, from 0
   readonly seed: number;
   readonly matched: boolean;
-  // the finding that matched it, or ""
   readonly by: string;
   readonly confidence: number;
-  // why the judge could not answer, or ""
   readonly error: string;
 };
 
@@ -127,8 +117,6 @@ async function trySeed(
   return { result: { ...none, confidence: top }, taken };
 }
 
-// matchRun : each seed of a case, matched or not, against one run's Act on findings; a judge that fails stops the run's
-// matching, and the seeds left are recorded unmatched with the reason
 export async function matchRun(
   seeds: readonly GoldenFinding[],
   findings: readonly ActOn[],

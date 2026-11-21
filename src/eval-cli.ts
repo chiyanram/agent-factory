@@ -1,6 +1,8 @@
 // eval-cli — `agent-factory eval reviewer` on the command line (ADR-0015 E7, #215): the eval pass of the automated
 // review over the golden set, on the host, through the same agent CLI as the production review. It spends on model
 // runs, so it never runs in CI or in a dry run, and it is refused before it spends when it could pass the $100 cap.
+// Its clones go in a fresh private folder under the factory home, never /tmp, where anyone could plant a CLAUDE.md
+// above a run folder.
 
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -51,13 +53,11 @@ function parsed(argv: readonly string[]): Parsed | "usage" {
   }
 }
 
-// reviewerOf : `reviewer [<repo>]` with its flags, or usage for any other words
 function reviewerOf(positionals: readonly string[], drafts: boolean, aim: Aim | "none"): Parsed | "usage" {
   const [what, root = ".", ...rest] = positionals;
   return what === "reviewer" && rest.length === 0 ? { root: resolve(root), drafts, aim } : "usage";
 }
 
-// aimOf : the --aim value; none when it is not given, bad when it is not an aim
 function aimOf(value: string | undefined): Aim | "none" | "bad" {
   return value === undefined ? "none" : (AIMS.find((a) => a === value) ?? "bad");
 }
@@ -68,7 +68,6 @@ function inCi(env: NodeJS.ProcessEnv): boolean {
   return !["", "false"].includes(env.CI ?? "");
 }
 
-// badDollars : why the first cap setting that is set is not a dollar amount, or ""
 function badDollars(env: NodeJS.ProcessEnv): string {
   const caps = ["caps.usdPerRun", "eval.judgeUsdPerRun"] as const;
   const bad = caps.find((id) => !DOLLARS.test(settingOf(env, id) || "0"));
@@ -77,7 +76,6 @@ function badDollars(env: NodeJS.ProcessEnv): string {
     : `${settingName(bad)} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(settingOf(env, bad))}`;
 }
 
-// refusal : why this pass may not run here, or ""
 export function refusal(env: NodeJS.ProcessEnv): string {
   const bad = badDollars(env);
   const alias = unpinnedModel(env, ["review.findModel", "review.ruleModel", "review.logicModel", "eval.judgeModel"]);
@@ -97,8 +95,6 @@ export function refusal(env: NodeJS.ProcessEnv): string {
   return checks.find(([refused]) => refused)?.[1] ?? "";
 }
 
-// workDir : a fresh private folder under the factory home for the pass's clones; never /tmp, where anyone could plant
-// a CLAUDE.md above a run folder
 async function workDir(env: NodeJS.ProcessEnv): Promise<Result<string>> {
   const home = env.FACTORY_HOME ?? join(homedir(), ".factory");
   if (!isAbsolute(home)) {
@@ -147,7 +143,6 @@ function note(w: Written): string {
   return w.proof ? "" : " (draft cases: not proof)";
 }
 
-// evalCommand : `eval reviewer`
 export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<number> {
   const p = parsed(argv);
   if (p === "usage") {

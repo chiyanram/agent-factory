@@ -7,10 +7,8 @@
 
 export const COPILOT_ON = { readOnly: false, writer: false } as const;
 
-// the ticket that turns each kind on, for the refusal's reason
 export const COPILOT_TICKET = { readOnly: "#697", writer: "#698" } as const;
 
-// the roles a project file may name in "agents", by the run kind each one is
 export const COPILOT_ROLES = {
   readOnly: ["design-reviewer", "verify-pass", "onboarder", "finder"],
   writer: ["implementer", "test-first", "cleanup"],

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanField, renderPost, type Post } from "../src/core/post.js";
 
-// The text of an accepted post; a refusal fails the test with its reason.
 function text(post: Post): string {
   const result = renderPost(post);
   switch (result.kind) {
@@ -16,14 +15,14 @@ function text(post: Post): string {
   }
 }
 
-const J = "\u2060"; // the word joiner cleanField puts after a trigger character
+const J = "\u2060";
 
-// What a forge would act on in posted text. Each check is a pattern of the plain characters the forge needs; a word
-// joiner or a backslash in between breaks it.
-const MENTION = /(^|[^\w])@[A-Za-z0-9_]/; // GitHub, GitLab
-const REFERENCE = /(#|!|\bGH-)\d/i; // #12, !12, owner/repo#12, GH-12: what a closing keyword and a link both need
-const LINK = /(:\/\/|www\.)/i; // any scheme, and GitHub's www. autolink, which also starts after "_", "*", "~" or "("
-const SPAN_OR_LINK = /(^|[^\\])[`[\]{}|]/; // an unescaped Markdown or Jira link, image, macro or code-span character
+const MENTION = /(^|[^\w])@[A-Za-z0-9_]/;
+const REFERENCE = /(#|!|\bGH-)\d/i;
+// GitHub's www. autolink also starts after "*", "_", "~" or "("
+// https://github.github.com/gfm/#autolinks-extension-
+const LINK = /(:\/\/|www\.)/i;
+const SPAN_OR_LINK = /(^|[^\\])[`[\]{}|]/;
 const HTML = /[<>]/;
 
 function inert(text: string): void {
@@ -187,7 +186,6 @@ describe("renderPost", () => {
 });
 
 describe("renderPost: no secret in posted text (#678; ADR-0012 S13, P4)", () => {
-  // built from parts, so no scanner takes the test for a leak
   const TOKEN = `ghp_${"a1B2".repeat(9)}`;
   const KEY = `sk-ant-api03-${"x9".repeat(16)}`;
   const PEM = ["-----BEGIN RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEA", "q2Vb7Y+ZkL", "-----END RSA PRIVATE KEY-----"];

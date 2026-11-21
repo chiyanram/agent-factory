@@ -1,8 +1,8 @@
 // usage — what the runs spent, from the run records (#131; ADR-0012 S16): today, the current window and the month, per
-// project and per ticket, and per run kind (#337). Only the orchestrator's runs write records, so a review or eval run
-// by hand is not in it.
-// Days and months are the reader's (zone.ts; records stay UTC, #487); the window is the last window.hours hours (default 5), the length of a subscription's usage
-// window. A run whose record has no spend is counted apart as unmeasured, never as free.
+// project and per ticket, and per run kind. Only the orchestrator's runs write records, so a review or eval run
+// by hand is not in it. Days and months are the reader's (zone.ts; records stay UTC); the window is the last
+// window.hours hours (default 5), the length of a subscription's usage window. A run whose record has no spend is
+// counted apart as unmeasured, never as free.
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,29 +14,23 @@ import { actedRates, type ActedRow, type Rate } from "../review/acted-on.js";
 import { tallyOf, type TicketTally } from "./touches.js";
 import { dayStart, monthStart, shownAt, UTC, type Zone } from "../zone.js";
 
-// RunKind and RUN_KINDS live in spend.ts, a leaf the records parser can import with no cycle (#488)
 export { RUN_KINDS, type RunKind };
 
-// one model run's record: the writer's, a review round's or a design review run's end, or what a failed run spent
 export type Spent = {
   readonly project: string;
   readonly ticket: string;
   readonly at: string;
   readonly kind: RunKind;
-  // a finder's lens (#337)
   readonly lens?: string;
   readonly spend: Spend | "unmeasured";
-  // the Copilot runs the line's spend leaves out: the Copilot day caps count them
   readonly copilot?: CopilotRuns;
 };
 
-// one review round's acted-on rows (#220): the last full round's findings, each acted on or not since
 export type ActedSeen = { readonly project: string; readonly at: string; readonly rows: readonly ActedRow[] };
 
 export type Spends = {
   readonly runs: readonly Spent[];
   readonly acted: readonly ActedSeen[];
-  // each ticket's touches, waits, rework rounds and cost (touches.ts, #487)
   readonly tallies: readonly TicketTally[];
   readonly problems: readonly string[];
 };
@@ -52,18 +46,14 @@ async function names(dir: string, suffix: string): Promise<readonly string[]> {
     .toSorted();
 }
 
-// ticketsOf : the tickets with a record file in the project's records folder, sorted (the retro reads them too)
 export function ticketsOf(home: string, project: string): Promise<readonly string[]> {
   return names(join(home, "runs", project), ".jsonl");
 }
 
-// projectsOf : the one project asked for, or every project with a records folder
 async function projectsOf(home: string, project: string | undefined): Promise<readonly string[]> {
   return project === undefined ? names(join(home, "runs"), "") : [project];
 }
 
-// the lines that end or follow a model run: the writer's, a review round's, a design review run's, what a
-// failed run spent, and a run the provider's usage limit parked; a line of these kinds with no spend was not measured
 const SPENDING: ReadonlySet<string> = new Set(["writer-ended", "review-ended", "spent", "design-ended", "parked"]);
 
 type Spending = Extract<Event, { kind: "writer-ended" | "review-ended" | "spent" | "design-ended" | "parked" }>;
@@ -72,8 +62,6 @@ function spending(e: Event): e is Spending {
   return SPENDING.has(e.kind);
 }
 
-// a writer run is the implementer's, but for its test-first and cleanup modes; a fix, rework, CI or merge run is the
-// implementer's
 const KIND_OF_MODE: Readonly<Record<WriterMode, RunKind>> = {
   "test-first": "test-first",
   fix: "implementer",
@@ -95,12 +83,10 @@ const KIND_OF_PHASE: Readonly<Record<Phase, RunKind>> = {
 
 const KIND_OF_STEP: Readonly<Record<DesignStep, RunKind>> = { review: "design-reviewer", verify: "verify pass" };
 
-// parkedKind : the run kind of a parked run: a test-first task's, else its phase's. Pure.
 function parkedKind(e: Extract<Spending, { kind: "parked" }>): RunKind {
   return e.task?.kind === "test-first" ? "test-first" : KIND_OF_PHASE[e.phase];
 }
 
-// kindOf : the run kind of a line that spends. Pure.
 function kindOf(e: Spending): RunKind {
   if (e.kind === "writer-ended") {
     return KIND_OF_MODE[e.mode];
@@ -114,8 +100,6 @@ function kindOf(e: Spending): RunKind {
   return e.kind === "review-ended" ? "automated review" : KIND_OF_PHASE[e.phase];
 }
 
-// spentOf : a spending line's runs: a review round's split into each finder's, by lens, and the verify pass's when it
-// spent; any other line, or a round line with no split, is one run of its kind. Pure.
 function spentOf(e: Spending, project: string, ticket: string): readonly Spent[] {
   const split = splitOf(e);
   const copilot = e.copilot === undefined ? {} : { copilot: e.copilot };
@@ -124,8 +108,6 @@ function spentOf(e: Spending, project: string, ticket: string): readonly Spent[]
     : withCopilot(splitRuns(split, { project, ticket, at: e.at }), e, { project, ticket });
 }
 
-// withCopilot : a round's runs with the line's Copilot runs on its first run only, so they count once; a round with
-// no measured run keeps them on a run of its own. Pure.
 function withCopilot(runs: readonly Spent[], e: Spending, where: Pick<Spent, "project" | "ticket">): readonly Spent[] {
   if (e.copilot === undefined) {
     return runs;
@@ -136,12 +118,10 @@ function withCopilot(runs: readonly Spent[], e: Spending, where: Pick<Spent, "pr
     : [{ ...first, copilot: e.copilot }, ...rest];
 }
 
-// splitOf : a review round line's spend per run; none on another line, or an older one (#337). Pure.
 function splitOf(e: Spending): RoundSpend | undefined {
   return e.kind === "review-ended" || e.kind === "spent" ? e.split : undefined;
 }
 
-// splitRuns : a round's runs: each finder's, by lens, and the verify pass's when it spent. Pure.
 function splitRuns(split: RoundSpend, where: Pick<Spent, "project" | "ticket" | "at">): readonly Spent[] {
   const { project, ticket, at } = where;
   const verify = split.verify.usd > 0 || split.verify.tokens > 0 ? [split.verify] : [];
@@ -153,20 +133,16 @@ function splitRuns(split: RoundSpend, where: Pick<Spent, "project" | "ticket" | 
   ];
 }
 
-// tally: none for a ticket whose lines are only pings' records (records.ts isActivity), such as a session's wait
 type Read = {
   readonly runs: readonly Spent[];
   readonly acted: readonly ActedSeen[];
   readonly tally: TicketTally | "none";
 };
 
-// runsOf : every measured or unmeasured run in a ticket's lines. Pure.
 export function runsOf(events: readonly Event[], where: Pick<Spent, "project" | "ticket">): readonly Spent[] {
   return events.filter(spending).flatMap((e) => spentOf(e, where.project, where.ticket));
 }
 
-// ticketSpends : every measured or unmeasured run of one ticket, and its acted-on rows, or why its records cannot be
-// read
 async function ticketSpends(home: string, project: string, ticket: string): Promise<Result<Read>> {
   const events = await readRecords({ home, project, ticket });
   if (events.kind === "failed") {
@@ -185,8 +161,6 @@ async function ticketSpends(home: string, project: string, ticket: string): Prom
   };
 }
 
-// readSpends : every run of the project, or of every project; a ticket whose records cannot be read is a problem, and
-// the rest are still read
 export async function readSpends(input: { readonly home: string; readonly project?: string }): Promise<Spends> {
   const runs: Spent[] = [];
   const acted: ActedSeen[] = [];
@@ -207,18 +181,14 @@ export async function readSpends(input: { readonly home: string; readonly projec
   return { runs, acted, tallies, problems };
 }
 
-// Periods : the start of today, of the current window and of the month, in ms since the epoch
 export type Periods = { readonly day: number; readonly window: number; readonly month: number };
 
-// periodsAt : the periods at now (ms), the day and month the reader's (zone.ts, #487). Pure.
 export function periodsAt(now: number, windowHours: number, zone: Zone = UTC): Periods {
   return { day: dayStart(now, zone), window: now - windowHours * 3_600_000, month: monthStart(now, zone) };
 }
 
-// Total : the measured spend and the unmeasured runs of a set of runs
 export type Total = { readonly spend: Spend; readonly unmeasured: number };
 
-// totalOf : the runs since from (ms), summed. Pure.
 export function totalOf(runs: readonly Spent[], from: number): Total {
   const since = runs.filter((r) => Date.parse(r.at) >= from);
   const measured = since.flatMap((r) => (r.spend === "unmeasured" ? [] : [r.spend]));
@@ -234,20 +204,16 @@ function row(name: string, kind: string, runs: readonly Spent[], p: Periods): re
   return [name, kind, cell(totalOf(runs, p.day)), cell(totalOf(runs, p.window)), cell(totalOf(runs, p.month))];
 }
 
-// kindName : a run's kind as its row names it: a finder by its lens in a ticket's rows. Pure.
 function kindName(r: Spent, byLens: boolean): string {
   return byLens && r.lens !== undefined ? `finder (${r.lens})` : r.kind;
 }
 
-// kindsIn : the kind names of a group's runs, in RUN_KINDS order, and a finder's lenses by name. Pure.
 function kindsIn(runs: readonly Spent[], byLens: boolean): readonly string[] {
   return RUN_KINDS.flatMap((k) =>
     [...new Set(runs.filter((r) => r.kind === k).map((r) => kindName(r, byLens)))].toSorted(),
   );
 }
 
-// groupRows : one group's rows: its one kind on one row; or with more kinds, a row for them all, then one per kind; a
-// ticket's finders one per lens (#337)
 function groupRows(name: string, runs: readonly Spent[], p: Periods, byLens = false): readonly (readonly string[])[] {
   const kinds = kindsIn(runs, byLens);
   const [only] = kinds;
@@ -277,8 +243,6 @@ function aligned(rows: readonly (readonly string[])[]): readonly string[] {
   );
 }
 
-// usageLines : the usage table: all, then each project, then each of its tickets with a run this month or window, each
-// split by run kind. Pure.
 export function usageLines(input: {
   readonly runs: readonly Spent[];
   readonly now: number;
@@ -287,7 +251,6 @@ export function usageLines(input: {
 }): readonly string[] {
   const zone = input.zone ?? UTC;
   const p = periodsAt(input.now, input.windowHours, zone);
-  // the window can reach back into the month before
   const month = input.runs.filter((r) => Date.parse(r.at) >= Math.min(p.month, p.window));
   const table: (readonly string[])[] = [["", "kind", "today", "window", "month"], ...groupRows("all", month, p)];
   for (const project of [...new Set(month.map((r) => r.project))].toSorted()) {
@@ -316,9 +279,6 @@ function rateText(name: string, r: Rate): string {
   return `${name} ${r.acted}/${r.of}`;
 }
 
-// actedLines : the automated review's acted-on rate this month, all and per project, per lens, category and bucket
-// (#220).
-// Pure.
 export function actedLines(input: {
   readonly acted: readonly ActedSeen[];
   readonly now: number;

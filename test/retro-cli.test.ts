@@ -44,7 +44,6 @@ function plant(ticket: string, events: readonly Event[]): void {
   writeFileSync(join(home, "runs", "loans", `${ticket}.jsonl`), events.map((e) => `${JSON.stringify(e)}\n`).join(""));
 }
 
-// run : the command's exit, stdout and stderr, with each merge's outcome from the stub
 async function run(args: readonly string[], outcomes: Readonly<Record<string, MergeOutcome>> = {}) {
   let out = "";
   let err = "";

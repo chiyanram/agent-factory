@@ -14,7 +14,6 @@ export type Allowlist =
   | { readonly kind: "ok"; readonly hosts: readonly string[] }
   | { readonly kind: "refused"; readonly reason: string };
 
-// the public git hosts, refused on every list
 export const GIT_HOSTS: readonly string[] = ["github.com", "gitlab.com"];
 
 const LABEL = "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?";
@@ -22,7 +21,6 @@ const HOST = new RegExp(`^\\.?(${LABEL}\\.)+[a-z]{2,63}$`);
 
 type Check = { readonly fails: (entry: string) => boolean; readonly why: string };
 
-// the first rule an entry breaks names the problem
 const CHECKS: readonly Check[] = [
   { fails: (e) => e.includes("*"), why: 'a wildcard; write ".example.com" to allow every subdomain' },
   { fails: (e) => e.includes("/") || e.includes(":"), why: "a scheme, port or path; write the host name alone" },
@@ -30,14 +28,12 @@ const CHECKS: readonly Check[] = [
   { fails: (e) => !HOST.test(e), why: "not a lower-case host name" },
 ];
 
-// reaches : an entry that allows the git host: the host, a subdomain of it, or a dotted entry that covers it
 function reaches(entry: string, git: string): boolean {
   const name = entry.startsWith(".") ? entry.slice(1) : entry;
   const under = (a: string, b: string): boolean => a === b || a.endsWith(`.${b}`);
   return under(name, git) || (entry.startsWith(".") && under(git, name));
 }
 
-// covered : a dotted entry ".x.com" covers "x.com" and every "<sub>.x.com"
 function covered(host: string, by: readonly string[]): boolean {
   return by.some((d) => d !== host && d.startsWith(".") && (`.${host}` === d || host.endsWith(d)));
 }
@@ -49,7 +45,6 @@ function gitCheck(gitHosts: readonly string[]): Check {
   };
 }
 
-// parseAllowlist : the entries checked; gitHosts are the project's own git hosts, refused besides the public ones
 export function parseAllowlist(entries: readonly string[], gitHosts: readonly string[]): Allowlist {
   const trimmed = entries.map((e) => e.trim()).filter((e) => e.length > 0);
   if (trimmed.length === 0) {
@@ -68,8 +63,6 @@ export function parseAllowlist(entries: readonly string[], gitHosts: readonly st
   return { kind: "ok", hosts: unique.filter((h) => !covered(h, unique)).toSorted() };
 }
 
-// ownGitHostsOf : the project's own git host, such as a company GitLab: the gitHostName a settings file sets and the one
-// this machine sets, lower case, with none for a public host (GIT_HOSTS refuses those anyway). Pure.
 export function ownGitHostsOf(names: readonly (string | undefined)[]): readonly string[] {
   const hosts = names.map((n) => (n ?? "").trim().toLowerCase()).filter((n) => n !== "" && !GIT_HOSTS.includes(n));
   return [...new Set(hosts)];
