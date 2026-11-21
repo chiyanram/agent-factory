@@ -112,7 +112,7 @@ export function vmBox(setup: VmBoxSetup): Box {
         return { kind: "failed", reason: checked.reason };
       }
       const name = newName();
-      const ran = await step(runArgs({ name, spec }));
+      const ran = await step(runArgs({ name, spec: checked.spec }));
       const ready = ran.kind === "ok" ? await prepare(name) : ran;
       if (ready.kind === "failed") {
         return ready;

@@ -22,6 +22,7 @@ import { specHash } from "../src/core/spec.js";
 import { lastLines, NO_TAIL, quietAfter, tailOf } from "../src/core/writer/run.js";
 import { minutesOf, questionsOf, stallOf } from "../src/core/writer/settings.js";
 import { cleanupText, writerStep, type WriterSetup } from "../src/core/writer/step.js";
+import { runFolder } from "../src/core/writer/clone.js";
 import { fencedOnly, INJECTED, ORDER } from "./fenced.js";
 import { FLOOR, KNOWLEDGE } from "../src/core/writer/prompt.js";
 import type { Role } from "../src/core/process/cards.js";
@@ -296,6 +297,7 @@ function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]
     }),
     pusher: pusher(pushes),
     agent: openAgentCli({ env: {} }).writer,
+    programs: ["make"],
     testFiles: TEST_FILES,
   };
 }
@@ -323,7 +325,10 @@ const openLine = (over: Partial<OpenChange> = {}): RunInput["change"] => ({
 async function run(s: WriterSetup, task: Task, change: RunInput["change"] = { kind: "none" }) {
   const step = writerStep({ kind: "ok", value: s });
   if (step.kind !== "available") throw new Error("unavailable");
-  return step.run({ ticket: "PROJ-1", change, head: change.kind === "open" ? change.line.head : "", task });
+  const folder = await runFolder(s.box);
+  if (folder.kind !== "ok") throw new Error(folder.reason);
+  const head = change.kind === "open" ? change.line.head : "";
+  return step.run({ ticket: "PROJ-1", change, head, task, folder: folder.value });
 }
 
 const FIX: Task = { kind: "fix" };
@@ -1075,7 +1080,7 @@ describe("the writer step: a later run on the change", () => {
     const fake = fakeBox({});
     const out = await run(setup(fake.box, forge(), []), FIX);
     expect(out).toMatchObject({ kind: "failed", reason: expect.stringContaining("the approval is stale") });
-    expect(existsSync(join(p.root, "box-runs"))).toBe(false);
+    expect(readdirSync(join(p.root, "box-runs"))).toEqual([]);
   });
 
   it("runs in the folder its step made for the start line, and removes it however the run ended", async () => {

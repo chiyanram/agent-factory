@@ -26,6 +26,7 @@ import { goAhead, start } from "../src/core/start.js";
 import { specHash } from "../src/core/spec.js";
 import { issueStore } from "../src/core/spec-store.js";
 import { tempDir } from "./temp.js";
+import { noRunFolder } from "./run-folder.js";
 
 const SPEC = (lane: string) =>
   [
@@ -406,6 +407,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
           {
@@ -477,6 +479,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           tasks.push(input.task),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -527,6 +530,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -817,6 +821,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => ({
           kind: "ok",
           value: { head: H, outcome: "blocked", patch: "", evidence: [], hung: false, why, output },
@@ -870,6 +875,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => ({ kind: "failed", reason: "the push failed", spend: { usd: 0.3, tokens: 900 } }),
       },
     };
@@ -895,7 +901,10 @@ describe("tick", () => {
     await approved();
     const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
     const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, trace };
-    const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async () => ({ kind: "ok", value }) } };
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "ok", value }) },
+    };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read).toMatchObject({
@@ -916,7 +925,7 @@ describe("tick", () => {
     const failed = { kind: "failed" as const, reason: "the push failed", spend: { usd: 0.3, tokens: 9 } };
     const steps: Steps = {
       ...STEPS_TODAY,
-      writer: { kind: "available", run: async () => ({ ...failed, traces: [trace] }) },
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ ...failed, traces: [trace] }) },
     };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
@@ -965,7 +974,7 @@ describe("tick", () => {
     await approved();
     const steps: Steps = {
       ...STEPS_TODAY,
-      writer: { kind: "available", run: async () => ({ kind: "failed", reason: "the box died" }) },
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "failed", reason: "the box died" }) },
     };
     const changes = { team, open: [open({ labels: [] })], merged: [] };
     const first: string[] = [];
@@ -1006,6 +1015,7 @@ describe("tick", () => {
       },
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => {
           wrote.push(input.task.kind);
           head = H2;
@@ -1130,6 +1140,7 @@ describe("tick", () => {
       },
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (wrote.push(input.task.kind), { kind: "failed", reason: "not this time" }),
       },
     };
@@ -1467,6 +1478,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (log.push(`writer on ${input.change.kind}`), { kind: "failed", reason: "stop here" }),
       },
     };
@@ -1562,6 +1574,7 @@ describe("tick", () => {
         ...STEPS_TODAY,
         writer: {
           kind: "available",
+          folder: noRunFolder,
           run: async () => ({
             kind: "ok",
             value: { head: H, outcome, patch: "p1", evidence: [], hung: false, why: "no key" },
@@ -1605,6 +1618,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => (
           log.push("writer runs"),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -1821,6 +1835,7 @@ describe("START and approval (#227)", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.task.kind),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -1968,6 +1983,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     ...STEPS_TODAY,
     writer: {
       kind: "available",
+      folder: noRunFolder,
       run: async (input) => (
         runs.push(input.ticket),
         { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -2187,6 +2203,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
           {
@@ -2656,6 +2673,7 @@ describe("the design review and the cleanup run (#236)", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           tasks.push(input.task),
           { kind: "ok", value: { head: H, outcome: "done", patch: "c1", evidence: [row], hung: false } }
@@ -2799,6 +2817,7 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => {
           tasks.push(input.task);
           const parked = limited;
@@ -2948,6 +2967,7 @@ describe("a killed writer run keeps its work", () => {
     };
     const writer: Steps["writer"] = {
       kind: "available",
+      folder: noRunFolder,
       run: async () => ({ kind: "failed", reason: "no run in this test" }),
       keep: keepLeft({
         env: gitEnv(),

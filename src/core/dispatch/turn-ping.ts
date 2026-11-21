@@ -12,7 +12,7 @@
 import type { Ping } from "../notify.js";
 import { whoseTurn, type Lane, type Turn } from "./next-step.js";
 import type { Summary } from "./records.js";
-import { LABEL_WAIT, type Action, type TicketState } from "./table.js";
+import type { Action, TicketState } from "./table.js";
 
 export type TurnStep = { readonly record: Lane | "none"; readonly ping: boolean };
 
@@ -30,7 +30,7 @@ export function turnDue(state: TicketState, action: Action): boolean {
 
 function whyOf(action: Action, runs: Pick<Summary, "blocked" | "blockedRun">, turn: Turn): string {
   const own = ownWhy(action, turn);
-  if (action.kind === "wait" && own === LABEL_WAIT) {
+  if (action.kind === "wait" && action.wait === "needs-human") {
     return withRun(runs.blocked.at(-1) ?? own, runs.blockedRun);
   }
   return action.kind === "needs-human" ? withRun(own, runs.blockedRun) : own;

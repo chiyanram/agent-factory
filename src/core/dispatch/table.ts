@@ -124,8 +124,36 @@ export type TicketState = {
   readonly programs?: readonly string[];
 };
 
+export const WAIT_KINDS = [
+  "ci",
+  "retry",
+  "design-retry",
+  "usage-limit",
+  "manual-ci",
+  "ci-skipped",
+  "merge",
+  "question",
+  "claimed-elsewhere",
+  "head-moved",
+  "needs-human",
+  "handed-over",
+  "stopped",
+  "approval-stale",
+  "no-start",
+  "start-only",
+  "spec-unwritten",
+  "lane-raised",
+  "lane-check-failed",
+  "approved-early",
+  "design-failed",
+  "blocked",
+  "broken",
+  "idle",
+] as const;
+export type WaitKind = (typeof WAIT_KINDS)[number];
+
 export type Action =
-  | { readonly kind: "wait"; readonly why: string }
+  | { readonly kind: "wait"; readonly wait: WaitKind; readonly why: string }
   | { readonly kind: "writer"; readonly task: Task; readonly why: string }
   | { readonly kind: "ready"; readonly head: string }
   | { readonly kind: "review"; readonly head: string }
@@ -135,7 +163,7 @@ export type Action =
   | { readonly kind: "blockers-unread"; readonly why: string }
   | { readonly kind: "design-note"; readonly spec: string; readonly design: string; readonly why: string }
   | { readonly kind: "needs-human"; readonly why: string; readonly run?: RunFolder }
-  | { readonly kind: "release"; readonly why: string }
+  | { readonly kind: "release"; readonly wait: WaitKind; readonly why: string }
   | { readonly kind: "ping"; readonly head: string }
   | { readonly kind: "reconcile" };
 
@@ -161,7 +189,7 @@ export const LABEL_WAIT = "needs-human: a person decides";
 
 const needsHuman: Rule = (s) => {
   const line = open(s);
-  return line !== "none" && line.needsHuman ? { kind: "wait", why: LABEL_WAIT } : "next";
+  return line !== "none" && line.needsHuman ? { kind: "wait", wait: "needs-human", why: LABEL_WAIT } : "next";
 };
 
 const DESIGN_PHASES: ReadonlySet<string> = new Set(["design-review", "design-verify"]);
@@ -184,21 +212,26 @@ export function goAt(view: ApprovalView): string {
 type Held = Exclude<ApprovalView, { kind: "approved" } | { kind: "started" }>;
 type HeldMap = { readonly [V in Held as V["kind"]]: V };
 
-const HELD: { readonly [K in keyof HeldMap]: (view: HeldMap[K]) => string } = {
-  stale: () => "the spec or its design changed after its approval",
-  missing: () => "the ticket has no START and no approval",
-  unapproved: (v) => `the ${v.lane} lane needs a human's approval; the ticket has a START only`,
-  unwritten: () => "the ticket has a START; its spec is not written yet",
-  unstarted: () => "approved, no START: a human STARTs the ticket first",
-  raised: (v) => raisedWhy(v),
+export type Waiting = { readonly wait: WaitKind; readonly why: string };
+
+const HELD: { readonly [K in keyof HeldMap]: (view: HeldMap[K]) => Waiting } = {
+  stale: () => ({ wait: "approval-stale", why: "the spec or its design changed after its approval" }),
+  missing: () => ({ wait: "no-start", why: "the ticket has no START and no approval" }),
+  unapproved: (v) => ({
+    wait: "start-only",
+    why: `the ${v.lane} lane needs a human's approval; the ticket has a START only`,
+  }),
+  unwritten: () => ({ wait: "spec-unwritten", why: "the ticket has a START; its spec is not written yet" }),
+  unstarted: () => ({ wait: "no-start", why: "approved, no START: a human STARTs the ticket first" }),
+  raised: (v) => ({ wait: "lane-raised", why: raisedWhy(v) }),
 };
 
-function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): string {
+function heldAs<K extends keyof HeldMap>(kind: K, view: HeldMap[K]): Waiting {
   return HELD[kind](view);
 }
 
-function heldWhy(view: ApprovalView): string {
-  return view.kind === "approved" || view.kind === "started" ? "" : heldAs(view.kind, view);
+function heldWaiting(view: ApprovalView): Waiting | "none" {
+  return view.kind === "approved" || view.kind === "started" ? "none" : heldAs(view.kind, view);
 }
 
 const DESIGN_STEP: Readonly<Record<DesignStep, string>> = { review: "design review", verify: "design verify pass" };
@@ -210,11 +243,16 @@ const DESIGN: { readonly [K in keyof DesignMap]: (d: DesignMap[K]) => Action | "
   done: () => "next",
   run: (d) => ({ kind: "design", step: d.step, spec: d.spec, design: d.design }),
   note: (d) => ({ kind: "design-note", spec: d.spec, design: d.design, why: d.why }),
-  held: (d) => ({ kind: "wait", why: d.why }),
-  later: (d) => ({ kind: "wait", why: `the ${DESIGN_STEP[d.step]} failed; the next try is at ${d.at}` }),
-  stopped: (d) => ({ kind: "wait", why: d.why }),
+  held: (d) => ({ kind: "wait", wait: d.wait, why: d.why }),
+  later: (d) => ({
+    kind: "wait",
+    wait: "design-retry",
+    why: `the ${DESIGN_STEP[d.step]} failed; the next try is at ${d.at}`,
+  }),
+  stopped: (d) => ({ kind: "wait", wait: "design-failed", why: d.why }),
   early: (d) => ({
     kind: "wait",
+    wait: "approved-early",
     why: `approved before the design review's findings (posted at ${d.at}): read them, then approve again`,
   }),
 };
@@ -233,12 +271,12 @@ const designReview: Rule = (s) =>
   s.design.kind === "run" && !startedIn(s.approval) ? "next" : designAs(s.design.kind, s.design);
 
 const approval: Rule = (s) => {
-  const why = heldWhy(s.approval);
-  if (why === "") {
+  const held = heldWaiting(s.approval);
+  if (held === "none") {
     return "next";
   }
   const line = open(s);
-  return line !== "none" && line.claimed ? { kind: "release", why } : { kind: "wait", why };
+  return line !== "none" && line.claimed ? { kind: "release", ...held } : { kind: "wait", ...held };
 };
 
 function newerStop(line: OpenLine, at: string): boolean {
@@ -252,6 +290,7 @@ const stopped: Rule = (s) => {
   return held
     ? {
         kind: "wait",
+        wait: "stopped",
         why: "a maintainer's /stop is newer than the START or approval; START (tiny) or approve again to go on",
       }
     : "next";
@@ -264,7 +303,9 @@ function quiet(s: TicketState, line: OpenLine): boolean {
 
 const asks: Rule = (s) => {
   const line = open(s);
-  return line === "none" || line.asks === 0 ? "next" : { kind: "wait", why: "an open question waits for a person" };
+  return line === "none" || line.asks === 0
+    ? "next"
+    : { kind: "wait", wait: "question", why: "an open question waits for a person" };
 };
 
 const unknownPipeline: Rule = (s) => {
@@ -277,7 +318,7 @@ const unknownPipeline: Rule = (s) => {
 const claimedElsewhere: Rule = (s) => {
   const line = open(s);
   return line !== "none" && line.claimed && s.runs.lastAt === ""
-    ? { kind: "wait", why: "claimed, but not by this dispatcher" }
+    ? { kind: "wait", wait: "claimed-elsewhere", why: "claimed, but not by this dispatcher" }
     : "next";
 };
 
@@ -346,7 +387,7 @@ function blockedAs<K extends keyof BlockedMap>(kind: K, s: TicketState, b: Block
 
 function holdAs(s: TicketState, why: string): Action {
   if (s.runs.heldWhy === why && s.runs.unreadPasses === 0) {
-    return { kind: "wait", why };
+    return { kind: "wait", wait: "blocked", why };
   }
   return { kind: "held", why, ping: s.runs.heldWhy !== why };
 }
@@ -378,7 +419,7 @@ const parked: Rule = (s) => {
 
 function afterReset(s: TicketState, p: ParkedRun, task: Task): Action {
   return s.now < Date.parse(p.until)
-    ? { kind: "wait", why: `${PARK_WAIT} ${p.until}` }
+    ? { kind: "wait", wait: "usage-limit", why: `${PARK_WAIT} ${p.until}` }
     : { kind: "writer", task: answered(s, task), why: `the provider's usage limit reset at ${p.until}` };
 }
 
@@ -397,7 +438,7 @@ function writerHead(s: TicketState): string {
 const headMoved: Rule = (s) => {
   const line = open(s);
   return line !== "none" && line.head !== writerHead(s)
-    ? { kind: "wait", why: "the head is not the writer's: a person pushed; stand off" }
+    ? { kind: "wait", wait: "head-moved", why: "the head is not the writer's: a person pushed; stand off" }
     : "next";
 };
 
@@ -579,11 +620,11 @@ const review: Rule = (s) => {
     : { kind: "writer", task: { kind: "act-on", head: writerHead(s) }, why: `${actOn} Act on finding(s)` };
 };
 
-const WAITS: Readonly<Record<string, string>> = {
-  running: "CI is running at this head",
-  none: "no CI result at this head yet",
-  manual: "a manual CI job waits for a person",
-  skipped: "CI skipped this head",
+const WAITS: Readonly<Record<string, Waiting>> = {
+  running: { wait: "ci", why: "CI is running at this head" },
+  none: { wait: "ci", why: "no CI result at this head yet" },
+  manual: { wait: "manual-ci", why: "a manual CI job waits for a person" },
+  skipped: { wait: "ci-skipped", why: "CI skipped this head" },
 };
 
 const RED = new Set(["failed", "canceled"]);
@@ -601,7 +642,7 @@ function red(s: TicketState, failed: "forge" | "verifier"): Action {
 function green(s: TicketState): Action {
   const head = writerHead(s);
   return s.runs.pingedAt === head
-    ? { kind: "wait", why: "the gate is green; the human reviews and merges" }
+    ? { kind: "wait", wait: "merge", why: "the gate is green; the human reviews and merges" }
     : { kind: "ping", head };
 }
 
@@ -635,7 +676,9 @@ const gate: Rule = (s) => {
   if (RED.has(pipeline)) {
     return red(s, "forge");
   }
-  return pipeline === "success" ? green(s) : { kind: "wait", why: WAITS[pipeline] ?? "waiting for CI" };
+  return pipeline === "success"
+    ? green(s)
+    : { kind: "wait", ...(WAITS[pipeline] ?? { wait: "ci", why: "waiting for CI" }) };
 };
 
 const RULES: readonly Rule[] = [
@@ -670,7 +713,7 @@ function first(state: TicketState): Action {
       return action;
     }
   }
-  return { kind: "wait", why: "nothing to do" };
+  return { kind: "wait", wait: "idle", why: "nothing to do" };
 }
 
 const RETRIES: Readonly<Partial<Record<Task["kind"], Retried>>> = {
@@ -689,27 +732,30 @@ function backedOff(state: TicketState, action: Action): Action {
   const next = state.runs.nextTry;
   const retries = action.kind === "writer" ? RETRIES[action.task.kind] : undefined;
   const early = next.kind === "set" && next.step === retries && state.now < Date.parse(next.at);
-  return early ? { kind: "wait", why: `the ${STEP_NAMES[next.step]} failed; the next try is at ${next.at}` } : action;
+  return early
+    ? { kind: "wait", wait: "retry", why: `the ${STEP_NAMES[next.step]} failed; the next try is at ${next.at}` }
+    : action;
 }
 
 function once(state: TicketState, action: Action): Action {
   return action.kind === "needs-human" && state.runs.blocked.includes(action.why)
     ? {
         kind: "wait",
+        wait: "handed-over",
         why: `handed to a person earlier: ${action.why}; START again (tiny) or approve again to go on`,
       }
     : action;
 }
 
 function releasable(action: Action): action is Extract<Action, { kind: "wait" }> {
-  return action.kind === "wait" && !action.why.startsWith(PARK_WAIT);
+  return action.kind === "wait" && action.wait !== "usage-limit";
 }
 
 function released(state: TicketState, action: Action): Action {
   const line = open(state);
   const quietClaim = line !== "none" && line.claimed && quiet(state, line);
   return quietClaim && releasable(action)
-    ? { kind: "release", why: `quiet for over ${state.quietMinutes} minutes: ${action.why}` }
+    ? { kind: "release", wait: action.wait, why: `quiet for over ${state.quietMinutes} minutes: ${action.why}` }
     : action;
 }
 
@@ -724,7 +770,7 @@ export function decide(state: TicketState): Action {
   return released(state, once(state, capped(state, backedOff(state, first(state)))));
 }
 
-const MACHINE_WAITS: ReadonlySet<string | undefined> = new Set([WAITS.running, WAITS.none]);
+const CARRIED_WAITS: ReadonlySet<WaitKind> = new Set(["ci", "design-retry", "usage-limit"]);
 
 export function inFlight(state: TicketState): boolean {
   const action = decide(state);
@@ -735,13 +781,6 @@ const TELLS: ReadonlySet<Action["kind"]> = new Set(["ping", "design-note", "held
 
 const HELD_KINDS: ReadonlySet<Action["kind"]> = new Set(["wait", "release"]);
 
-function designLater(why: string): boolean {
-  return Object.values(DESIGN_STEP).some((step) => why.startsWith(`the ${step} failed; the next try is at`));
-}
-
 function carried(row: Action): boolean {
-  return (
-    RUNS.has(row.kind) ||
-    (row.kind === "wait" && (MACHINE_WAITS.has(row.why) || designLater(row.why) || row.why.startsWith(PARK_WAIT)))
-  );
+  return RUNS.has(row.kind) || (row.kind === "wait" && CARRIED_WAITS.has(row.wait));
 }

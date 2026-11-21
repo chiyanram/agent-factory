@@ -73,7 +73,7 @@ describe("turnStep: the turn a pass records, and whether it pings", () => {
 });
 
 describe("turnDue: a person's turn no pass has pinged is in flight", () => {
-  const manual: Action = { kind: "wait", why: "a manual CI job waits for a person" };
+  const manual: Action = { kind: "wait", wait: "manual-ci", why: "a manual CI job waits for a person" };
   it("is due until the turn is recorded, and never for the factory's turn", () => {
     expect(turnDue(state({ turn: "factory", turnRead: true }), manual)).toBe(true);
     expect(turnDue(state({ turn: "needs-you", turnRead: true }), manual)).toBe(false);
@@ -83,7 +83,13 @@ describe("turnDue: a person's turn no pass has pinged is in flight", () => {
 
 describe("turnPing: what the person reads", () => {
   it("names the wait's why and the person's step", () => {
-    expect(turnPing({ state: state(), action: { kind: "wait", why: "CI skipped this head" }, change: 12 })).toEqual({
+    expect(
+      turnPing({
+        state: state(),
+        action: { kind: "wait", wait: "ci-skipped", why: "CI skipped this head" },
+        change: 12,
+      }),
+    ).toEqual({
       kind: "needs-you",
       ticket: "PROJ-1",
       change: 12,
@@ -93,7 +99,7 @@ describe("turnPing: what the person reads", () => {
   });
 
   it("gives the needs-human label's wait the newest hand-over's reason, and a blocked run's own why", () => {
-    const label: Action = { kind: "wait", why: "needs-human: a person decides" };
+    const label: Action = { kind: "wait", wait: "needs-human", why: "needs-human: a person decides" };
     expect(
       turnPing({ state: state({ blocked: ["first", "CI is still red"] }), action: label, change: 12 }),
     ).toMatchObject({ why: "CI is still red" });
@@ -101,7 +107,7 @@ describe("turnPing: what the person reads", () => {
     expect(turnPing({ state: state({ blockedRun }), action: label, change: 12 })).toMatchObject({
       why: `needs-human: a person decides; ${blockedRun}`,
     });
-    const manual: Action = { kind: "wait", why: "a manual CI job waits for a person" };
+    const manual: Action = { kind: "wait", wait: "manual-ci", why: "a manual CI job waits for a person" };
     expect(turnPing({ state: state({ blockedRun }), action: manual, change: 12 })).toMatchObject({
       why: "a manual CI job waits for a person",
     });
@@ -118,7 +124,7 @@ describe("turnPing: what the person reads", () => {
       change: 12,
       head: H,
     });
-    const green: Action = { kind: "wait", why: "the gate is green; the human reviews and merges" };
+    const green: Action = { kind: "wait", wait: "merge", why: "the gate is green; the human reviews and merges" };
     expect(turnPing({ state: state(), action: green, change: 12 })).toMatchObject({ kind: "ready", head: H });
   });
 });

@@ -13,7 +13,7 @@
 
 import { join } from "node:path";
 import type { Exit } from "../forge/api.js";
-import type { BoxSpec, Command, Probe, Ran } from "./types.js";
+import type { BoxSpec, Command, PinnedImage, Probe, Ran } from "./types.js";
 
 export const RUNTIME = "sysbox-runc";
 export const WORKDIR = "/work";
@@ -48,8 +48,17 @@ const RESERVED = /^(DOCKER_|HOME$)/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NETWORK = /^factory-int-[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+export type PinnedSpec = BoxSpec & { readonly image: PinnedImage };
+
+export type CheckedSpec =
+  | { readonly kind: "ok"; readonly spec: PinnedSpec }
+  | { readonly kind: "refused"; readonly reason: string };
+
+function isPinned(spec: BoxSpec): spec is PinnedSpec {
+  return spec.image.kind === "pinned";
+}
+
 const SPEC_RULES: readonly ((spec: BoxSpec) => Check)[] = [
-  (s) => (s.image.kind === "pinned" ? OK : refuse("the vm runner runs only a pinned image; this spec names none")),
   (s) =>
     s.worktree.startsWith("/") && mountable(s.worktree)
       ? OK
@@ -70,8 +79,12 @@ const SPEC_RULES: readonly ((spec: BoxSpec) => Check)[] = [
   (s) => (NETWORK.test(s.network) ? OK : refuse(`network ${JSON.stringify(s.network)} is not a docker network name`)),
 ];
 
-export function checkSpec(spec: BoxSpec): Check {
-  return firstRefusal(SPEC_RULES.map((rule) => rule(spec)));
+export function checkSpec(spec: BoxSpec): CheckedSpec {
+  if (!isPinned(spec)) {
+    return { kind: "refused", reason: "the vm runner runs only a pinned image; this spec names none" };
+  }
+  const check = firstRefusal(SPEC_RULES.map((rule) => rule(spec)));
+  return check.kind === "ok" ? { kind: "ok", spec } : check;
 }
 
 export function checkOwner(owner: Owner): Check {
@@ -110,7 +123,7 @@ export function readProbe(input: {
   return check.kind === "ok" ? { kind: "ready" } : { kind: "missing", reason: check.reason };
 }
 
-export function runArgs(input: { readonly name: string; readonly spec: BoxSpec }): readonly string[] {
+export function runArgs(input: { readonly name: string; readonly spec: PinnedSpec }): readonly string[] {
   const { name, spec } = input;
   const mounts = [
     `type=bind,src=${spec.worktree},dst=${WORKDIR}`,
@@ -132,7 +145,7 @@ export function runArgs(input: { readonly name: string; readonly spec: BoxSpec }
     "--tmpfs",
     `${HOME}:rw,nosuid,nodev,mode=0700`,
     ...[`HTTP_PROXY=${spec.proxy}`, `HTTPS_PROXY=${spec.proxy}`, `NO_PROXY=${LOCAL}`].flatMap((e) => ["--env", e]),
-    spec.image.kind === "pinned" ? spec.image.ref : "",
+    spec.image.ref,
   ];
 }
 

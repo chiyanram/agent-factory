@@ -60,12 +60,11 @@ export function runPrompt(input: {
   readonly mode: RunMode;
   readonly names: Names;
   readonly tools: readonly string[];
-  readonly programs?: readonly string[];
+  readonly programs: readonly string[];
 }): string {
   const listed = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
   const cleanup = input.mode === "cleanup" ? `\n${CLEANUP_REPORT}` : "";
-  const evidence = input.programs === undefined ? "" : `\n${evidenceRules(input.programs)}`;
-  return `${input.card.body}\n\n${TASKS[input.mode](input.names)}\n\n${FLOOR}${evidence}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${listed}\n\n${REPORT_INSTRUCTIONS}${cleanup}\n`;
+  return `${input.card.body}\n\n${TASKS[input.mode](input.names)}\n\n${FLOOR}\n${evidenceRules(input.programs)}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${listed}\n\n${REPORT_INSTRUCTIONS}${cleanup}\n`;
 }
 
 export const KNOWLEDGE =

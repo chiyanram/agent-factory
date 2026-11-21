@@ -216,7 +216,7 @@ describe("the board's lanes (#671)", () => {
     ]);
   });
 
-  it("puts a design note, and a wait no row names, under needs you", () => {
+  it("puts a design note, and a wait for a manual CI job, under needs you", () => {
     const base = decided("PROJ-8", { change: { kind: "none" }, runs: EMPTY });
     const note =
       "kind" in base
@@ -230,7 +230,13 @@ describe("the board's lanes (#671)", () => {
               why: "no further design review (round cap): the person decides",
             },
           };
-    const odd = "kind" in base ? base : { ...base, action: { kind: "wait" as const, why: "a why no row gives" } };
+    const odd =
+      "kind" in base
+        ? base
+        : {
+            ...base,
+            action: { kind: "wait" as const, wait: "manual-ci" as const, why: "a manual CI job waits for a person" },
+          };
     const two = boardOf({ decided: [note, odd], events: new Map(), now: NOW, describe: describeAction });
     expect(two.map((l) => [l.lane, l.waitsOn.kind])).toEqual([
       ["needs-you", "person"],
@@ -263,6 +269,7 @@ describe("the board's lanes (#671)", () => {
       waitsOn: { kind: "gate", what: "wait: the provider's usage limit lasts until 2026-11-13T15:00:00Z" },
       since: "2026-11-13T11:00:00Z",
       forMs: 3_600_000,
+      parkedUntil: "2026-11-13T15:00:00Z",
     } as const;
     expect(boardText({ lines: [parked], zone: { name: "Asia/Tokyo" }, mark: "#" }).slice(-2)).toEqual([
       "  PROJ-7  #15  wait: the provider's usage limit lasts until 2026-11-14 00:00 Asia/Tokyo (2026-11-13 15:00 UTC)",

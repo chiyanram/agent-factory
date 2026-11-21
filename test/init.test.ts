@@ -213,7 +213,7 @@ describe("init reads the clone (#369)", () => {
         toolchain: { file: "mise.toml", manager: "mise", tools: [{ name: "java", version: "27" }] },
       },
     });
-    expect(got).toMatchObject({ value: { integrationTests: true, testFiles: "default" } });
+    expect(got).toMatchObject({ value: { integrationTests: true } });
   });
 
   it.each([
@@ -232,7 +232,6 @@ describe("init reads the clone (#369)", () => {
         builds: [{ name, programs, egress }],
       },
     });
-    expect(got.kind === "ok" && got.value.testFiles).toBe("default");
   });
 
   it("finds Liquibase one module down, and no CI", async () => {

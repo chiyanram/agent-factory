@@ -171,6 +171,7 @@ describe("decide: one row each", () => {
     const busy = { kind: "open", line: line({ lastNoteAt: "2026-11-07T09:55:00Z" }) } as const;
     expect(decide(state({ runs: EMPTY, change: busy }))).toMatchObject({
       kind: "wait",
+      wait: "claimed-elsewhere",
       why: "claimed, but not by this dispatcher",
     });
     expect(decide(state({ runs: EMPTY }))).toMatchObject({
@@ -605,6 +606,7 @@ describe("backoff (#228)", () => {
     const runs = failedReady({ kind: "set", step: "ready", at: at(10_000) });
     expect(decide(state({ runs }))).toMatchObject({
       kind: "wait",
+      wait: "retry",
       why: expect.stringContaining(`the ready check failed; the next try is at ${at(10_000)}`),
     });
     expect(decide(state({ runs, now: NOW + 10_000 }))).toMatchObject({
@@ -638,6 +640,33 @@ describe("the design review before the approval, and no cleanup run after the im
   const unapproved = { kind: "unapproved", lane: "feature" } as const;
   const before = { approval: unapproved, change: { kind: "none" }, runs: EMPTY } as const;
 
+  it.each([
+    {
+      design: {
+        kind: "stopped",
+        step: "review",
+        why: "a cite in the spec or design does not hold: src/a.ts:9 names no `x`",
+      },
+      does: "reads the design run's log, or edits the spec or design, which reviews it afresh",
+    },
+    {
+      design: {
+        kind: "held",
+        wait: "lane-check-failed",
+        why: "the lane check failed, so no design review runs: no lanes file",
+      },
+      does: "reads why the lane check failed, fixes the spec's planned files or the lanes, then the design review runs",
+    },
+  ] as const)(
+    "should give each wait the next step of its kind when the wait comes from a design cite that does not hold or from a failed lane check: $design.kind",
+    ({ design, does }) => {
+      expect(whoseTurn(decide(state({ ...before, design })))).toEqual({
+        lane: "needs-you",
+        step: { who: "person", does },
+      });
+    },
+  );
+
   it("a design review due runs the design-reviewer, then the verify pass, before the approval rule waits", () => {
     expect(decide(state({ ...before, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } }))).toEqual(
       {
@@ -657,6 +686,7 @@ describe("the design review before the approval, and no cleanup run after the im
     );
     expect(decide(state({ ...before, design: { kind: "done" } }))).toEqual({
       kind: "wait",
+      wait: "start-only",
       why: "the feature lane needs a human's approval; the ticket has a START only",
     });
   });
@@ -664,9 +694,14 @@ describe("the design review before the approval, and no cleanup run after the im
   it("a failed design run waits for its next try; one out of tries waits for a person; an early approval waits", () => {
     expect(
       decide(state({ ...before, design: { kind: "later", step: "verify", at: "2026-11-07T10:00:20.000Z" } })),
-    ).toEqual({ kind: "wait", why: "the design verify pass failed; the next try is at 2026-11-07T10:00:20.000Z" });
+    ).toEqual({
+      kind: "wait",
+      wait: "design-retry",
+      why: "the design verify pass failed; the next try is at 2026-11-07T10:00:20.000Z",
+    });
     expect(decide(state({ ...before, design: { kind: "stopped", step: "review", why: "failed 3 times" } }))).toEqual({
       kind: "wait",
+      wait: "design-failed",
       why: "failed 3 times",
     });
     expect(decide(state({ design: { kind: "early", at: "2026-11-07T09:00:00Z" } }))).toMatchObject({
@@ -765,7 +800,11 @@ describe("a provider's usage limit parks the ticket until its reset", () => {
   it("waits in the factory lane until the reset, with no ping, and carries the ticket on", () => {
     const runs = wrote({ ...reviewed(1), parked: parkedAt("2026-11-07T14:00:00Z") });
     const action = decide(state({ runs }));
-    expect(action).toEqual({ kind: "wait", why: "the provider's usage limit lasts until 2026-11-07T14:00:00Z" });
+    expect(action).toEqual({
+      kind: "wait",
+      wait: "usage-limit",
+      why: "the provider's usage limit lasts until 2026-11-07T14:00:00Z",
+    });
     expect(whoseTurn(action)).toMatchObject({ lane: "factory", on: "gate" });
     expect(inFlight(state({ runs }))).toBe(true);
   });
@@ -798,6 +837,7 @@ describe("a provider's usage limit parks the ticket until its reset", () => {
     const runs = wrote({ ...reviewed(1), parked: parkedAt("2026-11-07T14:00:00Z"), lastAt: "2026-11-07T09:00:00Z" });
     expect(decide(state({ runs }))).toEqual({
       kind: "wait",
+      wait: "usage-limit",
       why: "the provider's usage limit lasts until 2026-11-07T14:00:00Z",
     });
   });
@@ -966,6 +1006,7 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     const same = [...FAILED, ended(30, "rework", "", GREP), blocked];
     expect(decide(at(same, BEFORE, cleared))).toMatchObject({
       kind: "wait",
+      wait: "handed-over",
       why: expect.stringContaining("handed to a person earlier: the writer's run changed nothing; START again"),
     });
     const restarted = { kind: "approved" as const, at: t(45), lane: "feature" as const, testFirst: false };
@@ -1045,6 +1086,7 @@ describe("can it get stuck? (#485)", () => {
     },
     {
       kind: "held",
+      wait: "lane-raised",
       why: "the lane is raised from feature to one-way door (db/V2.sql is under a one-way-door path): x",
     },
   ];
@@ -1099,9 +1141,9 @@ describe("can it get stuck? (#485)", () => {
     expect([...reached].toSorted()).toEqual([...LANES].toSorted());
   });
 
-  it("says whether a factory turn waits on a run or the gate, and names a step for a wait no row gives (#671)", () => {
+  it("says whether a factory turn waits on a run or the gate (#671)", () => {
     expect(whoseTurn({ kind: "review", head: H })).toMatchObject({ lane: "factory", on: "run" });
-    expect(whoseTurn({ kind: "wait", why: "CI is running at this head" })).toMatchObject({
+    expect(whoseTurn({ kind: "wait", wait: "ci", why: "CI is running at this head" })).toMatchObject({
       lane: "factory",
       on: "gate",
     });
@@ -1113,24 +1155,25 @@ describe("can it get stuck? (#485)", () => {
       lane: "ready-to-merge",
       step: { who: "person", does: "reviews and merges the change" },
     });
-    expect(whoseTurn({ kind: "wait", why: "a why no row gives" })).toEqual({
-      lane: "needs-you",
-      step: { who: "person", does: "looks at the ticket: the factory names no next step for this wait" },
-    });
   });
 
   it("names what the person does for a pushed head and a change someone else claimed", () => {
-    expect(nextStep({ kind: "wait", why: "the head is not the writer's: a person pushed; stand off" })).toEqual({
+    expect(
+      nextStep({ kind: "wait", wait: "head-moved", why: "the head is not the writer's: a person pushed; stand off" }),
+    ).toEqual({
       who: "person",
       does: "the person who pushed finishes, then STARTs the ticket again (tiny) or approves its spec again: agent-factory start | approve",
     });
     expect(
-      nextStep({ kind: "release", why: "quiet for over 30 minutes: claimed, but not by this dispatcher" }),
+      nextStep({
+        kind: "release",
+        wait: "claimed-elsewhere",
+        why: "quiet for over 30 minutes: claimed, but not by this dispatcher",
+      }),
     ).toEqual({
       who: "person",
       does: "whoever claimed it finishes it, or gives it back by removing the claim label on the git host",
     });
-    expect(nextStep({ kind: "wait", why: "a why no row gives" })).toBeUndefined();
     const unanswered =
       "the git host did not answer for the ticket's blockers on 3 passes in a row since t: PROJ-0: 502";
     expect(nextStep({ kind: "needs-human", why: unanswered })).toEqual({
@@ -1148,7 +1191,7 @@ describe("blocked by (#494)", () => {
     const why = "blocked by PROJ-0 (open, not merged): the build starts once each is merged";
     expect(decide(state({ ...unbuilt, blockers: waiting }))).toEqual({ kind: "held", why, ping: true });
     const told = { ...unbuilt, runs: { ...EMPTY, heldWhy: why } };
-    expect(decide(state({ ...told, blockers: waiting }))).toEqual({ kind: "wait", why });
+    expect(decide(state({ ...told, blockers: waiting }))).toEqual({ kind: "wait", wait: "blocked", why });
     expect(decide(state({ ...unbuilt, blockers: { kind: "none" } }))).toMatchObject({ kind: "writer" });
   });
 

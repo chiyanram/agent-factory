@@ -109,6 +109,7 @@ import {
   type Gate,
   type TicketState,
   type WaiverView,
+  type Waiting,
   startedIn,
 } from "./table.js";
 
@@ -336,12 +337,12 @@ async function designOf(setup: TickSetup, ticket: string, said: Said, events: re
   });
 }
 
-async function raisedOf(setup: TickSetup, spec: Spec): Promise<string> {
+async function raisedOf(setup: TickSetup, spec: Spec): Promise<Waiting | "none"> {
   const raise = await plannedCheck({ home: setup.home, project: setup.project, spec });
   if (raise.kind === "failed") {
-    return `the lane check failed, so no design review runs: ${raise.reason}`;
+    return { wait: "lane-check-failed", why: `the lane check failed, so no design review runs: ${raise.reason}` };
   }
-  return raise.value.kind === "raised" ? raisedWhy(raise.value) : "";
+  return raise.value.kind === "raised" ? { wait: "lane-raised", why: raisedWhy(raise.value) } : "none";
 }
 
 const MOST_BLOCKER_SPECS = 50;
@@ -770,12 +771,12 @@ async function begin(
   state: TicketState,
   step: Extract<Steps["writer"], { kind: "available" }>,
   mode: ReturnType<typeof modeOf>,
-): Promise<Result<{ readonly folder?: string }>> {
-  const folder = await folderFor(step);
+): Promise<Result<{ readonly folder: string }>> {
+  const folder = await step.folder();
   if (folder.kind === "failed") {
     return folder;
   }
-  const named = folder.value;
+  const named = { folder: folder.value };
   const started = await record({
     where: where(setup, state),
     event: {
@@ -857,20 +858,8 @@ async function parkNoticed(setup: TickSetup, state: TicketState, until: string, 
   await informed(setup, { kind: "held", ticket: state.ticket, change: number(state), why });
 }
 
-async function folderFor(
-  step: Extract<Steps["writer"], { kind: "available" }>,
-): Promise<Result<{ readonly folder?: string }>> {
-  if (step.folder === undefined) {
-    return { kind: "ok", value: {} };
-  }
-  const made = await step.folder();
-  return made.kind === "ok" ? { kind: "ok", value: { folder: made.value } } : made;
-}
-
-async function emptied(folder: string | undefined): Promise<void> {
-  if (folder !== undefined) {
-    await rmdir(folder).catch(() => undefined);
-  }
+async function emptied(folder: string): Promise<void> {
+  await rmdir(folder).catch(() => undefined);
 }
 
 type WriterValue = Extract<
@@ -1450,7 +1439,7 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
       setup.log(`${d.ticket}: broken: ${d.reason}`);
       ran.push({
         ticket: d.ticket,
-        action: { kind: "wait", why: "broken" },
+        action: { kind: "wait", wait: "broken", why: "broken" },
         result: { kind: "failed", reason: d.reason },
       });
       continue;
