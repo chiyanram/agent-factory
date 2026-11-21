@@ -21,8 +21,21 @@ export function secret(value: string): Secret {
   return { kind: "secret", reveal: () => value, toString: () => "[secret]", toJSON: () => "[secret]" };
 }
 
+class CheckedSecret implements Secret {
+  readonly kind = "secret";
+  readonly #value: string;
+  constructor(value: string) {
+    this.#value = value;
+  }
+  readonly reveal = (): string => this.#value;
+  readonly toString = (): string => "[secret]";
+  readonly toJSON = (): string => "[secret]";
+}
+
+export type CheckedToken = CheckedSecret;
+
 export type Checked =
-  | { readonly kind: "ok"; readonly token: Secret }
+  | { readonly kind: "ok"; readonly token: CheckedToken }
   | { readonly kind: "refused"; readonly reason: string };
 
 type Rule = { readonly fails: (t: string) => boolean; readonly why: string };
@@ -45,7 +58,9 @@ const RULES: readonly Rule[] = [
 function checked(pasted: string, rules: readonly Rule[]): Checked {
   const text = pasted.trim();
   const broken = rules.find((r) => r.fails(text));
-  return broken === undefined ? { kind: "ok", token: secret(text) } : { kind: "refused", reason: broken.why };
+  return broken === undefined
+    ? { kind: "ok", token: new CheckedSecret(text) }
+    : { kind: "refused", reason: broken.why };
 }
 
 export function checkToken(pasted: string): Checked {
@@ -191,7 +206,7 @@ const WEBHOOK = /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api\/webh
 export function checkWebhook(pasted: string): Checked {
   const text = pasted.trim();
   return WEBHOOK.test(text)
-    ? { kind: "ok", token: secret(text) }
+    ? { kind: "ok", token: new CheckedSecret(text) }
     : {
         kind: "refused",
         reason:

@@ -18,6 +18,7 @@ import { readSpends } from "../src/core/dispatch/usage.js";
 import { traceName } from "../src/core/dispatch/trace.js";
 import { STEPS_TODAY, type DesignInput, type Steps } from "../src/core/dispatch/steps.js";
 import { lock, runHoursEnd, tick, waitingPass, type TickSetup } from "../src/core/dispatch/tick.js";
+import { takeLock, type HeldLock } from "../src/core/lock.js";
 import { ROUND_CAP } from "../src/core/dispatch/design.js";
 import { LANES } from "../src/core/dispatch/next-step.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
@@ -294,6 +295,15 @@ describe("records", () => {
 describe("records: a torn last line (#483)", () => {
   const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
   const file = () => join(home, "runs", "ledger", "PROJ-1.jsonl");
+  let taken = 0;
+  const passLock = async (): Promise<HeldLock> => {
+    taken += 1;
+    const held = await takeLock(join(home, "locks", `pass-${taken}.lock`));
+    if (held.kind !== "held") {
+      throw new Error(`the test cannot take a pass lock: ${held.kind}`);
+    }
+    return held;
+  };
   const TORN = '{"at":"2026-11-07T09:10:00Z","kind":"writer-en';
   const started = () =>
     record({
@@ -305,7 +315,7 @@ describe("records: a torn last line (#483)", () => {
     await started();
     writeFileSync(file(), TORN, { flag: "a" });
     const warned: string[] = [];
-    const read = await readRecords(where(), { warn: (l) => warned.push(l), setAside: true });
+    const read = await readRecords(where(), { warn: (l) => warned.push(l), setAside: await passLock() });
     expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }] });
     expect(warned).toEqual([expect.stringContaining("was torn (a write cut short); it is moved to")]);
     expect(readFileSync(tornPath(file()), "utf8")).toBe(`${TORN}\n`);
@@ -313,7 +323,7 @@ describe("records: a torn last line (#483)", () => {
       summarize({ events: read.kind === "ok" ? read.value : [], since: "2026-11-07T08:00:00Z" }).interrupted,
     ).toEqual({ kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" });
     await record({ where: where(), event: { at: "2026-11-07T09:20:00Z", kind: "pinged", head: H } });
-    const again = await readRecords(where(), { warn: (l) => warned.push(l), setAside: true });
+    const again = await readRecords(where(), { warn: (l) => warned.push(l), setAside: await passLock() });
     expect(again).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "pinged" }] });
     expect(warned).toHaveLength(1);
   });
@@ -336,12 +346,14 @@ describe("records: a torn last line (#483)", () => {
     writeFileSync(file(), `${JSON.stringify({ at: "2026-11-07T09:10:00Z", kind: "from-a-newer-engine" })}\n`, {
       flag: "a",
     });
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toEqual({
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toEqual({
       kind: "failed",
       reason: `${file()} line 2 is not a record; fix or remove it`,
     });
     writeFileSync(file(), `{"at":"2026-11-07T09:00:00Z","kind":"from-a-newer-engine"}`);
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toMatchObject({ kind: "failed" });
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toMatchObject({
+      kind: "failed",
+    });
     expect(existsSync(tornPath(file()))).toBe(false);
   });
 
@@ -349,7 +361,7 @@ describe("records: a torn last line (#483)", () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     const line = JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H });
     writeFileSync(file(), line);
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toMatchObject({
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toMatchObject({
       kind: "ok",
       value: [{ kind: "pinged" }],
     });
@@ -359,7 +371,7 @@ describe("records: a torn last line (#483)", () => {
   it("a torn line in the middle still stops the ticket, naming the line", async () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     writeFileSync(file(), `${TORN}\n${JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H })}\n`);
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toEqual({
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toEqual({
       kind: "failed",
       reason: `${file()} line 1 is not a record; fix or remove it`,
     });

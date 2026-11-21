@@ -54,7 +54,6 @@ import { inFlight, PARK_WAIT, type WaitKind } from "./table.js";
 import { turnDue } from "./turn-ping.js";
 import {
   decideAll,
-  holder,
   lock,
   RUN_KINDS,
   runHoursEnd,
@@ -64,6 +63,7 @@ import {
   type Ran,
   type TickSetup,
 } from "./tick.js";
+import { holder } from "../lock.js";
 
 export const LOOP_GUARD: Guard = { file: LOOP_PID_FILE, what: "orchestrator loop" };
 export const MAX_FAILED_PASSES = 3;

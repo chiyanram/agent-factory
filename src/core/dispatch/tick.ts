@@ -20,7 +20,7 @@
 // re-runs a red check: a check a person quarantined reads as passed, and any other goes back to the implementer.
 //
 // A lock file keeps two passes from running at once (a pass by hand while the orchestrator loop runs, a run of an
-// hour). A lock whose holder died is taken over by a rename and a read-back, so of two passes only one keeps it. No
+// hour); src/core/lock.ts takes it, and of two passes that find one stale lock only one keeps it. No
 // cron or launchd job runs a pass: a human's command starts the orchestrator loop (orchestrator-loop.ts), and it ends
 // by itself when no ticket is in flight. Each pass that polled writes its last-poll time (last-poll.ts), so `status`
 // shows a loop that stopped. Each pass first deletes the project's traces older than TRACE_DAYS (trace.ts).
@@ -33,8 +33,7 @@
 
 import type { PluginHash } from "../process/use.js";
 import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
-import { randomUUID } from "node:crypto";
-import { link, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   approvalState,
@@ -81,7 +80,7 @@ import {
   type Task,
   type Where,
 } from "./records.js";
-import { codeOf } from "../field.js";
+import { takeLock, type HeldLock } from "../lock.js";
 import { writeLastPoll } from "./last-poll.js";
 import { shownAt, UTC } from "../zone.js";
 import { timelineOf } from "./timeline.js";
@@ -135,7 +134,12 @@ export type TickSetup = {
   readonly caps: Caps;
   readonly specs?: SpecStore;
   readonly quarantine?: readonly Quarantined[];
+  readonly passLock?: HeldLock;
 };
+
+function asideOf(setup: TickSetup): { readonly setAside?: HeldLock } {
+  return setup.passLock === undefined ? {} : { setAside: setup.passLock };
+}
 
 export type Decision = { readonly ticket: string; readonly action: Action };
 
@@ -444,7 +448,7 @@ async function stateOf(
   }
   const events = await readRecords(
     { home: setup.home, project: setup.project, ticket },
-    { warn: setup.log, setAside: true },
+    { warn: setup.log, ...asideOf(setup) },
   );
   if (events.kind === "failed") {
     return events;
@@ -1127,7 +1131,7 @@ async function failedSpent(
 type DesignAction = Extract<Action, { kind: "design" }>;
 
 async function earlierOf(setup: TickSetup, state: TicketState, a: DesignAction): Promise<readonly EarlierRound[]> {
-  const events = await readRecords(where(setup, state), { warn: setup.log, setAside: true });
+  const events = await readRecords(where(setup, state), { warn: setup.log, ...asideOf(setup) });
   return events.kind === "ok" ? roundsBefore(events.value, { spec: a.spec, design: a.design }) : [];
 }
 
@@ -1153,7 +1157,7 @@ async function designFindings(
   state: TicketState,
   a: DesignAction,
 ): Promise<Result<readonly DesignFinding[]>> {
-  const events = await readRecords(where(setup, state), { warn: setup.log, setAside: true });
+  const events = await readRecords(where(setup, state), { warn: setup.log, ...asideOf(setup) });
   if (events.kind === "failed") {
     return events;
   }
@@ -1574,49 +1578,6 @@ type Lock =
   | { readonly kind: "held"; readonly release: () => Promise<void> }
   | { readonly kind: "busy"; readonly reason: string };
 
-const STALE_UNREADABLE_MS = 10 * 60_000;
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return codeOf(error) === "EPERM";
-  }
-}
-
-export type Holder =
-  | { readonly kind: "alive"; readonly pid: number }
-  | { readonly kind: "dead" }
-  | { readonly kind: "unknown" };
-
-export async function holder(path: string, now: number): Promise<Holder> {
-  const text = await readFile(path, "utf8").catch(() => "");
-  const pid = Number(text.split(":")[0]);
-  if (Number.isSafeInteger(pid) && pid > 0) {
-    return alive(pid) ? { kind: "alive", pid } : { kind: "dead" };
-  }
-  const age = await stat(path).then(
-    (st) => now - st.mtimeMs,
-    () => 0,
-  );
-  return age > STALE_UNREADABLE_MS ? { kind: "dead" } : { kind: "unknown" };
-}
-
-async function take(lockPath: string, mine: string, token: string): Promise<boolean> {
-  try {
-    await link(mine, lockPath);
-    return true;
-  } catch {
-    const found = await holder(lockPath, Date.now());
-    if (found.kind !== "dead") {
-      return false;
-    }
-    await rename(mine, lockPath);
-    return (await readFile(lockPath, "utf8").catch(() => "")) === token;
-  }
-}
-
 export type Guard = { readonly file: string; readonly what: string };
 export const PASS_GUARD: Guard = { file: ".lock", what: "pass" };
 
@@ -1626,36 +1587,21 @@ export async function lock(input: {
   readonly guard?: Guard;
 }): Promise<Lock> {
   const guard = input.guard ?? PASS_GUARD;
-  const dir = join(input.home, "runs", input.project);
-  const lockPath = join(dir, guard.file);
-  const token = `${process.pid}:${randomUUID()}`;
-  const mine = join(dir, `.lock.${randomUUID()}`);
-  try {
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    await writeFile(mine, token, { mode: 0o600, flag: "wx" });
-    const held = await take(lockPath, mine, token);
-    await rm(mine, { force: true });
-    if (!held) {
-      const found = await holder(lockPath, Date.now());
-      return {
-        kind: "busy",
-        reason:
-          found.kind === "alive"
-            ? `another ${guard.what} (pid ${found.pid}) is running for ${input.project}`
-            : `another ${guard.what} holds ${lockPath}`,
-      };
-    }
-    const release = async (): Promise<void> => {
-      const now = await readFile(lockPath, "utf8").catch(() => "");
-      if (now === token) {
-        await rm(lockPath, { force: true });
-      }
-    };
-    return { kind: "held", release };
-  } catch {
-    await rm(mine, { force: true }).catch(() => undefined);
-    return { kind: "busy", reason: `cannot take ${lockPath}` };
+  const lockPath = join(input.home, "runs", input.project, guard.file);
+  const taken = await takeLock(lockPath);
+  if (taken.kind === "held") {
+    return taken;
   }
+  if (taken.kind === "failed") {
+    return { kind: "busy", reason: taken.reason };
+  }
+  return {
+    kind: "busy",
+    reason:
+      taken.holder.kind === "alive"
+        ? `another ${guard.what} (pid ${taken.holder.pid}) is running for ${input.project}`
+        : `another ${guard.what} holds ${lockPath}`,
+  };
 }
 
 async function acted(setup: TickSetup, decided: readonly Decided[]): Promise<readonly Ran[]> {
@@ -1712,13 +1658,14 @@ export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
   if (held.kind === "busy") {
     return { kind: "failed", reason: held.reason };
   }
+  const locked: TickSetup = { ...setup, passLock: held };
   try {
-    await pruned(setup);
-    const decided = await decideAll(setup);
+    await pruned(locked);
+    const decided = await decideAll(locked);
     if (decided.kind === "failed") {
       return decided;
     }
-    return { kind: "ok", value: await acted(setup, decided.value) };
+    return { kind: "ok", value: await acted(locked, decided.value) };
   } finally {
     await held.release();
   }

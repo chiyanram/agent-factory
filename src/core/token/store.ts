@@ -12,7 +12,7 @@
 import { lstat, mkdir, readFile, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import type { Runner as Cli } from "../forge/api.js";
-import { secret, type Meta, type Runner, type Secret } from "./rules.js";
+import { secret, type CheckedToken, type Meta, type Runner, type Secret } from "./rules.js";
 import { prop } from "../field.js";
 
 export type Done = { readonly kind: "ok" } | { readonly kind: "failed"; readonly reason: string };
@@ -27,13 +27,13 @@ type Read =
 
 export type TokenStore = {
   readonly where: string;
-  put(input: { readonly runner: Runner; readonly token: Secret; readonly meta: Meta }): Promise<Done>;
+  put(input: { readonly runner: Runner; readonly token: CheckedToken; readonly meta: Meta }): Promise<Done>;
   get(runner: Runner): Promise<Stored>;
 };
 
 type Vault = {
   readonly where: string;
-  write(runner: Runner, token: Secret): Promise<Done>;
+  write(runner: Runner, token: CheckedToken): Promise<Done>;
   read(runner: Runner): Promise<Read>;
 };
 
