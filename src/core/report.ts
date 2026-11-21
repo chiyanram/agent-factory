@@ -17,9 +17,9 @@
 // The writer controls its worktree, so the read is careful: .factory and the report must be a real folder and a real
 // regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Decide from it only once the
 // box has stopped: nothing of the writer's may still run and swap .factory between the checks and the open. A read
-// while the writer runs only starts the completion window (#182). The open never follows a symlink, and it does not
-// block, so a FIFO cannot hang the host. A reason never
-// quotes the file, not even a key name, since it is posted on the change and a report could hold anything.
+// while the writer runs only starts the completion window. The open never follows a symlink, and it does not block,
+// so a FIFO cannot hang the host. A reason never quotes the file, not even a key name, since it is posted on the
+// change and a report could hold anything.
 
 import { constants } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";

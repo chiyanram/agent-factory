@@ -28,8 +28,8 @@
 // The ticket list is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
 // the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
 // approval with no START waits. The newer of the two records is when the counts start afresh. The shared copy is a
-// note the project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or
-// none>", for people to see. It never starts anything: the orchestrator decides only from the local records.
+// note the project's own git host identity posts, `approved by <human> via <door>, spec <hash>, design <hash|none>`,
+// for people to see. It never starts anything: the orchestrator decides only from the local records.
 
 import type { PluginHash } from "../process/use.js";
 import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
