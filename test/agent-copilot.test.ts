@@ -29,7 +29,6 @@ function folder(): string {
   return dir;
 }
 
-// the flags that would widen a run's reach: every tool, path or URL, a trusted folder, branch config. Never passed.
 const COPILOT_FLAGS_NEVER: readonly string[] = [
   "--allow-all",
   "--yolo",
@@ -217,7 +216,6 @@ describe("readCopilotAnswer (#690)", () => {
   });
 });
 
-// the fake runner: records each call and what its private home held when the call started
 function fakeRunner(answer: { code: number; stdout: string; stderr?: string }) {
   const calls: { call: FolderCall; homeHeld: readonly string[]; homeMode: number }[] = [];
   const run = async (call: FolderCall) => {
@@ -229,7 +227,6 @@ function fakeRunner(answer: { code: number; stdout: string; stderr?: string }) {
   return { run, calls };
 }
 
-// onlyOf : the one item of a list that holds exactly one
 function onlyOf<T>(items: readonly T[]): T {
   const [only] = items;
   if (only === undefined || items.length !== 1) {
@@ -356,7 +353,6 @@ function readFile(path: string): string {
   return readFileSync(path, "utf8");
 }
 
-// gone : the process ended and is no zombie, within a second (Linux reads /proc; elsewhere a signal 0)
 async function gone(pid: number): Promise<boolean> {
   const alive = (): boolean => {
     const stat = join("/proc", String(pid), "stat");

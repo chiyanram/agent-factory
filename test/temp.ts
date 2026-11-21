@@ -7,7 +7,6 @@ import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// tempDir : a fresh, empty folder under the system temp folder, by its real path
 export function tempDir(prefix: string): string {
   return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 }

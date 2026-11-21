@@ -32,8 +32,6 @@ let p: Project;
 let head = "";
 beforeEach(() => {
   p = project("feat/x");
-  // a branch whose Makefile would write outside the folder if anything ran it on the host. The Makefile comes from
-  // main, so the change itself touches no judge file (#231)
   p.write("Makefile", `test:\n\ttouch ${join(p.root, "planted")}\n`);
   p.commitAll("planted target");
   p.git("push", "-q", "origin", "main");
@@ -65,10 +63,8 @@ const EGRESS: EgressStarted = {
   network: "factory-int-ledger",
 };
 
-// how many times a box run started the project's egress proxy
 let egressStarts = 0;
 
-// the box sees the worktree only while it runs: record what is in it at each run
 function watched(fake: FakeBox, seen: string[][]): Box {
   return {
     ...fake.box,
@@ -162,7 +158,6 @@ describe("the ready check (#91, #138)", () => {
     const fake = fakeBox({ runs: [exited(0), exited(0)] });
     const seen: string[][] = [];
     const out = await ready(watched(fake, seen), [row("make test"), row("./gradlew check --tests 'A*'", "AC2")]);
-    // the branch changes svc/Main.java: a code change, so the diff needs the bug lane (#230)
     expect(out).toEqual({ kind: "ok", value: { passed: true, why: "", human: false, lane: "bug" } });
     expect(existsSync(join(p.root, "planted"))).toBe(false);
     const runs = fake.calls.flatMap((c) => (c.op === "run" ? [c.command] : []));
@@ -171,7 +166,6 @@ describe("the ready check (#91, #138)", () => {
       ["./gradlew", "check", "--tests", "A*"],
     ]);
     expect(runs.every((c) => c.timeoutSeconds === 60 && c.stdin.kind === "none")).toBe(true);
-    // the box held the tree at the head, and nothing of the host's environment
     expect(seen[0]).toContain("Makefile");
     const start = fake.calls.find((c) => c.op === "start");
     expect(start?.op === "start" ? start.spec : undefined).toMatchObject({
@@ -183,7 +177,6 @@ describe("the ready check (#91, #138)", () => {
     expect(Object.keys(env)).not.toContain("GITHUB_TOKEN");
     expect(Object.keys(env)).not.toContain("PATH");
     expect(env.HTTPS_PROXY).toBe("http://factory-egress-ledger:3128");
-    // the box is stopped and the copy is gone
     expect(fake.live.size).toBe(0);
     expect(readdirSync(join(p.root, "box-runs"))).toEqual([]);
   });
@@ -274,7 +267,6 @@ describe("the ready check (#91, #138)", () => {
   });
 });
 
-// statusForge : a forge that keeps the statuses and the notes the host posts, and refuses every other call
 function statusForge(posted: CommitStatus[], noted: Post[] = []): Forge {
   const notUsed = async () => ({ kind: "failed" as const, reason: "not used" });
   return {
@@ -509,7 +501,6 @@ describe("the floor guard in the ready check (#190)", () => {
 });
 
 describe("the test checks in the ready check (#231)", () => {
-  // a change on feat/x that touches one file, pushed; its head
   function changed(path: string, text: string): string {
     p.git("checkout", "-q", "feat/x");
     p.write(path, text);
@@ -661,7 +652,6 @@ describe("boxPlan", () => {
         caCerts: "/etc/corp/ca.pem",
       },
     ]);
-    // no box.json is read, no vm box is asked for, and no egress container starts
     expect(images).toEqual([]);
     if (ok.kind !== "ok" || ok.value.plan.kind !== "ready") throw new Error("no plan");
     expect(await ok.value.plan.setup.egress()).toEqual({ kind: "own" });
@@ -669,8 +659,6 @@ describe("boxPlan", () => {
   });
 
   it("refuses the srt runner on an empty allowlist, the project's git host on it, a relative CA path, or a runner that does not answer", async () => {
-    // the project's own git host is refused on the list too, as the Squid proxy refuses it: already when the project
-    // file is read, so no plan is made (#485)
     write("ledger.json", { ...LOCAL, egress: { allow: ["gitlab.corp.example"] } });
     expect(await planFor([], { FACTORY_BOX: "srt", FACTORY_FORGE_HOST: "gitlab.corp.example" })).toMatchObject({
       kind: "failed",
@@ -784,7 +772,6 @@ describe("evidence that can prove its criterion (#444)", () => {
       },
     });
     expect(fake.calls.filter((c) => c.op === "start")).toEqual([]);
-    // the local gate's verify command counts as a gate run too; a targeted test run for two criteria does not
     expect(await ready(fakeBox({}).box, [said("make verify", "ok"), said("make verify", "ok", "AC-2")])).toMatchObject({
       kind: "ok",
       value: { passed: false },
@@ -809,10 +796,8 @@ describe("evidence that can prove its criterion (#444)", () => {
         why: 'row 1 (AC-1): its result does not quote what "./gradlew check" printed: copy a line of the command\'s own output into the result, never a description of it',
       },
     });
-    // the writer's rework reads what the command did print, to quote it
     const kept = await readKept({ recordsDir: recordsDirOf(p.clone), change: 12, head }, READY_FILE);
     expect(kept).toMatchObject({ kind: "ok", value: expect.stringContaining("BUILD SUCCESSFUL in 58s") });
-    // a fragment, a whole line, or the same words with another time all quote it
     for (const result of ["BUILD SUCCESSFUL", "5 actionable tasks: 5 executed", "BUILD SUCCESSFUL in 1m 2s"]) {
       const quoted = fakeBox({ runs: [printed(gradle)] });
       expect(await ready(quoted.box, [said("./gradlew check", result)])).toMatchObject({ value: { passed: true } });
@@ -820,7 +805,6 @@ describe("evidence that can prove its criterion (#444)", () => {
   });
 
   it("gives a git row the branch's history in the box: the head checked out, the default branch to diff against", async () => {
-    // a box that runs each row in its copy, as a runner would; the host's git config does not reach it
     const fake = fakeBox({});
     const outputs: string[] = [];
     const box: Box = {
@@ -843,20 +827,16 @@ describe("evidence that can prove its criterion (#444)", () => {
       said("git status --porcelain", "", "AC-2"),
       said("git rev-parse HEAD", head, "AC-3"),
     ];
-    // ledger#5 (#62): on a git whose default branch is main, the fresh copy's unborn HEAD is main, and fetching the
-    // default branch into it was refused; the same rows pass there too
     const mainFirst = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "init.defaultBranch", GIT_CONFIG_VALUE_0: "main" };
     expect(await ready(box, rows, head, mainFirst)).toMatchObject({ kind: "ok", value: { passed: true } });
     outputs.length = 0;
     const out = await ready(box, rows);
     expect(out).toMatchObject({ kind: "ok", value: { passed: true } });
-    // the branch's own files, not main's Makefile, which the branch merged in
     expect(outputs[0]?.split("\n")).toContain("svc/Extra.java");
     expect(outputs[0]?.split("\n")).not.toContain("Makefile");
     expect(outputs.slice(1)).toEqual(["", `${head}\n`]);
     const start = fake.calls.find((c) => c.op === "start");
     expect(start?.op === "start" ? start.spec.env : {}).toMatchObject({ GIT_CONFIG_KEY_0: "safe.directory" });
-    // a check with no git row gets no repository
     const plain = fakeBox({ runs: [exited(0)] });
     const seen: string[][] = [];
     await ready(watched(plain, seen), [row("make test")]);

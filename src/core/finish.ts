@@ -54,22 +54,17 @@ export type Next =
   | { readonly kind: "ready-check"; readonly head: string; readonly evidence: readonly Evidence[] }
   | { readonly kind: "wait-for-answer"; readonly head: string }
   | { readonly kind: "needs-human"; readonly reason: string }
-  // the run waits for the provider's reset; head: the branch after its work in progress was pushed
   | { readonly kind: "parked"; readonly head: string; readonly until: string; readonly said: string };
 
 export type Pusher = (request: PushRequest) => Promise<Done>;
 
 export type FinishInput = {
   readonly outcome: Outcome;
-  // the change the run worked on
   readonly change: number;
   readonly forge: Forge;
-  // the push of the writer's head: commit is the worktree's HEAD after the run, lease the branch before it
   readonly push: PushRequest;
-  // how the run ended: on its own, or stopped after its completion window (#182); a hung run's post says so
   readonly ending: Ending;
   readonly pusher?: Pusher;
-  // the project's questions setting; unset: round
   readonly questions?: Questions;
 };
 
@@ -89,11 +84,8 @@ function gitProblem(what: string, result: Awaited<ReturnType<typeof hostGit>>): 
   };
 }
 
-// noFactoryFolder : refuses when any commit the push adds touches .factory (as a folder or a file, in any letter case),
-// so a report committed and then deleted still never leaves.
 export function noFactoryFolder(env: NodeJS.ProcessEnv): Guard {
   return async (input) => {
-    // a merge's own changes count too (first parent), and replace refs never stand in for the commits sent
     const listed = await git({ ...env, GIT_NO_REPLACE_OBJECTS: "1" }, input.repo, [
       "log",
       "--format=%H",
@@ -112,7 +104,6 @@ export function noFactoryFolder(env: NodeJS.ProcessEnv): Guard {
   };
 }
 
-// fastForwardOnly : refuses a push that would rewrite the branch: the lease must be an ancestor of the commit.
 export function fastForwardOnly(env: NodeJS.ProcessEnv): Guard {
   return async (input) => {
     if (input.lease.kind === "absent") {
@@ -128,8 +119,6 @@ export function fastForwardOnly(env: NodeJS.ProcessEnv): Guard {
   };
 }
 
-// seatOnEvery : refuses when a commit on the branch's own line since `since` lacks the seat's "Agent:" trailer, read as
-// git reads trailers (#128). The first-parent line leaves out the commits a merge brings in, which are people's work.
 export function seatOnEvery(env: NodeJS.ProcessEnv, request: { readonly since: string; readonly seat: Seat }): Guard {
   return async (input) => {
     const plain = { ...env, GIT_NO_REPLACE_OBJECTS: "1" };
@@ -154,14 +143,11 @@ export function seatOnEvery(env: NodeJS.ProcessEnv, request: { readonly since: s
   };
 }
 
-// carries : the message's trailer names this seat. Pure.
 function carries(message: string, seat: Seat): boolean {
   const kind = commitKind({ message });
   return kind.kind === "agent" && kind.seat === seat;
 }
 
-// excludeFactory : adds /.factory/ to the clone's shared info/exclude once, so `git add -A` in any worktree leaves the
-// run's files out. Call it when the clone is set up for runs.
 export async function excludeFactory(input: { readonly repo: string; readonly env: NodeJS.ProcessEnv }): Promise<Done> {
   const common = await git(input.env, input.repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
   if (common.kind !== "ok") {
@@ -170,7 +156,6 @@ export async function excludeFactory(input: { readonly repo: string; readonly en
   return excludeIn(join(common.stdout.trim(), "info", "exclude"));
 }
 
-// excludeIn : the /.factory/ line in an exclude file, added once
 async function excludeIn(file: string): Promise<Done> {
   try {
     const now = await readFile(file, "utf8").catch(() => "");
@@ -190,14 +175,12 @@ function short(sha: string): string {
   return sha.slice(0, 8);
 }
 
-// nothing new: the writer made no commit on top of the branch it started from
 function unchanged(push: PushRequest): boolean {
   return push.lease.kind === "sha" && push.lease.sha === push.commit;
 }
 
 export type Sending = Pick<FinishInput, "forge" | "push" | "pusher">;
 
-// ciSetup : what the CI-file guard compares against: the default branch, and the CI file the project runs
 async function ciSetup(input: Sending): Promise<Result<CiSetup>> {
   const branch = await input.forge.defaultBranch();
   const config = branch.kind === "ok" ? await input.forge.ciConfig() : branch;
@@ -209,7 +192,6 @@ async function ciSetup(input: Sending): Promise<Result<CiSetup>> {
       };
 }
 
-// pushed : the writer's commits on the branch. Work in progress (a blocked run) only ever goes on top of the branch.
 async function pushed(input: Sending, mode: "any" | "on-top"): Promise<Done> {
   if (unchanged(input.push)) {
     return { kind: "ok" };
@@ -224,19 +206,14 @@ async function pushed(input: Sending, mode: "any" | "on-top"): Promise<Done> {
   return (input.pusher ?? hostPush)({ ...input.push, guards: [...ours, ...input.push.guards] });
 }
 
-// pushOnTop : work in progress pushed only on top of the branch, with every guard a blocked run's push has; the
-// hand-over lands what a dead run left behind this way
 export function pushOnTop(input: Sending): Promise<Done> {
   return pushed(input, "on-top");
 }
 
-// runFields : a hung run's one field, so a person sees a writer that does not exit (#182); none for a clean end
 function runFields(ending: Ending): readonly PostField[] {
   return ending.kind === "hung" ? [{ label: "run", value: hungLine(ending) }] : [];
 }
 
-// runItems : a stalled run's last output lines, so a person sees where it stopped (#228); each one is cleaned as an
-// item of the post
 function runItems(ending: Ending): readonly string[] {
   return ending.kind === "stalled" ? ending.last : [];
 }
@@ -245,7 +222,6 @@ async function post(input: FinishInput, note: Post): Promise<Done> {
   return input.forge.note({ number: input.change, post: note });
 }
 
-// items: what the blocked note lists before the run's last lines, such as the questions a round could not post
 type Block = {
   readonly reason: string;
   readonly by: "writer" | "host";
@@ -260,7 +236,6 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
   }
   const wip = block.pushFirst ? await pushed(input, "on-top") : ({ kind: "ok" } as const);
   const why = wip.kind === "ok" ? block.reason : `${block.reason}; the work in progress was not pushed: ${wip.reason}`;
-  // the writer's own words stay in the writer's seat; what the host decided is the coordinator's
   const said = await post(input, {
     seat: block.by === "writer" ? "writer" : "coordinator",
     title: `blocked: ${why}`,
@@ -270,7 +245,6 @@ async function blocked(input: FinishInput, block: Block): Promise<Result<Next>> 
   return said.kind === "ok" ? { kind: "ok", value: { kind: "needs-human", reason: why } } : said;
 }
 
-// deviationPost : the build's deviations from the design, one item each, where and why. Pure.
 export function deviationPost(head: string, deviations: readonly Deviation[]): Post {
   return {
     seat: "writer",
@@ -280,7 +254,6 @@ export function deviationPost(head: string, deviations: readonly Deviation[]): P
   };
 }
 
-// deviated : the deviation note, when the run gave any
 async function deviated(input: FinishInput, deviations: readonly Deviation[]): Promise<Done> {
   return deviations.length === 0 ? { kind: "ok" } : post(input, deviationPost(input.push.commit, deviations));
 }
@@ -301,7 +274,6 @@ async function done(input: FinishInput, outcome: Extract<Outcome, { kind: "done"
 
 const LETTERS = "ABCD";
 
-// asking : one question, numbered, with its lettered choices and the recommended one marked. Pure.
 function asking(q: Question, i: number): string {
   if (q.kind === "plain") {
     return `${i + 1}. ${q.question} (no choices: answer in words)`;
@@ -310,7 +282,6 @@ function asking(q: Question, i: number): string {
   return `${i + 1}. ${q.question} ${choices.join(" · ")}`;
 }
 
-// howToAnswer : what a person replies, for the questions posted. Pure.
 function howToAnswer(questions: readonly Question[]): string {
   const lettered = questions.some((q) => q.kind === "choices");
   return lettered
@@ -318,7 +289,6 @@ function howToAnswer(questions: readonly Question[]): string {
     : 'reply in words, each answer after its number, such as "1: EUR"';
 }
 
-// waitingFields : with one-at-a-time, how many questions wait for a later run. Pure.
 function waitingFields(waiting: number): readonly PostField[] {
   return waiting > 0
     ? [
@@ -334,8 +304,6 @@ function counted(n: number): string {
   return n === 1 ? "1 question" : `${n} questions`;
 }
 
-// questionRound : a numbered round of questions as one OPEN note's title, how to answer, and its items, the one form
-// answers.ts reads back, for the writer's round here and the coordinator's (loop.ts grill, #517). Pure.
 export function questionRound(questions: readonly Question[]): {
   readonly title: string;
   readonly answer: PostField;
@@ -348,10 +316,6 @@ export function questionRound(questions: readonly Question[]): {
   };
 }
 
-// readsBackAs : "" when the post, once rendered, reads back as the questions it holds, as written: the same questions,
-// choices and recommended one, or a plain question's same words. renderPost cuts each item and the title at its limit,
-// and a " · " or " A) " inside a text splits it, so a question that checks can still post damaged; the problem, naming
-// the question, otherwise. The one check for the coordinator's grill (#517) and the writer's round (#522). Pure.
 export function readsBackAs(note: Post, questions: readonly Question[]): string {
   const text = renderPost(note);
   if (text.kind === "refused") {
@@ -364,8 +328,6 @@ export function readsBackAs(note: Post, questions: readonly Question[]): string 
     : `question ${bad + 1} would not read back as written once posted: each question with its choices is cut at ${DEFAULT_FIELD_LIMIT} characters, and " · " or " A) " inside a text splits it; shorten or reword it`;
 }
 
-// readsBack : whether one question read back from the posted round is the one written: the same words, and the same
-// choices and recommended one, or none for a plain question. Pure.
 function readsBack(q: Question, back: Asked | undefined): boolean {
   if (back === undefined || !sameWords(back.text, q.question)) {
     return false;
@@ -373,14 +335,10 @@ function readsBack(q: Question, back: Asked | undefined): boolean {
   return q.kind === "choices" ? sameChoices(q, back) : back.choices.length === 0 && back.recommended === -1;
 }
 
-// sameWords : whether a text read back is the text written, as the template made it inert in the middle of a line: the
-// template escapes a "/" only at a line's start, and a posted question never starts one; the space keeps a word
-// boundary in front of the text, so a secret at its start is scrubbed as in the post
 function sameWords(back: string, written: string): boolean {
   return back === cleanField(`x ${flatText(written)}`, Number.POSITIVE_INFINITY).slice(2);
 }
 
-// sameChoices : whether a question's choices and recommended one read back as written
 function sameChoices(q: Extract<Question, { kind: "choices" }>, back: Asked): boolean {
   return (
     back.recommended === q.recommended &&
@@ -389,8 +347,6 @@ function sameChoices(q: Extract<Question, { kind: "choices" }>, back: Asked): bo
   );
 }
 
-// askPost : the one OPEN note: every question as a numbered round, or with one-at-a-time only the first, saying how
-// many wait. One plain question keeps its old form, the question as the title. Pure.
 function askPost(input: FinishInput, posted: readonly Question[], waiting: number): Post {
   const run = runFields(input.ending);
   const next = waitingFields(waiting);
@@ -402,8 +358,6 @@ function askPost(input: FinishInput, posted: readonly Question[], waiting: numbe
   return { seat: "writer", title: round.title, fields: [...run, round.answer, ...next], items: round.items };
 }
 
-// asked : post the questions as one OPEN note; a note that would not read back as written is never posted: the run is
-// blocked instead, naming the question, with the questions as written listed (#522)
 async function asked(input: FinishInput, questions: readonly Question[]): Promise<Result<Next>> {
   const posted = input.questions === "one-at-a-time" ? questions.slice(0, 1) : questions;
   const ask = askPost(input, posted, questions.length - posted.length);
@@ -415,7 +369,6 @@ async function asked(input: FinishInput, questions: readonly Question[]): Promis
   return said.kind === "ok" ? { kind: "ok", value: { kind: "wait-for-answer", head: input.push.commit } } : said;
 }
 
-// parked : the work in progress pushed on top of the branch; nothing is labelled or posted
 async function parked(input: FinishInput, outcome: Extract<Outcome, { kind: "parked" }>): Promise<Result<Next>> {
   const wip = await pushed(input, "on-top");
   if (wip.kind === "failed") {
@@ -425,7 +378,6 @@ async function parked(input: FinishInput, outcome: Extract<Outcome, { kind: "par
   return { kind: "ok", value: { kind: "parked", head: input.push.commit, until: outcome.until, said: outcome.said } };
 }
 
-// finishRun : push and post for one run end; the result says what comes next, or why the forge could not be told.
 export async function finishRun(input: FinishInput): Promise<Result<Next>> {
   const { outcome } = input;
   if (outcome.kind === "blocked") {
@@ -441,8 +393,6 @@ export async function finishRun(input: FinishInput): Promise<Result<Next>> {
   return outcome.kind === "done" ? done(input, outcome) : asked(input, outcome.questions);
 }
 
-// finishFirst : a ticket's first run: push the new branch with every guard, open its change, then finish on it. A push
-// or an open that fails is the host's failure: there is no change yet to post it on.
 export async function finishFirst(
   input: Omit<FinishInput, "change"> & { readonly open: () => Promise<Result<number>> },
 ): Promise<Result<{ readonly change: number; readonly next: Next }>> {
@@ -454,7 +404,6 @@ export async function finishFirst(
   if (change.kind === "failed") {
     return { kind: "failed", reason: `pushed, but the change did not open: ${change.reason}` };
   }
-  // the branch is now at the commit: finishRun has nothing more to push, only to post
   const next = await finishRun({
     ...input,
     change: change.value,

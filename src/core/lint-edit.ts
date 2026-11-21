@@ -1,4 +1,4 @@
-// lint-edit — the writer's PostToolUse hook, ported from lint-edit.sh (#138; ADR-0011 D17): lints the file an Edit or
+// lint-edit — the writer's PostToolUse hook (#138; ADR-0011 D17): lints the file an Edit or
 // Write just changed, with the project's own lint command (docs/agents/commands.md, "lint-file: <command>").
 //
 // Claude Code passes the tool call as JSON on stdin; the file is tool_input.file_path. The command runs with no shell
@@ -31,7 +31,6 @@ function parsed(text: string): unknown {
 
 type Edited = { readonly kind: "file"; readonly path: string } | { readonly kind: "none" };
 
-// pathOf : the tool call's file as an absolute path, or "" when it names none
 function pathOf(stdin: string, root: string): string {
   const file = prop(prop(parsed(stdin), "tool_input"), "file_path");
   if (typeof file !== "string" || file === "") {
@@ -44,7 +43,6 @@ async function real(path: string): Promise<string> {
   return realpath(path).catch(() => "");
 }
 
-// edited : the file the tool call changed, when it is still there and inside root, symlinks followed first
 async function edited(stdin: string, root: string): Promise<Edited> {
   const path = await real(pathOf(stdin, root));
   const top = await real(root);
@@ -56,7 +54,6 @@ async function edited(stdin: string, root: string): Promise<Edited> {
   return inside && isFile ? { kind: "file", path } : { kind: "none" };
 }
 
-// argvOf : the lint command as words, with a program first
 function argvOf(command: string): Result<Argv> {
   const words = commandWords(command);
   if (words.kind === "failed") {
@@ -66,7 +63,6 @@ function argvOf(command: string): Result<Argv> {
   if (bin === undefined) {
     return { kind: "failed", reason: "it is empty" };
   }
-  // NAME=value before the program sets a variable only in a shell
   return bin.includes("=")
     ? { kind: "failed", reason: "it sets a variable, which needs a shell" }
     : { kind: "ok", value: [bin, ...args] };
@@ -76,11 +72,9 @@ function tail(text: string): string {
   return text.trimEnd().split("\n").slice(-TAIL).join("\n");
 }
 
-// lintEdit : what the hook prints and how it exits, for one tool call
 export async function lintEdit(input: {
   readonly command: string;
   readonly stdin: string;
-  // the session's folder (CLAUDE_PROJECT_DIR)
   readonly root: string;
   readonly env: NodeJS.ProcessEnv;
   readonly run: FolderRunner;

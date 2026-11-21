@@ -27,9 +27,7 @@ export type WriterInput = {
   readonly identity: Identity;
   readonly store: Result<TokenStore>;
   readonly pusher: Pusher;
-  // the plugins, in order (process/use.ts)
   readonly plugins: readonly PluginDir[];
-  // the project's lanes, from its process (#232)
   readonly lanes: readonly LaneProps[];
 };
 
@@ -51,13 +49,10 @@ type Placed = {
   readonly box: BoxSetup;
   readonly store: TokenStore;
   readonly push: PushTarget;
-  // the project file's ready.programs (#444)
   readonly programs: readonly string[];
-  // the project file's ready.testFiles
   readonly testFiles: readonly string[];
 };
 
-// placed : the box, the token store and where to push, or the first one missing
 function placed(input: WriterInput): Result<Placed> {
   if (input.plan.kind === "unavailable") {
     return { kind: "failed", reason: input.plan.reason };
@@ -80,7 +75,6 @@ function placed(input: WriterInput): Result<Placed> {
     : push;
 }
 
-// writerSetup : the writer step's setup; each run reads its role card when it starts (step.ts)
 export function writerSetup(input: WriterInput): Promise<Result<WriterSetup>> {
   const where = placed(input);
   if (where.kind === "failed") {

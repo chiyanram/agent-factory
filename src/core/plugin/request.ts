@@ -27,7 +27,6 @@ import { callPlugin, registered, type Setup } from "./registry.js";
 import { dropPending, keepPending, parseId, readPending, type Id, type Pending } from "./pending.js";
 import { appendLine, approvalKey, counted, onTicket, readLog, type Where } from "./writes.js";
 
-// a write answers { kind: "done", url? } when it went out; any other kind is a failure
 export const DONE = "done";
 const MAX_ITEMS = 20;
 const JOINER = /\u2060/g;
@@ -40,7 +39,6 @@ export type Draft = {
   readonly title: string;
 };
 
-// what is sent: the plugin's op and input, and the text the person checks
 export type Built = { readonly op: string; readonly input: Readonly<Record<string, unknown>>; readonly text: string };
 
 export type Requested =
@@ -49,7 +47,6 @@ export type Requested =
       readonly count: number;
       readonly cap: number;
       readonly url: string;
-      // what the person must know after it went out (spec-body.ts: the approval is now stale)
       readonly note?: string;
     }
   | { readonly kind: "pending"; readonly id: string; readonly command: string; readonly text: string }
@@ -61,12 +58,10 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
   return { kind: "failed", reason };
 }
 
-// pointOf : the capability a request names, when it is one the coordinator may request
 export function pointOf(capability: string): Result<PostPoint> {
   if (isPostPoint(capability)) {
     return { kind: "ok", value: capability };
   }
-  // spec.body is a whole spec file, not a draft of a post: spec-body.ts reads and sends it
   if (isPolicyPoint(capability)) {
     return failed(
       `${capability} is sent from the spec file: request ${capability} --file <home>/specs/<p>/<t>/spec.md`,
@@ -82,7 +77,6 @@ export function pointOf(capability: string): Result<PostPoint> {
   );
 }
 
-// the fields each draft may hold; title is tracker.create's own
 const FIELDS: Readonly<Record<PostPoint, readonly string[]>> = {
   "tracker.comment": ["project", "ticket", "text", "items"],
   "tracker.create": ["project", "ticket", "title", "text", "items"],
@@ -119,7 +113,6 @@ function whereOf(raw: object): Result<Pick<Draft, "project" | "ticket">> {
     : failed('the draft must name its "project" and "ticket" as plain names');
 }
 
-// titleOf : tracker.create's title; the other writes have none
 function titleOf(capability: PostPoint, value: unknown): Result<string> {
   if (capability !== "tracker.create") {
     return { kind: "ok", value: "" };
@@ -154,7 +147,6 @@ function parsed(text: string): unknown {
   }
 }
 
-// draftOf : the draft's text, checked against the capability's schema
 export function draftOf(capability: PostPoint, text: string): Result<Draft> {
   const shape = shapeOf(capability, parsed(text));
   return shape.kind === "ok" ? fieldsOf(capability, shape.value) : shape;
@@ -167,7 +159,6 @@ function posted(post: Post, op: string, input: (text: string) => Readonly<Record
     : failed(rendered.reason);
 }
 
-// each write's text is a post.ts template: a seat line, then the cleaned fields
 const BUILD: Readonly<Record<PostPoint, (d: Draft) => Result<Built>>> = {
   "tracker.comment": (d) =>
     posted({ seat: "coordinator", title: d.text, fields: [], items: d.items }, "comment", (text) => ({
@@ -197,7 +188,6 @@ export function built(capability: PostPoint, draft: Draft): Result<Built> {
   return BUILD[capability](draft);
 }
 
-// what one write needs: where it goes, the plugin, the approval it counts against and the rule that holds
 export type Plan<P extends PolicyPoint = PostPoint> = {
   readonly where: Where;
   readonly capability: P;
@@ -248,14 +238,10 @@ async function declared(home: string, plugin: string, capability: PostPoint): Pr
     : failed(`the plugin ${plugin} did not declare the write ${capability}; it may not perform it`);
 }
 
-// the project's spec store, which the approval is checked against (spec-store.ts, #381)
 export type SpecsFor = (project: string) => Promise<Result<SpecStore>>;
 
-// what request and confirm run with: the plugin setup, and the spec store of the draft's project; the local one under
-// <home>/specs when none is given
 export type RequestSetup = Setup & { readonly specs?: SpecsFor };
 
-// approvalAt : the draft's ticket's approval, checked against its project's spec store
 async function approvalAt(
   setup: RequestSetup,
   where: Where,
@@ -267,7 +253,6 @@ async function approvalAt(
   return store.kind === "ok" ? approvalOf({ ...where, store: store.value }) : store;
 }
 
-// planOf : the write's plan, after the approval, the policy and the plugin's declared writes are each checked
 async function planOf(setup: RequestSetup, capability: PostPoint, draft: Draft): Promise<Result<Plan>> {
   const home = setup.home;
   const where = { home, project: draft.project, ticket: draft.ticket };
@@ -288,7 +273,6 @@ async function planOf(setup: RequestSetup, capability: PostPoint, draft: Draft):
     : writes;
 }
 
-// room : the writes of the plan's capability since its approval, while the cap has room for one more
 export async function room(plan: Plan<PolicyPoint>): Promise<Result<number>> {
   const log = await readLog(plan.where);
   if (log.kind === "failed") {
@@ -320,10 +304,8 @@ function answerOf(result: Awaited<ReturnType<typeof callPlugin>>): Result<string
   return kind === DONE ? { kind: "ok", value: url } : failed(`the plugin answered ${kind}${why}`);
 }
 
-// a write's call: the url it went out at ("" when none), or why it failed
 export type Sender = () => Promise<Result<string>>;
 
-// pluginSender : the call of the plugin the plan names, with the built op and input
 function pluginSender(setup: Setup, plan: Plan, write: Built): Sender {
   return async () =>
     answerOf(
@@ -331,8 +313,6 @@ function pluginSender(setup: Setup, plan: Plan, write: Built): Sender {
     );
 }
 
-// perform : one write, under the ticket's lock: a place under the cap, the reserved line, `before` (confirm removes
-// its pending file there, so it cannot go out twice), the call, and its outcome line
 export async function perform(
   plan: Plan<PolicyPoint>,
   text: string,
@@ -369,12 +349,10 @@ async function sent(
     : failed(`${plan.capability} on ${plan.where.project}/${plan.where.ticket} failed (it still counts): ${detail}`);
 }
 
-// quoted : one shell word, in single quotes, that the shell passes through byte for byte
 export function quoted(text: string): string {
   return `'${text.replace(/'/g, "'\\''")}'`;
 }
 
-// the draft as its capability's schema holds it, so confirm reads it back with the same check
 const STORED: Readonly<Record<PostPoint, (d: Draft) => object>> = {
   "tracker.comment": (d) => ({ project: d.project, ticket: d.ticket, text: d.text, items: d.items }),
   "tracker.create": (d) => ({ project: d.project, ticket: d.ticket, title: d.title, text: d.text, items: d.items }),
@@ -405,7 +383,6 @@ async function kept(plan: Plan, draft: Draft, write: Built): Promise<Requested> 
     : saved;
 }
 
-// shown : the text as a person can check it: the invisible word joiners left out
 export function shown(text: string): string {
   return text.replace(JOINER, "");
 }
@@ -414,7 +391,6 @@ function nothing(): Promise<Done> {
   return Promise.resolve({ kind: "ok" });
 }
 
-// planned : the plan, and the write built from the draft
 async function planned(
   setup: RequestSetup,
   capability: PostPoint,
@@ -441,7 +417,6 @@ async function requested(setup: RequestSetup, capability: PostPoint, draft: Draf
   return unwrapped(await onTicket(plan.where, () => okOf(run())));
 }
 
-// okOf, unwrapped : onTicket guards a Result; these carry their own cases, so they ride in one
 async function okOf<T extends Requested>(run: Promise<T>): Promise<Result<T>> {
   return { kind: "ok", value: await run };
 }
@@ -450,7 +425,6 @@ function unwrapped<T extends Requested>(r: Result<T>): T | { readonly kind: "fai
   return r.kind === "ok" ? r.value : r;
 }
 
-// request : one write the coordinator asks for: refused, done (allow) or pending (confirm)
 export async function request(setup: RequestSetup, capability: string, draftText: string): Promise<Requested> {
   const point = pointOf(capability);
   if (point.kind === "failed") {
@@ -460,7 +434,6 @@ export async function request(setup: RequestSetup, capability: string, draftText
   return draft.kind === "ok" ? requested(setup, point.value, draft.value) : draft;
 }
 
-// sameAsPending : the plan and the write made again now, and the pending request they must match
 function sameAsPending(id: Id, [plan, write]: readonly [Plan, Built], pending: Pending, given: string): Done {
   const checks: readonly (readonly [boolean, string])[] = [
     [
@@ -499,7 +472,6 @@ async function confirmedLocked(
   return same.kind === "ok" ? perform(plan, write.text, pluginSender(setup, plan, write), remove) : same;
 }
 
-// confirm : the pending request with that id, performed, when the text given is its text
 export async function confirm(setup: RequestSetup, id: string, text: string): Promise<Confirmed> {
   const parsedId = parseId(setup.home, id);
   if (parsedId.kind === "failed") {

@@ -75,14 +75,12 @@ export type Lesson = {
   readonly reviewBy: string;
 };
 
-// SAFE : a case file's path: plain relative parts, no "..", no hidden part
 const SAFE = /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*\/)*[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const list = (v: unknown): readonly unknown[] => (Array.isArray(v) ? v : []);
 const strings = (v: unknown): readonly string[] => list(v).filter((s): s is string => typeof s === "string");
 
-// caseFilesOf : the case's files, or the first path the engine will not write. Pure.
 function caseFilesOf(raw: unknown): Result<readonly CaseFile[]> {
   const read = list(raw).map((f) => ({ path: str(prop(f, "path")), text: str(prop(f, "text")) }));
   const bad = read.find((f) => !SAFE.test(f.path) || f.path.split("/").includes(".."));
@@ -91,7 +89,6 @@ function caseFilesOf(raw: unknown): Result<readonly CaseFile[]> {
     : { kind: "failed", reason: `a case file path is not plain: ${JSON.stringify(bad.path)}` };
 }
 
-// lessonOf : one lesson of the answer, the schema already checked by the CLI. Pure.
 function lessonOf(raw: unknown): Result<Lesson> {
   const files = caseFilesOf(prop(prop(raw, "case"), "files"));
   if (files.kind === "failed") {
@@ -112,7 +109,6 @@ function lessonOf(raw: unknown): Result<Lesson> {
   };
 }
 
-// lessonsOf : the run's lessons, or why the answer cannot be written. Pure.
 export function lessonsOf(output: unknown): Result<readonly Lesson[]> {
   const raw = prop(output, "lessons");
   if (!Array.isArray(raw)) {

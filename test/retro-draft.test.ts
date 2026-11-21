@@ -70,7 +70,6 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-// stub : a model that answers these lessons and keeps each run and what its folder held
 function stub(lessons: readonly unknown[]): { model: Model; runs: ModelRun[]; seen: string[][] } {
   const runs: ModelRun[] = [];
   const seen: string[][] = [];
@@ -96,7 +95,6 @@ const setup = (model: Model): DraftSetup => ({
   now: () => Date.parse("2026-11-14T10:00:00Z"),
 });
 
-// onlyRun : the one model run there was
 function onlyRun(runs: readonly ModelRun[]): ModelRun {
   expect(runs).toHaveLength(1);
   const [run] = runs;
@@ -115,7 +113,6 @@ describe("retro --draft", () => {
       kind: "ok",
       value: { dirs: [join(day, "1")], usd: 1.25, trace: join(day, "retro-2026-11-14T10-00-00-000Z.jsonl") },
     });
-    // the run's trace is kept beside the drafts, scrubbed (P10)
     const trace = readFileSync(join(day, "retro-2026-11-14T10-00-00-000Z.jsonl"), "utf8");
     expect(trace).toContain('"type":"result"');
     expect(trace).not.toContain("sk-ant-api03");
@@ -123,18 +120,15 @@ describe("retro --draft", () => {
     expect(run.folder.startsWith(join(home, "retro-runs", "loans-"))).toBe(true);
     expect(run.tools).toEqual(["Read", "Grep", "Glob"]);
     expect(run).toMatchObject({ maxUsd: RETRO_USD, schema: LESSON_SCHEMA, model: "the-logic-model" });
-    // the retro draft's time limit (P7)
     expect(run.limit).toEqual({ minutes: 16, setting: "FACTORY_RETRO_MINUTES" });
     expect(RETRO_USD).toBe("10");
     expect(run.prompt.startsWith("# Retro")).toBe(true);
-    // only the failures' tickets, their traces, and the pack with no symlink out of it
     const staged = s.seen.flat();
     expect(staged).toEqual(
       expect.arrayContaining(["failures.json", "records/12.jsonl", "records/15.jsonl", "traces/12/writer-1.jsonl"]),
     );
     expect(staged).toContain("pack/rules.md");
     expect(staged.filter((f) => f.includes("99") || f.includes("outside"))).toEqual([]);
-    // the stage is gone; the drafts are written by the engine
     expect(existsSync(run.folder)).toBe(false);
     const dir = join(home, "retro", "loans", "2026-11-14", "1");
     const lesson = readFileSync(join(dir, "lesson.md"), "utf8");
@@ -168,7 +162,6 @@ describe("retro --draft", () => {
       kind: "failed",
       reason: expect.stringContaining("trace: "),
     });
-    // only the run's trace is kept: no draft
     expect(readdirSync(join(home, "retro", "loans", "2026-11-14"))).toEqual(["retro-2026-11-14T10-00-00-000Z.jsonl"]);
     const none = stub([LESSON]);
     expect(await draftRetro(setup(none.model), [])).toEqual({ kind: "ok", value: { dirs: [], usd: 0, trace: "" } });
@@ -183,7 +176,6 @@ describe("retro --draft", () => {
   });
 });
 
-// importsOf : the src modules a module imports, by path. Pure but for the read.
 function importsOf(file: string): readonly string[] {
   const text = readFileSync(file, "utf8");
   return [...text.matchAll(/from "(\.[^"]+)\.js"/g)].map((m) => resolve(dirname(file), `${m[1] ?? ""}.ts`));
@@ -202,7 +194,6 @@ describe("nothing but a person's command starts a retro (#488 AC-3)", () => {
       }
     }
     expect(seen.size).toBeGreaterThan(10);
-    // the role card check reads the lesson schema (retro/lesson.ts), which runs nothing
     const runs = new Set(["src/core/retro/draft.ts", "src/core/retro/repeated.ts", "src/retro-cli.ts"]);
     expect([...seen].filter((f) => runs.has(relative(ROOT, f)))).toEqual([]);
   });

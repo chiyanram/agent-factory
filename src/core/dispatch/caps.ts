@@ -22,7 +22,7 @@
 //   run hours        runHours: the hours, in UTC, in which a pass may start a run (hours.ts); outside them none starts
 //
 // A review round starts several model runs: a finder per lens, at most review.maxFinders at once, and its verify passes
-// (#237). It counts as one run against runs at once. Before it starts, its worst case, every finder it can pick and
+// It counts as one run against runs at once. Before it starts, its worst case, every finder it can pick and
 // its verify passes each at caps.usdPerRun, must fit in the dollars left under the ticket's and the day's caps, or it
 // is held (overCaps). The window caps count tokens, which no per-run cap bounds, so they hold the next run only; with
 // no caps.usdPerRun the worst case is unbounded and only the caps above apply.
@@ -41,23 +41,18 @@ import { periodsAt, totalOf, WINDOW_HOURS, type Spent } from "./usage.js";
 import type { CopilotRuns } from "./spend.js";
 import { MOST_AI_CREDITS } from "../settings/variables.js";
 
-// a cap left unset is no cap
 export type Limit = number | "none";
 
 export type Caps = {
   readonly ticket: { readonly usd: Limit; readonly tokens: Limit };
   readonly day: { readonly usd: Limit; readonly tokens: Limit };
   readonly window: { readonly tokens: Limit; readonly machineTokens: Limit };
-  // a project's Copilot runs in a UTC day, whose cost is unknown
   readonly copilot: { readonly minutes: Limit; readonly runs: Limit };
   readonly windowHours: number;
-  // runs at once: the most runs one pass starts
   readonly runsAtOnce: number;
-  // the hours a pass may start a run in; "any" when no layer sets them
   readonly runHours: RunHours | "any";
 };
 
-// runs at once when no layer sets it (ADR-0012 S16)
 export const RUNS_AT_ONCE = 1;
 
 export const NO_CAPS: Caps = {
@@ -70,10 +65,8 @@ export const NO_CAPS: Caps = {
   runHours: "any",
 };
 
-// a cap and what it counts: dollars, or a whole number of tokens, minutes or runs
 type Read = { readonly id: MachineId; readonly whole: "tokens" | "minutes" | "runs" | false };
 
-// amountOf : a cap's text as a number above 0, whole when it counts tokens, or "bad". Pure.
 function amountOf(raw: string, whole: boolean): number | "bad" {
   const n = raw.trim() === "" ? Number.NaN : Number(raw);
   const ok = whole ? Number.isSafeInteger(n) : Number.isFinite(n);
@@ -102,7 +95,6 @@ function hoursOfWindow(env: NodeJS.ProcessEnv): Result<number> {
     : { kind: "failed", reason: `${settingName("window.hours")} must be a whole number of hours from 1 to 24` };
 }
 
-// runsAtOnceOf : runs at once, a whole number from 1
 export function runsAtOnceOf(env: NodeJS.ProcessEnv): Result<number> {
   const raw = settingOf(env, "caps.liveRuns") ?? String(RUNS_AT_ONCE);
   return /^[1-9]\d{0,2}$/.test(raw)
@@ -121,7 +113,6 @@ function runHoursOf(env: NodeJS.ProcessEnv): Result<RunHours | "any"> {
     : { kind: "failed", reason: `${settingName("runHours")} must be ${HOURS_HINT}, got ${JSON.stringify(raw)}` };
 }
 
-// the eight limits, in the order Caps holds them
 const READS: readonly Read[] = [
   { id: "caps.usdPerTicket", whole: false },
   { id: "caps.tokensPerTicket", whole: "tokens" },
@@ -135,7 +126,6 @@ const READS: readonly Read[] = [
 
 type Runs = { readonly windowHours: number; readonly runsAtOnce: number; readonly runHours: RunHours | "any" };
 
-// capsFrom : the eight limits, in READS order, and the runs' limits, as Caps. Pure.
 function capsFrom(limits: readonly Limit[], runs: Runs): Caps {
   const at = (i: number): Limit => limits[i] ?? "none";
   return {
@@ -162,7 +152,6 @@ function runsOf(env: NodeJS.ProcessEnv): Result<Runs> {
     : runHours;
 }
 
-// capsOf : the caps from the resolved settings, each checked; a bad one refuses the pass
 export function capsOf(env: NodeJS.ProcessEnv): Result<Caps> {
   const read = READS.map((r) => limitOf(env, r));
   const bad = read.find((r) => r.kind === "failed");
@@ -174,11 +163,8 @@ export function capsOf(env: NodeJS.ProcessEnv): Result<Caps> {
   return runs.kind === "ok" ? { kind: "ok", value: capsFrom(limits, runs.value) } : runs;
 }
 
-// reached, spentLine and ticketCapped live in ticket-cap.ts, which the decision table reads: it reaches no disk (P1)
 export { spentLine, ticketCapped } from "./ticket-cap.js";
 
-// Stop : whether a new run may start in this project now; a stop names why, the period its one notice is for, which
-// cap it is (the day's or the window's), and the first time (ms) a run may start again
 export type Stop =
   | { readonly kind: "go" }
   | {
@@ -212,8 +198,6 @@ function stopFor(input: {
   };
 }
 
-// roomAt : when a window of these hours, over these runs, next holds less than the limit: the oldest runs leave it one
-// by one, and the window has room once the one that brings it under the limit has left. Pure.
 export function roomAt(input: {
   readonly runs: readonly Spent[];
   readonly from: number;
@@ -234,8 +218,6 @@ export function roomAt(input: {
   return input.from + input.hours * 3_600_000;
 }
 
-// projectStop : the first cap the project's runs, or every project's runs on this machine, have reached now (ms):
-// today's, then the project's share of the window, then the machine's. Pure.
 export function projectStop(input: {
   readonly project: readonly Spent[];
   readonly machine: readonly Spent[];
@@ -245,7 +227,6 @@ export function projectStop(input: {
   const { caps } = input;
   const p = periodsAt(input.now, caps.windowHours);
   const today = new Date(p.day).toISOString().slice(0, 10);
-  // one notice per day, and per window length of time
   const slot = `window ${Math.floor(input.now / (caps.windowHours * 3_600_000))}`;
   const stops = [
     stopFor({
@@ -280,7 +261,6 @@ export function projectStop(input: {
   return stops.find((s) => s.kind === "stop") ?? { kind: "go" };
 }
 
-// copilotSince : the project's Copilot runs and their seconds since `from`. Pure.
 function copilotSince(runs: readonly Spent[], from: number): CopilotRuns {
   return runs
     .filter((r) => r.copilot !== undefined && Date.parse(r.at) >= from)
@@ -290,7 +270,6 @@ function copilotSince(runs: readonly Spent[], from: number): CopilotRuns {
     );
 }
 
-// copilotStop : the day's Copilot cap the project's runs have reached, minutes first, then runs. Pure.
 function copilotStop(input: {
   readonly runs: readonly Spent[];
   readonly from: number;
@@ -317,8 +296,6 @@ function copilotStop(input: {
   };
 }
 
-// copilotCapsGap : why a project that names Copilot for a role may not run under these caps, or "": a dollar or
-// token cap is set, and Copilot's cost is unknown, so with no Copilot cap it would pass that cap silently. Pure.
 export function copilotCapsGap(caps: Caps, agents: Readonly<Record<string, string>>): string {
   const named = Object.values(agents).includes("copilot");
   const counted = [
@@ -336,7 +313,6 @@ export function copilotCapsGap(caps: Caps, agents: Readonly<Record<string, strin
     : "";
 }
 
-// aiCreditsOf : caps.aiCreditsPerRun, the --max-ai-credits of each Copilot run: "" for none
 export function aiCreditsOf(env: NodeJS.ProcessEnv): Result<string> {
   const raw = settingOf(env, "caps.aiCreditsPerRun");
   if (raw === undefined) {
@@ -352,12 +328,10 @@ export function aiCreditsOf(env: NodeJS.ProcessEnv): Result<string> {
       };
 }
 
-// hhmm : a time as HH:MM UTC. Pure.
 function hhmm(at: number): string {
   return `${new Date(at).toISOString().slice(11, 16)} UTC`;
 }
 
-// heldWords : why a cap holds the project's runs, and when to start the orchestrator loop again (#305). Pure.
 export function heldWords(stop: Extract<Stop, { kind: "stop" }>, project: string): string {
   const again = `run \`agent-factory dispatch ${project}\` again`;
   return stop.period === "day"
@@ -365,8 +339,6 @@ export function heldWords(stop: Extract<Stop, { kind: "stop" }>, project: string
     : `the window is full until ${hhmm(stop.until)}: ${stop.why}; ${again} then`;
 }
 
-// overCaps : why a run whose worst case is `worst` dollars could pass the ticket's or the day's dollar cap, given what
-// each has spent; "" when it fits, or when the worst case is unbounded. Pure.
 export function overCaps(input: {
   readonly worst: number | "unbounded";
   readonly ticket: Spend;

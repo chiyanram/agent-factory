@@ -22,36 +22,24 @@ export const CONFIRM_MS = 10 * 60 * 1000;
 export type Reply = {
   readonly text: string;
   readonly files: readonly Attached[];
-  // the Confirm button's custom_id, when the answer asks for one
   readonly confirm?: string;
-  // the one log line for this answer; the gateway scrubs it, as it scrubs the reply
   readonly line: string;
 };
 
 export type DoorDeps = {
   readonly config: DoorConfig;
-  // the door's own environment, which the seam reads for the model-run marker
   readonly env: NodeJS.ProcessEnv;
   readonly now: () => number;
-  // a fresh random nonce, 32 hex characters
   readonly nonce: () => string;
-  // the scrub every reply passes through; /approve refuses a text it would change
   readonly scrub: (text: string) => string;
-  // the project, with its settings resolved once for this interaction
   readonly open: (project: string) => Promise<Result<ProjectDoor>>;
 };
 
-// what the door does in one project, through the terminal's own code
 export type ProjectDoor = {
-  // the factory home: a START is written there, and reads no spec, as at the terminal
   readonly home: string;
-  // where the ticket's spec and approval are: the project's spec store
   readonly specs: (ticket: string) => Result<Where>;
-  // whether factory/<ticket> is already on the project's git host
   readonly branchThere: (ticket: string) => Promise<Result<boolean>>;
-  // the project's board as text, read only (door/read.ts)
   readonly board: () => Promise<Result<string>>;
-  // after a START or an approval: the project's orchestrator loop, started when none runs, as at the terminal
   readonly after: () => Promise<void>;
 };
 
@@ -68,7 +56,6 @@ type Pending =
 
 type Held = Pending & { readonly until: number };
 
-// the person, and the project they act in, opened for this interaction
 type At = Asker & { readonly door: ProjectDoor };
 
 type Said = Omit<Reply, "line">;
@@ -79,13 +66,11 @@ const NONCE = /^[0-9a-f]{32}$/;
 const refused = (reason: string): Said => ({ text: `refused: ${reason}`, files: [] });
 const said = (text: string): Said => ({ text, files: [] });
 
-// nonceOf : the nonce a Confirm button carries, or "" when the custom_id is not one. Pure.
 function nonceOf(customId: string): string {
   const nonce = customId.startsWith(CONFIRM) ? customId.slice(CONFIRM.length) : "";
   return NONCE.test(nonce) ? nonce : "";
 }
 
-// approveText : what /approve shows above its Confirm. Pure.
 function approveText(project: string, ticket: string, seen: Shown): string {
   return [
     `Approve ${project}/${ticket}, lane ${seen.lane}: ${seen.title}`,
@@ -95,14 +80,12 @@ function approveText(project: string, ticket: string, seen: Shown): string {
   ].join("\n");
 }
 
-// whatOf : the interaction, named for the log line, its words quoted so they cannot break the line. Pure.
 function whatOf(i: Interaction): string {
   return i.type === 3 ? "Confirm" : `/${JSON.stringify(i.command)} ${JSON.stringify(i.ticket)}`;
 }
 
 export type DiscordDoor = { readonly handle: (raw: unknown) => Promise<Reply> };
 
-// discordDoor : the door over one people.json; its pending Confirms live as long as it does
 export function discordDoor(deps: DoorDeps): DiscordDoor {
   const held = new Map<string, Held>();
 
@@ -123,13 +106,11 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
 
   const stamp = (): string => new Date(deps.now()).toISOString();
 
-  // asked : start's question, with a Confirm that STARTs anyway
   const asked = (at: At, ticket: string, question: string): Said => {
     const confirm = hold({ kind: "start", project: at.project, ticket, user: at.user });
     return { text: `${question}. Confirm within 10 minutes to START anyway.`, files: [], confirm };
   };
 
-  // written : the answer to what the seam did with a START; the loop is started after one is written
   const written = async (at: At, ticket: string, result: Start): Promise<Said> => {
     if (result.kind === "refused") {
       return refused(result.reason);
@@ -141,7 +122,6 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
     return said(`started ${at.project}/${ticket} by ${result.record.by} at ${result.record.at}`);
   };
 
-  // started : START through the seam; with the branch on the git host and no Confirm yet, start itself asks
   const started = async (at: At, ticket: string, there: boolean, confirmed: boolean): Promise<Said> => {
     const where = { home: at.door.home, project: at.project, ticket };
     const branch = there ? "present" : "absent";
@@ -170,7 +150,6 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
     return { text: approveText(project, ticket, seen), files, confirm };
   };
 
-  // approved : approve through the seam, with exactly the hashes the person was shown
   const approved = async (at: At, p: Extract<Pending, { kind: "approve" }>): Promise<Said> => {
     const where = at.door.specs(p.ticket);
     const request = (w: Where) => ({ where: w, seenHash: p.spec, seenDesign: p.design, at: stamp() });
@@ -205,7 +184,6 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
     return text.kind === "ok" ? said(text.value) : refused(`cannot read the board: ${text.reason}`);
   };
 
-  // TICKET_COMMANDS : the commands that name a ticket
   const TICKET_COMMANDS: Readonly<Record<string, (at: At, ticket: string) => Promise<Said>>> = {
     start: startCommand,
     approve: approveCommand,

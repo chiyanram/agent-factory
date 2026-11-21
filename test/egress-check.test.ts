@@ -133,7 +133,6 @@ describe("report", () => {
   });
 });
 
-// the probe itself, run by this machine's node against local servers: no Docker and no network needed
 describe("the probe", () => {
   const servers: Server[] = [];
   const probe = async (...args: string[]): Promise<unknown> => {

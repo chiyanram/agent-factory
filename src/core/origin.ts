@@ -10,7 +10,6 @@ import { hostGit } from "./git.js";
 import { parseRemote } from "./init/detect.js";
 import { settingOf } from "./settings/machine.js";
 
-// expectedRepo : the project's repo as host/project, from the settings; "" when the project is not set
 function expectedRepo(env: NodeJS.ProcessEnv): Result<string> {
   const project = (settingOf(env, "gitHostProject") ?? "").replace(/\.git$/i, "");
   if (project === "") {
@@ -34,13 +33,11 @@ async function originUrl(clone: string, env: NodeJS.ProcessEnv): Promise<Result<
   return { kind: "failed", reason: got.kind === "refused" ? got.reason : notRead(got.stderr) };
 }
 
-// notRead : why git could not read the origin: none set, or the clone itself (no folder, not a git repo). Pure.
 function notRead(stderr: string): string {
   const line = stderr.trim().split("\n")[0] ?? "";
   return /no such remote/i.test(line) ? "it has no origin remote" : `cannot read its origin: ${line}`;
 }
 
-// mismatch : why the origin URL is not the expected host/project, or "" when it is. Pure.
 function mismatch(url: string, expected: string): string {
   const remote = parseRemote(url);
   if (remote === "bad") {
@@ -49,7 +46,6 @@ function mismatch(url: string, expected: string): string {
   return `${remote.host}/${remote.path}`.toLowerCase() === expected.toLowerCase() ? "" : `origin is ${url}`;
 }
 
-// originProblem : why the clone in the settings is not the project's repo, or "" when it is or nothing names both
 export async function originProblem(env: NodeJS.ProcessEnv): Promise<string> {
   const clone = settingOf(env, "clone") ?? "";
   if (clone === "") {
@@ -62,7 +58,6 @@ export async function originProblem(env: NodeJS.ProcessEnv): Promise<string> {
   return expected.value === "" ? "" : cloneProblem(clone, expected.value, env);
 }
 
-// cloneProblem : why the clone's origin is not the expected host/project, or "" when it is
 async function cloneProblem(clone: string, expected: string, env: NodeJS.ProcessEnv): Promise<string> {
   const url = await originUrl(clone, env);
   const why = url.kind === "ok" ? mismatch(url.value, expected) : url.reason;
@@ -71,7 +66,6 @@ async function cloneProblem(clone: string, expected: string, env: NodeJS.Process
     : `${clone}: ${why}, but the project is ${expected} (gitHostProject); fix the clone's origin or the project file`;
 }
 
-// checkedSetup : a pass's setup, run only once the clone is the project's repo
 export async function checkedSetup<T>(env: NodeJS.ProcessEnv, setup: () => Promise<Result<T>>): Promise<Result<T>> {
   const why = await originProblem(env);
   return why === "" ? setup() : { kind: "failed", reason: why };

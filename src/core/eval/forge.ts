@@ -26,7 +26,6 @@ export function evalChange(input: {
   };
 }
 
-// evalForge : the fake git host for one run; `login` is the factory's own
 export function evalForge(change: Change, login: string): Forge {
   const notes: Note[] = [];
   const ok = async (): Promise<Done> => ({ kind: "ok" });

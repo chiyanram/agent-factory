@@ -13,9 +13,7 @@ const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "scripts", "check-history.ts");
 const FIXTURES = join(ROOT, "tests", "fixtures", "history");
 
-// every line of a text, as added
 const all = (text: string): ReadonlySet<number> => new Set(text.split("\n").map((_, i) => i + 1));
-// file:line: rule for each finding on a text whose every line is added
 const notes = (file: string, lines: readonly string[]): readonly string[] =>
   scan(file, lines.join("\n"), all(lines.join("\n"))).map((f) => f.split(": ").slice(0, 3).join(": "));
 

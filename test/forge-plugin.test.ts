@@ -12,7 +12,6 @@ import { makeFakes, type FakeAnswer } from "../src/core/plugin/fakes.js";
 import { addPlugin, type Setup } from "../src/core/plugin/registry.js";
 import { tempDir } from "./temp.js";
 
-// the bundled plugins are made by `npm run build` (scripts/build-plugins.mjs); make test builds first
 const BUNDLED = join(import.meta.dirname, "..", "plugins");
 const NODE_DIR = dirname(process.execPath);
 
@@ -39,7 +38,6 @@ function http(status: string, body: unknown): FakeAnswer {
   };
 }
 
-// the bundled github plugin, added and pinned, with a fake gh first on its PATH
 async function bundled(answers: readonly FakeAnswer[]) {
   expect(existsSync(join(BUNDLED, "github", "lib")), "run npm run build first").toBe(true);
   const fakes = await makeFakes(["gh"], answers);
@@ -291,7 +289,6 @@ let t = ""; process.stdin.on("data", (d) => (t += d)); process.stdin.on("end", (
     expect((await addPlugin(setup, path)).kind).toBe("ok");
     const forge = pluginForge({ setup, plugin: "older", forge: "github", project: "a/b" });
     expect(await forge.waiting({ label: "waiting:operator" })).toEqual({ kind: "ok", value: [] });
-    // any other op it does not know still fails
     expect(await forge.me()).toMatchObject({ kind: "failed" });
   });
 
@@ -486,7 +483,6 @@ describe("openProjectForge: the forge plugin, opted in per project (#134 PR C)",
       "DRY RUN: add the label agent::claimed to #2",
       "DRY RUN: open a draft change from factory/P-1 into main",
     ]);
-    // no plugin is registered here, so a read reaches the registry and is refused there
     expect(await opened.value.forge.me()).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("plugin add"),

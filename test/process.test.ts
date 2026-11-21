@@ -6,7 +6,6 @@ import { BUILT_IN, oneHolder, readProcess, type Holder } from "../src/core/proce
 import { BASELINE } from "../src/core/review/rules.js";
 import { tempDir } from "./temp.js";
 
-// the rulebook's own process files, as chiyanram/skills ships them (crq/process/lanes.json and review.json)
 const FIXTURES = join(import.meta.dirname, "..", "tests", "fixtures", "process");
 const RULEBOOK_LANES = join(FIXTURES, "rulebook-lanes.json");
 const RULEBOOK_REVIEW = join(FIXTURES, "rulebook-review.json");
@@ -17,7 +16,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-// plugin : a plugin folder with these files under it
 function plugin(name: string, files: Readonly<Record<string, string>>): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
@@ -36,7 +34,6 @@ function rulebook(): string {
   return dir;
 }
 
-// the rulebook's lanes with one lane's field changed
 function lanesText(lane: string, field: string, value: unknown): string {
   const raw: unknown = JSON.parse(readFileSync(RULEBOOK_LANES, "utf8"));
   const lanes: unknown = Reflect.get(Object(raw), "lanes");

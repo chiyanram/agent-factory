@@ -27,7 +27,6 @@ export type PluginIo = {
   readonly pkg: string;
 };
 
-// pluginPath : the PATH a plugin runs with: absolute folders that are there and that no one but their owner can write
 export async function pluginPath(path: string): Promise<string> {
   const dirs = [...new Set(path.split(":").filter((d) => isAbsolute(d)))];
   const kept = await Promise.all(dirs.map(async (dir) => ((await ownersOnly(dir)) ? dir : "")));
@@ -39,7 +38,6 @@ async function ownersOnly(dir: string): Promise<boolean> {
   return s !== undefined && s.isDirectory() && (s.mode & 0o022) === 0;
 }
 
-// pluginSetup : what a plugin runs with: the factory's home, the environment it picks from, and the trusted PATH
 export async function pluginSetup(home: string, env: NodeJS.ProcessEnv, secrets?: Secrets): Promise<Setup> {
   const path = await pluginPath(env.PATH ?? "");
   return secrets === undefined ? { home, env, path } : { home, env, path, secrets };
@@ -49,7 +47,6 @@ function setupOf(io: PluginIo): Promise<Setup> {
   return pluginSetup(io.home, io.env);
 }
 
-// located : the plugin file a word names: an absolute path, or a bundled plugin's name
 async function located(io: PluginIo, word: string): Promise<Result<string>> {
   if (isAbsolute(word)) {
     return { kind: "ok", value: word };
@@ -92,7 +89,6 @@ function report(io: PluginIo, checks: readonly Check[]): boolean {
   return checks.every((c) => c.ok);
 }
 
-// update <name> : the test kit on the new version, then its hash and the writes it adds; nothing is recorded
 async function showUpdate(io: PluginIo, name: string): Promise<number> {
   const setup = await setupOf(io);
   const change = await planUpdate(setup, name);
@@ -109,7 +105,6 @@ async function showUpdate(io: PluginIo, name: string): Promise<number> {
   return 3;
 }
 
-// update <name> <sha256> : the version with that hash, after the test kit passes again
 async function recordUpdate(io: PluginIo, name: string, sha256: string): Promise<number> {
   const setup = await setupOf(io);
   const change = await planUpdate(setup, name);
@@ -146,7 +141,6 @@ const USAGE =
 
 type Verb = (io: PluginIo, args: readonly string[]) => Promise<number>;
 
-// update : a connector's update, or, when the second word is name@marketplace, a project's plugin pin (#232)
 function updateVerb(io: PluginIo, [first = "", second, third]: readonly string[]): Promise<number> {
   if (second?.includes("@") === true) {
     return pinUpdate(io, first, second, third);
@@ -158,7 +152,6 @@ function connectorUpdate(io: PluginIo, name: string, sha: string | undefined): P
   return sha === undefined ? showUpdate(io, name) : recordUpdate(io, name, sha);
 }
 
-// each subcommand and the numbers of words it takes after it
 const VERBS: Readonly<Record<string, { readonly words: readonly number[]; readonly run: Verb }>> = {
   add: { words: [1], run: (io, [path = ""]) => add(io, path) },
   update: { words: [1, 2, 3], run: updateVerb },
@@ -166,7 +159,6 @@ const VERBS: Readonly<Record<string, { readonly words: readonly number[]; readon
   list: { words: [0], run: (io) => list(io) },
 };
 
-// pluginCommand : one plugin subcommand; exit 0 done, 1 refused, 2 a test check failed, 3 an update not recorded
 export function pluginCommand(positionals: readonly string[], io: PluginIo): Promise<number> | number {
   const [verb = "", ...args] = positionals;
   const chosen = Object.hasOwn(VERBS, verb) ? VERBS[verb] : undefined;

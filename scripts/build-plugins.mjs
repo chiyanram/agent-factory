@@ -11,11 +11,9 @@ const ROOT = join(import.meta.dirname, "..");
 const DIST = join(ROOT, "dist");
 const PLUGINS = ["github", "gitlab"];
 const ENTRY = join(DIST, "core", "forge", "serve.js");
-// `import … from "x"`, `export … from "x"`, a bare `import "x"`, and `import("x")`
 const IMPORT =
   /(?:^|[\s;])(?:import|export)\s[^"';]*?from\s*["']([^"']+)["']|(?:^|[\s;])import\s*["']([^"']+)["']|import\s*\(\s*["']([^"']+)["']\s*\)/g;
 
-// imported : the modules one file imports by relative path; a package imported by name stops the build
 function imported(file) {
   const specs = [...readFileSync(file, "utf8").matchAll(IMPORT)].map((m) => m[1] ?? m[2] ?? m[3]);
   const named = specs.find((s) => !s.startsWith(".") && !s.startsWith("node:"));
@@ -25,7 +23,6 @@ function imported(file) {
   return specs.filter((s) => s.startsWith(".")).map((s) => resolve(dirname(file), s));
 }
 
-// closure : every compiled module the entry needs, by its path under dist
 function closure(entry) {
   const seen = new Set();
   const todo = [entry];

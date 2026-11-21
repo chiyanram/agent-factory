@@ -18,10 +18,8 @@ import { scrubSecrets } from "../scrub.js";
 
 export { SCRUBBED, scrubSecrets } from "../scrub.js";
 
-// the most characters of a reason kept in a record and a log line
 export const WHY_CHARS = 500;
 
-// whyText : a reason as a record and a log line hold it: scrubbed, one line, at most WHY_CHARS. Pure.
 export function whyText(text: string): string {
   const flat = flatText(scrubSecrets(text));
   const chars = Array.from(flat);
@@ -37,8 +35,6 @@ function asked(questions: readonly Question[]): string {
   return `the writer asked: ${questions.map((q) => q.question).join("; ")}`;
 }
 
-// whyOf : why a run that is not done stopped, from its outcome and what the run said last; "" for done. A reason the
-// host decided (a non-zero exit, no report) gets the run's last words, so "the run exited 1" says what failed. Pure.
 export function whyOf(outcome: Outcome, said: string): string {
   switch (outcome.kind) {
     case "done":
@@ -52,22 +48,18 @@ export function whyOf(outcome: Outcome, said: string): string {
   }
 }
 
-// blockedWhy : why a blocked run stopped; a reason the host decided gets the run's last words. Pure.
 function blockedWhy(outcome: Extract<Outcome, { kind: "blocked" }>, said: string): string {
   return whyText(withSaid(outcome.reason, outcome.by === "host" ? said : ""));
 }
 
-// withSaid : a reason and what the run said last. Pure.
 export function withSaid(reason: string, said: string): string {
   return said.trim() === "" ? reason : `${reason}; the run said: ${said}`;
 }
 
-// outputName : the file name for a run's kept output: the time, with no ":" so it is a plain name everywhere. Pure.
 export function outputName(at: number): string {
   return `writer-${new Date(at).toISOString().replace(/[:.]/g, "-")}.log`;
 }
 
-// keepOutput : the end of a run's output, scrubbed, in <home>/runs/<project>/<ticket>/<outputName>; the file's path
 export async function keepOutput(input: {
   readonly home: string;
   readonly project: string;

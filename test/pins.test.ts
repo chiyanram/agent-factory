@@ -29,7 +29,6 @@ function project(plugins?: readonly string[]): void {
   writeFileSync(projectPath(home, "ledger"), JSON.stringify(value));
 }
 
-// stored : a plugin folder in the store under its own hash, and pinned; its folder
 async function stored(): Promise<string> {
   const work = join(home, "work");
   mkdirSync(join(work, "skills", "crq", "process"), { recursive: true });

@@ -1,6 +1,8 @@
 // exec — runs one plugin command (#134; ADR-0014 P1): spawned, never through a shell, so no word of a request is ever parsed
 // as a command; a timeout, after which the plugin is killed; and a cap on what it prints, past which it is killed too.
-// The request goes in on stdin as one JSON object. Nothing here throws.
+// The request goes in on stdin as one JSON object. The plugin runs in a process group of its own, and the timeout, the
+// cap and the end of the call kill the whole group, so no write goes on after a call ends. Each stream decodes through
+// its own StringDecoder, so a UTF-8 character split across two chunks stays whole. Nothing here throws.
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
@@ -23,17 +25,13 @@ export type Exec = (input: {
   readonly limits: Limits;
 }) => Promise<Ran>;
 
-// killGroup : the plugin and every process it started; a plugin never outlives its call, so no write goes on after a
-// timeout or a cut
 function killGroup(pid: number | undefined): void {
   if (pid === undefined) {
     return;
   }
   try {
     process.kill(-pid, "SIGKILL");
-  } catch {
-    // the group is gone already
-  }
+  } catch {}
 }
 
 type End = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
@@ -44,10 +42,6 @@ function finished(end: End, out: { stdout: string; stderr: string }): Ran {
     : { kind: "exited", code: end.code, ...out };
 }
 
-// runPlugin : the plugin's answer, or why there is none. spawn with no shell, in a process group of its own, so the
-// timeout, the cap and the end of the call kill all of it; stdout and stderr together may hold at most maxBytes. Each
-// stream decodes through its own StringDecoder, so a UTF-8 character split across two chunks is kept whole, not
-// turned into U+FFFD.
 export const runPlugin: Exec = (input) =>
   new Promise((resolve) => {
     const out = { stdout: "", stderr: "" };

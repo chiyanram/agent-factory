@@ -42,23 +42,19 @@ export type ApprovalRecord = {
   readonly project: string;
   readonly ticket: string;
   readonly spec_hash: string;
-  // the design file's hash, or "none"
   readonly design_hash: string;
   readonly by: string;
   readonly via: Via;
   readonly at: string;
 };
 
-// store: the project's spec store (spec-store.ts specStoreOf); none given is the local one under <home>/specs
 export type Where = { readonly home: string; readonly store?: SpecStore } & Ticket;
 
 export type ApproveRequest = {
   readonly where: Where;
   readonly seenHash: string;
-  // the design hash the human confirmed; none given is "none"
   readonly seenDesign?: string;
   readonly by: string;
-  // the front door; none given is the terminal
   readonly via?: Via;
   readonly at: string;
 };
@@ -69,7 +65,6 @@ export type ApprovalState =
   | { readonly kind: "approved"; readonly record: ApprovalRecord; readonly spec: Spec }
   | {
       readonly kind: "stale";
-      // which of the two the human approved changed since
       readonly part: "spec" | "design";
       readonly approvedHash: string;
       readonly currentHash: string;
@@ -99,7 +94,6 @@ export type Current =
   | { readonly kind: "missing" }
   | Refused;
 
-// currentSpec : the ticket's spec as it is now, checked against the template, and its design's hash
 export async function currentSpec(where: Where): Promise<Current> {
   const read = await readSpec({ store: storeOf(where), project: where.project, ticket: where.ticket });
   if (read.kind !== "found") {
@@ -119,7 +113,6 @@ function seenDesign(request: ApproveRequest): string {
   return request.seenDesign ?? NO_DESIGN;
 }
 
-// sameAsSeen : the current spec, when both hashes are the ones the human confirmed
 function sameAsSeen(request: ApproveRequest, current: Extract<Current, { kind: "spec" }>): Confirmed {
   if (current.spec.hash !== request.seenHash) {
     return {
@@ -135,7 +128,6 @@ function sameAsSeen(request: ApproveRequest, current: Extract<Current, { kind: "
       };
 }
 
-// confirmedSpec : the current spec, if it and its design have exactly the hashes the human confirmed.
 async function confirmedSpec(request: ApproveRequest): Promise<Confirmed> {
   if (!FULL_HASH.test(request.seenHash)) {
     return { kind: "refused", reason: "give the full 64-character spec hash that `agent-factory spec` printed" };
@@ -149,7 +141,6 @@ async function confirmedSpec(request: ApproveRequest): Promise<Confirmed> {
   return sameAsSeen(request, current);
 }
 
-// approve : records the human's approval of the spec and the design they saw.
 export async function approve(request: ApproveRequest): Promise<Approve> {
   const path = approvalPath(request.where);
   if (path.kind === "refused") {
@@ -177,7 +168,6 @@ export async function approve(request: ApproveRequest): Promise<Approve> {
 
 const hash = (v: unknown): boolean => typeof v === "string" && FULL_HASH.test(v);
 
-// The fields a record must hold, and the value each must have, so isRecord is a table, not a chain of conditions.
 function recordProblems(r: unknown, where: Where): readonly boolean[] {
   return [
     field(r, "project") === where.project,
@@ -188,13 +178,11 @@ function recordProblems(r: unknown, where: Where): readonly boolean[] {
   ];
 }
 
-// the fields only a version 2 record has
 function secondProblems(r: unknown): readonly boolean[] {
   const design = field(r, "design_hash");
   return [field(r, "kind") === "approval", design === NO_DESIGN || hash(design), isVia(field(r, "via"))];
 }
 
-// asRecord : a checked record; a version 1 record bound no design and came from the terminal
 function asRecord(r: unknown): ApprovalRecord {
   const v = (name: string): string => String(field(r, name));
   const via = field(r, "via");
@@ -212,7 +200,6 @@ function asRecord(r: unknown): ApprovalRecord {
   };
 }
 
-// recordOf : a version 2 record as it is, a version 1 record as one that bound no design and came from the terminal
 function recordOf(value: unknown, where: Where): ApprovalRecord | "bad" {
   const version = field(value, "version");
   const checks = [...recordProblems(value, where), ...(version === 2 ? secondProblems(value) : [version === 1])];
@@ -249,15 +236,11 @@ function compare(record: ApprovalRecord, current: Current, where: Where): Approv
     : { kind: "stale", part: "design", approvedHash: record.design_hash, currentHash: current.design };
 }
 
-// readApproval : the ticket's approval record as it is on disk, without a look at the spec; the reviewer's pack (#224)
-// compares its hash with the spec it reads from the project's spec store
 export async function readApproval(where: Where): Promise<Stored> {
   const path = approvalPath(where);
   return path.kind === "path" ? readRecord(path.path, where) : path;
 }
 
-// approvalState : what the dispatcher decides on. Approved only while the spec and the design still have the approved
-// hashes.
 export async function approvalState(where: Where): Promise<ApprovalState> {
   const stored = await readApproval(where);
   return stored.kind === "record" ? compare(stored.record, await currentSpec(where), where) : stored;

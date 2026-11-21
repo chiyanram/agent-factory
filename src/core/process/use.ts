@@ -8,12 +8,10 @@ import { settingName, settingOf } from "../settings/machine.js";
 import { pinnedPlugins, treeHash } from "./pins.js";
 import type { PluginDir } from "./read.js";
 
-// one plugin a run uses: its folder, and what the run records name it by
 export type Used = PluginDir & { readonly ref: string; readonly sha256: string };
 
 export type RunPlugins = { readonly plugins: readonly Used[]; readonly warnings: readonly string[] };
 
-// the hash of each plugin, as a run record keeps it
 export type PluginHash = { readonly ref: string; readonly sha256: string };
 
 export function hashesOf(plugins: readonly Used[]): readonly PluginHash[] {
@@ -24,7 +22,6 @@ function deprecated(name: string): string {
   return `${name} is deprecated and is read for one release: list the plugin in the project's "plugins" and pin it with agent-factory plugin update <project> <name@marketplace>`;
 }
 
-// fallback : the rulebook folder setting as the one plugin, when it is set; its hash is taken now
 async function fallback(env: NodeJS.ProcessEnv): Promise<Result<RunPlugins>> {
   const name = settingName("rulebook");
   const dir = settingOf(env, "rulebook") ?? "";
@@ -40,7 +37,6 @@ async function fallback(env: NodeJS.ProcessEnv): Promise<Result<RunPlugins>> {
     : hash;
 }
 
-// runPlugins : the pinned plugins, or the deprecated folder setting when the project lists none
 export async function runPlugins(input: {
   readonly home: string;
   readonly project: string;

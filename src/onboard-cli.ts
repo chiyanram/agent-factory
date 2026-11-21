@@ -19,9 +19,7 @@ export type OnboardIo = {
   readonly home: string;
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
-  // the run's setup, once the project is known
   readonly setup: (project: string) => Promise<Result<OnboardSetup>>;
-  // the terminal's env: its door names the person, and a model run is refused (door/write.ts)
   readonly env: NodeJS.ProcessEnv;
   readonly now: () => number;
 };
@@ -62,20 +60,17 @@ async function accepted(project: string, brief: string, glossary: string, io: On
   return 0;
 }
 
-// acceptArgs : the project and both hashes of `accept <project> <brief hash> <glossary hash>`, or "bad"
 function acceptArgs(positionals: readonly string[]): readonly [string, string, string] | "bad" {
   const at = (i: number): string => positionals[i] ?? "";
   const shape = positionals.length === 4 && at(0) === "accept" && plainName(at(1));
   return shape && [at(2), at(3)].every((h) => HASH.test(h)) ? [at(1), at(2), at(3)] : "bad";
 }
 
-// runArgs : the project of `onboard <project>`, or "" when the words are not that
 function runArgs(positionals: readonly string[]): string {
   const project = positionals[0] ?? "";
   return positionals.length === 1 && project !== "accept" && plainName(project) ? project : "";
 }
 
-// onboardCommand : onboard <project>, or onboard accept <project> <brief hash> <glossary hash>
 export function onboardCommand(positionals: readonly string[], io: OnboardIo): Promise<number> {
   const acceptance = acceptArgs(positionals);
   if (acceptance !== "bad") {

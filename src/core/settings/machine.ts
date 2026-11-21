@@ -17,12 +17,10 @@ function variableOf(id: MachineId): string {
   return key.env;
 }
 
-// settingOf : a machine key's resolved value as text, or undefined when no layer sets it
 export function settingOf(env: NodeJS.ProcessEnv, id: MachineId): string | undefined {
   return env[variableOf(id)];
 }
 
-// settingName : the variable a machine key is read from, for a message that names it
 export function settingName(id: MachineId): string {
   return variableOf(id);
 }
@@ -31,7 +29,6 @@ function asText(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-// runEnv : the env a run's modules read, with every machine key a team, project or user file set in its variable
 export function runEnv(env: NodeJS.ProcessEnv, resolution: Resolution): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
   for (const r of resolution.values) {

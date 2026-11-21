@@ -10,11 +10,13 @@
 //   skip-permissions  no skip-permissions flag or bypass mode for an agent CLI (claude, copilot) in src/ (ADR-0012 S11)
 //   disable-comment   no lint or type-check disable comment in any tracked code file: fix the code (#148)
 //   lint-baseline     scripts/lint-baseline.json raises no count above the default branch's, at the merge base (#148)
+//   comment-baseline  scripts/comment-baseline.json the same, once the default branch holds it
 //   no-bash           no tracked .sh file and no file that starts with a shell's #! line, but the planted input in
 //                     tests/fixtures/: no bash ships (ADR-0013, #138)
 // Comment lines are skipped, except by disable-comment. ALLOW below lists each real exception, matched by file, rule
 // and a piece of the line, with the reason; an entry that matches nothing on a file that is there fails, so the list
 // only shrinks.
+// A lint baseline that does not parse counts nothing, so every key reads as raised.
 //
 //   node scripts/check-musts.ts [ROOT]     (make lint)
 //
@@ -34,6 +36,7 @@ export type Rule =
   | "skip-permissions"
   | "disable-comment"
   | "lint-baseline"
+  | "comment-baseline"
   | "no-bash";
 
 type LineRule = {
@@ -101,7 +104,6 @@ export const RULES: readonly LineRule[] = [
   },
 ];
 
-// the real exceptions, each with its reason
 export const ALLOW: readonly Allow[] = [
   {
     file: "src/core/ready/command.ts",
@@ -173,8 +175,6 @@ function hits(source: Source, rules: readonly LineRule[]): readonly Hit[] {
     );
 }
 
-// scan : every line that breaks a rule and has no ALLOW entry, and each entry for a scanned file that matched no line.
-// Pure.
 export function scan(sources: readonly Source[], allow: readonly Allow[] = ALLOW, rules = RULES): Scan {
   const all = sources.flatMap((s) => hits(s, rules));
   const used = new Set(all.map((h) => allowedBy(allow, h.file, h.rule.rule, h.line)));
@@ -187,8 +187,6 @@ export function scan(sources: readonly Source[], allow: readonly Allow[] = ALLOW
 
 const SHELL = /^#!\S*\/(?:env\s+)?(?:ba|da|k|z)?sh(?:\s|$)/;
 
-// bashFiles : each file that is a shell script: named .sh, or starting with a shell's #! line. A planted fixture is
-// skipped. Each source's text needs only its first line. Pure.
 export function bashFiles(sources: readonly Source[]): readonly string[] {
   return sources
     .filter((s) => !s.file.startsWith("tests/fixtures/"))
@@ -196,7 +194,6 @@ export function bashFiles(sources: readonly Source[]): readonly string[] {
     .map((s) => `${s.file}: no-bash: ship no bash script; write it in the TypeScript package (ADR-0013)`);
 }
 
-// firstLine : a file's first line, or nothing when it cannot be read
 function firstLine(file: string): string {
   try {
     return readFileSync(file, "utf8").split("\n", 1)[0] ?? "";
@@ -207,14 +204,17 @@ function firstLine(file: string): string {
 
 export type Counts = Readonly<Record<string, number>>;
 
-// raised : each lint-baseline key whose count is above the default branch's, a new key included. Pure.
-export function raised(now: Counts, base: Counts): readonly string[] {
+export type Baseline = { readonly path: string; readonly rule: "lint-baseline" | "comment-baseline" };
+
+export const LINT: Baseline = { path: "scripts/lint-baseline.json", rule: "lint-baseline" };
+export const COMMENTS: Baseline = { path: "scripts/comment-baseline.json", rule: "comment-baseline" };
+
+export function raised(now: Counts, base: Counts, baseline: Baseline = LINT): readonly string[] {
   return Object.keys(now)
     .filter((k) => (now[k] ?? 0) > (base[k] ?? 0))
-    .map((k) => `scripts/lint-baseline.json: lint-baseline: ${k} is ${now[k]}, above ${base[k] ?? 0}; it only shrinks`);
+    .map((k) => `${baseline.path}: ${baseline.rule}: ${k} is ${now[k]}, above ${base[k] ?? 0}; it only shrinks`);
 }
 
-// counts : a baseline's text as counts; text that does not parse counts nothing, so every key reads as raised
 export function counts(text: string): Counts {
   try {
     const value = JSON.parse(text) as unknown;
@@ -231,26 +231,26 @@ function git(root: string, args: readonly string[]): { readonly code: number; re
   return { code: r.status ?? -1, out: r.stdout };
 }
 
-// baseRef : the default branch to compare with
 export function baseRef(env: NodeJS.ProcessEnv): string {
   const pr = env.GITHUB_BASE_REF ?? "";
   return env.FACTORY_BASE_REF || (pr === "" ? "origin/main" : `origin/${pr}`);
 }
 
-const BASELINE = "scripts/lint-baseline.json";
-
-function baselineProblems(root: string, ref: string): readonly string[] {
+function baselineProblems(root: string, ref: string, baseline: Baseline): readonly string[] {
   const base = git(root, ["merge-base", ref, "HEAD"]);
   if (base.code !== 0) {
-    return [`${BASELINE}: lint-baseline: cannot find the default branch ${ref}; fetch it or set FACTORY_BASE_REF`];
+    return [
+      `${baseline.path}: ${baseline.rule}: cannot find the default branch ${ref}; fetch it or set FACTORY_BASE_REF`,
+    ];
   }
-  const then = git(root, ["show", `${base.out.trim()}:${BASELINE}`]);
-  const file = join(root, BASELINE);
-  return raised(
-    counts(existsSync(file) ? readFileSync(file, "utf8") : "{}"),
-    counts(then.code === 0 ? then.out : "{}"),
-  );
+  const then = git(root, ["show", `${base.out.trim()}:${baseline.path}`]);
+  if (then.code !== 0 && baseline === COMMENTS) {
+    return [];
+  }
+  return raised(counts(textOf(join(root, baseline.path))), counts(then.code === 0 ? then.out : "{}"), baseline);
 }
+
+const textOf = (file: string): string => (existsSync(file) ? readFileSync(file, "utf8") : "{}");
 
 function files(root: string): readonly string[] {
   return git(root, ["-c", "core.quotePath=false", "ls-files", "-z", "-co", "--exclude-standard"])
@@ -267,7 +267,8 @@ if (process.argv[1] === import.meta.filename) {
     ...result.findings,
     ...result.unused.map((a) => `${a.file}: ${a.rule}: the ALLOW entry "${a.has}" matches no line; remove it`),
     ...bashFiles(listed.map((file) => ({ file, text: firstLine(join(root, file)) }))),
-    ...baselineProblems(root, baseRef(process.env)),
+    ...baselineProblems(root, baseRef(process.env), LINT),
+    ...baselineProblems(root, baseRef(process.env), COMMENTS),
   ];
   for (const problem of problems) {
     console.log(problem);

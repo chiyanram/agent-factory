@@ -56,7 +56,6 @@ const TRACKER = {
   env: ["TRACK_LOG"],
 };
 
-// a plugin that appends each request to TRACK_LOG and answers done, or failed when the text says FAIL
 function plugin(name: string, described: unknown = TRACKER): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
@@ -232,7 +231,6 @@ describe("request: an allow write goes out at once, cleaned, within the cap (#13
       ["forge.write", draft({ text: "x" }), "dispatcher's"],
       ["context.read", draft({ text: "x" }), "not a write"],
       ["shell", draft({ text: "x" }), "not an extension point"],
-      // a spec change is the spec file itself, sent by spec-body.ts, never a draft of a post (#542)
       ["spec.body", draft({ text: "x" }), "is sent from the spec file"],
       ["tracker.comment", draft({ text: "x" }), "denies tracker.comment"],
     ];

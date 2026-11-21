@@ -1,6 +1,6 @@
 // The srt runner (#114) on a fake srt: the policy it generates, the arguments and variables it hands srt, its refusals
 // (missing srt, the wrong version, a platform srt does not sandbox), its timeout and its stop. No srt is needed: the
-// real one is checked on the laptop by test/srt-box-real.test.ts (GUIDE.md "Check the srt runner").
+// real one is checked on the laptop by test/srt-box-real.test.ts (docs/how-to/check-the-runner.md).
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -24,8 +24,8 @@ import { boxContract } from "./box-contract.js";
 import { tempDir } from "./temp.js";
 
 const RUNS = tempDir("srt-runs-");
-// a short root, as production's RUN_TMP_ROOT is: on macOS the OS temp folder is a long /private/var/folders path,
-// which leaves srt no room for its sockets (#485, the macOS job)
+// a short root: srt makes its sockets in the run's temp folder, and macOS caps a socket path (sun_path) at 104 bytes
+// https://github.com/apple-oss-distributions/xnu/blob/xnu-11215.1.10/bsd/sys/un.h
 const TMPS = realpathSync(mkdtempSync(join(realpathSync(RUN_TMP_ROOT), "srt-t-")));
 afterAll(() => {
   rmSync(RUNS, { recursive: true, force: true });
@@ -66,7 +66,6 @@ const SPEC: BoxSpec = {
 const VERSION: Exit = { code: 0, stdout: `${SRT_VERSION}\n`, stderr: "" };
 const OK: Exit = { code: 0, stdout: "", stderr: "" };
 
-// a fake srt: `--version` answers the version, every command answers `command`, or hangs until its stop when `hang`
 function fakeSrt(input: { readonly version?: Exit; readonly command?: Exit; readonly hang?: boolean } = {}): {
   readonly calls: Call[];
   readonly run: Runner;
@@ -108,7 +107,6 @@ function box(fake: { readonly run: Runner }, host: SrtHost = HOST, egress: SrtEg
 
 const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
 
-// the runner as app.ts makes it, from the host's environment, on a fake srt that records each call
 boxContract(
   "srt on a fake srt",
   (host) => {
@@ -169,8 +167,6 @@ describe("srt runner: the policy (#114)", () => {
       expect(deny).toContain(path);
     }
     expect(deny.length).toBeGreaterThanOrEqual(CREDENTIAL_PATHS.length);
-    // the clone and the private HOME come back writable; the agent CLI's install, its Node and the toolchains (#371)
-    // come back read-only
     expect(policy.filesystem.allowRead).toEqual([
       WORKTREE,
       "/Users/op/.factory/srt-runs/r/home",
@@ -245,15 +241,12 @@ describe("srt runner: the policy (#114)", () => {
     });
   });
 
-  // ledger/4 (#62): with no writable temp folder, Claude Code's Bash tool failed every call with EPERM on
-  // /private/tmp/claude-501/...; srt sets the run's TMPDIR to CLAUDE_CODE_TMPDIR. A folder inside the private HOME then
-  // failed every command with "listen EINVAL" on macOS: srt makes its sockets in it, and their paths are capped at 104
-  // bytes
+  // srt makes its sockets in the run's temp folder, and macOS caps a socket path (sun_path) at 104 bytes
+  // https://github.com/apple-oss-distributions/xnu/blob/xnu-11215.1.10/bsd/sys/un.h
   it("gives the run its own short temp folder, writable, and never /tmp itself (#62)", () => {
     const tmp = "/private/tmp/af-Xy12Ab";
     const env = srtEnv({ host: { PATH: "/bin" }, home: "/h", tmp, ca: { name: "X", file: "" }, spec: {} });
     expect([env.CLAUDE_CODE_TMPDIR, env.TMP, env.TEMP]).toEqual([tmp, tmp, tmp]);
-    // srt sets TMPDIR in the run itself
     expect(env.TMPDIR).toBeUndefined();
     expect(policy.filesystem.allowWrite).toContain("/private/tmp/af-Xy12Ab");
     const roots = new Set(["/tmp", "/private/tmp", "/var/tmp", "/tmp/claude"]);
@@ -284,7 +277,6 @@ describe("srt runner: the probe refuses to start without the pinned srt (S7)", (
     expect(readSrtProbe({ platform: "win32", programs: HOST.programs, refused: [], version: VERSION })).toMatchObject({
       kind: "missing",
     });
-    // an agent CLI that cannot be found is refused before srt is asked
     const noCli = { ...HOST, programs: { kind: "failed", reason: "claude is not on PATH" } } as const;
     expect(await box(fakeSrt(), noCli).probe()).toEqual({ kind: "missing", reason: "claude is not on PATH" });
   });
@@ -324,7 +316,6 @@ describe("srt runner: start, run and stop (#114)", () => {
       TEMP: tmp,
       CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
     });
-    // the run's temp folder is made before the run, private to it (#62)
     expect(statSync(tmp).isDirectory()).toBe(true);
     expect(statSync(tmp).mode & 0o777).toBe(0o700);
     const policy: unknown = JSON.parse(readFileSync(policyFile, "utf8"));

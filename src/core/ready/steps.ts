@@ -40,7 +40,6 @@ import { rerunPost } from "./rerun-note.js";
 
 export const VERIFY_CONTEXT = "agent-factory/verify";
 
-// what a box run needs, or why there is none
 export type BoxPlan =
   | { readonly kind: "ready"; readonly setup: BoxSetup; readonly project: ProjectFile }
   | { readonly kind: "unavailable"; readonly reason: string };
@@ -57,26 +56,20 @@ function failedRow(rows: readonly Row[]): Row | "none" {
   return rows.find((r) => r.ran.kind === "timedOut" || r.ran.code !== 0) ?? "none";
 }
 
-// human: the check stopped for a person (a test check hit), not for the writer
-// lane: the lane the diff needs (#230), once the lane check has read it
 type Checked = { readonly passed: boolean; readonly why: string; readonly human: boolean; readonly lane?: Lane };
 
 type ReadyInput = RunInput & { readonly evidence: readonly Evidence[] } & ReadyFacts;
 
 const PASSED: Checked = { passed: true, why: "", human: false };
 
-// the head of the ticket's waiver of the test checks (waiver.ts), or "none"
 export type WaiverHead = (ticket: string) => Promise<Result<string>>;
 
-// a check's result, and the row whose output shows why it failed: "none" when no row ran to fail (the floor guard, a
-// row that cannot run with no shell, no rows)
 type Judged = Checked & { readonly row: Row | "none" };
 
 function judged(checked: Checked): Judged {
   return { ...checked, row: "none" };
 }
 
-// argvs : every row's command as argv, or the first row that cannot run with no shell
 function argvs(evidence: readonly Evidence[], programs: readonly string[]): Result<ReturnType<typeof commandArgv>[]> {
   const all = evidence.map((e) => commandArgv(e.command, programs));
   const bad = all.findIndex((a) => a.kind === "failed");
@@ -104,8 +97,6 @@ function verdict(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
   };
 }
 
-// quoted : rows that all ran pass when each result quotes what its command printed; the first that does not fails
-// the check, with its output kept for the writer (#444)
 function quoted(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
   const prose = unquoted(evidence, rows.map(printedText));
   const row = prose === "none" ? undefined : rows[prose.at];
@@ -114,14 +105,12 @@ function quoted(evidence: readonly Evidence[], rows: readonly Row[]): Judged {
     : { passed: false, why: prose.why, human: false, row };
 }
 
-// printedText : what a row printed, stdout then stderr. Pure.
 function printedText(row: Row): string {
   return row.ran.kind === "exited" ? `${row.ran.stdout}\n${row.ran.stderr}` : "";
 }
 
 type Guarding = { readonly plan: ReadyPlan; readonly forge: Forge; readonly waiver: WaiverHead };
 
-// floorInput : what the floor guard and the lane check read the diff with, the ticket's waiver among it
 async function floorInput(g: Guarding, open: Open, input: RunInput): Promise<Result<FloorInput>> {
   const base = await g.forge.defaultBranch();
   if (base.kind === "failed") {
@@ -145,7 +134,6 @@ async function floorInput(g: Guarding, open: Open, input: RunInput): Promise<Res
     : waived;
 }
 
-// floor : the floor guard on the change's diff, before any box runs; none is a pass
 async function floor(at: FloorInput): Promise<Result<Checked>> {
   const hits = await floorGuard(at);
   if (hits.kind === "failed") {
@@ -157,13 +145,10 @@ async function floor(at: FloorInput): Promise<Result<Checked>> {
   };
 }
 
-// criterionId : the id of the n-th acceptance criterion, from 1. Pure.
 export function criterionId(n: number): string {
   return `AC-${n}`;
 }
 
-// uncovered : the ids of the acceptance criteria no evidence row names: a row names AC-n when its criterion starts with
-// that id (AC-2, AC2 or ac-2, and no digit after it). Pure.
 export function uncovered(criteria: readonly string[], evidence: readonly Evidence[]): readonly string[] {
   return criteria.flatMap((_, i) => {
     const id = new RegExp(`^AC-?${i + 1}(?!\\d)`, "i");
@@ -171,8 +156,6 @@ export function uncovered(criteria: readonly string[], evidence: readonly Eviden
   });
 }
 
-// covered : a guarded diff whose every acceptance criterion has an evidence row runs the rows again; a missing row
-// fails the check for the writer, and counts towards its tries
 async function covered(
   g: Guarding,
   open: Open,
@@ -196,7 +179,6 @@ async function covered(
       };
 }
 
-// guardedLane : the floor guard's verdict and the lane the diff needs, both read on the host before any box runs
 async function guardedLane(at: FloorInput, input: ReadyInput): Promise<Result<Checked & { readonly lane: Lane }>> {
   const guarded = await floor(at);
   if (guarded.kind === "failed") {
@@ -206,7 +188,6 @@ async function guardedLane(at: FloorInput, input: ReadyInput): Promise<Result<Ch
   return lane.kind === "ok" ? { kind: "ok", value: { ...guarded.value, lane: lane.value.lane } } : lane;
 }
 
-// baseOf : the default branch the floor guard read, or "" when it could not be read. Pure.
 function baseOf(at: Result<FloorInput>): string {
   return at.kind === "ok" ? at.value.base : "";
 }
@@ -244,14 +225,11 @@ async function rerun(g: Guarding, open: Open, input: ReadyInput, base: string): 
     head: input.head,
     commands,
     timeoutSeconds: plan.project.ready.timeoutSeconds,
-    // a git row reads the branch's history: the box's copy gets it, with the default branch to diff against
     ...(commands.some((c) => c[0] === GIT_PROGRAM) ? { history: { base } } : {}),
   });
   return rows.kind === "ok" ? reported(g, open, input, rows.value) : rows;
 }
 
-// reported : the rows' verdict, after the note that puts each re-run beside its claim (rerun-note.ts, #430); a note
-// that cannot be posted fails the step, so a person looks
 async function reported(g: Guarding, open: Open, input: ReadyInput, rows: readonly Row[]): Promise<Result<Judged>> {
   const judgedRows = verdict(input.evidence, rows);
   const note = rerunPost(input.head, input.evidence, rows, judgedRows.passed);
@@ -259,42 +237,31 @@ async function reported(g: Guarding, open: Open, input: ReadyInput, rows: readon
   return noted.kind === "ok" ? { kind: "ok", value: judgedRows } : noted;
 }
 
-// readyPrograms : every program the project's evidence rows may start with, or none without a project file (#444)
 export function readyPrograms(plan: BoxPlan): readonly string[] | undefined {
   return plan.kind === "ready" ? evidencePrograms(plan.project.ready.programs) : undefined;
 }
 
-// The writer's task file is cut at 20,000 characters from its end (writer/task.ts, MAX_TASK_CHARS), so a kept file
-// fits it by construction: the reason and each stream are cut from the front, where the least useful lines are, and
-// the headings take the rest. A test holds the sum under the cap (#199).
 const MOST_REASON_CHARS = 2_000;
 const MOST_STREAM_CHARS = 8_500;
 
-// cutNote : what cutting a text to its last `most` characters drops, for a block's title; none when nothing is cut.
-// Pure.
 function cutNote(text: string, most: number): string {
   return text.length <= most ? "" : ` (…${text.length - most} earlier characters cut)`;
 }
 
-// lastFenced : the end of a text, at most `most` characters, fenced as data under a title that says how much went
-// before it. Pure.
 function lastFenced(title: string, text: string, most: number, info = ""): string {
   return dataFence({ title: `${title}${cutNote(text, most)}`, text: text.slice(-most), info }).trim();
 }
 
-// stream : one stream's last lines, plain and fenced as data; none when it printed nothing. Pure.
 function stream(name: string, text: string): readonly string[] {
   return text.trim() === "" ? [] : ["", lastFenced(`${name}, its last lines`, tailOf(text), MOST_STREAM_CHARS, "text")];
 }
 
-// printed : a row's stdout and stderr tails; none for a row that ran out of time. Pure.
 function printed(row: Row): readonly string[] {
   return row.ran.kind === "exited" ? [...stream("stdout", row.ran.stdout), ...stream("stderr", row.ran.stderr)] : [];
 }
 
 export const READY_FILE = "ready.txt";
 
-// readyOutput : why a ready check failed, and what the failed row printed, as the writer reads it. Pure.
 export function readyOutput(why: string, row: Row | "none"): string {
   return [
     "# The ready check failed",
@@ -307,8 +274,6 @@ export function readyOutput(why: string, row: Row | "none"): string {
   ].join("\n");
 }
 
-// recorded : a failed check's output, kept with the head before the result goes to the run record; a check that cannot
-// keep it fails the step, so a person looks
 async function recorded(plan: ReadyPlan, open: Open, head: string, j: Judged): Promise<Result<Checked>> {
   const lane = j.lane === undefined ? {} : { lane: j.lane };
   const result = { kind: "ok", value: { passed: j.passed, why: j.why, human: j.human, ...lane } } as const;
@@ -325,7 +290,6 @@ async function readyAt(g: Guarding, open: Open, input: ReadyInput): Promise<Resu
   return checked.kind === "ok" ? recorded(g.plan, open, input.head, checked.value) : checked;
 }
 
-// readyStep : the ready check, when there is a box and a project file; waiver reads the ticket's waiver
 export function readyStep(plan: BoxPlan, forge: Forge, waiver: WaiverHead): Steps["ready"] {
   if (plan.kind === "unavailable") {
     return plan;
@@ -349,7 +313,6 @@ function post(v: Verifying, state: StatusState, description: string): ReturnType
 
 export const VERIFY_FILE = "verify.txt";
 
-// verifyOutput : what a failed verifier run printed, as the writer reads it. Pure.
 export function verifyOutput(row: Row): string {
   return [
     `# The local verifier failed`,
@@ -360,7 +323,6 @@ export function verifyOutput(row: Row): string {
   ].join("\n");
 }
 
-// kept : a failed run's output, kept with the head before the status is posted; a run that cannot keep it posts nothing
 async function kept(plan: ReadyPlan, v: Verifying, bad: Row | "none"): Promise<Result<string>> {
   if (bad === "none") {
     return { kind: "ok", value: "" };
@@ -369,7 +331,6 @@ async function kept(plan: ReadyPlan, v: Verifying, bad: Row | "none"): Promise<R
   return keepText(at, VERIFY_FILE, verifyOutput(bad));
 }
 
-// report : the verifier's result as the status at the head
 async function report(
   plan: ReadyPlan,
   v: Verifying,
@@ -383,7 +344,6 @@ async function report(
   return posted.kind === "ok" ? { kind: "ok", value: { passed } } : posted;
 }
 
-// described : the status's one line. Pure.
 function described(verify: Argv, bad: Row | "none"): string {
   return bad === "none" ? `${verify.join(" ")} passed` : rowLine(bad);
 }
@@ -401,7 +361,6 @@ async function verifyRun(plan: ReadyPlan, v: Verifying, verify: Argv): Promise<R
     timeoutSeconds: plan.project.ready.timeoutSeconds,
   });
   if (rows.kind === "failed") {
-    // no verdict from a box that failed: the status stays pending, and with no record of an end a person looks
     await post(v, "pending", `the local verifier could not run; a person looks: ${rows.reason}`);
     return rows;
   }
@@ -415,7 +374,6 @@ async function verifyAt(plan: ReadyPlan, v: Verifying): Promise<Result<{ readonl
     : { kind: "failed", reason: "the project's gate is forge-ci; the local verifier does not run" };
 }
 
-// verifyStep : the local verifier, when the project's gate is local and there is a box
 export function verifyStep(plan: BoxPlan, forge: Forge): Steps["verify"] {
   if (plan.kind === "unavailable") {
     return plan;

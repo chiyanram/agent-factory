@@ -11,7 +11,6 @@
 //
 // A leaf with no runtime imports, so scripts/garden-pr.ts loads it on Node's type stripping. Pure. Design: #573.
 
-// one file's numbers at one commit, as gardener counts them
 export type FileNumbers = {
   readonly test: boolean;
   readonly lines: number;
@@ -21,14 +20,12 @@ export type FileNumbers = {
   readonly callAssertions: number;
 };
 
-// a file at one commit: measured, or not there (added, deleted, or a file gardener skips as generated)
 export type Side = { readonly kind: "measured"; readonly numbers: FileNumbers } | { readonly kind: "absent" };
 
 export type Row = { readonly path: string; readonly before: Side; readonly after: Side };
 
 export type Rule = "W1" | "W2" | "W3" | "W4";
 
-// a number that got worse: its rule, the files it is about, and the number before and after
 export type Worse = {
   readonly rule: Rule;
   readonly what: string;
@@ -47,7 +44,6 @@ const count = (value: unknown, ...keys: readonly string[]): number | undefined =
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined;
 };
 
-// each count this module reads, and where gardener's snapshot JSON keeps it
 const NAMES = [
   "sourceFiles",
   "testFiles",
@@ -73,7 +69,6 @@ const FIELDS: { readonly [K in Name]: readonly [string, string] } = {
   callAssertions: ["tests", "callAssertions"],
 };
 
-// one file's numbers from its counts, which hold exactly one file
 const numbersFrom = (f: Counts): FileNumbers =>
   f.testFiles === 1
     ? {
@@ -93,7 +88,6 @@ const numbersFrom = (f: Counts): FileNumbers =>
         callAssertions: 0,
       };
 
-// every count, or where the missing ones should have been
 function countsOf(json: unknown): { readonly kind: "ok"; readonly counts: Counts } | Read {
   const missing = NAMES.filter((name) => count(json, ...FIELDS[name]) === undefined);
   if (missing.length > 0) {
@@ -117,8 +111,6 @@ function countsOf(json: unknown): { readonly kind: "ok"; readonly counts: Counts
   };
 }
 
-// fromSnapshot : one file's side from `gardener snapshot --json` run with a config whose code list is that one file.
-// No file counted means the file is not there at that commit, or gardener skipped it as generated.
 export function fromSnapshot(json: unknown): Read {
   const read = countsOf(json);
   if (!("counts" in read)) return read;
@@ -140,7 +132,6 @@ const numbersOf = (side: Side): FileNumbers => (side.kind === "measured" ? side.
 
 type Key = "typeEscapes" | "suppressions";
 
-// summed over every touched file, so a number that only moved from one touched file to another is neutral
 function summed(rows: readonly Row[], rule: Rule, key: Key, what: string): readonly Worse[] {
   const before = rows.reduce((n, r) => n + numbersOf(r.before)[key], 0);
   const after = rows.reduce((n, r) => n + numbersOf(r.after)[key], 0);
@@ -149,7 +140,6 @@ function summed(rows: readonly Row[], rule: Rule, key: Key, what: string): reado
   return [{ rule, what, paths, before, after }];
 }
 
-// worse : the numbers this change made worse, under the merge base's size limit
 export function worse(rows: readonly Row[], largeFileLines: number): readonly Worse[] {
   const big: Worse[] = rows.flatMap((r) => {
     if (r.after.kind !== "measured" || r.after.numbers.test) return [];
@@ -181,7 +171,6 @@ export function worse(rows: readonly Row[], largeFileLines: number): readonly Wo
   ];
 }
 
-// a side's four columns; a file not there at that commit shows a dash in each
 const cells = (side: Side): string =>
   side.kind === "measured"
     ? [
@@ -192,7 +181,6 @@ const cells = (side: Side): string =>
       ].join(" | ")
     : "– | – | – | –";
 
-// render : the rows and the worse list as Markdown, for a person (and later a CI job summary)
 export function render(rows: readonly Row[], found: readonly Worse[], largeFileLines: number): string {
   const head = ["| file | lines | type escapes | suppressions | mocks / call assertions |", "|---|---|---|---|---|"];
   const body = rows.flatMap((r) => [

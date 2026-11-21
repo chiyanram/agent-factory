@@ -1,4 +1,4 @@
-// The folders the srt runner allows back inside the hidden home (#114, the operator's choice A): the agent CLI's install
+// The folders the srt runner allows back inside the hidden home (#114): the agent CLI's install
 // and the Node it runs on, found from PATH and the CLI's first line, on a planted home. No srt and no real install needed.
 
 import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -24,7 +24,6 @@ describe("srt programs: the pure parts", () => {
     expect(interpreterOf("\u007fELF")).toBe("");
     expect(installRoot("/h/.nvm/versions/node/v22/bin/node")).toBe("/h/.nvm/versions/node/v22");
     expect(installRoot("/h/.local/share/claude/versions/2.0.0")).toBe("/h/.local/share/claude/versions");
-    // the home itself, a folder above it, and one outside it are never allowed back
     expect(keptDirs(["/h", "/", "/usr/bin", "/h/.local/bin", "/h/.local/bin", "/hx/bin"], "/h")).toEqual([
       "/h/.local/bin",
     ]);

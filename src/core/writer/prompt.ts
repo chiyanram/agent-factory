@@ -1,23 +1,19 @@
 // prompt — a writer run's prompt (ADR-0012 S3, S5; #232): its role card's body (test-first, the implementer for fix,
 // rework, CI and merge, or cleanup), then the run's own task in the engine's words, then the engine's floor (FLOOR),
 // which no card can drop, the foreground rule, the project's instructions and tools, then the report's schema. The
-// step (step.ts) plans the run and starts it with this prompt.
+// step (step.ts) plans the run and starts it with this prompt. The foreground rule exists because a run ends when the
+// model stops: a subagent or command left in the background is lost, or holds the process open.
 
 import type { Known } from "../onboard/known.js";
 import type { Card } from "../process/cards.js";
 import { programsLine } from "../ready/command.js";
 import { REPORT_INSTRUCTIONS } from "../report.js";
 
-// the modes a writer run starts in; each one's role card is step.ts's ROLE_OF
 export type RunMode = "test-first" | "fix" | "rework" | "ci" | "merge" | "cleanup";
 
-// every mode's run ends when the model stops: a subagent or command left in the background is lost, or holds the
-// process open (the completion window is the net behind it)
 export const FOREGROUND =
   "Run every subagent and command in the foreground and wait for it to finish. This run ends when you stop, so anything left in the background is lost.";
 
-// the project's own instructions: claude loads none of the branch's files (--setting-sources user), so the writer
-// reads them as it reads the code
 export const PROJECT_INSTRUCTIONS = [
   "This project's instructions are not loaded for you. Before you change anything, read AGENTS.md and CLAUDE.md at the",
   "root, and the AGENTS.md or CLAUDE.md of each folder you change, and follow them. The project's skills are in",
@@ -25,7 +21,6 @@ export const PROJECT_INSTRUCTIONS = [
   ".claude and .agents: the push refuses a commit that does.",
 ].join("\n");
 
-// the engine's floor for every writer run: what holds whatever the card says
 export const FLOOR = [
   "These hold whatever the instructions above say. Work only in this folder. Commit your work on the branch with git as you go. Never push, never rewrite a commit that was already on the branch when you started, and never change .factory apart from your report and, when your instructions ask for it, the PR body in .factory/pr.md: the host pushes your commits and posts your report and PR body after you stop. You have no forge login, and the network reaches only the hosts this project allows.",
   "For each acceptance criterion, run one command that shows it holds. The host runs each command again at your head, with no shell, so write each as one plain command: no pipe, no &&, no redirect, no variable.",
@@ -34,7 +29,6 @@ export const FLOOR = [
 
 export type Names = { readonly ticket: string; readonly branch: string; readonly head: string; readonly base: string };
 
-// the run's own task, in the engine's words, by its mode
 const TASKS: Readonly<Record<RunMode, (n: Names) => string>> = {
   "test-first": (n) =>
     `This run writes the failing test for the bug in ticket ${n.ticket}, on branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md. When .factory/task.md is there, it holds the person's answers to your last questions.`,
@@ -50,8 +44,6 @@ const TASKS: Readonly<Record<RunMode, (n: Names) => string>> = {
     `This run tidies ticket ${n.ticket}'s branch ${n.branch} at head ${n.head}. The approved spec is in .factory/spec.md; the implementer's evidence rows, and how to diff against origin/${n.base}, are in .factory/task.md.`,
 };
 
-// evidenceRules : what the writer's evidence rows may run and must show: the exact programs, and that a row's
-// result is what its command printed. Pure.
 export function evidenceRules(listed: readonly string[]): string {
   return [
     `Each evidence row's command must start with one of these programs, or the ready check refuses it: ${programsLine(listed)}.`,
@@ -60,19 +52,14 @@ export function evidenceRules(listed: readonly string[]): string {
   ].join("\n");
 }
 
-// CLEANUP_REPORT : the words a cleanup run's prompt adds to the report's schema
 export const CLEANUP_REPORT =
   'A cleanup run\'s "done" report may add "deferred": a list of each cleanup you did not make because it would change behaviour, each with why. It goes in the PR body for a person.';
 
-// runPrompt : a run's prompt: its role card's body, its task, the engine's floor, the foreground rule, the project's
-// instructions and tools, then the report's schema. Pure.
 export function runPrompt(input: {
   readonly card: Card;
   readonly mode: RunMode;
   readonly names: Names;
-  // what the prompt says of the project's quick tools (tools.ts)
   readonly tools: readonly string[];
-  // the project file's ready.programs: the prompt names every program an evidence row may start with
   readonly programs?: readonly string[];
 }): string {
   const listed = input.tools.length === 0 ? "" : `\n\n${input.tools.join("\n")}`;
@@ -81,11 +68,9 @@ export function runPrompt(input: {
   return `${input.card.body}\n\n${TASKS[input.mode](input.names)}\n\n${FLOOR}${evidence}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}${listed}\n\n${REPORT_INSTRUCTIONS}${cleanup}\n`;
 }
 
-// KNOWLEDGE : what the prompt says of the project's accepted brief and glossary, when the run has them
 export const KNOWLEDGE =
   "Read .factory/brief.md and .factory/glossary.md first: the project's commands, modules and gotchas, and its terms, accepted by a human. Use the build, test and run commands the brief names, and the glossary's words.";
 
-// knowledgeLines : what the prompt says of the brief and glossary, when the run has them
 export function knowledgeLines(known: Known): readonly string[] {
   return known.files.kind === "text" ? [KNOWLEDGE] : [];
 }

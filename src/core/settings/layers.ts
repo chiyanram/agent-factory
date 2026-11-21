@@ -44,7 +44,6 @@ function goodPin(team: string, commit: string, rest: readonly string[]): boolean
   return TEAM_NAME.test(team) && !team.includes("..") && COMMIT.test(commit) && rest.length === 0;
 }
 
-// pinOf : the project's team pin, none, or why it is not one
 export function pinOf(value: unknown): Pin | "none" | "bad" {
   if (value === undefined) {
     return "none";
@@ -87,7 +86,6 @@ async function readUser(home: string): Promise<Read> {
   }
 }
 
-// readTeamAt : the team file as it is at one commit of the team's clone, read through hostGit (#87)
 export async function readTeamAt(home: string, pin: Pin, env: NodeJS.ProcessEnv): Promise<Read> {
   const dir = teamDir(home, pin.team);
   const got = await hostGit({
@@ -136,7 +134,6 @@ function modeEntry(file: string, [id, mode]: readonly [string, unknown]): Modes 
     : { modes: new Map([[id, read.mode]]), problems: [] };
 }
 
-// modesOf : the team's mode per key; a mode that is not one is an error
 export function modesOf(team: FileLayer | undefined): Modes {
   if (team === undefined || !Object.hasOwn(team.value, TEAM_META)) {
     return { modes: new Map(), problems: [] };
@@ -152,7 +149,6 @@ export function modesOf(team: FileLayer | undefined): Modes {
   };
 }
 
-// halves : a team or user file that sets one policy point sets both its mode and its cap, as the project file must
 function halves(layer: FileLayer): readonly Problem[] {
   const policy = prop(layer.value, "policy");
   return POLICY_POINTS.flatMap((point) => {
@@ -189,7 +185,6 @@ function problemOf(read: Read, file: string): readonly Problem[] {
   return read.kind === "failed" ? [error(read.text.startsWith('"') ? `${file}: ${read.text}` : read.text)] : [];
 }
 
-// layered : every layer of one project, resolved. `team` replaces the pinned team file (team update reads the new pin)
 export async function layered(input: {
   readonly home: string;
   readonly env: NodeJS.ProcessEnv;
@@ -214,7 +209,6 @@ export async function layered(input: {
   return { ...resolution, pin: team.pin };
 }
 
-// refusals : the errors, as one reason a run is refused with; "" when there are none
 export function refusals(resolution: Resolution): string {
   return resolution.problems
     .filter((p) => p.level === "error")

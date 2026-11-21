@@ -20,12 +20,8 @@ import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "tests", "fixtures");
-// the rules pack's own schemas, version 1, as chiyanram/skills#316 ships them
 const V1 = join(FIXTURES, "pack-schema", "v1");
-// card format version 2, as the pack plans it: version 1 with edit-scope in enforced_guardrails. It stands in for the
-// pack's own file until the pin moves to a pack that ships it, when the pinned-pack check below reads the real one.
 const V2 = join(FIXTURES, "pack-schema", "v2");
-// cards from before the pack published its format: a next: field, plain-text guardrails
 const V0_CARDS = join(FIXTURES, "pack-schema", "v0-cards");
 const LANES = readFileSync(join(FIXTURES, "process", "rulebook-lanes.json"), "utf8");
 
@@ -39,7 +35,6 @@ function isRole(name: string): name is Role {
   return Object.hasOwn(ROLE_TOOLS, name);
 }
 
-// pack : a rules pack plugin with these schema files, lanes and cards; its process folder
 function pack(input: {
   readonly schemas?: Readonly<Record<string, string>>;
   readonly lanes?: string;
@@ -64,13 +59,11 @@ function v1Schemas(): Readonly<Record<string, string>> {
   return Object.fromEntries(readdirSync(V1).map((f) => [f, readFileSync(join(V1, f), "utf8")]));
 }
 
-// v1Schemas and card v2 beside card v1, as a pack that adds card v2 ships them
 function v2Schemas(): Readonly<Record<string, string>> {
   const card = "card-v2.schema.json";
   return { ...v1Schemas(), [card]: readFileSync(join(V2, card), "utf8") };
 }
 
-// a card as the pack ships it today: a [list] of guardrail IDs, no next:
 const CARD = [
   "---",
   "role: verify-pass",
@@ -153,7 +146,6 @@ describe("the rules pack's format version (#484)", () => {
   });
 
   it("a newer version of one part beside a version it reads leaves every part read and checked at the version it reads (#600)", async () => {
-    // lanes-v2 sits beside lanes-v1, as skills 935d5ae ships it; the rulebook lanes.json would break this v2
     const schemas: Readonly<Record<string, string>> = { ...v1Schemas(), "lanes-v2.schema.json": '{"type": "string"}' };
     const { plugin, process } = pack({ schemas, cards: { "verify-pass": CARD } });
     const read = await readPackSchemas(process);
@@ -163,7 +155,6 @@ describe("the rules pack's format version (#484)", () => {
     expect(parts.lanes).toEqual(JSON.parse(schemas["lanes-v1.schema.json"] ?? ""));
     expect(await readProcess([plugin])).toMatchObject({ kind: "ok" });
     expect(await readCard([plugin], "verify-pass")).toMatchObject({ kind: "ok", value: { role: "verify-pass" } });
-    // no part's check is skipped: a card that breaks card-v1 is still refused through this pack
     const bad = CARD.replace("rules: [RV1, RV7]\n", "rules: [RV1, RV7]\nowner: me\n");
     rmSync(join(root, "rulebook"), { recursive: true });
     const withBad = pack({ schemas, cards: { "verify-pass": bad } });
@@ -235,7 +226,6 @@ describe("the rules pack's format version (#484)", () => {
   });
 });
 
-// the pack's test-first card, naming edit-scope as card v2 allows
 const TEST_FIRST = [
   "---",
   "role: test-first",
@@ -396,7 +386,6 @@ describe("the engine reads a pack's files through the pack's own format (#484)",
   });
 
   it("a lanes file that breaks the pack's lanes schema stops the process from reading", async () => {
-    // the bug lane, second in the file, without its approval
     const loose = LANES.replace(/("lane": "bug",\s*"approval": )true/, "$1false");
     expect(loose).not.toBe(LANES);
     const { plugin } = pack({ schemas: v1Schemas(), lanes: loose });
@@ -407,13 +396,10 @@ describe("the engine reads a pack's files through the pack's own format (#484)",
   });
 });
 
-// The pinned rules pack's checkout: CI fetches .github/rules-pack.json's commit and names it in FACTORY_RULES_PACK.
-// Without it the check is skipped on a laptop and fails in CI, so CI can never pass without reading the pack.
 const PACK = process.env.FACTORY_RULES_PACK ?? "";
 const IN_CI = (process.env.CI ?? "") !== "";
 const PIN: unknown = JSON.parse(readFileSync(join(ROOT, ".github", "rules-pack.json"), "utf8"));
 
-// packCards : every role card of one plugin's process, each with how it read
 async function packCards(plugin: PluginDir): Promise<readonly { readonly at: string; readonly result: string }[]> {
   const found = await findProcess([plugin]);
   if (found.kind !== "ok") {
@@ -424,7 +410,6 @@ async function packCards(plugin: PluginDir): Promise<readonly { readonly at: str
   return Promise.all(
     files.map(async (f) => {
       const role = f.replace(/\.md$/, "");
-      // a card the engine never runs (coordinator, finder) is the pack's own business
       const read = isRole(role) ? await readCard([plugin], role) : ({ kind: "ok" } as const);
       return { at: `${plugin.label}/${f}`, result: read.kind === "ok" ? "ok" : read.reason };
     }),

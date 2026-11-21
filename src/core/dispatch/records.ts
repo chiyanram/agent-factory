@@ -2,28 +2,37 @@
 // append-only JSON-lines file per ticket: <FACTORY_HOME>/runs/<project>/<ticket>.jsonl. The dispatcher writes a line
 // before a run starts and one after it ends; the counts the table needs (ready-check failures, review rounds, CI
 // rounds: writer runs started for a red pipeline) are summed from the lines written since the human's START or approval
-// that let the build begin (#227), so a new one starts afresh.
+// that let the build begin, so a new one starts afresh.
 //
 // A "started" line with no "ended" after it means the dispatcher died during that run: the summary says so, and the
 // table blocks the ticket for a person rather than guess whether the run pushed.
 //
 // A check that fails (a ready check, a review with Act on findings, the local verifier) records nextTry{step, at} on
-// its "ended" line (#228): the writer's retry for it waits until then, at = now + min(10 s × 2^(n−1), 5 min) for the
+// its "ended" line: the writer's retry for it waits until then, at = now + min(10 s × 2^(n−1), 5 min) for the
 // step's n-th failure since the approval. The newest check line's nextTry is the one that holds.
 //
-// A writer or review "ended" line carries the run's spend{usd, tokens} (#131), as the agent CLI reported it; a line
+// A writer or review "ended" line carries the run's spend{usd, tokens}, as the agent CLI reported it; a line
 // with none was not measured (an older line, or a run stopped before its result). A run that failed after it spent
 // writes a "spent" line instead: it ends nothing, so the start still reads as a run that never ended and goes to a
 // person, but its spend counts. `usage` and the caps sum them all. A review round's line, ended or spent, also carries
-// split{finders, verify}: each finder's spend by its lens and the verify pass's, which sum to its spend (#337); an
-// older line has none.
+// split{finders, verify}: each finder's spend by its lens and the verify pass's, which sum to its spend.
 //
-// A writer "ended" line names the run's trace, a plain file name in <ticket>/ (trace.ts, #487); a "spent" line names
-// the failed run's traces. An older line has none.
+// A writer "ended" line names the run's trace, a plain file name in <ticket>/ (trace.ts); a "spent" line names
+// the failed run's traces.
 //
-// A design review (#236) runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
+// A design review runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
 // a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
 // findings or what the verify pass kept, and its spend, whether it finished or failed. design.ts reads them per hashes.
+//
+// Old lines stay readable: each field added after the first lines is optional, and a line that lacks it reads as the
+// old behaviour. Before a ticket has a "turn" line, seedTurn reads the turn from its older lines. The "turn" and
+// "waiting" lines only record whom a ping went to, so they are no activity: a claim's quiet time ignores them.
+//
+// Every string a line keeps is scrubbed, so no record holds a secret, whatever a run or a person wrote (P4). A bad line
+// fails the read with its line number, since a count summed past it could let a run go on that should have stopped.
+// The one exception is a torn last line, a write cut short: it is read past with a warning, so its run reads as one
+// that never ended. Only the pass that holds the pass lock moves it to <ticket>.jsonl.torn, since the cut would race
+// with an append from a second writer.
 
 import { appendFile, mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -41,9 +50,7 @@ import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
 import type { Lane as TurnLane } from "./next-step.js";
 
-// "onboard" is the onboarder's run (#235), which belongs to no ticket: its spend goes in the project's onboarder.jsonl
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
-// the two runs of a design review (#236)
 export type DesignStep = "review" | "verify";
 // what the writer was started for; "rebase" is the run for a merge conflict, which merges the default branch in and
 // never rebases (#103: every push is --force-with-lease against the head the host saw, push.ts, so a merge goes out
@@ -53,23 +60,14 @@ export type DesignStep = "review" | "verify";
 // dispatcher rule starts one; an older ledger's cleanup lines still read
 export type WriterMode = "test-first" | "fix" | "rework" | "ci" | "rebase" | "cleanup";
 
-// what one writer run is for, and so what the host hands the writer (#171). The record keeps only its mode.
-// answers: the person's answers to the writer's questions, when the run follows an answered round (#486; answers.ts)
 export type Task =
   | { readonly kind: "test-first"; readonly answers?: readonly Answer[] }
   | { readonly kind: "fix"; readonly answers?: readonly Answer[] }
-  // the ready check failed at this head; why it failed is kept with the head (kept.ts, #199)
   | { readonly kind: "ready-failed"; readonly head: string }
-  // the factory's review at this head left Act on findings
   | { readonly kind: "act-on"; readonly head: string }
-  // CI is red at this head
   | { readonly kind: "ci-red"; readonly head: string }
-  // the local verifier failed at this head (a local gate, #91); its output is kept with the head (kept.ts)
   | { readonly kind: "verify-failed"; readonly head: string }
-  // the change does not merge into the default branch at this head: merge the default branch in (#103)
   | { readonly kind: "conflict"; readonly head: string }
-  // the implementer's run ended done at this head: the cleanup run tidies the branch's own lines, and runs its evidence
-  // rows again
   | { readonly kind: "cleanup"; readonly head: string; readonly evidence: readonly Evidence[] };
 
 const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
@@ -83,13 +81,10 @@ const MODE_OF: Readonly<Record<Task["kind"], WriterMode>> = {
   cleanup: "cleanup",
 };
 
-// ParkedTask : the task a parked writer run had, without the answers, which the table adds again from the change
-//; a cleanup run, which no dispatcher rule starts, keeps none
 export type ParkedTask =
   | { readonly kind: "test-first" | "fix" }
   | { readonly kind: "ready-failed" | "act-on" | "ci-red" | "verify-failed" | "conflict"; readonly head: string };
 
-// parkedTaskOf : the task a parked line keeps, from the run's task; none for a cleanup run. Pure.
 export function parkedTaskOf(task: Task): ParkedTask | undefined {
   if (task.kind === "cleanup") {
     return undefined;
@@ -97,24 +92,20 @@ export function parkedTaskOf(task: Task): ParkedTask | undefined {
   return "head" in task ? { kind: task.kind, head: task.head } : { kind: task.kind };
 }
 
-// modeOf : the mode a task is recorded as. Pure.
 export function modeOf(task: Task): WriterMode {
   return MODE_OF[task.kind];
 }
 
-// the checks whose failure sends the writer back, and so back off before it goes (#228)
 export type Retried = "ready" | "review" | "verify";
 export type NextTry = { readonly step: Retried; readonly at: string };
 
 const FIRST_BACKOFF_MS = 10_000;
 const MOST_BACKOFF_MS = 5 * 60_000;
 
-// backoffMs : how long the writer waits after a step's n-th failure: 10 s, doubling, at most 5 minutes. Pure.
 export function backoffMs(n: number): number {
   return Math.min(FIRST_BACKOFF_MS * 2 ** Math.max(0, n - 1), MOST_BACKOFF_MS);
 }
 
-// nextTryOf : the next try after a step's n-th failure, from now (ms since the epoch). Pure.
 export function nextTryOf(retried: Retried, n: number, now: number): NextTry {
   return { step: retried, at: new Date(now + backoffMs(n)).toISOString() };
 }
@@ -126,10 +117,7 @@ export type Event =
       readonly phase: Phase;
       readonly mode: WriterMode | "none";
       readonly head: string;
-      // each plugin the run used and its hash (#232); absent on older lines
       readonly plugins?: readonly PluginHash[];
-      // the writer's run folder, named before the run: a pass that dies mid-run leaves its work there; absent
-      // on older lines and on every other phase
       readonly folder?: string;
     }
   | {
@@ -139,44 +127,28 @@ export type Event =
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
-      // the rows the ready check runs again; none unless the outcome is done
       readonly evidence: readonly Evidence[];
-      // the writer hung after its report and was stopped after the completion window (#182); false on older lines
       readonly hung: boolean;
-      // what the run spent (#131); none when it was not measured
       readonly spend?: Spend;
-      // the Copilot runs its spend leaves out; none on a line that has none
       readonly copilot?: CopilotRuns;
-      // the role card's hash, for a run started from a card (#236: cleanup)
       readonly card?: string;
-      // what a cleanup run left for a person, as each would change behaviour (#236)
       readonly deferred?: readonly string[];
-      // each cite of the project's brief that went stale, for the retro (#235); none on a line that has none
       readonly stale?: readonly string[];
-      // why a run that is not done stopped, scrubbed and cut (writer/why.ts, #62); none on a done line or an older one
       readonly why?: string;
-      // the file under <home>/runs/<project>/<ticket>/ that keeps the end of a host-blocked run's output (#62)
       readonly output?: string;
-      // the run's trace, a plain file name in the ticket's folder (trace.ts, #487); none on an older line
       readonly trace?: string;
     }
-  // why: the first row that failed, "" when it passed
   | {
       readonly at: string;
       readonly kind: "ready-ended";
       readonly head: string;
       readonly passed: boolean;
       readonly why: string;
-      // a test check stopped it for a person, not the writer (#231); absent on older lines, which are false
       readonly human?: boolean;
-      // only when it failed (#228)
       readonly nextTry?: NextTry;
-      // the lane the diff needs (#230); none on a line older than the lane check
       readonly lane?: Lane;
-      // every program the check let a row start with (#444); none on an older line
       readonly programs?: readonly string[];
     }
-  // the local verifier's run (#91); its result is the commit status it posted
   | {
       readonly at: string;
       readonly kind: "verify-ended";
@@ -190,42 +162,25 @@ export type Event =
       readonly head: string;
       readonly actOn: number;
       readonly nextTry?: NextTry;
-      // what the round's model runs spent (#131); none when it was not measured
       readonly spend?: Spend;
-      // the round's Copilot runs, which its spend leaves out; none on a line that has none
       readonly copilot?: CopilotRuns;
-      // the same spend per run: each finder's by its lens, and the verify pass's (#337); none on an older line
       readonly split?: RoundSpend;
-      // the last full round's Act on and Consider findings at its head, each acted on or not by this head (#220);
-      // none on a first round, a reused one, or an older line
       readonly acted?: Acted;
-      // per lens that ran, its verified findings no other lens reported (#237); none when the round ran no lens
       readonly lenses?: Readonly<Record<string, number>>;
-      // the findings the cite check noted as "cite not found" (#485); none on an older line
       readonly citesNotFound?: number;
-      // every finding of the round, per rule ID and bucket (#488); none on a reused round or an older line
       readonly found?: FoundByRule;
-      // each pass's trace, plain file names in the ticket's folder (trace.ts, #487); none on an older line
       readonly traces?: readonly string[];
     }
-  // what a run that failed spent (#131): a review round whose pass failed; or what the onboarder's run spent, finished
-  // or failed (#235)
   | {
       readonly at: string;
       readonly kind: "spent";
       readonly phase: Phase;
       readonly head: string;
       readonly spend: Spend;
-      // the Copilot runs its spend leaves out; none on a line that has none
       readonly copilot?: CopilotRuns;
-      // a review round's spend per run (#337); none on another phase's line or an older one
       readonly split?: RoundSpend;
-      // the failed run's traces, plain file names in the ticket's folder (trace.ts, #487); none on an older line
       readonly traces?: readonly string[];
     }
-  // a run the provider's usage limit refused (agent/usage-limit.ts): it ends the run's start, its work was pushed
-  // as a blocked run's is, and no failure is counted. until: the reset, ISO 8601 UTC, or "unknown"; said: the CLI's
-  // refusal, scrubbed and cut; task: the writer's task, which runs again after the reset (none for a cleanup run)
   | {
       readonly at: string;
       readonly kind: "parked";
@@ -235,11 +190,9 @@ export type Event =
       readonly said: string;
       readonly task?: ParkedTask;
       readonly spend?: Spend;
-      // the Copilot runs its spend leaves out; none on a line that has none
       readonly copilot?: CopilotRuns;
       readonly trace?: string;
     }
-  // one run of a design review (#236), at the spec and design hashes it read
   | {
       readonly at: string;
       readonly kind: "design-ended";
@@ -247,27 +200,17 @@ export type Event =
       readonly spec: string;
       readonly design: string;
       readonly outcome: "done" | "failed";
-      // why it failed, "" when it finished
       readonly why: string;
-      // the design-reviewer's findings, one per decision
       readonly findings: readonly DesignFinding[];
-      // what the verify pass kept
       readonly kept: readonly Kept[];
-      // the role card's hash; none when the run failed before it read one
       readonly card?: string;
       readonly spend?: Spend;
-      // the Copilot runs its spend leaves out; none on a line that has none
       readonly copilot?: CopilotRuns;
-      // a failure no retry fixes, such as a cite that does not hold: the step stops at once (#489); absent otherwise
       readonly final?: true;
-      // the spec's lane and its Planned files when the run read it, so a later edit that raises the lane or changes
-      // the files is reviewed again (#489); absent on older lines
       readonly lane?: Lane;
       readonly planned?: readonly string[];
-      // the run's trace, a plain file name in the ticket's folder (trace.ts, #487); none on an older line
       readonly trace?: string;
     }
-  // a person was told why the design review holds or ends at these hashes (a raised lane, the round cap), once (#489)
   | {
       readonly at: string;
       readonly kind: "design-noted";
@@ -275,32 +218,16 @@ export type Event =
       readonly design: string;
       readonly why: string;
     }
-  // the "ready for you" note went on the change at this head, once per head
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
-  // whose turn the ticket entered: a person was pinged on entering needs-you or ready-to-merge, and factory re-arms
-  // that ping (turn-ping.ts)
   | { readonly at: string; readonly kind: "turn"; readonly to: TurnLane }
-  // the operator was pinged that the ticket's session waits for their word, for the waiting label put on at since
-  // (waiting.ts); a later since pings again
   | { readonly at: string; readonly kind: "waiting"; readonly since: string }
-  // the dispatcher handed the ticket to a person, for this reason; the same stop is never posted twice
   | { readonly at: string; readonly kind: "blocked"; readonly why: string }
-  // the ticket's build is held by its spec's "Blocked by" for this reason; a person was pinged when it changed (#494)
   | { readonly at: string; readonly kind: "held"; readonly why: string }
-  // the git host did not answer for a blocker on one pass, with its reason (#494 AC-7)
   | { readonly at: string; readonly kind: "blockers-unread"; readonly why: string }
-  // the shared copy of this approval (shared.ts approvalKey) is on the ticket's PR (#227); it is posted once
   | { readonly at: string; readonly kind: "shared"; readonly approval: string }
-  // a person's answers to the writer's questions, as their own event, tied to the spec version they answered (#486,
-  // P13): the spec's hash, or "" when the ticket's lane needs no approval record
   | { readonly at: string; readonly kind: "answered"; readonly spec: string; readonly answers: readonly Answer[] }
-  // a person's START, at the START record's own time, recorded once by the first pass that reads it: START and approval
-  // are files a new one replaces, so these lines keep each of them for the ticket's touches (touches.ts, #487)
   | { readonly at: string; readonly kind: "begun"; readonly by: string; readonly via: Via }
-  // a person's approval of the spec with this hash, at the approval record's own time, recorded the same way (#487)
   | { readonly at: string; readonly kind: "approved"; readonly by: string; readonly via: Via; readonly spec: string }
-  // the ticket's change was merged, at the git host's merged-at, as this commit, by this person; recorded once, when
-  // the pass reconciles it (#487)
   | {
       readonly at: string;
       readonly kind: "merged";
@@ -308,14 +235,12 @@ export type Event =
       readonly sha: string;
       readonly by: string;
     }
-  // the merge's timeline (timeline.ts, #488): written once, after the merged line, from the ticket's own lines
   | {
       readonly at: string;
       readonly kind: "timeline";
       readonly number: number;
       readonly rounds: number;
       readonly found: FoundByRule;
-      // per rule ID: how many of the rated findings a later commit acted on, of how many
       readonly acted: Readonly<Record<string, { readonly acted: number; readonly of: number }>>;
       readonly spend: Readonly<Partial<Record<RunKind, Spend>>>;
       readonly unmeasured: number;
@@ -333,7 +258,6 @@ export function recordPath(where: Where): Result<string> {
       };
 }
 
-// record : one line, appended; the folder is made on first use, readable by this user alone
 export async function record(input: { readonly where: Where; readonly event: Event }): Promise<Done> {
   const path = recordPath(input.where);
   if (path.kind === "failed") {
@@ -341,7 +265,6 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   }
   try {
     await mkdir(dirname(path.value), { recursive: true, mode: 0o700 });
-    // every string the line keeps is scrubbed: no record holds a secret, whatever a run or a person wrote (P4, #485)
     const line = scrubbedJson(input.event);
     await appendFile(path.value, `${line}\n`, { mode: 0o600 });
     return { kind: "ok" };
@@ -350,18 +273,15 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   }
 }
 
-// prop : one property of a parsed JSON value, or undefined; no type assertion on the way
 export function prop(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }
 
-// codeOf : an error's code ("ENOENT"), or ""
 export function codeOf(error: unknown): string {
   const code = prop(error, "code");
   return typeof code === "string" ? code : "";
 }
 
-// a field that is not there, or not what it should be
 const BAD: unique symbol = Symbol("bad");
 type Bad = typeof BAD;
 
@@ -375,7 +295,6 @@ function oneOf<T extends string>(value: unknown, name: string, allowed: readonly
   return allowed.find((a) => a === v) ?? BAD;
 }
 
-// every lane, once: a key the Lane type adds and this misses fails the type check
 const TURN_LANE_KEYS: Readonly<Record<TurnLane, TurnLane>> = {
   "needs-you": "needs-you",
   "ready-to-merge": "ready-to-merge",
@@ -387,7 +306,6 @@ const MODES = ["test-first", "fix", "rework", "ci", "rebase", "cleanup"] as cons
 const OUTCOMES = ["done", "asked", "blocked"] as const;
 const RETRIED = ["ready", "review", "verify"] as const;
 
-// each event by its kind, so a handler per kind is typed without an assertion (TypeScript's correlated unions)
 type EventMap = { readonly [E in Event as E["kind"]]: E };
 type Kind = keyof EventMap;
 
@@ -404,19 +322,16 @@ function startedOf(raw: unknown, at: string): Event | Bad {
   return { at, kind: "started", phase, mode, head, ...pluginsOf(raw), ...folderOf(raw) };
 }
 
-// pluginsOf : a started line's plugins, as a field to spread; none on an older line
 function pluginsOf(raw: unknown): { readonly plugins?: readonly PluginHash[] } {
   const plugins = hashesIn(prop(raw, "plugins"));
   return plugins === undefined ? {} : { plugins };
 }
 
-// folderOf : a writer's start line's run folder, as a field to spread; none on an older line or another phase's
 function folderOf(raw: unknown): { readonly folder?: string } {
   const folder = prop(raw, "folder");
   return typeof folder === "string" ? { folder } : {};
 }
 
-// hashesIn : a started line's plugins and their hashes; none on an older line, or one that holds no list
 function hashesIn(value: unknown): readonly PluginHash[] | undefined {
   const list = Array.isArray(value) ? value : [];
   const hashes = list.flatMap((h: unknown) => {
@@ -433,7 +348,6 @@ function rowOf(row: unknown): Evidence | Bad {
   return criterion === BAD || command === BAD || result === BAD ? BAD : { criterion, command, result };
 }
 
-// evidenceOf : the rows; a line written before the rows were kept has none
 function evidenceOf(raw: unknown): readonly Evidence[] | Bad {
   const rows = prop(raw, "evidence");
   if (rows === undefined) {
@@ -450,7 +364,6 @@ type WriterParts = {
   readonly hung: boolean;
 };
 
-// hungOf : whether the writer hung after its report; a line written before #182 says nothing, which is false
 function hungOf(raw: unknown): boolean | Bad {
   const hung = prop(raw, "hung");
   if (hung === undefined) {
@@ -470,12 +383,10 @@ function writerParts(raw: unknown): WriterParts | Bad {
   return evidence === BAD || hung === BAD ? BAD : { head, patch, evidence, hung };
 }
 
-// amount : a spend figure: a finite number, never below 0
 function amount(value: unknown): number | Bad {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : BAD;
 }
 
-// spendField : an ended line's spend and its Copilot runs, as fields to spread: none on a line that has none
 function spendField(raw: unknown): { readonly spend?: Spend; readonly copilot?: CopilotRuns } | Bad {
   const copilot = copilotField(raw);
   const spend = prop(raw, "spend");
@@ -487,7 +398,6 @@ function spendField(raw: unknown): { readonly spend?: Spend; readonly copilot?: 
   return usd === BAD || tokens === BAD ? BAD : { spend: { usd, tokens }, ...copilot };
 }
 
-// copilotField : a line's Copilot runs and their seconds, as a field to spread: none on a line that has none
 function copilotField(raw: unknown): { readonly copilot?: CopilotRuns } | Bad {
   const copilot = prop(raw, "copilot");
   if (copilot === undefined) {
@@ -498,19 +408,16 @@ function copilotField(raw: unknown): { readonly copilot?: CopilotRuns } | Bad {
   return isCount(runs) && isCount(seconds) ? { copilot: { runs: Number(runs), seconds: Number(seconds) } } : BAD;
 }
 
-// spendIn : one spend figure, or BAD
 function spendIn(value: unknown): Spend | Bad {
   const usd = amount(prop(value, "usd"));
   const tokens = amount(prop(value, "tokens"));
   return usd === BAD || tokens === BAD ? BAD : { usd, tokens };
 }
 
-// findersIn : each finder's spend by its lens, or BAD when it is not an object of spends
 function findersIn(raw: unknown): Readonly<Record<string, Spend>> | Bad {
   return recordOf(raw, spendIn);
 }
 
-// splitField : a review round's spend per run (#337), as a field to spread: none on a line that has none
 function splitField(line: unknown): { readonly split?: RoundSpend } | Bad {
   const split = prop(line, "split");
   if (split === undefined) {
@@ -521,7 +428,6 @@ function splitField(line: unknown): { readonly split?: RoundSpend } | Bad {
   return verify === BAD || finders === BAD ? BAD : { split: { finders, verify } };
 }
 
-// spentOf : a spent line: its phase, head and spend, and a review round's spend per run (#337)
 function spentOf(raw: unknown, at: string): Event | Bad {
   const phase = oneOf(raw, "phase", PHASES);
   const head = str(raw, "head");
@@ -533,7 +439,6 @@ function spentOf(raw: unknown, at: string): Event | Bad {
   return spend === BAD || extras === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...extras };
 }
 
-// spentExtras : a spent line's optional split, traces and Copilot runs, as fields to spread, or BAD
 function spentExtras(raw: unknown): Pick<Extract<Event, { kind: "spent" }>, "split" | "traces" | "copilot"> | Bad {
   const split = splitField(raw);
   const traces = tracesField(raw);
@@ -541,7 +446,6 @@ function spentExtras(raw: unknown): Pick<Extract<Event, { kind: "spent" }>, "spl
   return split === BAD || traces === BAD || copilot === BAD ? BAD : { ...split, ...traces, ...copilot };
 }
 
-// tracesField : a line's traces, as a field to spread: none on a line that has none (#487)
 function tracesField(raw: unknown): { readonly traces?: readonly string[] } | Bad {
   const traces = prop(raw, "traces");
   if (traces === undefined) {
@@ -550,7 +454,6 @@ function tracesField(raw: unknown): { readonly traces?: readonly string[] } | Ba
   return Array.isArray(traces) && traces.every((t) => typeof t === "string") ? { traces } : BAD;
 }
 
-// cardField : a line's role card hash, as a field to spread: none on a line that has none (#236)
 function cardField(raw: unknown): { readonly card?: string } | Bad {
   const card = prop(raw, "card");
   if (card === undefined) {
@@ -559,7 +462,6 @@ function cardField(raw: unknown): { readonly card?: string } | Bad {
   return typeof card === "string" && /^[0-9a-f]{64}$/.test(card) ? { card } : BAD;
 }
 
-// deferredField : a cleanup run's deferred list, as a field to spread: none on a line that has none (#236)
 function deferredField(raw: unknown): { readonly deferred?: readonly string[] } | Bad {
   const deferred = prop(raw, "deferred");
   if (deferred === undefined) {
@@ -568,7 +470,6 @@ function deferredField(raw: unknown): { readonly deferred?: readonly string[] } 
   return Array.isArray(deferred) && deferred.every((d) => typeof d === "string") ? { deferred } : BAD;
 }
 
-// staleField : a writer line's stale cites, as a field to spread: none on a line that has none (#235)
 function staleField(raw: unknown): { readonly stale?: readonly string[] } | Bad {
   const stale = prop(raw, "stale");
   if (stale === undefined) {
@@ -577,14 +478,11 @@ function staleField(raw: unknown): { readonly stale?: readonly string[] } | Bad 
   return Array.isArray(stale) && stale.every((s) => typeof s === "string") ? { stale } : BAD;
 }
 
-// textOf : a line's optional text field: undefined on a line that has none, or BAD
 function textOf(raw: unknown, name: string): string | undefined | Bad {
   const value = prop(raw, name);
   return value === undefined || typeof value === "string" ? value : BAD;
 }
 
-// whyFields : a writer line's why, output file and trace, as fields to spread: none on a line that has none (#62,
-// #487)
 function whyFields(raw: unknown): { readonly why?: string; readonly output?: string; readonly trace?: string } | Bad {
   const why = textOf(raw, "why");
   const output = textOf(raw, "output");
@@ -594,7 +492,6 @@ function whyFields(raw: unknown): { readonly why?: string; readonly output?: str
     : { ...(why === undefined ? {} : { why }), ...outputAndTrace(output, trace) };
 }
 
-// outputAndTrace : a writer line's output file and trace, as fields to spread: none for one it has not. Pure.
 function outputAndTrace(
   output: string | undefined,
   trace: string | undefined,
@@ -602,7 +499,6 @@ function outputAndTrace(
   return { ...(output === undefined ? {} : { output }), ...(trace === undefined ? {} : { trace }) };
 }
 
-// notesFields : a writer line's stale cites, why and output file, as fields to spread, or BAD
 function notesFields(
   raw: unknown,
 ):
@@ -613,8 +509,6 @@ function notesFields(
   return stale === BAD || why === BAD ? BAD : { ...stale, ...why };
 }
 
-// writerExtras : a writer line's optional fields, its spend, card, deferred list, stale cites, why and output file, as
-// fields to spread, or BAD
 function writerExtras(
   raw: unknown,
 ):
@@ -636,7 +530,6 @@ function writerExtras(
 const UNHEADED = ["test-first", "fix"] as const;
 const HEADED = ["ready-failed", "act-on", "ci-red", "verify-failed", "conflict"] as const;
 
-// parkedTaskField : a parked line's task, as a field to spread: none on a line that has none, or BAD
 function parkedTaskField(raw: unknown): { readonly task?: ParkedTask } | Bad {
   const task = prop(raw, "task");
   if (task === undefined) {
@@ -651,7 +544,6 @@ function parkedTaskField(raw: unknown): { readonly task?: ParkedTask } | Bad {
   return kind === BAD || head === BAD ? BAD : { task: { kind, head } };
 }
 
-// untilOf : a parked line's reset: ISO 8601 UTC, or "unknown"
 function untilOf(raw: unknown): string | Bad {
   const until = str(raw, "until");
   return until === "unknown" ||
@@ -663,7 +555,6 @@ function untilOf(raw: unknown): string | Bad {
 type ParkedParts = Pick<Extract<Event, { kind: "parked" }>, "phase" | "head" | "until" | "said">;
 type ParkedExtras = Pick<Extract<Event, { kind: "parked" }>, "task" | "spend" | "copilot" | "trace">;
 
-// parkedParts : a parked line's fields every one has, or BAD
 function parkedParts(raw: unknown): ParkedParts | Bad {
   const phase = oneOf(raw, "phase", PHASES);
   const head = str(raw, "head");
@@ -672,7 +563,6 @@ function parkedParts(raw: unknown): ParkedParts | Bad {
   return phase === BAD || head === BAD || until === BAD || said === BAD ? BAD : { phase, head, until, said };
 }
 
-// parkedExtras : a parked line's optional task, spend and trace, as fields to spread, or BAD
 function parkedExtras(raw: unknown): ParkedExtras | Bad {
   const task = parkedTaskField(raw);
   const spend = spendField(raw);
@@ -687,7 +577,6 @@ function parkedExtras(raw: unknown): ParkedExtras | Bad {
   };
 }
 
-// spentAndTrace : a line's spend and trace, as fields to spread; none for what it has not. Pure.
 export function spentAndTrace(
   spend: Spend | undefined,
   trace: string | undefined,
@@ -740,7 +629,6 @@ function designEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "design-ended", ...parts, findings, kept, ...extras };
 }
 
-// designExtras : a design line's optional fields: card and spend, the final mark, the lane and Planned files
 function designExtras(raw: unknown): (ReturnType<typeof writerExtras> & DesignOptional) | Bad {
   const parts = [writerExtras(raw), finalField(raw), laneField(raw), plannedField(raw)];
   return parts.some((p) => p === BAD) ? BAD : Object.assign({}, ...parts);
@@ -748,7 +636,6 @@ function designExtras(raw: unknown): (ReturnType<typeof writerExtras> & DesignOp
 
 type DesignOptional = { readonly final?: true; readonly lane?: Lane; readonly planned?: readonly string[] };
 
-// plannedField : a design line's Planned files, as a field to spread: none on an older line, BAD when not strings
 function plannedField(raw: unknown): { readonly planned?: readonly string[] } | Bad {
   const planned = prop(raw, "planned");
   if (planned === undefined) {
@@ -762,7 +649,6 @@ function designNotedOf(raw: unknown, at: string): Event | Bad {
   return texts === BAD ? BAD : { at, kind: "design-noted", ...texts };
 }
 
-// finalField : a design line's final mark, as a field to spread: none when absent or false, BAD when not a boolean
 function finalField(raw: unknown): { readonly final?: true } | Bad {
   const final = prop(raw, "final");
   if (final !== undefined && typeof final !== "boolean") {
@@ -771,8 +657,6 @@ function finalField(raw: unknown): { readonly final?: true } | Bad {
   return final === true ? { final: true } : {};
 }
 
-// nextTryField : a check line's nextTry, as a field to spread: none on a line that has none (a pass, or older than
-// #228), BAD when it is there but not one
 function nextTryField(raw: unknown): { readonly nextTry?: NextTry } | Bad {
   const next = prop(raw, "nextTry");
   if (next === undefined) {
@@ -783,13 +667,10 @@ function nextTryField(raw: unknown): { readonly nextTry?: NextTry } | Bad {
   return retried === BAD || at === BAD || Number.isNaN(Date.parse(at)) ? BAD : { nextTry: { step: retried, at } };
 }
 
-// whyOf : a ready line's reason; a line older than the reasons has none
 function whyOf(raw: unknown): string | Bad {
   return prop(raw, "why") === undefined ? "" : str(raw, "why");
 }
 
-// laneField : a ready or design line's lane, as a field to spread: none on a line older than the lane check (#230,
-// #489), BAD when it is there but not a lane
 function laneField(raw: unknown): { readonly lane?: Lane } | Bad {
   const lane = prop(raw, "lane");
   if (lane === undefined) {
@@ -799,7 +680,6 @@ function laneField(raw: unknown): { readonly lane?: Lane } | Bad {
   return known === undefined ? BAD : { lane: known };
 }
 
-// humanField : a ready line's human flag, as a field to spread: none on a line that has none (#231)
 function humanField(raw: unknown): { readonly human?: boolean } | Bad {
   const human = prop(raw, "human");
   if (human === undefined) {
@@ -808,8 +688,6 @@ function humanField(raw: unknown): { readonly human?: boolean } | Bad {
   return typeof human === "boolean" ? { human } : BAD;
 }
 
-// programsField : a ready line's programs, as a field to spread: none on a line older than #444, BAD when it is there
-// but not a list of words
 function programsField(raw: unknown): { readonly programs?: readonly string[] } | Bad {
   const programs = prop(raw, "programs");
   if (programs === undefined) {
@@ -820,8 +698,6 @@ function programsField(raw: unknown): { readonly programs?: readonly string[] } 
     : BAD;
 }
 
-// readyExtras : a ready line's optional fields, its nextTry, its lane, its human flag and its programs, as fields to
-// spread, or BAD
 function readyExtras(raw: unknown):
   | {
       readonly nextTry?: NextTry;
@@ -859,7 +735,6 @@ function verifyEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "verify-ended", head, passed, ...next };
 }
 
-// actedField : a review line's acted-on rows, as a field to spread: none on a line that has none (#220)
 function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
   const acted = prop(raw, "acted");
   if (acted === undefined) {
@@ -870,12 +745,10 @@ function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
   return since !== BAD && Array.isArray(rows) && rows.every(isActedRow) ? { acted: { since, rows } } : BAD;
 }
 
-// entriesOf : an object's own entries; none for anything else. Pure.
 function entriesOf(value: unknown): readonly [string, unknown][] {
   return typeof value === "object" && value !== null ? Object.entries(value) : [];
 }
 
-// lensesField : a review line's per-lens unique findings (#237), as a field to spread; none on an older line
 function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, number>> } | Bad {
   const lenses = prop(raw, "lenses");
   if (lenses === undefined) {
@@ -887,7 +760,6 @@ function lensesField(raw: unknown): { readonly lenses?: Readonly<Record<string, 
     : BAD;
 }
 
-// citesField : a review line's count of findings whose cite was not found (#485), as a field to spread
 function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
   const n = prop(raw, "citesNotFound");
   if (n === undefined) {
@@ -898,18 +770,15 @@ function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
 
 const FOUND_BUCKETS: ReadonlySet<string> = new Set(BUCKETS);
 
-// isCount : a whole number of zero or more. Pure.
 function isCount(n: unknown): boolean {
   return Number.isSafeInteger(n) && Number(n) >= 0;
 }
 
-// isBucketCounts : one rule's counts per bucket. Pure.
 function isBucketCounts(value: unknown): boolean {
   const entries = entriesOf(value);
   return entries.length > 0 && entries.every(([bucket, n]) => FOUND_BUCKETS.has(bucket) && isCount(n));
 }
 
-// foundField : a review line's findings per rule ID and bucket (#488), as a field to spread; none on an older line
 function foundField(raw: unknown): { readonly found?: FoundByRule } | Bad {
   const found = prop(raw, "found");
   if (found === undefined) {
@@ -925,13 +794,11 @@ function foundField(raw: unknown): { readonly found?: FoundByRule } | Bad {
     : BAD;
 }
 
-// isActedCounts : one rule's acted-on count, of how many. Pure.
 function isActedCounts(value: unknown): boolean {
   const [acted, of] = [prop(value, "acted"), prop(value, "of")];
   return isCount(acted) && isCount(of) && Number(acted) <= Number(of);
 }
 
-// recordOf : an object whose every value `read` accepts, as a plain record, or BAD. Pure.
 function recordOf<T>(value: unknown, read: (v: unknown) => T | Bad): Readonly<Record<string, T>> | Bad {
   if (!isPlain(value)) {
     return BAD;
@@ -947,12 +814,10 @@ function recordOf<T>(value: unknown, read: (v: unknown) => T | Bad): Readonly<Re
   return out;
 }
 
-// isPlain : an object, not an array or null. Pure.
 function isPlain(value: unknown): value is object {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// byField : an optional by, as a field to spread, or BAD when it is there and not a string. Pure.
 function byField(raw: unknown): { readonly by?: string } | Bad {
   const by = prop(raw, "by");
   if (by === undefined) {
@@ -961,7 +826,6 @@ function byField(raw: unknown): { readonly by?: string } | Bad {
   return typeof by === "string" ? { by } : BAD;
 }
 
-// rescueOf : one rescue of a timeline line, or BAD. Pure.
 function rescueOf(raw: unknown): Rescue | Bad {
   const at = str(raw, "at");
   const why = str(raw, "why");
@@ -973,31 +837,26 @@ function rescueOf(raw: unknown): Rescue | Bad {
   return isCount(waitedMs) ? { at, why, waitedMs: Number(waitedMs), ...by } : BAD;
 }
 
-// actedCountsOf : one rule's acted-on counts, or BAD. Pure.
 function actedCountsOf(v: unknown): { readonly acted: number; readonly of: number } | Bad {
   return isActedCounts(v) ? { acted: Number(prop(v, "acted")), of: Number(prop(v, "of")) } : BAD;
 }
 
-// rescuesOf : a timeline line's rescues, or BAD. Pure.
 function rescuesOf(raw: unknown): readonly Rescue[] | Bad {
   const rescues = prop(raw, "rescues");
   const read = Array.isArray(rescues) ? rescues.map(rescueOf) : [BAD];
   return read.every((r): r is Rescue => r !== BAD) ? read : BAD;
 }
 
-// spendByKind : a timeline line's spend per run kind, or BAD when a key is not a run kind or a spend is not one. Pure.
 function spendByKind(raw: unknown): Readonly<Partial<Record<RunKind, Spend>>> | Bad {
   const spend = recordOf(prop(raw, "spend"), spendIn);
   return spend !== BAD && Object.keys(spend).every((k) => RUN_KINDS.some((kind) => kind === k)) ? spend : BAD;
 }
 
-// countsIn : a timeline line's two whole counts, or BAD. Pure.
 function countsIn(raw: unknown): { readonly rounds: number; readonly unmeasured: number } | Bad {
   const [rounds, unmeasured] = [prop(raw, "rounds"), prop(raw, "unmeasured")];
   return isCount(rounds) && isCount(unmeasured) ? { rounds: Number(rounds), unmeasured: Number(unmeasured) } : BAD;
 }
 
-// timelineParts : a timeline line's counts, or BAD when one is not as written. Pure.
 function timelineParts(raw: unknown): Omit<Extract<Event, { kind: "timeline" }>, "at" | "kind" | "number"> | Bad {
   const found = isPlain(prop(raw, "found")) ? foundField(raw) : BAD;
   const parts = [
@@ -1033,7 +892,6 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good) };
 }
 
-// optionalText : an optional string field, as a field to spread; "bad" when it is there and not a string. Pure.
 function optionalText(raw: unknown, name: "asked" | "chosen"): { readonly [k: string]: string } | "bad" {
   const v = prop(raw, name);
   if (v === undefined) {
@@ -1042,7 +900,6 @@ function optionalText(raw: unknown, name: "asked" | "chosen"): { readonly [k: st
   return typeof v === "string" ? { [name]: v } : "bad";
 }
 
-// readBack : the question and the chosen choice's text an answer carries, or "bad" when either is not a string. Pure.
 function readBack(raw: unknown): { readonly [k: string]: string } | "bad" {
   const [asked, chosen] = [optionalText(raw, "asked"), optionalText(raw, "chosen")];
   return asked === "bad" || chosen === "bad" ? "bad" : { ...asked, ...chosen };
@@ -1137,7 +994,6 @@ function parseLine(line: string): unknown {
   }
 }
 
-// eventOf : one line, checked field by field; anything else is BAD
 function eventOf(line: string): Event | Bad {
   const raw = parseLine(line);
   const at = str(raw, "at");
@@ -1149,10 +1005,8 @@ function isEvent(e: Event | Bad): e is Event {
   return e !== BAD;
 }
 
-// one line of a record file, and where it starts in the file
 type Line = { readonly text: string; readonly start: number };
 
-// linesOf : the file's non-empty lines with their byte offsets. Pure.
 function linesOf(text: string): readonly Line[] {
   const lines: Line[] = [];
   let start = 0;
@@ -1165,16 +1019,10 @@ function linesOf(text: string): readonly Line[] {
   return lines;
 }
 
-// tornPath : the side file a torn last line is moved to, beside the ticket's record; not a .jsonl name, so `usage`
-// never reads it as a ticket. Pure.
 export function tornPath(recordFile: string): string {
   return `${recordFile}.torn`;
 }
 
-// setAside : move a torn last line to the side file and cut it from the record, so the next line appended starts on a
-// line of its own. The cut is made only while the file is still the size it was read at. This assumes one dispatcher
-// writes a ticket's file at a time (the pass lock, tick.ts): between the size check and the cut, an append from a
-// second process could otherwise be lost. So only the pass that holds the lock asks for the cut (readRecords).
 async function setAside(file: string, size: number, line: Line): Promise<Done> {
   try {
     await appendFile(tornPath(file), `${line.text}\n`, { mode: 0o600 });
@@ -1194,19 +1042,11 @@ async function setAside(file: string, size: number, line: Line): Promise<Done> {
   }
 }
 
-// how a reader treats a torn last line: the pass that holds the lock sets it aside; every other reader (usage, a
-// command run by hand) skips it with a warning and writes nothing
 export type ReadOptions = {
   readonly warn?: (line: string) => void;
   readonly setAside?: boolean;
 };
 
-// readRecords : every line of the ticket's file, oldest first; no file is no events. A bad line fails the read with
-// its line number, since a count summed past it could let a run go on that should have stopped. The one exception is a
-// torn last line (#483): a write cut short, which leaves the file without its closing newline and the line not JSON.
-// It is read past with a warning, and the run it belonged to reads as one that never ended, so the table counts it as
-// a failed try (or hands it to a person when it may have pushed), as for any run the dispatcher died during. With
-// setAside (only the pass, which holds the lock) it is also moved to <ticket>.jsonl.torn and cut from the record.
 export async function readRecords(where: Where, options: ReadOptions = {}): Promise<Result<readonly Event[]>> {
   const path = recordPath(where);
   if (path.kind === "failed") {
@@ -1216,7 +1056,6 @@ export async function readRecords(where: Where, options: ReadOptions = {}): Prom
   return text.kind === "ok" ? eventsIn(path.value, text.value, options) : text;
 }
 
-// recordText : the record file's text; "" when there is none
 async function recordText(path: string): Promise<Result<string>> {
   try {
     return { kind: "ok", value: await readFile(path, "utf8") };
@@ -1225,8 +1064,6 @@ async function recordText(path: string): Promise<Result<string>> {
   }
 }
 
-// tornLine : the line at `index` when it is a write cut short: the last line, the file has no closing newline, and the
-// line is not JSON; none for any other bad line. Pure.
 function tornLine(text: string, lines: readonly Line[], index: number): Line | undefined {
   const line = index === lines.length - 1 && !text.endsWith("\n") ? lines[index] : undefined;
   return line !== undefined && parseLine(line.text) === undefined ? line : undefined;
@@ -1236,7 +1073,6 @@ function warnOf(options: ReadOptions): (line: string) => void {
   return options.warn ?? ((line) => process.stderr.write(`${line}\n`));
 }
 
-// tornRead : the events before a torn last line, with a warning; the line set aside when the caller holds the lock
 async function tornRead(path: string, text: string, torn: Line, options: ReadOptions): Promise<Done> {
   const aside =
     options.setAside === true ? await setAside(path, Buffer.byteLength(text), torn) : { kind: "ok" as const };
@@ -1249,7 +1085,6 @@ async function tornRead(path: string, text: string, torn: Line, options: ReadOpt
   return aside;
 }
 
-// eventsIn : the events of a record file's text; a torn last line read past, any other bad line refused
 async function eventsIn(path: string, text: string, options: ReadOptions): Promise<Result<readonly Event[]>> {
   const lines = linesOf(text);
   const events = lines.map((l) => eventOf(l.text));
@@ -1274,28 +1109,22 @@ export type LastWriter =
       readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
       readonly evidence: readonly Evidence[];
-      // when it ended (#444); none in a summary built by hand
       readonly at?: string;
     };
 
-// RunFolder : a writer run's folder, as its start line names it, and the head the run started from
 export type RunFolder = { readonly folder: string; readonly head: string };
 
 export type Summary = {
-  // a run whose start has no end: the dispatcher died during it
   readonly interrupted:
     | { readonly kind: "none" }
     | {
         readonly kind: "interrupted";
         readonly phase: Phase;
         readonly at: string;
-        // a writer run's folder and the head it started from; none on an older line
         readonly run?: RunFolder;
       };
   readonly lastWriter: LastWriter;
-  // the implementer's patch before its last one, to catch the same patch twice; a cleanup run's is never one (#236)
   readonly previousPatch: string;
-  // the implementer's last patch
   readonly implementerPatch: string;
   readonly testFirstDone: boolean;
   readonly readyFailures: number;
@@ -1307,13 +1136,9 @@ export type Summary = {
         readonly head: string;
         readonly passed: boolean;
         readonly why: string;
-        // a test check stopped it for a person (#231)
         readonly human: boolean;
-        // the lane the diff needs (#230); none on a line older than the lane check
         readonly lane?: Lane;
-        // the rows it ran: the last writer's when it ended (#444); none in a summary built by hand
         readonly evidence?: readonly Evidence[];
-        // every program it let a row start with (#444); none on a line older than that
         readonly programs?: readonly string[];
       };
   readonly lastVerify:
@@ -1324,35 +1149,21 @@ export type Summary = {
     | { readonly kind: "none" }
     | { readonly kind: "ended"; readonly head: string; readonly actOn: number };
   readonly ciRounds: number;
-  // reviews with Act on findings, and local verifier runs that failed: each one's n for its backoff (#228)
   readonly reviewFailures: number;
   readonly verifyFailures: number;
-  // when the writer may retry the step the newest check failed (#228)
   readonly nextTry: { readonly kind: "none" } | ({ readonly kind: "set" } & NextTry);
   readonly rebaseRuns: number;
   readonly pingedAt: string;
-  // the lane of the newest "turn" line, or, before the ticket has one, the lane its older lines say a person was
-  // already pinged for (seedTurn); "none" for neither
   readonly turn: TurnLane | "none";
-  // whether a "turn" line was read: then the older lines no longer seed the turn
   readonly turnRead: boolean;
-  // why the newest writer run was blocked, which only its own line keeps; "" for none, or once a later run started
   readonly blockedRun: string;
-  // every reason the dispatcher already handed the ticket to a person for
   readonly blocked: readonly string[];
-  // why the newest "held" line held the build, "" for none; and the passes since it on which the git host did not
-  // answer for a blocker (#494)
   readonly heldWhy: string;
   readonly unreadPasses: number;
-  // the git host's reason on the first of those passes, and when it was, so a person reads one stable reason per outage
   readonly unreadFirst: string;
   readonly unreadSince: string;
-  // the time of the newest line but a "turn" line (isActivity), or "" for none
   readonly lastAt: string;
-  // what the ticket's runs spent since the approval, for its cap (#131); an unmeasured run adds nothing
   readonly spent: Spend;
-  // the newest run the provider's usage limit parked, until another run ends; repeated: it parked at a reset no
-  // later than the park just before it, with no other run's end between
   readonly parked: Parked;
 };
 
@@ -1399,7 +1210,6 @@ export const EMPTY: Summary = {
   parked: { kind: "none" },
 };
 
-// patches : the same-patch check's two patches after a writer run: a cleanup run leaves them as they were (#236)
 function patches(
   s: Summary,
   e: Extract<Event, { kind: "writer-ended" }>,
@@ -1409,7 +1219,6 @@ function patches(
     : { previousPatch: s.implementerPatch, implementerPatch: e.patch };
 }
 
-// writerTurn : the turn a run's end seeds (seedTurn), and why it was blocked when it was. Pure.
 function writerTurn(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): Partial<Summary> {
   const why = e.why ?? "its note on the change says why";
   return {
@@ -1444,7 +1253,6 @@ function writerEnded(s: Summary, e: Extract<Event, { kind: "writer-ended" }>): S
 
 const UNPARKED: Parked = { kind: "none" };
 
-// repeatOf : a park at a reset no later than the park just before it: the provider refused again after its reset
 function repeatOf(before: Parked, until: string): boolean {
   return (
     before.kind === "parked" &&
@@ -1454,7 +1262,6 @@ function repeatOf(before: Parked, until: string): boolean {
   );
 }
 
-// parkedStep : a parked run ends its start and spends; the factory waits for the reset. Pure.
 function parkedStep(s: Summary, e: Extract<Event, { kind: "parked" }>): Summary {
   return {
     ...s,
@@ -1474,16 +1281,12 @@ function parkedStep(s: Summary, e: Extract<Event, { kind: "parked" }>): Summary 
   };
 }
 
-// nextTryView : the summary's nextTry from a check line. Pure.
 function nextTryView(next: NextTry | undefined): Summary["nextTry"] {
   return next === undefined ? { kind: "none" } : { kind: "set", ...next };
 }
 
 type Steps = { readonly [K in Kind]: (s: Summary, e: EventMap[K]) => Summary };
 
-// seedTurn : the turn an older line implies, for records written before the "turn" line: a run started is the
-// factory's turn, and a line the old code pinged a person with is that person's turn. Once a "turn" line is read, only
-// "turn" lines move it. Pure.
 function seedTurn(s: Summary, lane: TurnLane): Partial<Summary> {
   return s.turnRead ? {} : { turn: lane };
 }
@@ -1537,10 +1340,7 @@ const STEPS: Steps = {
     verifyFailures: s.verifyFailures + Number(!e.passed),
     nextTry: nextTryView(e.nextTry),
   }),
-  // a failed run's spend counts toward the ticket's cap; it ends nothing
   spent: (s, e) => ({ ...s, spent: addSpend(s.spent, e.spend) }),
-  // a design review's run ends its start; what it spent counts toward the ticket's cap (#236)
-  // a finished verify pass pinged a person before the "turn" line
   "design-ended": (s, e) => ({
     ...s,
     ...(e.step === "verify" && e.outcome === "done" ? seedTurn(s, "needs-you") : {}),
@@ -1549,14 +1349,11 @@ const STEPS: Steps = {
     spent: addSpend(s.spent, e.spend ?? NO_SPEND),
   }),
   parked: parkedStep,
-  // a note to a person counts nothing; design.ts reads it so the note is sent once
   "design-noted": (s) => ({ ...s, ...seedTurn(s, "needs-you") }),
   pinged: (s, e) => ({ ...s, ...seedTurn(s, "ready-to-merge"), pingedAt: e.head }),
   turn: (s, e) => ({ ...s, turn: e.to, turnRead: true }),
-  // a session's wait counts nothing; waiting.ts reads it so the ping goes once per label
   waiting: (s) => s,
   blocked: (s, e) => ({ ...s, ...seedTurn(s, "needs-you"), blocked: [...s.blocked, e.why] }),
-  // a read that held the build again starts the count of passes the git host did not answer afresh
   held: (s, e) => ({ ...s, heldWhy: e.why, unreadPasses: 0, unreadFirst: "", unreadSince: "" }),
   "blockers-unread": (s, e) => ({
     ...s,
@@ -1564,7 +1361,6 @@ const STEPS: Steps = {
     unreadFirst: s.unreadFirst === "" ? e.why : s.unreadFirst,
     unreadSince: s.unreadSince === "" ? e.at : s.unreadSince,
   }),
-  // the copy counts nothing; tick reads it from every line, so a later START never posts it twice
   shared: (s) => s,
   answered: (s) => s,
   begun: (s) => s,
@@ -1577,14 +1373,10 @@ function step<K extends Kind>(s: Summary, kind: K, e: EventMap[K]): Summary {
   return STEPS[kind](s, e);
 }
 
-// isActivity : whether a line is the ticket's activity: every line but "turn" and "waiting", which record whom a ping
-// went to, so a claim's quiet time and "claimed, but not by this orchestrator" (table.ts) read the same as without
-// them. Pure.
 export function isActivity(e: Event): boolean {
   return e.kind !== "turn" && e.kind !== "waiting";
 }
 
-// summarize : the counts since the approval at `since` (ISO 8601); older lines belong to an earlier approval.
 export function summarize(input: { readonly events: readonly Event[]; readonly since: string }): Summary {
   const from = Date.parse(input.since);
   return input.events

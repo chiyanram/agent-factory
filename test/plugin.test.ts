@@ -28,10 +28,8 @@ const DESCRIBE = {
   env: ["ECHO_SITE"],
 };
 
-// the same, declaring no write: the kit's write fidelity check does not apply
 const READ_ONLY = { ...DESCRIBE, writes: [] };
 
-// a plugin written as a Node script; `body` handles one parsed request (req) and prints its answer
 function plugin(name: string, body: string, described: unknown = DESCRIBE): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
@@ -127,14 +125,11 @@ describe("the registry: pinned by its folder's sha256, run from a private copy (
     expect(statSync(join(root, "home", "plugins", entry.sha256)).mode & 0o777).toBe(0o700);
     const found = await callPlugin(setup(), call);
     expect(found).toMatchObject({ kind: "ok", value: { kind: "found", fields: { text: "PROJ-1" } } });
-    // its env held only what it may have; macOS itself sets __CF_USER_TEXT_ENCODING in every process it starts
     const env = okValue(found).fields.env;
     const handed = Array.isArray(env) ? env.filter((name) => name !== "__CF_USER_TEXT_ENCODING") : env;
     expect(handed).toEqual(["ECHO_SITE", "HOME", "LANG", "PATH"]);
-    // the person's folder can change after review: the pinned copy still runs
     writeFileSync(path, `${readFileSync(path, "utf8")}\n// changed\n`);
     expect(await callPlugin(setup(), call)).toMatchObject({ kind: "ok" });
-    // the copy itself changed: refused
     writeFileSync(join(dirname(entry.path), "extra.js"), "x");
     expect(await callPlugin(setup(), call)).toMatchObject({
       kind: "failed",
@@ -236,7 +231,6 @@ describe("the registry: pinned by its folder's sha256, run from a private copy (
       value: { writesAdded: ["tracker.create"], after: { version: "2.0.0" } },
     });
     const shown = change.kind === "ok" ? change.value.after.sha256 : "";
-    // the file changes again after it was shown: refused
     writeFileSync(join(dirname(path), "later.js"), "x");
     expect(await applyUpdate(setup(), "echo", shown)).toMatchObject({
       kind: "failed",
@@ -331,7 +325,6 @@ describe("the contract test kit: agent-factory plugin test (#134)", () => {
     expect(crashed).toEqual(expect.arrayContaining(["bad input", "unknown op"]));
   });
 
-  // a plugin that hands each notify text to its CLI, `chat`, as an argv word and as JSON on stdin; `change` alters it
   function relay(name: string, change = "(t) => t"): string {
     const described = { ...DESCRIBE, name, capabilities: [{ name: "notify" }], writes: ["notify"], cli: ["chat"] };
     const path = plugin(
@@ -357,7 +350,6 @@ describe("the contract test kit: agent-factory plugin test (#134)", () => {
       "write fidelity notify/hello",
       "write fidelity notify/hello (tricky text)",
     ]);
-    // the fake answered from hello.cli.json; past its answers it exits 1, so the real CLI is never reached
     expect(checks.find((c) => c.name === "fixture notify/hello")).toMatchObject({ ok: true });
   });
 

@@ -33,7 +33,6 @@ describe("quarantineOf", () => {
     expect(quarantineOf({}, "/q.json", AT).kind).toBe("failed");
   });
 
-  // #507 review: a future added day would otherwise hold the check far past the cap from today
   it("refuses an entry added on a day still to come, and takes one added today", () => {
     expect(quarantineOf([{ ...Q, added: "2027-06-01", expires: "2027-06-15" }], "/q.json", AT)).toEqual({
       kind: "failed",

@@ -23,7 +23,6 @@ export type Remote = { readonly host: string; readonly path: string };
 
 export type Build = {
   readonly name: string;
-  // the file that told it
   readonly file: string;
   readonly programs: readonly string[];
   readonly verify: readonly string[];
@@ -37,25 +36,20 @@ export type Detected = {
   readonly clone: string;
   readonly name: string;
   readonly host: HostKind;
-  // the git host's name when it is not the public one, else ""
   readonly hostName: string;
   readonly project: string;
   readonly builds: readonly Build[];
   readonly testFiles: readonly string[] | "default";
-  // whether the clone keeps integration tests in src/integrationTest
   readonly integrationTests: boolean;
   readonly oneWayDoor: readonly { readonly glob: string; readonly tool: string }[];
-  // the CI files found, relative to the clone
   readonly ci: readonly string[];
   readonly toolchain: Declared | "none";
 };
 
-// the model API: every implementer run needs it
 export const MODEL_HOST = "api.anthropic.com";
 
 const MAVEN_HOSTS = ["repo.maven.apache.org", "repo1.maven.org"];
 
-// the build tools, in the order the first one wins the verify command
 const BUILDS: readonly (Build & { readonly needs?: string })[] = [
   {
     name: "Gradle",
@@ -111,7 +105,6 @@ const REMOTES: readonly RegExp[] = [
   /^(?:[^@/]+@)?([^/:]+):(?!\/)(.+?)(?:\.git)?\/?$/,
 ];
 
-// hostOf : the git host's kind and its name when it is not the public one. Pure.
 export function hostOf(host: string): { readonly kind: HostKind; readonly name: string } {
   if (host === "github.com") {
     return { kind: "github", name: "" };
@@ -127,7 +120,6 @@ async function gitOut(clone: string, args: readonly string[], env: NodeJS.Proces
   return { kind: "failed", reason: got.kind === "refused" ? got.reason : got.stderr.trim() };
 }
 
-// cloneRoot : the top folder of the clone that holds `dir`
 export async function cloneRoot(dir: string, env: NodeJS.ProcessEnv): Promise<Result<string>> {
   const top = await gitOut(dir, ["rev-parse", "--show-toplevel"], env);
   return top.kind === "ok" ? top : { kind: "failed", reason: `${dir} is not a git clone; run init inside the clone` };
@@ -158,7 +150,6 @@ async function buildsIn(clone: string): Promise<readonly Build[]> {
   return found;
 }
 
-// modules : the clone's root and each folder one down, where a multi-module build keeps its own sources
 async function modules(clone: string): Promise<readonly string[]> {
   const entries = await readdir(clone, { withFileTypes: true }).catch(() => []);
   const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules");
@@ -184,8 +175,6 @@ async function ciIn(clone: string): Promise<readonly string[]> {
   return (await isThere(join(clone, ".gitlab-ci.yml"))) ? [...github.toSorted(), ".gitlab-ci.yml"] : github.toSorted();
 }
 
-// the integration tests' folder; the built-in test globs already hold it, so the project file needs it only if they
-// ever stop
 const IT_GLOB = "**/src/integrationTest/**";
 
 async function integrationTestsIn(clone: string): Promise<boolean> {
@@ -196,7 +185,6 @@ async function testFilesIn(clone: string): Promise<Detected["testFiles"]> {
   return (await integrationTestsIn(clone)) && !TEST_FILES.includes(IT_GLOB) ? [...TEST_FILES, IT_GLOB] : "default";
 }
 
-// tools : what one toolchain file declares. Pure.
 export function toolsOf(file: string, text: string): readonly Tool[] {
   const lines = text.split("\n").map((l) => l.replace(/#.*$/, "").trim());
   if (file === ".tool-versions") {
@@ -214,7 +202,6 @@ export function toolsOf(file: string, text: string): readonly Tool[] {
   return miseTools(lines);
 }
 
-// miseTools : the [tools] table of a mise.toml: name = "1", name = ["1"], or name = { version = "1" }. Pure.
 function miseTools(lines: readonly string[]): readonly Tool[] {
   const start = lines.indexOf("[tools]");
   if (start < 0) {
@@ -238,7 +225,6 @@ async function toolchainIn(clone: string): Promise<Detected["toolchain"]> {
   return "none";
 }
 
-// projectName : the factory's name for the project: the clone folder's name, made plain. Pure.
 export function projectName(clone: string): string {
   const plain = basename(clone)
     .replace(/[^A-Za-z0-9._-]/g, "-")
@@ -246,7 +232,6 @@ export function projectName(clone: string): string {
   return plain === "" ? "project" : plain.slice(0, 100);
 }
 
-// detect : everything init reads from the clone that holds `dir`
 export async function detect(dir: string, env: NodeJS.ProcessEnv): Promise<Result<Detected>> {
   const clone = await cloneRoot(dir, env);
   if (clone.kind === "failed") {

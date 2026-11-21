@@ -11,5 +11,4 @@ export const REVIEW_MODELS = {
   logic: "claude-opus-5-5",
 } as const;
 
-// the eval judge's model
 export const JUDGE_MODEL = "claude-sonnet-5-5";

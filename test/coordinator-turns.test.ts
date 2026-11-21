@@ -14,7 +14,6 @@ import {
 import { field } from "../src/core/human-record.js";
 import { tempDir } from "./temp.js";
 
-// one transcript line as Claude Code writes it for an assistant turn
 function assistant(input: number, created: number, read: number): string {
   return JSON.stringify({
     type: "assistant",

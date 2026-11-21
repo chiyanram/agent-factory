@@ -29,7 +29,6 @@ function windowHours(env: NodeJS.ProcessEnv): number | "bad" {
   return /^[1-9]\d?$/.test(raw) && Number(raw) <= 24 ? Number(raw) : "bad";
 }
 
-// projectArg : the one project named, none for every project, or "bad"
 function projectArg(positionals: readonly string[]): { readonly project?: string } | "bad" {
   const [project] = positionals;
   if (project === undefined) {
@@ -38,8 +37,6 @@ function projectArg(positionals: readonly string[]): { readonly project?: string
   return positionals.length === 1 && plainName(project) ? { project } : "bad";
 }
 
-// outcomes : each merged ticket's outcome, read from the project's clone (outcome.ts, #487); none when no project is
-// named or its clone is not set, since only then is the clone known
 async function outcomes(
   io: UsageIo,
   spends: Spends,
@@ -50,7 +47,6 @@ async function outcomes(
     repo === ""
       ? []
       : spends.tallies.flatMap((t) => (t.merged !== undefined && t.project === project ? [{ t, m: t.merged }] : []));
-  // one fetch for every merged ticket of the run
   const why = merged.length === 0 ? "" : await fetchDefault({ repo, env: io.env });
   const read = new Map<string, MergeOutcome>();
   for (const { t, m } of merged) {
@@ -59,12 +55,10 @@ async function outcomes(
   return read;
 }
 
-// outcomeFor : one merge's outcome after the run's one fetch, or unknown with why the fetch failed
 function outcomeFor(input: Parameters<typeof outcomeOf>[0], why: string): Promise<MergeOutcome> {
   return why === "" ? outcomeOf({ ...input, fetched: true }) : Promise.resolve({ kind: "unknown", why });
 }
 
-// printed : the table on stdout and each problem on stderr; 1 when there was one
 function printed(io: UsageIo, spends: Spends, hours: number, read: ReadonlyMap<string, MergeOutcome>): number {
   const zone = readerZone(io.env);
   const now = io.now();
@@ -82,7 +76,6 @@ function printed(io: UsageIo, spends: Spends, hours: number, read: ReadonlyMap<s
   return spends.problems.length === 0 ? 0 : 1;
 }
 
-// usageCommand : the table on stdout; a ticket whose records cannot be read is named on stderr, and exits 1
 export async function usageCommand(positionals: readonly string[], io: UsageIo): Promise<number> {
   const which = projectArg(positionals);
   if (which === "bad") {

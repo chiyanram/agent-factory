@@ -23,7 +23,6 @@ describe("a Claude Code plugin is enabled at user scope (#555)", () => {
   const userSettings = (value: unknown): void => {
     writeFileSync(join(config, "settings.json"), typeof value === "string" ? value : JSON.stringify(value));
   };
-  // installed_plugins.json as Claude Code 2.1.326 writes it
   const installed = (scope = "user"): void => {
     writeFileSync(
       join(config, "plugins", "installed_plugins.json"),

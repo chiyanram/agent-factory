@@ -77,7 +77,6 @@ describe("readProjectFile (ADR-0014 P3, #91)", () => {
       value: {
         gate: { kind: "local", verify: ["make", "verify"] },
         ready: { programs: ["make", "./gradlew"], timeoutSeconds: 600, testFiles: TEST_FILES, judgeFiles: [] },
-        // checked as the proxy will use it: sorted, and a host a dotted entry covers dropped
         egress: { allow: [".gradle.org", "api.anthropic.com", "repo.maven.apache.org"] },
       },
     });

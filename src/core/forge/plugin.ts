@@ -2,6 +2,9 @@
 // pinned plugin (callPlugin: the hash checked, the capability and the write declared); its answer is read back with the
 // seam's own shapes (shapes.ts), so a plugin that answers anything else fails that call and nothing downstream sees it.
 // The dispatcher, the reviewer and every other caller keep the same interface, whatever forge plugin answers.
+//
+// A post is cleaned before it leaves for a plugin, so a plugin gets no secret and no model text that cleanBody has not
+// seen.
 
 import type { Note } from "../notes.js";
 import type { PluginResult } from "../plugin/contract.js";
@@ -21,7 +24,6 @@ export type PluginTarget = {
   readonly setup: Setup;
   readonly plugin: string;
   readonly forge: ForgeName;
-  // FACTORY_PROJECT: owner/name on GitHub, the full path on GitLab; the plugin checks it again
   readonly project: string;
 };
 
@@ -36,8 +38,6 @@ function reasonOf(target: PluginTarget, op: string, answer: PluginResult): strin
     : `${target.plugin} ${op} answered ${answer.kind}${why}`;
 }
 
-// a forge call's limits are the built-in adapter's: an answer of up to 64 MiB, and time to wait out a rate limit on
-// every try (api.ts), not the 1 MiB and the minute of any other plugin call
 export const FORGE_LIMITS: Limits = { timeoutMs: (MAX_WAIT * 4 + 120) * 1000, maxBytes: 64 * 1024 * 1024 };
 
 function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<PluginResult>> {
@@ -52,8 +52,6 @@ function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<P
   );
 }
 
-// read : a read op's value, in the shape the Forge interface says; unknown: the value of an op that a plugin built
-// before it answers unsupported, when the seam has one that means "nothing here"
 async function read<T>(
   target: PluginTarget,
   op: ForgeOp,
@@ -75,7 +73,6 @@ async function read<T>(
   return r.done(shape(r, answer.value.fields.value));
 }
 
-// write : a write op, done or not
 async function write(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<unknown>> {
   const answer = await ask(target, op, input);
   if (answer.kind === "failed") {
@@ -102,9 +99,6 @@ async function opened(target: PluginTarget, input: object): Promise<Result<numbe
   return r.done(r.int(done.value, ""));
 }
 
-// cleanedPost : a post as it leaves the host for a plugin: its title, field values and items scrubbed, and a PR body's
-// Markdown cleaned, so a plugin gets no secret and no model text that cleanBody has not seen, whether or not it
-// cleans them again. Labels are the factory's own words, which renderPost checks.
 export function cleanedPost<P extends BodyPost>(post: P): P {
   const scrubbed = {
     ...post,
@@ -120,17 +114,14 @@ export function cleanedPost<P extends BodyPost>(post: P): P {
       };
 }
 
-// landedOf : a plugin's answer to landed: when, as which commit and by whom (#487)
 function landedOf(r: Reader, v: unknown): Landed {
   return { at: r.text(v, "at"), sha: r.text(v, "sha"), by: r.text(v, "by") };
 }
 
-// branchStateRead : a plugin's answer to branchState, one of the four states or a failed read
 function branchStateRead(r: Reader, v: unknown): BranchState {
   return r.word(v, "", ["none", "merged", "opened", "closed"]);
 }
 
-// pluginForge : the Forge that one forge plugin serves
 export function pluginForge(target: PluginTarget): Forge {
   return {
     name: target.forge,
@@ -154,7 +145,6 @@ export function pluginForge(target: PluginTarget): Forge {
     status: (i) => written(target, "status", i),
     ciConfig: (): Promise<Result<CiConfig>> => read(target, "ciConfig", {}, ciConfigOf),
     claimed: (i) => read(target, "claimed", i, numbersOf),
-    // a plugin built before the waiting read keeps no waiting label, so no session waits on it
     waiting: (i): Promise<Result<readonly Waiting[]>> => read(target, "waiting", i, waitingOf, []),
     openChange: (i) => opened(target, { ...i, title: scrubSecrets(i.title), body: cleanedPost(i.body) }),
     changes: (i): Promise<Result<Changes>> => read(target, "changes", i, changesOf),

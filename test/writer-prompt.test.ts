@@ -51,8 +51,6 @@ describe("the writer's words", () => {
     expect(evidenceRules([])).toContain("never the evidence for what a file says");
   });
 
-  // a row quoted its pattern in double quotes with a backtick inside, which a shell runs as a command,
-  // so the ready check refused it three times; the rule tells the writer to use single quotes, and its own example runs
   it("tells the writer to quote patterns with single quotes, and its example is a row the ready check runs (#62)", () => {
     const rules = evidenceRules(["./gradlew"]);
     expect(rules).toContain("Quote patterns with single quotes");
@@ -76,8 +74,6 @@ describe("the writer's words", () => {
     expect(texts.filter((t) => !t.includes(FOREGROUND) || !t.includes(FLOOR))).toEqual([]);
   });
 
-  // a done report has no free-text field, so a CI run that finds no cause in the code stops as blocked, where its
-  // reason reaches the person, and never re-runs, waits out or drops a red check
   it("tells the CI run to find the root cause first, and to stop as blocked when it finds none in the code", async () => {
     const card = await readCard([], "implementer");
     if (card.kind !== "ok") throw new Error(card.reason);

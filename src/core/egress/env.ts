@@ -25,7 +25,8 @@ export function proxyEnv(proxy: ProxyAddress): Readonly<Record<string, string>> 
     https_proxy: url,
     NO_PROXY: noProxy,
     no_proxy: noProxy,
-    // every JVM reads it, so Maven, Gradle and its daemon all go through the proxy
+    // every JVM reads it at start, so Maven, Gradle and its daemon all go through the proxy
+    // https://docs.oracle.com/en/java/javase/21/docs/specs/jvmti.html
     JAVA_TOOL_OPTIONS: jvm.join(" "),
   };
 }

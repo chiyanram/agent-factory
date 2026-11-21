@@ -11,10 +11,6 @@ import { readDoorConfig, readDoorToken, storeDoorToken, doorDir } from "../src/c
 import { field } from "../src/core/human-record.js";
 import { tempDir } from "./temp.js";
 
-// The Discord door (ADR-0023 D4): a code-only bot that writes a START or an approval only through the door seam,
-// for a person its own check named from people.json. Every Discord call goes through a fake transport, so no test
-// reaches the network.
-
 const SPEC = [
   "# PROJ-1: renewals refuse a reserved loan",
   "",
@@ -45,7 +41,6 @@ const RAM = "300000000000000003";
 const ALICE = "300000000000000004";
 const STRANGER = "300000000000000005";
 const APP = "500000000000000001";
-// a planted bot token in the shape Discord gives one, joined at run time so the source holds no token-shaped string
 const TOKEN = ["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GaBcDe", "abcdefghijklmnopqrstuvwxyz0123456789AB"].join(".");
 
 let home = "";
@@ -93,7 +88,6 @@ function deps(over: Partial<DoorDeps> = {}): DoorDeps {
   };
 }
 
-// Who : who acts, and where; each field left out is the mapped default, and guild: undefined is a direct message
 type Who = {
   readonly user?: string;
   readonly bot?: true;
@@ -104,7 +98,6 @@ type Who = {
 
 const DEFAULTS = { user: RAM, guild: GUILD, channel: CHANNEL } as const;
 
-// channelOf : the interaction's channel object: a thread (type 11) when it has a parent
 function channelOf(id: string, parent: string | undefined) {
   return parent === undefined ? { id, type: 0 } : { id, type: 11, parent_id: parent };
 }

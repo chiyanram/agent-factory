@@ -20,7 +20,6 @@ function readAll(): Promise<string> {
 const CTRL_C = "\u0003";
 const STOPS = ["\r", "\n", CTRL_C];
 
-// the first Enter or Ctrl-C in a chunk, or -1
 function stopAt(chunk: string): number {
   const found = STOPS.map((c) => chunk.indexOf(c)).filter((i) => i >= 0);
   return found.length === 0 ? -1 : Math.min(...found);

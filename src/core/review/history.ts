@@ -12,12 +12,9 @@ export type Last =
   | { readonly kind: "round"; readonly round: number; readonly head: string; readonly patchId: string };
 
 export type History = {
-  // full rounds: a reuse line is no round
   readonly rounds: number;
   readonly last: Last;
-  // the Act on count of the last full round at each patch-id
   readonly actOn: ReadonlyMap<string, number>;
-  // every "- " line of the factory's summaries, to tell a protected file listed before from a new one
   readonly listed: ReadonlySet<string>;
 };
 
@@ -42,7 +39,6 @@ function lastOf(lines: readonly string[]): Last {
     : { kind: "round", round: Number(m[1]), head: m[2] ?? "", patchId: m[3] ?? "" };
 }
 
-// history : rounds, the last reviewed head, and the Act on count per patch-id, from the factory's notes oldest first
 export function history(input: { readonly notes: readonly Note[]; readonly factory: string }): History {
   const mine = reviewerNotes(input.notes, input.factory);
   const firsts = mine.map((n) => firstLine(n.body));
@@ -59,7 +55,6 @@ export function history(input: { readonly notes: readonly Note[]; readonly facto
   return { rounds: full.length, last: lastOf(firsts), actOn, listed };
 }
 
-// the line a protected file gets in the summary, exactly as the post template writes it
 export function protectedLine(path: string): string {
   return cleanField(`Protected · ${path}`);
 }

@@ -62,8 +62,6 @@ describe("brokenCites, in a real clone", () => {
   });
 });
 
-// two annotated tags whose ids share the prefix 3f1cb2d, found once by brute force over fixed content: git names
-// every object by its content, so the same commands make the same two ids on any machine
 describe("brokenCites, with a short commit that names more than one object", () => {
   let repo = "";
   const env = {

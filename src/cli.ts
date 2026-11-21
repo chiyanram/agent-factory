@@ -13,16 +13,12 @@ import { runProcess } from "./core/forge/api.js";
 import { readHidden } from "./core/token/index.js";
 import { createInterface, type Interface } from "node:readline/promises";
 
-// readLine : one line typed at the terminal, for init's questions (#369); one reader for the whole command
 let lines: Interface | undefined;
 function readLine(prompt: string): Promise<string> {
   lines ??= createInterface({ input: process.stdin, output: process.stderr, terminal: process.stdin.isTTY });
   return lines.question(prompt).catch(() => "");
 }
 
-// background : this command line again, detached from this terminal, its output appended to the log, so it outlives
-// the command that started it (the orchestrator loop, #305). It gets this process's own environment, so it resolves
-// the settings layers itself.
 function background(call: {
   readonly args: readonly string[];
   readonly log: string;
@@ -72,7 +68,6 @@ runCli(process.argv.slice(2), {
     agent: runInFolder,
     interactive: ({ bin, args, cwd, env, signal }) =>
       new Promise((resolve) => {
-        // Ctrl-C reaches the session, which uses it to stop a turn; the launcher waits for the session to end
         const ignore = (): void => undefined;
         process.on("SIGINT", ignore);
         process.on("SIGQUIT", ignore);
@@ -83,7 +78,6 @@ runCli(process.argv.slice(2), {
         };
         const child = spawn(bin, [...args], { cwd, env, stdio: "inherit", ...(signal ? { signal } : {}) });
         child.on("error", (error) => {
-          // an abort ends the session on purpose: its exit resolves the launch
           if (error.name === "AbortError") {
             return;
           }

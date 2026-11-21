@@ -7,8 +7,6 @@ import { usageCommand } from "../src/usage-cli.js";
 import { runCli, type Io } from "../src/app.js";
 import { tempDir } from "./temp.js";
 
-// Every run records its tokens and cost, and `usage` sums them from the run records (#131).
-
 const RESULT = {
   type: "result",
   total_cost_usd: 1.5,
@@ -31,7 +29,6 @@ describe("a run's spend, from the agent CLI's output", () => {
     expect(streamSpend(whole)).toEqual({ usd: 1.5, tokens: 116 });
     const pieces = text.match(/.{1,7}/gs) ?? [];
     expect(streamSpend(pieces.reduce(streamOf, NO_STREAM))).toEqual({ usd: 1.5, tokens: 116 });
-    // the last line with no newline yet still counts
     expect(streamSpend(streamOf(NO_STREAM, JSON.stringify(RESULT)))).toEqual({ usd: 1.5, tokens: 116 });
   });
 
@@ -255,7 +252,6 @@ describe("agent-factory usage", () => {
       writerEnded("2026-11-09T09:30:00Z", { usd: 4, tokens: 4 }, "cleanup"),
       { at: "2026-11-09T10:00:00Z", kind: "review-ended", head, actOn: 0, spend: { usd: 5, tokens: 5 } },
       { at: "2026-11-09T10:30:00Z", kind: "spent", phase: "review", head, spend: { usd: 6, tokens: 6 } },
-      // a round's line with its spend per run (#337): each finder's by lens, and the verify pass's
       {
         at: "2026-11-09T11:00:00Z",
         kind: "review-ended",
@@ -267,7 +263,6 @@ describe("agent-factory usage", () => {
           verify: { usd: 3, tokens: 3 },
         },
       },
-      // a failed round's, whose verify pass never ran
       {
         at: "2026-11-09T11:30:00Z",
         kind: "spent",
@@ -327,7 +322,6 @@ describe("agent-factory usage", () => {
   it("prints the table, names a ticket whose records cannot be read, and exits 1 for it", async () => {
     write("ledger", "PROJ-1", [writerEnded("2026-11-09T09:30:00Z", { usd: 2, tokens: 10 })]);
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
-    // a bad middle line (a bad last line is set aside as torn, #483)
     writeFileSync(
       join(home, "runs", "ledger", "PROJ-2.jsonl"),
       `not a record\n${JSON.stringify(writerEnded("2026-11-09T09:40:00Z", { usd: 1, tokens: 1 }))}\n`,
@@ -362,7 +356,6 @@ describe("agent-factory usage", () => {
   });
 
   it("starts today and the month at the reader's midnight", () => {
-    // 21:00 in Tokyo on the 9th
     expect(periodsAt(NOW, 5, { name: "Asia/Tokyo" })).toEqual({
       day: Date.parse("2026-11-08T15:00:00Z"),
       window: Date.parse("2026-11-09T07:00:00Z"),

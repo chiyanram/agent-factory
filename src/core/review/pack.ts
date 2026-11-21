@@ -14,7 +14,8 @@
 // Section 4 always holds the baseline review checks (rules.ts BASELINE), whatever the AGENTS.md files say; a pointer
 // to one of them is not repeated in section 3, and a missing one fails the pack (#226).
 // Every block sits in a fence longer than any backtick run inside it (fence.ts). One pack per head: a second call reuses
-// it. A step that fails leaves no pack behind, so a broken pack is never reused.
+// it. A step that fails leaves no pack behind, so a broken pack is never reused. A change with a control character in a
+// file name is refused, because that name could forge a line in the pack or the summary.
 
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,13 +29,10 @@ import { agentsChain, BASELINE, readRules, type Pointer } from "./rules.js";
 
 export type Previous = { readonly kind: "none" } | { readonly kind: "head"; readonly sha: string };
 
-// the approval a human gave the ticket's spec: the hash they saw, or none; a tiny ticket's START stands for it, bound to the
-// spec as it is (round.ts approvalFor, #227)
 export type Approval =
   | { readonly kind: "approved"; readonly hash: string; readonly by: string; readonly at: string }
   | { readonly kind: "none" };
 
-// where the change's contract comes from: the project's spec store, the ticket, and the ticket's approval
 export type SpecSource = {
   readonly store: SpecStore;
   readonly project: string;
@@ -43,21 +41,15 @@ export type SpecSource = {
 };
 
 export type PackInput = {
-  // the project's clone
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
   readonly change: Change;
   readonly defaultBranch: string;
-  // the rulebook plugin folder, the one that holds skills/<domain>/references/
   readonly rulebook: string;
-  // the baseline review checks of the project's process (process/read.ts); none given is the built-in BASELINE
   readonly baseline?: readonly Pointer[];
   readonly previous: Previous;
   readonly spec: SpecSource;
-  // the build's deviation notes from the change (deviations.ts, ADR-0018): section 6 carries them beside the design;
-  // none given is none
   readonly deviations?: readonly string[];
-  // where packs are kept
   readonly dir: string;
   readonly mark: "!" | "#";
 };
@@ -68,12 +60,8 @@ export type Pack = {
   readonly patchId: string;
   readonly base: string;
   readonly reused: boolean;
-  // the approved spec's acceptance criteria, as section 5 numbers them (1 is the first); none when no spec is approved.
-  // A Spec finding names one as its rule, AC<n>, and the round quotes that line from here, never from the model (#219).
   readonly criteria: readonly string[];
-  // the lane the spec names, approved or not: it picks the round's lenses (#237)
   readonly lane: Lane;
-  // the default branch's commit the rules came from: a lens's rubric file is read there too (#237)
   readonly master: string;
 };
 
@@ -92,7 +80,6 @@ function asResult(ran: Awaited<ReturnType<typeof hostGit>>, args: readonly strin
 
 type Where = Pick<Parameters<typeof hostGit>[0], "repo" | "stdin">;
 
-// with stdin (patch-id), git runs outside any repo, so it reads no repo's config
 function whereFor(repo: string, stdin: string | undefined): Where {
   return stdin === undefined
     ? { repo: { kind: "repo", path: repo }, stdin: { kind: "none" } }
@@ -133,7 +120,6 @@ function shapeProblem(input: PackInput): string {
   return plain ? previousProblem(input.previous) : `${input.mark}${c.number}: a branch name that is not plain`;
 }
 
-// missingBaseline : the first baseline review check the rulebook lacks, as the reason, or ""
 async function missingBaseline(rulebook: string, baseline: readonly Pointer[]): Promise<string> {
   for (const p of baseline) {
     const path = referencePath(rulebook, p);
@@ -148,8 +134,6 @@ function baselineOf(input: PackInput): readonly Pointer[] {
   return input.baseline ?? BASELINE;
 }
 
-// checks that need no git: the rulebook and its baseline review checks, the previous head, the target branch, the
-// branch names
 async function precheck(input: PackInput): Promise<string> {
   const missing = await missingBaseline(input.rulebook, baselineOf(input));
   return missing === "" ? shapeProblem(input) : missing;
@@ -162,7 +146,6 @@ async function trimmed(git: Git, args: readonly string[]): Promise<Result<string
   return out.kind === "ok" ? { kind: "ok", value: out.value.trim() } : out;
 }
 
-// tip : fetches the default branch and the change's branch; the branch's tip must be the change's head
 async function tip(input: PackInput, git: Git): Promise<Result<string>> {
   const n = input.change.number;
   const fetched = await git([
@@ -182,7 +165,6 @@ async function tip(input: PackInput, git: Git): Promise<Result<string>> {
   return head;
 }
 
-// heads : the change's head, the default branch's tip, and their merge-base
 async function heads(input: PackInput, git: Git): Promise<Result<Heads>> {
   const head = await tip(input, git);
   if (head.kind === "failed") {
@@ -202,7 +184,6 @@ function diff(git: Git, from: string, to: string): Promise<Result<string>> {
   return git(["-c", "core.quotePath=true", "diff", ...DIFF_FLAGS, from, to]);
 }
 
-// patchId : the stable patch-id of the change against its merge-base, with fixed flags so it is the same everywhere
 async function patchId(git: Git, h: Heads): Promise<Result<string>> {
   const patch = await diff(git, h.base, h.head);
   const id = patch.kind === "ok" ? await git(["patch-id", "--stable"], patch.value) : patch;
@@ -223,7 +204,6 @@ type Collected = {
   readonly pointers: readonly Pointer[];
 };
 
-// rule text worth a section: a file at the default branch with text in it (a binary or empty file is no rule text)
 async function ruleText(git: Git, h: Heads, path: string): Promise<Result<string>> {
   const shown = await git(["show", `${h.master}:${path}`]);
   return shown.kind === "ok" && !shown.value.includes("\u0000") ? shown : { kind: "ok", value: "" };
@@ -257,7 +237,6 @@ async function collectOne(
   return links.kind === "ok" ? { kind: "ok", value: { links: links.value, pointers: read.rules.pointers } } : links;
 }
 
-// collect : every AGENTS.md on the touched paths at the default branch, with its links and rulebook pointers
 async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<Result<Collected>> {
   const agents: string[] = [];
   const found: { links: string[]; pointers: Pointer[] } = { links: [], pointers: [] };
@@ -289,7 +268,6 @@ async function unresolved(rulebook: string, pointers: readonly Pointer[]): Promi
   return "";
 }
 
-// The spec as section 5 sees it: the approved one, or one whose hash no approval records
 type Contract =
   | { readonly kind: "approved"; readonly spec: Spec; readonly by: string; readonly at: string }
   | { readonly kind: "unapproved"; readonly hash: string; readonly lane: Lane; readonly approval: Approval };
@@ -300,7 +278,6 @@ function unread(read: Exclude<SpecRead, { readonly kind: "found" }>, name: strin
     : read.reason;
 }
 
-// specOf : the ticket's spec from the store, as checked; no spec, or one that is not ready, fails
 async function specOf(source: SpecSource): Promise<Result<Spec>> {
   const name = `${source.project}/${source.ticket}`;
   const read = await readSpec({ store: source.store, project: source.project, ticket: source.ticket });
@@ -313,7 +290,6 @@ async function specOf(source: SpecSource): Promise<Result<Spec>> {
     : { kind: "failed", reason: `the spec of ${name} is not ready: ${checked.problems.join("; ")}` };
 }
 
-// contract : the spec, approved only while its hash is the one the approval records
 async function contract(source: SpecSource): Promise<Result<Contract>> {
   const spec = await specOf(source);
   if (spec.kind === "failed") {
@@ -339,7 +315,6 @@ type Parts = {
   readonly contract: Contract;
 };
 
-// changeSection : the description, as data and never as the contract, then the diff
 async function changeSection(p: Parts): Promise<Result<string>> {
   const d = await diffSection(p);
   return d.kind === "ok"
@@ -398,7 +373,6 @@ async function rulesSection(p: Parts): Promise<Result<string>> {
     const text = await ruleText(p.git, p.h, file);
     blocks.push(fence({ title: file, text: text.kind === "ok" ? text.value : "", info: "markdown" }));
   }
-  // a baseline review check is in section 4 already
   const seen = new Set<string>(baselineOf(p.input).map((b) => `${b.domain}/${b.reference}`));
   for (const ptr of p.rules.pointers) {
     const key = `${ptr.domain}/${ptr.reference}`;
@@ -416,7 +390,6 @@ async function rulesSection(p: Parts): Promise<Result<string>> {
   return { kind: "ok", value: blocks.join("") };
 }
 
-// the design files and links the spec's "## Design" section names; a URL is never read as a file
 function designs(design: string): { readonly files: readonly string[]; readonly urls: readonly string[] } {
   const urls = design.match(/https?:\/\/[^\s)>\]]*/g) ?? [];
   const rest = urls.reduce((text, u) => text.replace(u, " "), design);
@@ -428,7 +401,6 @@ function designFiles(c: Contract): readonly string[] {
   return c.kind === "approved" ? designs(c.spec.design).files : [];
 }
 
-// linkedDesign : each design file as the default branch holds it, then each URL, listed and never fetched
 async function linkedDesign(p: Parts, d: ReturnType<typeof designs>): Promise<string> {
   const branch = p.input.defaultBranch;
   const parts: string[] = [];
@@ -443,7 +415,6 @@ async function linkedDesign(p: Parts, d: ReturnType<typeof designs>): Promise<st
   return parts.join("") + d.urls.map((u) => `\n- ${u}: linked, not fetched\n`).join("");
 }
 
-// deviationsPart : the build's deviation notes, fenced as data; none when there are none. Pure.
 function deviationsPart(deviations: readonly string[]): string {
   return deviations.length === 0
     ? ""
@@ -453,12 +424,10 @@ function deviationsPart(deviations: readonly string[]): string {
       ].join("");
 }
 
-// designSection : the design the approved spec links, then the build's deviation notes
 async function designSection(p: Parts): Promise<string> {
   return (await linkedSection(p)) + deviationsPart(p.input.deviations ?? []);
 }
 
-// linkedSection : the design the approved spec links, or why there is none
 async function linkedSection(p: Parts): Promise<string> {
   const c = p.contract;
   if (c.kind === "unapproved") {
@@ -473,7 +442,6 @@ async function linkedSection(p: Parts): Promise<string> {
     : linkedDesign(p, d);
 }
 
-// specSection : the approved spec's intent and criteria, or why there is none to review against
 function specSection(p: Parts): string {
   const c = p.contract;
   const name = `${p.input.spec.project}/${p.input.spec.ticket}`;
@@ -518,7 +486,6 @@ async function editsSection(p: Parts): Promise<Result<string>> {
 
 type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly baseline: string };
 
-// baselineSection : each baseline review check, fenced as data
 async function baselineSection(rulebook: string, baseline: readonly Pointer[]): Promise<Result<string>> {
   const blocks: string[] = [];
   for (const b of baseline) {
@@ -604,8 +571,6 @@ function controlled(path: string): boolean {
   return /\p{Cc}/u.test(path);
 }
 
-// touchedFiles : the files the change touches; a name with a control character could forge a line in the pack or the
-// summary, so such a change is refused and a person reviews it
 async function touchedFiles(git: Git, h: Heads): Promise<Result<readonly string[]>> {
   const names = await git(["diff", "--name-only", "--no-renames", "-z", h.base, h.head]);
   if (names.kind === "failed") {
@@ -621,7 +586,6 @@ async function touchedFiles(git: Git, h: Heads): Promise<Result<readonly string[
       };
 }
 
-// resolvedRules : the rules on the touched paths, each rulebook pointer resolved
 async function resolvedRules(
   input: PackInput,
   git: Git,
@@ -658,7 +622,6 @@ async function gather(input: PackInput, git: Git, h: Heads): Promise<Result<Part
     : c;
 }
 
-// prepare : every check before the pack is gathered
 async function prepare(input: PackInput, git: Git): Promise<Result<Heads>> {
   const refused = await precheck(input);
   if (refused !== "") {
@@ -674,17 +637,14 @@ async function written(path: string, p: Parts): Promise<Result<string>> {
   return text.kind === "ok" ? write(path, text.value) : text;
 }
 
-// criteriaOf : the acceptance criteria a Spec finding may quote: the approved spec's, or none (#219)
 function criteriaOf(c: Contract): readonly string[] {
   return c.kind === "approved" ? c.spec.criteria : [];
 }
 
-// laneOf : the lane the spec names, approved or not (#237). Pure.
 function laneOf(c: Contract): Lane {
   return c.kind === "approved" ? c.spec.lane : c.lane;
 }
 
-// buildPack : the pack for the change's head, from the cache when it is there.
 export async function buildPack(input: PackInput): Promise<Result<Pack>> {
   const git = gitFor(input);
   const h = await prepare(input, git);

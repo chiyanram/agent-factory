@@ -1,5 +1,8 @@
-// types — the forge seam (ADR-0010): one interface, a GitHub and a GitLab adapter, the same shapes from both. No bash
-// script calls a forge any more (#138).
+// types — the forge seam (ADR-0010): one interface, a GitHub and a GitLab adapter, the same shapes from both.
+//
+// A state the git host sends that is not in a table is "unknown", never "none". An issue method given a pull or merge
+// request number fails, so nothing is written to it. removeLabel succeeds when the label is gone afterwards, even if a
+// person removed it first. Every post goes through the posting template, so no free text is posted.
 
 import type { BodyPost, Post } from "../post.js";
 import type { Note } from "../notes.js";
@@ -7,27 +10,19 @@ import type { Done, Result } from "./api.js";
 
 export type ForgeName = "github" | "gitlab";
 
-// The pipeline of a change's head, in the factory's words. A state the forge sends that is not in the table is
-// "unknown" and keeps what it said, never read as "none" (#124).
 export type PipelineState = "success" | "failed" | "running" | "canceled" | "skipped" | "manual" | "none";
 export type Pipeline = { readonly kind: PipelineState } | { readonly kind: "unknown"; readonly raw: string };
 
-// Where a line finding is anchored: GitHub needs the head commit, GitLab the merge request's diff refs.
 export type Anchor =
   | { readonly kind: "github"; readonly head: string }
   | { readonly kind: "gitlab"; readonly base: string; readonly start: string; readonly head: string };
 
 export type ChangeState = "opened" | "merged" | "closed";
 
-// a branch's changes, as one state: none when no change was ever opened from it (#494)
 export type BranchState = ChangeState | "none";
 
-// an issue's state: open; closed as completed or as not planned; or closed with no merge seen, where the git host keeps
-// no reason for a close and no merged change closes or mentions it (#494: a blocker a person closed counts by why)
 export type IssueState = "open" | "completed" | "not_planned" | "closed";
 
-// Whether a change merges into its target as it stands (#103): conflict, clean, or unknown while the git host has not
-// worked it out yet (GitHub and GitLab both check it lazily, after a push to either branch).
 export type Mergeable = "clean" | "conflict" | "unknown";
 
 export type Change = {
@@ -41,73 +36,50 @@ export type Change = {
   readonly anchor: Anchor;
 };
 
-// A person's access to the project. maintainer: GitLab Maintainer or more, GitHub write access or more. developer:
-// GitLab Developer. guest: any lower access. bot: a GitLab bot account (a project or group access token, a service
-// account); a GitHub collaborator is always a user.
 export type Level = "maintainer" | "developer" | "guest";
 export type Person = { readonly name: string; readonly level: Level; readonly bot: boolean };
 
 export type OpenChange = {
   readonly number: number;
-  // the source branch: the dispatcher finds a ticket's change by it (factory/<ticket>)
   readonly branch: string;
-  // the branch lives in another repository (a fork): never the factory's own change
   readonly fork: boolean;
   readonly head: string;
   readonly draft: boolean;
   readonly labels: readonly string[];
   readonly pipeline: Pipeline;
-  // whether it merges into its target as it stands
   readonly mergeable: Mergeable;
-  // every comment, oldest first
   readonly comments: readonly Note[];
 };
 
 export type Changes = {
   readonly team: readonly Person[];
   readonly open: readonly OpenChange[];
-  // the merged changes that still carry the claim label
   readonly merged: readonly MergedChange[];
 };
 
 export type MergedChange = { readonly number: number; readonly branch: string; readonly fork: boolean };
-// A change that landed on its target, as the git host recorded it (#487): when, the commit it landed as (the merge,
-// squash or fast-forwarded head commit), and who landed it
 export type Landed = { readonly at: string; readonly sha: string; readonly by: string };
 
-// An open issue that carries a label, and when that label was last put on it: a ticket session that waits for the
-// operator's word. since is UTC, "" when the git host keeps no time for it.
 export type Waiting = { readonly number: number; readonly title: string; readonly since: string };
 
 export type LineFinding = { readonly file: string; readonly line: number };
 
-// The CI config file the forge runs for the project (#115): a file in this repository, or none here (GitHub reads
-// .github/workflows only; a GitLab project can run a file kept in another project).
 export type CiConfig =
   | { readonly kind: "file"; readonly path: string }
   | { readonly kind: "none"; readonly why: string };
 
-// A commit status the factory posts at a head (#91): the local verifier's result, read back by poll as the pipeline.
 export type StatusState = "pending" | "success" | "failed";
-// One failed CI job at a change's head (#171), for a CI run of the writer: its name, and the end of its log when the
-// forge keeps one the factory can read.
 export type JobLog = { readonly kind: "tail"; readonly text: string } | { readonly kind: "none"; readonly why: string };
 export type FailedJob = { readonly name: string; readonly log: JobLog };
 
 export type CommitStatus = {
   readonly sha: string;
-  // the change's branch: GitLab ties the status to the merge request's pipeline through it
   readonly ref: string;
   readonly state: StatusState;
-  // the status's name, such as agent-factory/verify
   readonly context: string;
-  // one line, cut to the forge's limit
   readonly description: string;
 };
 
-// A draft change the host opens after a ticket's first push (#164). Its title and body are the factory's own words: the
-// title is cleaned like any posted field, and the body goes through the posting template. The spec's text never goes
-// in, because at work the spec stays local (#127).
 export type ChangeRequest = {
   readonly branch: string;
   readonly base: string;
@@ -117,55 +89,27 @@ export type ChangeRequest = {
 
 export type Forge = {
   readonly name: ForgeName;
-  // the change's prefix in every line the factory prints: ! on GitLab, # on GitHub
   readonly mark: "!" | "#";
-  // the login the CLI acts as: the factory's own identity on this project
   me(): Promise<Result<string>>;
   change(input: { readonly number: number }): Promise<Result<Change>>;
-  // when, as which commit and by whom a change landed on its target, a read (#487: a ticket's merge touch and its
-  // outcome); a change that has not landed fails. Named so: the seam has no operation named for merging (P6)
   landed(input: { readonly number: number }): Promise<Result<Landed>>;
   defaultBranch(): Promise<Result<string>>;
-  // whether this branch is on the git host, in the repository itself (#227: a START asks first when factory/<ticket> is)
   branchExists(input: { readonly branch: string }): Promise<Result<boolean>>;
-  // where the changes from this branch of the repository itself stand (#494: a blocker holds a build until it is merged):
-  // merged when any is, else opened when any is, else closed when any is, else none
   branchState(input: { readonly branch: string }): Promise<Result<BranchState>>;
-  // an issue's body, "" when it has none (#381: on a personal project the issue is the spec); a pull or merge request
-  // is not an issue, so its number fails
   issueBody(input: { readonly number: number }): Promise<Result<string>>;
-  // an issue's state (#494: a blocker closed as completed, by a person's change on any branch, counts as merged); a pull
-  // or merge request is not an issue, so its number fails
   issueState(input: { readonly number: number }): Promise<Result<IssueState>>;
-  // an issue's body replaced by this text, byte for byte (#542: a spec change in the issue store, sent only on the
-  // person's yes at confirm); a pull or merge request is not an issue, so its number fails and nothing is written. The
-  // caller checks the text: the adapters send it as it is
   setIssueBody(input: { readonly number: number; readonly text: string }): Promise<Done>;
-  // fails unless the forge kept the label
   addLabel(input: { readonly number: number; readonly label: string }): Promise<Done>;
-  // succeeds when the label is gone afterwards, even if someone removed it first
   removeLabel(input: { readonly number: number; readonly label: string }): Promise<Done>;
-  // one comment, rendered from the posting template (#126), so no free text is ever posted
   note(input: { readonly number: number; readonly post: Post }): Promise<Done>;
-  // the change's description replaced, rendered from the posting template like a note (#236: the cleanup run's
-  // deferred list goes in the PR body), then the implementer's Markdown, cleaned (renderBody, #335)
   setBody(input: { readonly number: number; readonly post: BodyPost }): Promise<Done>;
-  // every comment, oldest first
   notes(input: { readonly number: number }): Promise<Result<readonly Note[]>>;
-  // one comment at file:line on the change's head; when the forge refuses that line, an unanchored one that names it
   lineFinding(input: { readonly change: Change; readonly at: LineFinding; readonly post: Post }): Promise<Done>;
-  // one commit status at a head; posting the same context again replaces it
   status(input: CommitStatus): Promise<Done>;
-  // the CI config file the forge runs for this project, as the project's settings say
   ciConfig(): Promise<Result<CiConfig>>;
-  // the numbers of the changes in that state that carry the label
   claimed(input: { readonly state: "opened" | "merged"; readonly label: string }): Promise<Result<readonly number[]>>;
-  // the open issues, never a pull or merge request, that carry the label, oldest first
   waiting(input: { readonly label: string }): Promise<Result<readonly Waiting[]>>;
-  // the change open from this branch of the repository itself, or a new draft one; two or more fail, so a person decides
   openChange(input: ChangeRequest): Promise<Result<number>>;
-  // everything poll decides on, in as few calls as paging allows
   changes(input: { readonly label: string }): Promise<Result<Changes>>;
-  // the failed CI jobs at the change's head: every name, and the log's last lines for the first few (#171)
   failedJobs(input: { readonly number: number; readonly head: string }): Promise<Result<readonly FailedJob[]>>;
 };

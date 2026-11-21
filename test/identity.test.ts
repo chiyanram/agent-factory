@@ -5,7 +5,6 @@ import type { Runner } from "../src/core/forge/api.js";
 const answer =
   (stdout: string, code = 0, stderr = ""): Runner =>
   async () => ({ code, stdout, stderr });
-// 2026-11-07T05:00:00Z, an hour before the token ends
 const NOW = Date.parse("2026-11-07T05:00:00Z") / 1000;
 const MINTED = JSON.stringify({
   token: "ghs_0123456789abcdefghij",

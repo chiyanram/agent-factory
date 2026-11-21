@@ -28,7 +28,6 @@ const SAYS_YES = /^Breaking change:\s*yes\b/i;
 const FOOTER = /^BREAKING CHANGE: \S/;
 const BANG = /^[a-z]+\([^)]*\)!: /;
 
-// placeholders : each <placeholder> the template holds, once
 export function placeholders(template: string): readonly string[] {
   return [...new Set(template.match(PLACEHOLDER) ?? [])];
 }
@@ -38,7 +37,6 @@ export function problems(body: string, template: string, title = ""): readonly s
   return [...why(lines), ...answered(lines), ...left(body, template), ...unticked(lines), ...breaking(lines, title)];
 }
 
-// breaking : the three marks of a breaking change agree; the title's "!" only when a title is given
 function breaking(lines: readonly string[], title: string): readonly string[] {
   const yes = lines.some((l) => SAYS_YES.test(l));
   return [

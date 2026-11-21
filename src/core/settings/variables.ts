@@ -1,6 +1,8 @@
 // variables — the machine keys, each with the FACTORY_* variable that is its lowest layer (#254), and the checks of a
 // file value. A leaf: machine.ts reads it, and the bundled git host plugins hold machine.ts, so it imports no module
 // at run time (scripts/build-plugins.mjs).
+//
+// A model key must hold a full id, because the agent CLI moves an alias to a new model with no PR here.
 
 import { HOURS_HINT, hoursOf, within } from "../dispatch/hours.js";
 import type { Check, KeyClass, MachineKey } from "./keys.js";
@@ -26,6 +28,7 @@ export const wholeNumber =
       : `a whole number from 1 to ${most}`;
 
 // the fewest and the most AI credits one Copilot run may be capped at: the CLI takes no cap under 30
+// https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/set-session-limit
 export const MOST_AI_CREDITS = [30, 1_000_000] as const;
 
 export const wholeFrom =
@@ -39,8 +42,6 @@ export const list: Check = (value) => (words(value) ? "" : 'a list of words, suc
 
 const text: Check = (value) => (word(value) ? "" : "a word");
 
-// listText : a list key's variable as a list: a JSON list of words, as runEnv writes it, or words split on ":", as a
-// person writes PATH; "bad" for anything else. Pure.
 export function listText(value: string): readonly string[] | "bad" {
   const trimmed = value.trim();
   if (!trimmed.startsWith("[")) {
@@ -54,19 +55,14 @@ export function listText(value: string): readonly string[] | "bad" {
   }
 }
 
-// what a folder list must hold, for its refusal
 export const FOLDERS_HINT = 'a list of folders under your home, such as ["~/.cargo"]';
 
 const folders: Check = (value) => (words(value) ? "" : FOLDERS_HINT);
 
-// pinnedModel : true for a model's full id, one that names its version, such as "claude-sonnet-5-5"; false for an
-// alias ("sonnet", "opus", "sonnet[1m]", "...-latest"), which the agent CLI moves to a new model with no PR here
-// (ADR-0015 E9, #213). Pure.
 export function pinnedModel(value: unknown): boolean {
   return typeof value === "string" && /^[A-Za-z][\w.:@/-]*\d[\w.:@/-]*(\[1m\])?$/.test(value) && !/latest/i.test(value);
 }
 
-// what a pinned model key must hold, for its refusal
 export const PINNED_HINT = 'a full model id, such as "claude-sonnet-5-5", never an alias such as "sonnet"';
 
 const pinned: Check = (value) => (pinnedModel(value) ? "" : PINNED_HINT);
@@ -78,26 +74,17 @@ const runHours: Check = (value) => (hoursOf(value) === "bad" ? HOURS_HINT : "");
 
 const DRY: readonly string[] = ["0", "1"];
 
-// the runner kinds, from the loosest to the strictest (#114): none runs no runner, so no run starts; srt is Anthropic's
-// sandbox runtime on a laptop; vm is a container with its own Docker under Sysbox. A lower layer may only climb.
 export const RUNNERS = ["none", "srt", "vm"] as const;
 
-// a file path a value names: absolute, so it means the same file wherever the factory runs. Pure.
 const absolutePath: Check = (value) =>
   typeof value === "string" && value.startsWith("/") && !value.includes("\u0000") ? "" : "an absolute file path";
 
-// where a project's specs live (#381), from the loosest to the strictest: issue, the git host issue's body, for a
-// personal project; local, <home>/specs, the work rule and the default. A ladder: a team or user file that says local
-// holds every project to it, and no lower layer may move a spec onto the git host.
 export const SPEC_STORES = ["issue", "local"] as const;
 export type SpecStoreKind = (typeof SPEC_STORES)[number];
 
-// how a run's questions are asked: all at once, as one numbered round of choices (the default), or one at a time
-// (#320)
 export const QUESTIONS = ["round", "one-at-a-time"] as const;
 export type Questions = (typeof QUESTIONS)[number];
 
-// the most tokens a token cap may hold
 const MOST_TOKENS = 1_000_000_000_000;
 
 const MACHINE_CHECK: Readonly<Record<KeyClass, Check>> = {
@@ -109,7 +96,6 @@ const MACHINE_CHECK: Readonly<Record<KeyClass, Check>> = {
   preference: text,
 };
 
-// a project on the git host: owner/name on GitHub, the full path on GitLab; forge/target.ts checks it in full. Pure.
 const hostProject: Check = (value) =>
   typeof value === "string" && /^[\w.-]+(\/[\w.-]+)+$/.test(value)
     ? ""
@@ -305,7 +291,6 @@ export const MACHINE_KEYS = [
     wholeNumber(5),
   ),
   machine("implementer.model", "FACTORY_WRITER_MODEL", "preference", "the implementer's model"),
-  // the read-only runs' time limits (agent/limits.ts reads them)
   machine("review.finderMinutes", "FACTORY_FINDER_MINUTES", "cap", "each finder run's time", wholeNumber(60)),
   machine("review.verifyMinutes", "FACTORY_VERIFY_MINUTES", "cap", "each verify pass run's time", wholeNumber(60)),
   machine("design.minutes", "FACTORY_DESIGN_MINUTES", "cap", "each design-reviewer run's time", wholeNumber(60)),
@@ -357,5 +342,4 @@ export const MACHINE_KEYS = [
   ),
 ] as const;
 
-// the name of a machine key, for machine.ts settingOf
 export type MachineId = (typeof MACHINE_KEYS)[number]["id"];

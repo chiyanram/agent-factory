@@ -30,10 +30,10 @@ const PLACES: CoordinatorPlaces = {
 };
 const HOME = homedir();
 
-// Claude Code's documented rule matching (permissions docs): a path rule is gitignore-style; ~/ is the home, // the
-// root, and a rule with neither is relative to the session's folder (the coordinator's). A Bash rule matches the
-// command as typed, * any text; a compound command is split on && || ; | &, and timeout, nice, nohup, time, command and
-// stdbuf are stripped first. Deny or ask on any part wins; allow needs every part.
+// Claude Code's rule matching: a path rule is gitignore-style; ~/ is the home, // the root, and a rule with neither is
+// relative to the session's folder. A compound command is split on && || ; | & and timeout, time, nice, nohup, command
+// and stdbuf are stripped first. Deny, then ask, then allow; deny or ask on any part wins, allow needs every part.
+// https://code.claude.com/docs/en/permissions
 const CWD = "/home/ram/.factory/coordinator";
 
 function literal(text: string): string {
@@ -62,7 +62,8 @@ function pathRegex(rule: string): RegExp {
 }
 
 function bashRegex(rule: string): RegExp {
-  // "x *" also matches a bare "x", as the docs' trailing wildcard does
+  // a trailing " *" also matches the bare command
+  // https://code.claude.com/docs/en/permissions#wildcard-patterns
   const bare = rule.endsWith(" *") ? `(?: .*)?` : "";
   const head = bare === "" ? rule : rule.slice(0, -2);
   return new RegExp(`^${head.split("*").map(literal).join(".*")}${bare}$`);
@@ -100,7 +101,6 @@ function one(tool: "Read" | "Edit" | "Bash", target: string, places: Coordinator
   return matches(p.allow, tool, target) ? "allow" : "prompt";
 }
 
-// what Claude Code does with one call: deny, then ask, then allow; else it asks
 function verdict(tool: "Read" | "Edit" | "Bash", target: string, places: CoordinatorPlaces = PLACES): Verdict {
   const each = tool === "Bash" ? parts(target).map((t) => one(tool, t, places)) : [one(tool, target, places)];
   const order: readonly Verdict[] = ["deny", "ask", "prompt", "allow"];
@@ -120,7 +120,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       `${HOME}/.claude/.credentials.json`,
       "/home/factory/.config/agent-factory/app.pem",
       "/home/ram/.factory/secrets/claude-token",
-      // the coordinator's own token on Linux
       `${HOME}/.config/agent-factory/secrets/claude-coordinator-token`,
       "/work/project/.env.local",
       "/work/project/sub/.env",
@@ -160,7 +159,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
 
   it("lets it edit spec drafts with no prompt; the edit-scope hook refuses any other edit before the rules (#676)", () => {
     expect(verdict("Edit", "/home/ram/.factory/specs/ledger/PROJ-1/spec.md")).toBe("allow");
-    // no rule names a project file, so only the hook stands between it and a prompt
     expect(verdict("Edit", "/work/project/src/app.ts")).toBe("prompt");
     expect(claudeSettings(PLACES).hooks.PreToolUse).toEqual([
       {
@@ -189,24 +187,18 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     for (const command of [
       "agent-factory poll",
       "agent-factory poll --json",
-      // the forms that name the project (#382)
       "agent-factory poll ledger",
       "agent-factory poll ledger --json",
       'agent-factory status ledger 12 aaaa1111 "writer started"',
       "agent-factory spec ledger PROJ-1",
-      // the spec's text, to edit it (#542)
       "agent-factory spec ledger 6 --show",
       "agent-factory approval ledger PROJ-1",
       'agent-factory status 12 aaaa1111 "writer started"',
-      // its round of questions (#517)
       "agent-factory grill ledger 12 aaaa1111 /home/ram/.factory/specs/ledger/PROJ-1/questions.json",
       "agent-factory request tracker.comment --file /home/ram/.factory/specs/ledger/PROJ-1/comment.json",
-      // the retro's listing, with no model (#488)
       "agent-factory retro ledger --json",
-      // the reset note, built by code
       "agent-factory handoff ledger",
       "agent-factory handoff",
-      // a waiting session's ping when no loop runs
       "agent-factory waiting ledger",
     ]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "allow" });
@@ -248,7 +240,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory spec ledger PROJ-1 && agent-factory start ledger PROJ-1 --yes",
       "agent-factory eval reviewer",
       "agent-factory eval reviewer . --drafts",
-      // the retro's drafts spend on a model run, though its listing is a read (#488 Q10 A)
       "agent-factory retro ledger --draft",
       "agent-factory retro ledger --json --draft",
       "agent-factory retro --draft ledger",
@@ -275,7 +266,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
   it("denies raw forge and network clients, git push, a second interpreter or shell, sudo and the App's token", () => {
     for (const command of [
       "gh api repos/o/r",
-      // the spec is read through agent-factory spec --show, never the git host CLI (#542)
       "gh issue view 6 --json body",
       "gh",
       "timeout 5 gh api x",
@@ -299,7 +289,6 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
       "agent-factory ask ledger 12 aaaa1111 q",
       "security find-generic-password -s x",
       "chmod 644 /home/ram/.factory/coordinator/.claude/settings.json",
-      // the tmux server keeps the env it started with, the seat token among it
       "tmux show-environment",
       "tmux -L af-coord-ledger show-environment -g",
     ]) {
@@ -414,14 +403,12 @@ describe("the wall's check (#105, #227)", () => {
         "Edit(//home/ram/.factory/waivers/**) is missing",
       ],
       [(p) => (p.deny = p.deny.filter((r) => r !== "Edit(~/.claude/**)")), "Edit(~/.claude/**) is missing"],
-      // the settings layers (#229): the user file, the teams' clones, and the project home
       ...["user.json", "teams/**", "projects/**"].map(
         (tail): [(p: Rules & Record<string, unknown>) => void, string] => [
           (p) => (p.deny = p.deny.filter((r) => r !== `Edit(//home/ram/.factory/${tail})`)),
           `Edit(//home/ram/.factory/${tail}) is missing`,
         ],
       ),
-      // the runs and the settings: the coordinator starts none
       [(p) => p.ask.push("Bash(agent-factory dispatch *)"), "lets the coordinator run agent-factory dispatch PROJ"],
       [(p) => p.allow.push("Bash(agent-factory review *)"), "lets the coordinator run agent-factory review PROJ 1"],
       [(p) => p.ask.push("Bash(agent-factory setup *)"), "lets the coordinator run agent-factory setup coordinator"],
@@ -554,7 +541,6 @@ describe("setup coordinator and the launcher (#106)", () => {
     ]);
   });
 
-  // the seat's own login: the launcher asks only the seat, and puts its token in the env, never argv
   const READY: SeatLogin = {
     kind: "ready",
     env: { CLAUDE_CODE_OAUTH_TOKEN: "seat-token-canary", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
@@ -625,7 +611,6 @@ describe("the coordinator's SessionStart hook (#732 D-2)", () => {
     for (const command of HUMAN_ONLY.filter((c) => !c.includes("*"))) {
       expect(brief).toContain(command);
     }
-    // a rule's glob is not a command name
     expect(brief).not.toContain("retro * --draft");
     expect(brief).toContain("exact words");
     expect(brief).toContain("starts with its ticket number");

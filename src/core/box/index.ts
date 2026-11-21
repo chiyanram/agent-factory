@@ -1,6 +1,6 @@
-// index — opens the box FACTORY_BOX names (#112). Setup (#136) and the dispatcher (#103) call openBox before any run,
-// and a refusal stops them: no run starts with no working box (S7). Each place's Box is passed in, so the vm runner
-// (#113, vm.ts) and the srt runner (#114, srt.ts) plug in here without a change to any caller.
+// index — opens the box FACTORY_BOX names (#112). Setup and the dispatcher call openBox before any run, and a refusal
+// stops them: no run starts with no working box (S7). Each place's Box is passed in, so the vm runner (vm.ts) and the
+// srt runner (srt.ts) plug in here without a change to any caller.
 
 import { chooseBox, startGate, type Found, type Opened } from "./choose.js";
 import type { Box, BoxPlace } from "./types.js";

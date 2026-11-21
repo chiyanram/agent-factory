@@ -64,7 +64,6 @@ describe("the verify pass sets the final severity and grade, lower only (ADR-001
     }
   });
 
-  // AC-3 of #485 (P15: a blocking finding needs proof; rulebook RV7)
   it("settles an Act on finding graded only cited as Consider, whether the finder or the verify pass graded it", () => {
     const why = "it holds (Consider, not Act on: the finding only cites the line)";
     const cited = { ...CORE, grade: "cited" } as const;

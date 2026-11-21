@@ -20,17 +20,14 @@ import { atWall, wallAt, type Zone } from "../zone.js";
 
 export type UsageLimit =
   | { readonly kind: "none" }
-  // until: the reset, ISO 8601 UTC to the second, or "unknown"; said: the refusal as the CLI printed it
   | { readonly kind: "limited"; readonly until: string; readonly said: string };
 
 export const NO_LIMIT: UsageLimit = { kind: "none" };
 
-// each rejected window the stream named, by its kind: its reset in ms since the epoch, 0 when it gave none to use
 export type Windows = Readonly<Record<string, number>>;
 
 export const NO_WINDOWS: Windows = {};
 
-// the refusals Claude Code prints (AO usage_limit.go:20-33)
 const CLAUDE_REFUSALS = [
   "You've hit your",
   "You've reached your",
@@ -51,21 +48,17 @@ const GENERAL =
 const RESET_CLOCK = /\bresets?(?:\s+at)?\s+(?:(tomorrow)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([^)]+)\)/i;
 const RESET_ISO = /\bresets?(?:\s+at)?\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2}))/i;
 
-// the longest wait a rate-limit event may name before it is read as no time (AO client.go:1432)
 const MOST_WAIT_MS = 31 * 86_400_000;
 const DAY_MS = 86_400_000;
 
-// prop : a field of a parsed JSON value, undefined for anything that has none
 function prop(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }
 
-// isoSeconds : ms since the epoch as ISO 8601 UTC to the second
 function isoSeconds(ms: number): string {
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-// overage : the window's overflow is paid for, so nothing is refused (AO client.go:1443-1447)
 function overage(info: unknown): boolean {
   const status = prop(info, "overageStatus");
   return (
@@ -78,26 +71,21 @@ function overage(info: unknown): boolean {
 
 const ALLOWED: ReadonlySet<unknown> = new Set(["allowed", "allowed_warning"]);
 
-// kindOf : the window a rate-limit event names
 function kindOf(info: unknown): string {
   const kind = prop(info, "rateLimitType");
   return typeof kind === "string" ? kind : "unknown";
 }
 
-// resetOf : a rejected window's reset in ms since the epoch, 0 when it names none to use
 function resetOf(info: unknown): number {
   const seconds = prop(info, "resetsAt");
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) * 1000 : 0;
 }
 
-// cleared : the windows without one
 function cleared(windows: Windows, kind: string): Windows {
   const { [kind]: _cleared, ...rest } = windows;
   return rest;
 }
 
-// windowAfter : the windows after one rate-limit event's info: an allowed or paid-for window clears, a rejected one
-// keeps its reset
 function windowAfter(windows: Windows, info: unknown): Windows {
   const status = prop(info, "status");
   if (overage(info) || ALLOWED.has(status)) {
@@ -106,12 +94,10 @@ function windowAfter(windows: Windows, info: unknown): Windows {
   return status === "rejected" ? { ...windows, [kindOf(info)]: resetOf(info) } : windows;
 }
 
-// windowsOf : the windows after one more stream event (AO client.go:1434-1465)
 export function windowsOf(windows: Windows, event: unknown): Windows {
   return prop(event, "type") === "rate_limit_event" ? windowAfter(windows, prop(event, "rate_limit_info")) : windows;
 }
 
-// windowReset : the latest reset of the windows still rejected when the run ended; "none" when any has no time to use
 function windowReset(windows: Windows, endedAt: number): number | "none" {
   const open = Object.values(windows).filter((reset) => reset === 0 || reset > endedAt);
   if (open.length === 0 || open.some((reset) => reset === 0 || reset - endedAt > MOST_WAIT_MS)) {
@@ -120,13 +106,11 @@ function windowReset(windows: Windows, endedAt: number): number | "none" {
   return Math.max(...open);
 }
 
-// refusal : the CLI's own refusal text, "" when what it printed is none it is known to print
 export function refusal(text: string): string {
   const said = text.trim().replaceAll("’", "'");
   return GENERAL.test(said) || CLAUDE_REFUSALS.some((p) => said.startsWith(p)) ? said : "";
 }
 
-// zoneNamed : the zone a refusal names, when it is UTC or an IANA name the runtime knows
 function zoneNamed(name: string): Zone | undefined {
   if (name !== "UTC" && !name.includes("/")) {
     return undefined;
@@ -138,7 +122,6 @@ function zoneNamed(name: string): Zone | undefined {
   }
 }
 
-// dayAfter : the calendar day after a wall's day
 function dayAfter(wall: { readonly year: number; readonly month: number; readonly day: number }): {
   readonly year: number;
   readonly month: number;
@@ -150,12 +133,10 @@ function dayAfter(wall: { readonly year: number; readonly month: number; readonl
 
 type Clock = { readonly zone: Zone; readonly hour: number; readonly minute: number; readonly tomorrow: boolean };
 
-// validClock : a 12-hour clock time. Pure.
 function validClock(hour12: number, minute: number): boolean {
   return hour12 >= 1 && hour12 <= 12 && minute <= 59;
 }
 
-// clockOf : the clock time a refusal names, on a 24-hour clock, in its zone; none for one it cannot read
 function clockOf(match: RegExpExecArray): Clock | undefined {
   const zone = zoneNamed(String(match[5]).trim());
   const hour12 = Number(match[2]);
@@ -167,13 +148,10 @@ function clockOf(match: RegExpExecArray): Clock | undefined {
   return { zone, hour: (hour12 % 12) + pm, minute, tomorrow: match[1] !== undefined };
 }
 
-// momentOf : a wall time's one moment, or "none" when daylight saving skips or repeats it
 function momentOf(at: number | "skipped" | "repeated"): number | "none" {
   return typeof at === "number" ? at : "none";
 }
 
-// clockReset : a clock time in a named zone, on the day the run ended there, or the next day when "tomorrow" or when
-// that time had passed; "none" for anything it cannot place once (AO usage_limit.go:57-93)
 function clockReset(match: RegExpExecArray, endedAt: number): number | "none" {
   const clock = clockOf(match);
   if (clock === undefined) {
@@ -192,7 +170,6 @@ function clockReset(match: RegExpExecArray, endedAt: number): number | "none" {
   return first > endedAt ? first : next();
 }
 
-// textReset : the reset a refusal's text names (AO usage_limit.go:50-93)
 function textReset(said: string, endedAt: number): number | "none" {
   const iso = RESET_ISO.exec(said);
   if (iso !== null) {
@@ -203,8 +180,6 @@ function textReset(said: string, endedAt: number): number | "none" {
   return clock === null ? "none" : clockReset(clock, endedAt);
 }
 
-// Printed : what a run printed, as far as a limit is read from it: its last result event (undefined for none), its
-// stderr, its stream's windows, and when it ended, in ms since the epoch
 export type Printed = {
   readonly result: unknown;
   readonly stderr: string;
@@ -212,8 +187,6 @@ export type Printed = {
   readonly endedAt: number;
 };
 
-// printedText : what the CLI said when it stopped: its last result event's text when that is an error, or its stderr's
-// first line when it printed no result event
 function printedText(input: Printed): string {
   if (input.result === undefined) {
     return input.stderr.trim().split("\n")[0] ?? "";
@@ -222,13 +195,11 @@ function printedText(input: Printed): string {
   return prop(input.result, "is_error") === true && typeof text === "string" ? text : "";
 }
 
-// resetFrom : the reset from the stream's windows, else from the refusal's text
 function resetFrom(input: Printed, said: string): number | "none" {
   const fromEvent = windowReset(input.windows, input.endedAt);
   return fromEvent === "none" ? textReset(said, input.endedAt) : fromEvent;
 }
 
-// claudeLimit : the limit a Claude run hit, from what it printed
 export function claudeLimit(input: Printed): UsageLimit {
   const said = refusal(printedText(input));
   if (said === "") {
@@ -246,7 +217,6 @@ function parsed(line: string): unknown {
   }
 }
 
-// claudeUsageLimit : the limit a Claude run hit, from its whole stream-json stdout and its stderr
 export function claudeUsageLimit(stdout: string, stderr: string, endedAt: number): UsageLimit {
   const events = stdout.split("\n").map(parsed);
   const windows = events.reduce<Windows>(windowsOf, NO_WINDOWS);

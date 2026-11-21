@@ -5,6 +5,9 @@
 // GitLab lists its own activity ("added ~label", "changed the description") as notes too, authored by whoever acted.
 // Under the developer's login such a note would read as their reply and close an ask (#128), so the seam returns
 // comments only: system notes are left out everywhere.
+//
+// GitLab records no reason for a close, so a closed issue counts as completed only when a merged merge request closes
+// it or mentions it. Else it is closed with no merge seen, and a person looks at it.
 
 import { plainBranch } from "../branch.js";
 import type { Note } from "../notes.js";
@@ -49,7 +52,6 @@ import type {
   Waiting,
 } from "./types.js";
 
-// Every pipeline status GitLab defines (PipelineStatusEnum). Anything else is unknown, never "none" (#124).
 const STATUS: Readonly<Record<string, Pipeline>> = {
   CREATED: { kind: "running" },
   WAITING_FOR_RESOURCE: { kind: "running" },
@@ -68,16 +70,12 @@ const STATUS: Readonly<Record<string, Pipeline>> = {
 
 export type HeadPipeline = { readonly kind: "none" } | { readonly kind: "pipeline"; readonly status: string };
 
-// pipeline : the status of the head pipeline. GitLab already gives only a pipeline for the diff head: its sha is the
-// head, or for a merged-results or merge-train pipeline the merge ref with the head as source_sha.
 export function pipeline(head: HeadPipeline): Pipeline {
   return head.kind === "none"
     ? { kind: "none" }
     : (STATUS[head.status.toUpperCase()] ?? { kind: "unknown", raw: head.status });
 }
 
-// mergeableOf : conflicts says the merge request cannot merge; CAN_BE_MERGED that it can. Any other merge status
-// (UNCHECKED, CHECKING, CANNOT_BE_MERGED_RECHECK) is unknown until GitLab has checked it. Pure.
 export function mergeableOf(conflicts: unknown, status: unknown): Mergeable {
   if (conflicts === true) {
     return "conflict";
@@ -85,7 +83,6 @@ export function mergeableOf(conflicts: unknown, status: unknown): Mergeable {
   return status === "CAN_BE_MERGED" ? "clean" : "unknown";
 }
 
-// GitLab's access levels: 40 Maintainer, 50 Owner; 30 Developer; lower is a guest or less.
 function level(access: number): Level {
   return access >= 40 ? "maintainer" : access >= 30 ? "developer" : "guest";
 }
@@ -116,19 +113,18 @@ const EARLIER = `query($project: ID!, $iid: String!, $before: String) { project(
     pageInfo { hasPreviousPage startCursor } nodes { ${COMMENT} } } } } }`;
 
 function comment(r: Reader, node: unknown): Note {
-  // a deleted account leaves author null: a person who is no member and not the factory
   const name = r.absent(node, "author") ? "" : r.text(node, "author.username");
   return { body: r.text(node, "body"), author: { name }, at: r.text(node, "createdAt") };
 }
 
-// GitLab's add_labels and remove_labels split on commas, so a label with a comma would touch two labels.
+// GitLab's add_labels and remove_labels are comma-separated, so a label with a comma would touch two labels.
+// https://docs.gitlab.com/api/merge_requests/
 function oneLabel(label: string): Done {
   return label.includes(",")
     ? { kind: "failed", reason: `gitlab: a label must not contain a comma, got ${JSON.stringify(label)}` }
     : { kind: "ok" };
 }
 
-// ciConfigOf : the CI file a GitLab project runs, from its ci_config_path setting
 export function ciConfigOf(setting: string): CiConfig {
   const path = setting.trim().replace(/^\/+/, "");
   if (path === "") {
@@ -172,7 +168,6 @@ export function gitlab(client: Client, project: string): Forge {
     return r.done(read(answer.value, r));
   }
 
-  // mergedFor : whether a merged merge request of this project is among an issue's list at `which`
   async function mergedFor(issue: number, which: "closed_by" | "related_merge_requests"): Promise<Result<boolean>> {
     const found = await get(`${base}/issues/${issue}/${which}?per_page=100`, `gitlab issue ${which}`, (v, r) =>
       r.list(v, "").some((m) => r.text(m, "state") === "merged"),
@@ -180,8 +175,6 @@ export function gitlab(client: Client, project: string): Forge {
     return found.kind === "ok" ? { kind: "ok", value: found.value === true } : found;
   }
 
-  // closedState : a closed issue is completed when a merged merge request closes it, else when one mentions it; else
-  // it is closed with no merge seen (#494)
   async function closedState(issue: number): Promise<Result<IssueState>> {
     for (const which of ["closed_by", "related_merge_requests"] as const) {
       const merged = await mergedFor(issue, which);
@@ -221,8 +214,6 @@ export function gitlab(client: Client, project: string): Forge {
     });
   }
 
-  // landedOf : when, as which commit and by whom a merge request was merged: the merge commit, else the squash commit,
-  // else the head itself when it was fast-forwarded onto the target
   async function landedOf(input: { readonly number: number }): Promise<Result<Landed>> {
     const answer = await rest(client, { path: `${base}/merge_requests/${input.number}`, method: "GET", body: none });
     if (answer.kind === "failed") {
@@ -398,7 +389,6 @@ export function gitlab(client: Client, project: string): Forge {
     });
   }
 
-  // since : when the label was last added to the issue, from every page of its label events, which come oldest first
   async function since(issue: number, label: string): Promise<Result<string>> {
     type Added = { readonly at: string; readonly label: string };
     const added = await pages(async (cursor): Promise<Result<Page<Added>>> => {
@@ -418,7 +408,6 @@ export function gitlab(client: Client, project: string): Forge {
     return added.kind === "ok" ? { kind: "ok", value: labelledAt(added.value, label) } : added;
   }
 
-  // waiting : the open issues with the label, oldest first, each with since when it carries it
   async function waiting(input: { readonly label: string }): Promise<Result<readonly Waiting[]>> {
     const one = oneLabel(input.label);
     if (one.kind === "failed") {
@@ -449,7 +438,6 @@ export function gitlab(client: Client, project: string): Forge {
     return { kind: "ok", value: out };
   }
 
-  // the open merge requests from this branch of the project itself: one from a fork has another source project
   async function openFrom(branch: string): Promise<Result<readonly number[]>> {
     const path = `${base}/merge_requests?state=opened&source_branch=${encodeURIComponent(branch)}&per_page=100`;
     const answer = await rest(client, { path, method: "GET", body: none });
@@ -461,7 +449,6 @@ export function gitlab(client: Client, project: string): Forge {
     return r.done(ours.map((m) => r.int(m, "iid")));
   }
 
-  // GitLab marks a draft by the title's "Draft: " prefix
   async function openChange(request: ChangeRequest): Promise<Result<number>> {
     return openOnce({
       mark: "!",
@@ -490,7 +477,6 @@ export function gitlab(client: Client, project: string): Forge {
 
   type Job = { readonly id: number; readonly name: string };
 
-  // failedOf : the failed jobs of one pipeline (a retried job counts once, as its latest try)
   async function failedOf(id: number): Promise<Result<readonly Job[]>> {
     const path = `${base}/pipelines/${id}/jobs?scope[]=failed&per_page=100`;
     const answer = await rest(client, { path, method: "GET", body: none });
@@ -501,7 +487,6 @@ export function gitlab(client: Client, project: string): Forge {
     return r.done(r.list(answer.value, "").map((j): Job => ({ id: r.int(j, "id"), name: r.text(j, "name") })));
   }
 
-  // failedJobs : the failed jobs of the merge request's head pipeline, each with its trace's end; none with no pipeline
   async function failedJobs(input: { readonly number: number }): Promise<Result<readonly FailedJob[]>> {
     const headId = await get(`${base}/merge_requests/${input.number}`, "gitlab merge request", (v, r) =>
       r.absent(v, "head_pipeline") ? 0 : r.int(v, "head_pipeline.id"),
@@ -532,7 +517,8 @@ export function gitlab(client: Client, project: string): Forge {
     change,
     landed: landedOf,
     failedJobs,
-    // ci_config_path: empty for .gitlab-ci.yml; "path@group/project" or a URL for a file kept outside this repository
+    // ci_config_path is empty for .gitlab-ci.yml, path@group/project for a file in another project, or a URL.
+    // https://docs.gitlab.com/ci/pipelines/settings/
     async ciConfig() {
       const set = await get(base, "gitlab project", (v, r) =>
         r.absent(v, "ci_config_path") ? "" : r.text(v, "ci_config_path"),
@@ -543,7 +529,6 @@ export function gitlab(client: Client, project: string): Forge {
       const branch = await get(base, "gitlab project", (v, r) => r.text(v, "default_branch"));
       return branch.kind === "ok" ? { kind: "ok", value: String(branch.value) } : branch;
     },
-    // search with ^ and $ matches the whole name, and the list is still checked for it exactly
     async branchExists(input) {
       if (!plainBranch(input.branch)) {
         return { kind: "failed", reason: `gitlab: not a plain branch name: ${JSON.stringify(input.branch)}` };
@@ -554,8 +539,6 @@ export function gitlab(client: Client, project: string): Forge {
       );
       return found.kind === "ok" ? { kind: "ok", value: found.value === true } : found;
     },
-    // every merge request from this branch of the project itself, in any state: one from a fork has another source
-    // project (#494)
     async branchState(input) {
       if (!plainBranch(input.branch)) {
         return { kind: "failed", reason: `gitlab: not a plain branch name: ${JSON.stringify(input.branch)}` };
@@ -571,8 +554,6 @@ export function gitlab(client: Client, project: string): Forge {
       );
       return found.kind === "ok" ? { kind: "ok", value: branchStateOf([String(found.value)]) } : found;
     },
-    // an issue's state (#494). GitLab records no reason for a close, so a closed issue is completed only when a merged
-    // merge request closes it or mentions it; else it is closed with no merge seen, which a person looks at
     async issueState(input) {
       const state = await get(`${base}/issues/${input.number}`, "gitlab issue", (v, r) => r.text(v, "state"));
       if (state.kind === "failed") {
@@ -580,15 +561,14 @@ export function gitlab(client: Client, project: string): Forge {
       }
       return state.value === "opened" ? { kind: "ok", value: "open" } : closedState(input.number);
     },
-    // an issue's description; GitLab numbers issues and merge requests apart, so an iid here is always an issue
     async issueBody(input) {
       const body = await get(`${base}/issues/${input.number}`, "gitlab issue", (v, r) =>
         r.absent(v, "description") ? "" : r.text(v, "description"),
       );
       return body.kind === "ok" ? { kind: "ok", value: String(body.value) } : body;
     },
-    // a commit status with the branch as ref: GitLab adds it to an external pipeline for that head, which the merge
-    // request shows as its head pipeline
+    // GitLab adds a commit status to a job in an external stage of a pipeline for that commit.
+    // https://docs.gitlab.com/api/commits/
     async status(input: CommitStatus) {
       const value = {
         state: input.state,
@@ -620,8 +600,6 @@ export function gitlab(client: Client, project: string): Forge {
     },
     note,
     setBody,
-    // an issue's description replaced (#542); GitLab numbers issues and merge requests apart, so an iid here is
-    // always an issue
     async setIssueBody(input) {
       return done(
         await rest(client, {
@@ -631,7 +609,6 @@ export function gitlab(client: Client, project: string): Forge {
         }),
       );
     },
-    // every comment, oldest first, every page: an MR with many notes must not push the reviewer's rounds out of view
     async notes(input) {
       return pages(async (cursor): Promise<Result<Page<Note>>> => {
         const page = cursor.kind === "after" ? Number(cursor.cursor) : 1;
@@ -652,7 +629,6 @@ export function gitlab(client: Client, project: string): Forge {
         return r.done({ items: notes, next: nextPage(batch.length === 100, page) });
       });
     },
-    // GitLab anchors a thread only to a line in the diff; otherwise it opens an unanchored one that names file:line
     async lineFinding(input) {
       const body = rendered(input.post);
       if (body.kind === "failed") {

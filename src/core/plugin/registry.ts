@@ -3,6 +3,10 @@
 // Every call hashes the copy again; a copy that changed is refused. `add` never replaces a plugin: `update` shows the
 // new version and records it only for the hash the person saw. There is no PATH scan at run time and no network
 // install: a plugin is bundled with the package or a local folder the person names. Nothing here throws.
+//
+// A secret a capability carries goes into the call's input on stdin only, never in env, argv or a file. It is keyed by
+// the real path of the plugin's file as it was added, so a secret goes to one plugin, never to a name. Each call is
+// sent in the plugin's own protocol major.
 
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -24,23 +28,18 @@ import { DEFAULT_LIMITS, runPlugin, type Exec, type Limits, type Ran } from "./e
 import { sourceOf, store, treeHash, type Source } from "./pin.js";
 import type { Secret } from "../token/rules.js";
 
-// source: the file the person named, as its real path; path: the pinned copy that runs
 export type Entry = Described & { readonly source: string; readonly path: string; readonly sha256: string };
 export type Registry = Readonly<Record<string, Entry>>;
 
 export type Setup = {
   readonly home: string;
   readonly env: NodeJS.ProcessEnv;
-  // the PATH a plugin finds its CLI and its interpreter on (trustedPluginPath)
   readonly path: string;
   readonly exec?: Exec;
   readonly limits?: Limits;
-  // the secrets a call of this plugin's capability carries in its input, on stdin only: never in env, argv or a file
-  // the plugin did not make (the Discord webhook, #119); none when not set
   readonly secrets?: Secrets;
 };
 
-// the source is the real path of the plugin's file as it was added, so a secret goes to one plugin, never to a name
 export type Secrets = (call: {
   readonly plugin: string;
   readonly capability: ExtensionPoint;
@@ -114,14 +113,12 @@ function entriesOf(file: string, raw: unknown): Result<Registry> {
     : failed(`${file}: the entry for ${bad[0]} is not valid; run agent-factory plugin add again`);
 }
 
-// readRegistry : the registered plugins; no file is none; a file that does not read is refused, never read as empty
 export async function readRegistry(home: string): Promise<Result<Registry>> {
   const file = registryPath(home);
   const text = await registryText(file);
   return text.kind === "ok" ? entriesOf(file, parsed(text.value)) : text;
 }
 
-// locked : the change, while no other plugin change runs; the lock file is the guard
 async function locked<T>(home: string, change: () => Promise<Result<T>>): Promise<Result<T>> {
   const lock = `${registryPath(home)}.lock`;
   const took = await attempt(async () => {
@@ -164,7 +161,6 @@ export function ranReason(ran: Ran): string {
   return reasonAs(ran.kind, ran);
 }
 
-// stdoutOf : what the plugin printed when it exited 0, or why it gave nothing usable
 export function stdoutOf(ran: Ran): Result<string> {
   return ran.kind === "exited" && ran.code === 0 ? { kind: "ok", value: ran.stdout } : failed(ranReason(ran));
 }
@@ -189,7 +185,6 @@ async function executable(path: string): Promise<Done> {
   return (s.mode & 0o111) === 0 ? failed(`${path} is not executable`) : { kind: "ok" };
 }
 
-// trustworthy : the plugin's real file and folder, when they are executable, ours and writable by no one else
 async function trustworthy(path: string): Promise<Result<Source>> {
   if (!isAbsolute(path)) {
     return failed(`a plugin is named by its absolute path, got ${JSON.stringify(path)}`);
@@ -198,7 +193,6 @@ async function trustworthy(path: string): Promise<Result<Source>> {
   return file.kind === "ok" ? sourceOf(path) : file;
 }
 
-// inspect : what a plugin says about itself and the hash of its folder; nothing is recorded or copied
 export async function inspect(setup: Setup, path: string): Promise<Result<Entry>> {
   const source = await trustworthy(path);
   if (source.kind === "failed") {
@@ -213,7 +207,6 @@ async function describedAt(setup: Setup, file: string, sha256: string): Promise<
   return d.kind === "ok" ? { kind: "ok", value: { ...d.value, source: file, path: file, sha256 } } : d;
 }
 
-// pinned : the entry, with its folder copied into the store; the copy's hash must be the one inspected
 async function pinned(setup: Setup, entry: Entry): Promise<Result<Entry>> {
   const copy = await store(setup.home, { file: entry.source, dir: dirname(entry.source) });
   if (copy.kind === "failed") {
@@ -252,14 +245,12 @@ async function recorded(setup: Setup, registry: Registry, entry: Entry): Promise
   return written.kind === "ok" ? copy : written;
 }
 
-// addPlugin : a new plugin, pinned and copied; a name already added is refused, so nothing is replaced unseen
 export function addPlugin(setup: Setup, path: string): Promise<Result<Entry>> {
   return locked(setup.home, () => addLocked(setup, path));
 }
 
 export type Change = { readonly before: Entry; readonly after: Entry; readonly writesAdded: readonly string[] };
 
-// registered : one plugin's entry, or why there is none
 export async function registered(home: string, name: string): Promise<Result<Entry>> {
   const registry = await readRegistry(home);
   if (registry.kind === "failed") {
@@ -276,7 +267,6 @@ function changeOf(name: string, before: Entry, after: Entry): Result<Change> {
     : failed(`${before.source} now calls itself ${after.name}, not ${name}`);
 }
 
-// planUpdate : what an update would record, and the writes it would add; nothing is written yet
 export async function planUpdate(setup: Setup, name: string): Promise<Result<Change>> {
   const before = await registered(setup.home, name);
   if (before.kind === "failed") {
@@ -309,7 +299,6 @@ async function recordedNow(setup: Setup, entry: Entry): Promise<Result<Entry>> {
   return registry.kind === "ok" ? recorded(setup, registry.value, entry) : registry;
 }
 
-// applyUpdate : the new version, recorded only when its hash is the one the person was shown
 export function applyUpdate(setup: Setup, name: string, sha256: string): Promise<Result<Entry>> {
   return locked(setup.home, () => applyLocked(setup, name, sha256));
 }
@@ -328,7 +317,6 @@ async function unchanged(entry: Entry, name: string): Promise<Done> {
     : failed(`the plugin ${name} changed since it was added (${entry.path}); review it, then plugin update`);
 }
 
-// checked : the plugin's entry, when its pinned copy is unchanged and it declares the capability
 async function checked(setup: Setup, call: Call): Promise<Result<Entry>> {
   const entry = await registered(setup.home, call.plugin);
   if (entry.kind === "failed") {
@@ -338,7 +326,6 @@ async function checked(setup: Setup, call: Call): Promise<Result<Entry>> {
   return same.kind === "ok" ? declares(entry.value, call) : same;
 }
 
-// declares : the capability is the plugin's, and a write is one it declared (ADR-0014 P5)
 function declares(entry: Entry, call: Call): Result<Entry> {
   if (!entry.capabilities.some((c) => c.name === call.capability)) {
     return failed(`the plugin ${call.plugin} does not declare ${call.capability}`);
@@ -348,7 +335,6 @@ function declares(entry: Entry, call: Call): Result<Entry> {
     : { kind: "ok", value: entry };
 }
 
-// callPlugin : one call of a registered plugin; a changed copy, an undeclared capability or a broken answer is refused
 export async function callPlugin(setup: Setup, call: Call): Promise<Result<PluginResult>> {
   const entry = isPoint(call.capability)
     ? await checked(setup, call)
@@ -360,14 +346,12 @@ export async function callPlugin(setup: Setup, call: Call): Promise<Result<Plugi
   return result.kind === "ok" ? result : failed(`the plugin ${call.plugin}: ${result.reason}`);
 }
 
-// answered : the call, with its secrets, run and read
 async function answered(setup: Setup, entry: Entry, call: Call): Promise<Result<PluginResult>> {
   const input = await withSecrets(setup, call, entry.source);
   const ran = input.kind === "ok" ? stdoutOf(await runCall(setup, entry, { ...call, input: input.value })) : input;
   return ran.kind === "ok" ? readResult(ran.value) : ran;
 }
 
-// withSecrets : the call's input with the secrets its plugin and capability carry, revealed only here, into the request
 async function withSecrets(setup: Setup, call: Call, source: string): Promise<Result<unknown>> {
   if (setup.secrets === undefined) {
     return { kind: "ok", value: call.input };
@@ -376,7 +360,6 @@ async function withSecrets(setup: Setup, call: Call, source: string): Promise<Re
   return secrets.kind === "ok" ? merged(call.input, secrets.value) : secrets;
 }
 
-// merged : the input with the secrets revealed into it; only an input that is one plain object can carry them
 function merged(input: unknown, secrets: Readonly<Record<string, Secret>>): Result<unknown> {
   const revealed = Object.fromEntries(Object.entries(secrets).map(([k, v]) => [k, v.reveal()]));
   if (Object.keys(revealed).length === 0) {
@@ -387,7 +370,6 @@ function merged(input: unknown, secrets: Readonly<Record<string, Secret>>): Resu
     : failed("a call that carries a secret needs an input that is one object");
 }
 
-// runCall : the request in the plugin's own protocol major, so a plugin on N−1 is spoken to as it expects
 function runCall(setup: Setup, entry: Entry, call: Call): Promise<Ran> {
   const request = { protocol: entry.protocol, capability: call.capability, op: call.op, input: call.input };
   return (setup.exec ?? runPlugin)({

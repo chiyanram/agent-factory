@@ -18,10 +18,8 @@ export type Reserved = {
   readonly kind: "reserved";
   readonly id: string;
   readonly capability: PolicyPoint;
-  // the approval this write counts against (approvalKey)
   readonly approval: string;
   readonly at: string;
-  // the sha256 of the text sent
   readonly sha256: string;
 };
 
@@ -42,7 +40,6 @@ export function logPath(where: Where): string {
   return join(where.home, "writes", where.project, `${where.ticket}.jsonl`);
 }
 
-// approvalKey : one approval, by when it was given and the spec it approved; a new approval is a new key
 export function approvalKey(record: { readonly at: string; readonly spec_hash: string }): string {
   return `${record.at} ${record.spec_hash}`;
 }
@@ -107,7 +104,6 @@ function linesOf(file: string, content: string): Result<readonly Line[]> {
     : { kind: "ok", value: read.filter((l): l is Line => l !== "bad") };
 }
 
-// readLog : every line of the ticket's write log; no log is no writes
 export async function readLog(where: Where): Promise<Result<readonly Line[]>> {
   const file = logPath(where);
   try {
@@ -117,7 +113,6 @@ export async function readLog(where: Where): Promise<Result<readonly Line[]>> {
   }
 }
 
-// counted : the writes of one capability against one approval
 export function counted(lines: readonly Line[], capability: PolicyPoint, approval: string): number {
   return lines.filter((l) => l.kind === "reserved" && l.capability === capability && l.approval === approval).length;
 }
@@ -145,7 +140,6 @@ async function takeLock(lock: string): Promise<Take> {
   }
 }
 
-// alive : whether the process a lock names still runs; a lock whose process is gone (killed mid-write) is stale
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -161,9 +155,6 @@ async function stale(lock: string): Promise<boolean> {
   return Number.isSafeInteger(pid) && pid > 0 && !alive(pid);
 }
 
-// locked : the lock, taken once more after a stale one is removed. Two processes that both find the same stale lock
-// could each take it, and so go one write past the cap; that needs a killed write and then two more at once on the
-// same ticket.
 async function locked(lock: string, where: Where): Promise<Done> {
   const first = await takeLock(lock);
   const again = first.kind === "held" && (await stale(lock)) ? await retaken(lock) : first;
@@ -180,7 +171,6 @@ async function retaken(lock: string): Promise<Take> {
   return takeLock(lock);
 }
 
-// onTicket : the change, while no other write on the same ticket runs; the lock file, holding its pid, is the guard
 export async function onTicket<T>(where: Where, change: () => Promise<Result<T>>): Promise<Result<T>> {
   const lock = join(where.home, "writes", where.project, `${where.ticket}.lock`);
   const took = await locked(lock, where);

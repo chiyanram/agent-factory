@@ -433,7 +433,6 @@ describe("failedJobs (#171)", () => {
       { status: 200, body: trace },
     ]);
     const out = await gitlab(f.client, project).failedJobs({ number: 7, head: "aaaa1111" });
-    // 251 lines in all: the last 200 start at line 52, with the colour codes gone
     expect(out).toEqual({
       kind: "ok",
       value: [
@@ -497,10 +496,8 @@ describe("issueState (#494)", () => {
   it("is open while opened; a closed issue is completed only when a merged merge request closes or mentions it", async () => {
     const f = fake("gitlab", [
       ok({ iid: 4, state: "opened" }),
-      // closed by a merge request that merged
       ok({ iid: 5, state: "closed" }),
       ok([{ iid: 9, state: "merged" }]),
-      // closed by hand; a merged merge request mentions it
       ok({ iid: 6, state: "closed" }),
       ok([]),
       ok([{ iid: 10, state: "merged" }]),
@@ -524,7 +521,6 @@ describe("issueState (#494)", () => {
     ]);
     const forge = gitlab(f.client, project);
     expect(await forge.issueState({ number: 7 })).toEqual({ kind: "ok", value: "closed" });
-    // a failed read is a failure, never a guess
     expect(await forge.issueState({ number: 8 })).toMatchObject({ kind: "failed" });
   });
 });

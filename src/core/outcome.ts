@@ -31,12 +31,10 @@ export type MergeOutcome =
 export const OUTCOME_DAYS = 14;
 export const WATCH_DAYS = 30;
 const DAY_MS = 86_400_000;
-// where the default branch is fetched in the project's clone, apart from every branch a person uses
 const FETCHED = "refs/factory/outcome-target";
 
 type Read = { readonly repo: string; readonly env: NodeJS.ProcessEnv };
 
-// git : one git call on the clone; its stdout, or why it failed
 async function git(
   read: Read,
   args: readonly string[],
@@ -56,60 +54,47 @@ async function git(
   };
 }
 
-// FIX : a subject that fixes or reverts, in the Conventional Commits form or git's own revert form. Pure.
 const FIX = /^(?:(?:fix|revert)(?:\([^)]*\))?!?:|Revert ")/i;
 
-// commitOf : one `git log` record's fields as a commit, or none for an empty record. Pure.
 function commitOf(fields: readonly string[]): readonly (Commit & { readonly body: string })[] {
   const [sha, subject, at, body] = [0, 1, 2, 3].map((i) => fields[i] ?? "");
   return sha === undefined || sha === "" ? [] : [{ sha, subject: String(subject), at: String(at), body: String(body) }];
 }
 
-// commitsOf : `git log` output of SHA, subject, date and body, one record per commit. Pure.
 function commitsOf(log: string): readonly (Commit & { readonly body: string })[] {
   return log.split("\x1e").flatMap((r) => commitOf(r.replace(/^\n/, "").split("\x1f")));
 }
 
-// Added : the lines a file gained in the merge, as ranges of its new text
 type Added = { readonly file: string; readonly from: number; readonly count: number };
 
-// Reading : the ranges found so far, and the file the diff is in
 type Reading = { readonly file: string; readonly added: readonly Added[] };
 
-// HUNK : a hunk header of `git diff -U0`: where its new lines start, and how many
 const HUNK = /^@@ -\S+ \+(\d+)(?:,(\d+))? @@/;
 
-// rangeOf : the new lines a hunk header adds, or none for a header that adds none. Pure.
 function rangeOf(line: string): { readonly from: number; readonly count: number } | undefined {
   const hunk = HUNK.exec(line);
   const count = Number(hunk?.[2] ?? "1");
   return hunk === null || count === 0 ? undefined : { from: Number(hunk[1]), count };
 }
 
-// hunkStep : a hunk that adds lines adds its range to the file the diff is in. Pure.
 function hunkStep(state: Reading, line: string): Reading {
   const range = rangeOf(line);
   return range === undefined ? state : { file: state.file, added: [...state.added, { file: state.file, ...range }] };
 }
 
-// diffStep : one more line of `git diff -U0`: a file header names the file (none for a deleted one); a hunk adds its
-// range. Pure.
 function diffStep(state: Reading, line: string): Reading {
   const path = /^\+\+\+ (?:b\/(.*)|\/dev\/null)$/.exec(line);
   return path === null ? hunkStep(state, line) : { file: path[1] ?? "", added: state.added };
 }
 
-// addedOf : the ranges each file gained, from `git diff -U0`; a deleted file gains none. Pure.
 export function addedOf(diff: string): readonly Added[] {
   return diff.split("\n").reduce<Reading>(diffStep, { file: "", added: [] }).added;
 }
 
-// lastSeen : the commits in which some line of the merge was last seen, from `git blame --reverse --porcelain`. Pure.
 export function lastSeen(porcelain: string): ReadonlySet<string> {
   return new Set([...porcelain.matchAll(/^([0-9a-f]{40}) \d+ \d+/gm)].map((m) => m[1] ?? ""));
 }
 
-// seenIn : every commit some line the merge added was last seen in, up to the tip
 async function seenIn(read: Read, sha: string, tip: string): Promise<ReadonlySet<string>> {
   const diff = await git(read, ["diff", "-U0", "--no-color", "--no-ext-diff", `${sha}^1`, sha]);
   const seen = new Set<string>();
@@ -121,21 +106,17 @@ async function seenIn(read: Read, sha: string, tip: string): Promise<ReadonlySet
   return seen;
 }
 
-// nextAfter : the commit after this one on the way to the tip, "" for none
 async function nextAfter(read: Read, last: string, tip: string): Promise<string> {
   const next = await git(read, ["rev-list", "--ancestry-path", "--reverse", `${last}..${tip}`]);
   return next.ok ? (next.out.split("\n")[0] ?? "") : "";
 }
 
-// touchedBy : each later commit that changed a line the merge added: for each commit a line was last seen in before
-// the tip, the next commit on the way to the tip (a line still there at the tip has none)
 async function touchedBy(read: Read, sha: string, tip: string, later: readonly Commit[]): Promise<readonly Commit[]> {
   const seen = [...(await seenIn(read, sha, tip))];
   const changers = await Promise.all(seen.map((last) => nextAfter(read, last, tip)));
   return later.filter((c) => changers.includes(c.sha));
 }
 
-// verdict : the outcome from what the history says, on the day it is read. Pure.
 export function verdict(input: {
   readonly day: number;
   readonly reverted?: Commit;
@@ -156,10 +137,8 @@ export function verdict(input: {
 
 const short = (c: Commit): string => `${c.sha.slice(0, 8)} ${c.subject}`;
 
-// each outcome by its kind, so a head per kind is typed without an assertion (as tick.ts DESCRIBE does)
 type OutcomeMap = { readonly [O in MergeOutcome as O["kind"]]: O };
 
-// HEADS : how each outcome reads after "outcome:"
 const HEADS: { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => string } = {
   watching: (o) => `watching, day ${o.day} of ${OUTCOME_DAYS}`,
   clean: (o) => (o.final ? `clean, final at ${WATCH_DAYS} days` : `clean at ${OUTCOME_DAYS / 7} weeks`),
@@ -172,26 +151,21 @@ function headAs<K extends keyof OutcomeMap>(kind: K, o: OutcomeMap[K]): string {
   return HEADS[kind](o);
 }
 
-// outcomeLines : a merged ticket's outcome as usage shows it, then each later commit that touched its lines. Pure.
 export function outcomeLines(o: MergeOutcome): readonly string[] {
   const touched = "touched" in o ? o.touched.filter((c) => !("by" in o) || c.sha !== o.by.sha) : [];
   return [`    outcome: ${headAs(o.kind, o)}`, ...touched.map((c) => `      touched by ${short(c)}`)];
 }
 
-// tipAt : the default branch, fetched, at its last commit before the end of the watch
-// fetchDefault : the default branch fetched into FETCHED, once per read of any number of merges; why it failed, or ""
 export async function fetchDefault(read: Read): Promise<string> {
   const fetched = await git(read, ["fetch", "-q", "--no-tags", "origin", `+HEAD:${FETCHED}`]);
   return fetched.ok ? "" : fetched.why;
 }
 
-// tipBefore : the fetched default branch's last commit before the end of the watch
 async function tipBefore(read: Read, end: number): Promise<{ ok: true; out: string } | { ok: false; why: string }> {
   const tip = await git(read, ["rev-list", "-1", `--before=${new Date(end).toISOString()}`, FETCHED]);
   return tip.ok ? { ok: true, out: tip.out.trim() } : tip;
 }
 
-// tipAt : the default branch's tip for the watch, fetched first unless the caller already fetched it
 async function tipAt(
   read: Read,
   end: number,
@@ -201,8 +175,6 @@ async function tipAt(
   return why === "" ? tipBefore(read, end) : { ok: false, why };
 }
 
-// outcomeOf : what became of a merge, read from the project's clone at now (ms); fetched: the caller has already run
-// fetchDefault for this read, so many merges cost one fetch
 export async function outcomeOf(
   input: Read & {
     readonly merged: { readonly at: string; readonly sha: string };

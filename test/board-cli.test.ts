@@ -17,9 +17,6 @@ import { boardCommand } from "../src/board-cli.js";
 import { boardPass, readOnly, ticketsAreIssues } from "../src/core/door/read.js";
 import { tempDir } from "./temp.js";
 
-// agent-factory board reads what a pass would decide, and can write nothing: no forge write, no record line, no lock
-// (#487 AC-5; the coordinator runs it with no prompt).
-
 const H = "1".repeat(40);
 const NOW = Date.parse("2026-11-13T12:00:00Z");
 const SPEC = [
@@ -51,7 +48,6 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-// a git host that answers poll from `changes`, and keeps every write op it is asked for
 function recording(changes: Changes, writes: string[]): Forge {
   const read = async () => ({ kind: "failed" as const, reason: "not read in this test" });
   const wrote = (op: string) => async () => {
@@ -105,7 +101,6 @@ function setup(forge: Forge, log: string[]): TickSetup {
     notify: NO_NOTIFY,
     dryRun: false,
     log: (l) => log.push(l),
-    // a feature with no design review, so an approved ticket goes straight to its writer
     lanes: [{ name: "feature", approval: true, lenses: 3, designReview: false, testFirst: false }],
   };
 }
@@ -128,7 +123,6 @@ function isCall(value: unknown): value is (input: unknown) => Promise<unknown> {
   return typeof value === "function";
 }
 
-// every file under the home, with its bytes
 function snapshot(): ReadonlyMap<string, string> {
   const files = readdirSync(home, { recursive: true, withFileTypes: true }).filter((d) => d.isFile());
   return new Map(
@@ -154,8 +148,6 @@ describe("the board writes nothing (#487 AC-5)", () => {
   });
 
   it("over tickets a pass would act on, shows them and makes no forge write, no record line and no lock", async () => {
-    // PROJ-1: approved, no PR (a pass would run the writer); PROJ-2: a green gate not yet pinged (a pass would note
-    // and ping); PROJ-9: merged and still claimed (a pass would remove the label)
     await approved("PROJ-1");
     await approved("PROJ-2");
     const at = { home, project: "ledger", ticket: "PROJ-2" };
@@ -208,7 +200,6 @@ describe("the board writes nothing (#487 AC-5)", () => {
     ).toBe(0);
     const text = out.join("");
     expect(text).toContain("  PROJ-1  no PR  writer (fix)");
-    // a green gate not yet pinged is a person's merge already
     expect(text).toContain("ready to merge (1)\n  PROJ-2  #14  ping at 11111111");
     expect(text).not.toContain("PROJ-9");
     expect(writes).toEqual([]);
@@ -218,7 +209,6 @@ describe("the board writes nothing (#487 AC-5)", () => {
   it("is a dry run on the read-only git host, with no step and no ping that could act, its log on stderr", async () => {
     const err: string[] = [];
     const writes: string[] = [];
-    // a step and a ping that would act, given by the pass's caller: the board's pass keeps neither
     const ran = { kind: "available" as const, run: async () => ({ kind: "failed" as const, reason: "ran" }) };
     const given: TickSetup = {
       ...setup(recording({ team: [], open: [], merged: [] }, writes), []),

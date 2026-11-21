@@ -14,6 +14,9 @@
 //
 // Every run is started from its role card (process/cards.ts): its prompt is prompt.ts's, the run gets only the card's
 // tools, the card's must_not_see leaves its input out of the run, and the card's hash goes in the run record.
+// No run rewrites the branch: test-first and fix only add commits. A host step that fails after the run still records
+// what the run spent. A failed step whose start line names the run folder writes no end, so the folder stays for the
+// next pass's hand-over.
 
 import { rmdir } from "node:fs/promises";
 import { goAhead, type GoAhead } from "../start.js";
@@ -58,11 +61,9 @@ export const ROLE_OF: Readonly<Record<RunMode, Role>> = {
   cleanup: "cleanup",
 };
 
-// where the host pushes to, and as whom (#108)
 export type PushTarget = {
   readonly forge: ForgeName;
   readonly host: string;
-  // owner/name on GitHub, the full path on GitLab (FACTORY_PROJECT)
   readonly project: string;
   readonly identity: Identity;
   readonly env: NodeJS.ProcessEnv;
@@ -74,22 +75,14 @@ export type WriterSetup = {
   readonly forge: Forge;
   readonly push: PushTarget;
   readonly home: string;
-  // the factory's project name: the approvals and specs folder
   readonly project: string;
-  // the claim label the new change gets
   readonly label: string;
   readonly login: () => Promise<BoxToken>;
-  // the host push: hostPush; a test passes its own
   readonly pusher: Pusher;
-  // the project file's ready.programs, which the prompt names for the evidence rows (#444); none in a test's setup
   readonly programs?: readonly string[];
-  // the project file's ready.testFiles: where a test-first run may edit (scope.ts scopesOf)
   readonly testFiles: readonly string[];
-  // the agent CLI's writer kind: the run's argv and settings file (agent/claude-writer.ts)
   readonly agent: ClaudeWriter;
-  // the project's lanes (#232); the default lanes when absent
   readonly lanes?: readonly LaneProps[];
-  // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
   readonly specs?: SpecStore;
 };
 
@@ -97,62 +90,44 @@ type Input = RunInput & { readonly task: Task; readonly folder?: string };
 export type WriterOut = {
   readonly head: string;
   readonly outcome: "done" | "asked" | "blocked" | "parked";
-  // the provider's usage limit the run hit, for a parked run: the reset, ISO 8601 UTC or "unknown", and the
-  // CLI's refusal, scrubbed and cut
   readonly parked?: { readonly until: string; readonly said: string };
   readonly patch: string;
   readonly evidence: readonly Evidence[];
-  // the writer hung after its report and the host stopped it after the completion window (#182)
   readonly hung: boolean;
-  // what the run spent (#131); none when the host started no run, or the run printed no result event
   readonly spend?: Spend;
-  // the role card's hash, for a run started from one (#236)
   readonly card?: string;
-  // what a cleanup run left for a person, as each would change behaviour (#236)
   readonly deferred?: readonly string[];
-  // each cite of the project's brief that went stale, or why the run went without it (#235)
   readonly stale?: readonly string[];
-  // why a run that is not done stopped, scrubbed and cut (why.ts, #62); none for done
   readonly why?: string;
-  // the file that keeps the end of a host-blocked run's output (why.ts keepOutput, #62)
   readonly output?: string;
-  // the run's trace, a plain file name in the ticket's folder (dispatch/trace.ts, #487); none when none was kept
   readonly trace?: string;
 };
 
-// programsOf : the project's ready.programs, as a field of the prompt's input to spread (#444)
 function programsOf(setup: WriterSetup): { readonly programs?: readonly string[] } {
   return setup.programs === undefined ? {} : { programs: setup.programs };
 }
 
-// deferredOf : a done report's deferred list, as a field to spread
 function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
   return outcome.kind === "done" && outcome.deferred !== undefined ? { deferred: outcome.deferred } : {};
 }
 
-// whyField : why the run stopped, as a field to spread: none when there is no reason. Pure.
 function whyField(why: string): { readonly why?: string } {
   return why === "" ? {} : { why };
 }
 
-// nextWhy : why the host handed the run to a person, with what the run said last when the host decided it. Pure.
 function nextWhy(ended: Ended, next: Extract<Next, { kind: "needs-human" }>): string {
   const host = ended.outcome.kind !== "blocked" || ended.outcome.by === "host";
   return whyText(withSaid(next.reason, host && ended.outcome.kind !== "done" ? ended.said : ""));
 }
 
-// spendField : what the run spent, as a field to spread; none when its CLI reported none, which `usage` counts as
-// unmeasured (+N?), never as free (#483). Pure.
 function spendField(spend: Spend | "unmeasured"): { readonly spend?: Spend } {
   return spend === "unmeasured" ? {} : { spend };
 }
 
-// traceField : the run's trace, as a field to spread; none when none was kept (#487). Pure.
 function traceField(trace: string | undefined): { readonly trace?: string } {
   return trace === undefined ? {} : { trace };
 }
 
-// spentOn : a host step that failed after the run still says what the run spent, so it is recorded (#483). Pure.
 function spentOn(result: Result<WriterOut>, ended: Result<Ended> | FailedSpent): Result<WriterOut> | FailedSpent {
   if (result.kind === "ok") {
     return result;
@@ -164,7 +139,6 @@ function spentOn(result: Result<WriterOut>, ended: Result<Ended> | FailedSpent):
   return ended.value.trace === undefined ? failed : { ...failed, traces: [ended.value.trace] };
 }
 
-// outOf : what the dispatcher records, from what the host did with the run. Pure.
 export function outOf(ended: Ended, next: Next): WriterOut {
   const base = {
     head: ended.tip,
@@ -186,8 +160,6 @@ export function outOf(ended: Ended, next: Next): WriterOut {
   }
 }
 
-// parkedField : a parked run's reset and the CLI's refusal, as a field to spread; none for any other outcome.
-// Pure.
 function parkedField(outcome: Outcome): { readonly parked?: { readonly until: string; readonly said: string } } {
   return outcome.kind === "parked" ? { parked: { until: outcome.until, said: whyText(outcome.said) } } : {};
 }
@@ -217,7 +189,6 @@ async function loginOf(setup: WriterSetup): Promise<Result<Readonly<Record<strin
   return token.kind === "ready" ? { kind: "ok", value: token.env } : { kind: "failed", reason: token.reason };
 }
 
-// goFor : what lets the build begin: an approval, or a START in the tiny lane (#227)
 async function goFor(setup: WriterSetup, ticket: string): Promise<Result<Extract<GoAhead, { kind: "go" }>>> {
   const go = await goAhead({
     home: setup.home,
@@ -235,7 +206,6 @@ async function goFor(setup: WriterSetup, ticket: string): Promise<Result<Extract
   };
 }
 
-// prepare : the approved spec, the default branch, where the run starts, and the box's model login
 async function prepare(setup: WriterSetup, input: Input): Promise<Result<Prepared>> {
   const go = await goFor(setup, input.ticket);
   if (go.kind === "failed") {
@@ -273,14 +243,10 @@ function pushOf(setup: WriterSetup, p: Prepared, clone: Clone, tip: string): Pus
     commit: tip,
     lease: p.start.kind === "branch" ? { kind: "sha", sha: clone.start } : { kind: "absent" },
     protectedBranches: [p.base],
-    // test-first and fix only add commits: no run of theirs rewrites the branch (a rebase run would, #171); each one
-    // carries the writer's seat, which the clone's hook adds (#128)
     guards: [fastForwardOnly(setup.push.env), seatOnEvery(setup.push.env, { since: clone.start, seat: "writer" })],
   };
 }
 
-// bodyOf : the change's body: it names the approved spec, never its text (#164), lists what a cleanup run deferred
-// (#236), and ends with the implementer's own PR body, which the forge cleans as it renders it (#335). Pure.
 export function bodyOf(
   p: Pick<Prepared, "spec" | "approver">,
   deferred: readonly string[] = [],
@@ -289,7 +255,6 @@ export function bodyOf(
   return {
     ...(prBody === undefined ? {} : { prBody }),
     seat: "coordinator",
-    // the spec's first line is "# <ticket>: <title>", so its title already names the ticket
     title: p.spec.title,
     fields: [
       { label: "spec", value: p.spec.hash },
@@ -299,7 +264,6 @@ export function bodyOf(
   };
 }
 
-// openFor : the first run's draft change, claimed, with the implementer's PR body when it wrote one
 function openFor(
   setup: WriterSetup,
   p: Prepared,
@@ -317,8 +281,6 @@ function openFor(
   };
 }
 
-// onChange : a later run's push and post on its open change; then the implementer's PR body, or a cleanup run's
-// deferred list, goes in the PR body
 async function onChange(
   setup: WriterSetup,
   input: Input,
@@ -345,7 +307,6 @@ async function onChange(
   return shown.kind === "ok" ? { kind: "ok", value: outOf(ended, next.value) } : shown;
 }
 
-// finished : the host's push and post for the run, and what the dispatcher records
 async function finished(
   setup: WriterSetup,
   input: Input,
@@ -359,8 +320,6 @@ async function finished(
     return onChange(setup, input, p, { push, ended, number: input.change.line.number, mode });
   }
   if (ended.tip === clone.start) {
-    // nothing to push and no change to post on: the record says the run changed nothing and why it stopped, and a
-    // person looks (#62)
     return {
       kind: "ok",
       value: {
@@ -392,12 +351,8 @@ async function finished(
   return kept.kind === "ok" ? { kind: "ok", value: outOf(ended, first.value.next) } : kept;
 }
 
-// PR_BODY_KEPT : the implementer's PR body as it wrote it, kept with the head it wrote it at, so the cleanup run that
-// follows puts it in the PR body again with its deferred list (#335)
 export const PR_BODY_KEPT = "pr.md";
 
-// prBodyOf : the implementer's PR body from a run, with the git host its links may point at; none for another role,
-// or a run that wrote none
 function prBodyOf(setup: WriterSetup, mode: RunMode, ended: Ended): PrBody | undefined {
   return ROLE_OF[mode] === "implementer" && ended.pr !== undefined
     ? { markdown: ended.pr, host: setup.push.host }
@@ -406,7 +361,6 @@ function prBodyOf(setup: WriterSetup, mode: RunMode, ended: Ended): PrBody | und
 
 type Wrote = { readonly number: number; readonly mode: RunMode; readonly ended: Ended };
 
-// prBodyKept : the implementer's PR body kept with its head, for the cleanup run
 async function prBodyKept(setup: WriterSetup, run: Wrote): Promise<Done> {
   const body = prBodyOf(setup, run.mode, run.ended);
   if (body === undefined) {
@@ -417,7 +371,6 @@ async function prBodyKept(setup: WriterSetup, run: Wrote): Promise<Done> {
   return kept.kind === "ok" ? { kind: "ok" } : kept;
 }
 
-// prBodyShown : an implementer run on an open change that wrote a PR body puts it in the PR body, and keeps it (#335)
 async function prBodyShown(setup: WriterSetup, p: Prepared, run: Wrote): Promise<Done> {
   const body = prBodyOf(setup, run.mode, run.ended);
   if (body === undefined) {
@@ -429,14 +382,11 @@ async function prBodyShown(setup: WriterSetup, p: Prepared, run: Wrote): Promise
     : { kind: "failed", reason: `the PR body was not set: ${set.reason}` };
 }
 
-// keptPrBody : the implementer's PR body kept at the head a cleanup run starts from; none when there is none
 async function keptPrBody(setup: WriterSetup, number: number, head: string): Promise<PrBody | undefined> {
   const kept = await readKept({ recordsDir: recordsDirOf(setup.box.repo), change: number, head }, PR_BODY_KEPT);
   return kept.kind === "ok" ? { markdown: kept.value, host: setup.push.host } : undefined;
 }
 
-// deferredShown : a cleanup run that ended done puts what it deferred, or nothing, in the PR body (#236), after the
-// implementer's PR body kept at the head it started from (#335)
 async function deferredShown(
   setup: WriterSetup,
   input: Input,
@@ -452,47 +402,36 @@ async function deferredShown(
   return set.kind === "ok" ? set : { kind: "failed", reason: `the PR body was not set: ${set.reason}` };
 }
 
-// the task the host hands a run in .factory/task.md, and the words a card's must_not_see may call it by
 type TaskFile = { readonly kind: "none" } | { readonly kind: "text"; readonly text: string; readonly part: Part };
 
-// what a run's planner decides: its mode, and its task
 type Draft = { readonly mode: RunMode; readonly task: TaskFile };
 
-// what one run does: its mode, its task, and the role card it starts from
 type Work = Draft & { readonly card: Card };
 
-// the approved spec, which every writer run gets
 const SPEC_PART: Part = { names: ["the approved spec", "the spec", "the bug spec"], needed: true };
 
-// mergeOf : the default branch a merge run merges in, or a cleanup run diffs against, which the clone fetches in, as a
-// field to spread
 function mergeOf(work: Work, base: string): { readonly merge?: string } {
   return work.mode === "merge" || work.mode === "cleanup" ? { merge: base } : {};
 }
 
-// withCard : the run record carries the card's hash (#236)
 function withCard(result: Result<WriterOut>, work: Work): Result<WriterOut> {
   return result.kind === "ok" ? { kind: "ok", value: { ...result.value, card: work.card.sha256 } } : result;
 }
 
-// knowledgeOf : the accepted brief and glossary as clone files, as a field to spread
 function knowledgeOf(known: Known): Pick<Parameters<typeof makeClone>[1], "knowledge"> {
   return known.files.kind === "text" ? { knowledge: { brief: known.files.brief, glossary: known.files.glossary } } : {};
 }
 
-// dirOf : the run folder the start line names, as a field to spread; none when the dispatcher named none
 function dirOf(input: Input): { readonly dir?: string } {
   return input.folder === undefined ? {} : { dir: input.folder };
 }
 
-// withStale : each stale cite of the brief goes into the run record, for the retro (#235)
 function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
   return result.kind === "ok" && known.stale.length > 0
     ? { kind: "ok", value: { ...result.value, stale: known.stale } }
     : result;
 }
 
-// personHome : the person's real home, for the deny list's credential paths (agent/claude-writer.ts writerDenies); "" when unknown
 function personHome(env: NodeJS.ProcessEnv): string {
   return env.HOME ?? "";
 }
@@ -566,8 +505,6 @@ async function inClone(
   return afterRun(input, clone.value.dir, out, ended);
 }
 
-// afterRun : the run folder removed once the run has an end; a failed step whose start line names the folder writes no
-// end, so its folder stays for the next pass's hand-over, which pushes what it holds and tells a person
 async function afterRun(
   input: Input,
   dir: string,
@@ -581,15 +518,12 @@ async function afterRun(
   return removed.kind === "ok" ? out : spentOn(removed, ended);
 }
 
-// writerTrace : the run's trace, opened in the ticket's folder; one that cannot be opened keeps nothing (#487)
 async function writerTrace(setup: WriterSetup, input: Input): Promise<TraceSink> {
   const at = { home: setup.home, project: setup.project, ticket: input.ticket };
   const opened = await openTrace({ ...at, kind: "writer", at: Date.now() });
   return opened.kind === "ok" ? opened.value : NO_TRACE;
 }
 
-// withTrace : the run's end with its trace named, when one was kept (#487); a trace that could not be kept leaves the
-// end as it was, and its record line names none. Pure.
 function withTrace(ended: Result<Ended> | FailedSpent, kept: Result<TraceKept>): Result<Ended> | FailedSpent {
   if (kept.kind === "failed") {
     return ended;
@@ -599,7 +533,6 @@ function withTrace(ended: Result<Ended> | FailedSpent, kept: Result<TraceKept>):
     : { ...ended, traces: [kept.value.name] };
 }
 
-// toKeep : the run's output to keep, for a run the host blocked (#62); none for any other. Pure.
 function toKeep(ended: Result<Ended> | FailedSpent): readonly string[] {
   if (ended.kind === "failed") {
     return [];
@@ -608,8 +541,6 @@ function toKeep(ended: Result<Ended> | FailedSpent): readonly string[] {
   return outcome.kind === "blocked" && outcome.by === "host" ? output : [];
 }
 
-// withOutput : a run the host blocked keeps the end of what it printed in a file, named in the record (#62): the
-// clone, and the run's own folder, are gone after this step. A file that cannot be written is said in the reason.
 async function withOutput(
   setup: WriterSetup,
   input: Input,
@@ -628,12 +559,10 @@ async function withOutput(
     : { kind: "ok", value: { ...value, why: notKept(value.why, kept.reason) } };
 }
 
-// notKept : the reason, and why the run's output was not kept. Pure.
 function notKept(why: string | undefined, reason: string): string {
   return whyText(`${why ?? "blocked"}; its output was not kept: ${reason}`);
 }
 
-// handOver : a run the host does not start; it says why on the change, labelled needs-human
 async function handOver(setup: WriterSetup, input: Input, reason: string): Promise<Result<WriterOut>> {
   if (input.change.kind !== "open") {
     return { kind: "failed", reason: `${reason}; and there is no open change to say so on` };
@@ -649,7 +578,6 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
       ...setup.push,
       repo: setup.box.repo,
       branch: input.change.line.branch,
-      // nothing new: the branch stays where it is
       commit: head,
       lease: { kind: "sha", sha: head },
       protectedBranches: [],
@@ -661,11 +589,9 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
     : next;
 }
 
-// what a planner decides, and what the run then does with its card
 type Drafted = { readonly kind: "run"; readonly work: Draft } | { readonly kind: "hand-over"; readonly reason: string };
 type Planned = { readonly kind: "run"; readonly work: Work } | { readonly kind: "hand-over"; readonly reason: string };
 
-// the words a card's must_not_see may call each task by
 const ACT_ON: Part = { names: ["the act_on list", "review findings"], needed: true };
 const FAILED_ROW: Part = { names: ["the failed evidence row"], needed: true };
 const FAILED_CI: Part = { names: ["the failed CI jobs"], needed: true };
@@ -674,7 +600,6 @@ const EVIDENCE_ROWS: Part = {
   needed: true,
 };
 
-// reworkPlan : the task a rework run gets, or why a person takes it
 async function reworkPlan(
   setup: WriterSetup,
   input: Input,
@@ -695,7 +620,6 @@ async function reworkPlan(
     : { kind: "hand-over", reason: `the rework run has no task: ${text.reason}; a person takes it` };
 }
 
-// ciPlan : the failed jobs a CI run gets, or why a person takes it
 async function ciPlan(
   setup: WriterSetup,
   input: Input,
@@ -713,7 +637,6 @@ async function ciPlan(
     : { kind: "run", work: { mode: "ci", task: { kind: "text", text: ciText(jobs.value), part: FAILED_CI } } };
 }
 
-// verifyPlan : the local verifier's kept output, for a CI run, or why a person takes it
 async function verifyPlan(
   setup: WriterSetup,
   input: Input,
@@ -729,7 +652,6 @@ async function verifyPlan(
     : { kind: "hand-over", reason: `the CI run has no task: ${kept.reason}; a person takes it` };
 }
 
-// mergePlan : a merge run for a conflict: no task file, the default branch fetched into the clone (inClone)
 function mergePlan(_setup: WriterSetup, input: Input): Promise<Drafted> {
   return Promise.resolve(
     input.change.kind === "open"
@@ -738,7 +660,6 @@ function mergePlan(_setup: WriterSetup, input: Input): Promise<Drafted> {
   );
 }
 
-// cleanupText : the implementer's evidence rows, which the cleanup run runs again, and the branch it diffs against
 export function cleanupText(evidence: readonly Evidence[], base: string): string {
   const rows = evidence.map((e) => `- ${e.criterion}: \`${e.command}\` gave: ${e.result}`);
   return [
@@ -751,7 +672,6 @@ export function cleanupText(evidence: readonly Evidence[], base: string): string
   ].join("\n");
 }
 
-// cleanupPlan : the evidence rows a cleanup run gets, or why a person takes it (#236)
 async function cleanupPlan(
   setup: WriterSetup,
   input: Input,
@@ -772,10 +692,8 @@ async function cleanupPlan(
     : { kind: "hand-over", reason: `the cleanup run has no default branch to diff against: ${base.reason}` };
 }
 
-// the person's answers to the writer's last round of questions (#486; answers.ts), in .factory/task.md
 const ANSWERS: Part = { names: ["the person's answers", "the answers"], needed: true };
 
-// plain : a test-first or fix run; after an answered round its task holds the person's answers, as data (P13)
 const plain = (mode: "test-first" | "fix", answers: readonly Answer[] = []): Promise<Drafted> =>
   Promise.resolve({
     kind: "run",
@@ -785,7 +703,6 @@ const plain = (mode: "test-first" | "fix", answers: readonly Answer[] = []): Pro
     },
   });
 
-// each task by its kind, so a planner per kind is typed without an assertion, and a new kind fails to compile here
 type TaskMap = { readonly [T in Task as T["kind"]]: T };
 type Planners = {
   readonly [K in keyof TaskMap]: (setup: WriterSetup, input: Input, task: TaskMap[K]) => Promise<Drafted>;
@@ -811,7 +728,6 @@ function planOn<K extends keyof TaskMap>(
   return PLANNERS[kind](setup, input, task);
 }
 
-// carded : the draft with its role card, checked: the card's must_not_see may leave out none of what the run needs
 async function carded(setup: WriterSetup, draft: Draft): Promise<Planned> {
   const role = ROLE_OF[draft.mode];
   const card = await readCard(setup.settings.plugins, role);
@@ -825,7 +741,6 @@ async function carded(setup: WriterSetup, draft: Draft): Promise<Planned> {
     : { kind: "hand-over", reason: `the ${role} run cannot start: ${inputs.reason}` };
 }
 
-// planned : what this run does, from its task, and the role card it starts from
 async function planned(setup: WriterSetup, input: Input): Promise<Planned> {
   const draft = await planOn(input.task.kind, setup, input, input.task);
   return draft.kind === "run" ? carded(setup, draft.work) : draft;
@@ -840,8 +755,6 @@ async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOu
   return p.kind === "ok" ? inClone(setup, input, p.value, plan.work) : p;
 }
 
-// runIn : one run in the folder the start line names. A run that stopped before its clone was made leaves the folder
-// empty, and rmdir removes only an empty one; a clone a failed run left stays for the hand-over (afterRun).
 async function runIn(setup: WriterSetup, input: Input): Promise<Result<WriterOut> | FailedSpent> {
   const out = await runOne(setup, input);
   if (input.folder !== undefined) {
@@ -850,8 +763,6 @@ async function runIn(setup: WriterSetup, input: Input): Promise<Result<WriterOut
   return out;
 }
 
-// writerStep : the dispatcher's writer, or why it cannot run here; the run folder is made before the start is
-// recorded, and a dead run's folder is looked into by the hand-over
 export function writerStep(setup: Result<WriterSetup>): Steps["writer"] {
   if (setup.kind === "failed") {
     return { kind: "unavailable", reason: setup.reason };

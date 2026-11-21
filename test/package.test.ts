@@ -7,7 +7,6 @@ import { prop } from "../src/core/dispatch/records.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// what npm would publish, read from npm itself: the files an installed agent-factory has
 function shipped(): readonly string[] {
   const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: ROOT, encoding: "utf8" });
   const packed: unknown = JSON.parse(out);
@@ -18,7 +17,6 @@ function shipped(): readonly string[] {
 describe("the published package (#171)", () => {
   it("ships every prompt and the box image the code reads at run time", () => {
     const files = shipped();
-    // the built-in role cards are in prompts/roles (#236, #235)
     const prompts = readdirSync(join(ROOT, "prompts"), { recursive: true, withFileTypes: true })
       .filter((f) => f.isFile())
       .map((f) => relative(ROOT, join(f.parentPath, f.name)));

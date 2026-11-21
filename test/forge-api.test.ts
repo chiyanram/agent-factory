@@ -56,7 +56,6 @@ describe("rest", () => {
   it("waits for the reset only when no requests are left, else a minute doubled for each limit in a row (#71, #62)", () => {
     const at = (h: Record<string, string>, tries = 1) => waitSeconds(new Map(Object.entries(h)), 1_000_000, tries);
     expect(at({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1000030" })).toBe(30);
-    // a secondary limit: requests are left, and the reset is a second away
     expect(at({ "x-ratelimit-remaining": "4000", "x-ratelimit-reset": "1000001" })).toBe(60);
     expect(at({ "x-ratelimit-remaining": "4000" }, 2)).toBe(120);
     expect(at({}, 3)).toBe(240);
@@ -155,7 +154,6 @@ describe("graphql", () => {
     expect(f.slept).toEqual([60]);
   });
 
-  // #62: "already exceeded" came back as a plain GraphQL error, and the pass failed with it as if it were any other
   it("knows a rate limit in each form: by type, by code, by message, at 200 or 403, primary or secondary (#62)", async () => {
     const reset = { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1002000" };
     for (const limit of [
@@ -225,7 +223,6 @@ describe("readAnswer", () => {
 });
 
 describe("processRunner (#228)", () => {
-  // 3000 lines of "x": 6000 bytes, past a cap of 1000
   const LOUD = { bin: "sh", args: ["-c", "yes x | head -n 3000"], stdin: "", env: { PATH: process.env.PATH } };
   const run = processRunner({ maxBuffer: 1000, tailChars: 100 });
 
@@ -246,7 +243,6 @@ describe("processRunner (#228)", () => {
     const here = await run({ bin: "sh", args: ["-c", "pwd"], stdin: "", env, cwd: "/" });
     expect(here.stdout.trim()).toBe("/");
     const stop = new AbortController();
-    // a child that would outlive its shell: the stop reaches it through the group
     const running = run({
       bin: "sh",
       args: ["-c", "sleep 30 & wait"],
@@ -263,7 +259,6 @@ describe("processRunner (#228)", () => {
     stoppedFirst.abort();
     const never = await run({ bin: "sh", args: ["-c", "sleep 30"], stdin: "", env, stop: stoppedFirst.signal });
     expect(never.code).not.toBe(0);
-    // a stoppable call that keeps all of its output is still stopped past the cap
     expect((await run({ ...LOUD, stop: new AbortController().signal })).code).not.toBe(0);
     const quiet = await run({ bin: "sh", args: ["-c", "echo hi"], stdin: "", env, stop: new AbortController().signal });
     expect(quiet).toEqual({ code: 0, stdout: "hi\n", stderr: "" });

@@ -14,7 +14,6 @@ import { prop } from "../dispatch/records.js";
 import { LANES } from "../spec.js";
 import type { Lens, Rubric } from "./lenses.js";
 
-// a lens, skill, reference or plugin name the round can join into a path: no slash, no dot
 const NAME = /^[A-Za-z0-9_-]+$/;
 const PLUGIN = /^[A-Za-z0-9_.@-]+$/;
 
@@ -25,7 +24,6 @@ function plain(value: unknown, pattern: RegExp): value is string {
   return typeof value === "string" && pattern.test(value);
 }
 
-// repoFile : a relative path in the repo, with no way out of it
 function repoFile(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -55,7 +53,6 @@ function rubricOf(raw: unknown): Rubric | "bad" {
   return skillRubric(raw);
 }
 
-// words : an optional list of strings, each one `ok` accepts; none for left out
 function words(value: unknown, ok: (w: string) => boolean): readonly string[] | "bad" {
   if (value === undefined) {
     return [];
@@ -80,7 +77,6 @@ function lensOf(raw: unknown): Lens | "bad" {
   return paths === "bad" || lanes === "bad" ? "bad" : { name, rubric, paths, lanes };
 }
 
-// lensListOf : the lenses a settings value names, in its order; "bad" when it is not a list of them. Pure.
 export function lensListOf(value: unknown): readonly Lens[] | "bad" {
   if (!Array.isArray(value)) {
     return "bad";
@@ -91,7 +87,6 @@ export function lensListOf(value: unknown): readonly Lens[] | "bad" {
   return good.length === lenses.length && names.size === good.length ? good : "bad";
 }
 
-// checkLenses : "" when a settings value is a good lens list, else what it must be. Pure.
 export function checkLenses(value: unknown): string {
   return lensListOf(value) === "bad" ? LENSES_HINT : "";
 }

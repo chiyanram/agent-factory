@@ -4,6 +4,8 @@
 // folder (core/coordinator-discord.ts). The settings come
 // from src/core/coordinator.ts. The launch reads only the coordinator's own model token from its OS user's store
 // (setup claude --seat coordinator), never the runs' token, and puts it in the env, never argv.
+// A Discord launch with no usable seat token is refused, so it never shares the runs' limit. Setup
+// refuses a symlink and writes each file beside its target and renames it over, so it never writes through a link.
 //
 //   <FACTORY_HOME>/coordinator/.claude/settings.json   the wall, read-only (0444)
 //   <FACTORY_HOME>/coordinator/CLAUDE.md               "follow prompts/coordinator.md", read-only
@@ -35,7 +37,6 @@ export type Interactive = (input: {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
-  // ends the session (SIGTERM) when aborted: the --discord launcher's reset
   readonly signal?: AbortSignal;
 }) => Promise<number>;
 
@@ -44,16 +45,12 @@ export type CoordinatorIo = {
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
   readonly interactive: Interactive;
-  // the coordinator seat's own model login; it never reads the runs' token
   readonly seat: () => Promise<SeatLogin>;
-  // how often the --discord launcher looks for the reset marker, in ms (a test makes it short)
   readonly pollMs?: number;
 };
 
 export type SeatLogin = BoxToken | { readonly kind: "missing"; readonly reason: string };
 
-// how the session starts: plain (the Claude app's or a terminal's chat), or in the project's Discord channel, with the
-// session user's home and uid for the plugin's state folder and its checks
 export type Launch =
   | { readonly kind: "plain"; readonly runner: "claude" | "copilot" }
   | { readonly kind: "discord"; readonly project: string; readonly home: string; readonly uid: number };
@@ -67,7 +64,6 @@ async function isLink(path: string): Promise<boolean> {
   );
 }
 
-// noLinks : refuses when any of these paths is a symlink, so setup never writes through one to another place
 async function noLinks(paths: readonly string[]): Promise<Done> {
   for (const path of paths) {
     if (await isLink(path)) {
@@ -77,8 +73,6 @@ async function noLinks(paths: readonly string[]): Promise<Done> {
   return { kind: "ok" };
 }
 
-// readOnly : the file with this text, mode 0444, written beside it and renamed over it, so a link put in its place is
-// replaced, never followed
 async function readOnly(path: string, text: string): Promise<Done> {
   return attempt(async () => {
     const next = `${path}.new`;
@@ -88,7 +82,6 @@ async function readOnly(path: string, text: string): Promise<Done> {
   }, `cannot write ${path}`);
 }
 
-// installCoordinator : the settings and the instructions, in the coordinator's own folder
 export async function installCoordinator(places: CoordinatorPlaces): Promise<Result<string>> {
   const dir = coordinatorDir(places.factoryHome);
   const links = await noLinks([dir, join(dir, ".claude")]);
@@ -109,7 +102,6 @@ export async function installCoordinator(places: CoordinatorPlaces): Promise<Res
 
 type Env = NodeJS.ProcessEnv;
 
-// missingSeat : no seat token: the session uses its own claude login, which a Discord session says
 function missingSeat(env: Env, reason: string, launch: Launch, io: CoordinatorIo): Result<Env> {
   if (launch.kind === "discord") {
     io.err(`agent-factory coordinator: no seat token of its own, so the chat shares the runs' limit: ${reason}\n`);
@@ -117,8 +109,8 @@ function missingSeat(env: Env, reason: string, launch: Launch, io: CoordinatorIo
   return { kind: "ok", value: env };
 }
 
-// readySeat : the seat's token in the env, never argv; an API key or auth token in the caller's env is dropped, since
-// Claude Code would use it before the seat's token
+// An API key or auth token in the caller's env is dropped: Claude Code uses either before the seat's OAuth token.
+// https://code.claude.com/docs/en/iam#authentication-precedence
 function readySeat(env: Env, seat: Extract<SeatLogin, { kind: "ready" }>, io: CoordinatorIo): Result<Env> {
   if (seat.notice.kind === "warn") {
     io.err(`agent-factory coordinator: ${seat.notice.text} --seat coordinator\n`);
@@ -127,8 +119,6 @@ function readySeat(env: Env, seat: Extract<SeatLogin, { kind: "ready" }>, io: Co
   return { kind: "ok", value: { ...rest, ...seat.env } };
 }
 
-// refusedSeat : a seat token that cannot be used refuses the Discord launch, which must not share the runs' limit
-// unawares; a plain launch says why and starts on its own login, as it did before the seat had a token
 function refusedSeat(env: Env, reason: string, launch: Launch, io: CoordinatorIo): Result<Env> {
   if (launch.kind === "discord") {
     return { kind: "failed", reason };
@@ -148,7 +138,6 @@ function seatEnv(env: Env, seat: SeatLogin, launch: Launch, io: CoordinatorIo): 
   }
 }
 
-// withSeat : the env with the seat's login, or why the session may not start; Copilot takes no claude token
 async function withSeat(env: Env, launch: Launch, io: CoordinatorIo): Promise<Result<Env>> {
   if (launch.kind === "plain" && launch.runner === "copilot") {
     return { kind: "ok", value: env };
@@ -156,7 +145,6 @@ async function withSeat(env: Env, launch: Launch, io: CoordinatorIo): Promise<Re
   return seatEnv(env, await io.seat(), launch, io);
 }
 
-// launchOf : the argv and env for the launch, after the Discord files' checks
 async function launchOf(
   places: CoordinatorPlaces,
   launch: Launch,
@@ -169,9 +157,6 @@ async function launchOf(
   return discordLaunch(places, launch, io);
 }
 
-// pluginOff : why the Discord plugin is not on at user scope in the session user's home, nor kept out of the
-// coordinator's folder, with its fix; "" when it is. An install can exit 0 and leave it off, and the session would
-// then start deaf.
 async function pluginOff(places: CoordinatorPlaces, home: string, env: Env): Promise<string> {
   const state = await pluginState(DISCORD_PLUGIN, {
     env: { ...env, HOME: home },
@@ -180,7 +165,6 @@ async function pluginOff(places: CoordinatorPlaces, home: string, env: Env): Pro
   return pluginProblem(DISCORD_PLUGIN, state);
 }
 
-// discordLaunch : the Discord launch's argv and env, after its two files and the plugin's state are checked
 async function discordLaunch(
   places: CoordinatorPlaces,
   launch: Extract<Launch, { kind: "discord" }>,
@@ -201,7 +185,6 @@ async function discordLaunch(
   return { kind: "ok", value: { argv: discordArgv(), env: discordEnv(io.env, dir) } };
 }
 
-// prepared : the argv and the env, the Discord files checked and the seat's login in place
 async function prepared(
   places: CoordinatorPlaces,
   launch: Launch,
@@ -215,9 +198,6 @@ async function prepared(
   return env.kind === "failed" ? env : { kind: "ok", value: { argv: built.value.argv, env: env.value } };
 }
 
-// startCoordinator : the session in its folder, with only the folder's settings (Claude Code) or the same rules as
-// flags (Copilot CLI), and its seat's own login; refused when setup has not written them, or, for the Discord launch,
-// when its plugin is not on at user scope or its files are looser than the wall
 export async function startCoordinator(places: CoordinatorPlaces, launch: Launch, io: CoordinatorIo): Promise<number> {
   const dir = coordinatorDir(places.factoryHome);
   const there = await readFile(join(dir, ".claude", "settings.json"), "utf8").then(
@@ -231,7 +211,6 @@ export async function startCoordinator(places: CoordinatorPlaces, launch: Launch
   return launch.kind === "plain" ? startOnce(places, launch, io, dir) : supervised(places, launch, io, dir);
 }
 
-// startOnce : one session: the launch prepared afresh (the Discord files checked, the seat's login read), then run
 async function startOnce(
   places: CoordinatorPlaces,
   launch: Launch,
@@ -248,9 +227,6 @@ async function startOnce(
   return io.interactive({ bin: bin ?? "claude", args, cwd: dir, env: ready.value.env, ...(signal ? { signal } : {}) });
 }
 
-// supervised : the Discord session, ended after the turn that reached the reset size (coordinator-turns.ts) and started
-// again fresh, from the brief and the handoff note, before the client would compact; it returns when the session
-// ends for any other reason
 async function supervised(
   places: CoordinatorPlaces,
   launch: Extract<Launch, { kind: "discord" }>,
@@ -280,7 +256,6 @@ function parsedSettings(text: string, path: string): Result<unknown> {
   }
 }
 
-// checkWall : ok only while the coordinator's settings are in place and hold the whole wall
 export async function checkWall(places: CoordinatorPlaces): Promise<Done> {
   const path = join(coordinatorDir(places.factoryHome), ".claude", "settings.json");
   const text = await readFile(path, "utf8").catch(() => "");

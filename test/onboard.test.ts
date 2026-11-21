@@ -16,7 +16,6 @@ import { onboardCommand } from "../src/onboard-cli.js";
 import { tempDir } from "./temp.js";
 import { fencedOnly } from "./fenced.js";
 
-// the rulebook's onboarder scenarios (chiyanram/skills plugins/rulebook/evals/onboarder/), as fixtures
 const MAKEFILE = [
   ".PHONY: build test run",
   "build: ## compile and package",
@@ -39,7 +38,6 @@ const CONTEXT = [
 
 const REPOSITORY = "src/main/java/library/LoanRepository.java";
 
-// the repository's lines: line 31 the field, line 44 the overdue query
 function repositoryText(overdueAt: number): string {
   const lines = Array.from({ length: 50 }, (_, i) => `  // line ${i + 1}`);
   lines[30] = "  private final JdbcTemplate jdbc;";
@@ -196,19 +194,16 @@ describe("agent-factory onboard (#235)", () => {
     const before = git(r.clone, "status", "--porcelain");
     const out = await onboard(setup(model(seen)));
     expect(out).toMatchObject({ kind: "ok", value: { spend: { usd: 0.75, tokens: 1200 } } });
-    // the onboarder's time limit (P7)
     expect(seen.map((s) => s.run.limit)).toEqual([LIMIT]);
     const brief = staged("brief.md");
     expect(brief).toContain("- `make build`: compile and package (`Makefile:2`, verified)");
     expect(brief).toContain("- `make test`: unit and integration tests (`Makefile:4`, verified)");
     expect(brief).toContain("- `make run`: start the api on port 8085 (`Makefile:6`, verified)");
     expect(brief).not.toMatch(/`\.\/gradlew/);
-    // a cite the default branch holds is kept and verified; one it does not is marked inferred
     expect(brief).toContain(`(\`${REPOSITORY}:44\`, verified)`);
     expect(brief).toContain("- A cite past the file's end is not kept (inferred)");
     expect(brief).toContain("- [AGENTS.md](AGENTS.md) (verified)");
     expect(brief).not.toMatch(/\b\d+ modules\b/);
-    // the repo is as it was, and the model ran read-only on a copy, from its card, with the engine's listing
     expect(git(r.clone, "status", "--porcelain")).toBe(before);
     expect(readdirSync(r.clone).toSorted()).toEqual([
       ".git",
@@ -224,7 +219,6 @@ describe("agent-factory onboard (#235)", () => {
     expect(seen[0]?.commands).toContain("`make test`: unit and integration tests (Makefile:4)");
     expect(seen[0]?.run.prompt).toMatch(/^# Onboarder/);
     expect(seen[0]?.run.prompt).toContain(FLOOR);
-    // what it spent is in the project's run records
     const read = await readRecords({ home: r.home, project: "ledger", ticket: "onboarder" });
     expect(read).toMatchObject({ kind: "ok", value: [{ kind: "spent", phase: "onboard", spend: { usd: 0.75 } }] });
   });
@@ -296,13 +290,11 @@ describe("agent-factory onboard (#235)", () => {
     ]);
   });
 
-  // acceptWords : the `onboard accept` words that `onboard <project>` printed for ledger
   const acceptWords = (printed: readonly string[]): string[] => {
     const hashes = printed.join("").match(/onboard accept ledger ([0-9a-f]{64}) ([0-9a-f]{64})/);
     return ["accept", "ledger", hashes?.[1] ?? "", hashes?.[2] ?? ""];
   };
 
-  // plainTerminal : the env of a plain terminal, outside any model run, with no git config but the test's own
   const plainTerminal = (): NodeJS.ProcessEnv => ({
     PATH: process.env.PATH,
     HOME: r.home,
@@ -403,7 +395,6 @@ describe("onboardSetup (#235, after #232 and #213)", () => {
   });
 });
 
-// the ledger pilot's AGENTS.md (#62): three MUSTs, one wrapped over two lines
 const LEDGER_AGENTS = [
   "# Agents",
   "",
@@ -432,7 +423,6 @@ const LEDGER_MUSTS = [
   "- Put every integration test under src/integrationTest, never beside the unit tests. (`AGENTS.md:9`, verified)",
 ];
 
-// what the ledger brief said (#62), and the claim the engine must not take on a cite
 const ABSENCE_CLAIM = {
   text: "Project rules: there is no CLAUDE.md, AGENTS.md, CONTRIBUTING, glossary or ADR directory in the repo",
   file: "Makefile",
@@ -440,7 +430,6 @@ const ABSENCE_CLAIM = {
   verified: true,
 };
 
-// what the ledger run on the operator's Mac said (#383), which refused the whole brief over build.gradle.kts
 const LEDGER_CLAIM = {
   text: "Project rules: the repo has no agent instruction file (CLAUDE.md/AGENTS.md), no glossary and no ADRs. The only written rules are comments in build.gradle.kts and gradle/libs.versions.toml",
   file: "build.gradle.kts",
@@ -492,7 +481,6 @@ describe("the project's MUSTs and the cite check (#383)", () => {
     expect(rules).toContain("- You MUST NOT push to main. (`CLAUDE.md:3`, verified)");
     expect(rules).not.toContain("Prefer records");
     expect(rules).not.toContain("# MUST pass");
-    // each MUST's cite is kept, so a run reports it stale when the line moves
     const cites: unknown = JSON.parse(staged("cites.json"));
     expect(cites).toContainEqual(expect.objectContaining({ file: "AGENTS.md", line: 8 }));
     expect(seen).toHaveLength(1);
@@ -514,7 +502,6 @@ describe("the project's MUSTs and the cite check (#383)", () => {
     }
     expect(brief).toContain("- [AGENTS.md](AGENTS.md) (verified)");
     expect(brief).toContain("- [CLAUDE.md](CLAUDE.md) (verified)");
-    // the note is staged for the human, never accepted, and the spend is in the run records
     const note = staged("dropped.md");
     expect(note).toContain(LEDGER_CLAIM.text);
     expect(note).toContain("the engine writes Project rules itself");

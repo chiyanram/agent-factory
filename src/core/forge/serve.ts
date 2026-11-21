@@ -50,7 +50,6 @@ function done(result: Done): Answer {
   return result.kind === "ok" ? { kind: "done" } : failed(result.reason);
 }
 
-// withInput : the op, when its input reads; else the reason it does not
 async function withInput<T>(
   input: unknown,
   read: (r: Reader, input: unknown) => T,
@@ -161,7 +160,6 @@ function client(forge: ForgeName, io: ServeIo): Client {
   };
 }
 
-// opened : the adapter for the project the request names
 function opened(forge: ForgeName, io: ServeIo, project: unknown): Result<Forge> {
   const name = typeof project === "string" ? project : "";
   if (forge === "github") {
@@ -189,8 +187,6 @@ function fieldIn(input: unknown, name: string): unknown {
   return typeof input === "object" && input !== null ? Reflect.get(input, name) : undefined;
 }
 
-// answer : one request's answer: unsupported for an op it does not know, refused for an op sent under the other
-// capability, so a read never writes
 export async function answer(forge: ForgeName, io: ServeIo, text: string): Promise<Answer> {
   const request = requestOf(text);
   if (request === "bad") {
@@ -207,7 +203,6 @@ export async function answer(forge: ForgeName, io: ServeIo, text: string): Promi
   return adapter.kind === "ok" ? RUN[request.op](adapter.value, request.input) : failed(adapter.reason);
 }
 
-// refusalOf : why the plugin refuses a known op: sent under the other capability, or for another forge; "" for none
 function refusalOf(forge: ForgeName, op: ForgeOp, request: Request): string {
   if (FORGE_OPS[op] !== request.capability) {
     return `${op} is ${FORGE_OPS[op]}, not ${request.capability}`;
@@ -216,7 +211,6 @@ function refusalOf(forge: ForgeName, op: ForgeOp, request: Request): string {
   return asked === undefined || asked === forge ? "" : `this plugin serves ${forge}, not ${JSON.stringify(asked)}`;
 }
 
-// serve : the plugin's whole run: describe or call; exit 0 with one JSON object, 64 for any other verb
 export async function serve(forge: ForgeName, version: string, io: ServeIo): Promise<number> {
   const [verb] = io.argv;
   if (verb === "describe") {
@@ -242,7 +236,6 @@ function stdinText(): Promise<string> {
   });
 }
 
-// main : the bundled plugin's entry: this process's words, stdin, environment and stdout
 export async function main(forge: ForgeName, version: string): Promise<void> {
   process.exitCode = await serve(forge, version, {
     argv: process.argv.slice(2),

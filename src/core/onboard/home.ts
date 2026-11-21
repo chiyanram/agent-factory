@@ -11,6 +11,8 @@
 //
 // The coordinator's settings deny any edit of the project home and both commands (coordinator.ts). A brief edited after
 // its acceptance is not read: a run then goes without it and its record says why.
+//
+// Only the door seam calls accept, with the by and via of the person a door vouched for.
 
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,10 +26,8 @@ const FILES = ["brief.md", "glossary.md", "cites.json"] as const;
 
 export type Hashes = { readonly brief: string; readonly glossary: string };
 
-// the staged note of the model lines the engine dropped (brief.ts); never one of FILES, so never accepted
 export const DROPPED = "dropped.md";
 
-// droppedNote : the note, or none when nothing was dropped, so an earlier run's note does not stay
 async function droppedNote(path: string, dropped: readonly string[]): Promise<void> {
   if (dropped.length === 0) {
     await rm(path, { force: true });
@@ -47,7 +47,6 @@ export function projectDir(home: string, project: string): Result<string> {
     : failed(`the project must be a plain name, got ${JSON.stringify(project)}`);
 }
 
-// stage : the onboarder's files, staged for a human; their hashes, as the human confirms them
 export async function stage(input: {
   readonly home: string;
   readonly project: string;
@@ -79,7 +78,6 @@ async function hashesIn(dir: string): Promise<Hashes | "missing"> {
     : { brief: specHash(brief), glossary: specHash(glossary) };
 }
 
-// what an acceptance comes to: the project home the files moved to, a failure, or the door seam's refusal
 export type Accept = Result<string> | Refused;
 
 export type AcceptRequest = {
@@ -91,8 +89,6 @@ export type AcceptRequest = {
   readonly at: string;
 };
 
-// accept : a human's acceptance of the staged files with exactly these hashes; they move into the project home. Only
-// the door seam calls it (door/write.ts acceptAs), with the by and via of the person a door vouched for
 export async function accept(input: AcceptRequest): Promise<Result<string>> {
   const dir = projectDir(input.home, input.project);
   if (dir.kind === "failed") {
@@ -147,7 +143,6 @@ async function moved(
 
 export type Knowledge =
   | { readonly kind: "none" }
-  // accepted, but a file changed since: a run goes without it
   | { readonly kind: "changed"; readonly why: string }
   | {
       readonly kind: "accepted";
@@ -172,8 +167,6 @@ function citesOf(text: string): readonly KeptCite[] {
   }
 }
 
-// readKnowledge : the accepted brief and glossary, which every run reads; none before a human accepts one
-// acceptedHashes : the hashes a human accepted, or "none" without an acceptance
 async function acceptedHashes(dir: string): Promise<Hashes | "none"> {
   const record = await readRecordFile(join(dir, "knowledge.json"));
   return record.kind === "json"

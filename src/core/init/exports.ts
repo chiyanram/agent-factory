@@ -5,7 +5,6 @@
 import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
-// the profiles a shell reads at login or start, under the home
 export const PROFILES: readonly string[] = [
   ".zshenv",
   ".zprofile",
@@ -19,7 +18,6 @@ export const PROFILES: readonly string[] = [
 
 export type Place = { readonly name: string; readonly file: string; readonly line: number };
 
-// exportsIn : each line of a profile's text that exports one of the names, sh or fish style. Pure.
 export function exportsIn(file: string, text: string, names: readonly string[]): readonly Place[] {
   return text.split("\n").flatMap((line, i) => {
     const name = exportedName(line);
@@ -27,7 +25,6 @@ export function exportsIn(file: string, text: string, names: readonly string[]):
   });
 }
 
-// exportedName : the variable a profile line exports, sh (export NAME=) or fish (set -gx NAME); "" for none. Pure.
 function exportedName(line: string): string {
   const sh = /^\s*export\s+([A-Z_][A-Z0-9_]*)=/.exec(line)?.[1];
   return sh ?? /^\s*set\s+-[a-zA-Z]*x[a-zA-Z]*\s+([A-Z_][A-Z0-9_]*)\s/.exec(line)?.[1] ?? "";
@@ -39,8 +36,6 @@ async function placesIn(home: string, profile: string, names: readonly string[])
   return text === undefined ? [] : exportsIn(real, text, names);
 }
 
-// exportPlaces : every profile line under the home that exports one of the names; a profile reached twice through
-// symlinks is read once
 export async function exportPlaces(home: string, names: readonly string[]): Promise<readonly Place[]> {
   if (home === "" || names.length === 0) {
     return [];
@@ -55,8 +50,6 @@ export async function exportPlaces(home: string, names: readonly string[]): Prom
   });
 }
 
-// exportsText : what init says about the exports the files now make needless: each file and line to remove, or the
-// names alone when no profile under the home holds them (exported elsewhere). Pure.
 export function exportsText(names: readonly string[], places: readonly Place[]): string {
   if (names.length === 0) {
     return "";

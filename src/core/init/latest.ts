@@ -10,7 +10,6 @@ export const RELEASES_API = "https://api.github.com/repos/chiyanram/agent-factor
 
 export type VersionCheck = { readonly ok: true; readonly line: string; readonly fix: string };
 
-// newer : whether version a is newer than b, by its numeric parts. Pure.
 export function newer(a: string, b: string): boolean {
   const pa = a.split(".").map(Number);
   const pb = b.split(".").map(Number);
@@ -18,12 +17,10 @@ export function newer(a: string, b: string): boolean {
   return i >= 0 && (pa[i] ?? 0) > (pb[i] ?? 0);
 }
 
-// installLine : the one line that installs a release. Pure.
 export function installLine(v: string): string {
   return `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v${v}/chiyanram-agent-factory-${v}.tgz`;
 }
 
-// versionCheck : the installed version and the latest release, as one check line. Pure.
 export function versionCheck(installed: string, latest: Result<string>): VersionCheck {
   if (latest.kind === "failed") {
     return {
@@ -41,13 +38,11 @@ export function versionCheck(installed: string, latest: Result<string>): Version
     : { ok: true, line: `agent-factory ${installed}, the latest release`, fix: "" };
 }
 
-// versionIn : the version a release list's answer names; none when it names none. Pure.
 function versionIn(body: unknown): string | undefined {
   const tag = typeof body === "object" && body !== null ? Reflect.get(body, "tag_name") : undefined;
   return typeof tag === "string" && /^v\d+\.\d+\.\d+$/.test(tag) ? tag.slice(1) : undefined;
 }
 
-// latestRelease : the latest release's version, read with the given fetch; why not, when it cannot be read
 export async function latestRelease(get: (url: string) => Promise<Response>): Promise<Result<string>> {
   try {
     const answer = await get(RELEASES_API);

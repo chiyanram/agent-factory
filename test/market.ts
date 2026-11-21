@@ -36,7 +36,6 @@ function git(dir: string, args: readonly string[]): string {
   return execFileSync("git", ["-C", dir, ...args], { env: GIT_ENV, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 }
 
-// commitMarket : the marketplace's origin with these files changed in one commit; the commit's id
 export function commitMarket(home: string, files: Readonly<Record<string, string>>): string {
   const origin = join(home, "origin");
   mkdirSync(origin, { recursive: true });
@@ -50,7 +49,6 @@ export function commitMarket(home: string, files: Readonly<Record<string, string
   return git(origin, ["rev-parse", "HEAD"]).trim();
 }
 
-// setUpMarket : the origin's first commit, its clone in the home, and the ledger project listing these plugins
 export function setUpMarket(home: string, plugins: readonly string[] = ["rulebook@chiyanram"]): string {
   mkdirSync(join(home, "projects"), { recursive: true });
   const first = commitMarket(home, PLUGIN);

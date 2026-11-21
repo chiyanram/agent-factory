@@ -10,7 +10,6 @@ import { join } from "node:path";
 
 export const LIMIT = 200;
 
-// lineCount : the lines in the text, the last one counted even without a newline
 export function lineCount(text: string): number {
   if (text === "") {
     return 0;
@@ -18,7 +17,6 @@ export function lineCount(text: string): number {
   return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
-// tooLong : why ROOT/AGENTS.md is too long, or "" when it is not (or is not there)
 export function tooLong(root: string): string {
   const file = join(root, "AGENTS.md");
   const lines = existsSync(file) ? lineCount(readFileSync(file, "utf8")) : 0;

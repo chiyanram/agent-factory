@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { claudeUsageLimit, NO_WINDOWS, windowsOf } from "../src/core/agent/usage-limit.js";
 
-// A provider's usage limit is read from its exact refusal text only, its reset time from the stream's rate-limit
-// event first, then from the text (AO b5f4911 backend/internal/domain/usage_limit.go).
-
 const at = (iso: string): number => Date.parse(iso);
 
 function line(event: unknown): string {
@@ -42,12 +39,10 @@ describe("a Claude usage-limit refusal", () => {
     expect(claudeUsageLimit(stream(result(HIT)), "", at("2026-11-17T10:00:00Z"))).toMatchObject({
       until: "2026-11-17T15:00:00Z",
     });
-    // past 15:00 London, the clock means the next day
     expect(claudeUsageLimit(stream(result(HIT)), "", at("2026-11-17T16:00:00Z"))).toMatchObject({
       until: "2026-11-18T15:00:00Z",
     });
     const tomorrow = "You've hit your limit · resets tomorrow 9:30am (Asia/Tokyo)";
-    // 19:00 in Tokyo on the 17th: tomorrow 09:30 is the 18th, 00:30 UTC
     expect(claudeUsageLimit(stream(result(tomorrow)), "", at("2026-11-17T10:00:00Z"))).toMatchObject({
       until: "2026-11-18T00:30:00Z",
     });
@@ -68,11 +63,9 @@ describe("a Claude usage-limit refusal", () => {
     expect(unknown("You've hit your limit · resets 3pm (PST)", "2026-11-17T10:00:00Z")).toMatchObject({
       until: "unknown",
     });
-    // 23:00 on 31 October in New York: 01:30 is next on 1 November, which shows 01:30 twice
     expect(unknown("You've hit your limit · resets 1:30am (America/New_York)", "2026-11-01T03:00:00Z")).toMatchObject({
       until: "unknown",
     });
-    // 00:00 on 8 March in New York, which skips 02:30
     expect(unknown("You've hit your limit · resets 2:30am (America/New_York)", "2026-03-08T05:00:00Z")).toMatchObject({
       until: "unknown",
     });

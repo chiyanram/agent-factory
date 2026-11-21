@@ -19,7 +19,6 @@ describe("the packed package (#482, ledger pilot row 13)", () => {
   });
 });
 
-// gardener's numbers depend on its exact version: an upgrade is its own change, and it rechecks any deep import
 describe("repo-gardener", () => {
   const read = (file: string): unknown => JSON.parse(readFileSync(join(import.meta.dirname, "..", file), "utf8"));
   const at = (value: unknown, ...keys: readonly string[]): unknown =>

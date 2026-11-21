@@ -25,25 +25,21 @@ const NUMBER = /\b(?:ADR-)?(00\d\d)\b/g;
 
 export type Adr = { readonly number: string; readonly file: string; readonly text: string };
 
-// headerOf : an ADR's text before its first "## " heading. Pure.
 export function headerOf(text: string): string {
   const at = text.search(/^## /m);
   return at < 0 ? text : text.slice(0, at);
 }
 
-// bodyOf : an ADR's text from its first "## " heading. Pure.
 export function bodyOf(text: string): string {
   return text.slice(headerOf(text).length);
 }
 
-// earlierOf : the ADRs this one's status says it changes. Pure.
 export function earlierOf(adr: Adr): readonly string[] {
   const header = headerOf(adr.text);
   const found = [...header.matchAll(VERB)].flatMap((m) => [...(m[2] ?? "").matchAll(NUMBER)].map((n) => n[1] ?? ""));
   return [...new Set(found)].filter((n) => n !== adr.number);
 }
 
-// namedBack : each earlier ADR whose header does not name the later one that changes it. Pure.
 export function namedBack(adrs: readonly Adr[]): readonly string[] {
   return adrs.flatMap((later) =>
     earlierOf(later).flatMap((n) => {
@@ -58,21 +54,15 @@ export function namedBack(adrs: readonly Adr[]): readonly string[] {
 
 const MARK = "**Today:**";
 
-// ends : a line that ends a running note, and is itself frozen: a blank line, a table row, a heading, a list item or
-// a code fence. Pure.
 function ends(line: string): boolean {
   return /^\s*$|^\s*\||^#|^\s*([-*]|\d+\.)\s|^\s*```/.test(line);
 }
 
-// cellEnd : where the table cell that starts at `from` ends: its next "|" that no backslash escapes, or the line's
-// end. Pure.
 function cellEnd(line: string, from: number): number {
   const at = line.slice(from).search(/(?<!\\)\|/);
   return at < 0 ? line.length : from + at;
 }
 
-// cutNote : the frozen text of a line that holds a note, the note cut out: the text before its marker, and in a table
-// row the cells after its own. runs: whether the note goes on to the next line, as a plain line's does. Pure.
 function cutNote(line: string): { readonly frozen: string; readonly runs: boolean } {
   const at = line.indexOf(MARK);
   const before = line.slice(0, at);
@@ -101,7 +91,6 @@ function kept(body: string): readonly string[] {
   return out.filter((l) => l !== "");
 }
 
-// inPlace : why an ADR's body changed from the default branch's, or "" when only its header or Today notes did. Pure.
 export function inPlace(file: string, before: string, after: string): string {
   const was = kept(bodyOf(before));
   const now = kept(bodyOf(after));
@@ -129,7 +118,6 @@ function adrsIn(root: string): readonly Adr[] {
   });
 }
 
-// changedInPlace : each ADR on the merge base whose body changed; none when the base cannot be read
 function changedInPlace(root: string, adrs: readonly Adr[]): readonly string[] {
   const base = git(root, ["merge-base", "HEAD", baseRef()])?.trim();
   if (base === undefined || base === "") {

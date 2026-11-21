@@ -14,7 +14,6 @@
 import { OUTCOME_DAYS, type MergeOutcome } from "../outcome.js";
 import { UNRECORDED, type Timeline } from "../dispatch/timeline.js";
 
-// a mistake counts as repeated after two sightings (P12; the rules pack's retro table, RT6)
 export const REPEATS = 2;
 
 const DAY_MS = 86_400_000;
@@ -28,13 +27,10 @@ export type Failure = {
   readonly cites: readonly string[];
 };
 
-// a merged ticket's merge time and what became of it
 export type Merge = { readonly at: string; readonly outcome: MergeOutcome };
 
 type Seen = { readonly kind: FailureKind; readonly key: string; readonly ticket: string; readonly cite: string };
 
-// actedInActOn : how many findings of the rule a later commit acted on, when the rule was found in Act on; 0 for none
-// or a row with no rule ID. Pure.
 function actedInActOn(t: Timeline, rule: string): number {
   return rule !== UNRECORDED && actOnOf(t, rule) > 0 ? actedOf(t, rule) : 0;
 }
@@ -42,7 +38,6 @@ function actedInActOn(t: Timeline, rule: string): number {
 const actOnOf = (t: Timeline, rule: string): number => t.found[rule]?.act_on ?? 0;
 const actedOf = (t: Timeline, rule: string): number => t.acted[rule]?.acted ?? 0;
 
-// rulesSeen : each rule ID the ticket's timeline found in Act on and saw acted on. Pure.
 function rulesSeen(ticket: string, t: Timeline): readonly Seen[] {
   return Object.keys(t.found).flatMap((rule): readonly Seen[] => {
     const acted = actedInActOn(t, rule);
@@ -52,14 +47,12 @@ function rulesSeen(ticket: string, t: Timeline): readonly Seen[] {
   });
 }
 
-// rescuesSeen : the ticket's rescues, one sighting of the one kind there is today. Pure.
 function rescuesSeen(ticket: string, t: Timeline): readonly Seen[] {
   return t.rescues.length === 0
     ? []
     : [{ kind: "rescue", key: "hand-over", ticket, cite: `${ticket} timeline ${t.at}: ${t.rescues.length} rescue(s)` }];
 }
 
-// escapedSeen : a fix or revert within OUTCOME_DAYS of the merge, or none. Pure.
 function escapedSeen(ticket: string, merge: Merge): readonly Seen[] {
   const o = merge.outcome;
   if (o.kind !== "fixed" && o.kind !== "reverted") {
@@ -78,7 +71,6 @@ function escapedSeen(ticket: string, merge: Merge): readonly Seen[] {
       ];
 }
 
-// grouped : the sightings by kind and key, in the order first seen. Pure.
 function grouped(seen: readonly Seen[]): readonly Failure[] {
   const out = new Map<string, { kind: FailureKind; key: string; tickets: string[]; cites: string[] }>();
   for (const s of seen) {
@@ -93,7 +85,6 @@ function grouped(seen: readonly Seen[]): readonly Failure[] {
   return [...out.values()];
 }
 
-// repeatedOf : the failures seen on min or more tickets, and every escaped defect. Pure.
 export function repeatedOf(input: {
   readonly timelines: ReadonlyMap<string, Timeline>;
   readonly merges: ReadonlyMap<string, Merge>;

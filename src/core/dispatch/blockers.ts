@@ -4,35 +4,31 @@
 //   every blocker merged              the build may start; the first run clones a fresh default branch, with them in
 //   a blocker not merged yet          wait, naming each blocker and where it stands
 //   a blocker closed with no merge    needs-human: a person decides whether the ticket still waits on it
+//   the ticket names itself, or the
+//     blockers form a cycle           needs-human, naming the cycle
 //
 // A blocker that is a git host issue (a number) also counts by its issue (AC-9): closed as completed, by a person's
 // change on any branch, it is merged; closed as not planned, it is closed with no merge; closed where the git host keeps
-// no reason and no merged change closes or mentions it (GitLab), it is closed with no merge seen, for a person.
-//   the ticket names itself, or the
-//     blockers form a cycle            needs-human, naming the cycle
+// no reason and no merged change closes or mentions it (GitLab), it is closed with no merge seen, for a person. A pass
+// the git host does not answer leaves the ticket waiting; after repeated passes a person looks (AC-7).
 //
 // Only a ticket with no run yet is held: once its build began, its spec's blockers no longer stop it. No ticket ever
 // builds on another ticket's open branch. Pure.
 
 import type { BranchState, IssueState } from "../forge/types.js";
 
-// where a blocker stands: its branch's changes, or "unseen" for an issue closed with no merge seen (#494 AC-9)
 export type BlockerState = BranchState | "unseen";
 
 export type BlockersView =
   | { readonly kind: "none" }
   | { readonly kind: "waiting"; readonly on: readonly { readonly ticket: string; readonly state: BlockerState }[] }
   | { readonly kind: "broken"; readonly why: string }
-  // the git host did not answer for a blocker this pass, with why; the ticket waits, and after repeated passes a
-  // person looks (#494 AC-7)
   | { readonly kind: "unread"; readonly why: string };
 
-// what the tick read of one blocker: where its change stands, and its own spec's blockers, for the cycle check
 export type Blocker = {
   readonly ticket: string;
   readonly state: BlockerState;
   readonly blockedBy: readonly string[];
-  // why the git host did not answer for the blocker's branch or issue; absent when it did
   readonly unread?: string;
 };
 
@@ -43,8 +39,6 @@ const BY_ISSUE: Readonly<Record<IssueState, BlockerState | "branch">> = {
   closed: "unseen",
 };
 
-// withIssue : a blocker's state once its issue is read: a merge on its branch stands; else a closed issue decides,
-// and an open one leaves the branch's state (#494 AC-9). Pure.
 export function withIssue(branch: BranchState, issue: IssueState): BlockerState {
   const byIssue = BY_ISSUE[issue];
   return branch === "merged" || byIssue === "branch" ? branch : byIssue;
@@ -53,16 +47,13 @@ export function withIssue(branch: BranchState, issue: IssueState): BlockerState 
 type Walk = {
   readonly ticket: string;
   readonly specs: ReadonlyMap<string, readonly string[]>;
-  // the tickets already walked to their end without finding the ticket: never walked again, so the walk is linear
   readonly done: Set<string>;
 };
 
-// cycleFrom : a path of blockers that leads back to the ticket, or none. Pure.
 export function cycleFrom(ticket: string, specs: ReadonlyMap<string, readonly string[]>): readonly string[] {
   return walk({ ticket, specs, done: new Set() }, [ticket]);
 }
 
-// walk : the first path from the end of `path` back to the ticket at its start, or none
 function walk(w: Walk, path: readonly string[]): readonly string[] {
   const at = path.at(-1) ?? "";
   for (const next of w.specs.get(at) ?? []) {
@@ -90,10 +81,8 @@ const STATE_WORDS: Readonly<Record<BlockerState, string>> = {
   unseen: "closed, no merge seen",
 };
 
-// a blocker that can never merge: a person decides whether the ticket still waits on it
 const DEAD: ReadonlySet<BlockerState> = new Set(["closed", "unseen"]);
 
-// blockersView : where the ticket's blockers leave its build. Pure.
 export function blockersView(ticket: string, blockedBy: readonly string[], read: readonly Blocker[]): BlockersView {
   if (blockedBy.length === 0) {
     return { kind: "none" };
@@ -108,7 +97,6 @@ export function blockersView(ticket: string, blockedBy: readonly string[], read:
     : { kind: "unread", why: unread.map((b) => `${b.ticket}: ${b.unread ?? ""}`).join("; ") };
 }
 
-// brokenWhy : why a person must look at the ticket's blockers: itself, a cycle, or one closed with no merge; "". Pure.
 function brokenWhy(ticket: string, blockedBy: readonly string[], read: readonly Blocker[]): string {
   if (blockedBy.includes(ticket)) {
     return `the spec's "Blocked by" names ${ticket} itself`;
@@ -125,7 +113,6 @@ function brokenWhy(ticket: string, blockedBy: readonly string[], read: readonly 
   return dead.length > 0 ? `blocked by ${dead.map((b) => `${b.ticket}, ${STATE_WORDS[b.state]}`).join("; ")}` : "";
 }
 
-// waiting : the blockers not merged yet; none when every one is. Pure.
 function waiting(blockedBy: readonly string[], read: readonly Blocker[]): BlockersView {
   const open = read.filter((b) => blockedBy.includes(b.ticket) && b.state !== "merged");
   return open.length === 0
@@ -133,7 +120,6 @@ function waiting(blockedBy: readonly string[], read: readonly Blocker[]): Blocke
     : { kind: "waiting", on: open.map((b) => ({ ticket: b.ticket, state: b.state })) };
 }
 
-// waitingWhy : what the wait says, each blocker with where it stands. Pure.
 export function waitingWhy(on: Extract<BlockersView, { kind: "waiting" }>["on"]): string {
   return `blocked by ${on.map((b) => `${b.ticket} (${STATE_WORDS[b.state]})`).join(", ")}: the build starts once each is merged`;
 }

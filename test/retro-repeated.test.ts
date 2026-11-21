@@ -7,7 +7,6 @@ import { repeatedOf, REPEATS, type Merge } from "../src/core/retro/repeated.js";
 
 const AT = "2026-11-01T12:00:00Z";
 
-// timeline : a merge's timeline line with these Act on findings and acted-on counts per rule, and these rescues
 function timeline(input: {
   readonly actOn?: Readonly<Record<string, number>>;
   readonly acted?: Readonly<Record<string, number>>;

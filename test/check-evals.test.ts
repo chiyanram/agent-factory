@@ -133,7 +133,6 @@ describe("check-evals on a repository", () => {
 
   const PATCH = ["--- a/a.ts", "+++ b/a.ts", "@@ -1,2 +1,2 @@", " const a = 1;", "-const b = 2;", "+const b = 3;", ""];
 
-  // a repository with one commit of a.ts (2 lines) and the given cases; every case is listed in cases.md as seeded
   function repo(cases: Readonly<Record<string, Readonly<Record<string, string>>>>, rows?: string): string {
     const dir = tempDir("factory-evals-test-");
     made.push(dir);
@@ -216,7 +215,6 @@ describe("check-evals on a repository", () => {
     expect(r.out).toContain("evals/reviewer/empty: a seeded case's golden.json must name its seed");
   });
 
-  // it applies every case's patch to its base commit, so it grows with the golden set: a cold macOS runner took 6 s
   it("passes this repository's own golden set", { timeout: 60_000 }, () => {
     expect(run(ROOT)).toEqual({ code: 0, out: "" });
   });

@@ -16,8 +16,6 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
-// DOCS : files that no test runs differently on macOS. prompts/ and plugins/ hold Markdown the code reads, so they are
-// not here.
 const DOCS: readonly RegExp[] = [
   /^docs\//,
   /^[^/]+\.md$/,
@@ -35,7 +33,6 @@ export type Change =
 
 export type Decision = { readonly run: boolean; readonly why: string };
 
-// decide : whether macOS runs for this change, and why. Pure.
 export function decide(c: Change): Decision {
   if (c.kind === "other") {
     return { run: true, why: `event ${c.event || "unknown"} always runs macOS` };
@@ -46,7 +43,6 @@ export function decide(c: Change): Decision {
   return byFiles(c.changed);
 }
 
-// byFiles : a ready pull request skips macOS only when it lists changed files and every one is docs. Pure.
 function byFiles(changed: readonly string[] | undefined): Decision {
   if (changed === undefined) {
     return { run: true, why: "cannot list the changed files, so macOS runs" };
@@ -76,8 +72,6 @@ function parse(text: string | undefined): unknown {
   }
 }
 
-// changeOf : the change a GitHub event names. A pull request's files are the diff from the merge base of its base and
-// head commits; `diff` returns undefined when git cannot give them. Pure but for `diff`.
 export function changeOf(
   event: string,
   eventText: string | undefined,

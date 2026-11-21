@@ -15,7 +15,6 @@ import type { Started } from "./start.js";
 export type LiveInput = {
   readonly setup: BoxSetup;
   readonly allowlist: readonly string[];
-  // the project's own git host, refused on the list besides the public ones (allowlist.ts)
   readonly gitHosts: readonly string[];
   readonly docker: { readonly run: Runner; readonly bin: string; readonly env: NodeJS.ProcessEnv };
   readonly ports: readonly number[];
@@ -45,7 +44,6 @@ async function runOne(setup: BoxSetup, session: Session, check: LiveCheck): Prom
   return { name: check.name, verdict: check.read(answerOf(ran)) };
 }
 
-// checksFor : the checks for this proxy and its network's gateway
 async function checksFor(
   input: LiveInput,
   egress: Extract<Started, { kind: "started" }>,
@@ -81,7 +79,6 @@ async function inRunner(input: LiveInput, folder: string): Promise<Result<readon
         "the srt runner keeps its own proxy, and this check needs a vm runner; on the laptop run the srt check (GUIDE.md, Check the srt runner)",
     };
   }
-  // the proxy is started once: the runner joins the one these checks then probe
   const setup: BoxSetup = { ...input.setup, egress: () => Promise.resolve(egress) };
   const session = await startBox(setup, { worktree: folder, readOnly: [], env: {} });
   if (session.kind === "failed") {
@@ -94,7 +91,6 @@ async function inRunner(input: LiveInput, folder: string): Promise<Result<readon
     : { kind: "failed", reason: `the runner ${session.value.id} did not stop: ${stopped.reason}` };
 }
 
-// checkEgress : every live check, in a runner on an empty folder that goes afterwards
 export async function checkEgress(input: LiveInput): Promise<Result<readonly Row[]>> {
   await mkdir(input.setup.runsDir, { recursive: true, mode: 0o700 });
   const folder = await mkdtemp(join(input.setup.runsDir, "egress-check-"));

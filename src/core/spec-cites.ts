@@ -22,7 +22,6 @@ export type SpecCite = {
 
 const CITE = /(?<![\w./-])((?:[\w.-]+\/)*[\w.-]*\w):(\d+)(?:-(\d+))?@([0-9a-fA-F]{7,40})\b/g;
 
-// specCites : every `file:line@commit` in the text, each once. Pure.
 export function specCites(text: string): readonly SpecCite[] {
   const seen = new Map<string, SpecCite>();
   for (const m of text.matchAll(CITE)) {
@@ -31,7 +30,6 @@ export function specCites(text: string): readonly SpecCite[] {
   return [...seen.values()];
 }
 
-// citeOf : one match as a cite: a single line ends where it starts. Pure.
 function citeOf(m: RegExpMatchArray): SpecCite {
   const line = Number(m[2]);
   const commit = (m[4] ?? "").toLowerCase();
@@ -49,7 +47,6 @@ function lines(text: string): number {
   return text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
-// citeBroken : why one cite does not hold in the clone; "" when it does
 async function citeBroken(at: Repo, c: SpecCite): Promise<string> {
   const commit = await git(at, ["rev-parse", "--verify", "-q", `${c.commit}^{commit}`]);
   if (commit === undefined) {
@@ -59,7 +56,6 @@ async function citeBroken(at: Repo, c: SpecCite): Promise<string> {
   return text === undefined ? `${c.text}: ${c.file} is not in ${c.commit}` : linesBroken(c, lines(text));
 }
 
-// notACommit : why a cite's commit does not resolve: a short one that names more than one object, or none at all
 async function notACommit(at: Repo, c: SpecCite): Promise<string> {
   const named = await git(at, ["rev-parse", `--disambiguate=${c.commit}`]);
   const many = (named ?? "").split("\n").filter((l) => l.trim() !== "").length > 1;
@@ -68,18 +64,15 @@ async function notACommit(at: Repo, c: SpecCite): Promise<string> {
     : `${c.text}: ${c.commit} is not a commit in the project's clone (fetch it, or cite one that is)`;
 }
 
-// fileAt : a file's text at a commit, undefined when it is not there or its path is not a plain path
 async function fileAt(at: Repo, commit: string, file: string): Promise<string | undefined> {
   return file.startsWith("-") || file.includes("..") ? undefined : git(at, ["show", `${commit}:${file}`]);
 }
 
-// linesBroken : why a cite's lines are not in a file of n lines; "" when they are. Pure.
 function linesBroken(c: SpecCite, n: number): string {
   const within = c.line >= 1 && c.end >= c.line && c.end <= n;
   return within ? "" : `${c.text}: the file has ${n} lines at ${c.commit}`;
 }
 
-// brokenCites : one line per cite in the texts that does not hold in the clone; none when every cite holds
 export async function brokenCites(at: Repo, texts: readonly string[]): Promise<readonly string[]> {
   const out: string[] = [];
   for (const cite of specCites(texts.join("\n"))) {

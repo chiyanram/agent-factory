@@ -40,7 +40,6 @@ function plain(question: string): Question {
   return { kind: "plain", question };
 }
 
-// A forge that records what the host told it, in order; label or note can be made to fail.
 function forge(log: Log, fail: { readonly label?: boolean; readonly note?: boolean } = {}): Forge {
   const text = (post: Post) => {
     const r = renderPost(post);
@@ -209,7 +208,6 @@ describe("finishRun", () => {
       return { next, log };
     }
 
-    // the log of a round blocked at question n: pushed, labelled, then one blocked note listing the questions
     function blockedAt(n: number, items: readonly string[]): Log {
       return [
         "push bbbb guards=3",
@@ -527,7 +525,6 @@ describe("noFactoryFolder", () => {
     const ok = signed("b.txt", "feat: b\n\nAgent: writer");
     const guard = seatOnEvery(env(), { since: base, seat: "writer" });
     expect(await guard({ repo, commit: ok, lease: { kind: "absent" } })).toEqual({ kind: "ok" });
-    // a person's commits brought in by a merge are not on the branch's own line
     git("switch", "-q", "-c", "main-side", base);
     signed("c.txt", "fix: a person's fix");
     git("switch", "-q", "-");
@@ -539,7 +536,6 @@ describe("noFactoryFolder", () => {
       kind: "failed",
       reason: `commit ${bare.slice(0, 8)} has no "Agent: writer" trailer: every commit of the writer carries it`,
     });
-    // another seat, or the trailer in a paragraph git does not read as trailers, is not the writer's
     const other = signed("e.txt", "feat: e\n\nAgent: reviewer");
     expect(await guard({ repo, commit: other, lease: { kind: "sha", sha: bare } })).toMatchObject({ kind: "failed" });
     const prose = signed("f.txt", "feat: f\n\nAgent: writer\nsaid in prose");

@@ -44,7 +44,6 @@ export {
 };
 
 export type PluginConfig = {
-  // the connector that serves each extension point, from "connectors" (or the old "plugins" map)
   readonly plugins: ReadonlyMap<ExtensionPoint, string>;
   readonly policy: Policy;
 };
@@ -57,7 +56,6 @@ export function isPolicyPoint(value: unknown): value is PolicyPoint {
   return typeof value === "string" && POLICY_POINTS.some((p) => p === value);
 }
 
-// isPostPoint : a write whose text is a post.ts template, sent through a connector (request.ts)
 export function isPostPoint(value: unknown): value is PostPoint {
   return typeof value === "string" && POST_POINTS.some((p) => p === value);
 }
@@ -66,7 +64,6 @@ function isMap(value: unknown): value is object {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// a value that is not what it should be
 const BAD: unique symbol = Symbol("bad");
 type Bad = typeof BAD;
 
@@ -74,7 +71,6 @@ function pairOf([point, name]: readonly [string, unknown]): readonly [ExtensionP
   return isPoint(point) && typeof name === "string" && PLUGIN_NAME.test(name) ? [point, name] : BAD;
 }
 
-// the connector map's field: "connectors", or the old "plugins" map when there is no "connectors"
 function connectorField(path: string, raw: object): Result<{ readonly name: string; readonly value: unknown }> {
   const [connectors, plugins] = [prop(raw, "connectors"), prop(raw, "plugins")];
   if (connectors !== undefined && isOldConnectors(plugins)) {
@@ -144,7 +140,6 @@ function policyOf(path: string, raw: unknown): Result<Policy> {
   return { kind: "ok", value: { ...DEFAULT_POLICY, ...Object.fromEntries(rules) } };
 }
 
-// pluginConfigOf : the connector fields of one project file's JSON
 export function pluginConfigOf(path: string, raw: object): Result<PluginConfig> {
   const plugins = connectorsOf(path, raw);
   if (plugins.kind === "failed") {
@@ -154,7 +149,6 @@ export function pluginConfigOf(path: string, raw: object): Result<PluginConfig> 
   return policy.kind === "ok" ? { kind: "ok", value: { plugins: plugins.value, policy: policy.value } } : policy;
 }
 
-// readPluginConfig : the project's connector fields; no project file is refused, since no write may go out without one
 export async function readPluginConfig(input: {
   readonly home: string;
   readonly project: string;
@@ -163,7 +157,6 @@ export async function readPluginConfig(input: {
   return raw.kind === "ok" ? pluginConfigOf(raw.path, raw.value) : failed(raw.reason);
 }
 
-// the file `project init` writes when no template is given: no connector and no plugin yet, and the default policy
 export function initialProject(): string {
   return `${JSON.stringify({ connectors: {}, plugins: [], policy: DEFAULT_POLICY }, null, 2)}\n`;
 }

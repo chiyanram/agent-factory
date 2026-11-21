@@ -12,6 +12,9 @@
 // files (team, project, user). A machine key is read from the files too, at its dotted name, and from its FACTORY_*
 // variable, the lowest layer (#254); a module reads its resolved value only through machine.ts, never the variable
 // (test/settings-read.test.ts fails on a direct read).
+//
+// A project-only key names one project's own place, so only the project file or its variable sets it, never a team
+// or user file, which every project reads.
 
 import { DEFAULT_POLICY, MAX_CAP, modesOf, POLICY_POINTS } from "../plugin/policy.js";
 import { checkPluginList } from "../process/plugins.js";
@@ -24,43 +27,29 @@ export type { MachineId } from "./variables.js";
 export const CLASSES = ["ladder", "cap", "allow-list", "deny-list", "locked", "preference"] as const;
 export type KeyClass = (typeof CLASSES)[number];
 
-// the ready check's timeout per command, in minutes (project.ts reads it)
 export const READY_MINUTES = { default: 30, most: 240 } as const;
 
-// a check of one value from a team or user file: "" when it is good, else what it must be
 export type Check = (value: unknown) => string;
 
 type Common = {
-  // the dotted name, as config show prints it
   readonly id: string;
   readonly class: KeyClass;
-  // what it is, for config show and the docs
   readonly about: string;
 };
 
 type Held = Common & {
-  // where the files hold it, in the JSON object
   readonly path: readonly string[];
   readonly check: Check;
-  // a ladder's values, from the loosest to the strictest
   readonly ladder?: readonly string[];
-  // the value when no layer sets it, if there is one
   readonly fallback?: unknown;
-  // the engine's own value, which no layer can change (the approval floor)
   readonly fixed?: unknown;
-  // true when no project file reader checks it, so the layers check the project's value too
   readonly checkProject?: true;
-  // a cap whose value is not a number: true when `lower` is no more than `upper` (the run hours: its hours are within)
   readonly within?: (lower: unknown, upper: unknown) => boolean;
-  // true for a key that names one project's own place (its git host project, its clone): only the project file or its
-  // variable sets it, never a team or user file, which every project reads (#369)
   readonly projectOnly?: true;
 };
 
-// a key the files hold, at its path of the JSON object
 export type FileKey = Held & { readonly where: "file" };
 
-// a key the files hold at its dotted name, with its FACTORY_* variable as the machine layer below them (#254)
 export type MachineKey = Held & { readonly where: "machine"; readonly env: string };
 
 export type Key = FileKey | MachineKey;
@@ -180,8 +169,6 @@ const FILE_KEYS: readonly FileKey[] = [
   },
   ...POLICY_POINTS.flatMap(policyKeys),
   {
-    // the checks a person quarantined (#485; process/quarantine.ts): only the project file holds them, never a team or
-    // user file, a branch or the rules pack
     id: "quarantine.checks",
     where: "file",
     path: ["quarantine", "checks"],
@@ -258,7 +245,6 @@ const FILE_KEYS: readonly FileKey[] = [
 
 export const KEYS: readonly Key[] = [...FILE_KEYS, ...MACHINE_KEYS];
 
-// the keys a file layer may hold besides the settings: the project's team pin, and the team's mode per key
 export const PROJECT_META = "team";
 export const TEAM_META = "modes";
 

@@ -11,7 +11,6 @@
 import { readFileSync } from "node:fs";
 import type * as Coordinator from "../src/core/coordinator.js";
 
-// the places the template is built for; any absolute paths do
 export const SAMPLE: Coordinator.CoordinatorPlaces = {
   pkg: "/opt/agent-factory",
   factoryHome: "/home/dev/.factory",

@@ -19,6 +19,7 @@
 // writes them itself. A step is safe to run again: the files are written whole, a plugin already pinned is kept, and
 // a cut-off marketplace clone is never taken as done. Exit 0 every check passed (a ? fails nothing), 1 a check failed
 // or init was refused, 3 an existing value was kept under --yes, 64 usage.
+// A settings file that is there and is not a JSON object is refused, so init never replaces a file it cannot read.
 
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -60,29 +61,20 @@ export type InitIo = {
   readonly env: NodeJS.ProcessEnv;
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
-  // the factory home
   readonly home: string;
-  // one line the person types; none off a terminal, where only --yes can answer
   readonly readLine?: (prompt: string) => Promise<string>;
   readonly probes: Probes;
-  // each marketplace init knows, by its name: where to clone it from when it is not in the factory home yet
   readonly markets: Readonly<Record<string, string>>;
-  // the engine's rules-pack pin (.github/rules-pack.json in the package): the commit init pins chiyanram's plugins at
-  // (#607); when it failed, only their pin fails, with the reason
   readonly enginePin: Result<PackPin>;
-  // writes the coordinator's settings and instructions (agent-factory setup coordinator), so setup is three commands:
-  // install, init, start (#485); none in a test that leaves it out
   readonly setupCoordinator?: () => Promise<Result<string>>;
 };
 
 export type InitArgs = {
   readonly project: string | undefined;
-  // the folder in the clone init reads
   readonly dir: string;
   readonly yes: boolean;
 };
 
-// the marketplaces init can clone by itself (GUIDE "The project file")
 export const KNOWN_MARKETS: Readonly<Record<string, string>> = { chiyanram: "https://github.com/chiyanram/skills" };
 
 export const INIT_HELP = `  init [<project>] [--repo <path>] [--yes]
@@ -105,8 +97,6 @@ function isObject(value: unknown): value is object {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// readJson : a settings file as JSON; none when it is not there; refused when it is there and not a JSON object, so
-// init never replaces a file it cannot read
 async function readJson(path: string): Promise<Result<Json>> {
   const text = await readFile(path, "utf8").catch((e: unknown) => (codeOf(e) === "ENOENT" ? undefined : ""));
   if (text === undefined) {
@@ -126,7 +116,6 @@ function heldOf(json: Json): object {
   return json.kind === "ok" ? json.value : {};
 }
 
-// writeJson : the file in place at once (a temp file, then a rename), mode 600, in a folder of mode 700
 async function writeJson(path: string, value: object): Promise<Result<string>> {
   const temp = `${path}.${process.pid}.tmp`;
   try {
@@ -175,8 +164,6 @@ function foundLines(d: Detected): string {
     .join("");
 }
 
-// picked : the round's answers: the recommendations under --yes or on an empty reply, else the reply, asked again
-// when it does not read
 async function picked(io: InitIo, questions: readonly Question[], yes: boolean): Promise<Result<readonly number[]>> {
   if (questions.length === 0) {
     io.out("Nothing to ask: the files already hold every answer.\n");
@@ -208,7 +195,6 @@ async function readPicks(io: InitIo, questions: readonly Question[]): Promise<Re
   return { kind: "failed", reason: "no answer read; nothing was written" };
 }
 
-// yesNo : the person's yes to one step; --yes takes `whenYes`; off a terminal, no
 async function yesNo(io: InitIo, yes: boolean, prompt: string, whenYes: boolean): Promise<boolean> {
   if (yes || io.readLine === undefined) {
     return yes && whenYes;
@@ -216,7 +202,6 @@ async function yesNo(io: InitIo, yes: boolean, prompt: string, whenYes: boolean)
   return saidYes((await io.readLine(prompt)).trim(), prompt.includes("[Y/n]"));
 }
 
-// saidYes : a typed yes, or Enter where the prompt's default is yes
 function saidYes(said: string, yesByDefault: boolean): boolean {
   return /^y(es)?$/i.test(said) || (said === "" && yesByDefault);
 }
@@ -239,7 +224,6 @@ function replacements(plan: Plan): number {
   return [...plan.projectChanges, ...plan.userChanges].filter((c) => c.kind === "replace").length;
 }
 
-// replaceOk : whether the replacements go in; --yes keeps every value the files hold
 async function replaceOk(io: InitIo, plan: Plan, yes: boolean): Promise<boolean> {
   const n = replacements(plan);
   if (n === 0) {
@@ -264,7 +248,6 @@ function baseOf(plan: Plan): object {
   return isObject(fresh) ? fresh : {};
 }
 
-// refusedResult : config check's errors on the project file init would write, as one reason; "" when none
 async function refusedResult(io: InitIo, path: string, value: object): Promise<string> {
   const problems = (await candidateProblems(io, path, JSON.stringify(value))).filter((p) => p.level === "error");
   return problems.length === 0
@@ -318,9 +301,6 @@ async function there(path: string): Promise<boolean> {
   );
 }
 
-// cloneMarket : the marketplace's clone in the factory home, made through hostGit when it is not there. It clones into
-// <dir>.partial and renames it once whole, so a clone cut off midway is never taken as done; a .partial left by one
-// is init's own, so the next try removes it
 async function cloneMarket(io: InitIo, ref: PluginRef): Promise<Result<string>> {
   const dir = marketplaceDir(io.home, ref.marketplace);
   if (await there(dir)) {
@@ -361,11 +341,8 @@ async function pinnedAt(io: InitIo, name: string, word: string): Promise<string>
   return pin === undefined ? "" : pin.commit.slice(0, 12);
 }
 
-// ENGINE_MARKET : the marketplace whose plugins init pins at the engine's rules-pack pin, never at its HEAD (#607)
 const ENGINE_MARKET = "chiyanram";
 
-// pinCommit : the commit init pins this plugin at: the engine's pin for chiyanram, none (its HEAD) for another
-// marketplace; failed when chiyanram's pin cannot be read
 function pinCommit(io: InitIo, ref: PluginRef): Result<string | undefined> {
   if (ref.marketplace !== ENGINE_MARKET) {
     return { kind: "ok", value: undefined };
@@ -373,7 +350,6 @@ function pinCommit(io: InitIo, ref: PluginRef): Result<string | undefined> {
   return io.enginePin.kind === "ok" ? { kind: "ok", value: io.enginePin.value.commit } : io.enginePin;
 }
 
-// updateLine : the plugin update command that pins this plugin, at the commit when one is given. Pure.
 function updateLine(name: string, word: string, commit: string | undefined): string {
   return `agent-factory plugin update ${name} ${word}${commit === undefined ? "" : ` ${commit}`}`;
 }
@@ -461,8 +437,6 @@ async function checksOf(io: InitIo, plan: Plan, runner: unknown): Promise<readon
   ];
 }
 
-// loginChecks : each login by a real call, both at once, once the gate says claude is there (a missing CLI needs an
-// install, not a login); the stored token only while a box would start with it, since a box refuses it otherwise
 async function loginChecks(p: Probes, project: string, token: boolean | "no claude"): Promise<readonly Check[]> {
   if (token === "no claude") {
     return [];
@@ -471,14 +445,12 @@ async function loginChecks(p: Probes, project: string, token: boolean | "no clau
   return Promise.all(who.map((w) => loginCheck(p, w, project)));
 }
 
-// the variables the files now hold: an export of one in a shell profile can go
 const MOVED = [
   { id: "gitHost", path: ["gitHost"] },
   { id: "gitHostProject", path: ["gitHostProject"] },
   { id: "clone", path: ["clone"] },
 ] as const;
 
-// exportLines : the exports the files now make needless, each with the profile file and line that holds it (#482)
 async function exportLines(io: InitIo, file: object, user: object): Promise<string> {
   const same = [
     ...MOVED.filter((m) => settingOf(io.env, m.id) === at(file, m.path)).map((m) => settingName(m.id)),
@@ -487,7 +459,6 @@ async function exportLines(io: InitIo, file: object, user: object): Promise<stri
   return exportsText(same, await exportPlaces(io.env.HOME ?? "", same));
 }
 
-// specLine : how the person writes a ticket's spec, in the store the project file names (#381)
 function specLine(io: InitIo, name: string, projectFile: object): string {
   return at(projectFile, ["specStore"]) === "issue"
     ? "write the ticket's spec in its git host issue's body (agent-factory spec --template <issue number> prints the template); the ticket is the issue number"
@@ -521,7 +492,6 @@ async function nextLines(
 
 type Held = { readonly name: string; readonly project: Json; readonly user: Json };
 
-// heldFiles : the project's name and the two files init may write, as they are now
 async function heldFiles(io: InitIo, args: InitArgs, d: Detected): Promise<Result<Held>> {
   const name = args.project ?? d.name;
   if (!plainName(name)) {
@@ -571,7 +541,6 @@ function planOf(
   };
 }
 
-// initCommand : the guided setup
 export async function initCommand(args: InitArgs, io: InitIo): Promise<number> {
   const d = await detect(args.dir, io.env);
   if (d.kind === "failed") {
@@ -592,8 +561,6 @@ export async function initCommand(args: InitArgs, io: InitIo): Promise<number> {
   return finish(io, plan.value, written.value, args.yes);
 }
 
-// coordinatorSet : the coordinator's settings written, as setup coordinator writes them; a failure shows as the wall
-// check's fix, never stops init
 async function coordinatorSet(io: InitIo): Promise<void> {
   if (io.setupCoordinator === undefined) {
     return;

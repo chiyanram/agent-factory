@@ -4,9 +4,6 @@
 // load this file on Node's type stripping; it uses only erasable TypeScript.
 
 export const SEVERITIES = ["blocker", "warning", "nit"] as const;
-// the Martian categories (ADR-0015 R2), with a severity as well (decided on #218, 2026-11-09)
-// the finding categories: the pinned rules pack's finding schema (finding-v1) holds the list, and CI checks this one
-// is the same (test/pack-schema.test.ts, #484)
 export const CATEGORIES = [
   "bug",
   "security",
@@ -21,9 +18,7 @@ export const CATEGORIES = [
   "style",
   "speculative",
 ] as const;
-// found-by-eval: a seeded case whose bug an eval pass of this reviewer found first, so its recall is reported apart
 export const KINDS = ["seeded", "found-by-eval", "clean", "rulebook-copy"] as const;
-// a case counts only once the operator sets its row to approved (evals/reviewer/README.md)
 export const STATUSES = ["draft", "approved"] as const;
 
 export type Severity = (typeof SEVERITIES)[number];
@@ -76,7 +71,6 @@ function valueProblems(item: Readonly<Record<string, unknown>>): readonly string
   return checks.filter(([ok]) => !ok).map(([, why]) => why);
 }
 
-// findingProblems : what is wrong with one entry of golden.json, as "finding N: …". Pure.
 export function findingProblems(item: unknown, index: number): readonly string[] {
   const why = isRecord(item) ? [...keyProblems(item), ...valueProblems(item)] : ["is not an object"];
   return why.map((w) => `finding ${index + 1}: ${w}`);
@@ -90,7 +84,6 @@ function parsed(raw: string): Result<unknown> {
   }
 }
 
-// asFinding : one checked entry; none when its severity or category is not known, never mapped to another (#484)
 function asFinding(item: Readonly<Record<string, unknown>>): readonly GoldenFinding[] {
   const { severity, category } = item;
   return oneOf(SEVERITIES, severity) && oneOf(CATEGORIES, category)
@@ -98,7 +91,6 @@ function asFinding(item: Readonly<Record<string, unknown>>): readonly GoldenFind
     : [];
 }
 
-// readGolden : golden.json's findings, or every reason it is not well-formed. Pure.
 export function readGolden(raw: string): Result<readonly GoldenFinding[]> {
   const json = parsed(raw);
   if (json.kind === "failed") {
@@ -126,7 +118,6 @@ function rowOf(line: string): Row {
   return { name: name.replaceAll("`", ""), kind, status };
 }
 
-// tableRows : the case rows of cases.md: each table line whose first cell is a `name` in backticks. Pure.
 export function tableRows(markdown: string): readonly Row[] {
   return markdown
     .split("\n")

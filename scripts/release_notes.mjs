@@ -5,6 +5,8 @@
 // A squash merge on GitHub appends `(#pr)` to the PR title, so the last `(#N)` at the end of a subject is the PR and
 // any before it are the tickets. The commit hash and the `closes` list are left out: the preset turns every `#N` in a
 // commit body into `closes #N`, even an issue the change only waits on.
+// A breaking-change note runs to the end of the message, so withoutTrailers drops each last paragraph that holds only
+// git trailers such as `Co-Authored-By:`.
 import createPreset from 'conventional-changelog-conventionalcommits'
 import { crossRepoLinks } from './release_links.mjs'
 
@@ -47,7 +49,6 @@ Install: \`npm i -g {{host}}/{{owner}}/{{repository}}/releases/download/{{curren
 
 const TRAILING_REFS = /(?:\s*\(#\d+\))+\s*$/
 
-// "the dispatcher (#103) (#154)" → { text: "the dispatcher", tickets: ["103"], pr: "154" }
 export function splitRefs(subject) {
   const tail = subject.match(TRAILING_REFS)?.[0] ?? ''
   const numbers = [...tail.matchAll(/#(\d+)/g)].map(([, n]) => n)
@@ -63,8 +64,6 @@ function refsLine({ tickets, pr }, { host, owner, repository }) {
 
 const TRAILER = /^[A-Za-z][\w-]*: \S/
 
-// A breaking-change note runs to the end of the message, so it picks up the git trailers after it, such as
-// `Co-Authored-By:`; drop each trailing paragraph made only of trailers (chiyanram/skills#283, agent-factory#343).
 export function withoutTrailers(text) {
   const paragraphs = text.split(/\n\s*\n/)
   while (paragraphs.length > 1 && paragraphs.at(-1).split('\n').every((line) => TRAILER.test(line))) paragraphs.pop()

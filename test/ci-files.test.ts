@@ -110,7 +110,6 @@ describe("noCiFiles: the host push refuses a change to CI (#115; ADR-0012 S9)", 
   const check = (sha: string, lease: string, config?: CiConfig) =>
     guard(config)({ repo, commit: sha, lease: { kind: "sha", sha: lease } });
 
-  // main holds the CI; the agent branch starts from it
   beforeEach(() => {
     root = tempDir("factory-ci-");
     execFileSync("git", ["init", "-q", "--bare", "-b", "main", join(root, "origin.git")], { env: env() });
@@ -196,12 +195,10 @@ describe("noCiFiles: the host push refuses a change to CI (#115; ADR-0012 S9)", 
   });
 
   it("lets a merge of the default branch bring its CI, and keeps a person's CI commit on the branch", async () => {
-    // a person changes CI on the agent branch, in their own commit: the lease holds it
     write(".github/workflows/ci.yml", "on: [push, pull_request]\n");
     const person = commit("person's CI change");
     write("src/a.ts", "agent\n");
     expect(await check(commit("agent code"), person)).toEqual({ kind: "ok" });
-    // main moves its CI; the writer merges main
     git("checkout", "-q", "main");
     write("ci/build.yml", "build:\n  script: make all\n");
     commit("main CI");

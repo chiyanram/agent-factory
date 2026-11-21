@@ -24,7 +24,6 @@ const CREDENTIALS = [
   ".claude.json",
   ".copilot/**",
 ];
-// the deny list every writer role got before its card's guardrails were read: the floor's must stay this, byte for byte
 const TODAY_DENIES = [
   "WebFetch",
   "Bash(git push)",
@@ -89,7 +88,6 @@ describe("the writer behind the agent CLI seam (#688)", () => {
     expect(writerDenies(["no-web"], HOME)).toEqual(["WebFetch", "Bash(curl)", "Bash(curl *)"]);
     expect(writerDenies(["no-credentials"], HOME)).toEqual(CREDENTIALS.map((p) => `Read(//home/op/${p})`));
     expect(writerDenies(["judge-files-locked", "edit-scope", "read-only"], HOME)).toEqual([]);
-    // with no home known, the runner alone hides the credential paths
     expect(writerDenies(["no-credentials"], "")).toEqual([]);
   });
 

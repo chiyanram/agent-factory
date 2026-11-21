@@ -13,8 +13,6 @@ const HOST = "github.com";
 const clean = (text: string, limit?: number): string =>
   cleanBody(text, limit === undefined ? { host: HOST } : { host: HOST, limit });
 
-// a normal PR1–PR7 body: the reason and the spec, the evidence table, breaking or not, the rollback, the changed
-// files, where to look first, and a one-way door's readiness
 const NORMAL = [
   "## Why",
   "",
@@ -283,7 +281,6 @@ describe("the Forge.setBody seam carries the cleaned PR body (#335)", () => {
 });
 
 describe("no secret in the posted PR body (#678; ADR-0012 S13, P4)", () => {
-  // built from parts, so no scanner takes the test for a leak
   const TOKEN = `ghp_${"a1B2".repeat(9)}`;
   const LAB = `glpat-${"Zq7".repeat(7)}`;
   const HIDDEN = String.fromCharCode(0x200b);

@@ -7,7 +7,6 @@ import type { Ran } from "../box/types.js";
 import type { ProxyAddress } from "./env.js";
 import { PROBE, PROBE_SECONDS } from "./probe.js";
 
-// a host no project lists, a public address the runner must not reach direct, and the image the inner Docker pulls
 export const OFF_LIST_HOST = "example.com";
 export const DIRECT_ADDRESS = "1.1.1.1";
 export const MODEL_HOST = "api.anthropic.com";
@@ -27,7 +26,6 @@ export type LiveCheck =
     }
   | { readonly kind: "skipped"; readonly name: string; readonly detail: string };
 
-// what the probe printed, or how the command ended when it printed nothing to read
 export type Answer =
   | { readonly kind: "json"; readonly value: Readonly<Record<string, unknown>>; readonly code: number }
   | { readonly kind: "text"; readonly code: number; readonly stdout: string; readonly stderr: string }
@@ -35,11 +33,8 @@ export type Answer =
 
 export type CheckInput = {
   readonly proxy: ProxyAddress;
-  // the project's allowlist, as parseAllowlist keeps it
   readonly hosts: readonly string[];
-  // the internal network's gateway, the host's side of it; "" when docker named none
   readonly gateway: string;
-  // the host ports setup names as reachable from a runner (#136)
   readonly ports: readonly number[];
   readonly modelHost: string;
   readonly pullImage: string;
@@ -48,7 +43,6 @@ export type CheckInput = {
 const pass = (detail: string): Verdict => ({ kind: "pass", detail });
 const fail = (detail: string): Verdict => ({ kind: "fail", detail });
 
-// allows : whether the list lets a host through, as Squid's dstdomain reads it
 export function allows(hosts: readonly string[], host: string): boolean {
   return hosts.some((h) => h === host || (h.startsWith(".") && (`.${host}` === h || host.endsWith(h))));
 }
@@ -72,12 +66,10 @@ function field(out: Answer, name: string): unknown {
   return out.kind === "json" ? out.value[name] : undefined;
 }
 
-// refusedByProxy : the proxy answered the CONNECT with 403
 function refusedByProxy(out: Answer): Verdict {
   return field(out, "proxy") === 403 ? pass("the proxy answered 403") : fail(`not refused: ${shown(out)}`);
 }
 
-// reached : the proxy opened the tunnel and the host answered over TLS; any HTTP status is the host's own answer
 function reached(out: Answer): Verdict {
   const server = field(out, "server");
   return field(out, "proxy") === 200 && typeof server === "string" && server.startsWith("HTTP/")
@@ -85,7 +77,6 @@ function reached(out: Answer): Verdict {
     : fail(`not reached: ${shown(out)}`);
 }
 
-// blocked : the probe ran, and the connection or the lookup failed
 function blocked(out: Answer): Verdict {
   return out.kind === "json" && typeof out.value.error === "string"
     ? pass(`failed as it must: ${out.value.error}`)
@@ -133,7 +124,6 @@ function modelCall(input: CheckInput): readonly LiveCheck[] {
   return allows(input.hosts, host)
     ? [
         { ...connect, name, argv: viaProxy(input, host, 443), read: reached },
-        // the proxy allows port 443 alone, so an allowed host on another port is refused
         { ...connect, name: `${host} on port 80 is refused`, argv: viaProxy(input, host, 80), read: refusedByProxy },
       ]
     : [{ kind: "skipped", name, detail: `${host} is not on this project's list; name another with --model-host` }];
@@ -152,7 +142,6 @@ function gateway(input: CheckInput): LiveCheck {
       };
 }
 
-// liveChecks : #130's Done when, in order, for one project's runner
 export function liveChecks(input: CheckInput): readonly LiveCheck[] {
   return [
     offList(input),
@@ -180,7 +169,6 @@ export function liveChecks(input: CheckInput): readonly LiveCheck[] {
   ];
 }
 
-// answerOf : a command's end, with its last stdout line read as JSON when it is
 export function answerOf(ran: Ran): Answer {
   switch (ran.kind) {
     case "failed":
@@ -204,12 +192,10 @@ function jsonOf(line: string, ran: Extract<Ran, { readonly kind: "exited" }>): A
   }
 }
 
-// readGateway : docker's `network inspect --format '{{range .IPAM.Config}}{{.Gateway}} {{end}}'`, its first IPv4
 export function readGateway(stdout: string): string {
   return stdout.split(/\s+/).find((w) => /^\d{1,3}(\.\d{1,3}){3}$/.test(w)) ?? "";
 }
 
-// report : one line per check, and whether all passed or were skipped
 export function report(rows: readonly Row[]): { readonly text: string; readonly ok: boolean } {
   const text = rows.map((r) => `${r.verdict.kind.padEnd(7)} ${r.name}: ${r.verdict.detail}\n`).join("");
   return { text, ok: rows.every((r) => r.verdict.kind !== "fail") };

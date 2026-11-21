@@ -1,26 +1,35 @@
 // tick — one pass of the orchestrator over a project (#103; ADR-0012 S3). It keeps no memory of its own: every pass
 // reads the local START and approval records, the git host (poll), and the run records, decides each ticket with the
 // table, then acts:
-//   - the shared copy of each approval, once, on the ticket's open PR (#227)
-//   - forge-only actions (needs-human, release, ping, reconcile) for every ticket that has one
-//   - at most one run (writer, ready check, reviewer or a design review's run) per pass: runs at once is 1 (ADR-0012 S16)
-//   - when a design review's verify pass ends (#236), what it kept goes to the front doors: a note on the ticket's PR
+//   - the shared copy of each approval, once, on the ticket's open PR
+//   - forge-only actions (needs-human, release, ping, a design note, a hold, an unread blocker, reconcile) for every
+//     ticket that has one
+//   - up to runs at once runs (writer, ready check, reviewer, local verifier or a design review's run), one after
+//     another (caps.ts)
+//   - when a design review's verify pass ends, what it kept goes to the front doors: a note on the ticket's PR
 //     when one is open, a ping, and the pass's log
-//   - no run at all while the project is at its day cap or its window share (#131; caps.ts), with one notice for it
+//   - no run at all while the project is at its day cap or its window share (caps.ts), with one notice for it
 // A run's step is a seam (steps.ts). A step that is not built yet says so, and the pass records nothing for it, so
 // the ticket is decided the same way next time. A "started" record is written before a run and an "ended" one after
-// it; a pass that dies in between leaves the first alone, and the next pass hands that ticket to a person.
+// it; a pass that dies in between leaves the first alone, and the next pass hands that ticket to a person. The start
+// is recorded before the claim is taken, so a pass that dies between them leaves a run for a person, never a claim
+// with no record, which would look like someone else's.
+//
+// A pass records first and then pings, so each ping goes once; a line that cannot be written sends no ping, and the
+// next pass tries again. A ping only informs: one that fails is printed, and the pass goes on. The factory never
+// re-runs a red check: a check a person quarantined reads as passed, and any other goes back to the implementer.
 //
 // A lock file keeps two passes from running at once (a pass by hand while the orchestrator loop runs, a run of an
-// hour). No cron or launchd job runs a pass: a human's command starts the orchestrator loop (orchestrator-loop.ts), and
-// it ends by itself when no ticket is in flight (#305). Each pass that polled writes its last-poll time (last-poll.ts),
-// so `status` shows a loop that stopped. Each pass first deletes the project's traces older than 30 days (trace.ts, #487).
+// hour). A lock whose holder died is taken over by a rename and a read-back, so of two passes only one keeps it. No
+// cron or launchd job runs a pass: a human's command starts the orchestrator loop (orchestrator-loop.ts), and it ends
+// by itself when no ticket is in flight. Each pass that polled writes its last-poll time (last-poll.ts), so `status`
+// shows a loop that stopped. Each pass first deletes the project's traces older than TRACE_DAYS (trace.ts).
 //
-// The ticket list (#227) is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
+// The ticket list is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
 // the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
-// approval with no START waits. The newer of the two records is when the counts start afresh. The shared copy is a note the
-// project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or none>", for
-// people to see. It never starts anything: the orchestrator decides only from the local records.
+// approval with no START waits. The newer of the two records is when the counts start afresh. The shared copy is a
+// note the project's own git host identity posts, "approved by <human> via <door>, spec <hash>, design <hash or
+// none>", for people to see. It never starts anything: the orchestrator decides only from the local records.
 
 import type { PluginHash } from "../process/use.js";
 import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
@@ -102,8 +111,6 @@ import {
   type WaiverView,
 } from "./table.js";
 
-// Logged : an action that ended, with what the log says of it in place of "done" (#62: a writer run that stopped, and
-// why)
 export type Logged = { readonly kind: "ok"; readonly said?: string } | Extract<Done, { kind: "failed" }>;
 
 export type TickSetup = {
@@ -112,30 +119,19 @@ export type TickSetup = {
   readonly forge: Forge;
   readonly label: string;
   readonly steps: Steps;
-  // the project file's gate (#91)
   readonly gate: Gate;
-  // every program an evidence row may start with (#444; ready/steps.ts readyPrograms); none without a project file
   readonly readyPrograms?: readonly string[];
   readonly now: () => number;
   readonly quietMinutes: number;
-  // how long the orchestrator loop waits between passes (poll.minutes), kept with the last-poll time for status
   readonly pollMinutes: number;
-  // the repository on the git host (FACTORY_PROJECT): status finds the last-poll time by it
   readonly repo: string;
-  // print each decision and act on none
   readonly dryRun: boolean;
   readonly log: (line: string) => void;
-  // a person's ping when a ticket needs them (#119); NO_NOTIFY when the project maps no notify plugin
   readonly notify: Notify;
-  // the plugins this pass's runs use, each with its hash, for the run records (#232); none when it lists none
   readonly plugins?: readonly PluginHash[];
-  // the project's lanes, from its process plugin or the built-in process (#232); the default lanes when absent
   readonly lanes?: readonly LaneProps[];
-  // the ticket, day and window caps (#131)
   readonly caps: Caps;
-  // the project's spec store (spec-store.ts, #381); the local one under <home>/specs when absent
   readonly specs?: SpecStore;
-  // the checks a person quarantined in the process plugin (#485; process/quarantine.ts); none when absent
   readonly quarantine?: readonly Quarantined[];
 };
 
@@ -146,7 +142,6 @@ async function namesIn(dir: string): Promise<readonly string[]> {
   return files.filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
 }
 
-// tickets with a START or an approval record, and those whose change is on the git host
 async function ticketNames(setup: TickSetup, lines: readonly (OpenLine | MergedLine)[]): Promise<readonly string[]> {
   const started = await namesIn(join(setup.home, "starts", setup.project));
   const approved = await namesIn(join(setup.home, "approvals", setup.project));
@@ -156,9 +151,6 @@ async function ticketNames(setup: TickSetup, lines: readonly (OpenLine | MergedL
   return [...new Set([...started, ...approved, ...onForge])].filter(plainName).toSorted();
 }
 
-// What a human said for the ticket: its approval as the table sees it, and the approval record itself, for its shared
-// copy, while it is the current one.
-// blockedBy: the spec's "Blocked by", read once here while the build may begin (#494); none otherwise
 type Said = {
   readonly view: ApprovalView;
   readonly record: ApprovalRecord | "none";
@@ -169,8 +161,6 @@ function newest(a: string, b: string): string {
   return Date.parse(b) > Date.parse(a) ? b : a;
 }
 
-// approvedView : an approval lets the build begin only with a START; the newer of the two is when the counts start,
-// so a person who takes the ticket back from needs-human may START or approve again
 function approvedView(
   approval: ApprovalRecord,
   lane: Lane,
@@ -182,8 +172,6 @@ function approvedView(
     : { kind: "approved", at: newest(approval.at, started.at), lane, testFirst: needsTestFirst(lane, lanes) };
 }
 
-// startedView : a START with no current approval: the build may begin in the tiny lane only. A spec the coordinator
-// has not written yet, or one not ready, waits for it.
 async function startedView(
   setup: TickSetup,
   ticket: string,
@@ -209,7 +197,6 @@ async function startOf(setup: TickSetup, ticket: string): Promise<Result<StartRe
   return { kind: "ok", value: stored.kind === "record" ? stored.record : "none" };
 }
 
-// unapprovedSaid : no current approval; a START may still let a tiny ticket begin
 async function unapprovedSaid(
   setup: TickSetup,
   ticket: string,
@@ -221,7 +208,6 @@ async function unapprovedSaid(
   return { kind: "ok", value: { view, record: "none" } };
 }
 
-// plannedView : a view that lets the build begin is held when the spec's planned files need a heavier lane (#230)
 async function plannedView(setup: TickSetup, ticket: string, said: Said, spec: Spec): Promise<Result<Said>> {
   const raise = await plannedCheck({ home: setup.home, project: setup.project, spec });
   if (raise.kind === "failed") {
@@ -232,7 +218,6 @@ async function plannedView(setup: TickSetup, ticket: string, said: Said, spec: S
     : { kind: "ok", value: said };
 }
 
-// saidOf : what a human said for the ticket, with the lane checked against the planned files before the build
 async function saidOf(setup: TickSetup, ticket: string): Promise<Result<Said>> {
   const said = await humanSaid(setup, ticket);
   const go = said.kind === "ok" && goAt(said.value.view) !== "";
@@ -260,8 +245,6 @@ async function humanSaid(setup: TickSetup, ticket: string): Promise<Result<Said>
     : unapprovedSaid(setup, ticket, started.value, state.kind === "stale");
 }
 
-// changeOf : the ticket's change: on factory/<ticket>, in this repository (a fork's branch is never it). An open change
-// wins over merged ones; two of the same kind cannot be told apart, so a person decides.
 function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): ChangeView {
   const ours = lines.filter((l) => l.branch === `${BRANCH_PREFIX}${ticket}` && !l.fork);
   const opened = ours.filter((l): l is OpenLine => l.kind === "open");
@@ -276,9 +259,6 @@ function changeOf(ticket: string, lines: readonly (OpenLine | MergedLine)[]): Ch
   return only.kind === "open" ? { kind: "open", line: only } : { kind: "merged", line: only };
 }
 
-// quarantined : the change as the table reads it with the quarantine in force (#485): a red head whose every failed
-// job a person quarantined, unexpired, reads as passed, and the pass logs each one so it still shows. A red check is
-// never re-run by the factory; one that is not quarantined goes back to the implementer as a CI round (table.ts).
 async function quarantined(setup: TickSetup, ticket: string, change: ChangeView): Promise<ChangeView> {
   const list = setup.quarantine ?? [];
   if (!redOpen(change) || list.length === 0) {
@@ -296,7 +276,6 @@ function redOpen(change: ChangeView): change is Extract<ChangeView, { kind: "ope
   return change.kind === "open" && change.line.pipeline.kind === "failed";
 }
 
-// heldAt : what the failed jobs at the head mean with the quarantine in force; jobs the git host cannot name block
 async function heldAt(setup: TickSetup, line: OpenLine, list: readonly Quarantined[]): Promise<Held> {
   const jobs = await setup.forge.failedJobs({ number: line.number, head: line.head });
   return jobs.kind === "ok"
@@ -308,7 +287,6 @@ async function heldAt(setup: TickSetup, line: OpenLine, list: readonly Quarantin
     : { kind: "blocks" };
 }
 
-// waiverOf : the ticket's waiver of the test checks (#231), as the table sees it
 async function waiverOf(setup: TickSetup, ticket: string): Promise<Result<WaiverView>> {
   const stored = await readWaiver({ home: setup.home, project: setup.project, ticket });
   if (stored.kind === "refused") {
@@ -321,7 +299,6 @@ async function waiverOf(setup: TickSetup, ticket: string): Promise<Result<Waiver
   };
 }
 
-// sharedBefore : whether the run records hold the shared copy of this approval
 function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none"): boolean {
   const key = approved === "none" ? "" : approvalKey(approved);
   return events.some((e) => e.kind === "shared" && e.approval === key);
@@ -329,15 +306,11 @@ function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none
 
 const DESIGN_KINDS: ReadonlySet<ApprovalView["kind"]> = new Set(["unapproved", "stale", "approved"]);
 
-// designOf : where the design review of the ticket's current spec and design stands (#236): due only after a START, in
-// a lane with a design review, while the ticket waits for its approval or has one
-// hasStart : whether the ticket has a START record
 async function hasStart(setup: TickSetup, ticket: string): Promise<boolean> {
   const started = await startOf(setup, ticket);
   return started.kind === "ok" && started.value !== "none";
 }
 
-// designDue : the ticket's current spec, when a design review is due for it
 async function designDue(setup: TickSetup, ticket: string, said: Said): Promise<Current | "off"> {
   if (!DESIGN_KINDS.has(said.view.kind) || !(await hasStart(setup, ticket))) {
     return "off";
@@ -363,8 +336,6 @@ async function designOf(setup: TickSetup, ticket: string, said: Said, events: re
   });
 }
 
-// raisedOf : why the spec's Planned files need a heavier lane, before any design review reads it (#230, #489); "" when
-// they do not. A check that cannot read the project's one-way-door paths holds the review too, and says why.
 async function raisedOf(setup: TickSetup, spec: Spec): Promise<string> {
   const raise = await plannedCheck({ home: setup.home, project: setup.project, spec });
   if (raise.kind === "failed") {
@@ -373,16 +344,13 @@ async function raisedOf(setup: TickSetup, spec: Spec): Promise<string> {
   return raise.value.kind === "raised" ? raisedWhy(raise.value) : "";
 }
 
-// the most specs the "Blocked by" cycle check reads from one ticket (#494)
 const MOST_BLOCKER_SPECS = 50;
 
-// blockedByOf : a ticket's spec's "Blocked by" tickets; none when its spec cannot be read
 async function blockedByOf(setup: TickSetup, ticket: string): Promise<readonly string[]> {
   const spec = await currentSpec(ticketAt(setup, ticket));
   return spec.kind === "spec" ? spec.spec.blockedBy : [];
 }
 
-// specsBehind : the "Blocked by" lists of every ticket behind these, as far as they go, for the cycle check
 async function specsBehind(
   setup: TickSetup,
   start: readonly string[],
@@ -400,17 +368,12 @@ async function specsBehind(
   return seen;
 }
 
-// building : whether the ticket's build has begun: a run, or its change open; its blockers are then not read. A ticket
-// nothing lets begin has no blockers to read at all: saidOf reads the spec's only while a START or approval lets it go
 function building(runs: Summary, change: ChangeView): boolean {
   return runs.lastWriter.kind !== "none" || change.kind !== "none";
 }
 
-// what the tick read of one blocker: where it stands, and why the git host did not answer when it did not
 type BlockerRead = { readonly state: BlockerState; readonly unread?: string };
 
-// blockerState : where a blocker's change stands; one the git host cannot answer for is unread, so the ticket waits on
-// a passing failure, and a person looks only after repeated passes (#494 AC-7)
 async function blockerState(setup: TickSetup, ticket: string): Promise<BlockerRead> {
   const read = await setup.forge.branchState({ branch: `${BRANCH_PREFIX}${ticket}` });
   if (read.kind === "failed") {
@@ -422,23 +385,17 @@ async function blockerState(setup: TickSetup, ticket: string): Promise<BlockerRe
     : issueBlocker(setup, Number(ticket), branch);
 }
 
-// issueTicket : whether the ticket is a git host issue: the project keeps its specs in issues, and it is a number
 function issueTicket(setup: TickSetup, ticket: string): boolean {
   return setup.specs?.kind === "issue" && ISSUE_NUMBER.test(ticket);
 }
 
-// a ticket that is a git host issue: its number
 const ISSUE_NUMBER = /^[1-9]\d{0,9}$/;
 
-// issueBlocker : a blocker that is a git host issue, by its issue too (#494 AC-9): closed as completed by a person's
-// change on any branch it is merged; an issue the git host cannot answer for leaves the branch's state
 async function issueBlocker(setup: TickSetup, issue: number, branch: BranchState): Promise<BlockerRead> {
   const read = await setup.forge.issueState({ number: issue });
   return read.kind === "ok" ? { state: withIssue(branch, read.value) } : { state: branch, unread: read.reason };
 }
 
-// blockersOf : where the ticket's blockers stand, read only while its build has not begun (#494): each blocker's
-// change on the git host, through the Forge seam, and every spec behind it for a cycle
 async function blockersOf(
   setup: TickSetup,
   ticket: string,
@@ -452,7 +409,6 @@ async function blockersOf(
   return blockersView(ticket, blockedBy, await blockersRead(setup, blockedBy));
 }
 
-// blockersRead : each ticket behind the blockers with its own blockers, and each direct blocker's change state
 async function blockersRead(setup: TickSetup, blockedBy: readonly string[]): Promise<readonly Blocker[]> {
   const read: Blocker[] = [];
   for (const [b, list] of await specsBehind(setup, blockedBy)) {
@@ -462,17 +418,14 @@ async function blockersRead(setup: TickSetup, blockedBy: readonly string[]): Pro
   return read;
 }
 
-// blockersField : the blockers as a field to spread; none when they hold nothing. Pure.
 function blockersField(blockers: BlockersView): { readonly blockers?: BlockersView } {
   return blockers.kind === "none" ? {} : { blockers };
 }
 
-// programsField : the pass's allowed evidence programs, as a field to spread: none without a project file (#444)
 function programsField(setup: TickSetup): { readonly programs?: readonly string[] } {
   return setup.readyPrograms === undefined ? {} : { programs: setup.readyPrograms };
 }
 
-// Decided's ticket: its state for the table, and the current approval with whether its shared copy is posted
 type Read = {
   readonly state: TicketState;
   readonly approved: ApprovalRecord | "none";
@@ -532,8 +485,6 @@ export type Decided =
   | (Read & { readonly action: Action })
   | { readonly kind: "broken"; readonly ticket: string; readonly reason: string };
 
-// decideAll : one decision per ticket, in ticket order. A ticket whose spec, START, approval or records cannot be read
-// is broken: it fails on its own, and every other ticket is still decided.
 export async function decideAll(setup: TickSetup): Promise<Result<readonly Decided[]>> {
   const lines = await poll({ forge: setup.forge, label: setup.label });
   if (lines.kind === "failed") {
@@ -567,7 +518,6 @@ function where(
   return { home: setup.home, project: setup.project, ticket: state.ticket };
 }
 
-// ticketAt : where the ticket's spec and approval are read, with the project's spec store
 function ticketAt(setup: TickSetup, ticket: string): ApprovalWhere {
   return {
     home: setup.home,
@@ -577,16 +527,11 @@ function ticketAt(setup: TickSetup, ticket: string): ApprovalWhere {
   };
 }
 
-// nextFields : what the person does next, as the hand-over note's one field (next-step.ts, #485)
 function nextFields(why: string): Post["fields"] {
   const step = nextStep({ kind: "needs-human", why });
   return step === undefined ? [] : [{ label: "next", value: `a person ${step.does}` }];
 }
 
-// handOver : needs-human, the claim released (as block does), one note, and a record so the same stop is never posted
-// twice; the person's ping is the turn's (turnPinged). With no change to label, the pass fails for this ticket, so the
-// operator sees it.
-// told: what the note says besides why, worked out once the change is labelled, so nothing hands it out meanwhile
 async function handOver(
   setup: TickSetup,
   state: TicketState,
@@ -616,13 +561,9 @@ async function handOver(
   return { kind: "ok" };
 }
 
-// Told : the fields and items a hand-over's note adds
 type Told = { readonly fields: Post["fields"]; readonly items: readonly string[] };
 const NOTHING_MORE: Told = { fields: [], items: [] };
 
-// keptTold : a dead writer run's work, saved before the person is told: its commits pushed on top of the
-// change's branch as a blocked run's are, every uncommitted file named, the folder kept. A step that cannot look says
-// why in the note, and the folder is still kept.
 async function keptTold(setup: TickSetup, state: TicketState, run: RunFolder): Promise<Told> {
   const kept = await keptIn(setup, state, run);
   const folder = { label: "run folder", value: run.folder };
@@ -633,7 +574,6 @@ async function keptTold(setup: TickSetup, state: TicketState, run: RunFolder): P
   return { fields: [folder, ...note.fields], items: note.items };
 }
 
-// keptIn : what the writer's step found in the folder and did with it, or why it could not look
 function keptIn(setup: TickSetup, state: TicketState, run: RunFolder): Promise<Result<KeptRun>> {
   const step = setup.steps.writer;
   const keep = step.kind === "available" ? step.keep : undefined;
@@ -642,25 +582,20 @@ function keptIn(setup: TickSetup, state: TicketState, run: RunFolder): Promise<R
     : keep({ folder: run.folder, since: run.head, change: changeNow(state) });
 }
 
-// changeNow : the open change's branch and head as the pass read them, or none
 function changeNow(state: TicketState): KeptInput["change"] {
   return state.change.kind === "open" ? { branch: state.change.line.branch, head: state.change.line.head } : "none";
 }
 
-// handOverRun : a hand-over, with a dead writer run's work saved first when the action names its folder
 function handOverRun(setup: TickSetup, state: TicketState, why: string, run: RunFolder | undefined): Promise<Done> {
   return run === undefined
     ? handOver(setup, state, why)
     : handOver(setup, state, why, () => keptTold(setup, state, run));
 }
 
-// handOverUnchanged : a stop with no change to label or note on, such as a held ticket's broken blocker (#494): the
-// record, so the same stop is never sent twice (table.ts once); the person's ping is the turn's (turnPinged)
 function handOverUnchanged(setup: TickSetup, state: TicketState, why: string): Promise<Done> {
   return record({ where: where(setup, state), event: { at: at(setup), kind: "blocked", why } });
 }
 
-// each action by its kind, so a handler per kind is typed without an assertion
 type ActionMap = { readonly [A in Action as A["kind"]]: A };
 type ActionKind = keyof ActionMap;
 type Handler<R> = { readonly [K in ActionKind]: (setup: TickSetup, state: TicketState, action: ActionMap[K]) => R };
@@ -684,14 +619,12 @@ async function releaseClaim(setup: TickSetup, state: TicketState, why: string): 
     : removed;
 }
 
-// quarantinedAt : the checks a person quarantined that let this head's red gate read as passed; none for a green one
 function quarantinedAt(state: TicketState): readonly Quarantined[] {
   return state.change.kind === "open" ? (state.change.line.quarantined ?? []) : [];
 }
 
 async function ping(setup: TickSetup, state: TicketState, head: string): Promise<Done> {
   const held = quarantinedAt(state);
-  // a gate that reads as green only because of a quarantine says so, naming each check and its expiry (#485)
   const said = await say(setup, state, {
     seat: "coordinator",
     title:
@@ -706,7 +639,6 @@ async function ping(setup: TickSetup, state: TicketState, head: string): Promise
     : said;
 }
 
-// informed : a person pinged; a ping only informs, so one that fails is printed and the pass goes on (#119)
 async function informed(setup: TickSetup, message: Ping): Promise<Done> {
   const sent = await setup.notify(message);
   if (sent.kind === "failed") {
@@ -715,9 +647,6 @@ async function informed(setup: TickSetup, message: Ping): Promise<Done> {
   return { kind: "ok" };
 }
 
-// writerSaid : the log line of a writer run that is not done, in place of "done" (#62): why it stopped, the file that
-// keeps its output, and, before the change is opened, that this line and the record are the only place it is said.
-// "" for a done run. Pure.
 function writerSaid(state: TicketState, value: WriterValue): string {
   if (value.outcome === "done") {
     return "";
@@ -736,9 +665,6 @@ async function reconcile(setup: TickSetup, state: TicketState): Promise<Done> {
   return setup.forge.removeLabel({ number: n, label: setup.label });
 }
 
-// mergedLine : the change's merge recorded once, as the git host has it (#487: the merge touch and the outcome), then
-// its timeline line once, from the ticket's lines, with no model (timeline.ts, #488). A merge the git host cannot answer
-// for is logged and costs only those lines: the claim still comes off.
 async function mergedLine(setup: TickSetup, state: TicketState, n: number): Promise<void> {
   const place = where(setup, state);
   const events = await readRecords(place, { warn: () => undefined });
@@ -755,7 +681,6 @@ async function mergedLine(setup: TickSetup, state: TicketState, n: number): Prom
   }
 }
 
-// mergeOf : the change's merged line: the one its records hold, or the git host's, recorded now
 async function mergeOf(
   setup: TickSetup,
   place: Where,
@@ -774,7 +699,6 @@ async function mergeOf(
   return kept.kind === "ok" ? { kind: "ok", value: { number: n, at: landed.value.at } } : kept;
 }
 
-// the actions that only touch the forge; "none" for a run or a wait
 const FORGE: Handler<Promise<Done> | "none"> = {
   "needs-human": (setup, state, a) => handOverRun(setup, state, a.why, a.run),
   release: (setup, state, a) => releaseClaim(setup, state, a.why),
@@ -796,7 +720,6 @@ async function forgeAction(setup: TickSetup, state: TicketState, action: Action)
   return dispatchOn(FORGE, action.kind, setup, state, action);
 }
 
-// a run a cap held back is marked held (#131, #305), so the orchestrator loop tells it from a step not set up
 export type Ran = {
   readonly ticket: string;
   readonly action: Action;
@@ -804,7 +727,6 @@ export type Ran = {
   readonly held?: boolean;
 };
 
-// claim : the change carries the claim label before a writer runs on it
 async function claim(setup: TickSetup, state: TicketState): Promise<Done> {
   const line = state.change.kind === "open" ? state.change.line : "none";
   return line === "none" || line.claimed
@@ -820,14 +742,11 @@ function headOf(state: TicketState): string {
   return state.change.kind === "open" ? state.change.line.head : "";
 }
 
-// specHashOf : the hash of the ticket's spec as it is now, or "" when it cannot be read
 async function specHashOf(setup: TickSetup, ticket: string): Promise<string> {
   const spec = await currentSpec(ticketAt(setup, ticket));
   return spec.kind === "spec" ? spec.spec.hash : "";
 }
 
-// answeredFirst : the person's answers kept as their own event before the run that receives them, tied to the spec
-// version they answered (#486, P13); nothing for a task with none
 async function answeredFirst(setup: TickSetup, state: TicketState, task: Task): Promise<Done> {
   const answers = task.kind === "fix" || task.kind === "test-first" ? (task.answers ?? []) : [];
   if (answers.length === 0) {
@@ -846,10 +765,6 @@ async function runWriter(setup: TickSetup, state: TicketState, task: Task): Prom
   return kept.kind === "ok" ? startWriter(setup, state, task, step) : kept;
 }
 
-// begin : the run folder made, the start recorded with it, then the claim taken; the folder, as a field to spread.
-// The start is recorded before the claim: a pass that dies between them leaves a run that never ended, which goes to
-// a person, never a claim with no record, which would look like someone else's. The folder is named before the run,
-// so a pass that dies mid-run leaves its work where the record says.
 async function begin(
   setup: TickSetup,
   state: TicketState,
@@ -875,14 +790,12 @@ async function begin(
   });
   const claimed = started.kind === "ok" ? await claim(setup, state) : started;
   if (claimed.kind === "failed") {
-    // the folder is still empty, and rmdir removes only an empty one
     await emptied(named.folder);
     return claimed;
   }
   return { kind: "ok", value: named };
 }
 
-// startWriter : the writer's start recorded, the claim taken, then the run
 async function startWriter(
   setup: TickSetup,
   state: TicketState,
@@ -896,8 +809,6 @@ async function startWriter(
   }
   const named = begun.value;
   const ran = await step.run({ ticket: state.ticket, change: state.change, head: headOf(state), task, ...named });
-  // a step that fails leaves the start alone: the next pass sees a run that never ended and asks a person; what the
-  // run spent is still recorded (#483)
   if (ran.kind !== "ok") {
     return failedSpent(setup, state, headOf(state), ran, "writer");
   }
@@ -907,8 +818,6 @@ async function startWriter(
     : writerEnded(setup, state, mode, { ...rest, outcome });
 }
 
-// parkedEvent : a parked writer run's "parked" line: its reset, the CLI's refusal, the task it runs again after the
-// reset, and what it spent. Pure.
 function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Event, { kind: "parked" }> {
   const { until, said } = value.parked ?? { until: "unknown", said: value.why ?? "" };
   const parkedTask = parkedTaskOf(task);
@@ -924,8 +833,6 @@ function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Even
   };
 }
 
-// writerParked : a run the provider's usage limit refused: its "parked" line, then one notice per project and reset
-// time; an unknown reset sends none, since it is a person's step, which the turn rule pings
 async function writerParked(setup: TickSetup, state: TicketState, task: Task, value: WriterValue): Promise<Logged> {
   const event = parkedEvent(at(setup), task, value);
   const kept = await record({ where: where(setup, state), event });
@@ -938,8 +845,6 @@ async function writerParked(setup: TickSetup, state: TicketState, task: Task, va
   return { kind: "ok", said: `writer parked: ${PARK_WAIT} ${event.until}: ${event.said}` };
 }
 
-// parkNoticed : one notice per project and reset time, so every ticket parked on one reset sends one between them; an
-// unknown reset is a person's step instead, which the turn rule pings
 async function parkNoticed(setup: TickSetup, state: TicketState, until: string, said: string): Promise<void> {
   const path = join(setup.home, "runs", setup.project, "provider-notice.json");
   const before = await readFile(path, "utf8").catch(() => "");
@@ -952,7 +857,6 @@ async function parkNoticed(setup: TickSetup, state: TicketState, until: string, 
   await informed(setup, { kind: "held", ticket: state.ticket, change: number(state), why });
 }
 
-// folderFor : the run folder the step makes, as a field to spread; a step that makes none (a test's) names none
 async function folderFor(
   step: Extract<Steps["writer"], { kind: "available" }>,
 ): Promise<Result<{ readonly folder?: string }>> {
@@ -963,7 +867,6 @@ async function folderFor(
   return made.kind === "ok" ? { kind: "ok", value: { folder: made.value } } : made;
 }
 
-// emptied : a run folder no run used, removed; rmdir refuses one that holds anything
 async function emptied(folder: string | undefined): Promise<void> {
   if (folder !== undefined) {
     await rmdir(folder).catch(() => undefined);
@@ -975,11 +878,8 @@ type WriterValue = Extract<
   { kind: "ok" }
 >["value"];
 
-// EndedValue : a writer run that ended other than parked, as its "writer-ended" line holds it
 type EndedValue = Omit<WriterValue, "outcome" | "parked"> & { readonly outcome: "done" | "asked" | "blocked" };
 
-// writerEnded : the run's end recorded; a run that ended on a person is pinged on the next pass, which sees their turn
-// (turnPinged); the pass logs why it stopped
 async function writerEnded(
   setup: TickSetup,
   state: TicketState,
@@ -994,12 +894,10 @@ async function writerEnded(
   return ended.kind === "ok" && said !== "" ? { kind: "ok", said } : ended;
 }
 
-// usedBy : the plugins and hashes a run of this pass records
 function usedBy(setup: TickSetup): readonly PluginHash[] {
   return setup.plugins ?? [];
 }
 
-// startCheck : the "started" line of a ready check or a review, or why it cannot start
 async function startCheck(
   setup: TickSetup,
   state: TicketState,
@@ -1012,18 +910,15 @@ async function startCheck(
   });
 }
 
-// failedAt : a failed check's nextTry, as a field to spread; n counts this failure (#228)
 function failedAt(setup: TickSetup, step: Retried, failed: boolean, before: number) {
   return failed ? { nextTry: nextTryOf(step, before + 1, setup.now()) } : {};
 }
 
-// the rows the writer's last done run gave, which the ready check runs again
 function evidenceOf(state: TicketState): readonly Evidence[] {
   const w = state.runs.lastWriter;
   return w.kind === "ended" ? w.evidence : [];
 }
 
-// readyFacts : the spec's acceptance criteria and the project's one-way-door paths, read on the host before the check
 async function readyFacts(setup: TickSetup, state: TicketState): Promise<Result<ReadyFacts>> {
   const spec = await currentSpec(ticketAt(setup, state.ticket));
   if (spec.kind !== "spec") {
@@ -1035,8 +930,6 @@ async function readyFacts(setup: TickSetup, state: TicketState): Promise<Result<
     : oneWayDoor;
 }
 
-// readyStarted : the facts the ready check needs, then its "started" line; neither is written when the facts cannot
-// be read
 async function readyStarted(setup: TickSetup, state: TicketState, head: string): Promise<Result<ReadyFacts>> {
   const facts = await readyFacts(setup, state);
   const started = facts.kind === "ok" ? await startCheck(setup, state, "ready", head) : facts;
@@ -1064,8 +957,6 @@ async function runReady(setup: TickSetup, state: TicketState, head: string): Pro
     : ran;
 }
 
-// readyEnded : the ready check's end, with the lane the diff needs (#230); a stop for a person (#231) is marked so and
-// sets no next try for the writer
 function readyEnded(
   setup: TickSetup,
   state: TicketState,
@@ -1107,27 +998,22 @@ async function runVerify(setup: TickSetup, state: TicketState, head: string): Pr
     : ran;
 }
 
-// dollarCapped : whether the ticket or the day has a dollar cap. Pure.
 function dollarCapped(caps: Caps): boolean {
   return caps.ticket.usd !== "none" || caps.day.usd !== "none";
 }
 
-// roomCheck : the review step's worst case, when a dollar cap could hold the round; undefined when none could
 function roomCheck(setup: TickSetup): (() => Promise<Result<number | "unbounded">>) | undefined {
   const step = setup.steps.review;
   const worstUsd = step.kind === "available" ? step.worstUsd : undefined;
   return dollarCapped(setup.caps) ? worstUsd : undefined;
 }
 
-// daySpend : what the project's runs spent today (UTC); read only when the day has a dollar cap
 async function daySpend(setup: TickSetup): Promise<Spend> {
   const { caps } = setup;
   const runs = caps.day.usd === "none" ? [] : (await readSpends({ home: setup.home, project: setup.project })).runs;
   return totalOf(runs, periodsAt(setup.now(), caps.windowHours).day).spend;
 }
 
-// roundRoom : why a review round is held by its worst case (caps.ts overCaps), or ""; read before its "started" line,
-// so a held round leaves no run behind
 async function roundRoom(setup: TickSetup, state: TicketState): Promise<Result<string>> {
   const worstUsd = roomCheck(setup);
   if (worstUsd === undefined) {
@@ -1142,7 +1028,6 @@ async function roundRoom(setup: TickSetup, state: TicketState): Promise<Result<s
     : worst;
 }
 
-// heldRound : the round held by its worst case, or a failure to read it, or "go"
 async function heldRound(setup: TickSetup, state: TicketState): Promise<Done | Unavailable | "go"> {
   const room = await roundRoom(setup, state);
   if (room.kind === "failed") {
@@ -1202,8 +1087,6 @@ function reviewEnded(
   });
 }
 
-// ratings : a posted round's acted-on rows and unique findings per lens, as fields to spread; none it does not have
-// (#220, #237). Pure.
 function ratings(value: { readonly acted?: Acted; readonly lenses?: Readonly<Record<string, number>> }): {
   readonly acted?: Acted;
   readonly lenses?: Readonly<Record<string, number>>;
@@ -1214,8 +1097,6 @@ function ratings(value: { readonly acted?: Acted; readonly lenses?: Readonly<Rec
   };
 }
 
-// counts : a posted round's cites not found and findings per rule ID, as fields to spread; none it does not have
-// (#485, #488). Pure.
 function counts(value: { readonly citesNotFound?: number; readonly found?: FoundByRule }): {
   readonly citesNotFound?: number;
   readonly found?: FoundByRule;
@@ -1226,18 +1107,14 @@ function counts(value: { readonly citesNotFound?: number; readonly found?: Found
   };
 }
 
-// splitIn : a round's spend per run, as a field to spread; none when it has none (#337). Pure.
 function splitIn(ran: { readonly split?: RoundSpend }): { readonly split?: RoundSpend } {
   return ran.split === undefined ? {} : { split: ran.split };
 }
 
-// tracesIn : a failed run's traces, as a field to spread; none when it has none (#487). Pure.
 function tracesIn(ran: { readonly traces?: readonly string[] }): { readonly traces?: readonly string[] } {
   return ran.traces === undefined ? {} : { traces: ran.traces };
 }
 
-// failedSpent : a writer run or a review that failed leaves its start alone, so a person looks; what it spent is still
-// recorded, as a spent line, so the caps and usage count it (#131, #483)
 async function failedSpent(
   setup: TickSetup,
   state: TicketState,
@@ -1260,9 +1137,6 @@ async function failedSpent(
 
 type DesignAction = Extract<Action, { kind: "design" }>;
 
-// designFindings : the design-reviewer's findings at the action's hashes, which its verify pass checks
-// earlierOf : the ticket's earlier rounds, for a re-review and its verify pass; none on a first round or when the
-// records do not read (the review then runs as a first round)
 async function earlierOf(setup: TickSetup, state: TicketState, a: DesignAction): Promise<readonly EarlierRound[]> {
   const events = await readRecords(where(setup, state), { warn: setup.log, setAside: true });
   return events.kind === "ok" ? roundsBefore(events.value, { spec: a.spec, design: a.design }) : [];
@@ -1274,7 +1148,6 @@ function earlierField(rounds: readonly EarlierRound[]): { readonly earlier?: rea
 
 type ReviewRan = Result<DesignRan<{ readonly findings: readonly DesignFinding[] }>>;
 
-// lessRepeats : a re-review's findings less those an earlier round settled (design.ts dropRepeats), logged
 function lessRepeats(setup: TickSetup, state: TicketState, ran: ReviewRan, rounds: readonly EarlierRound[]): ReviewRan {
   if (ran.kind === "failed" || ran.value.kind === "failed" || rounds.length === 0) {
     return ran;
@@ -1310,7 +1183,6 @@ async function designFindings(
 
 type DesignEnded = Extract<Event, { kind: "design-ended" }>;
 
-// answerOf : a finished run's findings and kept findings; each run gives one of the two
 function answerOf(v: {
   readonly findings?: readonly DesignFinding[];
   readonly kept?: readonly Kept[];
@@ -1326,7 +1198,6 @@ function finalField(final: true | undefined): { readonly final?: true } {
   return final === true ? { final: true } : {};
 }
 
-// designEnded : the run's "design-ended" line, from how it ended; a step that failed with no answer kept no card
 function designEnded(
   setup: TickSetup,
   a: DesignAction,
@@ -1355,7 +1226,6 @@ function designEnded(
     : { ...base, outcome: "done", why: "", ...answerOf(v), ...extras };
 }
 
-// runDesignStep : the design-reviewer, or the verify pass over its conflicts and opens
 async function runDesignStep(
   setup: TickSetup,
   state: TicketState,
@@ -1377,8 +1247,6 @@ async function runDesignStep(
   return findings.kind === "ok" ? step.run({ ...input, findings: toVerify(findings.value) }) : findings;
 }
 
-// runDesign : one run of the design review (#236): a "started" line, the run, then its "design-ended" line, whether it
-// finished or failed, with its card and spend; a finished verify pass then goes to the front doors
 const DESIGN_PHASE = { review: "design-review", verify: "design-verify" } as const;
 
 async function runDesign(setup: TickSetup, state: TicketState, a: DesignAction): Promise<Done | Unavailable> {
@@ -1393,7 +1261,6 @@ async function runDesign(setup: TickSetup, state: TicketState, a: DesignAction):
   return started.kind === "ok" ? designRan(setup, state, a) : started;
 }
 
-// designRan : the run, then its "design-ended" line; a finished verify pass goes to the front doors
 async function designRan(setup: TickSetup, state: TicketState, a: DesignAction): Promise<Done> {
   const ended = designEnded(setup, a, await runDesignStep(setup, state, a), await readAt(setup, state, a));
   const kept = await record({ where: where(setup, state), event: ended });
@@ -1406,8 +1273,6 @@ async function designRan(setup: TickSetup, state: TicketState, a: DesignAction):
   return ended.step === "verify" ? designPosted(setup, state, ended) : { kind: "ok" };
 }
 
-// readAt : the spec's lane and Planned files, when the spec still has the action's hashes; kept on its design line so
-// a later edit that moves them is reviewed again (design.ts)
 async function readAt(setup: TickSetup, state: TicketState, a: DesignAction): Promise<SpecRead | "none"> {
   const current = await currentSpec(ticketAt(setup, state.ticket));
   return current.kind === "spec" && current.spec.hash === a.spec && current.design === a.design
@@ -1415,8 +1280,6 @@ async function readAt(setup: TickSetup, state: TicketState, a: DesignAction): Pr
     : "none";
 }
 
-// designNote : the person told once why the design review holds or ends at these hashes, in the record, so the note is
-// never sent twice; the person's ping is the turn's (turnPinged)
 function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAction): Promise<Done> {
   setup.log(`${state.ticket}: design review: ${a.why}`);
   return record({
@@ -1427,8 +1290,6 @@ function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAction): 
 
 type DesignNoteAction = Extract<Action, { kind: "design-note" }>;
 
-// holdRecorded : the build held by the spec's "Blocked by", recorded so the next pass waits without a word, and the person told
-// once when what it waits on changed (#494 AC-10); a ping only informs
 async function holdRecorded(setup: TickSetup, state: TicketState, a: Extract<Action, { kind: "held" }>): Promise<Done> {
   const kept = await record({ where: where(setup, state), event: { at: at(setup), kind: "held", why: a.why } });
   if (kept.kind === "failed" || !a.ping) {
@@ -1437,7 +1298,6 @@ async function holdRecorded(setup: TickSetup, state: TicketState, a: Extract<Act
   return informed(setup, { kind: "held", ticket: state.ticket, change: number(state), why: a.why });
 }
 
-// designPost : the verify pass's kept findings, as the note on the ticket's PR. Pure.
 export function designPost(ended: DesignEnded): Post {
   const counted = ended.kept.length === 0 ? "no finding kept" : `${ended.kept.length} finding(s) kept`;
   return {
@@ -1451,9 +1311,6 @@ export function designPost(ended: DesignEnded): Post {
   };
 }
 
-// designPosted : what the verify pass kept, to the front doors: the pass's log and a note on the ticket's PR when one is
-// open; the person is pinged when the next pass sees their turn (turnPinged). The record holds the findings, so a note
-// that fails fails the pass, and the next pass does not post it again: it reads the review as done.
 function designPosted(setup: TickSetup, state: TicketState, ended: DesignEnded): Promise<Done> {
   for (const k of ended.kept) {
     setup.log(`${state.ticket}: design review: ${keptLine(k)}`);
@@ -1461,7 +1318,6 @@ function designPosted(setup: TickSetup, state: TicketState, ended: DesignEnded):
   return say(setup, state, designPost(ended));
 }
 
-// the actions that start a run; "none" for the rest
 const RUN: Handler<Promise<Logged | Unavailable> | "none"> = {
   writer: (setup, state, a) => runWriter(setup, state, a.task),
   ready: (setup, state, a) => runReady(setup, state, a.head),
@@ -1504,7 +1360,6 @@ function describeAs<K extends ActionKind>(kind: K, action: ActionMap[K]): string
   return DESCRIBE[kind](action);
 }
 
-// describe : an action in a few words, as the pass logs it and `board` shows it (#487)
 export function describe(action: Action): string {
   return describeAs(action.kind, action);
 }
@@ -1515,14 +1370,11 @@ function logResult(setup: TickSetup, ticket: string, result: Logged | Unavailabl
 
 type Later = { readonly state: TicketState; readonly action: Action };
 
-// unshared : the approval and the PR its shared copy goes on, or "none" when it is posted already or has no PR yet
 function unshared(d: Read): { readonly approval: ApprovalRecord; readonly number: number } | "none" {
   const n = d.state.change.kind === "open" ? d.state.change.line.number : "none";
   return d.approved === "none" || d.shared || n === "none" ? "none" : { approval: d.approved, number: n };
 }
 
-// share : the shared copy of the ticket's current approval (#227), once, on its open PR. It is for people to see and
-// never starts anything, so one that fails is printed and the pass goes on; the next pass tries again.
 async function share(setup: TickSetup, d: Read): Promise<void> {
   const due = unshared(d);
   if (due === "none") {
@@ -1536,8 +1388,6 @@ async function share(setup: TickSetup, d: Read): Promise<void> {
   }
 }
 
-// heardLines : the ticket's START and approval, each as a begun or approved line at its own time, when the records do
-// not hold it yet (#487): a new START or approval replaces its file, so the lines keep each one for the touches. Pure.
 export function heardLines(
   events: readonly Event[],
   started: StartRecord | "none",
@@ -1555,8 +1405,6 @@ export function heardLines(
   return [...begun, ...ok];
 }
 
-// heard : the ticket's START and approval recorded once each (heardLines). Records that cannot be read write nothing,
-// so no line is written twice; a line that cannot be written is printed, and the next pass writes it.
 async function heard(setup: TickSetup, d: Read): Promise<void> {
   const place = where(setup, d.state);
   const events = await readRecords(place, { warn: () => undefined });
@@ -1572,9 +1420,6 @@ async function heard(setup: TickSetup, d: Read): Promise<void> {
   }
 }
 
-// turnPinged : the ticket's turn recorded when it moved, then the person pinged when it entered theirs (turn-ping.ts):
-// the record first, so the ping goes once; a line that cannot be written is printed, sends no ping, and the
-// next pass tries again. It follows the forge action, so the note on the change is there before the ping.
 async function turnPinged(setup: TickSetup, d: Read & { readonly action: Action }): Promise<void> {
   const step = turnStep(d.state.runs, whoseTurn(d.action).lane);
   if (step.record === "none") {
@@ -1590,8 +1435,6 @@ async function turnPinged(setup: TickSetup, d: Read & { readonly action: Action 
   }
 }
 
-// forgeThenTurn : the ticket's forge-only action, then its turn, unless that action failed: the next pass decides it
-// again, and pings then
 async function forgeThenTurn(setup: TickSetup, d: Read & { readonly action: Action }): Promise<Done | "none"> {
   const done = await forgeAction(setup, d.state, d.action);
   if (done === "none" || done.kind === "ok") {
@@ -1600,7 +1443,6 @@ async function forgeThenTurn(setup: TickSetup, d: Read & { readonly action: Acti
   return done;
 }
 
-// forgePass : every forge-only action, on fresh decisions, and each ticket's turn; what is left is a run or a wait
 async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran[]): Promise<readonly Later[]> {
   const later: Later[] = [];
   for (const d of decided) {
@@ -1629,7 +1471,6 @@ async function forgePass(setup: TickSetup, decided: readonly Decided[], ran: Ran
 
 export const RUN_KINDS: ReadonlySet<ActionKind> = new Set(["writer", "ready", "review", "verify", "design"]);
 
-// stopNow : whether a new run may start in the project; the runs are read only when a cap is set (#131)
 async function stopNow(setup: TickSetup): Promise<Stop> {
   const { day, window } = setup.caps;
   const set = [day.usd, day.tokens, window.tokens, window.machineTokens].some((l) => l !== "none");
@@ -1641,7 +1482,6 @@ async function stopNow(setup: TickSetup): Promise<Stop> {
   return projectStop({ project: project.runs, machine: machine.runs, now: setup.now(), caps: setup.caps });
 }
 
-// noticed : one notice per stop and period: the period's key is kept in the project's runs folder
 async function noticed(setup: TickSetup, stop: Extract<Stop, { kind: "stop" }>, first: Later): Promise<void> {
   const path = join(setup.home, "runs", setup.project, "caps-notice.json");
   const before = await readFile(path, "utf8").catch(() => "");
@@ -1653,7 +1493,6 @@ async function noticed(setup: TickSetup, stop: Extract<Stop, { kind: "stop" }>, 
   await informed(setup, { kind: "paused", ticket: first.state.ticket, change: number(first.state), why: stop.why });
 }
 
-// paused : every run held while the project is at a cap, each recorded as unavailable, so the pass does not fail
 async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Promise<boolean> {
   const [first] = runs;
   const stop = first === undefined ? ({ kind: "go" } as const) : await stopNow(setup);
@@ -1669,12 +1508,8 @@ async function paused(setup: TickSetup, runs: readonly Later[], ran: Ran[]): Pro
   return true;
 }
 
-// what a run held outside the run hours is recorded with; the orchestrator loop ends on it (runHoursEnd)
 const OUTSIDE_HOURS = "held: outside";
 
-// runHoursEnd : after a pass that held a run outside the run hours, what to tell the human; "none" otherwise. The
-// orchestrator loop ends then, with this line, and never waits for the hours (#299; no job runs in the background):
-// the held runs stay in the records, so the next dispatch picks them up. Pure.
 export function runHoursEnd(setup: Pick<TickSetup, "project" | "caps">, ran: readonly Ran[]): string {
   const hours = setup.caps.runHours;
   const held = ran.some((r) => r.result.kind === "unavailable" && r.result.reason.startsWith(OUTSIDE_HOURS));
@@ -1683,8 +1518,6 @@ export function runHoursEnd(setup: Pick<TickSetup, "project" | "caps">, ran: rea
     : "none";
 }
 
-// closed : every run held while the hour is outside the run hours (hours.ts); nothing is stopped, and the tickets stay
-// in flight, so a dispatch started inside the hours runs them (runHoursEnd)
 function closed(setup: TickSetup, runs: readonly Later[], ran: Ran[]): boolean {
   const hours = setup.caps.runHours;
   if (runs.length === 0 || hours === "any" || openAt(hours, setup.now())) {
@@ -1703,8 +1536,6 @@ function closed(setup: TickSetup, runs: readonly Later[], ran: Ran[]): boolean {
   return true;
 }
 
-// runPass : up to runs at once of the runs that can start, one after another; none outside the run hours, and none
-// while the project is at a cap, checked again before each run after the first
 async function runPass(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<void> {
   const runs = later.filter((l) => RUN_KINDS.has(l.action.kind));
   if (closed(setup, runs, ran)) {
@@ -1713,7 +1544,6 @@ async function runPass(setup: TickSetup, later: readonly Later[], ran: Ran[]): P
   await someRuns(setup, later, ran, setup.caps.runsAtOnce);
 }
 
-// someRuns : up to `most` runs from `later`, the caps checked before each
 async function someRuns(setup: TickSetup, later: readonly Later[], ran: Ran[], most: number): Promise<void> {
   const pending = later.filter((l) => RUN_KINDS.has(l.action.kind));
   if (most < 1 || pending.length === 0 || (await paused(setup, pending, ran))) {
@@ -1725,13 +1555,10 @@ async function someRuns(setup: TickSetup, later: readonly Later[], ran: Ran[], m
   }
 }
 
-// heldOf : a result a cap held, marked held, as a field to spread. Pure.
 function heldOf(result: Logged | Unavailable): { readonly held?: true } {
   return result.kind === "unavailable" && result.held === true ? { held: true } : {};
 }
 
-// firstRun : the first run that can start, and the index of its entry in `later`, or "none"; an unavailable step
-// lets the next one try
 async function firstRun(setup: TickSetup, later: readonly Later[], ran: Ran[]): Promise<number | "none"> {
   for (const [i, { state, action }] of later.entries()) {
     const pending = runAction(setup, state, action);
@@ -1758,7 +1585,6 @@ type Lock =
   | { readonly kind: "held"; readonly release: () => Promise<void> }
   | { readonly kind: "busy"; readonly reason: string };
 
-// a lock with no readable pid this old is left over from a crash, not one being written
 const STALE_UNREADABLE_MS = 10 * 60_000;
 
 function alive(pid: number): boolean {
@@ -1775,7 +1601,6 @@ export type Holder =
   | { readonly kind: "dead" }
   | { readonly kind: "unknown" };
 
-// holder : who holds a lock file: a live pid, a dead one (a crash left it), or unknown while it is being written
 export async function holder(path: string, now: number): Promise<Holder> {
   const text = await readFile(path, "utf8").catch(() => "");
   const pid = Number(text.split(":")[0]);
@@ -1789,8 +1614,6 @@ export async function holder(path: string, now: number): Promise<Holder> {
   return age > STALE_UNREADABLE_MS ? { kind: "dead" } : { kind: "unknown" };
 }
 
-// take : the lock, from a file already holding our token: link (fails if any lock is there), or, over a dead one, an
-// atomic rename followed by a read-back, so of two passes that both found it dead only one keeps it
 async function take(lockPath: string, mine: string, token: string): Promise<boolean> {
   try {
     await link(mine, lockPath);
@@ -1805,12 +1628,9 @@ async function take(lockPath: string, mine: string, token: string): Promise<bool
   }
 }
 
-// what a lock file guards: one pass, or one orchestrator loop (#305), at a time per project
 export type Guard = { readonly file: string; readonly what: string };
 export const PASS_GUARD: Guard = { file: ".lock", what: "pass" };
 
-// lock : one pass at a time per project, or with a guard one of what it guards. It never throws: a lock it cannot take
-// is "busy", with the reason.
 export async function lock(input: {
   readonly home: string;
   readonly project: string;
@@ -1836,7 +1656,6 @@ export async function lock(input: {
             : `another ${guard.what} holds ${lockPath}`,
       };
     }
-    // release only a lock that is still ours
     const release = async (): Promise<void> => {
       const now = await readFile(lockPath, "utf8").catch(() => "");
       if (now === token) {
@@ -1850,7 +1669,6 @@ export async function lock(input: {
   }
 }
 
-// acted : a dry run prints each decision and acts on none; a real pass writes its last-poll time, then acts
 async function acted(setup: TickSetup, decided: readonly Decided[]): Promise<readonly Ran[]> {
   if (setup.dryRun) {
     decided.forEach((d) =>
@@ -1867,18 +1685,14 @@ async function acted(setup: TickSetup, decided: readonly Decided[]): Promise<rea
   return actAll(setup, decided);
 }
 
-// waitingOf : the pass's setup as the wait's record and ping read it (waiting-pass.ts)
 function waitingOf(setup: TickSetup): WaitingSetup {
   return { ...setup, waiting: () => setup.forge.waiting({ label: WAITING_LABEL }) };
 }
 
-// flights : each waiting ticket's flight, from the pass's decisions: a ticket's name is its issue only when the project
-// keeps its specs in issues, so any other waiting issue is no ticket in flight
 function flights(setup: TickSetup, decided: readonly Decided[]): (ticket: string) => Flight {
   return (ticket) => (issueTicket(setup, ticket) ? flightOf(decided, ticket) : NO_FLIGHT);
 }
 
-// flightOf : the waiting ticket's lane and change when it is in flight; none for either when it is not. Pure.
 function flightOf(decided: readonly Decided[], ticket: string): Flight {
   const flying = decided.find(
     (d): d is Read & { readonly action: Action } => !("kind" in d) && d.state.ticket === ticket,
@@ -1886,7 +1700,6 @@ function flightOf(decided: readonly Decided[], ticket: string): Flight {
   return flying === undefined ? NO_FLIGHT : { lane: whoseTurn(flying.action).lane, change: number(flying.state) };
 }
 
-// polled : the pass's last-poll time; one that cannot be written is printed, and status then shows the pass as late
 async function polled(setup: TickSetup): Promise<void> {
   const last = { at: at(setup), pollMinutes: setup.pollMinutes, forge: setup.forge.name, repo: setup.repo };
   const written = await writeLastPoll({ home: setup.home, project: setup.project, poll: last });
@@ -1895,8 +1708,6 @@ async function polled(setup: TickSetup): Promise<void> {
   }
 }
 
-// pruned : the project's traces older than TRACE_DAYS deleted, at the start of each pass (#487); one that cannot be
-// deleted is logged, and the pass goes on
 async function pruned(setup: TickSetup): Promise<void> {
   const gone = await pruneTraces({ home: setup.home, project: setup.project, now: setup.now() });
   for (const problem of gone.problems) {
@@ -1904,7 +1715,6 @@ async function pruned(setup: TickSetup): Promise<void> {
   }
 }
 
-// tick : one locked pass
 export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
   if (!plainName(setup.project)) {
     return { kind: "failed", reason: `the project must be a plain name, got ${JSON.stringify(setup.project)}` };
@@ -1925,13 +1735,8 @@ export async function tick(setup: TickSetup): Promise<Result<readonly Ran[]>> {
   }
 }
 
-// what `agent-factory waiting` did: each waiting ticket's outcome, or nothing while a pass holds the lock, since that
-// pass pings each one itself
 export type WaitingRun = { readonly kind: "ran"; readonly waits: readonly WaitingRan[] } | { readonly kind: "busy" };
 
-// waitingPass : a pass's wait pings alone, under the pass lock, for a session that waits while no loop runs.
-// It decides each ticket as a pass does, so a ticket whose own turn is already needs you gets no second ping, and it
-// acts on no decision: no run, no git host write, no turn ping. A dry run names the waits and records nothing.
 export async function waitingPass(setup: TickSetup): Promise<Result<WaitingRun>> {
   if (!plainName(setup.project)) {
     return { kind: "failed", reason: `the project must be a plain name, got ${JSON.stringify(setup.project)}` };

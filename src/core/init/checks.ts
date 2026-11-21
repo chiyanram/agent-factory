@@ -5,6 +5,8 @@
 // call: the stored token an implementer run gets, and this shell's login the read-only runs get. A login call that
 // cannot answer is a ? that names why and fails nothing. Every program call goes through the probes, so a test runs
 // none. It never runs a command only a human runs; a ✗ prints the command for the human.
+//
+// srt is pinned, and the pin moves only once a release's changes are reviewed (ADR-0012 S7).
 
 import { join } from "node:path";
 import { SIGN_IN, type Login } from "../agent/login.js";
@@ -15,32 +17,22 @@ import { under } from "../box/srt-programs.js";
 import { tokenAge, tokenRecord, type Age, type Meta } from "../token/index.js";
 import type { Declared, HostKind, Tool } from "./detect.js";
 
-// unsure: the check could not answer, so it fails nothing; its fix is how to try again
 export type Check = { readonly ok: boolean; readonly line: string; readonly fix: string; readonly unsure?: boolean };
 
-// the logins runs use: the stored token a writer's box gets, and this shell's login the read-only runs get
 export type Who = "writer" | "readOnly";
 
 export type Probes = {
   readonly run: Runner;
   readonly env: NodeJS.ProcessEnv;
-  // a program on PATH: the PATH entry it was found in, and its real path; none when PATH has none
   readonly which: (name: string) => Promise<{ readonly found: string; readonly real: string } | "none">;
-  // the Node this command runs on
   readonly execPath: string;
-  // the person's home, where the toolchain managers keep their installs
   readonly home: string;
   readonly platform: NodeJS.Platform;
   readonly now: Date;
-  // this package's version
   readonly version: string;
-  // the latest release's version (#482); none in a test
   readonly latest?: () => Promise<Result<string>>;
-  // the project's default branch, read through the Forge seam with the project's identity: the login works
   readonly gitHost: (project: string) => Promise<Result<string>>;
-  // the coordinator's settings hold its wall
   readonly wall: () => Promise<Result<string>>;
-  // one real call with that login, through the agent CLI (agent/login.ts), in the environment the project's runs get
   readonly login: (who: Who, project: string) => Promise<Login>;
 };
 
@@ -52,7 +44,6 @@ function fail(line: string, fix: string): Check {
   return { ok: false, line, fix };
 }
 
-// the one-line install of this package's own release (GUIDE "Install a pinned version")
 export function selfInstall(version: string): string {
   return `npm i -g https://github.com/chiyanram/agent-factory/releases/download/v${version}/chiyanram-agent-factory-${version}.tgz`;
 }
@@ -61,7 +52,6 @@ function srtFix(platform: NodeJS.Platform): string {
   return platform === "linux" ? `${SRT_INSTALL} (and install bubblewrap, socat and ripgrep)` : SRT_INSTALL;
 }
 
-// srtCheck : srt on PATH at the pinned version; the pin moves only once a release's changes are reviewed (S7)
 export async function srtCheck(p: Probes): Promise<Check> {
   const srt = await p.which("srt");
   if (srt === "none") {
@@ -83,8 +73,6 @@ export async function claudeCheck(p: Probes): Promise<Check> {
     : pass("claude is on PATH");
 }
 
-// nodeCheck : agent-factory on PATH, under the Node that PATH gives (a Node upgrade leaves the old one's global
-// packages behind)
 export async function nodeCheck(p: Probes): Promise<Check> {
   const [self, node] = [await p.which("agent-factory"), await p.which("node")];
   const reinstall = `${selfInstall(p.version)} && ${SRT_INSTALL}`;
@@ -101,8 +89,6 @@ export async function nodeCheck(p: Probes): Promise<Check> {
 
 const RENEW = "claude setup-token, then agent-factory setup claude";
 
-// tokenCheck : the claude token's expiry on record, read without the token; usable: a box would start with it, as
-// boxToken decides (valid or expiring), so the login call is worth making
 export async function tokenCheck(
   home: string,
   now: Date,
@@ -133,8 +119,6 @@ const LOGIN: Readonly<Record<Who, { readonly name: string; readonly fix: string 
   readOnly: { name: "the read-only runs' claude login", fix: SIGN_IN },
 };
 
-// loginCheck : one login, proved by a real call: ✓ only when Anthropic accepted it, ✗ only when it refused it, and ?
-// when the call could not tell
 export async function loginCheck(p: Probes, who: Who, project: string): Promise<Check> {
   const { name, fix } = LOGIN[who];
   const login = await p.login(who, project);
@@ -178,7 +162,6 @@ export async function wallCheck(p: Probes): Promise<Check> {
     : fail(`the coordinator's settings: ${wall.reason}`, "agent-factory setup coordinator");
 }
 
-// the program each declared tool puts on PATH
 const PROGRAMS: Readonly<Record<string, string>> = {
   java: "java",
   node: "node",
@@ -191,13 +174,10 @@ const PROGRAMS: Readonly<Record<string, string>> = {
   ruby: "ruby",
 };
 
-// majorOf : the first number in a version, such as 27 in "temurin-27.0.1" or 25 in "25.0.1-tem"; "" when none. Pure.
 export function majorOf(version: string): string {
   return /\d+/.exec(version)?.[0] ?? "";
 }
 
-// owner : the toolchain manager whose install folder holds a program's real path, and the version folder it sits in.
-// Pure.
 export function owner(real: string, home: string): { readonly manager: string; readonly version: string } | "none" {
   const m = MANAGERS.find((x) => under(real, join(home, x.installs)));
   if (m === undefined) {
@@ -207,7 +187,8 @@ export function owner(real: string, home: string): { readonly manager: string; r
   return { manager: m.name, version };
 }
 
-// a .tool-versions file is read by mise as well as asdf
+// mise reads a .tool-versions file as well as asdf
+// https://mise.jdx.dev/configuration.html
 function sameManager(declared: Declared, manager: string): boolean {
   return declared.manager === manager || (declared.file === ".tool-versions" && manager === "mise");
 }
@@ -217,8 +198,6 @@ function fixFor(declared: Declared): string {
   return `put ${declared.manager}'s install first on PATH${m === undefined ? "" : `: ${m.fix}`}; load it after any other manager in your shell profile`;
 }
 
-// toolCheck : one declared tool against the program PATH resolves, which is the one a run gets (a run gets PATH,
-// never JAVA_HOME); a ✗ names the manager that wins
 export async function toolCheck(p: Probes, declared: Declared, tool: Tool): Promise<Check | "skip"> {
   const program = PROGRAMS[tool.name.replace(/^.*:/, "")];
   if (program === undefined) {
@@ -240,7 +219,6 @@ type Resolved = {
   readonly home: string;
 };
 
-// matches : the program PATH gives is the declared manager's, at the declared major version
 function matches(r: Resolved, found: { readonly manager: string; readonly version: string }): boolean {
   const wanted = majorOf(r.tool.version);
   return sameManager(r.declared, found.manager) && (wanted === "" || majorOf(found.version) === wanted);
@@ -274,7 +252,6 @@ export async function toolchainChecks(p: Probes, declared: Declared | "none"): P
   return each;
 }
 
-// checkLines : each check as it prints: ✓, ✗ with its fix under it, or ? with how to retry
 export function checkLines(checks: readonly Check[]): string {
   return checks.map(checkLine).join("");
 }

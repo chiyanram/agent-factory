@@ -44,7 +44,6 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     const r = await update();
     expect(r).toMatchObject({ code: 0, err: "" });
     expect(r.out).toContain(`rulebook@chiyanram: not pinned -> ${first.slice(0, 12)} 1.1.0 sha256:`);
-    // a first pin counts the files per folder, never lists each one (#482)
     expect(r.out).toContain("+ 1 file in skills/crq\n");
     expect(r.out).not.toContain("lanes.json");
     const pins = await readPins(home, "ledger");
@@ -77,7 +76,6 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     expect(moved).toMatchObject({ code: 0, err: "" });
     expect(moved.out).toContain("+ NEW.md");
     expect(moved.out).toContain(`pinned rulebook@chiyanram at ${third.slice(0, 12)}`);
-    // an older commit can be named, and moving back shows what goes
     const back = await update(first);
     expect(back.out).toContain(`-> ${first.slice(0, 12)}`);
     expect(back.out).toContain("- NEW.md");

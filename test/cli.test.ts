@@ -18,16 +18,13 @@ const started: {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
 }[] = [];
-// the background commands a test asked for: the fake starts none of them (#305)
 const backgrounded: { readonly args: readonly string[]; readonly log: string }[] = [];
-// the agent CLI's login call: what each test's fake answers, and the calls it got; no test starts a CLI
 const ACCEPTED =
   '{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"ok","total_cost_usd":0.008}';
 const REFUSED =
   '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"api_error","result":"Failed to authenticate. API Error: 401 OAuth access token is invalid.","total_cost_usd":0}';
 let loginAnswer = { code: 0, stdout: ACCEPTED };
 const agentCalls: FolderCall[] = [];
-// this test's own ids: a test never runs as root, and the platform is linux so no Keychain is touched
 const ME = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 type Run = { readonly code: number; readonly out: string; readonly err: string };
 async function cli(
@@ -84,7 +81,6 @@ describe("agent-factory spec", () => {
     expect(run.err).toContain("Acceptance criteria");
   });
 
-  // #489: checked at spec, before any design review: the planned files' lane, and the spec's own cites
   it("stops a spec whose planned files need a heavier lane, and one with a cite that does not hold, exit 2", async () => {
     mkdirSync(join(home, "projects"), { recursive: true });
     writeFileSync(
@@ -137,7 +133,6 @@ describe("agent-factory spec", () => {
     expect((await cli(["spec", "ledger", "PROJ-1"])).code).toBe(0);
   });
 
-  // #542: the coordinator edits a spec it can read, whether or not it passes the checks
   it("--show prints the spec's text as stored, exit 0, even when it fails the checks; none is exit 1", async () => {
     const failing = SPEC.replace("1. It works.", "TBD");
     writeSpec(failing);
@@ -146,7 +141,6 @@ describe("agent-factory spec", () => {
     expect(await cli(["spec", "ledger", "PROJ-1", "--show"])).toMatchObject({ code: 0, out: SPEC });
     expect((await cli(["spec", "ledger", "PROJ-2", "--show"])).code).toBe(1);
     expect((await cli(["spec", "--template", "--show", "PROJ-1"])).code).toBe(64);
-    // a control character a terminal acts on is escaped; the line ends stay as they are (#542)
     writeSpec(`${SPEC}\u001b[2J a\rb\r\n`);
     expect((await cli(["spec", "ledger", "PROJ-1", "--show"])).out).toBe(`${SPEC}\\u001b[2J a\\u000db\r\n`);
   });
@@ -222,7 +216,6 @@ describe("agent-factory approve and approval", () => {
   });
 });
 
-// A fake glab on disk: the poll command runs it as a real process, so this checks the whole path from argv to the line.
 function fakeGlab(): string {
   const answers = {
     user: { username: "ram" },
@@ -314,7 +307,6 @@ describe("agent-factory poll", () => {
   });
 });
 
-// writeProject : <home>/projects/<name>.json with the project's git host, its project there and its clone (#377)
 function writeProject(name: string, gitHostProject: string, clone = home): void {
   mkdirSync(join(home, "projects"), { recursive: true });
   writeFileSync(join(home, "projects", `${name}.json`), JSON.stringify({ gitHost: "gitlab", gitHostProject, clone }));
@@ -322,7 +314,6 @@ function writeProject(name: string, gitHostProject: string, clone = home): void 
 
 describe("commands read the project's git host and clone from the project file (#382)", () => {
   const POLLED = "!9 merged claimed=yes\n";
-  // no FACTORY_PROJECT, FACTORY_FORGE or FACTORY_REPO: only the factory home and the fake glab
   const bare = () => ({ FACTORY_HOME: home, FACTORY_GLAB: fakeGlab(), PATH: process.env.PATH });
 
   it("poll with no export reads the one project in the factory home, or the project it names", async () => {
@@ -410,7 +401,6 @@ describe("commands read the project's git host and clone from the project file (
         `stored the coordinator's own claude token in ${join(home, ".config", "agent-factory")}`,
       ),
     });
-    // XDG_CONFIG_HOME is ignored: the token stays where the coordinator's Read deny names it
     expect(existsSync(join(home, ".config", "agent-factory", "secrets", "claude-coordinator-token"))).toBe(true);
     expect(existsSync(join(home, "secrets", "claude-token"))).toBe(false);
     expect(run.out).not.toContain(TOKEN);
@@ -419,7 +409,6 @@ describe("commands read the project's git host and clone from the project file (
     expect(status).toMatch(/^claude token: none/m);
     const other = await cli(["setup", "status"], { ...env, HOME: join(home, "none"), FACTORY_BOX: "vm" });
     expect(other.out).toContain("coordinator seat token: none for this OS user, so the chat shares the runs' limit");
-    // the launch then starts on it, in the env, never argv
     expect((await cli(["setup", "coordinator"], env)).code).toBe(0);
     started.length = 0;
     expect(await cli(["coordinator"], env)).toMatchObject({ code: 0 });
@@ -457,7 +446,6 @@ describe("commands read the project's git host and clone from the project file (
         .map((l): unknown => JSON.parse(l))
         .map((l) => field(l, "kind")),
     ).toEqual(["turn", "turn", "reset"]);
-    // a hook input it cannot read still exits 0, so the hook never blocks the session
     expect(await cli(["coordinator-turn"], env, "not json")).toMatchObject({ code: 0 });
   });
 
@@ -506,7 +494,6 @@ describe("agent-factory app-token", () => {
   });
 });
 
-// a glab that answers the branch search: factory/PROJ-1 is there when `there`
 function branchGlab(there: boolean): string {
   const body = JSON.stringify(there ? [{ name: "factory/PROJ-1" }] : []);
   const path = join(home, "glab");
@@ -518,7 +505,6 @@ function branchGlab(there: boolean): string {
   return path;
 }
 
-// issueGlab : a fake glab that answers issue 2's description from <home>/issue.json, and refuses anything else
 function issueGlab(): string {
   const path = join(home, "glab");
   writeFileSync(
@@ -640,7 +626,6 @@ describe("start and approve start the orchestrator loop (#305)", () => {
     expect(first.code).toBe(0);
     expect(first.out).toContain("started the orchestrator loop for ledger (pid 4242)");
     expect(backgrounded).toEqual([{ args: ["dispatch", "ledger"], log: LOG() }]);
-    // a loop runs: its file names a live pid (this test's own)
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     writeFileSync(join(home, "runs", "ledger", "loop.pid"), `${process.pid}:x`);
     writeSpec(SPEC);
@@ -650,7 +635,6 @@ describe("start and approve start the orchestrator loop (#305)", () => {
       out: expect.stringContaining(`the orchestrator loop for ledger is already running (pid ${process.pid})`),
     });
     expect(backgrounded.length).toBe(1);
-    // the loop that wrote the file died: approve starts a new one
     writeFileSync(join(home, "runs", "ledger", "loop.pid"), "999999999:x");
     expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC)])).out).toContain("started the orchestrator loop");
     expect(backgrounded.length).toBe(2);
@@ -1006,7 +990,6 @@ describe("agent-factory box (#113)", () => {
   it("fails with the tool's own words when the build fails, and writes no box file", async () => {
     const run = await cli(["box", "build", "ledger"]);
     expect(run.code).toBe(1);
-    // the first step packs this package for the base image (#171)
     expect(run.err).toContain("agent-factory box: npm pack: no CLI in this test");
   });
 });
@@ -1038,8 +1021,6 @@ describe("agent-factory setup coordinator and coordinator (#106)", () => {
 
 describe("agent-factory plugin (#134)", () => {
   it("adds and tests a bundled forge plugin by its name, with the kit's fake gh in place of the real one", async () => {
-    // the plugin's #!/usr/bin/env node needs node in a PATH folder only its owner can write (pluginPath); a CI runner's
-    // tool cache may not be one, so the test gives it a link to this node in such a folder
     const bin = join(home, "bin");
     mkdirSync(bin, { mode: 0o755 });
     symlinkSync(process.execPath, join(bin, "node"));

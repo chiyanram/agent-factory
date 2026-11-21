@@ -29,7 +29,6 @@ export type StartRecord = {
   readonly at: string;
 };
 
-// store: the project's spec store, which goAhead reads the spec from (approval.ts); none given is the local one
 export type Where = { readonly home: string; readonly store?: SpecStore } & Ticket;
 
 export type StartRequest = {
@@ -37,15 +36,12 @@ export type StartRequest = {
   readonly by: string;
   readonly via: Via;
   readonly at: string;
-  // whether factory/<ticket> is already on the git host
   readonly branch: "absent" | "present";
-  // the human's yes to START over that branch
   readonly confirmed: boolean;
 };
 
 export type Start =
   | { readonly kind: "started"; readonly record: StartRecord; readonly path: string }
-  // factory/<ticket> is already on the git host: START again with the human's yes
   | { readonly kind: "ask"; readonly question: string }
   | Refused;
 
@@ -65,7 +61,6 @@ export function startPath(where: Where): PathResult {
       };
 }
 
-// start : records the human's START; asks first when the ticket's branch is already on the git host
 export async function start(request: StartRequest): Promise<Start> {
   const path = startPath(request.where);
   if (path.kind === "refused") {
@@ -103,7 +98,6 @@ function isStart(value: unknown, where: Where): value is StartRecord {
   ].every(Boolean);
 }
 
-// readStart : the ticket's START as it is on disk
 export async function readStart(where: Where): Promise<StoredStart> {
   const path = startPath(where);
   if (path.kind === "refused") {
@@ -118,9 +112,6 @@ export async function readStart(where: Where): Promise<StoredStart> {
     : { kind: "refused", reason: `${path.path} is not a START record for ${where.project}/${where.ticket}` };
 }
 
-// What lets a ticket's build begin, for the steps that run it (the implementer's run): always a START (nothing runs
-// without one), plus its current approval in every lane above tiny. The spec is the approved one, or in the tiny lane
-// the spec as it is now: a START binds no hash, so the tiny lane builds the spec as the coordinator left it.
 export type GoAhead =
   | {
       readonly kind: "go";
@@ -144,7 +135,6 @@ async function tinyStart(where: Where & Lanes, held: string): Promise<GoAhead> {
     : { kind: "held", why: `${held}, and a START alone builds only the tiny lane` };
 }
 
-// approvedStart : an approval releases the build only where a human also said START
 async function approvedStart(
   where: Where,
   approved: { readonly spec: Spec; readonly by: string; readonly at: string },
@@ -158,7 +148,6 @@ async function approvedStart(
     : { kind: "held", why: "approved, no START: a human STARTs the ticket first" };
 }
 
-// planned : a go-ahead whose spec's planned files need a heavier lane than the one a human said yes to is held (#230)
 async function planned(where: Where, go: GoAhead): Promise<GoAhead> {
   if (go.kind !== "go") {
     return go;
@@ -170,8 +159,6 @@ async function planned(where: Where, go: GoAhead): Promise<GoAhead> {
   return raise.value.kind === "raised" ? { kind: "held", why: raisedWhy(raise.value) } : go;
 }
 
-// goAhead : whether the ticket's build may begin, and on whose word; the lane is checked against the planned files
-// the project's lanes (process/read.ts, #232); the default lanes when a caller gives none
 export type Lanes = { readonly lanes?: readonly LaneProps[] | undefined };
 
 export async function goAhead(where: Where & Lanes): Promise<GoAhead> {

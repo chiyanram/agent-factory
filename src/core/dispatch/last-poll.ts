@@ -1,11 +1,15 @@
-// last-poll — when the orchestrator last polled the git host, so a stopped orchestrator loop shows (#103, #305; from
-// chiyanram/skills#223 D6, "no turn ends blind"). Each pass writes, right after its poll,
+// last-poll — when the orchestrator last polled the git host, so a stopped orchestrator loop shows (#305; "no turn
+// ends blind"). Each pass writes, right after its poll,
 // <FACTORY_HOME>/runs/<project>/last-poll.json: the time, the poll interval it was told (FACTORY_POLL_MINUTES), and the
 // git host and repository it polled. `agent-factory status` reads it and puts "orchestrator last ran N min ago" at the
 // head of its line. While an orchestrator loop is meant to be running (its loop.pid is there; orchestrator-loop.ts),
 // the line is flagged LATE when that is more than three poll intervals ago while any change is claimed, so the
 // coordinator sees a loop that stopped. With no loop meant to be running, nothing is late: the line says so, and, when
-// a change is claimed, names the command that starts one.
+// a change is claimed, names the command that starts one. A person runs it, since the coordinator's settings deny
+// dispatch.
+//
+// A pass replaces the file in one rename, so a reader never sees half a file. A file that is not a record fails the
+// read and names the file, so a broken file never reads as "never ran".
 //
 // status knows the repository (FACTORY_PROJECT), not the factory's project name, so it reads every project's file and
 // keeps the newest one for that git host and repository; that project's folder tells whether its loop is meant to be
@@ -21,16 +25,11 @@ import { plainName } from "../spec.js";
 import { codeOf, prop } from "./records.js";
 
 export const LAST_POLL_FILE = "last-poll.json";
-// how many poll intervals may pass before status flags the orchestrator as late
 export const LATE_INTERVALS = 3;
 export const DEFAULT_POLL_MINUTES = 5;
-// the file an orchestrator loop holds while it runs (orchestrator-loop.ts, LOOP_GUARD)
 export const LOOP_PID_FILE = "loop.pid";
-// how the project's last orchestrator loop ended (orchestrator-loop.ts)
 export const LOOP_END_FILE = "loop-end.json";
 
-// LoopEnded : how a loop ended: nothing in flight (done), a run held back by a step not set up or a cap (held), or
-// passes that failed (failed); why says what, and what to do
 export type LoopEnded = {
   readonly at: string;
   readonly kind: "done" | "held" | "failed";
@@ -38,11 +37,9 @@ export type LoopEnded = {
 };
 
 export type LastPoll = {
-  // ISO 8601
   readonly at: string;
   readonly pollMinutes: number;
   readonly forge: ForgeName;
-  // owner/name on GitHub, the full path on GitLab
   readonly repo: string;
 };
 
@@ -50,7 +47,6 @@ function runsDir(home: string): string {
   return join(home, "runs");
 }
 
-// writeLastPoll : the pass's last-poll time, replaced in one rename so a reader never sees half a file
 export async function writeLastPoll(input: {
   readonly home: string;
   readonly project: string;
@@ -84,7 +80,6 @@ const isTime = (v: unknown): v is string => typeof v === "string" && Number.isFi
 const isMinutes = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
 const isForge = (v: unknown): v is ForgeName => v === "github" || v === "gitlab";
 
-// lastPollOf : one file's record, or "bad" when it is not one. Pure.
 export function lastPollOf(text: string): LastPoll | "bad" {
   const raw = parsed(text);
   const [at, pollMinutes, forge, repo] = ["at", "pollMinutes", "forge", "repo"].map((name) => prop(raw, name));
@@ -102,8 +97,6 @@ async function readOne(path: string): Promise<LastPoll | "none" | "bad"> {
 
 type Polled = { readonly project: string; readonly poll: LastPoll };
 
-// polledHere : every project's last pass on this git host and repository; a file that is not a record fails the read,
-// naming it, so a broken file is never read as "never ran"
 async function polledHere(input: {
   readonly home: string;
   readonly forge: ForgeName;
@@ -122,7 +115,6 @@ async function polledHere(input: {
   return { kind: "ok", value: ours.filter((p) => p.poll.forge === input.forge && p.poll.repo === input.repo) };
 }
 
-// readLastPoll : the newest pass any project made on this git host and repository, or "none" when no pass has run
 export async function readLastPoll(input: {
   readonly home: string;
   readonly forge: ForgeName;
@@ -136,7 +128,6 @@ export async function readLastPoll(input: {
   return { kind: "ok", value: newest === "none" ? "none" : newest.poll };
 }
 
-// newestOf : the newest record, or "none". Pure.
 function newestOf(polls: readonly Polled[]): Polled | "none" {
   return polls.reduce<Polled | "none">(
     (best, p) => (best === "none" || Date.parse(p.poll.at) > Date.parse(best.poll.at) ? p : best),
@@ -144,12 +135,8 @@ function newestOf(polls: readonly Polled[]): Polled | "none" {
   );
 }
 
-// the orchestrator loop as status sees it: whether one is meant to be running for the repository, the project it runs
-// for ("<project>" when no pass names one), and, with none running, why the last one stopped while a ticket was still
-// in flight (absent when it ended with nothing in flight, or none ran)
 export type LoopView = { readonly meant: boolean; readonly project: string; readonly ended?: string };
 
-// stoppedWhy : why the project's last loop stopped while a ticket was in flight, or "" (#305)
 async function stoppedWhy(dir: string): Promise<string> {
   const raw = parsed(await readFile(join(dir, LOOP_END_FILE), "utf8").catch(() => ""));
   const [at, kind, why] = ["at", "kind", "why"].map((name) => prop(raw, name));
@@ -157,8 +144,6 @@ async function stoppedWhy(dir: string): Promise<string> {
   return stopped ? `the last loop ended at ${at}: ${why}` : "";
 }
 
-// readLoop : whether a loop is meant to be running for this git host and repository: a project that polled it holds
-// its loop file
 export async function readLoop(input: {
   readonly home: string;
   readonly forge: ForgeName;
@@ -182,13 +167,11 @@ function holdsLoop(dir: string): Promise<boolean> {
   );
 }
 
-// notMeant : no loop for the project, with why its last one stopped while a ticket was in flight
 async function notMeant(home: string, project: string): Promise<LoopView> {
   const ended = await stoppedWhy(join(runsDir(home), project));
   return ended === "" ? { meant: false, project } : { meant: false, project, ended };
 }
 
-// claimed changes: how many, or why the git host could not say
 export type Claimed =
   | { readonly kind: "count"; readonly count: number }
   | { readonly kind: "unknown"; readonly reason: string };
@@ -197,7 +180,6 @@ function changes(count: number): string {
   return count === 1 ? "1 change" : `${count} changes`;
 }
 
-// claimedWords : what the flag says of the claims. Pure.
 function claimedWords(claimed: Claimed): string {
   return claimed.kind === "count"
     ? `while ${changes(claimed.count)} ${claimed.count === 1 ? "is" : "are"} claimed`
@@ -208,15 +190,10 @@ function anyClaimed(claimed: Claimed): boolean {
   return claimed.kind === "unknown" || claimed.count > 0;
 }
 
-// startWords : who restarts the loop: a person, since the coordinator's settings deny dispatch
 function startWords(loop: LoopView): string {
   return `a person runs \`agent-factory dispatch ${loop.project}\``;
 }
 
-// livenessLine : the head of status's line. While a loop is meant to be running: when the orchestrator last ran,
-// flagged LATE when that is more than LATE_INTERVALS poll intervals ago while any change is claimed (a claim the git
-// host cannot list counts as one). With no loop: that none runs, and the command that starts one while a change is
-// claimed. Pure.
 export function livenessLine(input: {
   readonly last: Result<LastPoll | "none">;
   readonly now: number;
@@ -233,8 +210,6 @@ export function livenessLine(input: {
   return last.value === "none" ? neverRan(claimed, loop) : ranLine(last.value, input.now, claimed, loop);
 }
 
-// notRunning : no loop runs: why the last one stopped while a ticket was in flight, else the command that starts one
-// while a change is claimed
 function notRunning(claimed: Claimed, loop: LoopView): string {
   if (loop.ended !== undefined && loop.ended !== "") {
     return `no orchestrator loop running; ${loop.ended}`;
@@ -257,8 +232,6 @@ function ranLine(last: LastPoll, now: number, claimed: Claimed, loop: LoopView):
     : ran;
 }
 
-// headed : status's line with the liveness line at its head: the last-poll time and the loop file for this git host
-// and repository, and the open changes that carry the claim label
 export async function headed(input: {
   readonly home: Result<string>;
   readonly forge: Forge;

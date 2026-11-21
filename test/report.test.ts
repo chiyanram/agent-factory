@@ -34,7 +34,6 @@ describe("a writer that hung after its report (#182)", () => {
       kind: "blocked",
       by: "writer",
     });
-    // the report is read again after the stop: one that went bad in the window is blocked
     expect(decide({ end: hung, file: { kind: "missing" } })).toMatchObject({ kind: "blocked", by: "host" });
   });
 
@@ -95,7 +94,6 @@ describe("decide (#109 done-when)", () => {
 describe("parseReport", () => {
   it("reads the three outcomes", () => {
     expect(parseReport(JSON.stringify(DONE))).toEqual({ kind: "done", evidence: DONE.evidence });
-    // AC-1 of #486: more than five questions are one round, the whole frontier
     const eight = Array.from({ length: 8 }, (_, i) => ({ ...CURRENCY, question: `Q${i + 1}?` }));
     expect(parseReport(JSON.stringify({ status: "asked", questions: eight }))).toMatchObject({
       kind: "asked",
@@ -298,7 +296,6 @@ describe("parseReport: a cleanup run's deferred list (#236)", () => {
       kind: "blocked",
       reason: expect.stringContaining("deferred 1"),
     });
-    // only done may carry it
     expect(parseReport(JSON.stringify({ status: "asked", questions: ["q?"], deferred: ["x"] }))).toMatchObject({
       kind: "blocked",
     });

@@ -10,7 +10,8 @@
 //   skip      S2: a skip marker added in a test file: @Disabled, @Ignore, @IgnoreIf, @Requires(false),
 //             @PendingFeature, .skip(, xit(, xdescribe(, pytest.mark.skip, t.Skip(
 //   assert    S3: more assertion lines removed than added in a test file that stays: assert, expect(, assertThat,
-//             verify(, and in a Spock spec every line of a then: or expect: block
+//             verify(, and in a Spock spec every line of a then: or expect: block; or an assertion that checked a
+//             value now checks only presence (assertEquals(x, 5) to assertNotNull(x))
 //   judge     S4: a judge file added, changed, moved or deleted (judge.ts: build files, the verify command's files,
 //             test config, and the project's own)
 //
@@ -31,7 +32,6 @@ import type { Result } from "../forge/api.js";
 import { globRegex } from "../ci-files.js";
 import { hostGit, type GitResult } from "../git.js";
 
-// check: "test" for a test check (S1-S4), which a person decides; "code" for a code check, which the writer fixes
 export type Hit = {
   readonly file: string;
   readonly line: number;
@@ -40,22 +40,16 @@ export type Hit = {
 };
 
 export type FloorInput = {
-  // the project's clone, read only through hostGit
   readonly repo: string;
   readonly env: NodeJS.ProcessEnv;
-  // the default branch and the change's branch, both fetched from the forge
   readonly base: string;
   readonly branch: string;
   readonly head: string;
-  // the globs that name test files
   readonly testFiles: readonly string[];
-  // the globs that name judge files (judge.ts judgeFiles)
   readonly judgeFiles: readonly string[];
-  // the head of the ticket's waiver (waiver.ts), or "none"
   readonly waived: string;
 };
 
-// the built-in test files, which a project file's ready.testFiles replaces
 export const TEST_FILES: readonly string[] = [
   "**/src/test/**",
   "**/test/**",
@@ -82,37 +76,24 @@ export const TEST_FILES: readonly string[] = [
   "**/*.cy.*",
 ];
 
-// skip markers, and the focus markers that skip every other test: JUnit and Spock annotations, bare or qualified;
-// Spock's @Requires({ false }); the .skip and .only of Jest, Vitest and Mocha in all their forms; xit, xtest,
-// xdescribe, fit, fdescribe; pytest and unittest skips and xfail; Go's t.Skip
 const SKIP =
   /@(?:[\w.]+\.)?(?:Disabled|Ignore)\w*|@PendingFeature\b|@Requires\s*\(\s*\{?\s*false|\.(?:skip|only)\w*\s*[.(]|\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(|pytest\.mark\.(?:skip\w*|xfail)|\.skipTest\s*\(|unittest\.skip\w*|\bt\.Skip(?:Now|f)?\s*\(/;
-// assertion calls: assert and every assertX( of JUnit, unittest and the like, assert_eq! and friends, expect(,
-// assertThat, verify(, and Go's t.Error and t.Fatal
 const ASSERT =
   /\bassert\b|\bassert\w*\s*[(!]|\bexpect\s*\(|\bassertThat\b|\bverify\s*\(|\b[tb]\.(?:Error|Fatal)f?\s*\(/;
-// an assertion that checks a value: equal, same, matches, throws, has the size, contains
 const VALUE =
   /\bassert(?:Equals|NotEquals|Same|ArrayEquals|IterableEquals|LinesMatch|Throws|Equal|In|Raises|_eq|_ne)\b|\.(?:toBe|toEqual|toStrictEqual|toMatch\w*|toThrow\w*|toHaveLength|toContain\w*|toHaveProperty|isEqualTo|isSameAs|containsExactly\w*|hasSize|hasMessage\w*)\s*\(|\s(?:==|!=|===|!==)\s/;
-// an assertion that checks only that something is there, or true: read before VALUE, so `x != null` and
-// assertTrue(x != null) are presence checks, not comparisons (#485 review)
 const PRESENCE =
   /\bassert(?:NotNull|Null|True|False|IsNotNone|IsNone|Truthy)\b|\.(?:toBeDefined|toBeTruthy|toBeFalsy|toBeNull|toBeUndefined|isNotNull|isNull|isTrue|isFalse|isPresent|isNotEmpty|exists)\s*\(|\bassert\s+[\w.]+\s*$|\bis\s+not\s+None\b|(?:!==?|==)\s*(?:null|undefined|None|nil)\b|\b(?:null|undefined|None|nil)\s*(?:!==?|==)/;
 const SUPPRESS =
   /@SuppressWarnings\b|NOSONAR|\bnoinspection\b|eslint-disable|oxlint-disable|biome-ignore|@ts-ignore|@ts-expect-error|#\s*noqa\b|#\s*type:\s*ignore|\bnolint\b/;
-// a test case: JUnit's @Test and its kin, a Spock feature (a method named by a string), it( and test( (with .each),
-// an RSpec it "…", pytest's def test_, Go's func Test
 const CASE =
   /@(?:[\w.]+\.)?(?:Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b|^\s*def\s+["']|(?<![.\w$])(?:it|test)(?:\.each\b.*)?\s*\(|^\s*it\s+["']|\bdef\s+test_\w*\s*\(|\bfunc\s+Test\w*\s*\(/;
 const COMMENT = /^\s*(\/\/|#|\/\*|\*|--)\s*\S/;
-// a reason: a comment with at least one word in it, so a bare "/**/" or "*/" is none
 const REASON = /^\s*(?:\/\/|#|\/\*|\*|--).*[\p{L}\p{N}]/u;
 const EMPTY_CATCH = /\bcatch\b[^{]*\{\s*\}/;
 const OPEN_CATCH = /\bcatch\b[^{]*\{\s*$/;
 const EXCEPT = /^\s*except\b[^:]*:\s*(pass)?\s*(#.*)?$/;
-// a line with no code of its own: braces and punctuation only
 const BRACES = /^[\s{}()[\];,]*$/;
-// a method or feature boundary in a Spock spec: a Spock block never runs past one
 const METHOD = /^\s*(?:def|void|public|protected|private|static)\b.*\(/;
 const SPECIFICATION = /\bextends\s+(?:spock\.lang\.)?Specification\b/;
 const SPOCK_LABEL = /^\s*(given|setup|when|then|expect|where|cleanup|and)\s*:/;
@@ -125,7 +106,6 @@ function git(input: FloorInput, args: readonly string[]): Promise<GitResult> {
   return hostGit({
     args,
     repo: { kind: "repo", path: input.repo },
-    // a path is a path, never a pattern that matches another file's lines
     env: { ...input.env, GIT_NO_REPLACE_OBJECTS: "1", GIT_LITERAL_PATHSPECS: "1" },
     stdin: { kind: "none" },
   });
@@ -139,12 +119,9 @@ function out(result: GitResult, what: string): Result<string> {
   return failed(`the floor guard cannot ${what}: ${why || "git failed"}`);
 }
 
-// the default branch as the floor guard fetched it; the ready check's git rows diff against it too (boxrun.ts, #444)
 export const BASE_REF = "refs/factory/floor-base";
 const HEAD_REF = "refs/factory/floor-head";
 
-// mergeBase : the default branch and the change's branch fetched, the change's tip checked against the head, and the
-// commit the change started from
 export async function mergeBase(input: FloorInput): Promise<Result<string>> {
   const fetched = out(
     await git(input, [
@@ -172,13 +149,11 @@ export async function mergeBase(input: FloorInput): Promise<Result<string>> {
   return base.kind === "ok" ? { kind: "ok", value: base.value.trim() } : base;
 }
 
-// Change : one file the diff touches, as git's rename detection pairs it
 export type Change =
   | { readonly kind: "added" | "modified"; readonly path: string }
   | { readonly kind: "deleted"; readonly path: string }
   | { readonly kind: "renamed"; readonly from: string; readonly path: string };
 
-// changesOf : the -z name-status list: a status, then one path, or two for a rename or a copy
 export function changesOf(text: string): readonly Change[] {
   const words = text.split("\0").filter((w) => w !== "");
   const word = (i: number): string => words[i] ?? "";
@@ -203,8 +178,6 @@ function changeOf(status: string, first: string, second: string): Change {
     : { kind: status === "A" ? "added" : "modified", path: first };
 }
 
-// Lines : the lines a file's diff removed (by their number in the old file) and added (in the new one), and where in
-// the new file each hunk that only removed lines left its gap
 type Lines = {
   readonly removed: readonly number[];
   readonly added: readonly number[];
@@ -219,7 +192,6 @@ function range(start: string | undefined, count: string | undefined): readonly n
   return Array.from({ length: n }, (_, k) => first + k);
 }
 
-// linesOf : the hunk headers of a -U0 diff; each names the old and the new lines it changed
 function linesOf(diff: string): Lines {
   const hunks = diff
     .split("\n")
@@ -228,7 +200,6 @@ function linesOf(diff: string): Lines {
   return {
     removed: hunks.flatMap((m) => range(m[1], m[2])),
     added: hunks.flatMap((m) => range(m[3], m[4])),
-    // "+c,0": the lines went after line c of the new file
     gaps: hunks.flatMap((m) => (m[4] === "0" ? [Number(m[3]), Number(m[3]) + 1] : [])),
   };
 }
@@ -257,7 +228,6 @@ function codeHit(file: string, line: number, what: string): Hit {
   return { file, line, what, check: "code" };
 }
 
-// fresh : the added lines that are new, not a line the same diff removed and put back (moved or re-indented)
 function fresh(f: File): readonly number[] {
   const removed = new Set(f.lines.removed.map((n) => at(f.before, n).trim()));
   return f.lines.added.filter((n) => !removed.has(at(f.after, n).trim()));
@@ -277,14 +247,11 @@ function reasonless(f: File): readonly Hit[] {
     .map((n) => codeHit(f.change.path, n, "adds a suppression with no reason on the line above"));
 }
 
-// reasoned : the line above is a comment with a word in it, and is not itself a suppression
 function reasoned(text: readonly string[], line: number): boolean {
   const above = at(text, line - 1);
   return REASON.test(above) && !SUPPRESS.test(above);
 }
 
-// emptyCatches : a catch or except the diff left empty: one it added, or one whose body it emptied, since a catch
-// line next to a changed line or a removal's gap is checked too
 function emptyCatches(f: File): readonly Hit[] {
   const added = fresh(f);
   const moved = new Set(f.lines.added.filter((n) => !added.includes(n)));
@@ -301,18 +268,14 @@ function emptyCatchAt(text: readonly string[], line: number): boolean {
   return braceCatch(here, next) || exceptPass(here, next);
 }
 
-// braceCatch : catch (…) {} on one line, or a catch whose next line closes it
 function braceCatch(here: string, next: string): boolean {
   return EMPTY_CATCH.test(here) || (OPEN_CATCH.test(here) && next.startsWith("}"));
 }
 
-// exceptPass : except …: pass, on one line or two
 function exceptPass(here: string, next: string): boolean {
   return EXCEPT.test(here) && (here.trim().endsWith("pass") || next === "pass");
 }
 
-// spockBlock : the Spock block a line sits in: the label above it, where "and:" keeps the block it continues; a
-// method or feature line above ends the search, so a block never runs into the next method
 function spockBlock(text: readonly string[], line: number): string {
   for (let n = line; n >= 1; n -= 1) {
     const label = labelAt(text, n);
@@ -323,7 +286,6 @@ function spockBlock(text: readonly string[], line: number): string {
   return "";
 }
 
-// labelAt : the Spock label on a line, "method" on a method line, "" on any other
 function labelAt(text: readonly string[], n: number): string {
   const line = at(text, n);
   return METHOD.test(line) ? "method" : (SPOCK_LABEL.exec(line)?.[1] ?? "");
@@ -333,7 +295,6 @@ function isSpock(path: string, text: readonly string[]): boolean {
   return path.endsWith("Spec.groovy") || text.some((l) => SPECIFICATION.test(l));
 }
 
-// statement : a line of code, not a blank, a comment or a Spock label
 function statement(code: string): boolean {
   return !BRACES.test(code) && !COMMENT.test(code) && !SPOCK_LABEL.test(code);
 }
@@ -342,13 +303,11 @@ function inSpockCheck(text: readonly string[], line: number, path: string): bool
   return isSpock(path, text) && ["then", "expect"].includes(spockBlock(text, line));
 }
 
-// asserting : a line that asserts: an assertion call, or in a Spock spec any statement of a then: or expect: block
 function asserting(text: readonly string[], line: number, path: string): boolean {
   const code = at(text, line).trim();
   return statement(code) && (ASSERT.test(code) || inSpockCheck(text, line, path));
 }
 
-// what the assertion check says of itself: it counts lines, and no mutation command is set (#485, #495)
 export const WEAKER = "line count, the weaker check: no mutation command is set (#495)";
 
 function assertions(f: File): readonly Hit[] {
@@ -366,8 +325,6 @@ function assertions(f: File): readonly Hit[] {
   return weakened(f, { from, removed, added });
 }
 
-// weakened : as many assertions as before, but one that checked a value became one that checks only that something is
-// there: assertEquals(x, 5) to assertNotNull(x), toEqual(5) to toBeDefined() (S3, #485). Line counting alone misses it.
 function weakened(
   f: File,
   seen: { readonly from: string; readonly removed: readonly number[]; readonly added: readonly number[] },
@@ -385,13 +342,11 @@ function weakened(
     : [];
 }
 
-// testCase : a line that opens a test case, not inside a comment
 function testCase(text: readonly string[], line: number): boolean {
   const code = at(text, line);
   return !COMMENT.test(code) && CASE.test(code);
 }
 
-// cases : fewer test cases in a test file that stays (S1)
 function cases(f: File): readonly Hit[] {
   if (!f.test || f.change.kind === "added") {
     return [];
@@ -466,7 +421,6 @@ function okLines(lines: readonly string[]): Result<readonly string[]> {
   return { kind: "ok", value: lines };
 }
 
-// movedOut : a test file moved to a path that is not a test file: as good as deleted
 function movedOut(input: FloorInput, change: Change): readonly Hit[] {
   const leaves = change.kind === "renamed" && !isTestFile(change.path, input.testFiles);
   return leaves && isTestFile(change.from, input.testFiles)
@@ -481,7 +435,6 @@ const JUDGE_MOVES: Readonly<Record<Change["kind"], string>> = {
   deleted: "deletes a judge file",
 };
 
-// judged : a change to a judge file (S4), at either of its paths
 function judged(input: FloorInput, change: Change): readonly Hit[] {
   const paths = change.kind === "renamed" ? [change.from, change.path] : [change.path];
   return paths.some((p) => isTestFile(p, input.judgeFiles)) ? [hit(change.path, 0, JUDGE_MOVES[change.kind])] : [];
@@ -501,8 +454,6 @@ async function hitsIn(input: FloorInput, base: string, change: Change): Promise<
     : file;
 }
 
-// interdiff : the paths the change touched since the waiver's head, or "none" when there is no waiver or git cannot
-// diff against its head (then the waiver clears nothing)
 async function interdiff(input: FloorInput): Promise<ReadonlySet<string> | "none"> {
   if (input.waived === "none") {
     return "none";
@@ -523,13 +474,11 @@ async function interdiff(input: FloorInput): Promise<ReadonlySet<string> | "none
   return listed.kind === "ok" ? new Set(listed.value.split("\0").filter((w) => w !== "")) : "none";
 }
 
-// cleared : a change the waiver covers: none of its paths changed since the waiver's head
 function cleared(since: ReadonlySet<string> | "none", change: Change): boolean {
   const paths = change.kind === "renamed" ? [change.from, change.path] : [change.path];
   return since !== "none" && !paths.some((p) => since.has(p));
 }
 
-// floorGuard : every move in the diff that lowers the bar, in file order; none is a pass
 export async function floorGuard(input: FloorInput): Promise<Result<readonly Hit[]>> {
   const base = await mergeBase(input);
   if (base.kind === "failed") {
@@ -566,7 +515,6 @@ export async function floorGuard(input: FloorInput): Promise<Result<readonly Hit
 
 const MAX_SHOWN = 10;
 
-// hitsLine : the hits as one line for the run record, and for the person (a test check) or the writer's task
 export function hitsLine(hits: readonly Hit[]): string {
   const shown = hits.slice(0, MAX_SHOWN).map((h) => `${h.file}${h.line > 0 ? `:${h.line}` : ""} ${h.what}`);
   const more = hits.length > MAX_SHOWN ? `; and ${hits.length - MAX_SHOWN} more` : "";
@@ -576,7 +524,6 @@ export function hitsLine(hits: readonly Hit[]): string {
   return `the floor guard: ${shown.join("; ")}${more}. ${next}`;
 }
 
-// forHuman : whether the hits stop the change for a person: any test check hit does
 export function forHuman(hits: readonly Hit[]): boolean {
   return hits.some((h) => h.check === "test");
 }

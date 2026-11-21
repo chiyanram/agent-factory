@@ -37,23 +37,18 @@
 // A deny in any settings scope cannot be loosened by another scope, and the session starts with --setting-sources
 // project, so the person's own user settings add no allow rule. Bash deny rules match a command as typed; the docs say
 // they are no security boundary, which is why the forge login stays out of the coordinator's reach in the target.
+//
+// This file loads with no build, so it imports no value from the package.
 
 import { join } from "node:path";
 import type { Argv } from "./project.js";
 
 export type CoordinatorPlaces = {
-  // the installed package, absolute
   readonly pkg: string;
-  // the factory's home (FACTORY_HOME), absolute
   readonly factoryHome: string;
-  // the factory OS user's home on the VM, where the App's key lives
   readonly botHome: string;
 };
 
-// the commands the coordinator may run with no prompt: they read, post one templated status line, or ask for a write
-// that the policy decides in code
-// (handoff is the coordinator's reset note, built by code from the records; waiting pings a waiting session once)
-// (retro is its listing; its --draft spends on a model run and is in HUMAN_ONLY, #488 Q10 A)
 const READS = [
   "poll",
   "board",
@@ -68,22 +63,15 @@ const READS = [
   "--help",
   "--version",
 ];
-// the runs and the settings: the orchestrator loop starts every run (start and approve start it), and a person runs
-// setup, so the coordinator, which starts no runs, runs none of them
 const RUNS = ["agent-factory dispatch", "agent-factory review", "agent-factory setup"];
 
-// the commands only a human runs: the AI never approves, never STARTs (#227), never waives a test check (#231), and
-// never starts an eval pass, an extra task that spends on model runs (#215), nor the onboarder's run or its acceptance,
-// which a human reviews (#235)
 export const HUMAN_ONLY = [
   "agent-factory approve",
   "agent-factory start",
   "agent-factory waive",
-  // a front door writes a person's word (ADR-0023)
   "agent-factory door",
   "agent-factory eval",
   "agent-factory onboard",
-  // the retro's drafts spend on a model run; its listing is a read (#488 Q10 A)
   "agent-factory retro * --draft",
   "agent-factory retro --draft",
 ];
@@ -117,7 +105,6 @@ const DENY_BASH = [
   "eval",
   "sudo",
   "su",
-  // the tmux server holds the env it started with, the coordinator's seat token among it
   "tmux",
   "agent-factory-app-token",
   "security",
@@ -128,11 +115,9 @@ const DENY_BASH = [
   "agent-factory lint-edit",
   "agent-factory plugin",
   "agent-factory project",
-  // init writes the user layer and the project file, the settings that hold the coordinator's own wall (#369)
   "agent-factory init",
 ];
 
-// the secret paths of review issue 6, under the person's home
 const SECRET_HOME = [
   ".ssh/**",
   ".gnupg/**",
@@ -159,7 +144,8 @@ const SECRET_HOME = [
   ".copilot/**",
 ];
 
-// absolute : a path as a Claude Code rule path: // then the path from the root
+// A Claude Code rule path that starts with // is absolute from the filesystem root.
+// https://code.claude.com/docs/en/permissions#how-path-patterns-match
 function absolute(path: string): string {
   return `//${path.replace(/^\/+/, "")}`;
 }
@@ -199,14 +185,13 @@ function readDenies(p: CoordinatorPlaces): readonly string[] {
     ...SECRET_HOME.map((s) => `Read(~/${s})`),
     `Read(${absolute(p.factoryHome)}/secrets/**)`,
     `Read(${absolute(p.botHome)}/**)`,
-    // the coordinator's own seat token on Linux (seatHome)
     "Read(~/.config/agent-factory/**)",
-    // a rule with no //, ~/ or / is relative to the session's folder: these must reach every project
+    // A rule path with no //, ~/ or / is relative to the current folder, so these must start with //.
+    // https://code.claude.com/docs/en/permissions#how-path-patterns-match
     "Read(//**/.env*)",
   ];
 }
 
-// the model's own web tools: outside context comes only through `agent-factory fetch` (ADR-0012 S18)
 const WEB = ["WebFetch", "WebSearch"];
 
 export function editDenies(p: CoordinatorPlaces): readonly string[] {
@@ -218,8 +203,6 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${home}/approvals/**)`,
     `Edit(${home}/starts/**)`,
     `Edit(${home}/waivers/**)`,
-    // the settings layers (#229; settings/layers.ts): the user file, every team's clone and its team.json, and the
-    // project home (each <project>.json and its <project>/ folder); and the rubric folders (#232)
     `Edit(${home}/user.json)`,
     `Edit(${home}/teams/**)`,
     `Edit(${home}/projects/**)`,
@@ -237,42 +220,28 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
   ];
 }
 
-// the built-in tools that edit files, which the edit-scope hook sees
 const EDIT_TOOLS = "Edit|Write|MultiEdit|NotebookEdit";
 
-// word : one shell word, as a hook's command line needs (coordinator.ts loads with no build, so it imports no value)
 function word(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`;
 }
 
-// editScopeHook : the hook that refuses an edit outside the spec drafts, run from the installed package by its
-// absolute path, so the package's own command answers; `node` itself comes from the session's PATH, and a hook that
-// cannot run makes the edit ask, never pass
 function editScopeHook(p: CoordinatorPlaces): CommandHook {
   const cli = word(`${p.pkg}/dist/cli.js`);
   return { type: "command", command: `node ${cli} edit-scope ${word(`${p.factoryHome}/specs`)}` };
 }
 
-// the session starts the hook re-injects the role, the wall and the handoff note on: a fresh start, a resume, a clear,
-// and a compaction, after which the chat holds only a model's summary
 export const SESSION_STARTS = "startup|resume|clear|compact";
 
-// briefHook : the hook whose output Claude Code adds to the session's context: coordinatorBrief, then the project's
-// handoff note (core/handoff.ts); it always exits 0, so a failed read never blocks the session
 export function briefHook(p: CoordinatorPlaces): CommandHook {
   return { type: "command", command: `node ${word(`${p.pkg}/dist/cli.js`)} coordinator-brief` };
 }
 
-// turnHook : the Stop hook that measures and logs the context size of every turn, and asks for a reset at the size
-// below the client's compaction (core/coordinator-turns.ts); it always exits 0
 export function turnHook(p: CoordinatorPlaces): CommandHook {
   return { type: "command", command: `node ${word(`${p.pkg}/dist/cli.js`)} coordinator-turn` };
 }
 
-// coordinatorBrief : the role and the wall in a few lines, built from HUMAN_ONLY and RUNS so they stay in step with
-// the deny rules. Pure.
 export function coordinatorBrief(project: string, compacted = false): string {
-  // a rule's glob ("retro * --draft") is not a command a person types
   const never = [...HUMAN_ONLY, ...RUNS]
     .filter((c) => !c.includes("*"))
     .map((c) => `\`${c}\``)
@@ -290,7 +259,6 @@ export function coordinatorBrief(project: string, compacted = false): string {
   ].join("\n");
 }
 
-// claudeSettings : the coordinator's .claude/settings.json
 export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
   const specs = `${absolute(p.factoryHome)}/specs`;
   return {
@@ -316,7 +284,6 @@ export function claudeSettings(p: CoordinatorPlaces): ClaudeSettings {
 // path, so the session's folder and --add-dir are its only path scope. Today: untried against a live Copilot CLI.
 export function copilotArgs(p: CoordinatorPlaces): readonly string[] {
   const allow = READS.map((c) => `shell(agent-factory ${c})`);
-  // what is not allowed asks, so confirm asks here as in Claude Code; approve, start, waive and the runs are denied
   const deny = DENY_BASH.map((c) => `shell(${c})`);
   return [
     "--add-dir",
@@ -326,15 +293,15 @@ export function copilotArgs(p: CoordinatorPlaces): readonly string[] {
   ];
 }
 
-// the session's instructions: prompts/coordinator.md, from the installed package (#378: GUIDE.md was not packed)
-// (an @import cannot hold a space, so a package path with one gets the sentence only)
+// An @import path ends at its first space unless the space is escaped, so a package path with one gets the
+// sentence only.
+// https://code.claude.com/docs/en/memory#import-additional-files
 export function claudeMd(p: CoordinatorPlaces): string {
   const guide = `${p.pkg}/prompts/coordinator.md`;
   const importLine = /\s/.test(guide) ? "" : `\n@${guide}\n`;
   return `# Coordinator\n\nYou are the factory's coordinator. Follow ${guide} as your instructions.\n${importLine}`;
 }
 
-// coordinatorDir : the coordinator's folder in the factory home, where its settings and instructions live
 export function coordinatorDir(factoryHome: string): string {
   return join(factoryHome, "coordinator");
 }
@@ -343,9 +310,6 @@ export function claudeArgv(): Argv {
   return ["claude", "--setting-sources", "project"];
 }
 
-// The wall's check (#105, #227): what the orchestrator refuses to start under, and what the lint holds the template to.
-
-// commands no allow or ask rule may reach: a human's word, a raw git host or network client, a second shell
 const NEVER_LET = [
   "agent-factory approve PROJ PROJ-1 0",
   "agent-factory start PROJ PROJ-1",
@@ -361,7 +325,6 @@ const NEVER_LET = [
   "bash -c true",
 ];
 
-// prop : as dispatch/records.ts has it; copied, since this file loads with no build and so imports no value
 function prop(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }
@@ -375,8 +338,6 @@ function rules(settings: unknown, key: "allow" | "ask" | "deny"): readonly strin
   return Array.isArray(list) ? list.filter((r): r is string => typeof r === "string") : [];
 }
 
-// bashReaches : whether a Bash rule matches the command: "Bash" and "Bash(*)" match all, "*" is any text, and the
-// old "Bash(gh:*)" form is the prefix "gh"
 export function bashReaches(rule: string, command: string): boolean {
   const pattern = /^Bash(?:\((.*)\))?$/.exec(rule.trim());
   if (pattern === null) {
@@ -387,7 +348,6 @@ export function bashReaches(rule: string, command: string): boolean {
   return new RegExp(`^${glob.replace(/ \.\*$/, "( .*)?")}$`).test(command);
 }
 
-// editsOutside : an Edit or Write rule with no path, or a path outside the spec drafts (a ".." may climb out)
 function editsOutside(rule: string, specs: string): boolean {
   const edit = /^(?:Edit|Write|MultiEdit|NotebookEdit)(?:\((.*)\))?$/.exec(rule.trim());
   const path = edit?.[1] ?? "";
@@ -407,7 +367,6 @@ function denyProblems(settings: unknown, p: CoordinatorPlaces): readonly string[
   return needed.filter((rule) => !deny.has(rule)).map((rule) => `the deny rule ${rule} is missing`);
 }
 
-// hookProblems : the edit-scope hook must stand, exactly as built, with hooks switched on
 function hookProblems(settings: unknown, p: CoordinatorPlaces): readonly string[] {
   const hooks = prop(prop(settings, "hooks"), "PreToolUse");
   const want = editScopeHook(p);
@@ -436,7 +395,6 @@ function bypassProblems(settings: unknown): readonly string[] {
   ];
 }
 
-// wallProblems : every way these coordinator settings are looser than the wall; none means the wall holds
 export function wallProblems(settings: unknown, p: CoordinatorPlaces): readonly string[] {
   const specs = `${absolute(p.factoryHome)}/specs`;
   const edits = rules(settings, "allow")

@@ -8,17 +8,13 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
 
-// one call the box made of its runtime (the docker CLI for vm), or what a fake box was given
 export type Handed = { readonly argv: readonly string[]; readonly env: Readonly<Record<string, string | undefined>> };
 export type Made = { readonly box: Box; readonly handed: () => readonly Handed[] };
 
-// a host with only what any machine has; the canary test adds its own to a copy
 const HOST: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", HOME: "/home/op", LANG: "C" };
 const TRUE = { argv: ["true"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
-// a command that prints one line; each box's maker answers it with that line
 export const STREAMED = { argv: ["echo", "streamed"], stdin: { kind: "none" }, timeoutSeconds: 30 } as const;
 
-// every word a box handed on: each argument, and each variable's name and value
 function words(handed: readonly Handed[]): readonly string[] {
   return handed.flatMap((h) => [
     ...h.argv,
@@ -49,9 +45,7 @@ export function boxContract(name: string, make: (host: NodeJS.ProcessEnv) => Mad
       await made.box.run({ session: started.session, command: { ...TRUE, stdin: { kind: "text", text: "a prompt" } } });
       await made.box.stop(started.session);
       const handed = words(made.handed());
-      // what the spec declares does reach the run, so the check below looks at the run's real input
       expect(handed).toContain("CLAUDE_CODE_OAUTH_TOKEN");
-      // names, not only values: a redacting runner can hide a value
       const leaks = ["FACTORY_CANARY", canary, "GH_TOKEN", ghToken];
       expect(handed.filter((w) => leaks.some((l) => w.includes(l)))).toEqual([]);
     });

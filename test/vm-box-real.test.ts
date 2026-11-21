@@ -12,7 +12,6 @@ import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
 import { vmBox } from "../src/core/box/vm.js";
 import { runProcess } from "../src/core/forge/api.js";
 
-// a name that looks like a secret: one of these in the box must be one the spec declared
 const SECRET_LIKE = /TOKEN|KEY|SECRET|PASSWORD/i;
 
 const network = `factory-canary-${randomUUID().slice(0, 8)}`;
@@ -23,7 +22,6 @@ afterEach(async () => {
   await dockerCli(["network", "rm", network]);
 });
 
-// the host the dispatcher runs on, with a canary and a forge token planted in it
 const planted = { canary: `canary-${randomUUID()}`, ghToken: `ghp_${randomUUID().replaceAll("-", "")}` };
 const host = { ...process.env, FACTORY_CANARY: planted.canary, GH_TOKEN: planted.ghToken };
 
@@ -31,10 +29,8 @@ type Opened =
   | { readonly kind: "ready"; readonly box: Box; readonly image: PinnedImage }
   | { readonly kind: "skip"; readonly why: string };
 
-// the box user takes the ids of the user running this test, as the dispatcher's own
 const OWNER = { uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 };
 
-// pinned : the image named, which must be pinned: a typo fails the run, never skips it
 function pinned(ref: string): PinnedImage {
   const image = pinImage(ref);
   if (image.kind === "refused") {
@@ -43,7 +39,6 @@ function pinned(ref: string): PinnedImage {
   return image;
 }
 
-// opened : the vm box over the real docker, or why there is none here
 async function opened(ref: string): Promise<Opened> {
   if (ref === "") {
     return { kind: "skip", why: "set FACTORY_TEST_BOX_IMAGE to an image ID from agent-factory box build to run this" };
@@ -56,7 +51,6 @@ async function opened(ref: string): Promise<Opened> {
     : { kind: "skip", why: `no vm box here: ${probe.reason}` };
 }
 
-// envIn : what `env` prints in a fresh box with this spec
 async function envIn(box: Box, spec: BoxSpec): Promise<string> {
   const started = await box.start(spec);
   if (started.kind !== "started") {
@@ -73,7 +67,6 @@ async function envIn(box: Box, spec: BoxSpec): Promise<string> {
   return ran.stdout;
 }
 
-// the names in the output of `env`, one variable a line
 function namesOf(stdout: string): readonly string[] {
   return stdout
     .split("\n")
@@ -100,7 +93,6 @@ describe("the vm box on a real docker (#181)", () => {
     };
     const stdout = await envIn(found.box, spec);
     const names = namesOf(stdout);
-    // the declared variable is there, so this is the run's real environment
     expect(names).toContain("CLAUDE_CODE_OAUTH_TOKEN");
     expect(names.filter((n) => n === "FACTORY_CANARY" || n === "GH_TOKEN")).toEqual([]);
     expect([planted.canary, planted.ghToken].filter((v) => stdout.includes(v))).toEqual([]);

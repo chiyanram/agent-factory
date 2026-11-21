@@ -22,7 +22,6 @@ import { now, perform, quoted, room, type Confirmed, type Plan, type Requested, 
 import { approvalKey, onTicket, type Where } from "./writes.js";
 
 export const SPEC_BODY: PolicyPoint = "spec.body";
-// the plugin a spec.body plan names: the project's own forge, whichever connector serves it
 const FORGE = "forge";
 const ISSUE = /^[1-9]\d{0,9}$/;
 const UNAPPROVED = "unapproved";
@@ -31,15 +30,12 @@ export type Issues = Pick<Forge, "issueBody" | "setIssueBody">;
 
 export type SpecBodySetup = {
   readonly home: string;
-  // the project's spec store, which must be the issue store
   readonly specs: SpecsFor;
-  // the project's forge, which reads the issue's body and sets it
   readonly issues: (project: string) => Promise<Result<Issues>>;
 };
 
 type Body = Where & { readonly text: string };
 
-// what one spec.body write needs: the plan perform takes, the forge, the issue's body now and the approved spec's hash
 type BodyPlan = {
   readonly plan: Plan<PolicyPoint>;
   readonly issues: Issues;
@@ -55,7 +51,6 @@ function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-// specBodyOf : the body from its file, <home>/specs/<project>/<ticket>/spec.md, its text as it is
 export function specBodyOf(
   input: { readonly home: string; readonly specs: string; readonly file: string },
   text: string,
@@ -68,7 +63,6 @@ export function specBodyOf(
     : failed(`a ${SPEC_BODY} request takes the spec file, <home>/specs/<project>/<ticket>/spec.md; got ${input.file}`);
 }
 
-// sendable : the store, the ticket and the text, checked before anything is read from the git host
 async function sendable(setup: SpecBodySetup, body: Body): Promise<Done> {
   const problems = postableSpec(body.text);
   if (problems.length > 0) {
@@ -86,7 +80,6 @@ async function sendable(setup: SpecBodySetup, body: Body): Promise<Done> {
     : failed(`${body.project} keeps its specs in local files: edit the spec.md itself; nothing is sent`);
 }
 
-// ruleOf : the policy's rule for spec.body; deny refuses it
 async function ruleOf(where: Where): Promise<Result<Plan<PolicyPoint>["rule"]>> {
   const config = await readPluginConfig(where);
   if (config.kind === "failed") {
@@ -98,7 +91,6 @@ async function ruleOf(where: Where): Promise<Result<Plan<PolicyPoint>["rule"]>> 
     : { kind: "ok", value: rule };
 }
 
-// approvalOf : the approval the write counts against, and the spec hash it approved; "unapproved" when there is none
 async function approvalOf(
   where: Where,
 ): Promise<Result<{ readonly key: string; readonly at: string; readonly hash: string }>> {
@@ -111,7 +103,6 @@ async function approvalOf(
     : { kind: "ok", value: { key: UNAPPROVED, at: "none", hash: "" } };
 }
 
-// baseOf : the forge, and the sha256 of the issue's body as it is now
 async function baseOf(setup: SpecBodySetup, body: Body): Promise<Result<Pick<BodyPlan, "issues" | "base">>> {
   const issues = await setup.issues(body.project);
   if (issues.kind === "failed") {
@@ -121,7 +112,6 @@ async function baseOf(setup: SpecBodySetup, body: Body): Promise<Result<Pick<Bod
   return current.kind === "ok" ? { kind: "ok", value: { issues: issues.value, base: sha256(current.value) } } : current;
 }
 
-// bodyPlan : every check above, then the plan; the issue is read last, after nothing local refused
 async function bodyPlan(setup: SpecBodySetup, body: Body): Promise<Result<BodyPlan>> {
   const where = { home: body.home, project: body.project, ticket: body.ticket };
   const ok = await sendable(setup, body);
@@ -151,7 +141,6 @@ async function bodyPlan(setup: SpecBodySetup, body: Body): Promise<Result<BodyPl
   return { kind: "ok", value: { plan, ...base.value, approvedHash: approval.value.hash } };
 }
 
-// kept : the request, kept for the person's confirm with the command that sends it
 async function kept(body: Body, p: BodyPlan): Promise<Requested> {
   const n = await room(p.plan);
   if (n.kind === "failed") {
@@ -166,7 +155,6 @@ async function kept(body: Body, p: BodyPlan): Promise<Requested> {
     : saved;
 }
 
-// requestSpecBody : a spec change kept for the person's confirm, or why it is refused
 export async function requestSpecBody(setup: SpecBodySetup, body: Body): Promise<Requested> {
   const run = async (): Promise<Result<Requested>> => {
     const p = await bodyPlan(setup, body);
@@ -176,7 +164,6 @@ export async function requestSpecBody(setup: SpecBodySetup, body: Body): Promise
   return done.kind === "ok" ? done.value : done;
 }
 
-// sameAsKept : the plan made again now, and the kept request it must match
 function sameAsKept(p: BodyPlan, pending: Pending, given: string): Done {
   const checks: readonly (readonly [boolean, string])[] = [
     [given === pending.text, "the text is not the kept request's text; nothing went out"],
@@ -187,7 +174,6 @@ function sameAsKept(p: BodyPlan, pending: Pending, given: string): Done {
   return bad === undefined ? { kind: "ok" } : failed(bad[1]);
 }
 
-// sender : the issue's body set to the text
 function sender(p: BodyPlan, text: string): () => Promise<Result<string>> {
   return async () => {
     const set = await p.issues.setIssueBody({ number: Number(p.plan.where.ticket), text });
@@ -195,7 +181,6 @@ function sender(p: BodyPlan, text: string): () => Promise<Result<string>> {
   };
 }
 
-// staleNote : what the person must do when the ticket was approved and its spec now differs
 function staleNote(p: BodyPlan, text: string): { readonly note?: string } {
   return p.approvedHash !== "" && p.approvedHash !== specHash(text)
     ? { note: "the ticket's approval is now stale: approve the new spec again" }
@@ -222,7 +207,6 @@ async function confirmedLocked(
   return done.kind === "done" ? { ...done, ...staleNote(p.value, text) } : done;
 }
 
-// confirmSpecBody : the kept spec change with that id, sent, when the text given is its text
 export async function confirmSpecBody(
   setup: SpecBodySetup,
   id: Id,

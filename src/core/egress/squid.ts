@@ -4,6 +4,9 @@
 // 2026-11-07). It allows a CONNECT to port 443 of an allowed host and nothing else: no plain HTTP, no other port, no
 // cache. TLS is never opened, so the proxy sees only the host name. At work, every request leaves through the
 // corporate proxy (upstream), never direct.
+//
+// The allowlist never matches by reverse DNS, because the owner of an IP sets its PTR name and could name an allowed
+// host.
 
 export const PROXY_PORT = 3128;
 
@@ -15,7 +18,6 @@ export function squidConf(input: { readonly hosts: readonly string[]; readonly u
   const lines = [
     "# rendered by agent-factory (#130); do not edit, it is written again on every start",
     `http_port ${PROXY_PORT}`,
-    // -n: never match by reverse DNS, because the owner of an IP sets its PTR name and could name an allowed host
     `acl allowed dstdomain -n ${input.hosts.join(" ")}`,
     "acl CONNECT method CONNECT",
     "acl tls port 443",
@@ -27,7 +29,8 @@ export function squidConf(input: { readonly hosts: readonly string[]; readonly u
     "via off",
     "forwarded_for delete",
     // the files the ubuntu/squid entrypoint tails to `docker logs`: Squid runs as user proxy, which cannot open the
-    // container's /dev/stdout, so a log there stops Squid at start (found on the first live start, #113)
+    // container's /dev/stdout, so a log there stops Squid at start
+    // https://git.launchpad.net/~ubuntu-docker-images/ubuntu-docker-images/+git/squid/tree/entrypoint.sh?h=6.6-24.04
     "access_log stdio:/var/log/squid/access.log",
     "cache_log /var/log/squid/cache.log",
     ...upstreamLines(input.upstream),

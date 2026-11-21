@@ -12,6 +12,8 @@
 // refused, never reused: a box on it would have an open network. The proxy is created again on every start, so it
 // always runs the config rendered now; the project's dispatch lock keeps that from happening under a running box. The
 // config goes in with `docker cp`, not a bind mount, because Rancher Desktop shares no $HOME with its VM (ADR-0012 S8).
+//
+// A docker failure is never read as an absent network, so a broken docker never makes one to create.
 
 import type { Call, Exit, Runner } from "../forge/api.js";
 import type { PinnedImage } from "../box/types.js";
@@ -20,7 +22,6 @@ import type { ProxyAddress } from "./env.js";
 
 export const OUTBOUND_NETWORK = "factory-ext";
 
-// the project's proxy container and the internal network its boxes join; the project is a plain name (spec.ts)
 export type EgressNames = { readonly proxy: string; readonly network: string };
 
 export function egressNames(project: string): EgressNames {
@@ -37,7 +38,6 @@ export type NetworkPlan =
   | { readonly kind: "keep" }
   | { readonly kind: "refused"; readonly reason: string };
 
-// planNetwork : what to do with a network, given what docker says about it. Pure.
 export function planNetwork(input: {
   readonly name: string;
   readonly state: NetworkState;
@@ -55,8 +55,6 @@ export function planNetwork(input: {
       };
 }
 
-// readNetwork : docker's answer to `network inspect --format {{.Internal}}`. A missing network is "absent"; any other
-// failure is not read as absent, so a broken docker is never taken for a network to create.
 export function readNetwork(exit: Exit): NetworkState | { readonly kind: "failed"; readonly reason: string } {
   if (exit.code === 0) {
     return { kind: "present", internal: exit.stdout.trim() === "true" };
@@ -109,7 +107,6 @@ function ensureNetwork(name: string, internal: boolean): Step {
   };
 }
 
-// removeProxy : succeeds when no proxy container is left, even if there was none
 function removeProxy(name: string): Step {
   return async (docker) => {
     const exit = await docker.run(call(docker, ["rm", "--force", name]));

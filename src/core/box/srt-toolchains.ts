@@ -1,11 +1,11 @@
-// srt-toolchains — the toolchain folders under the person's home that the srt runner allows back, read-only (#371;
-// the operator's hybrid model on #30, 2026-11-10: the project declares its toolchain in its own file, such as
-// mise.toml, .tool-versions or .sdkmanrc, and the runner provides it). The home stays hidden (#114, choice A): only
-// these folders come back, never the home itself, never a manager's config or shims, and never a folder that is or
-// holds a credential path (srt-plan.ts secretPaths). Nothing here throws.
+// srt-toolchains — the toolchain folders under the person's home that the srt runner allows back, read-only (#371).
+// The project declares its toolchain in its own file, such as mise.toml, .tool-versions or .sdkmanrc, and the runner
+// provides it. The home stays hidden: only these folders come back, never the home itself, never a manager's config
+// (it can hold secrets, such as mise's `env`) or shims, and never a folder that is or holds a credential path
+// (srt-plan.ts secretPaths). Nothing here throws.
 //
 //   a known manager    present when a PATH entry lies inside its install folder; then that whole folder comes back
-//   srt.readOnly    a list of folders under the home (~/x or an absolute path), an allow-list key read through
+//   srt.readOnly       a list of folders under the home (~/x or an absolute path), an allow-list key read through
 //                      settingOf; an entry that breaks a rule is refused with the reason, and the probe refuses to start
 //   shims              a PATH that reaches a manager only through its shims gets a warning that says how to put the real
 //                      install folders on PATH, since the shims need the manager's config, which stays hidden
@@ -19,20 +19,14 @@ import { FOLDERS_HINT, listText } from "../settings/variables.js";
 import { secretPaths } from "./srt-plan.js";
 import { under } from "./srt-programs.js";
 
-// one toolchain manager, its folders relative to the home
 export type Manager = {
   readonly name: string;
-  // where it keeps its toolchains: allowed back read-only when PATH reaches inside it
   readonly installs: string;
-  // its shims: never allowed back
   readonly shims: readonly string[];
-  // its config, which can hold secrets (mise's `env`): never allowed back
   readonly config: readonly string[];
-  // what to do when PATH reaches it only through its shims
   readonly fix: string;
 };
 
-// the known toolchain managers, one row each (#371)
 export const MANAGERS: readonly Manager[] = [
   {
     name: "mise",
@@ -64,25 +58,20 @@ export const MANAGERS: readonly Manager[] = [
   },
 ];
 
-// one folder allowed back, and why: a manager's name, or srt.readOnly
 export type Toolchain = { readonly dir: string; readonly from: string };
 
 export type Toolchains = {
   readonly allowed: readonly Toolchain[];
-  // each srt.readOnly entry refused, with the reason
   readonly refused: readonly string[];
-  // each manager PATH reaches only through its shims
   readonly warnings: readonly string[];
 };
 
 export const NO_TOOLCHAINS: Toolchains = { allowed: [], refused: [], warnings: [] };
 
-// tilde : a path under the home as ~/x, for a message. Pure.
 export function tilde(path: string, home: string): string {
   return path === home ? "~" : under(path, home) ? `~/${relative(home, path)}` : path;
 }
 
-// hidden : every path under the home a folder allowed back may never be or hold, and what it is. Pure.
 function hidden(home: string, factoryHome: string): readonly { readonly path: string; readonly what: string }[] {
   const secrets = secretPaths(home, factoryHome).map((path) => ({
     path,
@@ -95,8 +84,6 @@ function hidden(home: string, factoryHome: string): readonly { readonly path: st
   return [...secrets, ...managers];
 }
 
-// folderProblem : why a folder may not come back, or "" when it may: it must be under the home, not the home itself,
-// and neither be nor hold a credential path, the factory home, or a manager's config or shims. Pure.
 export function folderProblem(dir: string, home: string, factoryHome: string): string {
   if (dir === home) {
     return "is your home itself, which the srt runner hides";
@@ -108,8 +95,6 @@ export function folderProblem(dir: string, home: string, factoryHome: string): s
   return near === undefined ? "" : `is or holds ${tilde(near.path, home)}, ${near.what}, which no run may read`;
 }
 
-// expand : one srt.readOnly entry as an absolute path: ~ and ~/x are under the home; undefined for any other
-// relative path. Pure.
 export function expand(entry: string, home: string): string | undefined {
   if (entry === "~" || entry.startsWith("~/")) {
     return normalize(join(home, entry.slice(1)));
@@ -117,7 +102,6 @@ export function expand(entry: string, home: string): string | undefined {
   return isAbsolute(entry) ? normalize(entry) : undefined;
 }
 
-// managersOn : each manager whose install folder a PATH entry lies inside, with that folder. Pure.
 export function managersOn(path: readonly string[], home: string): readonly Toolchain[] {
   return MANAGERS.flatMap((m) => {
     const installs = join(home, m.installs);
@@ -125,7 +109,6 @@ export function managersOn(path: readonly string[], home: string): readonly Tool
   });
 }
 
-// shimWarnings : a warning for each manager PATH reaches only through its shims. Pure.
 export function shimWarnings(path: readonly string[], home: string): readonly string[] {
   return MANAGERS.flatMap((m) => {
     const shims = m.shims.map((s) => join(home, s)).filter((s) => path.some((p) => under(p, s)));
@@ -152,7 +135,6 @@ async function isDir(path: string): Promise<boolean> {
 
 type Checked = { readonly kind: "ok"; readonly dir: string } | { readonly kind: "refused"; readonly reason: string };
 
-// checkEntry : one srt.readOnly entry, at its real path, or why it is refused
 async function checkEntry(entry: string, home: string, factoryHome: string): Promise<Checked> {
   const name = `srt.readOnly ${JSON.stringify(entry)}`;
   const path = expand(entry, home);
@@ -167,13 +149,11 @@ async function checkEntry(entry: string, home: string, factoryHome: string): Pro
   return problem === "" ? { kind: "ok", dir } : { kind: "refused", reason: `${name} ${problem}` };
 }
 
-// readOnlyEntries : srt.readOnly as a list, or why it is not one
 function readOnlyEntries(env: NodeJS.ProcessEnv): readonly string[] | "bad" {
   const text = settingOf(env, "srt.readOnly");
   return text === undefined ? [] : listText(text);
 }
 
-// fromSetting : the folders srt.readOnly allows back, and the entries it refuses
 async function fromSetting(
   env: NodeJS.ProcessEnv,
   home: string,
@@ -190,7 +170,6 @@ async function fromSetting(
   };
 }
 
-// fromManagers : each detected manager's install folder, at its real path, when it is a folder that may come back
 async function fromManagers(path: readonly string[], home: string, factoryHome: string): Promise<readonly Toolchain[]> {
   const found = await Promise.all(
     managersOn(path, home).map(async (t) => {
@@ -201,8 +180,6 @@ async function fromManagers(path: readonly string[], home: string, factoryHome: 
   return found.flat();
 }
 
-// locateToolchains : the toolchain folders under `home` the srt runner allows back read-only, the srt.readOnly
-// entries it refuses, and the shims warnings
 export async function locateToolchains(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly home: string;
@@ -219,8 +196,6 @@ export async function locateToolchains(input: {
   return { allowed, refused: setting.refused, warnings: shimWarnings(path, home) };
 }
 
-// toolchainLines : what `setup status` prints for the srt runner's toolchains: a risk line per folder allowed back,
-// then each refusal and warning. Pure.
 export function toolchainLines(toolchains: Toolchains, home: string): readonly string[] {
   return [
     ...toolchains.allowed.map(

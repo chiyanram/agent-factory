@@ -13,7 +13,6 @@ export type FakeAnswer = { readonly code: number; readonly stdout: string; reado
 export type FakeCall = { readonly cli: string; readonly argv: readonly string[]; readonly stdin: string };
 
 export type Fakes = {
-  // the folder to put first on the PATH
   readonly dir: string;
   readonly calls: () => Promise<readonly FakeCall[]>;
   readonly remove: () => Promise<void>;
@@ -59,7 +58,6 @@ async function callsIn(state: string): Promise<readonly FakeCall[]> {
     .filter((c): c is FakeCall => c !== "bad");
 }
 
-// makeFakes : one fake for each program, answering from `answers`
 export async function makeFakes(clis: readonly string[], answers: readonly FakeAnswer[]): Promise<Result<Fakes>> {
   const state = await attempt(() => mkdtemp(join(tmpdir(), "factory-kit-")), "cannot make the kit's fake CLIs");
   if (state.kind === "failed") {
@@ -85,7 +83,6 @@ function filled(state: string, clis: readonly string[], answers: readonly FakeAn
   }, "cannot make the kit's fake CLIs");
 }
 
-// stringsIn : every text a call carried: each argv word, stdin, and every string inside either one that is JSON
 export function stringsIn(call: FakeCall): readonly string[] {
   const words = [...call.argv, call.stdin];
   return [...words, ...words.flatMap((w) => leaves(parsedOr(w)))];

@@ -1,16 +1,17 @@
-// built — the project's box image, built on this host and pinned by its local ID (#113 Q1, decided on #30,
-// 2026-11-07): `agent-factory box build <project>`. No registry: the image never leaves the host that runs it.
+// built — the project's box image, built on this host and pinned by its local ID (#113): `agent-factory box build
+// <project>`. No registry: the image never leaves the host that runs it.
 //
 //   1 the base image, from the package's images/factory-box, tagged factory-box-base:<12 hex of its ID>; its build
-//     context holds this package itself (npm pack), so the box runs the host's own agent-factory (#171 Q3): the
-//     writer's lint hook is agent-factory lint-edit
+//     context holds this package itself (npm pack), so the box runs the host's own agent-factory: the writer's lint
+//     hook is agent-factory lint-edit
 //   2 the project's own layer, if <home>/projects/<p>/box.Dockerfile exists: FROM ${BASE} (that tag), tagged
 //     factory-box-<p>:<12 hex of its ID>; with none, the project runs the base
 //   3 the image's ID, sha256:<64 hex>, written to <home>/projects/<p>/box.json; the dispatcher runs exactly that ID
 //
-// The base goes to the project build by tag, because BuildKit cannot build FROM sha256:<id>: it looks the ID up in the
-// registry (tried on Docker 29.9, 2026-11-07). The ID still pins what runs. The tags also keep `docker image prune`
-// from removing either image. Nothing here throws.
+// The last FROM of a project layer must be the base, or the box loses its engine and its agents. Each tag names the
+// image's own ID, so a tag never points at another build. The base goes to the project build by tag, because BuildKit
+// cannot build FROM sha256:<id>: it looks the ID up in the registry. The ID still pins what runs. The tags also keep
+// `docker image prune` from removing either image. Nothing here throws.
 
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,13 +26,10 @@ import type { Docker } from "./vm.js";
 
 export const BOX_FILE = "box.json";
 export const PROJECT_DOCKERFILE = "box.Dockerfile";
-// the name the base Dockerfile copies this package in by
 export const PACKAGE_FILE = "agent-factory.tgz";
 
-// packs this package into a folder: the tarball's path, or why it cannot (box/pack.ts; a test passes its own)
 export type Packer = (dest: string) => Promise<Result<string>>;
 
-// a read of box.json: the image, none built yet, or a file that is there but refused
 export type BoxFileRead =
   | { readonly kind: "ok"; readonly image: PinnedImage }
   | { readonly kind: "missing"; readonly reason: string }
@@ -57,7 +55,6 @@ function imageOf(path: string, text: string): BoxFileRead {
   return pin.kind === "pinned" ? { kind: "ok", image: pin } : { kind: "failed", reason: `${path}: ${pin.reason}` };
 }
 
-// readBoxFile : the image box build recorded for the project
 export async function readBoxFile(input: { readonly home: string; readonly project: string }): Promise<BoxFileRead> {
   const path = join(projectDir(input.home, input.project), BOX_FILE);
   try {
@@ -69,10 +66,8 @@ export async function readBoxFile(input: { readonly home: string; readonly proje
   }
 }
 
-// the last FROM of a project Dockerfile must be the base, or the box would lose its engine and its agents
 const FROM_BASE = /^FROM\s+\$\{?BASE\}?(\s+AS\s+\S+)?\s*$/i;
 
-// checkLayer : a project Dockerfile builds on the base image. Pure.
 export function checkLayer(text: string): Result<string> {
   const froms = text.split("\n").filter((line) => /^FROM\s/i.test(line.trim()));
   const last = froms.at(-1)?.trim() ?? "";
@@ -81,12 +76,10 @@ export function checkLayer(text: string): Result<string> {
     : { kind: "failed", reason: `its last FROM must be the base image: ARG BASE, then FROM \${BASE}` };
 }
 
-// tagOf : a tag named by the image's own ID, so it can never point at another build. Pure.
 export function tagOf(name: string, id: string): string {
   return `${name}:${id.replace(/^sha256:/, "").slice(0, 12)}`;
 }
 
-// the base builds from its folder's own Dockerfile; a project layer from its file, on the base's tag
 export type Source =
   | { readonly kind: "base"; readonly context: string; readonly dockerfile: string }
   | { readonly kind: "layer"; readonly context: string; readonly dockerfile: string; readonly base: string };
@@ -100,14 +93,12 @@ function sourceArgs(source: Source): readonly string[] {
   }
 }
 
-// buildArgs : one `docker build` that writes the new image's ID to `idFile`. Pure.
 export function buildArgs(idFile: string, source: Source): readonly string[] {
   return ["build", "--quiet", "--iidfile", idFile, ...sourceArgs(source)];
 }
 
 type Build = { readonly docker: Docker; readonly scratch: string; readonly pack: Packer };
 
-// baseContext : a build folder that holds this package as PACKAGE_FILE
 async function baseContext(b: Build): Promise<Result<string>> {
   const dir = join(b.scratch, "base");
   const made = await attempt(() => mkdir(dir, { recursive: true, mode: 0o700 }), `cannot make ${dir}`);
@@ -129,7 +120,6 @@ async function docker(d: Docker, args: readonly string[]): Promise<Result<string
     : { kind: "failed", reason: `docker ${args[0] ?? ""}: ${exit.stderr.trim()}` };
 }
 
-// buildOne : build, read the ID docker wrote, tag the image by it; the ID
 async function buildOne(b: Build, name: string, source: Source): Promise<Result<string>> {
   const idFile = join(b.scratch, `${name}.id`);
   const built = await docker(b.docker, buildArgs(idFile, source));
@@ -157,7 +147,6 @@ async function layerText(path: string): Promise<Result<string> | { readonly kind
   }
 }
 
-// layered : the project's image on top of the base, or the base itself when the project has no Dockerfile
 async function layered(b: Build, dir: string, project: string, base: string): Promise<Result<Built>> {
   const dockerfile = join(dir, PROJECT_DOCKERFILE);
   const text = await layerText(dockerfile);
@@ -202,12 +191,10 @@ async function buildAll(
   return image.kind === "ok" ? record(input.dir, image.value) : image;
 }
 
-// buildBox : the base, the project's layer, and box.json, in that order; the first failure stops it
 export async function buildBox(input: {
   readonly docker: Docker;
   readonly home: string;
   readonly project: string;
-  // the package's images/factory-box folder
   readonly baseDir: string;
   readonly pack: Packer;
 }): Promise<Result<Built>> {

@@ -21,7 +21,6 @@ import {
   type WaiveAs,
 } from "./write.js";
 
-// whoApproves : the OS user and, when set, the operator's own git user.name
 async function whoApproves(env: NodeJS.ProcessEnv): Promise<string> {
   const name = await hostGit({
     args: ["config", "--get", "user.name"],
@@ -40,7 +39,6 @@ export const terminalDoor: Door<NodeJS.ProcessEnv> = {
   verify: async (env) => vouch(VIA, await whoApproves(env)),
 };
 
-// asTerminal : the write as the person at the terminal, or the door's refusal when its check names no one
 async function asTerminal<T>(env: NodeJS.ProcessEnv, write: (person: Person) => Promise<T>): Promise<T | Refused> {
   const person = await terminalDoor.verify(env);
   return person.kind === "refused" ? person : write(person);

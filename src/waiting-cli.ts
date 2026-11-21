@@ -12,7 +12,6 @@ import { WAITING_LABEL } from "./core/dispatch/waiting.js";
 export type WaitingIo = {
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
-  // the locked wait pings of one pass (tick.ts waitingPass)
   readonly run: () => Promise<Result<WaitingRun>>;
 };
 
@@ -31,13 +30,10 @@ const SAID: { readonly [O in WaitingRan["outcome"]]: string } = {
   "dry-run": "DRY RUN, not recorded or pinged",
 };
 
-// waitingLine : one waiting ticket as the command prints it; a ticket is an issue, which is # on both git hosts. Pure.
 export function waitingLine(w: WaitingRan): string {
   return `#${w.ticket} waits for the operator (${w.title}): ${SAID[w.outcome]}`;
 }
 
-// waitingCommand : exit 0 when each wait was recorded, or a pass runs; 1 when nothing could be read; 2 when a wait
-// was not recorded or its ping did not go out
 export async function waitingCommand(project: string, io: WaitingIo): Promise<number> {
   const ran = await io.run();
   if (ran.kind === "failed") {

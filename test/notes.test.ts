@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { agentTrailer, classify, commitKind, openAsks, type Note, type Readers } from "../src/core/notes.js";
 import { renderPost } from "../src/core/post.js";
 
-// At work the factory posts with the developer's own login: "ram" writes both the agents' notes and their own replies.
 const readers: Readers = { factory: "ram", members: new Set(["ram", "lee"]) };
 let clock = 0;
 function note(name: string, body: string): Note {
@@ -99,7 +98,6 @@ describe("openAsks", () => {
   });
 
   it("orders by the instant, not the text of the timestamp", () => {
-    // 10:30+01:00 is 09:30Z, before the ask at 10:00Z, though it sorts after it as text
     const ask = {
       author: { name: "ram" },
       body: posted("writer", "OPEN: which currency?"),

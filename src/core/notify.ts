@@ -19,7 +19,6 @@ import { readProjectRaw } from "./project.js";
 import type { TokenStore } from "./token/store.js";
 
 export type Ping =
-  // next: the person's step (next-step.ts)
   | {
       readonly kind: "needs-you";
       readonly ticket: string;
@@ -28,14 +27,11 @@ export type Ping =
       readonly next: string;
     }
   | { readonly kind: "ready"; readonly ticket: string; readonly change: number | "none"; readonly head: string }
-  // the project is at a day cap or its window share (#131): no new run starts; ticket is the first one held
   | { readonly kind: "paused"; readonly ticket: string; readonly change: number | "none"; readonly why: string }
-  // the ticket's build waits on the tickets its spec is blocked by (#494); it only informs
   | { readonly kind: "held"; readonly ticket: string; readonly change: number | "none"; readonly why: string };
 
 export type Notify = (ping: Ping) => Promise<Done>;
 
-// NO_NOTIFY : a project that maps no notify plugin pings no one; the forge notes stay the record
 export const NO_NOTIFY: Notify = () => Promise.resolve({ kind: "ok" });
 
 type Where = { readonly project: string; readonly mark: string };
@@ -55,7 +51,6 @@ function titleAs<K extends Ping["kind"]>(kind: K, ping: Extract<Ping, { kind: K 
   return TITLES[kind](ping);
 }
 
-// pingPost : what a person reads, as a posting template. Pure.
 export function pingPost(where: Where, ping: Ping): Post {
   return {
     seat: "coordinator",
@@ -76,7 +71,6 @@ export type NotifyTarget = {
   readonly mark: string;
 };
 
-// pluginNotify : the pings through one notify plugin; the plugin answers { kind: "done" } when it went out
 export function pluginNotify(target: NotifyTarget): Notify {
   return async (ping) => {
     const text = renderPost(pingPost(target, ping));
@@ -103,7 +97,6 @@ function sentDone(plugin: string, sent: Awaited<ReturnType<typeof callPlugin>>):
     : { kind: "failed", reason: `${plugin} answered ${sent.value.kind}${why}` };
 }
 
-// dryNotify : FACTORY_DRY_RUN=1: each ping printed instead of sent
 export function dryNotify(log: (line: string) => void): Notify {
   return (ping) => {
     log(`DRY RUN: notify: ${titleAs(ping.kind, ping)}`);
@@ -111,8 +104,6 @@ export function dryNotify(log: (line: string) => void): Notify {
   };
 }
 
-// notifyPluginOf : the notify plugin the project file maps, or "" when it maps none or there is no file; a file that is
-// there but does not read is refused
 export async function notifyPluginOf(files: {
   readonly home: string;
   readonly project: string;
@@ -125,9 +116,6 @@ export async function notifyPluginOf(files: {
   return config.kind === "ok" ? { kind: "ok", value: config.value.plugins.get("notify") ?? "" } : config;
 }
 
-// webhookSecrets : the Discord webhook, from the token store, for a notify call of the bundled discord plugin only:
-// the file the registry added must be the package's own plugins/discord/plugin, so no other plugin that calls itself
-// discord is ever handed it; any other plugin or capability gets no secret
 export function webhookSecrets(store: Result<TokenStore>, bundled: string): Secrets {
   return async (call) => {
     if (call.capability !== "notify" || !(await sameFile(call.source, bundled))) {

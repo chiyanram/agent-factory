@@ -3,8 +3,6 @@ import type { Event } from "../src/core/dispatch/records.js";
 import { tallyOf, ticketLines, touchesOf } from "../src/core/dispatch/touches.js";
 import { UTC } from "../src/core/zone.js";
 
-// Per ticket: the touches a person made, how long each waited, rework rounds and cost (#487 AC-2).
-
 const writer = (at: string, mode: "fix" | "rework", outcome: "done" | "asked" | "blocked"): Event => ({
   at,
   kind: "writer-ended",
@@ -40,7 +38,6 @@ describe("a ticket's touches (#487)", () => {
       answered("2026-11-13T07:00:00Z"),
       writer("2026-11-13T08:00:00Z", "fix", "asked"),
       answered("2026-11-13T10:05:00Z"),
-      // a second answers line for the same ask is not a second touch
       answered("2026-11-13T10:10:00Z"),
       writer("2026-11-13T11:00:00Z", "fix", "asked"),
       answered("2026-11-13T11:30:00Z"),
@@ -111,7 +108,6 @@ describe("a ticket's touches (#487)", () => {
   });
 
   it("reads the lines in time order, not file order, so a later-written begun line still sorts first", () => {
-    // the begun line is appended after the approval line, but its at is earlier
     const events = [approved("2026-11-13T10:00:00Z"), begun("2026-11-13T08:00:00Z")];
     expect(touchesOf(events)).toEqual([
       { kind: "approve", at: "2026-11-13T10:00:00Z", by: "ram", waitedMs: 2 * 3_600_000 },
@@ -160,7 +156,6 @@ describe("the tickets section of usage (#487)", () => {
   });
 
   it("keeps a ticket active this month when an older begun line is appended after a newer one", () => {
-    // a newer run line, then the backfilled START with its record's own, older time
     const events = [writer("2026-11-13T08:00:00Z", "fix", "done"), begun("2026-10-20T08:00:00Z")];
     const late = tallyOf({ project: "ledger", ticket: "PROJ-2" }, events, COST);
     expect(late.last).toBe("2026-11-13T08:00:00Z");
@@ -180,7 +175,6 @@ describe("the tickets section of usage (#487)", () => {
     expect(ticketLines({ tallies: [shipped], from, zone: UTC }).at(-1)).toBe(
       "    outcome: read with agent-factory usage ledger, with the project's clone set",
     );
-    // a ticket not merged has no outcome line
     expect(ticketLines({ tallies: [tally], from, zone: UTC }).some((l) => l.includes("outcome"))).toBe(false);
   });
 

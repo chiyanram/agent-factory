@@ -15,19 +15,15 @@ import type { Where } from "./writes.js";
 
 const HEX = /^[0-9a-f]{12}$/;
 
-// one kept request: its id, the plugin and the approval it was made under, the draft as its schema holds it, and the
-// text the person checks
 export type Pending = {
   readonly id: string;
   readonly plugin: string;
   readonly approval: string;
   readonly draft: unknown;
   readonly text: string;
-  // spec.body: the sha256 of the issue's body when the request was kept, so confirm never writes over a later edit
   readonly base?: string;
 };
 
-// a request id, read back: where the write goes, its capability and the hex that names its file
 export type Id = { readonly where: Where; readonly capability: PolicyPoint; readonly hex: string };
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
@@ -38,7 +34,6 @@ export function pendingFile(home: string, hex: string): string {
   return join(home, "pending", `${hex}.json`);
 }
 
-// keepPending : the request in its own new file, with the time it was kept; a file already there is never written over
 export function keepPending(home: string, hex: string, record: Pending, at: string): Promise<Done> {
   const file = pendingFile(home, hex);
   return attempt(async () => {
@@ -50,12 +45,10 @@ export function keepPending(home: string, hex: string, record: Pending, at: stri
   }, `cannot write ${file}`);
 }
 
-// dropPending : the request's file removed, so it cannot go out twice
 export function dropPending(home: string, hex: string): Promise<Done> {
   return attempt(() => rm(pendingFile(home, hex)), "cannot remove the pending request");
 }
 
-// parseId : <project>/<ticket>/<capability>/<12 hex>, as request printed it
 export function parseId(home: string, id: string): Result<Id> {
   const parts = id.split("/");
   const [project, ticket, capability, hex] = four(parts);
@@ -68,7 +61,6 @@ function four(parts: readonly string[]): readonly [string, string, string, strin
   return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? "", parts[3] ?? ""];
 }
 
-// baseOf : a spec.body request's base, none for any other request
 function baseOf(value: unknown): { readonly base?: string } | "bad" {
   if (value === undefined) {
     return {};
@@ -92,7 +84,6 @@ function pendingOf(raw: unknown): Pending | "bad" {
     : "bad";
 }
 
-// readPending : the kept request the id names, when its file holds that very request
 export async function readPending(id: Id, given: string): Promise<Result<Pending>> {
   const file = pendingFile(id.where.home, id.hex);
   const text = await attempt(

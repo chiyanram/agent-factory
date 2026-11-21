@@ -11,7 +11,8 @@ import { join } from "node:path";
 import type { Done } from "../forge/api.js";
 import { hostGit } from "../git.js";
 
-// matched without case: on macOS claude.md opens CLAUDE.md
+// matched without case: the default APFS format on macOS is not case-sensitive, so claude.md opens CLAUDE.md
+// https://support.apple.com/guide/disk-utility/file-system-formats-dsku19ed921c/mac
 const RULE_FILES = new Set(["claude.md", "claude.local.md", "agents.md"]);
 const RULE_DIRS = new Set([".claude", ".agents"]);
 
@@ -20,7 +21,6 @@ type CopyInput = {
   readonly sha: string;
   readonly into: string;
   readonly env: NodeJS.ProcessEnv;
-  // rules: every symlink and rule file goes, for a reader (the reviewer); none: the tree as it is, for a box run
   readonly prune: "rules" | "none";
 };
 
@@ -43,7 +43,6 @@ async function step(input: CopyInput, args: readonly string[]): Promise<Done> {
       };
 }
 
-// the .gitattributes paths in the private index
 async function attributes(input: CopyInput): Promise<readonly string[] | "failed"> {
   const listed = await git(input, ["ls-files", "-z"]);
   return listed.kind === "ok"
@@ -51,13 +50,11 @@ async function attributes(input: CopyInput): Promise<readonly string[] | "failed
     : "failed";
 }
 
-// a symlink, a rule file or a rule folder: never shown to the reviewer
 function ruleOrLink(name: string, s: Awaited<ReturnType<typeof lstat>>): boolean {
   const lower = name.toLowerCase();
   return s.isSymbolicLink() || RULE_FILES.has(lower) || (s.isDirectory() && RULE_DIRS.has(lower));
 }
 
-// prune : removes every symlink, every rule file and every rule folder under dir
 async function prune(dir: string): Promise<void> {
   for (const name of await readdir(dir)) {
     const path = join(dir, name);
@@ -70,7 +67,6 @@ async function prune(dir: string): Promise<void> {
   }
 }
 
-// dropAttributes : the .gitattributes files leave the private index before the checkout
 async function dropAttributes(input: CopyInput): Promise<Done> {
   const attrs = await attributes(input);
   if (attrs === "failed") {
@@ -91,7 +87,6 @@ async function checkout(input: CopyInput): Promise<Done> {
   return dropped.kind === "ok" ? step(input, ["checkout-index", "-a"]) : dropped;
 }
 
-// copyCode : the files at sha in `into` (which must not exist yet; its parent holds the private index)
 export async function copyCode(input: CopyInput): Promise<Done> {
   try {
     await mkdir(input.into, { recursive: true, mode: 0o700 });

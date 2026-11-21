@@ -56,8 +56,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-// git resolves origin through the trusted insteadOf to the bare repository on disk; these tests check the push, so they
-// report the URL the clone names. pushUrls itself is tested against real git below.
 const hostPush = (r: PushRequest) =>
   realHostPush(r, { urls: async () => ({ kind: "ok", value: ["https://github.com/o/r.git"] }) });
 
@@ -130,7 +128,6 @@ describe("hostPush", () => {
 
   it("refuses a clone that pushes elsewhere, or to more than one URL, as git resolves them (the review's findings 1-3)", async () => {
     const real = (r: PushRequest) => realHostPush(r);
-    // the trusted insteadOf rewrites the clone's URL to the bare repository on disk, which is not the project
     expect(await real(request({}))).toMatchObject({ kind: "failed", reason: expect.stringContaining(remote) });
     git(root, "config", "--global", "--unset", `url.${remote}.insteadOf`);
     git(work, "config", "--add", "remote.origin.pushurl", join(root, "evil.git"));
@@ -167,7 +164,6 @@ describe("hostPush", () => {
     expect(await hostPush(request({ branch: "feat/new", commit: head, lease: { kind: "absent" } }))).toEqual({
       kind: "ok",
     });
-    // the branch exists now, so "the caller saw none" no longer holds
     const next = commit("second push");
     expect(await hostPush(request({ branch: "feat/new", commit: next, lease: { kind: "absent" } }))).toMatchObject({
       kind: "failed",

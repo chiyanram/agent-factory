@@ -15,24 +15,18 @@ import type { Event } from "./records.js";
 
 export const WAITING_LABEL = "waiting:operator";
 
-// the step a waiting ticket's line shows, and whom it waits on
 export const SESSION_WAITS = "session waits";
 export const OPERATOR = "the operator";
 
-// sessionWait : what the operator does for a waiting ticket, naming the label it comes from, since the label is a
-// session's claim. Pure.
 export function sessionWait(w: Waiting): string {
   return `answers the ticket's session, which waits for their word (${WAITING_LABEL}: ${w.title})`;
 }
 
-// recordedSince : the label time of the ticket's newest "waiting" line, or none before its first. Pure.
 export function recordedSince(events: readonly Event[]): string {
   const lines = events.flatMap((e) => (e.kind === "waiting" ? [e] : []));
   return lines.toSorted((a, b) => a.at.localeCompare(b.at)).at(-1)?.since ?? "none";
 }
 
-// waitingStep : whether the pass records the label's time, and whether it pings: once per label time, and no ping when
-// the ticket's own turn is already needs you ("none": the ticket is not in flight). Pure.
 export function waitingStep(input: {
   readonly recorded: string;
   readonly since: string;
@@ -42,7 +36,6 @@ export function waitingStep(input: {
   return { record, ping: record && input.lane !== "needs-you" };
 }
 
-// waitingPing : the ping that a ticket's session waits for the operator. Pure.
 export function waitingPing(w: Waiting, change: number | "none"): Ping {
   return {
     kind: "needs-you",

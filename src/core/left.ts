@@ -13,11 +13,8 @@ import type { Post } from "./post.js";
 import type { PushRequest } from "./push.js";
 import type { PushTarget } from "./writer/step.js";
 
-// Left : commits the branch does not hold yet, and files git has not committed
 export type Left = { readonly head: string; readonly commits: readonly string[]; readonly files: readonly string[] };
 
-// Landing : where the commits are pushed, and the push itself (hostPush; a test passes its own); a target that is not
-// set pushes nothing, and says why
 export type Landing = { readonly target: Result<PushTarget>; readonly pusher: Pusher };
 
 export type GitIn = (args: readonly string[]) => ReturnType<typeof hostGit>;
@@ -48,7 +45,6 @@ function leftOf(head: Result<string>, commits: Result<string>, files: Result<str
     commits: textOf(commits)
       .split("\n")
       .filter((l) => l !== ""),
-    // each entry of `status -z` is "XY path"
     files: textOf(files)
       .split("\0")
       .filter((e) => e.length > 3)
@@ -56,8 +52,6 @@ function leftOf(head: Result<string>, commits: Result<string>, files: Result<str
   };
 }
 
-// leftIn : the head, the commits that `not` excludes none of (["--remotes"], or the commit the run started from), and
-// every uncommitted file
 async function leftIn(git: GitIn, not: readonly string[]): Promise<Result<Left>> {
   const head = out(await git(["rev-parse", "HEAD"]), "read its head");
   const commits = out(await git(["rev-list", "HEAD", "--not", ...not]), "list its commits");
@@ -69,8 +63,6 @@ async function leftIn(git: GitIn, not: readonly string[]): Promise<Result<Left>>
   return bad?.kind === "failed" ? bad : { kind: "ok", value: leftOf(head, commits, files) };
 }
 
-// leftNote : what a note tells a person of the work: its unlanded commits, the push, and every uncommitted file, which
-// the hand-over never commits
 export function leftNote(left: Left, pushed: string): Pick<Post, "fields" | "items"> {
   return {
     fields: [
@@ -82,11 +74,8 @@ export function leftNote(left: Left, pushed: string): Pick<Post, "fields" | "ite
   };
 }
 
-// Onto : the change's branch and its head as the forge has it now, and the clone or worktree that holds the commits
 export type Onto = { readonly repo: string; readonly branch: string; readonly sha: string };
 
-// landed : the unlanded commits pushed on top of the branch, or why they were not; fits says whether they still go on
-// top of the branch as it is now
 async function landed(input: Pushing, onto: Onto, left: Left, fits: () => Promise<Done>): Promise<string> {
   if (left.commits.length === 0 || left.head === onto.sha) {
     return "nothing to push";
@@ -99,7 +88,6 @@ async function landed(input: Pushing, onto: Onto, left: Left, fits: () => Promis
 
 type Pushing = { readonly forge: Forge; readonly landing: Landing };
 
-// requestFor : where the commits go, once they fit on top of the branch as the forge has it now
 async function requestFor(
   input: Pushing,
   onto: Onto,
@@ -128,18 +116,14 @@ async function requestFor(
     : base;
 }
 
-// KeptInput : a run that never ended: its folder, the head it started from ("" on a first run), and the change's
-// branch and head now, or none when no change is open
 export type KeptInput = {
   readonly folder: string;
   readonly since: string;
   readonly change: { readonly branch: string; readonly head: string } | "none";
 };
 
-// KeptRun : what the run left, and what became of its commits
 export type KeptRun = Left & { readonly pushed: string };
 
-// fromStart : the run's commits go on top only while the branch is still where the run started
 function fromStart(input: KeptInput, head: string): () => Promise<Done> {
   return async () =>
     head === input.since
@@ -147,9 +131,6 @@ function fromStart(input: KeptInput, head: string): () => Promise<Done> {
       : failed(`the branch moved to ${head.slice(0, 8)} since the writer started; a person puts the two together`);
 }
 
-// keepLeft : the hand-over's look into a dead writer run's folder: its commits since the head it started from,
-// pushed on top of the change's branch; its uncommitted files named; the folder kept. A first run, with no change
-// open, pushes nothing. git never climbs out of the folder, so a folder with no clone is never read as one above it.
 export function keepLeft(setup: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: Forge;
@@ -167,7 +148,6 @@ export function keepLeft(setup: {
     if (!existsSync(join(repo, ".git"))) {
       return failed(`${input.folder} holds no clone: the run stopped before it was made, or its step removed it`);
     }
-    // a first run's start is on no branch of the forge yet: only its head is named
     const left = await leftIn(git, input.since === "" ? ["HEAD"] : [input.since]);
     if (left.kind === "failed") {
       return left;

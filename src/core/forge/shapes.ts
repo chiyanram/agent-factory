@@ -60,8 +60,6 @@ export function postOf(r: Reader, value: unknown): Post {
   };
 }
 
-// bodyPostOf : a PR body: a post, and the implementer's Markdown with the git host when it has them (#335). The adapter
-// that posts it cleans the Markdown again (renderBody), whatever cleaned it before.
 export function bodyPostOf(r: Reader, value: unknown): BodyPost {
   const post = postOf(r, value);
   return r.absent(value, "prBody")
@@ -105,7 +103,6 @@ function personOf(r: Reader, value: unknown): Person {
 
 const MERGEABLE: readonly [Mergeable, ...Mergeable[]] = ["unknown", "clean", "conflict"];
 
-// mergeableOf : a plugin built before mergeability was on the seam (#103) sends none, which is unknown
 function mergeableOf(r: Reader, value: unknown): Mergeable {
   return r.absent(value, "mergeable") ? "unknown" : r.word(value, "mergeable", MERGEABLE);
 }
@@ -165,7 +162,6 @@ export function lineFindingOf(r: Reader, value: unknown): LineFinding {
   return { file: r.text(value, "file"), line: r.int(value, "line") };
 }
 
-// failedJobsOf : the failed jobs at a head (#171); task.ts caps what reaches the writer, whatever the plugin sends
 export function failedJobsOf(r: Reader, value: unknown): readonly FailedJob[] {
   return r.list(value, "").map((j) => ({
     name: r.text(j, "name"),
@@ -180,7 +176,6 @@ export function numbersOf(r: Reader, value: unknown): readonly number[] {
   return r.list(value, "").map((n) => r.int(n, ""));
 }
 
-// waitingOf : the open issues that carry a label, and since when
 export function waitingOf(r: Reader, value: unknown): readonly Waiting[] {
   return r
     .list(value, "")

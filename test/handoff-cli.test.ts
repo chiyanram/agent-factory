@@ -5,9 +5,6 @@ import type { Waiting } from "../src/core/forge/types.js";
 import { handoffCommand, type HandoffIo } from "../src/handoff-cli.js";
 import { tempDir } from "./temp.js";
 
-// agent-factory handoff prints the coordinator's reset note from the board and the open maps, read-only, and exits 1
-// when a section could not be read.
-
 const NOW = Date.parse("2026-11-17T15:00:00Z");
 
 let home = "";

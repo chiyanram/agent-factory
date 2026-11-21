@@ -3,10 +3,10 @@
 // answer reads; this file writes the policy, runs srt and keeps the runners it started. Nothing here throws.
 //
 // A started runner is a folder of its own, outside the clone: policy.json (0600, which the run cannot write) and home/
-// (0700, the run's HOME); and a temp folder with a short path, /tmp/af-<6 characters> (0700, srt-plan.ts tmpEnv, #62).
-// stop removes both. A
-// command that outlives its timeout, or a stop, gets SIGTERM and then SIGKILL, sent to srt's whole process group, so
-// the sandboxed agent and everything it started go with it.
+// (0700, the run's HOME); and a temp folder with a short path, /tmp/af-<6 characters> (0700, srt-plan.ts tmpEnv).
+// The temp folder goes by its real path, so srt's rule and the sockets srt makes there name one folder. stop removes
+// both. A command that outlives its timeout, or a stop, gets SIGTERM and then SIGKILL, sent to srt's whole process
+// group, so the sandboxed agent and everything it started go with it.
 
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
@@ -31,25 +31,18 @@ import type { Box, BoxSpec, Command, Copy, Done, Probe, Ran, Session } from "./t
 
 export type SrtBoxSetup = {
   readonly run: Runner;
-  // the srt binary, found on the host's PATH
   readonly bin: string;
-  // the host's environment: only PATH and the locale reach a run (srt-plan.ts srtEnv)
   readonly env: NodeJS.ProcessEnv;
   readonly host: SrtHost;
   readonly egress: SrtEgress;
-  // the variable the company CA goes in (settingName("egress.caCerts"))
   readonly caName: string;
-  // a private folder (0700) each started runner's own folder goes in
   readonly runsDir: string;
-  // a new runner name; a test passes its own
   readonly newName?: () => string;
-  // where each run's temp folder goes (#62); /tmp unless a test passes its own
   readonly tmpRoot?: string;
 };
 
 type Failed = { readonly kind: "failed"; readonly reason: string };
 
-// one started runner: its spec, its folder, the variables its commands see, and the stops of its running commands
 type Live = {
   readonly spec: BoxSpec;
   readonly dir: string;
@@ -68,7 +61,6 @@ function outputOf(command: Command): Output {
   };
 }
 
-// timed : the command's exit, or its timeout: at the time limit the stop fires, and the command is read as timed out
 async function timed(exit: Promise<Exit>, stop: AbortController, seconds: number): Promise<Ran> {
   let late = false;
   const timer = setTimeout(() => {
@@ -83,8 +75,6 @@ async function timed(exit: Promise<Exit>, stop: AbortController, seconds: number
     : { kind: "exited", code: ended.code, stdout: ended.stdout, stderr: ended.stderr };
 }
 
-// runTmp : a fresh 0700 temp folder for one run under the root, by its real path, so srt's rule and the sockets it
-// makes there name one folder (/tmp is /private/tmp on macOS); refused when srt's sockets would not fit in it (#62)
 async function runTmp(root: string): Promise<Result<string>> {
   const made = await attempt(
     async () => mkdtemp(join(await realpath(root), RUN_TMP_PREFIX)),
@@ -107,7 +97,6 @@ export function srtBox(setup: SrtBoxSetup): Box {
     reason: `runner ${session.id} is not running in this srt runner`,
   });
 
-  // prepare : the runner's folder, its private HOME and its policy
   const prepare = async (name: string, spec: BoxSpec): Promise<Live | Failed> => {
     const dir = join(setup.runsDir, name);
     const home = join(dir, "home");
@@ -225,7 +214,6 @@ export function srtBox(setup: SrtBoxSetup): Box {
     copyIn: (c) => copy(c, (inClone) => [c.host, inClone]),
     copyOut: (c) => copy(c, (inClone) => [inClone, c.host]),
 
-    // a runner this Box never started, or already stopped, is not its to remove
     stop: async (session): Promise<Done> => {
       const runner = live.get(session.id);
       return runner === undefined ? { kind: "ok" } : remove(session.id, runner);

@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { callerCount, hostGit, plan, trustedPath, type GitRequest, type GitResult } from "../src/core/git.js";
 import { tempDir } from "./temp.js";
 
-// Real repos in a temp folder. The operator's config is a temp global file; the system config is off.
 let base = "";
 let repo = "";
 let ran = "";
@@ -17,11 +16,8 @@ function git(args: readonly string[], cwd: string = repo): string {
 function gitTry(args: readonly string[], input = ""): void {
   try {
     execFileSync("git", ["-C", repo, ...args], { env, input, stdio: ["pipe", "pipe", "pipe"] });
-  } catch {
-    // plain git may fail after running the plant; the plant's trace is what counts
-  }
+  } catch {}
 }
-// plant NAME : a program that records that it ran
 function plant(name: string): string {
   const file = join(base, name);
   writeFileSync(file, `#!/bin/sh\necho ${name} >> "${ran}"\n`);
@@ -46,7 +42,6 @@ function ok(result: GitResult): string {
   }
   return result.stdout;
 }
-// the helpers that apply: the ones after the last empty value, which resets the list
 function effective(values: string): readonly string[] {
   const list = values.split("\n").filter((_v, i, all) => i < all.length - 1 || all[i] !== "");
   return list.slice(list.lastIndexOf("") + 1);
@@ -178,7 +173,6 @@ describe("hostGit runs no program the repo's own config or hooks name", () => {
     mkdirSync(join(repo, "bin"));
     writeFileSync(join(repo, "bin/ssh"), readFileSync(plant("ssh")));
     chmodSync(join(repo, "bin/ssh"), 0o755);
-    // a loopback port nothing listens on: refused at once, with no name to look up (a .invalid lookup hangs on macOS, #527)
     git(["remote", "set-url", "origin", "ssh://git@127.0.0.1:1/x.git"]);
     await hostGit(
       request(["fetch", "-q", "origin"], { env: { ...env, PATH: `bin:${join(repo, "bin")}:${env.PATH ?? ""}` } }),
@@ -275,7 +269,7 @@ describe("hostGit keeps what the operator chose", () => {
   });
 
   it("without a repo, git runs outside any repo and reads no folder's config", async () => {
-    git(["config", "diff.external", "/evil"]); // would be refused, if hostGit read this repo's config
+    git(["config", "diff.external", "/evil"]);
     const before = process.cwd();
     process.chdir(repo);
     const result = await hostGit({
@@ -340,8 +334,6 @@ describe("trustedPath and plan", () => {
   });
 });
 
-// AC-6 of #485: a hostile global git config (another default branch, aliases, a hooks path, fetch.prune, a diff prefix,
-// colour) changes no result the engine reads through hostGit
 describe("hostGit is hermetic against the operator's global config (#485)", () => {
   const diffOf = async (): Promise<string> =>
     ok(await hostGit(request(["diff", "HEAD~1", "HEAD"]))) +
@@ -369,11 +361,9 @@ describe("hostGit is hermetic against the operator's global config (#485)", () =
       ].join("\n"),
     );
     expect(await diffOf()).toBe(plain);
-    // a branch deleted on the remote is kept by a fetch: fetch.prune is off for every engine call
     execFileSync("git", ["--git-dir", join(base, "origin.git"), "branch", "-q", "-D", "gone"], { env });
     ok(await hostGit(request(["fetch", "-q", "origin"])));
     expect(git(["branch", "-r"])).toContain("origin/gone");
-    // a repo the engine starts is on main, whatever the operator's default branch
     const fresh = join(base, "fresh");
     ok(await hostGit({ args: ["init", "-q", fresh], repo: { kind: "none" }, env, stdin: { kind: "none" } }));
     expect(execFileSync("git", ["-C", fresh, "symbolic-ref", "HEAD"], { env, encoding: "utf8" }).trim()).toBe(

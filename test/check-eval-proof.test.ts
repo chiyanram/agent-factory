@@ -30,8 +30,6 @@ const MODELS = {
   judge: "claude-sonnet-5-5",
 };
 
-// a results document as agent-factory eval reviewer writes it (src/core/eval/results.ts), cut to what the check reads:
-// `found` of 10 seed-runs, aimed at quality
 function pass(over: Record<string, unknown> = {}, found = 8, hits = 0): Record<string, unknown> {
   return {
     version: 1,
@@ -47,8 +45,6 @@ function pass(over: Record<string, unknown> = {}, found = 8, hits = 0): Record<s
   };
 }
 
-// a baseline of two runs over one case of 5 seeds, matching 2 and 3 at $4 and $5: recall 5/10, its noise one seed of 5
-// (so a quality change needs more than 7/10, and holds down to 3/10) and $2 a pass
 function baseline(over: Record<string, unknown> = {}): Record<string, unknown> {
   const run = (n: number, matched: number, usd: number) => ({
     run: n,
@@ -150,8 +146,6 @@ describe("proofProblems", () => {
   });
 
   it("refuses a results file in which a case or a run errored, naming each; the same file without it passes (N11)", () => {
-    // an errored round on a clean case reports no finding: it would read as a clean floor kept by a reviewer that never
-    // ran. The flags say proof and not partial, as a hand-edited or stale file could
     const runs = (error: string) => [
       { run: 1, outcome: "posted", error: "", act_on: [], seeds: [] },
       { run: 2, outcome: "failed", error, act_on: [], seeds: [] },
@@ -329,7 +323,6 @@ describe("check-eval-proof, the script", () => {
     put(RESULT, `${JSON.stringify(pass({ head, inputs: { head, prompts, models: MODELS } }))}\n`);
     git("add", "-A");
     commit("the eval pass, and a baseline");
-    // make lint checks the proof and the baseline's shape, not the label; --approval checks only the label
     expect(run(dir, env)).toEqual({ code: 0, out: "" });
     expect(run(dir, env, ["--approval"])).toMatchObject({
       code: 1,

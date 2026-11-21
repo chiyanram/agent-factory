@@ -55,7 +55,6 @@ export function maxUsd(env: NodeJS.ProcessEnv): Result<string> {
 
 const MODEL_KEYS = { find: "review.findModel", rule: "review.ruleModel", logic: "review.logicModel" } as const;
 
-// unpinnedModel : the refusal of the first of these model keys that is set to an alias, or ""
 export function unpinnedModel(env: NodeJS.ProcessEnv, ids: readonly MachineId[]): string {
   const bad = ids.find((id) => {
     const value = settingOf(env, id);
@@ -78,7 +77,6 @@ export type Paths = {
   readonly maxUsd: string;
   readonly maxRuns: number;
   readonly maxFinders: number;
-  // each finder's and each verify pass's time limit
   readonly limits: RunLimits;
 };
 
@@ -91,7 +89,6 @@ type Limits = {
   readonly limits: RunLimits;
 };
 
-// runLimitsOf : the finder's and the verify pass's time limits
 export function runLimitsOf(env: NodeJS.ProcessEnv): Result<RunLimits> {
   const finder = limitOf(env, "review.finderMinutes");
   if (finder.kind === "failed") {
@@ -101,10 +98,8 @@ export function runLimitsOf(env: NodeJS.ProcessEnv): Result<RunLimits> {
   return verify.kind === "ok" ? { kind: "ok", value: { finder: finder.value, verify: verify.value } } : verify;
 }
 
-// the most finder runs a round runs at once when no layer sets it (#237)
 export const MAX_FINDERS = 4;
 
-// maxFindersOf : review.maxFinders, a whole number from 1; the check of its key keeps it at 16 or less
 export function maxFindersOf(env: NodeJS.ProcessEnv): Result<number> {
   const raw = settingOf(env, "review.maxFinders") ?? String(MAX_FINDERS);
   return /^[1-9]\d?$/.test(raw)
@@ -145,7 +140,6 @@ function places(env: NodeJS.ProcessEnv): Result<Places> {
   return h.kind === "ok" ? { kind: "ok", value: { repo: repo.value, home: h.value } } : h;
 }
 
-// paths : the settings, each checked; a value that is set but not valid is refused, and so is a model alias
 export function paths(env: NodeJS.ProcessEnv): Result<Paths> {
   const alias = unpinnedModel(env, Object.values(MODEL_KEYS));
   if (alias !== "") {
@@ -174,16 +168,13 @@ function models(env: NodeJS.ProcessEnv): ReviewSetup["models"] {
   };
 }
 
-// reviewSetup : everything one round needs, for change `number`, acting as `factory` on `forge`
 export function reviewSetup(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: Forge;
   readonly factory: string;
-  // the project whose specs and approvals the review reads (<home>/specs/<project>, <home>/approvals/<project>)
   readonly project: string;
   readonly number: number;
   readonly paths: Paths;
-  // the project's plugins, in order (process/use.ts)
   readonly plugins: readonly PluginDir[];
   readonly model?: Model;
   readonly sessions?: Sessions;

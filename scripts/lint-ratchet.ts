@@ -4,6 +4,8 @@
 // The baseline counts the findings that were already in the code when the rules landed, per file and rule. A count
 // above its baseline fails: new code meets every rule. A count below its baseline also fails until the baseline is
 // shrunk with --shrink, so a fixed finding can never come back. Never write a disable comment; fix the code.
+// Output that is not oxlint's JSON throws, and a baseline that does not parse counts nothing, so a broken run fails
+// closed.
 //
 //   node scripts/lint-ratchet.ts            check (make lint)
 //   node scripts/lint-ratchet.ts --shrink   write the lower counts into the baseline; never raises one
@@ -36,7 +38,6 @@ function count(diagnostics: readonly Diagnostic[]): Counts {
   return counts;
 }
 
-// judge : pure. New findings first, then the ones fixed but still in the baseline.
 function judge(now: Counts, base: Counts): Verdict {
   const over = Object.keys(now).filter((k) => (now[k] ?? 0) > (base[k] ?? 0));
   if (over.length > 0) {
@@ -46,7 +47,6 @@ function judge(now: Counts, base: Counts): Verdict {
   return under.length > 0 ? { kind: "shrinkable", keys: under } : { kind: "clean" };
 }
 
-// shrink : each count lowered to what is there now; a key with nothing left is dropped; nothing is ever raised
 function shrink(now: Counts, base: Counts): Counts {
   const kept = Object.keys(base)
     .map((k) => [k, Math.min(now[k] ?? 0, base[k] ?? 0)] as const)
@@ -55,7 +55,6 @@ function shrink(now: Counts, base: Counts): Counts {
   return Object.fromEntries(kept);
 }
 
-// field : one property of a parsed JSON value, or undefined; no type assertion on the way
 function field(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
 }
@@ -85,7 +84,6 @@ function runOxlint(): Promise<{ readonly stdout: string; readonly stderr: string
   });
 }
 
-// oxlint : every finding; output that is not oxlint's JSON throws, so a broken run never reads as clean
 async function oxlint(): Promise<readonly Diagnostic[]> {
   const { stdout, stderr } = await runOxlint();
   const list = field(JSON.parse(stdout === "" ? "null" : stdout) as unknown, "diagnostics");
@@ -95,7 +93,6 @@ async function oxlint(): Promise<readonly Diagnostic[]> {
   return list.map(toDiagnostic);
 }
 
-// readBaseline : a baseline that does not parse counts nothing, so every finding fails: it fails closed
 function readBaseline(): Counts {
   const value = JSON.parse(readFileSync(BASELINE, "utf8")) as unknown;
   return typeof value === "object" && value !== null

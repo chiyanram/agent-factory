@@ -58,7 +58,6 @@ describe("citeProblem and citeChecked: pure", () => {
     expect(coreOf({ ...raw, line: "2" }, "F1", (t) => t)).not.toHaveProperty("lineEnd");
   });
 
-  // #485 review: the finder's schema lets "N-M" through, and a reversed range is noted as malformed, never read as N
   it('asks the finder for a line as a number or "N-M" text, and notes a reversed range as malformed', () => {
     const line = JSON.parse(FIND_SCHEMA).properties.findings.items.properties.line;
     expect(line).toEqual({ anyOf: [{ type: "integer" }, { type: "string", pattern: "^[0-9]+(-[0-9]+)?$" }] });
@@ -91,7 +90,6 @@ describe("checkCites: at the reviewed commit, through git", () => {
     git("add", "a.ts");
     git("commit", "-q", "-m", "one");
     sha = git("rev-parse", "HEAD").trim();
-    // a later commit grows the file: the check reads the reviewed commit, not the working tree
     writeFileSync(join(repo, "a.ts"), "one\ntwo\nthree\nfour\nfive\n");
     git("commit", "-q", "-am", "two");
   });
@@ -104,7 +102,6 @@ describe("checkCites: at the reviewed commit, through git", () => {
       f({ id: "gone", file: "b.ts", line: 1 }),
       f({ id: "past", file: "a.ts", line: 5 }),
       f({ id: "odd", file: "--output=x", line: 1 }),
-      // a why the verify pass wrote in the check's own words is not the check's: it is not counted (#485)
       f({ id: "said", file: "a.ts", line: 1, bucket: "noted", why: "cite not found: the model said so" }),
     ]);
     expect(notFound).toBe(3);

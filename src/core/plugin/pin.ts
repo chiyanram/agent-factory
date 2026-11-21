@@ -1,7 +1,8 @@
 // pin — what `plugin add` pins, and where the core runs it from (#134; ADR-0014 P2). A plugin is the folder its file
 // sits in: every file under it counts, so a script's own modules are pinned with it. Its sha256 is taken over the
 // tree, and the tree is copied into <home>/plugins/<sha256>/ (mode 700), which is what every call runs: the person's
-// folder can change after review and the plugin does not. A folder or file that someone else could write to, a
+// folder can change after review and the plugin does not. The copy is hashed again, so what runs is what was hashed.
+// A folder or file that someone else could write to, a
 // symlink inside it, or a tree past the size limits is refused. Nothing here throws.
 //
 // Not pinned: the interpreter a script names (#!/usr/bin/env node finds it on the trusted PATH) and the CLI the plugin
@@ -29,7 +30,6 @@ function trusted(s: Stats): boolean {
   return (s.uid === uid || s.uid === 0) && (s.mode & 0o022) === 0;
 }
 
-// safeOwner : owned by this user or by root, and writable by no one else
 async function safeOwner(path: string): Promise<Done> {
   const s = await stat(path).catch(() => undefined);
   if (s === undefined) {
@@ -41,7 +41,6 @@ async function safeOwner(path: string): Promise<Done> {
 type File = { readonly rel: string; readonly exec: boolean; readonly size: number };
 type Walk = { readonly files: File[]; readonly dirs: string[] };
 
-// visit : one entry of the tree into the walk; a symlink is refused
 async function visit(root: string, path: string, walk: Walk): Promise<Done> {
   const s = await lstat(path);
   if (s.isSymbolicLink()) {
@@ -72,7 +71,6 @@ function within(files: readonly File[], dir: string): Result<readonly File[]> {
     : { kind: "ok", value: files.toSorted((a, b) => (a.rel < b.rel ? -1 : 1)) };
 }
 
-// filesOf : every file of the tree, sorted
 async function filesOf(dir: string): Promise<Result<readonly File[]>> {
   const walk: Walk = { files: [], dirs: [] };
   for (let here: string | undefined = dir; here !== undefined; here = walk.dirs.pop()) {
@@ -93,7 +91,6 @@ async function hashed(dir: string, files: readonly File[]): Promise<string> {
   return hash.digest("hex");
 }
 
-// treeHash : the sha256 of every file's path, whether it is executable, and its content
 export async function treeHash(dir: string): Promise<Result<string>> {
   const listed = await attempt(() => filesOf(dir), `cannot read ${dir}`);
   const files = listed.kind === "ok" ? listed.value : listed;
@@ -103,7 +100,6 @@ export async function treeHash(dir: string): Promise<Result<string>> {
   return attempt(() => hashed(dir, files.value), `cannot read the files of ${dir}`);
 }
 
-// sourceOf : the real plugin file and its folder, both safe to trust
 export async function sourceOf(path: string): Promise<Result<Source>> {
   const file = await realpath(path).catch(() => undefined);
   if (file === undefined) {
@@ -139,8 +135,6 @@ async function settle(staging: string, target: string, sha: string, again: Resul
   }, `cannot write ${target}`);
 }
 
-// store : the plugin's tree copied into <home>/plugins/<sha256>/ and hashed again there, so what runs is what was
-// hashed
 export async function store(home: string, source: Source): Promise<Result<Pinned>> {
   const sha = await treeHash(source.dir);
   if (sha.kind === "failed") {

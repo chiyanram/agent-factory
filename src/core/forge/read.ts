@@ -5,15 +5,12 @@
 import type { Result } from "./api.js";
 
 export type Reader = {
-  // the value at path, as JSON gave it: undefined when a step is missing
   at(value: unknown, path: string): unknown;
   text(value: unknown, path: string): string;
   int(value: unknown, path: string): number;
   bool(value: unknown, path: string): boolean;
   list(value: unknown, path: string): readonly unknown[];
-  // one of the words given; the first is the placeholder after a failure
   word<T extends string>(value: unknown, path: string, words: readonly [T, ...T[]]): T;
-  // true when JSON has null (or nothing) at path: a ghost author, a commit with no checks
   absent(value: unknown, path: string): boolean;
   done<T>(value: T): Result<T>;
 };
@@ -37,7 +34,6 @@ export function reader(context: string): Reader {
     text: (value, path) => check(walk(value, path), path, "a string", (v) => typeof v === "string", ""),
     int: (value, path) => {
       const found = walk(value, path);
-      // GitLab's GraphQL gives an iid as a string of digits
       const number = typeof found === "string" && /^\d+$/.test(found) ? Number(found) : found;
       return check(number, path, "a whole number", (v) => Number.isSafeInteger(v), 0);
     },

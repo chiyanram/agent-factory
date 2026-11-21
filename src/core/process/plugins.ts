@@ -10,7 +10,6 @@
 import type { Result } from "../forge/api.js";
 import { prop } from "../dispatch/records.js";
 
-// isOldConnectors : a "plugins" value in the old shape, a map of connectors rather than a list of plugins
 export function isOldConnectors(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -20,7 +19,6 @@ export const OLD_CONNECTORS =
 
 export type PluginRef = { readonly name: string; readonly marketplace: string };
 
-// a plugin's name and its marketplace's, as Claude Code names them: lower-case words joined by - . or _
 const PART = "[a-z0-9][a-z0-9._-]{0,63}";
 const REF = new RegExp(`^${PART}@${PART}$`);
 
@@ -50,12 +48,10 @@ function refsOf(value: unknown): readonly PluginRef[] | undefined {
   return good.length === refs.length && names.size === good.length ? good : undefined;
 }
 
-// checkPluginList : "" when a settings value is a good plugin list, or the old connector map; else what it must be
 export function checkPluginList(value: unknown): string {
   return isOldConnectors(value) || refsOf(value) !== undefined ? "" : `${PLUGIN_LIST_HINT}, no name twice`;
 }
 
-// pluginListOf : the plugins one project file's JSON lists, in order; none when it lists none
 export function pluginListOf(path: string, raw: object): Result<readonly PluginRef[]> {
   const value = prop(raw, "plugins");
   if (value === undefined || isOldConnectors(value)) {

@@ -2,7 +2,9 @@
 // by its hash (#232; docs/DESIGN.md section 5 "Plugins"). The marketplace names each plugin's folder in
 // .claude-plugin/marketplace.json ("source": "./plugins/<name>"), which must be a folder inside the marketplace. Every
 // git call goes through hostGit; the checkout is a worktree of the marketplace's clone, removed after the copy.
-// Nothing is pinned here: `agent-factory plugin update` shows the change, checks it, then moves the pin.
+// Nothing is pinned here: `agent-factory plugin update` shows the change, checks it, then moves the pin. Only a full
+// commit is fetched, so no word is read as a ref or an option. A first pin shows one file count per folder, so a person
+// reads the plugin's shape; a later pin shows each changed file.
 
 import { cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
@@ -30,7 +32,6 @@ function gitWhy(r: GitResult): string {
   return r.kind === "refused" ? r.reason : r.kind === "failed" ? r.stderr.trim() : "";
 }
 
-// targetCommit : the given commit, or the marketplace's HEAD after a fetch from its origin
 export async function targetCommit(
   env: NodeJS.ProcessEnv,
   dir: string,
@@ -46,8 +47,6 @@ export async function targetCommit(
     : failed(`cannot fetch the marketplace in ${dir}: ${gitWhy(fetched)}`);
 }
 
-// fetchedCommit : a full commit the clone does not hold yet, fetched from its origin (#607); only a full commit
-// reaches here, so no word is read as a ref or an option
 async function fetchedCommit(env: NodeJS.ProcessEnv, dir: string, commit: string): Promise<Result<string>> {
   const fetched = await git(env, dir, ["fetch", "-q", "--end-of-options", "origin", commit]);
   return fetched.kind === "ok"
@@ -63,7 +62,6 @@ async function commitOf(env: NodeJS.ProcessEnv, dir: string, rev: string, named:
 
 type Entry = { readonly source: string; readonly version: string };
 
-// entryOf : the plugin's folder and version, as the marketplace file names them at that commit. Pure.
 export function entryOf(text: string, name: string): Result<Entry> {
   const list = prop(parsedJson(text), "plugins");
   const found: unknown = Array.isArray(list) ? list.find((p: unknown) => prop(p, "name") === name) : undefined;
@@ -73,7 +71,6 @@ export function entryOf(text: string, name: string): Result<Entry> {
     : { kind: "ok", value: { source: path, version: matching(prop(found, "version"), /^/) ?? "" } };
 }
 
-// inside : a relative folder inside the marketplace's repo, normalized; a git, URL or outside source is not one
 function inside(source: unknown): string | undefined {
   const path = typeof source === "string" ? normalize(source) : "..";
   return path.startsWith("..") || isAbsolute(path) || path === "." ? undefined : path;
@@ -81,7 +78,6 @@ function inside(source: unknown): string | undefined {
 
 export type Fetched = Pin & { readonly dir: string; readonly files: readonly string[] };
 
-// fetchPlugin : one plugin at one commit of its marketplace, copied into the store by its hash; nothing is pinned
 export async function fetchPlugin(input: {
   readonly home: string;
   readonly env: NodeJS.ProcessEnv;
@@ -139,12 +135,8 @@ async function stored(s: {
   };
 }
 
-// changedFiles : what a new version adds, removes and changes, by path, from both versions' file lines. Pure.
-// FOLDER_DEPTH : how many path parts name a folder in a first pin's count (skills/crq, not each references file)
 const FOLDER_DEPTH = 2;
 
-// folderCounts : a first pin's files as one "+ N files in <folder>" line per folder, so a person reads the plugin's
-// shape, not every file; a later pin shows each changed file (changedFiles) (#482, ledger pilot row 12). Pure.
 export function folderCounts(files: readonly string[]): readonly string[] {
   const counts = new Map<string, number>();
   for (const line of files) {

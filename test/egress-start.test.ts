@@ -18,8 +18,6 @@ const OK: Exit = { code: 0, stdout: "", stderr: "" };
 const NAMES = egressNames("ledger");
 const NO_NETWORK: Exit = { code: 1, stdout: "", stderr: "Error response from daemon: network factory-int not found" };
 
-// a fake docker: answers by the first two arguments and the last, records every call; a network it is not told about
-// is missing
 function fakeDocker(answers: Readonly<Record<string, Exit>>): {
   readonly calls: Call[];
   readonly docker: { run: Runner; bin: string; env: NodeJS.ProcessEnv };

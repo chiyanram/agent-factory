@@ -12,7 +12,6 @@ export type BoxCall =
 
 export type FakeBox = { readonly box: Box; readonly calls: BoxCall[]; readonly live: Set<string> };
 
-// answered : the scripted answer, or a failure naming the run that has none; an exit's stdout goes to the watcher first
 function answered(command: Command, answer: Ran | undefined, n: number): Ran {
   if (answer === undefined) {
     return { kind: "failed", reason: `fake: no answer for run ${n}: ${command.argv.join(" ")}` };

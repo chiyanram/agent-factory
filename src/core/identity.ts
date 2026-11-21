@@ -42,7 +42,6 @@ function appSetting(env: NodeJS.ProcessEnv): Result<IdentitySetting> {
   return { kind: "ok", value: { kind: "app", user, command } };
 }
 
-// identitySetting : the project's identity setting. A value that is set but not known is refused, never guessed.
 export function identitySetting(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly forge: "github" | "gitlab";
@@ -59,7 +58,6 @@ export function identitySetting(input: {
     : { kind: "failed", reason: "FACTORY_IDENTITY=app is a GitHub App; on GitLab a bot is its own glab login (own)" };
 }
 
-// the least time a token must have left when the host takes it
 export const MIN_LEFT_SECONDS = 600;
 
 function lasts(expiresAt: unknown, now: number): boolean {
@@ -86,7 +84,6 @@ function parseMinted(exit: Exit, now: number): Result<Identity> {
   }
 }
 
-// resolveIdentity : the identity to act with. For an App, one sudo call to the factory user for a token.
 export async function resolveIdentity(input: {
   readonly setting: IdentitySetting;
   readonly project: string;

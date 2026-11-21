@@ -1,6 +1,7 @@
 // door/discord/shown — what /approve shows a person: the spec's and the design's texts, the lane and both full hashes,
 // each hash computed from the very text shown, as `approve` computes it (approval.ts currentSpec). The hashes a Confirm
 // binds are therefore the hashes of what the person was shown; an edit after that makes `approve` refuse.
+// A text the scrub would change is refused, since the person would approve a hash of words they did not see.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,9 +22,7 @@ export type Shown = {
   readonly specText: string;
   readonly lane: string;
   readonly title: string;
-  // the design's hash, or "none"
   readonly design: string;
-  // undefined when the ticket has no design
   readonly designText: string | undefined;
 };
 
@@ -33,7 +32,6 @@ function storeOf(where: Where): SpecStore {
   return where.store ?? { kind: "local", root: join(where.home, "specs") };
 }
 
-// designText : the design file beside a local spec, or undefined when there is none; an issue store keeps none
 async function designText(where: Where): Promise<string | undefined> {
   const store = storeOf(where);
   const path =
@@ -41,7 +39,6 @@ async function designText(where: Where): Promise<string | undefined> {
   return path?.kind === "path" ? readFile(path.path, "utf8").catch(() => undefined) : undefined;
 }
 
-// specOf : the spec as stored and as checked, or why it cannot be shown; read once, so its hash is the hash of the text
 async function specOf(where: Where): Promise<{ readonly text: string; readonly spec: Spec } | Refused> {
   const read = await readSpec({ store: storeOf(where), project: where.project, ticket: where.ticket });
   if (read.kind !== "found") {
@@ -53,8 +50,6 @@ async function specOf(where: Where): Promise<{ readonly text: string; readonly s
     : no(`the spec is not ready: ${checked.problems.join("; ")}`);
 }
 
-// shown : the texts the person will see and their hashes, which are the hashes `approve` computes from the same
-// texts. A text the scrub would change is refused, since the person would approve a hash of words they did not see.
 export async function shown(where: Where, scrub: (text: string) => string): Promise<Shown | Refused> {
   const read = await specOf(where);
   const design = await designText(where);

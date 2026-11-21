@@ -14,13 +14,10 @@ import type { SpecRead, SpecStore } from "./spec.js";
 
 export type IssueReader = Pick<Forge, "issueBody">;
 
-// the forge, opened when the issue store first reads
 export type OpenIssues = () => Promise<Result<IssueReader>>;
 
-// an issue number: what a ticket is in the issue store
 const ISSUE = /^[1-9]\d{0,9}$/;
 
-// specStoreKind : the project's spec store, local when no layer sets it
 export function specStoreKind(env: NodeJS.ProcessEnv): Result<SpecStoreKind> {
   const set = settingOf(env, "specStore") ?? "local";
   const kind = SPEC_STORES.find((k) => k === set);
@@ -43,8 +40,6 @@ function issueRead(body: Result<string>, where: string): SpecRead {
   return body.value.trim() === "" ? { kind: "missing", where } : { kind: "found", text: body.value, where };
 }
 
-// issueStore : the store whose spec for ticket N is the body of issue N on the project's git host. A ticket that is
-// not an issue number is refused, never looked up.
 export function issueStore(input: { readonly open: OpenIssues; readonly hostProject: string }): SpecStore {
   return {
     kind: "issue",
@@ -62,7 +57,6 @@ export function issueStore(input: { readonly open: OpenIssues; readonly hostProj
   };
 }
 
-// specStoreOf : the project's spec store from its resolved settings: local under <home>/specs, or its issues
 export function specStoreOf(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly home: string;
@@ -84,12 +78,10 @@ export function specStoreOf(input: {
   };
 }
 
-// issuesFrom : an OpenIssues over a forge already open
 export function issuesFrom(forge: IssueReader): OpenIssues {
   return () => Promise.resolve({ kind: "ok", value: forge });
 }
 
-// openOnce : an OpenIssues that opens the forge at most once, however many reads it serves
 export function openOnce(open: OpenIssues): OpenIssues {
   let held: Promise<Result<IssueReader>> | undefined;
   return () => {

@@ -10,8 +10,6 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-// a plugin that writes `parts` (each a list of byte values) to `stream`, one write per part, a pause between them, so
-// each part reaches runPlugin as a chunk of its own
 function splitWriter(stream: "stdout" | "stderr", parts: readonly (readonly number[])[]): string {
   const path = join(root, `plugin-${stream}`);
   writeFileSync(
@@ -31,7 +29,6 @@ next(0);
 
 const bytes = (text: string): number[] => [...Buffer.from(text, "utf8")];
 
-// "€" is three bytes in UTF-8 (e2 82 ac); the cut falls after its first byte
 const EURO = bytes('{"text":"5 €"}');
 const CUT = EURO.indexOf(0xe2) + 1;
 

@@ -13,6 +13,9 @@
 // and everything it started are stopped, and the run answers failed with the reason (ADR-0012 S7).
 //
 // The CLI gets only the environment it needs (CLAUDE_ENV): no git host token, no FACTORY_* (ADR-0012 S2, S6).
+//
+// A CLI that answered and exited stands, even when a process it left holds its output open past the limit. A sessions
+// list that does not come in time fails, so a caller never reads "unknown" as "none".
 
 import { prop } from "../dispatch/records.js";
 import { NO_STREAM, spendOf, streamOf } from "../dispatch/spend.js";
@@ -48,7 +51,6 @@ export function claudeArgs(run: ModelRun): readonly string[] {
   ];
 }
 
-// the read-only runs sign in with this shell's claude login (CLAUDE_ENV), so a refused one is renewed there
 const REFUSED = `the claude login was refused (HTTP 401); ${SIGN_IN}; `;
 
 function failure(answer: unknown, stderr: string): string {
@@ -57,12 +59,10 @@ function failure(answer: unknown, stderr: string): string {
   return fix + (said || stderr.trim().split("\n")[0] || "no answer").slice(0, 200);
 }
 
-// lastResult : the last result event of the stream; a stream with none, or output that is no stream, has none
 function lastResult(stdout: string): unknown {
   return streamOf(NO_STREAM, `${stdout}\n`).result;
 }
 
-// readAnswer : the structured output of one run, or why there is none
 export function readAnswer(input: {
   readonly code: number;
   readonly stdout: string;
@@ -79,7 +79,6 @@ export function readAnswer(input: {
   return { kind: "ok", value: { output, answer, costUsd: spent.usd, tokens: spent.tokens, stream } };
 }
 
-// stopped : a run the limit stopped: failed, with what it streamed before the stop kept as its trace and spend
 function stopped(run: ModelRun, stdout: string): ModelResult {
   return {
     kind: "failed",
@@ -104,13 +103,10 @@ const CLAUDE_ENV = new Set([
   "https_proxy",
   "http_proxy",
   "no_proxy",
-  // the company CA (egress.caCerts)
   settingName("egress.caCerts"),
   "SSL_CERT_FILE",
 ]);
 
-// claudeEnv : the environment the claude CLI gets: what it needs to run and sign in, the model-run mark, and nothing
-// else
 export function claudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const kept = Object.entries(env).filter(
     ([name, value]) =>
@@ -123,24 +119,19 @@ export type ClaudeSetup = {
   readonly bin: string;
   readonly env: NodeJS.ProcessEnv;
   readonly run: FolderRunner;
-  // how long a minute of a run's limit is; a test makes it short
   readonly minuteMs: number;
-  // how long the sessions list may take
   readonly sessionsMs: number;
 };
 
-// claudeModel : the read-only run, through the claude CLI, stopped at its limit
 export function claudeModel(setup: ClaudeSetup): Model {
   return async (run) => {
     const call = { bin: setup.bin, args: claudeArgs(run), env: setup.env, cwd: run.folder };
     const { exit, late } = await timed(setup.run, call, run.limit.minutes * setup.minuteMs);
-    // a CLI that answered and exited stands, even when a process it left held its output open past the limit
     const read = readAnswer(exit);
     return late && read.kind === "failed" ? stopped(run, exit.stdout) : read;
   };
 }
 
-// sessionNames : the names in `claude agents --json`, or why it did not print a list
 export function sessionNames(stdout: string): Result<readonly string[]> {
   let parsed: unknown;
   try {
@@ -155,8 +146,6 @@ export function sessionNames(stdout: string): Result<readonly string[]> {
   return { kind: "ok", value: names };
 }
 
-// claudeSessions : the live background sessions, through `claude agents --json`; a list that does not come in time
-// fails, so a caller never mistakes "unknown" for "none"
 export function claudeSessions(setup: ClaudeSetup): Sessions {
   return async (): Promise<Result<readonly string[]>> => {
     const call = { bin: setup.bin, args: ["agents", "--json"], env: setup.env };

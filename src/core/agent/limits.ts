@@ -18,7 +18,6 @@ export type LimitId =
 export const LIMIT_DEFAULT = 20;
 export const LIMIT_MOST = 60;
 
-// minutesIn : the minutes a set value names, LIMIT_DEFAULT for none, or NaN for text that is no whole number
 function minutesIn(set: string | undefined): number {
   if (set === undefined) {
     return LIMIT_DEFAULT;
@@ -26,7 +25,6 @@ function minutesIn(set: string | undefined): number {
   return /^\d+$/.test(set) ? Number(set) : Number.NaN;
 }
 
-// limitOf : the run's limit from its key, LIMIT_DEFAULT minutes when no layer sets it
 export function limitOf(env: NodeJS.ProcessEnv, id: LimitId): Result<RunLimit> {
   const setting = settingName(id);
   const minutes = minutesIn(settingOf(env, id));

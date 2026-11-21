@@ -131,8 +131,6 @@ describe("proxyEnv", () => {
   });
 });
 
-// AC-4 of #485: a project on a company GitLab gets that host refused, whichever layer names it, and every caller
-// passes the project's own host (parseAllowlist has no default for it)
 describe("the project's own git host on the allowlist (#485)", () => {
   const file = { gate: "local", verify: ["make", "test"], ready: { programs: ["make"] } };
 

@@ -25,7 +25,6 @@ function parsed(text: string): unknown {
   }
 }
 
-// deny : a PreToolUse refusal: the decision on stdout, the reason on stderr, exit 2
 export function deny(reason: string): Scoped {
   const decision = {
     hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
@@ -33,9 +32,6 @@ export function deny(reason: string): Scoped {
   return { code: 2, out: `${JSON.stringify(decision)}\n`, err: `${reason}\n` };
 }
 
-// real : the path with every part that exists followed through symlinks; the parts that do not exist yet kept as typed.
-// "" when a part is there but cannot be followed (a dangling link, a loop, no access), since a Write would follow the
-// link to wherever it points
 export async function real(path: string): Promise<string> {
   const found = await realpath(path).catch(() => "");
   if (found !== "") {
@@ -53,7 +49,6 @@ export async function real(path: string): Promise<string> {
   return above === "" ? "" : join(above, basename(path));
 }
 
-// fileOf : the absolute path the tool call edits, or "" when it names none, a relative one or one with a ".."
 export function fileOf(stdin: string): string {
   const input = prop(parsed(stdin), "tool_input");
   const named = prop(input, "file_path") ?? prop(input, "notebook_path");
@@ -61,14 +56,11 @@ export function fileOf(stdin: string): string {
   return isAbsolute(file) && !file.split(/[\\/]/).includes("..") ? file : "";
 }
 
-// within : whether the file, followed through its links, sits inside the specs folder; never when either cannot be
-// followed (an inside of "" would never match, but a root of "" would let "/" match everything)
 async function within(file: string, specs: string): Promise<boolean> {
   const [inside, root] = await Promise.all([real(file), real(specs)]);
   return root !== "" && inside.startsWith(`${root}${sep}`);
 }
 
-// editScope : pass (exit 0) an edit inside the specs folder, deny (exit 2) any other
 export async function editScope(stdin: string, specs: string): Promise<Scoped> {
   const file = fileOf(stdin);
   const named = file === "" ? "this call names no absolute file" : `${file} is outside them`;

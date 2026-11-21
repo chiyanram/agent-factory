@@ -1,6 +1,6 @@
 // The srt runner on the real srt (#114 "Done when"): inside srt, reading ~/.ssh/canary and a direct connection off the
 // allowlist both fail. It needs the pinned srt on this machine, so it runs on the work laptop and is skipped elsewhere,
-// always with the reason (GUIDE.md "Check the srt runner"):
+// always with the reason (docs/how-to/check-the-runner.md):
 //
 //   echo canary > ~/.ssh/canary && FACTORY_TEST_SRT=1 npx vitest run test/srt-box-real.test.ts
 //
@@ -31,8 +31,6 @@ const OFF_LIST = "https://example.com";
 
 const toolchains = await locateToolchains({ env: process.env, home: HOME, factoryHome: FACTORY });
 
-// the runner as app.ts makes it: the whole home hidden, the agent CLI's install, its Node and the toolchains allowed
-// back read-only
 async function makeBox(): Promise<Box> {
   const programs = await locatePrograms({
     env: process.env,
@@ -52,7 +50,6 @@ async function makeBox(): Promise<Box> {
   });
 }
 
-// why : the reason this machine cannot run the check, or "" when it can
 async function why(box: Box): Promise<string> {
   if (process.env.FACTORY_TEST_SRT !== "1") {
     return "set FACTORY_TEST_SRT=1 on the work laptop to run this";
@@ -64,18 +61,15 @@ async function why(box: Box): Promise<string> {
 const box = await makeBox();
 const skip = await why(box);
 
-// the programs a toolchain case tries, in this order, each with --version
 const TRIED = ["java", "node", "python3", "go", "ruby"];
 
 type Tool = { readonly dir: string; readonly program: string };
 
-// programsIn : each tried program in one PATH folder
 function programsIn(dir: string, entry: string): readonly Tool[] {
   const names = existsSync(entry) ? readdirSync(entry) : [];
   return TRIED.filter((n) => names.includes(n)).map((n) => ({ dir, program: join(entry, n) }));
 }
 
-// toolchainProgram : a program on PATH inside a detected manager's install folder (#371), or "none"
 function toolchainProgram(found: Toolchains): Tool | "none" {
   const path = (process.env.PATH ?? "").split(delimiter);
   const tools = found.allowed
@@ -86,7 +80,6 @@ function toolchainProgram(found: Toolchains): Tool | "none" {
 
 const tool = toolchainProgram(toolchains);
 
-// inSrt : one command in a fresh runner on the clone
 async function inSrt(argv: readonly [string, ...string[]]): Promise<Ran> {
   const started = await box.start({ image: NO_IMAGE, worktree: CLONE, readOnly: [], env: {}, proxy: "", network: "" });
   if (started.kind !== "started") {
@@ -173,9 +166,6 @@ describe.skipIf(skip !== "")(`srt runner on the real srt${skip === "" ? "" : ` (
     expect(existsSync(outside)).toBe(false);
   });
 
-  // ledger/4 (#62): Claude Code's Bash tool failed every call with EPERM on /private/tmp/claude-501/... inside srt
-  // the call runs inside srt, so it names the run's temp folder; written as .call so check-temp-dirs, which keeps this
-  // test's own temp folders on tempDir(), does not read it as one
   it("makes a temp folder under the run's own temp folder, and cannot write to /tmp directly", async () => {
     const made = await inSrt([
       "node",

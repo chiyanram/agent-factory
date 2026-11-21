@@ -25,7 +25,6 @@ export type Login =
   | { readonly kind: "unknown"; readonly reason: string }
   | { readonly kind: "missing" };
 
-// how long the call may take: a refusal came back in 4 s; offline, the CLI retries for minutes
 export const LOGIN_MS = 60_000;
 
 export const LOGIN_ARGS: readonly string[] = [
@@ -42,17 +41,13 @@ export const LOGIN_ARGS: readonly string[] = [
   "--verbose",
 ];
 
-// how to renew the login a run on this host gets from this shell (claude.ts CLAUDE_ENV) once Anthropic refused it
 export const SIGN_IN =
   "run claude and sign in with /login; unset a stale ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN in your shell";
 
-// refusedLogin : the run's result event says the provider refused its login (HTTP 401). Pure.
 export function refusedLogin(answer: unknown): boolean {
   return prop(answer, "api_error_status") === 401;
 }
 
-// loginOf : what one login call proved. A call past its limit stands on a result event it printed in time. It never
-// quotes the CLI's output. Pure.
 export function loginOf(exit: Exit, late: boolean, limitMs: number): Login {
   const answer = streamOf(NO_STREAM, `${exit.stdout}\n`).result;
   if (late && answer === undefined) {
@@ -64,7 +59,6 @@ export function loginOf(exit: Exit, late: boolean, limitMs: number): Login {
   return exit.code === CANNOT_START ? { kind: "missing" } : answered(exit.code, answer);
 }
 
-// answered : the verdict of a call that ran: only a 401 is refused, only a result the CLI marked ok is authorized
 function answered(code: number, answer: unknown): Login {
   if (refusedLogin(answer)) {
     return { kind: "refused", status: 401 };
@@ -72,7 +66,6 @@ function answered(code: number, answer: unknown): Login {
   return code === 0 && prop(answer, "is_error") === false ? { kind: "authorized" } : unsure(code, answer);
 }
 
-// unsure : why a call that was neither accepted nor refused could not tell
 function unsure(code: number, answer: unknown): Login {
   const status = prop(answer, "api_error_status");
   if (typeof status === "number") {
@@ -81,7 +74,6 @@ function unsure(code: number, answer: unknown): Login {
   return { kind: "unknown", reason: `claude exited ${code} with no ${answer === undefined ? "result" : "answer"}` };
 }
 
-// what a login of its own must not inherit from this shell: another login, and the CLI's own config folder
 function ownLogin(name: string): boolean {
   return (
     name.startsWith("ANTHROPIC_") ||
@@ -91,8 +83,6 @@ function ownLogin(name: string): boolean {
   );
 }
 
-// loginEnv : the call's environment. With a token, the token alone in a private empty HOME, as a writer's box gets it
-// (S15); without one, the claude env as this shell gives it, which is what the read-only runs on this host use. Pure.
 export function loginEnv(
   env: NodeJS.ProcessEnv,
   token: Readonly<Record<string, string>> | undefined,
@@ -107,17 +97,13 @@ export function loginEnv(
 
 export type LoginSetup = {
   readonly bin: string;
-  // the claude env (claude.ts claudeEnv): no git host token, no FACTORY_*
   readonly env: NodeJS.ProcessEnv;
   readonly run: FolderRunner;
-  // the call's limit; LOGIN_MS unless a test shortens it
   readonly ms: number | undefined;
 };
 
-// claudeLogin : one login call in a fresh empty folder, removed after; the token, when given, is the only login
 export function claudeLogin(setup: LoginSetup): (token?: Readonly<Record<string, string>>) => Promise<Login> {
   return async (token) => {
-    // by its real path: on macOS the temp folder sits behind a symlink, and HOME must name the folder the CLI runs in
     const folder = await realpath(await mkdtemp(join(tmpdir(), "factory-login-")));
     try {
       const call = { bin: setup.bin, args: LOGIN_ARGS, env: loginEnv(setup.env, token, folder), cwd: folder };

@@ -1,5 +1,10 @@
 // app — the command line, as a function: runCli(argv, io) returns the exit code and writes only through io, so a test
 // can run every command. src/cli.ts only binds it to the process (#101). A UI replaces only these two files.
+//
+// A human's command starts dispatch, never cron or launchd; a dry run is one pass, because it acts on nothing. `spec
+// --show` escapes terminal control characters, so a spec cannot move the cursor or set a title. review refuses an
+// unknown factory login, because its notes are the review rounds. The coordinator's hooks always exit 0, so a hook
+// never blocks the session.
 
 import { parseArgs } from "node:util";
 import { realpathSync } from "node:fs";
@@ -131,8 +136,6 @@ import {
 
 export type { Io } from "./cli-common.js";
 
-// HELP_COMMANDS : every command's help lines, a line "  <name> …" and its indented continuations, in one order;
-// helpText groups them by INTERNAL, so the set alone decides what --help shows
 export const HELP_COMMANDS = `  poll                         one line of facts per open change, read from the forge
   spec <project> <ticket>      check a ticket's local spec: its hash, or what it is missing
   spec <project> <ticket> --show
@@ -229,26 +232,20 @@ settings:
 
 type Args = {
   readonly json: boolean;
-  // retro: the lesson drafts, one model run (#488)
   readonly draft: boolean;
   readonly template: boolean;
-  // spec: print the spec's text instead of checking it (#542)
   readonly show: boolean;
   readonly once: boolean;
   readonly dryRun: boolean;
   readonly yes: boolean;
   readonly noLoop: boolean;
-  // init: the product clone to read (default: the current folder)
   readonly repo: string | undefined;
-  // coordinator: start it in the project's Discord channel
   readonly discord: boolean;
-  // setup claude: whose token, the runs' (none) or the coordinator's
   readonly seat: string | undefined;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
 
-// usage : the spend table (#131), with the project's settings layers resolved when it names one
 function usage({ positionals, io }: Args): Promise<number> {
   const [project] = positionals;
   return resolvedRun("usage", project, io, (resolved) => {
@@ -261,7 +258,6 @@ function usage({ positionals, io }: Args): Promise<number> {
   });
 }
 
-// trace : a ticket's run traces, or one trace (#487), with the project's settings layers resolved
 function trace({ positionals, io }: Args): Promise<number> {
   const [project] = positionals;
   return resolvedRun("trace", project, io, (resolved) => {
@@ -274,10 +270,8 @@ function trace({ positionals, io }: Args): Promise<number> {
   });
 }
 
-// retro : the failures seen on two or more merges (#488), with the project's settings layers resolved
 function retro({ positionals, json, draft, io }: Args): Promise<number> {
   const [project] = positionals;
-  // the flags parseArgs read, back on the command line retroCommand reads
   const words = [...positionals, ...(json ? ["--json"] : []), ...(draft ? ["--draft"] : [])];
   return resolvedRun("retro", project, io, (resolved) => {
     const home = factoryHome(resolved.env);
@@ -294,7 +288,6 @@ function retro({ positionals, json, draft, io }: Args): Promise<number> {
   });
 }
 
-// onboard : the onboarder's run, or a human's acceptance of what it staged (#235), with the project's settings resolved
 function onboardCli({ positionals, io }: Args): Promise<number> {
   const project = positionals[0] === "accept" ? positionals[1] : positionals[0];
   return resolvedRun("onboard", project, io, (resolved) => {
@@ -335,7 +328,6 @@ function onboardCli({ positionals, io }: Args): Promise<number> {
   });
 }
 
-// poll [<project>] : the project's changes; with no project named, the one in the factory home (#382)
 function poll(args: Args): Promise<number> {
   if (args.positionals.length > 1) {
     args.io.err("usage: agent-factory poll [<project>] [--json]\n");
@@ -369,9 +361,6 @@ async function pollResolved({ json, io }: Args): Promise<number> {
   return 0;
 }
 
-// spec : one line "spec <project>/<ticket> <hash> <path>" for a spec that follows the template (exit 0); its problems
-// (exit 2); or why it cannot be read (exit 1). The hash is what `approve` (#104) asks the human to confirm. With
-// --show, the spec's text as stored, checked or not, so the coordinator can edit a spec that does not pass yet (#542).
 async function spec({ template: wantTemplate, show, positionals, io }: Args): Promise<number> {
   if (wantTemplate && show) {
     io.err("usage: agent-factory spec <project> <ticket> --show, or agent-factory spec --template <ticket>\n");
@@ -424,7 +413,6 @@ async function specResolved(io: Io, project: string, ticket: string, show: boole
   }
 }
 
-// specRead : a spec that was found: its text with --show, else its checks and hashes
 function specRead(
   io: Io,
   at: SpecWhere,
@@ -434,9 +422,6 @@ function specRead(
   return show ? Promise.resolve(specShown(io, read.text)) : specFound(io, at, read);
 }
 
-// specShown : the spec's text as the store holds it; no check runs, so a spec that fails one still shows. A control
-// character a terminal acts on is escaped (inertText), so the text cannot move the cursor or set a title; a spec that
-// holds one fails `spec` anyway
 function specShown(io: Io, text: string): number {
   io.out(inertText(text));
   return 0;
@@ -455,8 +440,6 @@ type SpecWhere = {
   readonly ticket: string;
 };
 
-// specsAt : where the ticket's spec is read: the project's spec store from its resolved settings (#381); the git host
-// is opened only when the issue store reads an issue
 function specsAt(
   io: Io,
   project: string,
@@ -472,7 +455,6 @@ function specsAt(
     : { kind: "refused", reason: store.reason };
 }
 
-// issuesOf : the project's forge, for the issue store
 async function issuesOf(io: Io, home: string, project: string): Promise<Result<Forge>> {
   const opened = await openProjectForge(
     { env: io.env, log: (line) => io.err(`${line}\n`) },
@@ -481,7 +463,6 @@ async function issuesOf(io: Io, home: string, project: string): Promise<Result<F
   return opened.kind === "ok" ? { kind: "ok", value: opened.value.forge } : opened;
 }
 
-// specFound : the spec's hash and its design's (#227), or what the spec is missing
 async function specFound(
   io: Io,
   at: SpecWhere,
@@ -506,9 +487,6 @@ async function specFound(
   return 0;
 }
 
-// beforeDesignReview : what stops a spec before any design review (#489): a planned file that needs a heavier lane
-// than the spec's (#230), and a `file:line@commit` cite in the spec or its design that does not hold in the project's
-// clone
 async function beforeDesignReview(io: Io, at: SpecWhere, read: Spec, text: string): Promise<readonly string[]> {
   const raise = await plannedCheck({ home: at.home, project: at.project, spec: read });
   const raised =
@@ -516,8 +494,6 @@ async function beforeDesignReview(io: Io, at: SpecWhere, read: Spec, text: strin
   return [...raised, ...(await citesChecked(io, [text, await designTextOf(at)]))];
 }
 
-// citesChecked : the cites that do not hold in the project's clone. With cites and no clone set, it says on stderr that
-// they were not checked and stops nothing: the design review checks them again in the clone before any model runs.
 async function citesChecked(io: Io, texts: readonly string[]): Promise<readonly string[]> {
   const clone = settingOf(io.env, "clone") ?? "";
   if (isAbsolute(clone)) {
@@ -530,14 +506,12 @@ async function citesChecked(io: Io, texts: readonly string[]): Promise<readonly 
   return [];
 }
 
-// noClone : why the clone cannot be read: none set, or a path that is not absolute
 function noClone(clone: string): string {
   return clone === ""
     ? "no clone set (FACTORY_REPO)"
     : `FACTORY_REPO must be an absolute path, got ${JSON.stringify(clone)}`;
 }
 
-// designTextOf : the design beside a local spec, or "" when there is none
 async function designTextOf(at: SpecWhere): Promise<string> {
   if (at.store.kind !== "local") {
     return "";
@@ -546,7 +520,6 @@ async function designTextOf(at: SpecWhere): Promise<string> {
   return path.kind === "path" ? readFile(path.path, "utf8").catch(() => "") : "";
 }
 
-// branchOnHost : whether factory/<ticket> is already on the git host, through the project's forge seam
 async function branchOnHost(io: Io, home: string, project: string, ticket: string): Promise<Result<boolean>> {
   const opened = await openProjectForge(
     { env: io.env, log: (line) => io.err(`${line}\n`) },
@@ -564,7 +537,6 @@ function startTarget(positionals: readonly string[]): TicketArgs | "bad" {
     : "bad";
 }
 
-// branchAt : whether factory/<ticket> is on the git host, with the factory home it was asked from
 async function branchAt(
   io: Io,
   target: TicketArgs,
@@ -577,7 +549,6 @@ async function branchAt(
   return there.kind === "ok" ? { kind: "ok", value: { home: home.path, there: there.value } } : there;
 }
 
-// start : a human's START at the terminal (#227). It asks first, exit 3, when the ticket's branch is on the git host.
 async function startCommand({ positionals, yes, noLoop, io }: Args): Promise<number> {
   const target = startTarget(positionals);
   if (target === "bad") {
@@ -590,8 +561,6 @@ async function startCommand({ positionals, yes, noLoop, io }: Args): Promise<num
   });
 }
 
-// withLoop : the orchestrator loop for the project, started in the background when none runs (#305), after a human's
-// START or approval. The record is kept either way: a loop that cannot start is printed, and the exit stays 0.
 async function withLoop(name: string, io: Io, project: string): Promise<number> {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {
@@ -649,7 +618,6 @@ function startOutcome(io: Io, result: Awaited<ReturnType<typeof startAtTerminal>
 
 type ApproveArgs = TicketArgs & { readonly hash: string; readonly design: string };
 
-// approveArgs : the project, the ticket, the spec hash and the design hash ("none" when not given)
 function approveArgs(positionals: readonly string[]): ApproveArgs | "bad" {
   const [project, ticket, hash, design] = [...positionals, "none"];
   const given = positionals.length >= 3 && positionals.length <= 4;
@@ -693,7 +661,6 @@ async function approveResolved(args: ApproveArgs, noLoop: boolean, io: Io): Prom
   return noLoop ? 0 : withLoop("approve", io, project);
 }
 
-// waive : a human's waiver of the test checks at one head, at the terminal (#231)
 async function waiveCommand({ positionals, io }: Args): Promise<number> {
   const [project, ticket, head] = positionals;
   const target = startTarget([project, ticket].flatMap((n) => (n === undefined ? [] : [n])));
@@ -797,8 +764,6 @@ type Planned = {
 
 type Project = { readonly forge: Forge; readonly identity: Identity };
 
-// hostBoxPlan : the project's box plan on this host: the vm box and the project's egress proxy, through its docker, or
-// the srt runner with its own proxy (#114)
 function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
   const docker = hostDocker(io.env, io.system.run);
   return boxPlan({
@@ -832,7 +797,6 @@ function hostBoxPlan(io: Io, home: string, project: string): Promise<PlanRead> {
   });
 }
 
-// egressCli : `egress check <project>` with the project's resolved settings (egress-cli.ts)
 function egressCli(argv: readonly string[], io: Io): Promise<number> {
   return egressCommand(argv, {
     out: io.out,
@@ -850,8 +814,6 @@ function egressCli(argv: readonly string[], io: Io): Promise<number> {
   });
 }
 
-// processAndQuarantine : the project's process, and the checks a person quarantined, which come from the project's own
-// settings, never the rules pack (#485)
 async function processAndQuarantine(
   home: string,
   project: string,
@@ -865,7 +827,6 @@ async function processAndQuarantine(
   return quarantine.kind === "ok" ? { kind: "ok", value: { ...own.value, quarantine: quarantine.value } } : quarantine;
 }
 
-// stepsFor : the gate and every step for one pass; a project file that is there but refused stops the pass
 async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
   const { forge, identity } = opened;
   const planned = await hostBoxPlan(io, home, project);
@@ -923,7 +884,6 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
   };
 }
 
-// programsOf : the programs the project's evidence rows may start with, as a field to spread (#444)
 function programsOf(plan: BoxPlan): { readonly readyPrograms?: readonly string[] } {
   const programs = readyPrograms(plan);
   return programs === undefined ? {} : { readyPrograms: programs };
@@ -931,7 +891,6 @@ function programsOf(plan: BoxPlan): { readonly readyPrograms?: readonly string[]
 
 type PassSettings = { readonly home: string; readonly quiet: number; readonly poll: number; readonly caps: Caps };
 
-// passSetup : the steps, and every setting of one pass with them
 async function passSetup(
   project: string,
   dryRun: boolean,
@@ -968,7 +927,6 @@ async function passSetup(
   };
 }
 
-// aroundPass : the pass's pings (#119) and the project's spec store (#381)
 async function aroundPass(
   io: Io,
   home: string,
@@ -983,8 +941,6 @@ async function aroundPass(
   return specs.kind === "ok" ? { kind: "ok", value: { notify: notify.value, specs: specs.value } } : specs;
 }
 
-// notifierFor : the pings of a pass (#119): through the notify plugin the project file maps, with the webhook from the
-// token store; none when it maps none; printed instead of sent under FACTORY_DRY_RUN=1
 async function notifierFor(io: Io, home: string, project: string, mark: string): Promise<Result<Notify>> {
   const plugin = await notifyPluginOf({ home, project });
   if (plugin.kind === "failed" || plugin.value === "") {
@@ -997,8 +953,6 @@ async function notifierFor(io: Io, home: string, project: string, mark: string):
   return { kind: "ok", value: pluginNotify({ setup, plugin: plugin.value, project, mark }) };
 }
 
-// setupNow : one pass's settings, the project's git host opened afresh. The project file may map the forge to a plugin
-// (#134); then every forge call of the pass goes through it.
 async function setupNow(project: string, dryRun: boolean, io: Io, settings: PassSettings): Promise<Result<TickSetup>> {
   const opened = await openProjectForge(
     { env: io.env, log: (line) => io.err(`${line}\n`) },
@@ -1021,8 +975,6 @@ async function onePass(project: string, dryRun: boolean, io: Io, settings: PassS
   return passed.value.some((r) => r.result.kind === "failed") ? 2 : 0;
 }
 
-// dispatchReady : the pass's settings; refused while the coordinator could approve, START or reach the git host
-// itself (#105, #227)
 async function dispatchReady(io: Io): Promise<DispatchSettings> {
   const settings = dispatchSettings(io.env);
   const places = placesOf(io);
@@ -1032,7 +984,6 @@ async function dispatchReady(io: Io): Promise<DispatchSettings> {
     : settings;
 }
 
-// loopWords : a forge command's words checked, with its project word, if any, taken off first
 function loopWords(name: string, positionals: readonly string[]) {
   const words = projectWord(name, positionals);
   const command = LOOP_COMMANDS[name];
@@ -1040,7 +991,6 @@ function loopWords(name: string, positionals: readonly string[]) {
   return { project: words.project, parsed: plain && command !== undefined ? command(words.rest) : "usage" } as const;
 }
 
-// loopCommand : a forge command of loop-cli: its words checked first, then run on the chosen project's settings
 function loopCommand(name: string, { positionals, io }: Args): Promise<number> {
   const words = loopWords(name, positionals);
   const parsed = words.parsed;
@@ -1049,7 +999,6 @@ function loopCommand(name: string, { positionals, io }: Args): Promise<number> {
     : projectRun(name, words.project, io, projectForm(name), (resolved) => Promise.resolve(parsed(resolved)));
 }
 
-// boardNamed : a chosen project, or the usage when none was chosen. Pure.
 function boardNamed(chosen: Result<string | undefined>, form: string): Result<string> {
   if (chosen.kind === "failed") {
     return chosen;
@@ -1059,8 +1008,6 @@ function boardNamed(chosen: Result<string | undefined>, form: string): Result<st
     : { kind: "ok", value: chosen.value };
 }
 
-// boardProject : the project the board (or the handoff note) is for: the one named, or the one chosen as projectRun
-// chooses
 async function boardProject(io: Io, positionals: readonly string[], form: string): Promise<Result<string>> {
   const home = factoryHome(io.env);
   if (home.kind !== "home" || positionals.length > 1) {
@@ -1069,20 +1016,17 @@ async function boardProject(io: Io, positionals: readonly string[], form: string
   return boardNamed(await chosenProject({ home: home.path, project: positionals[0], env: io.env, usage: form }), form);
 }
 
-// a read of the board: the board itself, or the coordinator's reset note built on it
 type BoardReader = {
   readonly name: "board" | "handoff";
   readonly form: string;
   readonly run: (project: string, io: Io, read: BoardRead) => Promise<number>;
 };
 
-// what each board reader's command gets from the read-only pass
 type BoardRead = {
   readonly home: string;
   readonly pass: TickSetup;
 };
 
-// boardReaderCli : a board reader for the project named or chosen, its settings resolved
 async function boardReaderCli(reader: BoardReader, positionals: readonly string[], io: Io): Promise<number> {
   const project = await boardProject(io, positionals, reader.form);
   if (project.kind === "failed") {
@@ -1092,7 +1036,6 @@ async function boardReaderCli(reader: BoardReader, positionals: readonly string[
   return resolvedRun(reader.name, project.value, io, (resolved) => boardReaderOn(reader, project.value, resolved));
 }
 
-// boardReaderOn : the pass's setup made read-only (boardPass), handed to the reader with nothing acted on
 async function boardReaderOn(reader: BoardReader, project: string, io: Io): Promise<number> {
   const settings = dispatchSettings(io.env);
   const setup = "kind" in settings ? settings : await setupNow(project, true, io, settings);
@@ -1103,7 +1046,6 @@ async function boardReaderOn(reader: BoardReader, project: string, io: Io): Prom
   return reader.run(project, io, { home: settings.home, pass: boardPass(setup.value, io.err) });
 }
 
-// boardIo : what the board and the handoff note read, from the read-only pass
 function boardIo(io: Io, { home, pass }: BoardRead) {
   return {
     ...io,
@@ -1116,7 +1058,6 @@ function boardIo(io: Io, { home, pass }: BoardRead) {
   };
 }
 
-// board : every ticket in flight, read-only
 function boardReader(json: boolean): BoardReader {
   return {
     name: "board",
@@ -1125,7 +1066,6 @@ function boardReader(json: boolean): BoardReader {
   };
 }
 
-// handoff : the project coordinator's reset note, built by code from the board and the open maps
 const HANDOFF_READER: BoardReader = {
   name: "handoff",
   form: "agent-factory handoff [<project>]",
@@ -1137,17 +1077,14 @@ const HANDOFF_READER: BoardReader = {
     }),
 };
 
-// boardCli : the board command
 function boardCli({ positionals, json, io }: Args): Promise<number> {
   return boardReaderCli(boardReader(json), positionals, io);
 }
 
-// boardOn : the board as the terminal prints it, for a front door
 function boardOn(project: string, json: boolean, io: Io): Promise<number> {
   return boardReaderOn(boardReader(json), project, io);
 }
 
-// waiting : a pass's wait pings alone (waiting-cli.ts), for the project named or chosen as the board's
 async function waitingCli({ positionals, dryRun, io }: Args): Promise<number> {
   const project = await boardProject(io, positionals, "agent-factory waiting [<project>]");
   if (project.kind === "failed") {
@@ -1168,9 +1105,6 @@ async function waitingCli({ positionals, dryRun, io }: Args): Promise<number> {
   });
 }
 
-// dispatch : the orchestrator loop (#305), or with --once one pass (#103). A human's command starts it; no cron or
-// launchd job does. A lock keeps passes apart, and another keeps a second loop out. A dry run is one pass: it acts on
-// nothing, so a loop of them would never end.
 async function dispatchCommand({ positionals, once, dryRun, io }: Args): Promise<number> {
   const [project] = positionals;
   if (project === undefined || positionals.length !== 1) {
@@ -1191,8 +1125,6 @@ async function dispatchResolved(project: string, once: boolean, dryRun: boolean,
   return once ? onePass(project, dryRun, io, settings) : loopPasses(project, io, settings);
 }
 
-// loopPasses : passes until no ticket is in flight; exit 0, 1 when it cannot run or stopped on failed passes, 2 when an
-// action failed
 async function loopPasses(project: string, io: Io, settings: PassSettings): Promise<number> {
   const ended = await orchestratorLoop({
     home: settings.home,
@@ -1210,9 +1142,6 @@ async function loopPasses(project: string, io: Io, settings: PassSettings): Prom
   return ended.value.failedActions ? 2 : 0;
 }
 
-// the login the factory posts as, or "" when the forge cannot say (the reviewer then counts no earlier round)
-// factoryLogin : the login the factory posts as; its notes are the review rounds, so an unknown login is refused,
-// never read as "no rounds"
 async function factoryLogin(forge: Forge): Promise<Result<string>> {
   const me = await forge.me();
   return me.kind === "ok"
@@ -1297,7 +1226,6 @@ async function runReview(target: Target, io: Io, p: Paths, plugins: readonly Plu
   return round.value.kind === "moved" ? 3 : 0;
 }
 
-// review : one round (#138). A reviewer spends on model runs, so a dry run refuses it.
 async function reviewCommand({ positionals, io }: Args): Promise<number> {
   const target = reviewTarget(positionals);
   if (target === "bad") {
@@ -1318,8 +1246,6 @@ async function reviewResolved(target: Target, io: Io): Promise<number> {
   return runReview(target, io, p.value, used.value.plugins);
 }
 
-// app-token : run as the factory user, which alone can read the App's key (#108). It prints the token on stdout for the
-// developer's host process that called it through sudo; nothing else is printed there.
 async function appTokenCommand({ positionals, io }: Args): Promise<number> {
   const [project] = positionals;
   if (project === undefined || positionals.length !== 1) {
@@ -1350,7 +1276,6 @@ type SetupInput = {
   readonly store: TokenStore;
   readonly io: Io;
   readonly args: readonly string[];
-  // setup claude --seat coordinator
   readonly seat?: string | undefined;
 };
 
@@ -1372,8 +1297,6 @@ async function setupDiscord({ store, io }: { readonly store: TokenStore; readonl
   return 0;
 }
 
-// setupClaude : the pasted token, tried by one real login call with the env a box gets, then stored; with
-// --seat coordinator, the coordinator's own, in its own OS user's store
 async function setupClaude({ store, io, seat }: SetupInput): Promise<number> {
   const pasted = await io.readSecret(PASTE);
   const runner = seat === "coordinator" ? "claude-coordinator" : "claude";
@@ -1388,7 +1311,6 @@ async function setupClaude({ store, io, seat }: SetupInput): Promise<number> {
   return 0;
 }
 
-// agentOf : the agent CLI that init and setup call, through this machine's runner (a fake in a test)
 function agentOf(io: Io): AgentCli {
   return openAgentCli({ env: io.env, run: io.system.agent });
 }
@@ -1396,8 +1318,6 @@ function agentOf(io: Io): AgentCli {
 const COPILOT_PASTE =
   "Paste the fine-grained GitHub token that has only the Copilot requests permission (it stays hidden), then Enter: ";
 
-// setupCopilot : the copilot token and the expiry date GitHub showed for it, from the argument or asked for; a date
-// that will be refused is refused before the token is asked for
 async function setupCopilot({ store, io, args }: SetupInput): Promise<number> {
   const typed =
     args[0] ??
@@ -1436,15 +1356,12 @@ function ageLine(runner: "claude" | "copilot", age: Age, meta: Meta): { readonly
   }
 }
 
-// tokenLine : one line on the claude token, and whether a box may start with it
 function tokenLine(status: Status): { readonly line: string; readonly ok: boolean } {
   return status.kind === "none"
     ? { line: `claude token: none: ${status.reason}`, ok: false }
     : ageLine("claude", status.age, status.meta);
 }
 
-// seatLine : the coordinator's own token for this OS user, a warning only: without one the coordinator
-// starts on its own claude login and shares the runs' limit
 async function seatLine(io: Io): Promise<string> {
   const store = seatStore(io);
   const status: Status =
@@ -1457,8 +1374,6 @@ async function seatLine(io: Io): Promise<string> {
   return `coordinator seat ${ageLine("claude", status.age, status.meta).line.replace("setup claude", "setup claude --seat coordinator")}`;
 }
 
-// copilotLines : the copilot token's line once one is stored; none when there is none, since Copilot is optional, but
-// a store that cannot read one says why and fails
 function copilotLines(status: Status): { readonly lines: readonly string[]; readonly ok: boolean } {
   if (status.kind === "none") {
     return status.missing ? { lines: [], ok: true } : { lines: [`copilot token: none: ${status.reason}`], ok: false };
@@ -1467,7 +1382,6 @@ function copilotLines(status: Status): { readonly lines: readonly string[]; read
   return { lines: [line.line], ok: line.ok };
 }
 
-// srtLines : the srt runner's toolchain folders as setup status prints them (#371), and whether none was refused
 async function srtLines(io: Io, box: BoxChoice): Promise<{ readonly lines: readonly string[]; readonly ok: boolean }> {
   const home = factoryHome(io.env);
   if (box.kind !== "chosen" || box.place !== "srt" || home.kind === "refused") {
@@ -1477,7 +1391,6 @@ async function srtLines(io: Io, box: BoxChoice): Promise<{ readonly lines: reado
   return { lines: toolchainLines(toolchains, homedir()), ok: toolchains.refused.length === 0 };
 }
 
-// latestLines : the installed version against the latest release (#482); none when this run cannot read it
 async function latestLines(io: Io): Promise<readonly string[]> {
   return io.latestRelease === undefined ? [] : [versionCheck(version(), await io.latestRelease()).line];
 }
@@ -1496,12 +1409,10 @@ async function setupStatus({ store, io }: { readonly store: TokenStore; readonly
   return [box.kind === "chosen", srt.ok, token.ok, copilot.ok].every(Boolean) ? 0 : 1;
 }
 
-// this package's folder: next to dist/ (or src/ in a test)
 function packageDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "..");
 }
 
-// the package's own box image: images/factory-box
 function baseDir(): string {
   return join(packageDir(), "images", "factory-box");
 }
@@ -1512,7 +1423,6 @@ function builtLine(project: string, b: Built): string {
     : `box ${project}: ${b.image} (the base; no box.Dockerfile)`;
 }
 
-// box build : the project's box image, built here and pinned by its ID (#113 Q1)
 type BoxArgs = { readonly kind: "build"; readonly project: string } | { readonly kind: "usage" };
 
 function boxArgs(positionals: readonly string[]): BoxArgs {
@@ -1572,7 +1482,6 @@ type CoordinatorArgs = { readonly project: string | undefined; readonly runner: 
 
 const RUNNERS: ReadonlySet<string> = new Set(["claude", "copilot"]);
 
-// coordinatorArgs : [<project>] [claude | copilot]; with --discord, a project and Claude Code
 function coordinatorArgs(positionals: readonly string[], discord: boolean): CoordinatorArgs {
   const last = String(positionals.at(-1));
   const rest = RUNNERS.has(last) ? positionals.slice(0, -1) : positionals;
@@ -1580,17 +1489,14 @@ function coordinatorArgs(positionals: readonly string[], discord: boolean): Coor
   return oneProject(rest) && discordFits(discord, rest[0], runner) ? { project: rest[0], runner } : "bad";
 }
 
-// oneProject : at most one positional, a plain project name
 function oneProject(rest: readonly string[]): boolean {
   return rest.length <= 1 && rest.every(plainName);
 }
 
-// discordFits : a Discord launch is for one named project, and only Claude Code has channels
 function discordFits(discord: boolean, project: string | undefined, runner: "claude" | "copilot"): boolean {
   return !discord || (project !== undefined && runner === "claude");
 }
 
-// plugin : register, update, test and list plugins (#134)
 async function pluginCli({ positionals, io }: Args): Promise<number> {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {
@@ -1600,7 +1506,6 @@ async function pluginCli({ positionals, io }: Args): Promise<number> {
   return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg: PKG });
 }
 
-// settingsIo : what config and team run with: the factory home, never the product repo (#229)
 function settingsIo(io: Io, json: boolean, name: string): SettingsIo | undefined {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {
@@ -1620,9 +1525,6 @@ async function teamCli({ positionals, json, io }: Args): Promise<number> {
   return sio === undefined ? 1 : teamCommand(positionals, sio);
 }
 
-// initProbes : what init's checks ask this machine: programs on PATH, srt's version, the git host login for the project
-// (through the Forge seam, with the project's settings resolved from the files init just wrote) and the coordinator's
-// settings
 function initProbes(io: Io, home: string): Probes {
   return {
     run: io.system.run,
@@ -1654,9 +1556,6 @@ function initProbes(io: Io, home: string): Probes {
   };
 }
 
-// initLogin : one login by a real call, in the environment the project's settings resolve to, as its runs get it (a
-// company CA or proxy may come from a settings file): the stored token as a box gets it, or this shell's login as
-// the read-only runs get it
 async function initLogin(io: Io, home: string, who: Who, project: string): Promise<Login> {
   const settings = await runSettings({ home, project, env: io.env });
   const agent = agentOf(settings.kind === "ok" ? { ...io, env: settings.value.env } : io);
@@ -1678,13 +1577,11 @@ function realExecPath(): string {
   }
 }
 
-// initDir : the clone init reads: --repo, an absolute path, else the current folder
 function initDir(repo: string | undefined): string | undefined {
   const dir = repo ?? process.cwd();
   return isAbsolute(dir) ? dir : undefined;
 }
 
-// init : the guided setup of this laptop and one project (#369); the coordinator's settings deny it
 async function initCli({ positionals, yes, repo, io }: Args): Promise<number> {
   const home = factoryHome(io.env);
   const dir = initDir(repo);
@@ -1715,9 +1612,6 @@ async function initCli({ positionals, yes, repo, io }: Args): Promise<number> {
   );
 }
 
-// coordinatorProject : the project the session's commands act on when they name none (#382): the one named, else the
-// one in the factory home; with none or several and none named, the session starts with no default and its commands
-// name their project
 async function coordinatorProject(home: string, project: string | undefined, io: Io): Promise<Result<string>> {
   if (project === undefined) {
     const known = await projectNames(home);
@@ -1727,8 +1621,6 @@ async function coordinatorProject(home: string, project: string | undefined, io:
   return chosen.kind === "ok" ? { kind: "ok", value: project } : chosen;
 }
 
-// coordinator : the coordinator's session, in its own folder with its own settings, for one project;
-// with --discord, in that project's Discord channel, which needs the project named and Claude Code
 async function coordinatorCommand({ positionals, discord, io }: Args): Promise<number> {
   const args = coordinatorArgs(positionals, discord);
   if (args === "bad") {
@@ -1752,20 +1644,15 @@ async function coordinatorCommand({ positionals, discord, io }: Args): Promise<n
   });
 }
 
-// seatOf : the coordinator seat's own login, from its own OS user's store
 async function seatOf(io: Io): Promise<SeatLogin> {
   const store = seatStore(io);
   return store.kind === "refused" ? store : seatLogin({ store: store.store, now: new Date() });
 }
 
-// turnIo : where the coordinator's turns are logged: its own OS user's state folder
 function turnIo(io: Io, project: string): TurnIo {
   return { home: userHome(io), project, now: () => new Date() };
 }
 
-// coordinatorTurnCommand : the Stop hook: the turn's context size logged, and a reset asked for at the
-// size below the client's compaction; a launch with no supervisor (the app, a plain terminal) shows the person a line
-// to reset. It always exits 0, so the hook never blocks the session.
 async function coordinatorTurnCommand({ io }: Args): Promise<number> {
   const project = io.env[DEFAULT_PROJECT] ?? "";
   const turn = await recordTurn(await io.readStdin(), turnIo(io, project)).catch(() => undefined);
@@ -1775,19 +1662,16 @@ async function coordinatorTurnCommand({ io }: Args): Promise<number> {
   return 0;
 }
 
-// resetNote : the line the person sees at the reset size. Pure.
 function resetNote(tokens: number, project: string): string {
   const handoff = project === "" ? "agent-factory handoff" : `agent-factory handoff ${project}`;
   return `the coordinator's context is ${tokens} tokens, at its reset size; start a fresh coordinator from ${handoff}`;
 }
 
-// userHome : the session user's home, as the env names it
 function userHome(io: Io): string {
   const named = io.env.HOME;
   return named !== undefined && named.startsWith("/") ? named : homedir();
 }
 
-// seatStore : the coordinator seat's own token store, in its own OS user's config folder
 function seatStore(io: Io): Opened {
   return openStore({
     platform: io.system.platform,
@@ -1798,8 +1682,6 @@ function seatStore(io: Io): Opened {
   });
 }
 
-// coordinatorBriefCommand : the SessionStart hook's text: the role and the wall, then the handoff note for
-// the session's project; exit 0 whatever the note's reads did, so the hook never blocks the session
 async function coordinatorBriefCommand({ io }: Args): Promise<number> {
   const project = io.env[DEFAULT_PROJECT] ?? "";
   const compacted = await recordStart(await io.readStdin(), turnIo(io, project)).catch(() => false);
@@ -1810,7 +1692,6 @@ async function coordinatorBriefCommand({ io }: Args): Promise<number> {
   return 0;
 }
 
-// coordinatorSession : where the session's rules point, and its project ("" for none)
 async function coordinatorSession(
   io: Io,
   named: string | undefined,
@@ -1823,7 +1704,6 @@ async function coordinatorSession(
   return project.kind === "ok" ? { kind: "ok", value: { places: places.value, project: project.value } } : project;
 }
 
-// sessionEnv : the coordinator session's env, with its project as the default of the commands it runs (#382)
 function sessionEnv(io: Io, project: string): NodeJS.ProcessEnv {
   if (project === "") {
     return io.env;
@@ -1832,9 +1712,7 @@ function sessionEnv(io: Io, project: string): NodeJS.ProcessEnv {
   return { ...io.env, [DEFAULT_PROJECT]: project };
 }
 
-// setup : make and keep the box's model-only token (#136), and say whether a box may start
 async function setupCommand({ positionals, seat, io }: Args): Promise<number> {
-  // the coordinator's settings and the door's token file need no token store
   const own: Readonly<Record<string, () => Promise<number>>> = {
     coordinator: () => setupCoordinator({ io }),
     "door-discord": () => setupDoorDiscord(io),
@@ -1860,24 +1738,20 @@ async function setupStep({
     );
     return 64;
   }
-  // the coordinator seat's token lives in its own OS user's store, not the factory home's
   const store = seat === undefined ? factoryStore(io) : seatStore(io);
   if (store.kind === "refused") {
     io.err(`agent-factory setup: ${store.reason}\n`);
     return 1;
   }
-  // status reads the user and machine layers, so a user file's srt.readOnly shows (#371)
   return step.name === "status"
     ? resolvedRun("setup status", undefined, io, (resolved) => step.run({ store: store.store, io: resolved, args: [] }))
     : step.run({ store: store.store, io, args: positionals.slice(1), seat });
 }
 
-// seatFits : --seat names the coordinator, and only for setup claude
 function seatFits(step: string, seat: string | undefined): boolean {
   return seat === undefined || (step === "claude" && seat === "coordinator");
 }
 
-// factoryStore : the factory home's token store, the runs' and the dispatcher's
 function factoryStore(io: Io): Opened {
   const home = factoryHome(io.env);
   return home.kind === "home"
@@ -1891,7 +1765,6 @@ function factoryStore(io: Io): Opened {
     : home;
 }
 
-// boardText : the project's board as the terminal prints it, for the Discord door's /board
 async function boardText(io: Io, project: string): Promise<Result<string>> {
   const out: string[] = [];
   const err: string[] = [];
@@ -1899,7 +1772,6 @@ async function boardText(io: Io, project: string): Promise<Result<string>> {
   return code === 0 ? { kind: "ok", value: out.join("") } : { kind: "failed", reason: err.join("").trim() };
 }
 
-// DOOR_WIRING : what the Discord door does through the terminal's own start, approve and board code
 const DOOR_WIRING: DoorWiring = {
   where: (io, project, ticket) => {
     const at = specsAt(io, project, ticket);
@@ -1943,20 +1815,13 @@ const COMMANDS: readonly Command[] = [
   { name: "team", run: teamCli },
   { name: "init", run: initCli },
   ...Object.keys(LOOP_COMMANDS).map((name) => ({ name, run: (args: Args) => loopCommand(name, args) })),
-  // the writer's lint hook reads no setting, and prints only the lint's own output
   { name: "lint-edit", run: ({ positionals, io }: Args) => lintEditCommand(positionals, io) },
-  // the coordinator's edit hook, the same: it reads no setting, and prints only its decision
   { name: "edit-scope", run: ({ positionals, io }: Args) => editScopeCommand(positionals, io) },
-  // the coordinator's SessionStart hook
   { name: "coordinator-brief", run: coordinatorBriefCommand },
-  // the coordinator's Stop hook
   { name: "coordinator-turn", run: coordinatorTurnCommand },
-  // the writer's edit hook in the run, the same (writer/scope.ts writerScope)
   { name: "writer-scope", run: ({ positionals, io }: Args) => writerScopeCommand(positionals, io) },
 ];
 
-// COMMAND_NAMES : every command the CLI takes, the ones that read their own options too; test/cli-doc.test.ts checks
-// that docs/reference/cli.md lists each one (#482)
 export const COMMAND_NAMES: readonly string[] = [
   ...COMMANDS.map((c) => c.name),
   ...Object.keys(REQUEST_COMMANDS),
@@ -1964,8 +1829,6 @@ export const COMMAND_NAMES: readonly string[] = [
   "egress",
 ];
 
-// INTERNAL : the commands a person does not run: the coordinator's, the orchestrator's and the hooks'. --help hides
-// them and --help --all shows them; each still runs. test/cli-doc.test.ts checks the set against docs/reference/cli.md.
 export const INTERNAL: ReadonlySet<string> = new Set([
   "poll",
   "status",
@@ -1986,9 +1849,6 @@ export const INTERNAL: ReadonlySet<string> = new Set([
   "app-token",
 ]);
 
-// helpText : the usage, the person's commands, then the internal ones (--help --all) or a line that names
-// --help --all, then the options and settings. A block is a command's first line and its continuation lines; each
-// group keeps the order the blocks have in HELP_COMMANDS.
 function helpText(options: { readonly help?: boolean; readonly all?: boolean }): string {
   const all = options.help === true && options.all === true;
   const blocks = HELP_COMMANDS.split(/\n(?=  \S)/).map((block) => block.replace(/\n*$/, "\n"));
@@ -2000,8 +1860,6 @@ function helpText(options: { readonly help?: boolean; readonly all?: boolean }):
   return `usage: agent-factory <command>\n\nfor you:\n${yours}\n${rest}\n${HELP_TAIL}`;
 }
 
-// ownOptions : request, confirm and project read their own options (--file, --template <file>, a text that is one
-// word), so the main command line never parses their words
 function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefined {
   const [name = ""] = argv;
   const run = Object.hasOwn(REQUEST_COMMANDS, name) ? REQUEST_COMMANDS[name] : undefined;
@@ -2023,11 +1881,9 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
 }
 
 export function runCli(argv: readonly string[], io: Io): Promise<number> {
-  // eval reads its own options (--drafts)
   if (argv[0] === "eval") {
     return evalCommand(argv.slice(1), io);
   }
-  // egress reads its own options (--port, --model-host, --pull)
   if (argv[0] === "egress") {
     return egressCli(argv.slice(1), io);
   }

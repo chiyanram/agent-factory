@@ -5,17 +5,14 @@
 export type Choice = { readonly label: string; readonly value: unknown };
 
 export type Question = {
-  // the setting it decides, such as "runner" or "gate"
   readonly id: string;
   readonly text: string;
   readonly choices: readonly Choice[];
-  // the index of the recommended choice
   readonly recommended: number;
 };
 
 const LETTERS = "ABCD";
 
-// asking : one question, numbered, with its lettered choices and the recommended one marked
 export function asking(q: Question, i: number): string {
   const choices = q.choices.map((c, j) => `   ${LETTERS[j]}) ${c.label}${j === q.recommended ? " (recommended)" : ""}`);
   return [`${i + 1}. ${q.text}`, ...choices].map((l) => `${l}\n`).join("");
@@ -32,7 +29,6 @@ function recommended(questions: readonly Question[]): readonly number[] {
   return questions.map((q) => q.recommended);
 }
 
-// pickOf : one "<n><letter>" answer, as the question's index and the choice's, or why it is not one
 function pickOf(questions: readonly Question[], word: string): readonly [number, number] | string {
   const m = /^(\d+)([A-Da-d])$/.exec(word);
   const i = m === null ? -1 : Number(m[1]) - 1;
@@ -47,7 +43,6 @@ function choiceOf(q: Question, i: number, letter: string): readonly [number, num
   return j < q.choices.length ? [i, j] : `question ${i + 1} has no choice ${letter}`;
 }
 
-// answersOf : the choice picked for each question, from one reply
 export function answersOf(questions: readonly Question[], reply: string): Answers {
   const text = reply.trim();
   if (text === "" || /^accept all$/i.test(text)) {
@@ -64,7 +59,6 @@ export function answersOf(questions: readonly Question[], reply: string): Answer
   return { kind: "ok", picks };
 }
 
-// valueOf : the value a question's pick stands for
 export function valueOf(questions: readonly Question[], picks: readonly number[], id: string): unknown {
   const i = questions.findIndex((q) => q.id === id);
   const q = questions[i];

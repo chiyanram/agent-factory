@@ -9,6 +9,10 @@
 // The plugin reads access.json once at boot in static mode, so the check runs on every start: a file loosened while
 // the session ran is refused at the next one.
 //
+// The launch keeps the person's user settings out with --setting-sources project, so --settings enables this one
+// plugin. dontAsk refuses anything that would prompt, so no permission prompt reaches the plugin's relay. Every start
+// is fresh from the handoff note, never --continue or --resume.
+//
 // Today: the project channel's groups.<id>.allowFrom must equal the DM allowFrom because #548 read the plugin's
 // server.ts as gating the relay's text path (`yes <id>`) by the channel's list alone; #729's hand test confirms it.
 
@@ -24,13 +28,6 @@ import { DISCORD_PLUGIN } from "./agent/claude-plugins.js";
 
 export { DISCORD_PLUGIN };
 
-// discordArgv : the coordinator's launch with the channel plugin. --setting-sources project keeps the person's own
-// user settings out, and with it a plugin enabled at user scope does not load, so --settings enables this one plugin
-// for this session. dontAsk refuses anything that would prompt, so no permission prompt ever reaches the plugin's
-// relay (its DM buttons and its `yes <id>` text path): the relay stays off. --autocompact sets the window the client
-// compacts in, above the size the coordinator resets at (coordinator-turns.ts). Never --continue or --resume: every
-// start is fresh, from the handoff note.
-//
 // Today: the relay stays off until the hand test #729 shows its text path is safe.
 export function discordArgv(): Argv {
   return [
@@ -48,13 +45,10 @@ export function discordArgv(): Argv {
   ];
 }
 
-// discordStateDir : the project's own state folder: one bot token and one gateway per project
 export function discordStateDir(home: string, project: string): string {
   return join(home, ".claude", "channels", `discord-${project}`);
 }
 
-// discordEnv : the plugin's settings for the launch; a DISCORD_BOT_TOKEN in the caller's env is dropped, so the
-// state folder's .env is the one place the token comes from
 export function discordEnv(env: NodeJS.ProcessEnv, stateDir: string): NodeJS.ProcessEnv {
   const { DISCORD_BOT_TOKEN: _dropped, ...rest } = env;
   return { ...rest, DISCORD_ACCESS_MODE: "static", DISCORD_STATE_DIR: stateDir };
@@ -66,7 +60,6 @@ function snowflakes(value: unknown): readonly string[] | undefined {
     : undefined;
 }
 
-// samePeople : the channel's list holds the same people as the DM list; a DM list that is not ids is refused on its own
 function samePeople(channel: readonly string[], people: readonly string[] | undefined): boolean {
   const left = new Set(channel);
   const right = new Set(people ?? channel);
@@ -79,7 +72,6 @@ function objectOf(value: unknown): Readonly<Record<string, unknown>> | undefined
     : undefined;
 }
 
-// channelProblems : the project channel's own allowFrom, which gates the relay's text path
 function channelProblems(id: string, group: unknown, people: readonly string[] | undefined): readonly string[] {
   if (!SNOWFLAKE.test(id)) {
     return [`groups holds ${JSON.stringify(id)}, which is not a channel id`];
@@ -93,7 +85,6 @@ function channelProblems(id: string, group: unknown, people: readonly string[] |
     : [`groups.${id}.allowFrom must be the same people as allowFrom, the mapped people`];
 }
 
-// groupProblems : exactly one channel, the project's
 function groupProblems(groups: unknown, people: readonly string[] | undefined): readonly string[] {
   const entries = Object.entries(objectOf(groups) ?? {});
   const only = entries.length === 1 ? entries[0] : undefined;
@@ -102,7 +93,6 @@ function groupProblems(groups: unknown, people: readonly string[] | undefined): 
     : channelProblems(only[0], only[1], people);
 }
 
-// policyProblems : direct messages only from the listed people
 function policyProblems(access: unknown): readonly string[] {
   const people = snowflakes(field(access, "allowFrom")) ?? [];
   return [
@@ -111,7 +101,6 @@ function policyProblems(access: unknown): readonly string[] {
   ];
 }
 
-// pendingProblems : no pairing code waits, since one would add a person outside the list
 function pendingProblems(pending: unknown): readonly string[] {
   const codes = pending === undefined ? {} : objectOf(pending);
   return codes !== undefined && Object.keys(codes).length === 0
@@ -119,8 +108,6 @@ function pendingProblems(pending: unknown): readonly string[] {
     : ["pending must be empty: a pairing code would add a person outside the list"];
 }
 
-// accessProblems : every way the plugin's access.json is looser than the wall needs; none means it holds. Pure, so the
-// guided setup and the door can check the same file.
 export function accessProblems(access: unknown): readonly string[] {
   if (objectOf(access) === undefined) {
     return ["it is not a JSON object"];
@@ -132,7 +119,6 @@ export function accessProblems(access: unknown): readonly string[] {
   ];
 }
 
-// the parts of a file's stat the checks read
 export type Entry = Pick<Stats, "mode" | "uid"> & {
   readonly link: boolean;
   readonly file: boolean;
@@ -145,8 +131,8 @@ const firstBroken = (rules: readonly Rule[]): string | undefined => rules.find((
 const modeOf = (e: Entry): string => (e.mode & 0o777).toString(8);
 const plainAs = (e: Entry, kind: "file" | "folder"): boolean => !e.link && (kind === "file" ? e.file : e.folder);
 
-// tokenFileProblem : the .env must be a plain file the session's user owns (the plugin chmods it at boot and skips
-// one it cannot), unreadable by group and others. Pure.
+// The Discord plugin chmods its .env to 0600 at boot and skips the file when that fails.
+// https://github.com/anthropics/claude-plugins-official/blob/668a0c6542d1da594f2d49ddab382198abbddbb2/external_plugins/discord/server.ts
 export function tokenFileProblem(path: string, e: Entry | undefined, uid: number): string | undefined {
   if (e === undefined) {
     return `${path} is missing`;
@@ -158,7 +144,6 @@ export function tokenFileProblem(path: string, e: Entry | undefined, uid: number
   ]);
 }
 
-// accessFileProblem : access.json and its folder must be plain, and writable by no one but their owner. Pure.
 export function accessFileProblem(path: string, e: Entry | undefined, kind: "file" | "folder"): string | undefined {
   if (e === undefined) {
     return `${path} is missing`;
@@ -169,8 +154,6 @@ export function accessFileProblem(path: string, e: Entry | undefined, kind: "fil
   ]);
 }
 
-// stateFolderProblem : the state folder must be plain, the session user's own (the plugin writes its inbox there and
-// chmods .env), and writable by no one else. Pure.
 export function stateFolderProblem(path: string, e: Entry | undefined, uid: number): string | undefined {
   return (
     accessFileProblem(path, e, "folder") ??
@@ -178,7 +161,6 @@ export function stateFolderProblem(path: string, e: Entry | undefined, uid: numb
   );
 }
 
-// ownWarning : the warning for an access.json the session's own user can rewrite. Pure.
 export function ownWarning(path: string, e: Entry | undefined, uid: number): string | undefined {
   return e?.uid === uid
     ? `${path} belongs to the coordinator's own user, which can rewrite it; on the VM make it root's, mode 444`
@@ -204,7 +186,6 @@ function parsed(text: string): unknown {
 
 const fix = (dir: string): string => `; see docs/how-to/set-up-coordinator-discord.md (the state folder is ${dir})`;
 
-// filesProblem : the state folder, its .env and its access.json, by their stat
 async function filesProblem(dir: string, uid: number): Promise<string | undefined> {
   const env = join(dir, ".env");
   const access = join(dir, "access.json");
@@ -220,8 +201,6 @@ function contentProblems(text: string): readonly string[] {
   return value === undefined ? ["it is not valid JSON"] : accessProblems(value);
 }
 
-// checkDiscord : the state folder's .env and access.json, checked before the launch; ok holds the warnings to print.
-// No reason carries the token file's text: the token file is never read.
 export async function checkDiscord(dir: string, uid: number): Promise<Result<readonly string[]>> {
   const problem = await filesProblem(dir, uid);
   if (problem !== undefined) {

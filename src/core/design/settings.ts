@@ -20,7 +20,6 @@ export function designSetup(input: {
   readonly forge: DesignSetup["forge"];
   readonly home: string;
   readonly project: string;
-  // the project's plugins, in order (process/use.ts, #232): the process plugin among them holds the role cards
   readonly plugins: readonly PluginDir[];
   readonly model?: Model;
 }): Result<DesignSetup> {

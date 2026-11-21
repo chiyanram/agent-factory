@@ -2,6 +2,11 @@
 // (`claude setup-token` prints it once) and pastes it at a hidden prompt; setup claude tries it with one login call
 // through the claude CLI, which has no tools, then stores it. No agent run sees it, and it is never printed,
 // logged, passed in argv or put in an env file. The dispatcher calls boxTokenFrom before each run.
+//
+// A pasted token the provider refuses is not stored, so the one stored before stays; one the login call could not
+// check is stored, with why. The seat token lives in the coordinator's own user's config folder, never the factory
+// home, and XDG_CONFIG_HOME is ignored, so it is always where the coordinator's Read deny names it. A missing seat
+// token is no refusal: the session then uses its own claude login and shares the runs' limit.
 
 import {
   boxToken,
@@ -59,22 +64,17 @@ export type Saved =
   | { readonly kind: "saved"; readonly where: string; readonly meta: Meta }
   | { readonly kind: "refused"; readonly reason: string };
 
-// the claude token saved, with what its login call found, for the person
 export type ClaudeSaved =
   | { readonly kind: "saved"; readonly where: string; readonly meta: Meta; readonly note: string }
   | { readonly kind: "refused"; readonly reason: string };
 
-// a login call with the env a box gets for its model login (agent/login.ts)
 export type TryLogin = (env: Readonly<Record<string, string>>) => Promise<Login>;
 
-// tried : the pasted token tried by one real call before it is stored: a token the provider refuses is not stored, so
-// the one stored before stays; one the call could not check is stored, with why
 async function tried(token: Secret, meta: Meta, now: Date, login: TryLogin): Promise<Result<string>> {
   const box = boxToken({ token, meta, now });
   return box.kind === "refused" ? { kind: "failed", reason: box.reason } : noteOf(await login(box.env));
 }
 
-// noteOf : what a login call means for storing the token. Pure.
 function noteOf(got: Login): Result<string> {
   switch (got.kind) {
     case "authorized":
@@ -91,7 +91,6 @@ function noteOf(got: Login): Result<string> {
   }
 }
 
-// saveClaudeToken : a claude token, tried, then stored for the runs, or for the coordinator's own
 export async function saveClaudeToken(input: {
   readonly store: TokenStore;
   readonly pasted: string;
@@ -114,7 +113,6 @@ export async function saveClaudeToken(input: {
     : { kind: "refused", reason: put.reason };
 }
 
-// saveCopilotToken : the copilot token, checked, kept until the expiry date the person typed
 export async function saveCopilotToken(input: {
   readonly store: TokenStore;
   readonly pasted: string;
@@ -137,14 +135,12 @@ export async function saveCopilotToken(input: {
 
 export type Status =
   | { readonly kind: "age"; readonly age: Age; readonly meta: Meta }
-  // missing: no token was ever stored, as against one the store cannot read
   | { readonly kind: "none"; readonly reason: string; readonly missing: boolean };
 
 export function claudeTokenStatus(input: { readonly store: TokenStore; readonly now: Date }): Promise<Status> {
   return tokenStatus({ ...input, runner: "claude" });
 }
 
-// tokenStatus : the age of a runner's token on record, or why there is none
 export async function tokenStatus(input: {
   readonly store: TokenStore;
   readonly runner: "claude" | "copilot" | "claude-coordinator";
@@ -156,7 +152,6 @@ export async function tokenStatus(input: {
     : { kind: "none", reason: stored.reason, missing: stored.kind === "missing" };
 }
 
-// boxTokenFrom : the dispatcher's one call before a box starts; no stored, unexpired token means no run
 export async function boxTokenFrom(input: { readonly store: TokenStore; readonly now: Date }): Promise<BoxToken> {
   const stored = await input.store.get("claude");
   return stored.kind === "found"
@@ -164,15 +159,10 @@ export async function boxTokenFrom(input: { readonly store: TokenStore; readonly
     : { kind: "refused", reason: stored.reason };
 }
 
-// seatHome : where the coordinator seat keeps its own token on Linux, and its expiry on either OS: the coordinator's
-// own user's config folder, never the factory home, whose secrets/ only the factory user reads
-// It ignores XDG_CONFIG_HOME, so the token is always where the coordinator's Read deny names it.
 export function seatHome(home: string): string {
   return join(home, ".config", "agent-factory");
 }
 
-// seatLogin : the coordinator's launch login from its own seat token; it never reads the runs' claude token. Missing
-// is not a refusal: the session then uses its own claude login and shares the runs' limit.
 export async function seatLogin(input: {
   readonly store: TokenStore;
   readonly now: Date;
@@ -187,7 +177,6 @@ export async function seatLogin(input: {
     : login;
 }
 
-// copilotLoginFrom : a Copilot run's login from the store, or why none may start
 export async function copilotLoginFrom(input: { readonly store: TokenStore; readonly now: Date }): Promise<BoxToken> {
   const stored = await input.store.get("copilot");
   return stored.kind === "found"
@@ -195,7 +184,6 @@ export async function copilotLoginFrom(input: { readonly store: TokenStore; read
     : { kind: "refused", reason: stored.reason };
 }
 
-// saveDiscordWebhook : the webhook the dispatcher pings through (#119), checked, then kept like the claude token
 export async function saveDiscordWebhook(input: {
   readonly store: TokenStore;
   readonly pasted: string;

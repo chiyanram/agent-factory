@@ -44,7 +44,6 @@ const ended = (
   kept: [],
 });
 
-// a done review's line, typed as itself
 function designEnd(at: string): Extract<Event, { kind: "design-ended" }> {
   return {
     at,
@@ -104,7 +103,6 @@ describe("designView (#236)", () => {
       final: true,
     } as const;
     expect(view([cite])).toEqual({ kind: "stopped", step: "review", why: "a cite does not hold" });
-    // an edit is new hashes: the stop does not carry over
     expect(view([{ ...cite, spec: "b".repeat(64) }])).toEqual({ kind: "run", step: "review", spec: S, design: D });
   });
 
@@ -159,7 +157,6 @@ describe("design findings", () => {
   });
 });
 
-// #489 (P15, review converges): a re-review only for an Act on CONFLICT, at most 2 rounds, Consider never blocks
 describe("the design review converges (#489)", () => {
   const OLD = "b".repeat(64);
   const OLDER = "c".repeat(64);
@@ -192,7 +189,6 @@ describe("the design review converges (#489)", () => {
       spec: S,
       design: D,
     });
-    // Consider items and opens never block: the person decides on them, with no second review
     expect(view([round("2026-11-07T09:02:00Z", OLD, consider)])).toEqual({ kind: "done" });
     expect(view([round("2026-11-07T09:02:00Z", OLD, [])])).toEqual({ kind: "done" });
   });
@@ -204,17 +200,13 @@ describe("the design review converges (#489)", () => {
     expect(view([...two, told])).toEqual({ kind: "done" });
   });
 
-  // #489 review: an edit after convergence that raises the lane or changes the Planned files is a new review, whatever
-  // the round count, since no earlier round saw it
   it("reviews again after the cap when the lane rose or the Planned files changed since the last round", () => {
     const at = (spec: string, time: string): Event => ({ ...round(time, spec, actOn), ...FEATURE });
     const two = [at(OLDER, "2026-11-07T08:02:00Z"), at(OLD, "2026-11-07T09:02:00Z")];
     const run = { kind: "run", step: "review", spec: S, design: D };
     expect(view(two, "", { ...FEATURE, lane: "one-way door" })).toEqual(run);
     expect(view(two, "", { ...FEATURE, planned: ["src/a.ts", "db/V2.sql"] })).toEqual(run);
-    // the same files in another order, or a lane that fell, moves nothing
     expect(view(two, "", { lane: "bug", planned: ["src/a.ts"] })).toMatchObject({ kind: "note", why: ROUND_CAP });
-    // a converged round (no Act on CONFLICT) is reviewed again too when the lane rose
     const calm: Event = { ...round("2026-11-07T09:02:00Z", OLD, consider), ...FEATURE };
     expect(view([calm], "", { ...FEATURE, lane: "one-way door" })).toEqual(run);
   });
@@ -224,7 +216,6 @@ describe("the design review converges (#489)", () => {
     const r = (spec: string, time: string, f: string): Event => ({ ...round(time, spec, actOn), ...files(f) });
     const ab = [r("d".repeat(64), "2026-11-07T08:02:00Z", "a.ts"), r(OLD, "2026-11-07T09:02:00Z", "b.ts")];
     expect(view(ab, "", files("a.ts"))).toEqual({ kind: "note", spec: S, design: D, why: ROUND_CAP });
-    // a pair no round read is reviewed, past the 2 rounds, MAX_MOVED_REVIEWS times; then the person decides, told once
     const run = { kind: "run", step: "review", spec: S, design: D };
     expect(view(ab, "", files("c.ts"))).toEqual(run);
     const four = [

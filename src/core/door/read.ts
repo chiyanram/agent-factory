@@ -1,7 +1,8 @@
 // door/read — the one read model every front door shows (ADR-0023 D2): the board's lines (dispatch/board.ts), decided
 // as a pass would decide them, with each ticket whose session waits for the operator (dispatch/waiting.ts) as an
 // ordinary needs-you line, on a git host whose write ops refuse and with no step or ping that can run. The CLI's
-// `board` prints them; the Discord door (#548) reads the same lines.
+// `board` prints them; the Discord door (#548) reads the same lines. The write ops come from the seam's own list, so a
+// write op added later is refused too: a write is impossible here, not merely unused.
 
 import type { Done, Result } from "../forge/api.js";
 import { FORGE_OPS } from "../forge/ops.js";
@@ -14,20 +15,13 @@ import { NO_NOTIFY } from "../notify.js";
 
 const REFUSED = "the board writes nothing to the git host";
 
-// the git host's write ops (forge/ops.ts forge.write), read from the seam's own list so a write op added later is
-// refused too
 const WRITE_OPS = Object.entries(FORGE_OPS).flatMap(([op, kind]) => (kind === "forge.write" ? [op] : []));
 
-// readOnly : the git host with every write op refused: the board only reads, so a write it should never make fails
-// instead of landing
 export function readOnly(forge: Forge): Forge {
   const refuse = async (): Promise<Done> => ({ kind: "failed", reason: REFUSED });
   return { ...forge, ...Object.fromEntries(WRITE_OPS.map((op) => [op, refuse])) };
 }
 
-// boardPass : the pass setup the board decides with: a dry run on a read-only git host, with no step that can run and
-// no ping that can go out, and its log on stderr, so --json stays one value. decideAll only reads; this makes a write
-// impossible, not merely unused.
 export function boardPass(setup: TickSetup, err: (text: string) => void): TickSetup {
   return {
     ...setup,
@@ -39,7 +33,6 @@ export function boardPass(setup: TickSetup, err: (text: string) => void): TickSe
   };
 }
 
-// eventsOf : each ticket's record lines; a ticket whose records cannot be read has none here (decideAll names it)
 async function eventsOf(
   home: string,
   project: string,
@@ -57,21 +50,16 @@ async function eventsOf(
 export type BoardRead = {
   readonly home: string;
   readonly project: string;
-  // every ticket of the project, decided as a pass would, read-only (tick.ts decideAll on a boardPass)
   readonly decided: () => Promise<Result<readonly Decided[]>>;
-  // the open issues whose session waits for the operator, read once; a failed read is one needs-you line
   readonly waiting: () => Promise<Result<readonly Waiting[]>>;
-  // the project keeps its specs in issues, so a ticket's name is its issue's number (ticketsAreIssues)
   readonly ticketsAreIssues: boolean;
   readonly now: () => number;
 };
 
-// ticketsAreIssues : whether the project keeps its specs in issues, so a ticket's name is its issue's number. Pure.
 export function ticketsAreIssues(setup: Pick<TickSetup, "specs">): boolean {
   return setup.specs?.kind === "issue";
 }
 
-// doorBoard : the board's lines; a project the pass cannot read fails
 export async function doorBoard(read: BoardRead): Promise<Result<readonly BoardLine[]>> {
   const decided = await read.decided();
   if (decided.kind === "failed") {

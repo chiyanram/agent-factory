@@ -2,6 +2,8 @@
 // set to base.sha, change.patch committed on factory/<case>, and both pushed to a bare origin beside it, so the review
 // fetches main and the change's branch from origin as it does in production. Every git call goes through hostGit, so a
 // hook or config in the clone runs nothing (AGENTS.md MUST).
+//
+// The commit names its own author, so no global git identity is read.
 
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
@@ -11,7 +13,6 @@ export const BRANCH_OF = (name: string): string => `factory/${name}`;
 
 export type Cloned = { readonly repo: string; readonly head: string; readonly branch: string };
 
-// the commit's author, so no global identity is needed and none is read
 const AUTHOR = {
   GIT_AUTHOR_NAME: "agent-factory eval",
   GIT_AUTHOR_EMAIL: "eval@agent-factory.invalid",
@@ -33,7 +34,6 @@ async function git(repo: RepoTarget, env: NodeJS.ProcessEnv, args: readonly stri
   return { kind: "failed", reason: `git ${args[0] ?? ""}: ${why}` };
 }
 
-// steps : the calls one after another; the first that fails stops the rest
 async function steps(
   calls: readonly (readonly [RepoTarget, readonly string[]])[],
   env: NodeJS.ProcessEnv,
@@ -48,7 +48,6 @@ async function steps(
   return last;
 }
 
-// throwaway : the clone of `root` under `into`, with the case's change as the head of factory/<name>
 export async function throwaway(input: {
   readonly root: string;
   readonly into: string;

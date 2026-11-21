@@ -13,12 +13,10 @@ import { join } from "node:path";
 const MARKETPLACE = "chiyanram";
 const PLUGINS = ["rulebook@chiyanram", "toolbox@chiyanram"];
 
-// at : the value at a path of object keys, or undefined
 function at(value: unknown, path: readonly string[]): unknown {
   return path.reduce<unknown>((v, k) => (typeof v === "object" && v !== null ? Reflect.get(v, k) : undefined), value);
 }
 
-// read : a file's JSON, or undefined when it is missing or not JSON
 function read(file: string): unknown {
   if (!existsSync(file)) {
     return undefined;
@@ -30,10 +28,8 @@ function read(file: string): unknown {
   }
 }
 
-// Pins : what the two files say: the marketplace source the sessions load, and the engine's pin
 type Pins = { readonly settings: unknown; readonly source: unknown; readonly pin: unknown };
 
-// a rule over the two files: why they fail it, or "" when they pass. Pure.
 type Rule = (p: Pins) => string;
 
 const RULES: readonly Rule[] = [
@@ -62,7 +58,6 @@ const RULES: readonly Rule[] = [
   ),
 ];
 
-// pinProblems : why the settings and the rules-pack pin disagree; none when they agree. Pure.
 export function pinProblems(settings: unknown, pin: unknown): readonly string[] {
   const pins = { settings, source: at(settings, ["extraKnownMarketplaces", MARKETPLACE, "source"]), pin };
   return RULES.map((rule) => rule(pins)).filter((why) => why !== "");

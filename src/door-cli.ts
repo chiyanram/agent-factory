@@ -20,7 +20,6 @@ export const DOOR_HELP = `  door discord                 the Discord door: a lon
                                <factory home>/door/discord/people.json; waive and merge stay at the terminal
 `;
 
-// what the door does through the terminal's own code, for one project, with that project's settings resolved
 export type DoorWiring = {
   readonly where: (io: Io, project: string, ticket: string) => Result<Where>;
   readonly branchThere: (io: Io, project: string, ticket: string) => Promise<Result<boolean>>;
@@ -28,7 +27,6 @@ export type DoorWiring = {
   readonly after: (io: Io, project: string) => Promise<void>;
 };
 
-// the transport and timers; a test passes fakes, so no test reaches Discord
 export type DoorReach = {
   readonly transport: (token: string) => Transport;
   readonly timers: Timers;
@@ -36,8 +34,6 @@ export type DoorReach = {
 
 const REAL_REACH: DoorReach = { transport: (token) => realTransport(token, version()), timers: REAL_TIMERS };
 
-// opener : the project, its settings layers resolved once per interaction as resolvedRun resolves them for a terminal
-// command, with their warnings printed, then bound to the terminal's own code
 function opener(io: Io, home: string, wiring: DoorWiring): (project: string) => Promise<Result<ProjectDoor>> {
   return async (project) => {
     const settings = await runSettings({ home, project, env: io.env });
@@ -63,7 +59,6 @@ function opener(io: Io, home: string, wiring: DoorWiring): (project: string) => 
 
 type Boot = { readonly home: string; readonly token: string; readonly config: DoorConfig };
 
-// boot : the factory home, the door's token and people.json, each refused as the files module says
 async function boot(env: NodeJS.ProcessEnv): Promise<Result<Boot>> {
   const home = factoryHome(env);
   if (home.kind === "refused") {
@@ -79,7 +74,6 @@ async function boot(env: NodeJS.ProcessEnv): Promise<Result<Boot>> {
     : config;
 }
 
-// doorCommand : agent-factory door discord; it returns only when Discord refuses the token or an intent
 export async function doorCommand(
   positionals: readonly string[],
   io: Io,
@@ -98,7 +92,6 @@ export async function doorCommand(
   return runDoor(io, wiring, reach, booted.value);
 }
 
-// runDoor : the door on the Gateway, every line it prints scrubbed with its token cut out
 async function runDoor(io: Io, wiring: DoorWiring, reach: DoorReach, { home, token, config }: Boot): Promise<number> {
   const scrub = scrubberOf(token);
   const quiet: Io = { ...io, out: (text) => io.out(scrub(text)), err: (text) => io.err(scrub(text)) };
@@ -124,7 +117,6 @@ async function runDoor(io: Io, wiring: DoorWiring, reach: DoorReach, { home, tok
   return 1;
 }
 
-// setupDoorDiscord : the door's bot token, pasted at a hidden prompt and stored at 0600; never printed
 export async function setupDoorDiscord(io: Io): Promise<number> {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {

@@ -14,6 +14,9 @@
 //
 // The plan starts nothing. Each box run starts the project's egress proxy (egress below) inside the project's dispatch
 // lock, so a pass that finds the lock taken never recreates the proxy under a box that is running.
+//
+// A project file that is there but refused stops the pass, because read as forge CI a local project would lose its
+// gate.
 
 import { isAbsolute, join } from "node:path";
 import {
@@ -44,12 +47,10 @@ import type { BoxPlan } from "./steps.js";
 
 export type Plan = { readonly gate: Gate; readonly plan: BoxPlan };
 
-// a project file that is there but refused stops the pass: read as forge CI, a local project would lose its gate
 export type PlanRead =
   | { readonly kind: "ok"; readonly value: Plan }
   | { readonly kind: "failed"; readonly reason: string };
 
-// what starts the project's egress proxy: openEgress with this host's docker, or a test's own
 export type EgressOpener = (input: {
   readonly project: string;
   readonly allowlist: readonly string[];
@@ -62,21 +63,17 @@ export type PlanInput = {
   readonly env: NodeJS.ProcessEnv;
   readonly home: string;
   readonly project: string;
-  // this host's boxes, for the project's image
   readonly boxesFor: (image: PinnedImage) => readonly Box[];
   readonly openEgress: EgressOpener;
-  // this host's srt runner, for the project's egress (#114)
   readonly srtFor: (egress: SrtEgress) => Promise<Box>;
 };
 
 type Egress = { readonly upstream: Upstream; readonly image: PinnedImage; readonly gitHosts: readonly string[] };
 
-// ownGitHost : the project's own git host, such as a company GitLab, which the allowlist refuses too
 function ownGitHost(env: NodeJS.ProcessEnv): readonly string[] {
   return ownGitHostsOf([settingOf(env, "gitHostName")]);
 }
 
-// egressOf : the settings the project's proxy starts with. Pure.
 function egressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<Egress> {
   if (project.egress.allow.length === 0) {
     return { kind: "failed", reason: 'the project file has no "egress.allow": name the hosts its boxes may reach' };
@@ -104,7 +101,6 @@ type Placed = {
   readonly egress: () => Promise<RunEgress>;
 };
 
-// placedVm : the project's image, a vm box for it that answers its probe, and the project's Squid proxy
 async function placedVm(input: PlanInput, project: ProjectFile): Promise<Result<Placed>> {
   const egress = egressOf(input.env, project);
   if (egress.kind === "failed") {
@@ -121,7 +117,6 @@ async function placedVm(input: PlanInput, project: ProjectFile): Promise<Result<
     : { kind: "failed", reason: opened.reason };
 }
 
-// caCertsOf : the company CA's file, or "" for none; a relative path is refused. Pure.
 function caCertsOf(env: NodeJS.ProcessEnv): Result<string> {
   const set = (settingOf(env, "egress.caCerts") ?? "").trim();
   return set === "" || isAbsolute(set)
@@ -132,8 +127,6 @@ function caCertsOf(env: NodeJS.ProcessEnv): Result<string> {
       };
 }
 
-// srtEgressOf : the srt runner's egress: the allowlist checked as the Squid proxy checks it, the company proxy and CA.
-// Pure.
 function srtEgressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<SrtEgress> {
   if (project.egress.allow.length === 0) {
     return { kind: "failed", reason: 'the project file has no "egress.allow": name the hosts its runners may reach' };
@@ -150,7 +143,6 @@ function srtEgressOf(env: NodeJS.ProcessEnv, project: ProjectFile): Result<SrtEg
   return ca.kind === "ok" ? { kind: "ok", value: { hosts: list.hosts, upstream, caCerts: ca.value } } : ca;
 }
 
-// placedSrt : the srt runner, made for the project's egress, when it answers its probe (#114)
 async function placedSrt(input: PlanInput, project: ProjectFile): Promise<Result<Placed>> {
   const egress = srtEgressOf(input.env, project);
   if (egress.kind === "failed") {
@@ -165,13 +157,11 @@ async function placedSrt(input: PlanInput, project: ProjectFile): Promise<Result
     : { kind: "failed", reason: opened.reason };
 }
 
-// placed : the runner FACTORY_BOX names, ready for the project
 function placed(input: PlanInput, project: ProjectFile): Promise<Result<Placed>> {
   const choice = chooseBox(input.env);
   return choice.kind === "chosen" && choice.place === "srt" ? placedSrt(input, project) : placedVm(input, project);
 }
 
-// readied : the setup a box run needs; the first thing missing is the reason there is none
 async function readied(input: PlanInput, project: ProjectFile): Promise<Result<BoxSetup>> {
   const repo = repoOf(input.env);
   if (repo.kind === "failed") {
@@ -201,7 +191,6 @@ async function setupFor(input: PlanInput, project: ProjectFile): Promise<BoxPlan
     : { kind: "unavailable", reason: setup.reason };
 }
 
-// boxPlan : the gate and the box plan for one pass over `project`
 export async function boxPlan(input: PlanInput): Promise<PlanRead> {
   const file = await readProjectFile({ home: input.home, project: input.project, env: input.env });
   if (file.kind !== "ok") {

@@ -15,7 +15,8 @@
 //     .claude/, .agents/ or an agent instruction file
 //   - a line that says a file is absent which the default branch holds (cites.ts "absence"), or one the engine cannot
 //     tell apart from such a claim
-// A brief is refused only when the model gave lines and none is left; the brief with what is left is staged otherwise.
+// A brief is refused only when the model gave lines and none is left, because the engine's lines alone would hide an
+// unusable answer. Otherwise the brief with what is left is staged.
 //
 // A term the project's own glossary (CONTEXT.md or GLOSSARY.md) defines is linked there, never given a meaning of ours.
 // No count goes in. Each kept cite is returned with its line's text, so every later run can check it again (cites.ts).
@@ -27,7 +28,6 @@ import { type Absence, absence } from "./cites.js";
 import type { Commands } from "./listing.js";
 import { projectMusts, RULE_FILES } from "./musts.js";
 
-// a cite the brief keeps, with the text of its line when it was written (line 0: the file as a whole, text "")
 export type KeptCite = Cite & { readonly text: string };
 
 export type BriefInput = {
@@ -35,14 +35,11 @@ export type BriefInput = {
   readonly base: string;
   readonly sha: string;
   readonly commands: Commands;
-  // every path at the default branch
   readonly files: readonly string[];
-  // a file's lines at the default branch, or undefined when it is not there
   readonly lines: (path: string) => readonly string[] | undefined;
   readonly answer: Answer;
 };
 
-// dropped: one note per model line the engine left out of the brief, for the human, never for a run
 export type Written = {
   readonly brief: string;
   readonly glossary: string;
@@ -50,7 +47,6 @@ export type Written = {
   readonly dropped: readonly string[];
 };
 
-// where a project keeps its rules, in the order the brief lists them
 const RULE_PLACES = [
   "AGENTS.md",
   "CLAUDE.md",
@@ -68,20 +64,17 @@ function present(files: readonly string[], place: string): boolean {
   return files.some((f) => f === place || f.startsWith(`${place}/`));
 }
 
-// checked : the cite as the brief keeps it, or "none" when the default branch does not hold that file and line
 function checked(input: BriefInput, cite: Cite): KeptCite | "none" {
   const lines = cite.file === "" ? undefined : input.lines(cite.file);
   return lines === undefined || cite.line > lines.length ? "none" : { ...cite, text: lineText(lines, cite.line) };
 }
 
-// lineText : a cite's line, or "" for the file as a whole
 function lineText(lines: readonly string[], line: number): string {
   return line === 0 ? "" : (lines[line - 1] ?? "");
 }
 
 type Mark = { readonly mark: string; readonly cite: KeptCite | "none" } | { readonly dropped: string };
 
-// a line that speaks of the project's rules, which only the engine writes (musts.ts)
 const RULES_TALK = [
   /^\s*project rules\b/i,
   /\b(?:AGENTS|CLAUDE)\.md\b/i,
@@ -91,7 +84,6 @@ const RULES_TALK = [
   /\binstruction files?\b/i,
 ] as const;
 
-// rulesTalk : whether a model line speaks of the project's rules
 export function rulesTalk(text: string): boolean {
   const plain = text.replace(/[`*]/g, "");
   return RULES_TALK.some((r) => r.test(plain));
@@ -99,8 +91,6 @@ export function rulesTalk(text: string): boolean {
 
 const ENGINE_RULES = "the engine writes Project rules itself, from the root AGENTS.md and CLAUDE.md";
 
-// absentMark : the mark of a line that says a file is absent, checked against the file list (cites.ts "absence"); a
-// line the file list contradicts, or may, is dropped; undefined when the line is no such claim
 function absentMark(input: BriefInput, item: Cite, text: string): Mark | undefined {
   const absent = absence(text, item.file, input.files);
   if (absent.kind === "not-absence") {
@@ -115,7 +105,6 @@ function absentMark(input: BriefInput, item: Cite, text: string): Mark | undefin
   };
 }
 
-// droppedWhy : why an absence claim is dropped: the repo holds a file it claims absent, or one it may mean
 function droppedWhy(absent: Extract<Absence, { readonly held: readonly string[] }>): string {
   const held = absent.held.join(", ");
   return absent.kind === "false"
@@ -123,18 +112,14 @@ function droppedWhy(absent: Extract<Absence, { readonly held: readonly string[] 
     : `it says a file is absent, and the default branch holds ${held}, which it names`;
 }
 
-// markOf : how a line is marked: verified with its cite, verified against the file list, or inferred; or, for a model
-// line, dropped with the reason
 function markOf(input: BriefInput, item: Cite & { readonly verified: boolean }, text: string, model: boolean): Mark {
   return (model ? modelMark(input, item, text) : undefined) ?? citedMark(input, item);
 }
 
-// modelMark : a model line dropped, or marked against the file list; undefined when its cite decides
 function modelMark(input: BriefInput, item: Cite, text: string): Mark | undefined {
   return rulesTalk(text) ? { dropped: `"${text}": ${ENGINE_RULES}` } : absentMark(input, item, text);
 }
 
-// citedMark : a line marked by its cite: verified or inferred at its file:line, or inferred without one
 function citedMark(input: BriefInput, item: Cite & { readonly verified: boolean }): Mark {
   const cite = checked(input, item);
   if (cite === "none") {
@@ -148,7 +133,6 @@ type Lines = {
   readonly lines: readonly string[];
   readonly cites: readonly KeptCite[];
   readonly dropped: readonly string[];
-  // how many lines the model gave, kept or dropped
   readonly given: number;
 };
 
@@ -173,7 +157,6 @@ function section(title: string, lines: readonly string[], empty: string): readon
   return ["", `## ${title}`, "", ...(lines.length === 0 ? [empty] : lines)];
 }
 
-// commandLines : the engine's listing, every command verified where it was read
 function commandLines(input: BriefInput): Lines {
   const c = input.commands;
   if (c.kind !== "listed") {
@@ -195,8 +178,6 @@ function ruleLines(input: BriefInput): readonly string[] {
   return nested ? [...own, "- the AGENTS.md or CLAUDE.md of a folder, for that folder (verified)"] : own;
 }
 
-// ruleMustLines : each MUST the root AGENTS.md and CLAUDE.md state, one line each, cited at its line (musts.ts); the
-// engine reads them itself, since the model's copy of the code holds no rule file
 function ruleMustLines(input: BriefInput): Lines {
   const musts = projectMusts(input.lines);
   if (musts.length > 0) {
@@ -217,7 +198,6 @@ function ruleMustLines(input: BriefInput): Lines {
 const stackLine = (i: Item): string => i.text;
 const moduleLine = (m: Module): string => `**${m.name}**: ${m.job}`;
 
-// briefOf : brief.md, and the cites it keeps
 function briefOf(input: BriefInput): Lines {
   const rules = ruleMustLines(input);
   const commands = commandLines(input);
@@ -250,7 +230,6 @@ function briefOf(input: BriefInput): Lines {
   };
 }
 
-// defined : the terms a glossary defines, as "**Term**:" at a line's start, in lower case
 function defined(lines: readonly string[]): ReadonlySet<string> {
   return new Set(lines.flatMap((l) => /^\*\*([^*]+)\*\*\s*:/.exec(l)?.[1]?.trim().toLowerCase() ?? []));
 }
@@ -258,7 +237,6 @@ function defined(lines: readonly string[]): ReadonlySet<string> {
 const termLine = (t: Term): string =>
   `**${t.term}**: ${t.meaning}${t.avoid.length === 0 ? "" : ` _Avoid_: ${t.avoid.join(", ")}.`}`;
 
-// glossaryOf : glossary.md: the project's own glossary linked, then the terms it does not define
 function glossaryOf(input: BriefInput): Lines {
   const own = GLOSSARIES.find((g) => input.lines(g) !== undefined);
   const theirs = own === undefined ? new Set<string>() : defined(input.lines(own) ?? []);
@@ -290,9 +268,6 @@ function glossaryOf(input: BriefInput): Lines {
   };
 }
 
-// written : brief.md, glossary.md, every cite they keep, and a note for each model line the engine dropped; refused
-// only when the model gave lines and the engine dropped every one, since a brief of the engine's lines alone would hide
-// that the model's answer was unusable
 export function written(input: BriefInput): Result<Written> {
   const brief = briefOf(input);
   const glossary = glossaryOf(input);

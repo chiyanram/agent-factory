@@ -23,7 +23,6 @@ export const TEST_CONFIG: readonly string[] = [
   "**/conftest.py",
 ];
 
-// the files a verify program reads on its own, at the root of the repo
 const PROGRAM_FILES: Readonly<Record<string, readonly string[]>> = {
   make: ["Makefile", "makefile", "GNUmakefile"],
   gmake: ["Makefile", "makefile", "GNUmakefile"],
@@ -40,16 +39,13 @@ const PROGRAM_FILES: Readonly<Record<string, readonly string[]>> = {
   task: ["Taskfile.yml", "Taskfile.yaml"],
 };
 
-// a word that names a file: it has a folder or an extension, and is not an option
 const PATHLIKE = /^[^-].*(?:\/|\.[A-Za-z0-9]+$)/;
 
-// plain : a word as a glob from the repo's root: no leading ./, and a folder as everything in it
 function plain(word: string): string {
   const path = word.replace(/^(?:\.\/)+/, "");
   return path.endsWith("/") ? `${path}**` : path;
 }
 
-// verifyFiles : the files the verify command names. Pure.
 export function verifyFiles(verify: Argv): readonly string[] {
   const [program, ...rest] = verify;
   const name = plain(program).split("/").at(-1) ?? "";
@@ -58,8 +54,6 @@ export function verifyFiles(verify: Argv): readonly string[] {
   return [...new Set([...own, ...named])].filter((w) => w !== "" && !w.includes(".."));
 }
 
-// judgeFiles : the judge files' globs for a project: the built-in ones, the verify command's files, and the project's
-// own additions. Pure.
 export function judgeFiles(project: ProjectFile): readonly string[] {
   const verify = project.gate.kind === "local" ? verifyFiles(project.gate.verify) : [];
   return [...new Set([...BUILD_FILES, ...TEST_CONFIG, ...verify, ...project.ready.judgeFiles])];

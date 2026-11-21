@@ -3,8 +3,6 @@ import type { BoardLine } from "../src/core/dispatch/board.js";
 import type { Result } from "../src/core/forge/api.js";
 import { HANDOFF_MAX_CHARS, handoffNote, mapTables, type MapRead } from "../src/core/handoff.js";
 
-// The coordinator's reset note is built by code from the records, never by a model, and is capped.
-
 const UTC = { name: "UTC" };
 const AT = Date.parse("2026-11-17T15:00:00Z");
 
@@ -109,7 +107,6 @@ describe("handoffNote", () => {
     expect(complete).toBe(true);
     expect(text.length).toBeLessThanOrEqual(HANDOFF_MAX_CHARS);
     expect(text).toMatch(/\(\d+ more table lines: read #2\)/);
-    // the first map keeps its rows before the last map's are all gone
     expect(text).toContain("| #10 |");
     expect(text).toContain("| #1399 |");
   });
@@ -132,7 +129,6 @@ describe("handoffNote", () => {
     expect(text).toContain("(5 more table lines: read #1)");
     expect(text).toMatch(/\(\d+ more tickets: run agent-factory board aruvii\)/);
     expect(text).toContain("  F0  no PR");
-    // the lane still counts every ticket, and no ticket is shown without what it waits on
     expect(text).toContain("factory (50)");
     const lines = text.split("\n");
     const last = lines.findLastIndex((l) => /^ {2}F\d+ {2}/.test(l));
@@ -140,7 +136,6 @@ describe("handoffNote", () => {
   });
 
   it("never leaves a table's head without its rows", () => {
-    // over by about three data rows, so a cut down to the head and the separator alone would fit
     const full = note({ maps: ok([map(1, 3)]) }).text.length;
     const { text } = note({ maps: ok([map(1, 3)]), maxChars: full - 120 });
     expect(text).not.toContain("| child | state |");

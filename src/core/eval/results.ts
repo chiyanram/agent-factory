@@ -2,6 +2,9 @@
 // seeds in Act on, overall, per category and per severity; the clean-floor hits (any Act on finding on a case whose
 // golden.json is []); what the pass spent; and the inputs it ran with, by SHA, so a CI check can match them with a PR's
 // head. A partial pass (stopped at the cap, or a run that failed) and a pass with draft cases are never proof.
+//
+// A found-by-eval case was chosen because this reviewer found its bug, so the overall recall is also given without
+// those cases (P11).
 
 import { createHash } from "node:crypto";
 import type { ActOn } from "../review/act-on.js";
@@ -12,7 +15,6 @@ import type { Aim } from "./bar.js";
 
 export type RunRecord = {
   readonly run: number;
-  // posted, or what the round did instead, or failed
   readonly outcome: string;
   readonly error: string;
   readonly cost_usd: number;
@@ -25,12 +27,9 @@ export type CaseRecord = { readonly case: Case; readonly error: string; readonly
 export type Tally = { readonly found: number; readonly of: number; readonly recall: number | null };
 
 export type Inputs = {
-  // the commit of this repository the pass ran at
   readonly head: string;
   readonly models: Readonly<Record<"find" | "rule" | "logic" | "judge", string>>;
-  // git blob SHAs of the instructions each run read, as `git rev-parse <commit>:<path>` prints them
   readonly prompts: Readonly<Record<"find" | "verify" | "judge", string>>;
-  // the rulebook checkout's commit, or "unknown"
   readonly rulebook: string;
 };
 
@@ -42,13 +41,11 @@ export type Pass = {
   readonly spent: number;
   readonly stopped: string;
   readonly drafts: boolean;
-  // what the change the pass proves aims at (ADR-0021); none for a pass that proves no change, such as a baseline
   readonly aim: Aim | "none";
   readonly skipped: readonly Row[];
   readonly cases: readonly CaseRecord[];
 };
 
-// blobSha : the SHA git gives a file's content (git hash-object). Pure.
 export function blobSha(content: Buffer): string {
   return createHash("sha1")
     .update(Buffer.concat([Buffer.from(`blob ${content.length}\0`), content]))
@@ -57,7 +54,6 @@ export function blobSha(content: Buffer): string {
 
 type Hit = { readonly found: boolean; readonly category: string; readonly severity: string };
 
-// hits : one entry per seed per run that ran. Pure.
 function hits(cases: readonly CaseRecord[]): readonly Hit[] {
   return cases.flatMap((c) =>
     c.runs.flatMap((r) =>
@@ -81,9 +77,6 @@ function by(list: readonly Hit[], names: readonly string[], key: "category" | "s
   );
 }
 
-// recall : recall@act_on, overall, per category and per severity (#218: a finding carries both). A found-by-eval case
-// was chosen because this reviewer found its bug, so the overall is also given without those cases (P11: cases it was
-// not tuned on). Pure.
 export function recall(cases: readonly CaseRecord[]): {
   readonly overall: Tally;
   readonly overall_without_found_by_eval: Tally;
@@ -99,7 +92,6 @@ export function recall(cases: readonly CaseRecord[]): {
   };
 }
 
-// cleanFloor : every Act on finding on a clean case; the floor is 0 (ADR-0015 E2). Pure.
 export function cleanFloor(cases: readonly CaseRecord[]): {
   readonly hits: number;
   readonly findings: readonly (ActOn & { readonly case: string; readonly run: number })[];
@@ -110,7 +102,6 @@ export function cleanFloor(cases: readonly CaseRecord[]): {
   return { hits: findings.length, findings };
 }
 
-// partialWhy : why a pass is partial: the cap, a case that could not be set up, a run that failed. Pure.
 export function partialWhy(p: Pass): readonly string[] {
   const failed = p.cases.flatMap((c) => [
     ...(c.error === "" ? [] : [`${c.case.name}: ${c.error}`]),
@@ -133,7 +124,6 @@ function caseEntry(c: CaseRecord): Record<string, unknown> {
   };
 }
 
-// document : the results file's JSON. Pure.
 export function document(p: Pass): Record<string, unknown> {
   const why = partialWhy(p);
   const ran = p.cases.map((c) => c.case.name);

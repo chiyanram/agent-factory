@@ -7,7 +7,6 @@ describe("scrubSecrets", () => {
     const pem =
       "a\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\nAAAABG5vbmU=\n-----END OPENSSH PRIVATE KEY-----\nz";
     expect(scrubSecrets(pem)).toBe("a\n[scrubbed]\nz");
-    // a key cut off before its END line is scrubbed to its last line of key text, never the rest of the text
     expect(scrubSecrets("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg\nAAAA+/=\nthe test failed at A.java:3")).toBe(
       "[scrubbed]\nthe test failed at A.java:3",
     );
@@ -27,7 +26,6 @@ describe("scrubSecrets", () => {
     expect(scrubSecrets("token ghp_short123 and github_pat_ab12cd34 and glpat-x1y2z3w4")).toBe(
       "token [scrubbed] and [scrubbed] and [scrubbed]",
     );
-    // under 8 characters after the prefix it is a name, not a token
     expect(scrubSecrets("the gh_ prefix, ghp_ alone and the ghs_test fixture")).toBe(
       "the gh_ prefix, ghp_ alone and the ghs_test fixture",
     );

@@ -21,14 +21,10 @@ import { isTestFile } from "../ready/floor.js";
 import { matches, type LensCount } from "../lane.js";
 import { GRADES, type Grade } from "./verdicts.js";
 
-// the lens a round runs when the project names none: one finder on the baseline review checks, as before lenses
 export const BASELINE_LENS = "baseline";
 
-// the lens that reviews every edit to an existing test (DESIGN.md section 5; its rubric: chiyanram/skills#235)
 export const TEST_INTEGRITY = "test-integrity";
 
-// where a lens's rubric comes from: a skill in an enabled plugin (its SKILL.md, or one of its references), a file in
-// the repo on the default branch, or the baseline review checks alone, which every finder sees already
 export type Rubric =
   | { readonly kind: "skill"; readonly plugin: string; readonly skill: string; readonly reference?: string }
   | { readonly kind: "file"; readonly path: string }
@@ -37,20 +33,16 @@ export type Rubric =
 export type Lens = {
   readonly name: string;
   readonly rubric: Rubric;
-  // globs; empty for every file
   readonly paths: readonly string[];
-  // lane names; empty for every lane
   readonly lanes: readonly string[];
 };
 
-// a file the change touches, and whether it was there before the change
 export type Touched = { readonly path: string; readonly existed: boolean };
 
 export type { LensCount };
 
 export type Pick = {
   readonly lenses: readonly Lens[];
-  // every lens on the strongest model: a one-way door, by its lane or by a path it touches
   readonly strongest: boolean;
 };
 
@@ -59,12 +51,10 @@ function applies(lens: Lens, lane: string, touched: readonly Touched[]): boolean
   return inLane && (lens.paths.length === 0 || touched.some((t) => matches(t.path, lens.paths)));
 }
 
-// editsTest : an existing test file changed, as the ready check names test files. Pure.
 export function editsTest(touched: readonly Touched[], testFiles: readonly string[]): boolean {
   return touched.some((t) => t.existed && isTestFile(t.path, testFiles));
 }
 
-// pickLenses : the lenses a round runs; at least one when any lens applies. Pure.
 export function pickLenses(input: {
   readonly lenses: readonly Lens[];
   readonly lane: string;
@@ -82,7 +72,6 @@ export function pickLenses(input: {
   return { lenses: [...counted, ...integrity], strongest };
 }
 
-// a finding as a finder reports it
 type Reported = {
   readonly id: string;
   readonly file: string;
@@ -95,8 +84,6 @@ export type Merged<F extends Reported> = F & { readonly lenses: readonly string[
 
 type Kept<F> = { finding: F; readonly lenses: string[] };
 
-// keepOne : one report into the findings kept so far, by file, line and rule; a later report replaces the kept one only
-// when its grade is stronger, so a tie keeps the earlier, lower ID
 function keepOne<F extends Reported>(kept: Map<string, Kept<F>>, lens: string, f: F): void {
   const key = JSON.stringify([f.file, f.line, f.rule]);
   const seen = kept.get(key);
@@ -112,7 +99,6 @@ function keepOne<F extends Reported>(kept: Map<string, Kept<F>>, lens: string, f
   }
 }
 
-// mergeFindings : every lens's findings, in the lenses' order, as one list for the verify pass. Pure.
 export function mergeFindings<F extends Reported>(
   byLens: readonly { readonly lens: string; readonly findings: readonly F[] }[],
 ): readonly Merged<F>[] {
@@ -129,7 +115,6 @@ export function mergeFindings<F extends Reported>(
   return merged;
 }
 
-// uniqueByLens : per lens that ran, its verified findings that no other lens reported. Pure.
 export function uniqueByLens(
   ran: readonly string[],
   sorted: readonly { readonly lenses: readonly string[]; readonly bucket: string }[],

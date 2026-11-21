@@ -1,6 +1,14 @@
 // github — the GitHub adapter of the forge seam, through `gh api` (ADR-0010). REST for single changes and writes,
 // GraphQL for lists, with every list paged to its end (#71). Owner, name and label go in as GraphQL variables, never
 // into the query text. Only branches in the repository itself are supported: the writer pushes there.
+//
+// A list page holds 30 pull requests, so one page query costs one GraphQL point: GitHub adds the requests each
+// connection could need, divides by 100 and rounds.
+// https://docs.github.com/en/graphql/overview/rate-limits-and-node-limits-for-the-graphql-api
+//
+// A GitHub App's login is always given in its [bot] form, so the factory's own notes match its login whichever API
+// read them. A label DELETE that fails counts only when the label is still on the pull request, because a person may
+// have removed it first.
 
 import { plainBranch } from "../branch.js";
 import type { Note } from "../notes.js";
@@ -47,7 +55,6 @@ import type { GithubProject } from "./target.js";
 
 export type { GithubProject };
 
-// Every check rollup state GitHub defines (StatusState). Anything else is unknown, never "none" (#124).
 const ROLLUP: Readonly<Record<string, Pipeline>> = {
   SUCCESS: { kind: "success" },
   FAILURE: { kind: "failed" },
@@ -56,10 +63,8 @@ const ROLLUP: Readonly<Record<string, Pipeline>> = {
   EXPECTED: { kind: "running" },
 };
 
-// GitHub's MergeableState in the seam's words: CONFLICTING, MERGEABLE, or UNKNOWN while GitHub still computes it
 const MERGEABLE: Readonly<Record<string, Mergeable>> = { MERGEABLE: "clean", CONFLICTING: "conflict" };
 
-// mergeableOf : the pull request's MergeableState; anything else, or none, is unknown. Pure.
 export function mergeableOf(state: unknown): Mergeable {
   return typeof state === "string" ? (MERGEABLE[state] ?? "unknown") : "unknown";
 }
@@ -79,8 +84,6 @@ const GITHUB_STATES: Readonly<Record<CommitStatus["state"], string>> = {
   failed: "failure",
 };
 
-// GitHub's repository permission, in the seam's levels: write or more counts as a maintainer, as on a personal
-// repository a collaborator has write access and the owner admin.
 function level(permission: string): Level {
   return ["ADMIN", "MAINTAIN", "WRITE"].includes(permission) ? "maintainer" : "guest";
 }
@@ -90,9 +93,6 @@ const COMMENT = "body createdAt author { login __typename }";
 const COLLABORATORS = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   collaborators(first: 100, after: $after) { pageInfo { hasNextPage endCursor } edges { permission node { login } } } } }`;
 
-// GitHub prices a query at the requests its connections could need, over 100, rounded: a page of n open pull requests,
-// each with its labels, its last commit and its comments, is 1 + 3n requests. 30 to a page is 91: 1 point, where 50 was
-// 151: 2 points, for the same pull requests (#62). The page sizes inside a pull request add nothing to the price.
 const OPEN = `query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
   pullRequests(states: [OPEN], first: 30, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
@@ -111,17 +111,12 @@ function byState(state: "opened" | "merged"): string {
     pageInfo { hasNextPage endCursor } nodes { number headRefName isCrossRepository } } } }`;
 }
 
-// the open issues with a label, and the times labels were put on each: the newest for that label is since when it
-// waits. GitHub's issues connection holds no pull request.
 const WAITING = `query($owner: String!, $name: String!, $label: String!, $after: String) { repository(owner: $owner, name: $name) {
   issues(states: [OPEN], labels: [$label], first: 50, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
     nodes { number title
       timelineItems(itemTypes: [LABELED_EVENT], last: 100) { nodes { ... on LabeledEvent { createdAt label { name } } } } } } } }`;
 
-// GraphQL names a GitHub App by its slug alone ("ledger-factory"); REST, git and app-token use "ledger-factory[bot]".
-// The seam always gives the [bot] form, so the factory's own notes match its login whichever way they were read. A
-// deleted account leaves the author null: a person who is no member and not the factory.
 function author(r: ReturnType<typeof reader>, node: unknown): string {
   if (r.absent(node, "author")) {
     return "";
@@ -134,13 +129,11 @@ function comment(r: ReturnType<typeof reader>, node: unknown): Note {
   return { body: r.text(node, "body"), author: { name: author(r, node) }, at: r.text(node, "createdAt") };
 }
 
-// the check-run conclusions that make the rollup red (ROLLUP above: FAILURE, ERROR)
 const RED_CHECKS = new Set(["failure", "timed_out", "cancelled", "startup_failure", "action_required"]);
 const RED_STATUSES = new Set(["failure", "error"]);
 
 type RedCheck = { readonly id: number; readonly name: string; readonly actions: boolean };
 
-// redChecks : the failed check runs at a head; only a GitHub Actions run has a job log the API gives. Pure.
 export function redChecks(answer: unknown, r: ReturnType<typeof reader>): readonly RedCheck[] {
   return r
     .list(answer, "check_runs")
@@ -148,7 +141,6 @@ export function redChecks(answer: unknown, r: ReturnType<typeof reader>): readon
     .map((c) => ({ id: r.int(c, "id"), name: r.text(c, "name"), actions: r.at(c, "app.slug") === "github-actions" }));
 }
 
-// redStatuses : the failed commit statuses at a head, which carry a description and no log. Pure.
 export function redStatuses(answer: unknown, r: ReturnType<typeof reader>): readonly FailedJob[] {
   return r
     .list(answer, "statuses")
@@ -162,7 +154,6 @@ export function redStatuses(answer: unknown, r: ReturnType<typeof reader>): read
     }));
 }
 
-// githubIssueState : an issue's state from GitHub's state and state_reason (#494). Pure.
 function githubIssueState(state: string, reason: string): IssueState {
   if (state === "open") {
     return "open";
@@ -182,7 +173,6 @@ export function github(client: Client, project: GithubProject): Forge {
     return r.done(pick(answer.value, r));
   }
 
-  // failedJobs : the head's failed check runs, each Actions run with its log's end, then its failed commit statuses
   async function failedJobs(input: { readonly head: string }): Promise<Result<readonly FailedJob[]>> {
     const checks = await getJson(
       `${repo}/commits/${input.head}/check-runs?filter=latest&per_page=100`,
@@ -245,8 +235,6 @@ export function github(client: Client, project: GithubProject): Forge {
     });
   }
 
-  // landedOf : when, as which commit and by whom a pull request was merged; merge_commit_sha is the merge, squash or
-  // rebased commit on the base branch
   async function landedOf(input: { readonly number: number }): Promise<Result<Landed>> {
     const answer = await rest(client, { path: `${repo}/pulls/${input.number}`, method: "GET", body: { kind: "none" } });
     if (answer.kind === "failed") {
@@ -298,8 +286,6 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
-  // setIssueBody : the issue's body replaced (#542). The issues endpoint also edits a pull request's body, so the
-  // number is read first and a pull request is refused before anything is written
   async function setIssueBody(input: { readonly number: number; readonly text: string }): Promise<Done> {
     const pull = await getJson(
       `${repo}/issues/${input.number}`,
@@ -428,7 +414,6 @@ export function github(client: Client, project: GithubProject): Forge {
     );
   }
 
-  // the open pull requests from this branch of the repository itself: head=owner:branch leaves forks out
   async function openFrom(branch: string): Promise<Result<readonly number[]>> {
     const head = encodeURIComponent(`${project.owner}:${branch}`);
     const answer = await rest(client, {
@@ -478,7 +463,6 @@ export function github(client: Client, project: GithubProject): Forge {
     change,
     landed: landedOf,
     failedJobs,
-    // GitHub runs .github/workflows only, which the guard always covers
     async ciConfig() {
       return { kind: "ok", value: { kind: "none", why: "GitHub runs .github/workflows" } };
     },
@@ -490,8 +474,8 @@ export function github(client: Client, project: GithubProject): Forge {
       const r = reader("github repository");
       return r.done(r.text(answer.value, "default_branch"));
     },
-    // matching-refs answers every ref that starts with the name (factory/T1 also finds factory/T10), so the exact ref
-    // is looked for in the list; a plain branch name has no character a URL path must escape
+    // matching-refs answers every ref that starts with the name, so the exact ref is looked for in the list.
+    // https://docs.github.com/en/rest/git/refs
     async branchExists(input) {
       if (!plainBranch(input.branch)) {
         return { kind: "failed", reason: `github: not a plain branch name: ${JSON.stringify(input.branch)}` };
@@ -500,7 +484,6 @@ export function github(client: Client, project: GithubProject): Forge {
         r.list(v, "").some((ref) => r.text(ref, "ref") === `refs/heads/${input.branch}`),
       );
     },
-    // every pull request from this branch of the repository itself, in any state: head=owner:branch leaves forks out
     async branchState(input) {
       if (!plainBranch(input.branch)) {
         return { kind: "failed", reason: `github: not a plain branch name: ${JSON.stringify(input.branch)}` };
@@ -514,8 +497,6 @@ export function github(client: Client, project: GithubProject): Forge {
         ),
       );
     },
-    // an issue's state by its state_reason: closed as not_planned is not planned, any other close is completed (#494);
-    // a pull request is no issue, so it fails
     async issueState(input) {
       const answer = await getJson(`${repo}/issues/${input.number}`, "github issue", (v, r) => ({
         pull: !r.absent(v, "pull_request"),
@@ -530,7 +511,8 @@ export function github(client: Client, project: GithubProject): Forge {
         ? { kind: "failed", reason: `github: #${input.number} is a pull request, not an issue` }
         : { kind: "ok", value: githubIssueState(state, reason) };
     },
-    // the issues endpoint also answers a pull request, which carries pull_request: that is no issue, so it fails
+    // The issues endpoints also answer pull requests, which carry the pull_request key.
+    // https://docs.github.com/en/rest/issues/issues
     async issueBody(input) {
       const answer = await getJson(`${repo}/issues/${input.number}`, "github issue", (v, r) => ({
         pull: !r.absent(v, "pull_request"),
@@ -562,8 +544,6 @@ export function github(client: Client, project: GithubProject): Forge {
         ? { kind: "ok" }
         : { kind: "failed", reason: `github: #${input.number}: GitHub did not keep the label ${input.label}` };
     },
-    // GitHub answers 404 when the label is already gone (a human removed it after the caller looked). That is a
-    // release, so a failed DELETE counts only when the label is still on the pull request.
     async removeLabel(input) {
       const removed = await rest(client, {
         path: `${repo}/issues/${input.number}/labels/${encodeURIComponent(input.label)}`,
@@ -607,7 +587,6 @@ export function github(client: Client, project: GithubProject): Forge {
         return r.done({ items: batch, next: nextPage(batch.length === 100, page) });
       });
     },
-    // a commit status: statusCheckRollup, which poll reads, counts it with the checks
     async status(input) {
       const value = {
         state: GITHUB_STATES[input.state],
@@ -618,7 +597,6 @@ export function github(client: Client, project: GithubProject): Forge {
         await rest(client, { path: `${repo}/statuses/${input.sha}`, method: "POST", body: { kind: "json", value } }),
       );
     },
-    // GitHub anchors a review comment only to a line in the diff; otherwise the finding goes out as a plain comment
     async lineFinding(input) {
       const body = rendered(input.post);
       if (body.kind === "failed") {

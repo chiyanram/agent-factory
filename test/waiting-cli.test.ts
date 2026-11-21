@@ -4,8 +4,6 @@ import type { WaitingRun } from "../src/core/dispatch/tick.js";
 import type { WaitingRan } from "../src/core/dispatch/waiting-pass.js";
 import { waitingCommand } from "../src/waiting-cli.js";
 
-// agent-factory waiting <project>: a pass's wait pings alone, for a session that waits while no loop runs
-
 async function ran(answer: Result<WaitingRun>): Promise<{ code: number; out: string; err: string }> {
   let out = "";
   let err = "";

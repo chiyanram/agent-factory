@@ -11,7 +11,6 @@ import type { Guard } from "./push.js";
 
 export const AGENT_SETTINGS = [".claude", ".agents", "AGENTS.md", "CLAUDE.md"] as const;
 
-// isAgentSetting : the path is one of the list, or inside one of its folders, in any letter case. Pure.
 export function isAgentSetting(path: string): boolean {
   const lower = path.toLowerCase();
   return AGENT_SETTINGS.some((s) => {
@@ -20,7 +19,6 @@ export function isAgentSetting(path: string): boolean {
   });
 }
 
-// noAgentSettings : refuses a push that adds or changes an agent setting; the work is then blocked with the files named
 export function noAgentSettings(setup: ProtectedSetup): Guard {
   return protectedFiles(setup, {
     name: "settings",

@@ -48,7 +48,6 @@ describe("turnStep: the turn a pass records, and whether it pings", () => {
   it("pings once on entering a person's turn, and records it first", () => {
     expect(turnStep(read("factory"), "needs-you")).toEqual({ record: "needs-you", ping: true });
     expect(turnStep(read("factory"), "ready-to-merge")).toEqual({ record: "ready-to-merge", ping: true });
-    // from one person's lane to the other is entering a turn too
     expect(turnStep(read("needs-you"), "ready-to-merge")).toEqual({ record: "ready-to-merge", ping: true });
   });
 
@@ -66,7 +65,6 @@ describe("turnStep: the turn a pass records, and whether it pings", () => {
   it("records the first turn of a ticket with no turn line; pings only a person's turn older lines did not ping", () => {
     expect(turnStep(read("none", false), "factory")).toEqual({ record: "factory", ping: false });
     expect(turnStep(read("none", false), "needs-you")).toEqual({ record: "needs-you", ping: true });
-    // an older line already pinged this turn: recorded, not pinged again
     expect(turnStep(read("ready-to-merge", false), "ready-to-merge")).toEqual({
       record: "ready-to-merge",
       ping: false,
@@ -103,7 +101,6 @@ describe("turnPing: what the person reads", () => {
     expect(turnPing({ state: state({ blockedRun }), action: label, change: 12 })).toMatchObject({
       why: `needs-human: a person decides; ${blockedRun}`,
     });
-    // a wait that is no hand-over does not carry the blocked run's why
     const manual: Action = { kind: "wait", why: "a manual CI job waits for a person" };
     expect(turnPing({ state: state({ blockedRun }), action: manual, change: 12 })).toMatchObject({
       why: "a manual CI job waits for a person",
@@ -149,7 +146,6 @@ describe("the turn in the summary", () => {
     expect(turnOf([{ at: at(3), kind: "pinged", head: H }])).toEqual(["ready-to-merge", false]);
     expect(turnOf([{ at: at(3), kind: "blocked", why: "x" }])).toEqual(["needs-you", false]);
     expect(turnOf([started, asked])).toEqual(["needs-you", false]);
-    // a run started after the ping: the ticket left that turn
     expect(turnOf([{ at: at(0), kind: "pinged", head: H }, started])).toEqual(["factory", false]);
   });
 
@@ -164,7 +160,6 @@ describe("the turn in the summary", () => {
       expect(turnOf([{ at: at(4), kind: "turn", to }])).toEqual([to, true]);
     }
     const s = summarize({ events: [started, { at: at(9), kind: "turn", to: "needs-you" }], since: at(0) });
-    // a claim's quiet time and "claimed, but not by this orchestrator" read the newest activity, not the ping's line
     expect(s.lastAt).toBe(at(1));
     expect(summarize({ events: [{ at: at(9), kind: "turn", to: "factory" }], since: at(0) }).lastAt).toBe("");
   });

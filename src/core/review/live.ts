@@ -2,6 +2,8 @@
 // the agent CLI's sessions list (src/core/agent/) names its session (a writer: writer-<n>) or its pid file in <repo>/.claude/runs/ names a
 // process that is still there. The reviewer writes reviewer-<n>.pid while
 // it runs, so the one-run and FACTORY_MAX_RUNS checks see it, and removes it after, only when the file is still its own.
+// liveRuns fails when the agent CLI cannot list its sessions, so a caller never reads "unknown" as "none" and releases
+// a claim a run still holds.
 
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,7 +26,6 @@ function alive(pid: number): boolean {
   }
 }
 
-// pidRuns : the runs whose pid file names a live process
 async function pidRuns(dir: string): Promise<readonly string[]> {
   const names = await readdir(dir).catch(() => [] as string[]);
   const live: string[] = [];
@@ -47,8 +48,6 @@ function refusal(runs: readonly string[], number: number, maxRuns: number): stri
     : "";
 }
 
-// liveRuns : the names of this machine's live runs (writer-<n>, reviewer-<n>); fails when claude cannot say, so a
-// caller never mistakes "unknown" for "none" and releases a claim a run still holds
 export async function liveRuns(input: {
   readonly repo: string;
   readonly sessions: Sessions;
@@ -61,7 +60,6 @@ export async function liveRuns(input: {
   return { kind: "ok", value: [...new Set([...listed.value, ...pids])].filter((r) => RUN.test(r)) };
 }
 
-// holdRun : the reviewer's run on change `number`, or why it may not start now
 export async function holdRun(input: {
   readonly repo: string;
   readonly number: number;
@@ -80,7 +78,6 @@ export async function holdRun(input: {
   }
   const file = join(dir, `reviewer-${input.number}.pid`);
   const mine = String(process.pid);
-  // the file left by a run that died goes first; "wx" then refuses a reviewer that started since the check
   const written = await attempt(async () => {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await rm(file, { force: true });

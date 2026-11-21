@@ -36,10 +36,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export type Ran = {
-  // the exit code, or null when a signal ended it
   readonly code: number | null;
   readonly signal: string | null;
-  // why the program could not be started, or ""
   readonly error: string;
   readonly out: string;
   readonly err: string;
@@ -50,21 +48,15 @@ export type Seen = {
   readonly init: Ran;
   readonly start: Ran;
   readonly dispatch: Ran;
-  // the branch the demo clone is on: main, as a real project's default branch is, whatever git's own default
   readonly branch: string;
-  // the files init must leave, each with whether it is there
   readonly files: Readonly<Record<string, boolean>>;
-  // the commit init pinned rulebook@chiyanram at, and the commit .github/rules-pack.json names; "" when there is none
   readonly pin: { readonly written: string; readonly engine: string };
 };
 
-// the checks init may fail on a clean machine: the logins a person makes after install, never the install itself
 export const ALLOWED_FAILED = [/^claude token: none on record$/];
 
-// a crash, as Node prints one: a stack frame, with or without parentheses, or an uncaught error's name
 const CRASH = /^\s+at \S|^(?:\w*Error|Error)(?: \[[A-Z_]+\])?: |\bERR_[A-Z_]{3,}\b/m;
 
-// ended : why a run did not end with an answer: a signal, a spawn error, or a crash; "" when it did. Pure.
 function ended(what: string, r: Ran): readonly string[] {
   return [
     ...(r.signal === null ? [] : [`agent-factory ${what} was ended by ${r.signal}`]),
@@ -73,7 +65,6 @@ function ended(what: string, r: Ran): readonly string[] {
   ];
 }
 
-// exitOk : exit 0; a start or a dry run against the fake git host has no reason to exit 1. Pure.
 function exitOk(what: string, r: Ran): readonly string[] {
   return r.code === 0 ? [] : [`agent-factory ${what} exited ${String(r.code)}: ${r.err.trim().slice(0, 300)}`];
 }
@@ -84,7 +75,6 @@ function versionProblems(r: Ran, version: string): readonly string[] {
     : [`agent-factory --version printed ${JSON.stringify(r.out.trim())}, not ${version}`];
 }
 
-// failedChecks : the checks init marks ✗, by their text. Pure.
 export function failedChecks(out: string): readonly string[] {
   return out.split("\n").flatMap((line) => {
     const m = /^\s*✗ (.+)$/.exec(line);
@@ -103,19 +93,16 @@ function initProblems(seen: Seen): readonly string[] {
   return [...exit, ...refused, ...failed.map((c) => `init check failed: ${c}`), ...missing];
 }
 
-// decided : the dry run named a decision for ticket 1. Pure.
 function decided(r: Ran): readonly string[] {
   return /^1: \S/m.test(r.out)
     ? []
     : [`agent-factory dispatch --dry-run named no decision for ticket 1: ${r.out.trim()}`];
 }
 
-// onMain : the demo clone is on main. Pure.
 function onMain(branch: string): readonly string[] {
   return branch === "main" ? [] : [`the demo clone is on ${JSON.stringify(branch)}, not main`];
 }
 
-// pinProblems : init pinned rulebook@chiyanram at the engine's rules-pack pin, never at skills HEAD (#607). Pure.
 function pinProblems(pin: Seen["pin"]): readonly string[] {
   if (pin.engine === "") {
     return ["the engine's rules-pack pin (.github/rules-pack.json) has no commit"];
@@ -127,7 +114,6 @@ function pinProblems(pin: Seen["pin"]): readonly string[] {
       ];
 }
 
-// problems : what the install test found wrong, one line each; none means it passed. Pure.
 export function problems(seen: Seen, version: string): readonly string[] {
   return [
     ...ended("--version", seen.version),
@@ -144,7 +130,6 @@ export function problems(seen: Seen, version: string): readonly string[] {
   ];
 }
 
-// the spec issue 1 holds: a tiny ticket, so a START alone lets its build begin
 const SPEC = [
   "# 1: the readme names the project",
   "",
@@ -166,8 +151,6 @@ const SPEC = [
   "",
 ].join("\n");
 
-// FAKE_GH : a git host for example/demo, as `gh api --include` answers it: an admin login, the repository, no branch
-// factory/1 yet, issue 1 with the spec, and no pull requests; anything else is a 404, and every call is logged
 const FAKE_GH = `#!/usr/bin/env node
 const fs = require("fs");
 const args = process.argv.slice(2);
@@ -194,7 +177,6 @@ if (path.startsWith("repos/chiyanram/agent-factory/releases")) reply(404, { mess
 reply(404, { message: "Not Found" });
 `;
 
-// a program that prints one line and exits 0, for the pinned CLIs a person installs
 function fakeVersion(text: string): string {
   return `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(`${text}\n`)});\n`;
 }
@@ -239,7 +221,6 @@ function installed(
   });
   const home = join(root, "home");
   mkdirSync(home);
-  // a clean machine: the install and the fakes before the system's PATH, a fresh HOME, no factory variable, no git config
   const env: NodeJS.ProcessEnv = {
     PATH: `${join(prefix, "bin")}:${fakes(root, srtVersion)}:${process.env.PATH ?? ""}`,
     HOME: home,
@@ -250,7 +231,6 @@ function installed(
   return { bin: join(prefix, "bin", "agent-factory"), env };
 }
 
-// clone : a clone on main whatever git's own default branch, with one commit, as a real project's is
 function clone(root: string, env: NodeJS.ProcessEnv): string {
   const dir = join(root, "demo");
   mkdirSync(dir);
@@ -263,7 +243,6 @@ function clone(root: string, env: NodeJS.ProcessEnv): string {
   return dir;
 }
 
-// field : a string at this path of a JSON file, or "" when the file, the path or the string is not there
 function field(path: string, keys: readonly string[]): string {
   let parsed: unknown;
   try {
@@ -286,7 +265,6 @@ function srtVersionOf(repo: string): string {
 function main(): number {
   const repo = process.cwd();
   const version = String(JSON.parse(readFileSync(join(repo, "package.json"), "utf8")).version);
-  // the real path: on macOS the temp folder sits behind a symlink
   const root = mkdtempSync(join(realpathSync(tmpdir()), "factory-install-"));
   try {
     const { bin, env } = installed(root, repo, srtVersionOf(repo));

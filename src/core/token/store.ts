@@ -47,8 +47,6 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// --- the expiry, in <home>/tokens.json ---------------------------------------------------------------------------
-
 async function readMetas(home: string): Promise<Readonly<Record<string, unknown>>> {
   try {
     const value = JSON.parse(await readFile(join(home, "tokens.json"), "utf8")) as unknown;
@@ -72,8 +70,6 @@ function asMeta(value: unknown): MetaRead {
     : { kind: "bad" };
 }
 
-// tokenRecord : a token's expiry on record in <home>/tokens.json, read without the token itself (#369: init checks a
-// token's days left and never reads the secret); none when no expiry is on record
 export async function tokenRecord(home: string, runner: Runner): Promise<Meta | "none"> {
   const meta = asMeta((await readMetas(home))[runner]);
   return meta.kind === "meta" ? meta.meta : "none";
@@ -110,14 +106,10 @@ function withMeta(vault: Vault, home: string): TokenStore {
   };
 }
 
-// --- macOS Keychain ----------------------------------------------------------------------------------------------
-
 export function keychainVault(run: Cli, env: NodeJS.ProcessEnv): Vault {
   return {
     where: "the macOS login Keychain",
     write: async (runner, token) => {
-      // checkToken allows only [A-Za-z0-9._-] and checkWebhook a Discord URL of letters, digits, ".", "/", ":", "_"
-      // and "-": neither holds a space, a quote or a backslash, so the line needs no quoting
       const exit = await run({
         bin: "security",
         args: ["-i"],
@@ -145,8 +137,6 @@ export function keychainVault(run: Cli, env: NodeJS.ProcessEnv): Vault {
   };
 }
 
-// --- Linux file --------------------------------------------------------------------------------------------------
-
 export type Owner = { readonly uid: number };
 
 export type FileStat = {
@@ -171,7 +161,6 @@ const FILE_RULES: readonly FileRule[] = [
   },
 ];
 
-// unsafeFile : every reason a token file may not be read; empty when it may. Pure.
 export function unsafeFile(stat: FileStat, owner: Owner): readonly string[] {
   return FILE_RULES.filter((r) => r.fails(stat, owner)).map((r) => r.why(stat, owner));
 }
@@ -213,8 +202,6 @@ export function fileVault(home: string, owner: Owner): Vault {
     },
   };
 }
-
-// --- which store --------------------------------------------------------------------------------------------------
 
 export type Opened =
   | { readonly kind: "store"; readonly store: TokenStore }
