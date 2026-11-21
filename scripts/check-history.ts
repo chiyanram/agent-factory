@@ -315,6 +315,8 @@ function problems(root: string, env: NodeJS.ProcessEnv): readonly string[] {
     "--no-ext-diff",
     "--no-renames",
     "--diff-filter=AM",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
     base.out.trim(),
   ]);
   const added = new Map(addedLines(diff.out));

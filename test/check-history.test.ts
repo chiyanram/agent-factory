@@ -247,7 +247,27 @@ describe("the script", () => {
     expect(run(ROOT)).toEqual({ code: 0, out: "" });
   });
 
-  it("fails the history notes a planted change adds, and only those", () => {
+  const DIFF_CONFIGS: readonly (readonly [string, Readonly<Record<string, string>>])[] = [
+    ["git's default prefixes", {}],
+    ["diff.mnemonicPrefix", { "diff.mnemonicPrefix": "true" }],
+    ["diff.noprefix", { "diff.noprefix": "true" }],
+    ["diff.srcPrefix and diff.dstPrefix", { "diff.srcPrefix": "old/", "diff.dstPrefix": "new/" }],
+  ];
+  const withConfig = (env: NodeJS.ProcessEnv, config: Readonly<Record<string, string>>): NodeJS.ProcessEnv => {
+    const pairs = Object.entries({ "diff.mnemonicPrefix": "false", "diff.noprefix": "false", ...config });
+    return {
+      ...env,
+      GIT_CONFIG_COUNT: String(pairs.length),
+      ...Object.fromEntries(
+        pairs.flatMap(([k, v], i) => [
+          [`GIT_CONFIG_KEY_${i}`, k],
+          [`GIT_CONFIG_VALUE_${i}`, v],
+        ]),
+      ),
+    };
+  };
+
+  it.each(DIFF_CONFIGS)("fails the history notes a planted change adds, and only those, under %s", (_, config) => {
     const dir = tempDir("factory-history-");
     made.push(dir);
     const git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
@@ -256,7 +276,7 @@ describe("the script", () => {
     git("add", "-A");
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base");
     cpSync(join(FIXTURES, "after"), dir, { recursive: true });
-    const out = run(dir, { ...process.env, FACTORY_BASE_REF: "main" });
+    const out = run(dir, withConfig({ ...process.env, FACTORY_BASE_REF: "main" }, config));
     expect(out.code).toBe(1);
     expect(out.out.split("\n").map((l) => l.split(": ").slice(0, 3).join(": "))).toEqual([
       "docs/adr/0099-x.md:10: history-note: ticket",
