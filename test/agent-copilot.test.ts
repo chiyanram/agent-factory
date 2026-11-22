@@ -8,12 +8,13 @@ import {
   readCopilotAnswer,
   type CopilotSetup,
 } from "../src/core/agent/copilot.js";
-import { endLive, runInFolder, type FolderCall } from "../src/core/agent/folder.js";
+import { endLive, type FolderCall } from "../src/core/agent/folder.js";
 import { openCopilotCli } from "../src/core/agent/index.js";
 import { COPILOT_ON } from "../src/core/agent/switch.js";
 import type { BoxToken } from "../src/core/token/index.js";
 import type { ModelRun } from "../src/core/review/model.js";
 import { tempDir } from "./temp.js";
+import { stopOnceStarted } from "./started-first.js";
 
 const made: string[] = [];
 afterEach(() => {
@@ -319,7 +320,7 @@ describe("copilotModel (#690)", () => {
       `#!/bin/sh\necho "$HOME" > ${join(dir, "home")}\n/bin/sleep 600 &\necho $! > ${pidFile}\nwait\n`,
     );
     chmodSync(bin, 0o755);
-    const run = copilotModel(setupWith(runInFolder, READY, { bin, minuteMs: 300 }));
+    const run = copilotModel(setupWith(stopOnceStarted(pidFile), READY, { bin, minuteMs: 300 }));
     const result = await run(runIn(dir, { limit: { minutes: 1, setting: "FACTORY_FINDER_MINUTES" } }));
     expect(result).toMatchObject({
       kind: "failed",
