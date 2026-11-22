@@ -11,7 +11,7 @@
 // file is checked against the rules pack's own lanes schema, when the pack ships one (pack-schema.ts, #484). A process with no
 // review.json keeps the built-in baseline.
 
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { DEFAULT_LANES, lanesOf, type LaneProps } from "../lane.js";
@@ -35,6 +35,24 @@ function failed(reason: string): { readonly kind: "failed"; readonly reason: str
 }
 
 const NAME = /^[A-Za-z0-9_-]+$/;
+
+export async function referencesDir(dirs: readonly string[]): Promise<string> {
+  const held = await Promise.all(dirs.map(holdsReferences));
+  return dirs[held.indexOf(true)] ?? "";
+}
+
+async function holdsReferences(dir: string): Promise<boolean> {
+  const skills = dir === "" ? [] : await readdir(join(dir, "skills")).catch((): string[] => []);
+  const held = await Promise.all(
+    skills.map((s) =>
+      stat(join(dir, "skills", s, "references")).then(
+        (st) => st.isDirectory(),
+        () => false,
+      ),
+    ),
+  );
+  return held.includes(true);
+}
 
 export async function processDir(dir: string): Promise<string> {
   const skills = await readdir(join(dir, "skills")).catch((): string[] => []);

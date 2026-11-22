@@ -11,7 +11,7 @@ import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "scripts", "check-musts.ts");
-const DISABLE = planted("oxlint-disable.txt").trimEnd();
+const DISABLE = planted("lint-directive.txt").trimEnd();
 
 const findings = (file: string, text: string, allow: readonly Allow[] = []) =>
   scan([{ file, text }], allow).findings.map((f) => f.split(": ").slice(0, 2).join(": "));

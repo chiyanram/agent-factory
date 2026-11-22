@@ -1,6 +1,6 @@
 // planted — the fake secrets and the planted code a test feeds to a check. A token is built from its parts here, and
 // only here, so GitHub push protection stays on for test/ and still lets these through; a real token pasted into a
-// test is caught. Code that a repository check must not find in test/ (a disable comment, an `as any`) lives as text
+// test is caught. Code that a repository check must not find in test/ (a disable comment, a type escape) lives as text
 // in tests/fixtures/planted/, which every check skips.
 
 import { readFileSync } from "node:fs";
