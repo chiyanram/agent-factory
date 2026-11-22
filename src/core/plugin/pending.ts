@@ -7,11 +7,11 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseJson, type Done, type Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
 import { plainName } from "../spec.js";
 import { isPolicyPoint, type PolicyPoint } from "./config.js";
 import type { Where } from "./writes.js";
+import { prop } from "../field.js";
 
 const HEX = /^[0-9a-f]{12}$/;
 

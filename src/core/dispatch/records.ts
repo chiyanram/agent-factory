@@ -49,6 +49,8 @@ import { isActedRow, type Acted, type FoundByRule } from "../review/acted-on.js"
 import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
 import type { Lane as TurnLane } from "./next-step.js";
+import { prop, codeOf } from "../field.js";
+import type { HeldLock } from "../lock.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
 export type DesignStep = "review" | "verify";
@@ -271,15 +273,6 @@ export async function record(input: { readonly where: Where; readonly event: Eve
   } catch {
     return { kind: "failed", reason: `cannot write ${path.value}` };
   }
-}
-
-export function prop(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}
-
-export function codeOf(error: unknown): string {
-  const code = prop(error, "code");
-  return typeof code === "string" ? code : "";
 }
 
 const BAD: unique symbol = Symbol("bad");
@@ -1025,13 +1018,13 @@ export function tornPath(recordFile: string): string {
 
 async function setAside(file: string, size: number, line: Line): Promise<Done> {
   try {
-    await appendFile(tornPath(file), `${line.text}\n`, { mode: 0o600 });
     const handle = await open(file, "r+");
     try {
       const now = await handle.stat();
       if (now.size !== size) {
         return { kind: "failed", reason: `${file} grew while its torn last line was set aside` };
       }
+      await appendFile(tornPath(file), `${line.text}\n`, { mode: 0o600 });
       await handle.truncate(line.start);
       return { kind: "ok" };
     } finally {
@@ -1044,7 +1037,7 @@ async function setAside(file: string, size: number, line: Line): Promise<Done> {
 
 export type ReadOptions = {
   readonly warn?: (line: string) => void;
-  readonly setAside?: boolean;
+  readonly setAside?: HeldLock;
 };
 
 export async function readRecords(where: Where, options: ReadOptions = {}): Promise<Result<readonly Event[]>> {
@@ -1075,8 +1068,8 @@ function warnOf(options: ReadOptions): (line: string) => void {
 
 async function tornRead(path: string, text: string, torn: Line, options: ReadOptions): Promise<Done> {
   const aside =
-    options.setAside === true ? await setAside(path, Buffer.byteLength(text), torn) : { kind: "ok" as const };
-  const where = options.setAside === true ? `it is moved to ${tornPath(path)}` : "it is skipped";
+    options.setAside === undefined ? { kind: "ok" as const } : await setAside(path, Buffer.byteLength(text), torn);
+  const where = options.setAside !== undefined ? `it is moved to ${tornPath(path)}` : "it is skipped";
   if (aside.kind === "ok") {
     warnOf(options)(
       `warning: the last line of ${path} was torn (a write cut short); ${where}, and its run counts as one that never ended`,

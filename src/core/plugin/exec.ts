@@ -6,6 +6,7 @@
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { signalGroup } from "../forge/api.js";
 
 export type Limits = { readonly timeoutMs: number; readonly maxBytes: number };
 
@@ -25,15 +26,6 @@ export type Exec = (input: {
   readonly limits: Limits;
 }) => Promise<Ran>;
 
-function killGroup(pid: number | undefined): void {
-  if (pid === undefined) {
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {}
-}
-
 type End = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
 
 function finished(end: End, out: { stdout: string; stderr: string }): Ran {
@@ -48,6 +40,7 @@ export const runPlugin: Exec = (input) =>
     const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
     let size = 0;
     let stop: Ran | "none" = "none";
+    let failed = "";
     const child = spawn(input.path, [...input.args], {
       env: input.env,
       detached: true,
@@ -56,7 +49,7 @@ export const runPlugin: Exec = (input) =>
     });
     const halt = (why: Ran): void => {
       stop = stop === "none" ? why : stop;
-      killGroup(child.pid);
+      failed += signalGroup(child.pid, "SIGKILL");
     };
     const timer = setTimeout(() => halt({ kind: "timedOut", ms: input.limits.timeoutMs }), input.limits.timeoutMs);
     const take = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
@@ -78,9 +71,9 @@ export const runPlugin: Exec = (input) =>
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
-      killGroup(child.pid);
+      failed += signalGroup(child.pid, "SIGKILL");
       out.stdout += decoders.stdout.end();
-      out.stderr += decoders.stderr.end();
+      out.stderr += decoders.stderr.end() + failed;
       resolve(stop === "none" ? finished({ code, signal }, out) : stop);
     });
     child.stdin.on("error", () => undefined);

@@ -14,6 +14,7 @@ import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RoundPart } from "../src/core/dispatch/spend.js";
 import type { RunInput } from "../src/core/dispatch/steps.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
+import { fakeToken } from "./planted.js";
 
 let p: Project;
 beforeEach(() => {
@@ -309,6 +310,21 @@ describe("reviewRound", () => {
     const other = { label: "team@acme", dir: join(p.root, "none") };
     await reviewRound(
       setup(forge(log), model([findAnswer([])], []), { plugins: [{ label: "rulebook", dir: RULEBOOK }, other] }),
+    );
+    expect(log.posts.at(-1)).toContain("No findings");
+  });
+
+  it("AC-20 should refuse a review setup before the round when no pinned plugin holds review references", async () => {
+    const empty = { label: "team@acme", dir: join(p.root, "empty-plugin") };
+    mkdirSync(join(empty.dir, "skills", "flow"), { recursive: true });
+    const log = fresh();
+    expect(await reviewRound(setup(forge(log), model([], []), { plugins: [empty] }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("needs a plugin that holds its review references"),
+    });
+    expect(log.posts).toEqual([]);
+    await reviewRound(
+      setup(forge(log), model([findAnswer([])], []), { plugins: [empty, { label: "rulebook", dir: RULEBOOK }] }),
     );
     expect(log.posts.at(-1)).toContain("No findings");
   });
@@ -615,6 +631,37 @@ describe("reviewRound", () => {
     );
     expect(again.labels).toEqual([]);
     expect(again.posts.at(-1)).toContain("- Protected · .github/workflows/ci.yml");
+  });
+
+  it("should count a protected file as fresh when only its bare path was listed in an earlier note (AC-4)", async () => {
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write(".github/workflows/ci.yml", "on: push\n");
+    p.commitAll("ci");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    const head = p.git("rev-parse", "HEAD");
+    p.git("checkout", "-q", "main");
+    const first = fresh();
+    await reviewRound(setup(forge(first, { change: changeAt(head) }), model([findAnswer([])], [])));
+    const bare = first.posts.map((body) =>
+      body.replace("- Protected · .github/workflows/ci.yml", "- .github/workflows/ci.yml"),
+    );
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write("svc/Main.java", "class Main { int total() { return 3; } }\n");
+    p.commitAll("more");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    const later = p.git("rev-parse", "HEAD");
+    p.git("checkout", "-q", "main");
+    const again = fresh();
+    await reviewRound(
+      setup(
+        forge(again, {
+          change: changeAt(later),
+          notes: bare.map((body) => ({ body, author: { name: "ram" }, at: "t" })),
+        }),
+        model([findAnswer([])], []),
+      ),
+    );
+    expect(again.labels).toEqual(["needs-human"]);
   });
 
   it("no line of any post starts with /: a finding cannot run a GitLab quick action", async () => {
@@ -957,7 +1004,7 @@ describe("reviewStep", () => {
 });
 
 describe("the review step keeps each pass's stream as its trace (#487)", () => {
-  const token = `${["sk-ant-"].join("")}oat01-AAAAbbbbCCCCdddd`;
+  const token = fakeToken("claude-oauth");
   const streaming =
     (m: Model): Model =>
     async (run) => {

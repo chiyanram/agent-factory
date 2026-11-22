@@ -79,14 +79,14 @@ export type WriterSetup = {
   readonly label: string;
   readonly login: () => Promise<BoxToken>;
   readonly pusher: Pusher;
-  readonly programs?: readonly string[];
+  readonly programs: readonly string[];
   readonly testFiles: readonly string[];
   readonly agent: ClaudeWriter;
   readonly lanes?: readonly LaneProps[];
   readonly specs?: SpecStore;
 };
 
-type Input = RunInput & { readonly task: Task; readonly folder?: string };
+type Input = RunInput & { readonly task: Task; readonly folder: string };
 export type WriterOut = {
   readonly head: string;
   readonly outcome: "done" | "asked" | "blocked" | "parked";
@@ -102,10 +102,6 @@ export type WriterOut = {
   readonly output?: string;
   readonly trace?: string;
 };
-
-function programsOf(setup: WriterSetup): { readonly programs?: readonly string[] } {
-  return setup.programs === undefined ? {} : { programs: setup.programs };
-}
 
 function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
   return outcome.kind === "done" && outcome.deferred !== undefined ? { deferred: outcome.deferred } : {};
@@ -422,10 +418,6 @@ function knowledgeOf(known: Known): Pick<Parameters<typeof makeClone>[1], "knowl
   return known.files.kind === "text" ? { knowledge: { brief: known.files.brief, glossary: known.files.glossary } } : {};
 }
 
-function dirOf(input: Input): { readonly dir?: string } {
-  return input.folder === undefined ? {} : { dir: input.folder };
-}
-
 function withStale(result: Result<WriterOut>, known: Known): Result<WriterOut> {
   return result.kind === "ok" && known.stale.length > 0
     ? { kind: "ok", value: { ...result.value, stale: known.stale } }
@@ -458,7 +450,7 @@ async function inClone(
     ref: TARGET_REF,
   });
   const clone = await makeClone(setup.box, {
-    ...dirOf(input),
+    dir: input.folder,
     start: p.start,
     spec: p.spec.text,
     plugins: setup.settings.plugins.map((d) => d.dir),
@@ -475,7 +467,7 @@ async function inClone(
     mode: work.mode,
     names: { ticket: input.ticket, branch: clone.value.branch, head: clone.value.start, base: p.base },
     tools: [...knowledgeLines(known), ...toolLines(tools)],
-    ...programsOf(setup),
+    programs: setup.programs,
   });
   const trace = await writerTrace(setup, input);
   const ran = await writerRun({
@@ -511,7 +503,7 @@ async function afterRun(
   out: Result<WriterOut> | FailedSpent,
   ended: Result<Ended> | FailedSpent,
 ): Promise<Result<WriterOut> | FailedSpent> {
-  if (out.kind !== "ok" && input.folder !== undefined) {
+  if (out.kind !== "ok") {
     return out;
   }
   const removed = await removeClone(dir);
@@ -757,9 +749,7 @@ async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOu
 
 async function runIn(setup: WriterSetup, input: Input): Promise<Result<WriterOut> | FailedSpent> {
   const out = await runOne(setup, input);
-  if (input.folder !== undefined) {
-    await rmdir(input.folder).catch(() => undefined);
-  }
+  await rmdir(input.folder).catch(() => undefined);
   return out;
 }
 

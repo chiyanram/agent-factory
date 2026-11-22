@@ -6,10 +6,11 @@ import { doorCommand, type DoorWiring } from "../src/door-cli.js";
 import { doorDir } from "../src/core/door/discord/files.js";
 import { FakeDiscord, timersOf } from "./fake-discord.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const SPEC =
   "# PROJ-1: a title\n\n## Intent\n\nDo the thing.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\ntiny\n";
-const TOKEN = ["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GaBcDe", "abcdefghijklmnopqrstuvwxyz0123456789AB"].join(".");
+const TOKEN = fakeToken("discord-bot");
 const GUILD = "100000000000000001";
 const CHANNEL = "200000000000000002";
 const RAM = "300000000000000003";

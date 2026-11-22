@@ -1,0 +1,2 @@
+vi.mock("x");
+it("a", () => { expect(f).toHaveBeenCalled(); });

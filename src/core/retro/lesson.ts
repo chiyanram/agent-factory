@@ -5,7 +5,7 @@
 // Pure.
 
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
+import { prop } from "../field.js";
 
 export const LEVELS = ["structure", "type", "lint", "test", "rule"] as const;
 const ACTION_TYPES = ["rule", "script", "check", "playbook"] as const;

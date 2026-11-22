@@ -23,7 +23,6 @@
 
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { codeOf } from "./core/dispatch/records.js";
 import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { readKnowledge } from "./core/onboard/home.js";
@@ -56,6 +55,7 @@ import { applied, at, changeOf, diffLines, projectEntries, questionsFor, type Ch
 import { answersOf, asking, HOW_TO_ANSWER, valueOf, type Question } from "./core/init/round.js";
 import { pinUpdate } from "./plugin-pin-cli.js";
 import { candidateProblems, checkProblems } from "./settings-cli.js";
+import { codeOf } from "./core/field.js";
 
 export type InitIo = {
   readonly env: NodeJS.ProcessEnv;

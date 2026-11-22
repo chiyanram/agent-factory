@@ -18,7 +18,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Done, Result } from "../forge/api.js";
 import { approvalState } from "../approval.js";
-import { prop } from "../dispatch/records.js";
 import { cleanField, renderPost, type Post } from "../post.js";
 import { plainName, type SpecStore } from "../spec.js";
 import { isPolicyPoint, isPostPoint, readPluginConfig, type PolicyPoint, type PostPoint, type Rule } from "./config.js";
@@ -26,6 +25,7 @@ import { isPoint } from "./contract.js";
 import { callPlugin, registered, type Setup } from "./registry.js";
 import { dropPending, keepPending, parseId, readPending, type Id, type Pending } from "./pending.js";
 import { appendLine, approvalKey, counted, onTicket, readLog, type Where } from "./writes.js";
+import { prop } from "../field.js";
 
 export const DONE = "done";
 const MAX_ITEMS = 20;

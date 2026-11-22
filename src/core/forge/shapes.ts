@@ -103,10 +103,6 @@ function personOf(r: Reader, value: unknown): Person {
 
 const MERGEABLE: readonly [Mergeable, ...Mergeable[]] = ["unknown", "clean", "conflict"];
 
-function mergeableOf(r: Reader, value: unknown): Mergeable {
-  return r.absent(value, "mergeable") ? "unknown" : r.word(value, "mergeable", MERGEABLE);
-}
-
 function openOf(r: Reader, value: unknown): OpenChange {
   return {
     number: r.int(value, "number"),
@@ -116,7 +112,7 @@ function openOf(r: Reader, value: unknown): OpenChange {
     draft: r.bool(value, "draft"),
     labels: texts(r, value, "labels"),
     pipeline: pipelineOf(r, r.at(value, "pipeline")),
-    mergeable: mergeableOf(r, value),
+    mergeable: r.word(value, "mergeable", MERGEABLE),
     comments: notesOf(r, r.at(value, "comments")),
   };
 }

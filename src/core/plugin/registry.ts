@@ -12,7 +12,6 @@ import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Done, Result } from "../forge/api.js";
-import { codeOf, prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
 import {
   isPoint,
@@ -27,6 +26,7 @@ import {
 import { DEFAULT_LIMITS, runPlugin, type Exec, type Limits, type Ran } from "./exec.js";
 import { sourceOf, store, treeHash, type Source } from "./pin.js";
 import type { Secret } from "../token/rules.js";
+import { codeOf, prop } from "../field.js";
 
 export type Entry = Described & { readonly source: string; readonly path: string; readonly sha256: string };
 export type Registry = Readonly<Record<string, Entry>>;
@@ -335,7 +335,9 @@ function declares(entry: Entry, call: Call): Result<Entry> {
     : { kind: "ok", value: entry };
 }
 
-export async function callPlugin(setup: Setup, call: Call): Promise<Result<PluginResult>> {
+export type Called = PluginResult & { readonly protocol: number };
+
+export async function callPlugin(setup: Setup, call: Call): Promise<Result<Called>> {
   const entry = isPoint(call.capability)
     ? await checked(setup, call)
     : failed(`${String(call.capability)} is not an extension point`);
@@ -346,10 +348,11 @@ export async function callPlugin(setup: Setup, call: Call): Promise<Result<Plugi
   return result.kind === "ok" ? result : failed(`the plugin ${call.plugin}: ${result.reason}`);
 }
 
-async function answered(setup: Setup, entry: Entry, call: Call): Promise<Result<PluginResult>> {
+async function answered(setup: Setup, entry: Entry, call: Call): Promise<Result<Called>> {
   const input = await withSecrets(setup, call, entry.source);
   const ran = input.kind === "ok" ? stdoutOf(await runCall(setup, entry, { ...call, input: input.value })) : input;
-  return ran.kind === "ok" ? readResult(ran.value) : ran;
+  const result = ran.kind === "ok" ? readResult(ran.value) : ran;
+  return result.kind === "ok" ? { kind: "ok", value: { ...result.value, protocol: entry.protocol } } : result;
 }
 
 async function withSecrets(setup: Setup, call: Call, source: string): Promise<Result<unknown>> {

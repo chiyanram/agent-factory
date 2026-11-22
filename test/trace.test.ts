@@ -15,10 +15,11 @@ import {
   traceStep,
 } from "../src/core/dispatch/trace.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const DAY = 24 * 60 * 60_000;
 const AT = Date.parse("2026-11-13T06:07:15.123Z");
-const TOKEN = `${["sk-ant-"].join("")}oat01-AAAAbbbbCCCCdddd`;
+const TOKEN = fakeToken("claude-oauth");
 
 let home = "";
 const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });

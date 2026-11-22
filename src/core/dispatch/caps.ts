@@ -163,8 +163,6 @@ export function capsOf(env: NodeJS.ProcessEnv): Result<Caps> {
   return runs.kind === "ok" ? { kind: "ok", value: capsFrom(limits, runs.value) } : runs;
 }
 
-export { spentLine, ticketCapped } from "./ticket-cap.js";
-
 export type Stop =
   | { readonly kind: "go" }
   | {

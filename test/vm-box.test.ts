@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Call, Exit, Runner } from "../src/core/forge/api.js";
-import type { BoxSpec, PinnedImage } from "../src/core/box/types.js";
+import { NO_IMAGE, type BoxSpec, type PinnedImage } from "../src/core/box/types.js";
 import { hostDocker } from "../src/core/box/docker.js";
 import { vmBox } from "../src/core/box/vm.js";
 import { checkSpec, readRan } from "../src/core/box/vm-plan.js";
@@ -249,6 +249,13 @@ describe("vm box: copy and stop", () => {
 
 describe("checkSpec", () => {
   it("accepts the spec a run builds", () => {
-    expect(checkSpec(SPEC)).toEqual({ kind: "ok" });
+    expect(checkSpec(SPEC)).toEqual({ kind: "ok", spec: SPEC });
+  });
+
+  it("refuses a spec that names no pinned image", () => {
+    expect(checkSpec({ ...SPEC, image: NO_IMAGE })).toEqual({
+      kind: "refused",
+      reason: "the vm runner runs only a pinned image; this spec names none",
+    });
   });
 });

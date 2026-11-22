@@ -11,12 +11,14 @@ import { readRecords, record, summarize, tornPath, type Event } from "../src/cor
 import type { Evidence } from "../src/core/report.js";
 import { waive } from "../src/core/waiver.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
-import { NO_CAPS, ticketCapped, type Caps } from "../src/core/dispatch/caps.js";
+import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
+import { ticketCapped } from "../src/core/dispatch/ticket-cap.js";
 import { NO_SPEND } from "../src/core/dispatch/spend.js";
 import { readSpends } from "../src/core/dispatch/usage.js";
 import { traceName } from "../src/core/dispatch/trace.js";
 import { STEPS_TODAY, type DesignInput, type Steps } from "../src/core/dispatch/steps.js";
 import { lock, runHoursEnd, tick, waitingPass, type TickSetup } from "../src/core/dispatch/tick.js";
+import { takeLock, type HeldLock } from "../src/core/lock.js";
 import { ROUND_CAP } from "../src/core/dispatch/design.js";
 import { LANES } from "../src/core/dispatch/next-step.js";
 import type { Changes, Forge, OpenChange } from "../src/core/forge/types.js";
@@ -25,6 +27,7 @@ import { goAhead, start } from "../src/core/start.js";
 import { specHash } from "../src/core/spec.js";
 import { issueStore } from "../src/core/spec-store.js";
 import { tempDir } from "./temp.js";
+import { noRunFolder } from "./run-folder.js";
 
 const SPEC = (lane: string) =>
   [
@@ -292,6 +295,15 @@ describe("records", () => {
 describe("records: a torn last line (#483)", () => {
   const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
   const file = () => join(home, "runs", "ledger", "PROJ-1.jsonl");
+  let taken = 0;
+  const passLock = async (): Promise<HeldLock> => {
+    taken += 1;
+    const held = await takeLock(join(home, "locks", `pass-${taken}.lock`));
+    if (held.kind !== "held") {
+      throw new Error(`the test cannot take a pass lock: ${held.kind}`);
+    }
+    return held;
+  };
   const TORN = '{"at":"2026-11-07T09:10:00Z","kind":"writer-en';
   const started = () =>
     record({
@@ -303,7 +315,7 @@ describe("records: a torn last line (#483)", () => {
     await started();
     writeFileSync(file(), TORN, { flag: "a" });
     const warned: string[] = [];
-    const read = await readRecords(where(), { warn: (l) => warned.push(l), setAside: true });
+    const read = await readRecords(where(), { warn: (l) => warned.push(l), setAside: await passLock() });
     expect(read).toMatchObject({ kind: "ok", value: [{ kind: "started" }] });
     expect(warned).toEqual([expect.stringContaining("was torn (a write cut short); it is moved to")]);
     expect(readFileSync(tornPath(file()), "utf8")).toBe(`${TORN}\n`);
@@ -311,7 +323,7 @@ describe("records: a torn last line (#483)", () => {
       summarize({ events: read.kind === "ok" ? read.value : [], since: "2026-11-07T08:00:00Z" }).interrupted,
     ).toEqual({ kind: "interrupted", phase: "writer", at: "2026-11-07T09:00:00Z" });
     await record({ where: where(), event: { at: "2026-11-07T09:20:00Z", kind: "pinged", head: H } });
-    const again = await readRecords(where(), { warn: (l) => warned.push(l), setAside: true });
+    const again = await readRecords(where(), { warn: (l) => warned.push(l), setAside: await passLock() });
     expect(again).toMatchObject({ kind: "ok", value: [{ kind: "started" }, { kind: "pinged" }] });
     expect(warned).toHaveLength(1);
   });
@@ -334,12 +346,14 @@ describe("records: a torn last line (#483)", () => {
     writeFileSync(file(), `${JSON.stringify({ at: "2026-11-07T09:10:00Z", kind: "from-a-newer-engine" })}\n`, {
       flag: "a",
     });
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toEqual({
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toEqual({
       kind: "failed",
       reason: `${file()} line 2 is not a record; fix or remove it`,
     });
     writeFileSync(file(), `{"at":"2026-11-07T09:00:00Z","kind":"from-a-newer-engine"}`);
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toMatchObject({ kind: "failed" });
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toMatchObject({
+      kind: "failed",
+    });
     expect(existsSync(tornPath(file()))).toBe(false);
   });
 
@@ -347,7 +361,7 @@ describe("records: a torn last line (#483)", () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     const line = JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H });
     writeFileSync(file(), line);
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toMatchObject({
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toMatchObject({
       kind: "ok",
       value: [{ kind: "pinged" }],
     });
@@ -357,7 +371,7 @@ describe("records: a torn last line (#483)", () => {
   it("a torn line in the middle still stops the ticket, naming the line", async () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     writeFileSync(file(), `${TORN}\n${JSON.stringify({ at: "2026-11-07T09:20:00Z", kind: "pinged", head: H })}\n`);
-    expect(await readRecords(where(), { warn: () => undefined, setAside: true })).toEqual({
+    expect(await readRecords(where(), { warn: () => undefined, setAside: await passLock() })).toEqual({
       kind: "failed",
       reason: `${file()} line 1 is not a record; fix or remove it`,
     });
@@ -405,6 +419,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
           {
@@ -476,6 +491,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           tasks.push(input.task),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -526,6 +542,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -816,6 +833,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => ({
           kind: "ok",
           value: { head: H, outcome: "blocked", patch: "", evidence: [], hung: false, why, output },
@@ -869,6 +887,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => ({ kind: "failed", reason: "the push failed", spend: { usd: 0.3, tokens: 900 } }),
       },
     };
@@ -894,7 +913,10 @@ describe("tick", () => {
     await approved();
     const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
     const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, trace };
-    const steps: Steps = { ...STEPS_TODAY, writer: { kind: "available", run: async () => ({ kind: "ok", value }) } };
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "ok", value }) },
+    };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read).toMatchObject({
@@ -915,7 +937,7 @@ describe("tick", () => {
     const failed = { kind: "failed" as const, reason: "the push failed", spend: { usd: 0.3, tokens: 9 } };
     const steps: Steps = {
       ...STEPS_TODAY,
-      writer: { kind: "available", run: async () => ({ ...failed, traces: [trace] }) },
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ ...failed, traces: [trace] }) },
     };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
@@ -964,7 +986,7 @@ describe("tick", () => {
     await approved();
     const steps: Steps = {
       ...STEPS_TODAY,
-      writer: { kind: "available", run: async () => ({ kind: "failed", reason: "the box died" }) },
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "failed", reason: "the box died" }) },
     };
     const changes = { team, open: [open({ labels: [] })], merged: [] };
     const first: string[] = [];
@@ -1005,6 +1027,7 @@ describe("tick", () => {
       },
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => {
           wrote.push(input.task.kind);
           head = H2;
@@ -1129,6 +1152,7 @@ describe("tick", () => {
       },
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (wrote.push(input.task.kind), { kind: "failed", reason: "not this time" }),
       },
     };
@@ -1466,6 +1490,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (log.push(`writer on ${input.change.kind}`), { kind: "failed", reason: "stop here" }),
       },
     };
@@ -1561,6 +1586,7 @@ describe("tick", () => {
         ...STEPS_TODAY,
         writer: {
           kind: "available",
+          folder: noRunFolder,
           run: async () => ({
             kind: "ok",
             value: { head: H, outcome, patch: "p1", evidence: [], hung: false, why: "no key" },
@@ -1604,6 +1630,7 @@ describe("tick", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => (
           log.push("writer runs"),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -1820,6 +1847,7 @@ describe("START and approval (#227)", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.task.kind),
           { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -1967,6 +1995,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     ...STEPS_TODAY,
     writer: {
       kind: "available",
+      folder: noRunFolder,
       run: async (input) => (
         runs.push(input.ticket),
         { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -2186,6 +2215,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
           {
@@ -2655,6 +2685,7 @@ describe("the design review and the cleanup run (#236)", () => {
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => (
           tasks.push(input.task),
           { kind: "ok", value: { head: H, outcome: "done", patch: "c1", evidence: [row], hung: false } }
@@ -2798,6 +2829,7 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async (input) => {
           tasks.push(input.task);
           const parked = limited;
@@ -2947,6 +2979,7 @@ describe("a killed writer run keeps its work", () => {
     };
     const writer: Steps["writer"] = {
       kind: "available",
+      folder: noRunFolder,
       run: async () => ({ kind: "failed", reason: "no run in this test" }),
       keep: keepLeft({
         env: gitEnv(),

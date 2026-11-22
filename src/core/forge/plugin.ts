@@ -2,13 +2,15 @@
 // pinned plugin (callPlugin: the hash checked, the capability and the write declared); its answer is read back with the
 // seam's own shapes (shapes.ts), so a plugin that answers anything else fails that call and nothing downstream sees it.
 // The dispatcher, the reviewer and every other caller keep the same interface, whatever forge plugin answers.
+// A protocol 1 plugin may leave out an open change's mergeable and answer the waiting read unsupported; asProtocolTwo
+// reads that answer as unknown and as no waiting issue, and a protocol 2 answer that does either fails.
 //
 // A post is cleaned before it leaves for a plugin, so a plugin gets no secret and no model text that cleanBody has not
 // seen.
 
 import type { Note } from "../notes.js";
 import type { PluginResult } from "../plugin/contract.js";
-import { callPlugin, type Setup } from "../plugin/registry.js";
+import { callPlugin, type Called, type Setup } from "../plugin/registry.js";
 import type { Limits } from "../plugin/exec.js";
 import { MAX_WAIT, type Done, type Result } from "./api.js";
 import { FORGE_OPS, type ForgeOp } from "./ops.js";
@@ -40,7 +42,7 @@ function reasonOf(target: PluginTarget, op: string, answer: PluginResult): strin
 
 export const FORGE_LIMITS: Limits = { timeoutMs: (MAX_WAIT * 4 + 120) * 1000, maxBytes: 64 * 1024 * 1024 };
 
-function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<PluginResult>> {
+function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<Called>> {
   return callPlugin(
     { ...target.setup, limits: target.setup.limits ?? FORGE_LIMITS },
     {
@@ -52,25 +54,44 @@ function ask(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<P
   );
 }
 
+function withMergeable(open: unknown): unknown {
+  return typeof open === "object" && open !== null && !("mergeable" in open) ? { ...open, mergeable: "unknown" } : open;
+}
+
+function openAsTwo(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || !("open" in value) || !Array.isArray(value.open)) {
+    return value;
+  }
+  return { ...value, open: value.open.map(withMergeable) };
+}
+
+const PROTOCOL_ONE: Partial<Record<ForgeOp, (answer: PluginResult) => PluginResult>> = {
+  waiting: (answer) => (answer.kind === "unsupported" ? { kind: "ok", fields: { value: [] } } : answer),
+  changes: (answer) =>
+    answer.kind === "ok" ? { ...answer, fields: { ...answer.fields, value: openAsTwo(answer.fields.value) } } : answer,
+};
+
+function asProtocolTwo(op: ForgeOp, answer: Called): PluginResult {
+  const one = PROTOCOL_ONE[op];
+  return answer.protocol === 1 && one !== undefined ? one(answer) : answer;
+}
+
 async function read<T>(
   target: PluginTarget,
   op: ForgeOp,
   input: object,
   shape: (r: Reader, value: unknown) => T,
-  unknown?: T,
 ): Promise<Result<T>> {
-  const answer = await ask(target, op, input);
-  if (answer.kind === "failed") {
-    return answer;
+  const asked = await ask(target, op, input);
+  if (asked.kind === "failed") {
+    return asked;
   }
-  if (answer.value.kind === "unsupported" && unknown !== undefined) {
-    return { kind: "ok", value: unknown };
-  }
-  if (answer.value.kind !== "ok") {
-    return failed(reasonOf(target, op, answer.value));
+  const answer = asProtocolTwo(op, asked.value);
+  if (answer.kind !== "ok") {
+    return failed(reasonOf(target, op, answer));
   }
   const r = reader(`${target.plugin} ${op}`);
-  return r.done(shape(r, answer.value.fields.value));
+  return r.done(shape(r, answer.fields.value));
 }
 
 async function write(target: PluginTarget, op: ForgeOp, input: object): Promise<Result<unknown>> {
@@ -145,7 +166,7 @@ export function pluginForge(target: PluginTarget): Forge {
     status: (i) => written(target, "status", i),
     ciConfig: (): Promise<Result<CiConfig>> => read(target, "ciConfig", {}, ciConfigOf),
     claimed: (i) => read(target, "claimed", i, numbersOf),
-    waiting: (i): Promise<Result<readonly Waiting[]>> => read(target, "waiting", i, waitingOf, []),
+    waiting: (i): Promise<Result<readonly Waiting[]>> => read(target, "waiting", i, waitingOf),
     openChange: (i) => opened(target, { ...i, title: scrubSecrets(i.title), body: cleanedPost(i.body) }),
     changes: (i): Promise<Result<Changes>> => read(target, "changes", i, changesOf),
     failedJobs: (i): Promise<Result<readonly FailedJob[]>> => read(target, "failedJobs", i, failedJobsOf),

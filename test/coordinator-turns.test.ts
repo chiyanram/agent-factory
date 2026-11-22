@@ -11,8 +11,8 @@ import {
   resetWanted,
   turnLog,
 } from "../src/core/coordinator-turns.js";
-import { field } from "../src/core/human-record.js";
 import { tempDir } from "./temp.js";
+import { prop } from "../src/core/field.js";
 
 function assistant(input: number, created: number, read: number): string {
   return JSON.stringify({
@@ -77,7 +77,7 @@ describe("recordTurn and recordStart: the coordinator's own log", () => {
 
   it("at the reset size logs a reset and writes the marker the launcher watches", async () => {
     expect(await recordTurn(hookInput(RESET_AT), io())).toEqual({ kind: "measured", tokens: RESET_AT, reset: true });
-    expect(lines().map((l) => field(l, "kind"))).toEqual(["turn", "reset"]);
+    expect(lines().map((l) => prop(l, "kind"))).toEqual(["turn", "reset"]);
     expect(await resetWanted(home, "ledger")).toBe(true);
     await clearReset(home, "ledger");
     expect(existsSync(resetMarker(home, "ledger"))).toBe(false);

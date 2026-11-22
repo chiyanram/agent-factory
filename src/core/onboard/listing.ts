@@ -9,7 +9,7 @@
 // A Gradle or Maven wrapper with no Makefile is named as inferred: listing its tasks (./gradlew tasks) runs the build's
 // own code, which only a runner may do. Pure.
 
-import { prop } from "../dispatch/records.js";
+import { prop } from "../field.js";
 
 export type Listed = {
   readonly command: string;

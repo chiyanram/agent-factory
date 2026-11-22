@@ -8,8 +8,9 @@ import { CONFIRM_MS, discordDoor, type DoorDeps } from "../src/core/door/discord
 import { INTENTS, openGateway, scrubberOf, type GatewaySetup } from "../src/core/door/discord/gateway.js";
 import { FakeDiscord, timersOf } from "./fake-discord.js";
 import { readDoorConfig, readDoorToken, storeDoorToken, doorDir } from "../src/core/door/discord/files.js";
-import { field } from "../src/core/human-record.js";
 import { tempDir } from "./temp.js";
+import { prop } from "../src/core/field.js";
+import { fakeToken } from "./planted.js";
 
 const SPEC = [
   "# PROJ-1: renewals refuse a reserved loan",
@@ -41,7 +42,7 @@ const RAM = "300000000000000003";
 const ALICE = "300000000000000004";
 const STRANGER = "300000000000000005";
 const APP = "500000000000000001";
-const TOKEN = ["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GaBcDe", "abcdefghijklmnopqrstuvwxyz0123456789AB"].join(".");
+const TOKEN = fakeToken("discord-bot");
 
 let home = "";
 let now = 0;
@@ -336,7 +337,7 @@ describe("an approve sent as chat never reaches the door (#731)", () => {
     const gateway = gatewayOf(fake, discordDoor(deps()).handle, () => undefined);
     await connected(fake);
     const frames = fake.socket.sent.map((s): unknown => JSON.parse(s));
-    expect(frames.find((m) => field(m, "op") === 2)).toMatchObject({ d: { intents: 1 } });
+    expect(frames.find((m) => prop(m, "op") === 2)).toMatchObject({ d: { intents: 1 } });
     await gateway.stop();
   });
 

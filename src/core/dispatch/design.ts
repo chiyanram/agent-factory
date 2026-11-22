@@ -29,6 +29,7 @@ import type { Lane } from "../spec.js";
 import { above } from "../lane.js";
 import { toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { backoffMs, type DesignStep, type Event } from "./records.js";
+import type { Waiting } from "./table.js";
 
 export const MAX_DESIGN_FAILURES = 3;
 export const MAX_DESIGN_ROUNDS = 2;
@@ -38,7 +39,7 @@ export const ROUND_CAP = "no further design review (round cap): the person decid
 export type DesignView =
   | { readonly kind: "off" }
   | { readonly kind: "note"; readonly spec: string; readonly design: string; readonly why: string }
-  | { readonly kind: "held"; readonly why: string }
+  | { readonly kind: "held"; readonly wait: Waiting["wait"]; readonly why: string }
   | { readonly kind: "run"; readonly step: DesignStep; readonly spec: string; readonly design: string }
   | { readonly kind: "later"; readonly step: DesignStep; readonly at: string }
   | { readonly kind: "stopped"; readonly step: DesignStep; readonly why: string }
@@ -188,15 +189,15 @@ export type ViewInput = {
   readonly spec: string;
   readonly design: string;
   readonly read: SpecRead;
-  readonly raised: string;
+  readonly raised: Waiting | "none";
   readonly approvedAt: string;
   readonly now: number;
 };
 
 export function designView(input: ViewInput): DesignView {
   const h = { spec: input.spec, design: input.design };
-  if (input.raised !== "") {
-    return noted(input.events, h) ? { kind: "held", why: input.raised } : { kind: "note", ...h, why: input.raised };
+  if (input.raised !== "none") {
+    return noted(input.events, h) ? { kind: "held", ...input.raised } : { kind: "note", ...h, why: input.raised.why };
   }
   return reviewAt(input, h);
 }

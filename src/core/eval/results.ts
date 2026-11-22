@@ -11,7 +11,7 @@ import type { ActOn } from "../review/act-on.js";
 import type { Case } from "./cases.js";
 import { CATEGORIES, SEVERITIES, type Row } from "./golden.js";
 import type { SeedResult } from "./judge.js";
-import type { Aim } from "./bar.js";
+import { partialWhy, type Aim } from "./bar.js";
 
 export type RunRecord = {
   readonly run: number;
@@ -100,17 +100,6 @@ export function cleanFloor(cases: readonly CaseRecord[]): {
     .filter((c) => c.case.golden.length === 0)
     .flatMap((c) => c.runs.flatMap((r) => r.act_on.map((f) => ({ case: c.case.name, run: r.run, ...f }))));
   return { hits: findings.length, findings };
-}
-
-export function partialWhy(p: Pass): readonly string[] {
-  const failed = p.cases.flatMap((c) => [
-    ...(c.error === "" ? [] : [`${c.case.name}: ${c.error}`]),
-    ...c.runs.filter((r) => r.error !== "").map((r) => `${c.case.name} run ${r.run}: ${r.error}`),
-  ]);
-  const short = p.cases.filter((c) => c.error === "" && c.runs.length < p.runs).length;
-  const missing =
-    p.stopped === "" ? [] : [p.stopped, ...(short > 0 ? [`${short} case(s) ran fewer than ${p.runs} runs`] : [])];
-  return [...missing, ...failed];
 }
 
 function caseEntry(c: CaseRecord): Record<string, unknown> {

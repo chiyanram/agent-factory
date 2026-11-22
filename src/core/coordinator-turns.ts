@@ -13,7 +13,7 @@
 
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { field } from "./human-record.js";
+import { prop } from "./field.js";
 
 export const AUTOCOMPACT = "200k";
 export const RESET_AT = 120_000;
@@ -44,9 +44,9 @@ function count(value: unknown): number {
 
 function usageTokens(usage: unknown): number {
   return (
-    count(field(usage, "input_tokens")) +
-    count(field(usage, "cache_creation_input_tokens")) +
-    count(field(usage, "cache_read_input_tokens"))
+    count(prop(usage, "input_tokens")) +
+    count(prop(usage, "cache_creation_input_tokens")) +
+    count(prop(usage, "cache_read_input_tokens"))
   );
 }
 
@@ -54,8 +54,8 @@ export function contextTokens(transcript: string): number | { readonly reason: s
   const usages = transcript
     .split("\n")
     .map(parsed)
-    .filter((line) => field(line, "type") === "assistant")
-    .map((line) => field(field(line, "message"), "usage"))
+    .filter((line) => prop(line, "type") === "assistant")
+    .map((line) => prop(prop(line, "message"), "usage"))
     .filter((usage) => typeof usage === "object" && usage !== null);
   const last = usages.at(-1);
   return last === undefined ? { reason: "no assistant turn with usage in the transcript" } : usageTokens(last);
@@ -79,7 +79,7 @@ export type Turn =
   | { readonly kind: "unread"; readonly reason: string };
 
 async function transcriptOf(input: unknown): Promise<string | { readonly reason: string }> {
-  const path = field(input, "transcript_path");
+  const path = prop(input, "transcript_path");
   if (typeof path !== "string" || path === "") {
     return { reason: "the hook input names no transcript_path" };
   }
@@ -94,7 +94,7 @@ async function turnTokens(input: unknown): Promise<number | { readonly reason: s
 export async function recordTurn(hookInput: string, io: TurnIo, resetAt = RESET_AT): Promise<Turn> {
   const input = parsed(hookInput);
   const tokens = await turnTokens(input);
-  const session = field(input, "session_id") ?? null;
+  const session = prop(input, "session_id") ?? null;
   if (typeof tokens !== "number") {
     await appendLine(io, { kind: "turn", session, contextTokens: null, why: tokens.reason });
     return { kind: "unread", reason: tokens.reason };
@@ -110,10 +110,10 @@ export async function recordTurn(hookInput: string, io: TurnIo, resetAt = RESET_
 
 export async function recordStart(hookInput: string, io: TurnIo): Promise<boolean> {
   const input = parsed(hookInput);
-  if (field(input, "source") !== "compact") {
+  if (prop(input, "source") !== "compact") {
     return false;
   }
-  await appendLine(io, { kind: "compaction", fault: true, session: field(input, "session_id") ?? null });
+  await appendLine(io, { kind: "compaction", fault: true, session: prop(input, "session_id") ?? null });
   return true;
 }
 

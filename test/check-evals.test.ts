@@ -4,7 +4,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileProblems, kindProblem, placeProblems, shaProblem, tableProblems } from "../scripts/check-evals.js";
+import {
+  fileProblems,
+  inPool,
+  kindProblem,
+  placeProblems,
+  POOL,
+  shaProblem,
+  tableProblems,
+} from "../scripts/check-evals.js";
 import { CATEGORIES, findingProblems, readGolden, tableRows } from "../src/core/eval/golden.js";
 import { tempDir } from "./temp.js";
 
@@ -113,6 +121,24 @@ describe("the small checks", () => {
       "two: cases.md: kind odd is not one of seeded, found-by-eval, clean, rulebook-copy",
       "two: cases.md: status done is not draft or approved",
     ]);
+  });
+});
+
+describe("inPool", () => {
+  it("AC-21 should finish the golden-set check in a time that does not grow one case at a time when cases are added", async () => {
+    let running = 0;
+    let most = 0;
+    const cases = Array.from({ length: 10 }, (_, i) => i);
+    const out = await inPool(cases, POOL, async (n) => {
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running -= 1;
+      return n * 2;
+    });
+    expect(out).toEqual(cases.map((n) => n * 2));
+    expect(most).toBe(POOL);
+    expect(await inPool([], POOL, async (n: number) => n)).toEqual([]);
   });
 });
 

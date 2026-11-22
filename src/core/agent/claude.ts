@@ -17,7 +17,6 @@
 // A CLI that answered and exited stands, even when a process it left holds its output open past the limit. A sessions
 // list that does not come in time fails, so a caller never reads "unknown" as "none".
 
-import { prop } from "../dispatch/records.js";
 import { NO_STREAM, spendOf, streamOf } from "../dispatch/spend.js";
 import type { Result } from "../forge/api.js";
 import type { Sessions } from "../review/live.js";
@@ -26,6 +25,7 @@ import { settingName } from "../settings/machine.js";
 import { timed, type FolderRunner } from "./folder.js";
 import { refusedLogin, SIGN_IN } from "./login.js";
 import { MODEL_RUN_MARK } from "./mark.js";
+import { prop } from "../field.js";
 
 const READ_ONLY = ["Read", "Grep", "Glob"];
 

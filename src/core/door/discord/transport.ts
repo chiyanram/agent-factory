@@ -3,7 +3,7 @@
 // port. Tests pass a fake, so no test reaches Discord. A failure names the route and the status, never the URL, since
 // an interaction's path holds its token.
 
-import { field } from "../../human-record.js";
+import { prop } from "../../field.js";
 
 export type SocketEvents = {
   readonly message: (text: string) => void;
@@ -73,7 +73,7 @@ function bodyOf(call: RestCall): { readonly body?: string | FormData; readonly t
 // https://docs.discord.com/developers/topics/rate-limits
 async function waitAsked(response: Response): Promise<number> {
   const asked: unknown = await response.json().catch(() => undefined);
-  const seconds = field(asked, "retry_after");
+  const seconds = prop(asked, "retry_after");
   return typeof seconds === "number" && seconds > 0 ? Math.min(seconds, 30) : 1;
 }
 
@@ -108,7 +108,7 @@ async function tried(token: string, agent: string, call: RestCall, left: number)
 }
 
 function whyFailed(error: unknown): string {
-  const code = field(field(error, "cause"), "code");
+  const code = prop(prop(error, "cause"), "code");
   return typeof code === "string" ? code : "the call failed";
 }
 

@@ -12,7 +12,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { codeOf } from "../dispatch/records.js";
+import { codeOf } from "../field.js";
 
 export const DISCORD_PLUGIN = "discord@claude-plugins-official";
 

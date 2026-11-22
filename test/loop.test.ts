@@ -7,6 +7,7 @@ import { lintEdit } from "../src/core/lint-edit.js";
 import { ask, grill, status } from "../src/core/loop.js";
 import { openAsks } from "../src/core/notes.js";
 import { LOOP_COMMANDS, questionsFrom } from "../src/loop-cli.js";
+import { checkedRound, type CheckedRound } from "../src/core/finish.js";
 import { tempDir } from "./temp.js";
 import { renderPost } from "../src/core/post.js";
 import { runInFolder, type FolderCall } from "../src/core/agent/folder.js";
@@ -125,10 +126,15 @@ describe("grill (#517)", () => {
     { question: "which currency?", choices: ["EUR", "USD", "GBP"], recommended: 0 },
   ] as const;
   const ASKED = QUESTIONS.map((q) => ({ kind: "choices", ...q }) as const);
+  const checked = checkedRound(ASKED);
+  if (checked.kind === "failed") {
+    throw new Error(checked.reason);
+  }
+  const ROUND: CheckedRound = checked.value;
 
   it("AC-1: posts one [coordinator] OPEN: N questions note with an item per question, open until each is answered", async () => {
     const log: string[] = [];
-    expect(await grill({ forge: forge(log), number: 12, sha: "aaaa1111", questions: ASKED })).toEqual({
+    expect(await grill({ forge: forge(log), number: 12, sha: "aaaa1111", round: ROUND })).toEqual({
       kind: "ok",
       value: "asked 2 question(s) on !12 at aaaa1111",
     });
@@ -147,9 +153,16 @@ describe("grill (#517)", () => {
     expect(openAsks({ notes: notes("1B", "2: A"), readers })).toBe(0);
   });
 
+  it("AC-18 should post the grill question round exactly as the check read it back when the round passes the check", async () => {
+    const log: string[] = [];
+    await grill({ forge: forge(log), number: 12, sha: "aaaa1111", round: ROUND });
+    const read = renderPost(ROUND.post);
+    expect(log).toEqual([`note !12 ${read.kind === "ok" ? read.text : read.reason}`]);
+  });
+
   it("refuses a head that moved and posts nothing", async () => {
     const log: string[] = [];
-    expect(await grill({ forge: forge(log), number: 12, sha: "bbbb2222", questions: ASKED })).toMatchObject({
+    expect(await grill({ forge: forge(log), number: 12, sha: "bbbb2222", round: ROUND })).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("head moved"),
     });
@@ -172,7 +185,7 @@ describe("grill (#517)", () => {
 
     it("reads a list of questions from a file under <home>/specs", async () => {
       const read = await questionsFrom(env(), put("q.json", JSON.stringify(QUESTIONS)));
-      expect(read).toEqual({ kind: "ok", value: ASKED });
+      expect(read).toMatchObject({ kind: "ok", value: { questions: ASKED } });
     });
 
     it("refuses a file outside <home>/specs, one that links out of it, and one that is not there", async () => {

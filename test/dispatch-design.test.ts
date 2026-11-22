@@ -14,6 +14,7 @@ import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./temp.js";
 import { keep, readDesignFindings, toVerify, type DesignFinding } from "../src/core/design/findings.js";
+import type { Waiting } from "../src/core/dispatch/table.js";
 
 const S = "a".repeat(64);
 const D = "none";
@@ -59,7 +60,7 @@ function designEnd(at: string): Extract<Event, { kind: "design-ended" }> {
 }
 
 const FEATURE = { lane: "feature", planned: ["src/a.ts"] } as const;
-const view = (events: readonly Event[], approvedAt = "", read: SpecRead = FEATURE, raised = "") =>
+const view = (events: readonly Event[], approvedAt = "", read: SpecRead = FEATURE, raised: Waiting | "none" = "none") =>
   designView({ events, spec: S, design: D, read, raised, approvedAt, now: NOW });
 
 describe("designView (#236)", () => {
@@ -230,9 +231,10 @@ describe("the design review converges (#489)", () => {
 
   it("holds the review while the Planned files need a heavier lane: the person is told once, then it waits", () => {
     const why = "the lane is raised from feature to one-way door (db/V2.sql …)";
-    expect(view([], "", FEATURE, why)).toEqual({ kind: "note", spec: S, design: D, why });
+    const raised = { wait: "lane-raised", why } as const;
+    expect(view([], "", FEATURE, raised)).toEqual({ kind: "note", spec: S, design: D, why });
     const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, design: D, why };
-    expect(view([told], "", FEATURE, why)).toEqual({ kind: "held", why });
+    expect(view([told], "", FEATURE, raised)).toEqual({ kind: "held", wait: "lane-raised", why });
   });
 
   it("earlier rounds carry their findings, what the verify pass kept and what it dismissed", () => {

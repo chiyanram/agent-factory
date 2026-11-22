@@ -192,7 +192,6 @@ export function projectEntries(
     { path: ["gate"], value: gate },
     ...only(gate === "local", { path: ["verify"], value: verifyOf(d) }),
     { path: ["ready", "programs"], value: programsOf(d) },
-    ...only(d.testFiles !== "default", { path: ["ready", "testFiles"], value: d.testFiles }),
     { path: ["egress", "allow"], value: union([[MODEL_HOST], ...d.builds.map((b) => b.egress)]) },
     ...only(nonEmpty(doors), { path: ["lanes", "oneWayDoor"], value: doors }),
     { path: ["plugins"], value: pick("plugins", ["plugins"]) },

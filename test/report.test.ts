@@ -110,13 +110,10 @@ describe("parseReport", () => {
     });
   });
 
-  it("still reads a plain question, for one release, as one with no choices (#320)", () => {
-    expect(parseReport(JSON.stringify({ status: "asked", questions: ["EUR or USD?", CURRENCY] }))).toEqual({
-      kind: "asked",
-      questions: [
-        { kind: "plain", question: "EUR or USD?" },
-        { kind: "choices", question: "EUR or USD?", choices: ["EUR", "USD"], recommended: 0 },
-      ],
+  it("should refuse a plain question with a message that names the new form when the engine reads it (AC-1)", () => {
+    expect(parseReport(JSON.stringify({ status: "asked", questions: ["EUR or USD?", CURRENCY] }))).toMatchObject({
+      kind: "blocked",
+      reason: expect.stringContaining("question 1 must be {question, choices, recommended}"),
     });
   });
 
@@ -153,10 +150,16 @@ describe("parseReport", () => {
       [{ status: "done", evidence: [{ ...DONE.evidence[0], url: "x" }] }, "evidence 1 has 1 field(s)"],
       [{ status: "done", evidence: ["make test"] }, "evidence 1 must be"],
       [{ status: "done", evidence: DONE.evidence, questions: ["x"] }, "1 field(s) the schema does not name for done"],
-      [{ status: "asked", questions: ["\u200b"] }, "question 1 must be non-empty"],
+      [
+        { status: "asked", questions: [{ question: "\u200b", choices: ["a", "b"], recommended: 0 }] },
+        "question 1 question must be non-empty",
+      ],
       [{ status: "blocked", blocker: "\u0000\u2060 " }, "blocker must be non-empty"],
       [{ status: "asked", questions: Array.from({ length: 21 }, (_, i) => `q${i}`) }, "more than 20"],
-      [{ status: "asked", questions: ["  "] }, "question 1 must be non-empty"],
+      [
+        { status: "asked", questions: [{ question: "  ", choices: ["a", "b"], recommended: 0 }] },
+        "question 1 question must be non-empty",
+      ],
       [{ status: "blocked" }, "blocker must be non-empty"],
       [{ status: "blocked", blocker: "x".repeat(2001) }, "longer than 2000"],
     ] as const) {
@@ -296,7 +299,7 @@ describe("parseReport: a cleanup run's deferred list (#236)", () => {
       kind: "blocked",
       reason: expect.stringContaining("deferred 1"),
     });
-    expect(parseReport(JSON.stringify({ status: "asked", questions: ["q?"], deferred: ["x"] }))).toMatchObject({
+    expect(parseReport(JSON.stringify({ status: "asked", questions: [CURRENCY], deferred: ["x"] }))).toMatchObject({
       kind: "blocked",
     });
   });

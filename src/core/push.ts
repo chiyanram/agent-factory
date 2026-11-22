@@ -172,7 +172,7 @@ async function placeChecks(request: PushRequest, seams: Seams): Promise<Done> {
       };
 }
 
-async function repoHelpers(request: PushRequest, _seams: Seams): Promise<Done> {
+async function repoHelpers(request: PushRequest): Promise<Done> {
   if (request.identity.kind === "own") {
     return { kind: "ok" };
   }
@@ -195,7 +195,7 @@ async function repoHelpers(request: PushRequest, _seams: Seams): Promise<Done> {
       };
 }
 
-async function guarded(request: PushRequest, _seams: Seams): Promise<Done> {
+async function guarded(request: PushRequest): Promise<Done> {
   for (const guard of request.guards) {
     const verdict = await guard({ repo: request.repo, commit: request.commit, lease: request.lease });
     if (verdict.kind === "failed") {
@@ -236,8 +236,9 @@ export async function hostPush(request: PushRequest, seams: Seams = REAL): Promi
   if (shape !== "") {
     return { kind: "failed", reason: shape };
   }
-  for (const step of [placeChecks, repoHelpers, guarded]) {
-    const verdict = await step(request, seams);
+  const checks = [(r: PushRequest) => placeChecks(r, seams), repoHelpers, guarded];
+  for (const step of checks) {
+    const verdict = await step(request);
     if (verdict.kind === "failed") {
       return verdict;
     }

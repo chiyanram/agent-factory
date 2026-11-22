@@ -25,6 +25,7 @@ import { NO_NOTIFY } from "../src/core/notify.js";
 import { specHash } from "../src/core/spec.js";
 import { start } from "../src/core/start.js";
 import { tempDir } from "./temp.js";
+import { noRunFolder } from "./run-folder.js";
 
 const SPEC = [
   "# PROJ-1: renewals refuse a reserved loan",
@@ -119,6 +120,7 @@ function writer(outcome: "done" | "asked", runs: string[]): Steps {
     ...STEPS_TODAY,
     writer: {
       kind: "available",
+      folder: noRunFolder,
       run: async (input) => (
         runs.push(input.ticket), { kind: "ok", value: { head: H, outcome, patch: "p1", evidence: [], hung: false } }
       ),
@@ -334,7 +336,7 @@ describe("the orchestrator loop (#305)", () => {
     ).toEqual([]);
     expect(
       heldBack({ project: "ledger", caps: NO_CAPS }, [
-        { ticket: "PROJ-1", action: { kind: "wait", why: "CI" }, result: unset },
+        { ticket: "PROJ-1", action: { kind: "wait", wait: "ci", why: "CI" }, result: unset },
       ]),
     ).toEqual([]);
     await approved();
@@ -378,6 +380,7 @@ function ledgerSteps(runs: string[], ready: () => boolean = () => true): Steps {
     ...writer("done", runs),
     writer: {
       kind: "available",
+      folder: noRunFolder,
       run: async (input) => (
         runs.push(`writer ${input.task.kind}`),
         { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
@@ -425,6 +428,7 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
       ...STEPS_TODAY,
       writer: {
         kind: "available",
+        folder: noRunFolder,
         run: async () => ({
           kind: "ok",
           value: {
@@ -477,7 +481,13 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
     const unset = { kind: "unavailable", reason: "no runner" } as const;
     expect(
       pace(
-        [{ ticket: "PROJ-1", action: { kind: "wait", why: "CI is running at this head" }, result: { kind: "ok" } }],
+        [
+          {
+            ticket: "PROJ-1",
+            action: { kind: "wait", wait: "ci", why: "CI is running at this head" },
+            result: { kind: "ok" },
+          },
+        ],
         new Set(),
       ),
     ).toEqual({

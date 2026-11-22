@@ -11,6 +11,7 @@ import type { Failure } from "../src/core/retro/repeated.js";
 import { claudeArgs, claudeEnv } from "../src/core/agent/claude.js";
 import type { Model, ModelRun } from "../src/core/review/model.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const LANES = readFileSync(join(ROOT, "tests", "fixtures", "process", "rulebook-lanes.json"), "utf8");
@@ -76,7 +77,7 @@ function stub(lessons: readonly unknown[]): { model: Model; runs: ModelRun[]; se
   const model: Model = (run) => {
     runs.push(run);
     seen.push(readdirSync(run.folder, { recursive: true }).map(String).toSorted());
-    const stream = `${JSON.stringify({ type: "result", key: `sk-ant-api03-${"a".repeat(40)}` })}\n`;
+    const stream = `${JSON.stringify({ type: "result", key: fakeToken("anthropic-key", "a".repeat(40)) })}\n`;
     return Promise.resolve({
       kind: "ok",
       value: { output: { lessons }, answer: {}, costUsd: 1.25, tokens: 10, stream },

@@ -14,6 +14,7 @@ describe("the writer's words", () => {
         mode,
         names: { ticket: "PROJ-1", branch: "factory/PROJ-1", head: "abc", base: "main" },
         tools: [],
+        programs: ["make"],
       });
       expect(text).toContain("When .factory/task.md is there, it holds the person's answers to your last questions.");
     }
@@ -27,10 +28,11 @@ describe("the writer's words", () => {
       mode: "fix",
       names: { ticket: "PROJ-1", branch: "factory/PROJ-1", head: "abc", base: "main" },
       tools: ["Each file you edit is linted at once with: make lint-file."],
+      programs: ["make"],
     });
     expect(
       text.startsWith(
-        `${card.value.body}\n\nThis run builds ticket PROJ-1, on branch factory/PROJ-1 at head abc. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design. When .factory/task.md is there, it holds the person's answers to your last questions.\n\n${FLOOR}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
+        `${card.value.body}\n\nThis run builds ticket PROJ-1, on branch factory/PROJ-1 at head abc. Your contract is the approved spec in .factory/spec.md: the intent, the acceptance criteria and the design. When .factory/task.md is there, it holds the person's answers to your last questions.\n\n${FLOOR}\n${evidenceRules(["make"])}\n\n${FOREGROUND}\n\n${PROJECT_INSTRUCTIONS}\n\nEach file you edit is linted at once with: make lint-file.\n\n`,
       ),
     ).toBe(true);
     expect(text).toContain(REPORT_INSTRUCTIONS);
@@ -70,7 +72,7 @@ describe("the writer's words", () => {
     if (card.kind !== "ok") throw new Error(card.reason);
     const modes = ["fix", "test-first", "rework", "ci", "merge", "cleanup"] as const;
     const names = { ticket: "PROJ-1", branch: "b", head: "h", base: "main" };
-    const texts = modes.map((mode) => runPrompt({ card: card.value, mode, names, tools: [] }));
+    const texts = modes.map((mode) => runPrompt({ card: card.value, mode, names, tools: [], programs: ["make"] }));
     expect(texts.filter((t) => !t.includes(FOREGROUND) || !t.includes(FLOOR))).toEqual([]);
   });
 
@@ -82,6 +84,7 @@ describe("the writer's words", () => {
       mode: "ci",
       names: { ticket: "PROJ-1", branch: "b", head: "h", base: "main" },
       tools: [],
+      programs: ["make"],
     });
     expect(text).toContain("First find the root cause in the failed job's log");
     expect(text).toContain("when it is in the code or a test, fix it");

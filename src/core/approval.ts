@@ -23,7 +23,7 @@
 // local, so an edit to the issue makes the approval stale like an edit to a local spec.
 
 import { join } from "node:path";
-import { field, isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
+import { isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import {
   checkSpec,
   designHash,
@@ -35,6 +35,7 @@ import {
   type SpecStore,
   type Ticket,
 } from "./spec.js";
+import { prop } from "./field.js";
 
 export type ApprovalRecord = {
   readonly version: 2;
@@ -170,23 +171,23 @@ const hash = (v: unknown): boolean => typeof v === "string" && FULL_HASH.test(v)
 
 function recordProblems(r: unknown, where: Where): readonly boolean[] {
   return [
-    field(r, "project") === where.project,
-    field(r, "ticket") === where.ticket,
-    hash(field(r, "spec_hash")),
-    typeof field(r, "by") === "string",
-    typeof field(r, "at") === "string",
+    prop(r, "project") === where.project,
+    prop(r, "ticket") === where.ticket,
+    hash(prop(r, "spec_hash")),
+    typeof prop(r, "by") === "string",
+    typeof prop(r, "at") === "string",
   ];
 }
 
 function secondProblems(r: unknown): readonly boolean[] {
-  const design = field(r, "design_hash");
-  return [field(r, "kind") === "approval", design === NO_DESIGN || hash(design), isVia(field(r, "via"))];
+  const design = prop(r, "design_hash");
+  return [prop(r, "kind") === "approval", design === NO_DESIGN || hash(design), isVia(prop(r, "via"))];
 }
 
 function asRecord(r: unknown): ApprovalRecord {
-  const v = (name: string): string => String(field(r, name));
-  const via = field(r, "via");
-  const second = field(r, "version") === 2;
+  const v = (name: string): string => String(prop(r, name));
+  const via = prop(r, "via");
+  const second = prop(r, "version") === 2;
   return {
     version: 2,
     kind: "approval",
@@ -201,7 +202,7 @@ function asRecord(r: unknown): ApprovalRecord {
 }
 
 function recordOf(value: unknown, where: Where): ApprovalRecord | "bad" {
-  const version = field(value, "version");
+  const version = prop(value, "version");
   const checks = [...recordProblems(value, where), ...(version === 2 ? secondProblems(value) : [version === 1])];
   return checks.every(Boolean) ? asRecord(value) : "bad";
 }

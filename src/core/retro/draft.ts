@@ -12,7 +12,6 @@
 
 import { cp, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { codeOf } from "../dispatch/records.js";
 import { keepTraceIn, prunedIn } from "../dispatch/trace.js";
 import type { Result } from "../forge/api.js";
 import { readCard } from "../process/cards.js";
@@ -20,6 +19,7 @@ import { findProcess, type PluginDir } from "../process/read.js";
 import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { lessonsOf, LESSON_SCHEMA, type Lesson } from "./lesson.js";
 import type { Failure } from "./repeated.js";
+import { codeOf } from "../field.js";
 
 export const RETRO_USD = "10";
 

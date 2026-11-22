@@ -7,9 +7,9 @@
 //
 // The typical round cost is a guide for the operator, never a guard.
 
-import { prop } from "../dispatch/records.js";
 import type { Model, ModelResult } from "../review/model.js";
 import { MAX_JUDGED } from "./judge.js";
+import { prop } from "../field.js";
 
 export const CAP_USD = 100;
 export const RUNS_PER_ROUND = 3;

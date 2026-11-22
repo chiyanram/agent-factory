@@ -890,28 +890,27 @@ describe("the read-only runs' time limits (ADR-0012 S7, P7)", () => {
 });
 
 describe("connectors and the plugin list (#232)", () => {
-  it("reads the connectors, and the old plugins map for one release with a warning", async () => {
+  it("reads the connectors with no warning", async () => {
     writeProject({ ...BASE, connectors: { notify: "discord" } });
     discordOn();
     const now = await readPluginConfig({ home, project: "ledger" });
     expect(now).toMatchObject({ kind: "ok" });
     expect(now.kind === "ok" ? [...now.value.plugins] : []).toEqual([["notify", "discord"]]);
     expect((await cli(["config", "check", "ledger"])).err).not.toContain("warning");
-
-    const path = writeProject({ ...BASE, plugins: { notify: "discord" } });
-    const old = await readPluginConfig({ home, project: "ledger" });
-    expect(old.kind === "ok" ? [...old.value.plugins] : []).toEqual([["notify", "discord"]]);
-    expect(pluginListOf(path, { plugins: { notify: "discord" } })).toEqual({ kind: "ok", value: [] });
-    const checked = await cli(["config", "check", "ledger"]);
-    expect(checked.code).toBe(0);
-    expect(checked.err).toContain(`warning: ${path}:10: "plugins" holds a map of connectors`);
   });
 
-  it("refuses the old plugins map beside connectors, and a bad connector map", () => {
-    expect(pluginConfigOf("/p.json", { connectors: {}, plugins: { notify: "discord" } })).toMatchObject({
+  it("should refuse an old plugins map with a message that names the new form when the engine reads it (AC-1)", async () => {
+    const path = writeProject({ ...BASE, plugins: { notify: "discord" } });
+    expect(pluginListOf(path, { plugins: { notify: "discord" } })).toEqual({
       kind: "failed",
-      reason: expect.stringContaining('keep only "connectors"'),
+      reason: `${path}: a map of connectors is no longer read under "plugins": rename the key to "connectors"`,
     });
+    const checked = await cli(["config", "check", "ledger"]);
+    expect(checked.code).not.toBe(0);
+    expect(checked.err).toContain('rename the key to "connectors"');
+  });
+
+  it("refuses a bad connector map, and reads connectors beside a plugin list", () => {
     expect(pluginConfigOf("/p.json", { connectors: ["discord"] })).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining('"connectors" must map extension points to connector names'),
@@ -929,7 +928,7 @@ describe("connectors and the plugin list (#232)", () => {
         { name: "team-rules", marketplace: "acme" },
       ],
     });
-    const bad = ["rulebook", "Rulebook@chiyanram", "a@b@c", "../x@y", "a..b@c", "", 7];
+    const bad = ["rulebook", "a@b@c", "../x@y", "a..b@c", ".a@b", "-a@b", "a b@c", "a/b@c", "", 7];
     for (const entry of bad) {
       expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({
         kind: "failed",
@@ -938,6 +937,16 @@ describe("connectors and the plugin list (#232)", () => {
     }
     expect(pluginListOf("/p.json", { plugins: ["a@x", "a@y"] })).toMatchObject({ kind: "failed" });
     expect(pluginListOf("/p.json", { plugins: "rulebook@chiyanram" })).toMatchObject({ kind: "failed" });
+  });
+
+  it("AC-17 should accept a plugin name when Claude Code accepts it, and refuse it when Claude Code refuses it", () => {
+    const long = `${"a".repeat(100)}@${"B".repeat(100)}`;
+    for (const entry of ["Rulebook@Chiyanram", "team_rules@acme.io", "a.b-c_d@0x", long]) {
+      expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({ kind: "ok" });
+    }
+    for (const entry of ["_a@b", "a@.b", "a@b..c", "a@b/c"]) {
+      expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({ kind: "failed" });
+    }
   });
 
   it("config check refuses two pinned plugins that each hold a process, naming both (#426)", async () => {

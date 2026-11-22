@@ -25,16 +25,17 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "./forge/api.js";
-import { codeOf, prop } from "./dispatch/records.js";
 import { plainName } from "./spec.js";
 import { ownGitHostsOf, parseAllowlist } from "./egress/allowlist.js";
 import { settingOf } from "./settings/machine.js";
 import { TEST_FILES } from "./ready/floor.js";
-import { READY_MINUTES } from "./settings/keys.js";
+import { fileKeys, READY_MINUTES } from "./settings/keys.js";
+import { word } from "./settings/variables.js";
 import { layered, refusals } from "./settings/layers.js";
 import { runEnv } from "./settings/machine.js";
 import { capsOf, copilotCapsGap } from "./dispatch/caps.js";
 import { COPILOT_ON, COPILOT_ROLES, COPILOT_TICKET, type AgentName, type AgentRole } from "./agent/switch.js";
+import { codeOf, prop } from "./field.js";
 
 export type Argv = readonly [string, ...string[]];
 
@@ -54,15 +55,8 @@ export type ProjectFile = {
   readonly egress: { readonly allow: readonly string[] };
 };
 
-const DEFAULT_MINUTES = READY_MINUTES.default;
-const MAX_MINUTES = READY_MINUTES.most;
-
 function failed(path: string, why: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason: `${path}: ${why}` };
-}
-
-function word(value: unknown): value is string {
-  return typeof value === "string" && value !== "" && !value.includes("\u0000");
 }
 
 export function argvOf(value: unknown): Argv | "bad" {
@@ -73,68 +67,57 @@ export function argvOf(value: unknown): Argv | "bad" {
   return program === undefined ? "bad" : [program, ...rest];
 }
 
+function keyWhy(id: string, value: unknown): string {
+  const key = fileKeys().find((k) => k.id === id);
+  return key === undefined ? `no setting is named ${id}` : key.check(value);
+}
+
+function wordsOf(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter(word) : [];
+}
+
 function gateOf(path: string, raw: unknown): Result<ProjectFile["gate"]> {
   const gate = prop(raw, "gate");
   if (gate === "forge-ci") {
     return { kind: "ok", value: { kind: "forge-ci" } };
   }
-  if (gate !== "local") {
-    return failed(path, `"gate" must be "forge-ci" or "local", got ${JSON.stringify(gate)}`);
-  }
-  const verify = argvOf(prop(raw, "verify"));
+  return gate === "local"
+    ? verifyOf(path, raw)
+    : failed(path, `"gate" must be ${keyWhy("gate", gate)}, got ${JSON.stringify(gate)}`);
+}
+
+function verifyOf(path: string, raw: unknown): Result<ProjectFile["gate"]> {
+  const value = prop(raw, "verify");
+  const verify = argvOf(value);
   return verify === "bad"
-    ? failed(path, `"verify" must be the verifier's command as a list of words, such as ["make", "verify"]`)
+    ? failed(path, `"verify" must be the verifier's command as ${keyWhy("verify", value) || "a list of words"}`)
     : { kind: "ok", value: { kind: "local", verify } };
 }
 
-function minutesOf(value: unknown): number | "bad" {
-  if (value === undefined) {
-    return DEFAULT_MINUTES;
-  }
-  return Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= MAX_MINUTES ? Number(value) : "bad";
-}
-
-function programsOf(value: unknown): readonly string[] | "bad" {
-  return Array.isArray(value) && value.length > 0 && value.every(word) ? value.filter(word) : "bad";
+function readyWhy(id: string, value: unknown): string {
+  const why = value === undefined && id !== "ready.programs" ? "" : keyWhy(id, value);
+  return why === "" ? "" : `"${id}" must be ${why}`;
 }
 
 function readyOf(path: string, raw: unknown): Result<ProjectFile["ready"]> {
   const ready = prop(raw, "ready");
-  const programs = programsOf(prop(ready, "programs"));
-  if (programs === "bad") {
-    return failed(path, `"ready.programs" must list the programs an evidence row may start with, such as ["make"]`);
+  const value = (name: string): unknown => prop(ready, name);
+  const why = ["programs", "timeoutMinutes", "testFiles", "judgeFiles"]
+    .map((name) => readyWhy(`ready.${name}`, value(name)))
+    .find((w) => w !== "");
+  if (why !== undefined) {
+    return failed(path, why);
   }
-  const minutes = minutesOf(prop(ready, "timeoutMinutes"));
-  const testFiles = testFilesOf(prop(ready, "testFiles"));
-  if (testFiles === "bad") {
-    return failed(path, `"ready.testFiles" must list globs, such as ["src/test/**", "**/*Spec.groovy"]`);
-  }
-  const judgeFiles = judgeFilesOf(prop(ready, "judgeFiles"));
-  if (judgeFiles === "bad") {
-    return failed(path, `"ready.judgeFiles" must list globs, such as ["ci/**"]`);
-  }
-  return minutes === "bad"
-    ? failed(path, `"ready.timeoutMinutes" must be a whole number from 1 to ${MAX_MINUTES}`)
-    : { kind: "ok", value: { programs, timeoutSeconds: minutes * 60, testFiles, judgeFiles } };
-}
-
-function judgeFilesOf(value: unknown): readonly string[] | "bad" {
-  if (value === undefined) {
-    return [];
-  }
-  return Array.isArray(value) && value.every(word) ? value.filter(word) : "bad";
-}
-
-function testFilesOf(value: unknown): readonly string[] | "bad" {
-  if (value === undefined) {
-    return TEST_FILES;
-  }
-  return Array.isArray(value) && value.length > 0 && value.every(word) ? value.filter(word) : "bad";
-}
-
-function allowOf(egress: unknown): readonly string[] | "bad" {
-  const allow = prop(egress, "allow");
-  return Array.isArray(allow) && allow.every(word) ? allow.filter(word) : "bad";
+  const minutes = value("timeoutMinutes");
+  return {
+    kind: "ok",
+    value: {
+      programs: wordsOf(value("programs")),
+      timeoutSeconds: (typeof minutes === "number" ? minutes : READY_MINUTES.default) * 60,
+      testFiles: value("testFiles") === undefined ? TEST_FILES : wordsOf(value("testFiles")),
+      judgeFiles: wordsOf(value("judgeFiles")),
+    },
+  };
 }
 
 function gitHostsOf(raw: unknown, env: NodeJS.ProcessEnv): readonly string[] {
@@ -147,10 +130,11 @@ function egressOf(path: string, raw: unknown, env: NodeJS.ProcessEnv): Result<Pr
   if (egress === undefined) {
     return { kind: "ok", value: { allow: [] } };
   }
-  const allow = allowOf(egress);
-  if (allow === "bad") {
-    return failed(path, `"egress.allow" must list host names, such as ["api.anthropic.com"]`);
+  const why = keyWhy("egress.allow", prop(egress, "allow"));
+  if (why !== "") {
+    return failed(path, `"egress.allow" must be ${why}`);
   }
+  const allow = wordsOf(prop(egress, "allow"));
   const list = parseAllowlist(allow, gitHostsOf(raw, env));
   return list.kind === "ok"
     ? { kind: "ok", value: { allow: list.hosts } }

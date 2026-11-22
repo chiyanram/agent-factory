@@ -14,10 +14,10 @@
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prop } from "../dispatch/records.js";
 import { NO_STREAM, streamOf } from "../dispatch/spend.js";
 import type { Exit } from "../forge/api.js";
 import { CANNOT_START, timed, type FolderRunner } from "./folder.js";
+import { prop } from "../field.js";
 
 export type Login =
   | { readonly kind: "authorized" }

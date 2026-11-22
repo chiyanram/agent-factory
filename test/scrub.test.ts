@@ -1,6 +1,7 @@
 // what looks like a secret is scrubbed before any record, kept file or trace holds it (P4; #62, #485)
 import { describe, expect, it } from "vitest";
 import { scrubbedJson, scrubSecrets } from "../src/core/scrub.js";
+import { fakeToken } from "./planted.js";
 
 describe("scrubSecrets", () => {
   it("scrubs a PEM private key, whole", () => {
@@ -60,7 +61,7 @@ describe("scrubSecrets: a name that says token, secret, password or key (#686)",
   });
 
   it("still scrubs a value after =, a quoted value, a config name's value and one with more than letters", () => {
-    const ghp = `${["ghp", "_"].join("")}${"a1B2".repeat(9)}`;
+    const ghp = fakeToken("github-classic");
     expect(scrubSecrets(`GITHUB_TOKEN=${ghp}`)).toBe("GITHUB_TOKEN=[scrubbed]");
     expect(scrubSecrets("GITHUB_TOKEN=abcd1234efgh")).toBe("GITHUB_TOKEN=[scrubbed]");
     expect(scrubSecrets("Authorization: token123abc")).toBe("Authorization: [scrubbed]");

@@ -21,7 +21,7 @@ export type Step<I, O, F = never, X = unknown> =
   | ({ readonly kind: "available"; readonly run: (input: I) => Promise<Result<O> | F> } & X);
 
 export type WriterExtras = {
-  readonly folder?: () => Promise<Result<string>>;
+  readonly folder: () => Promise<Result<string>>;
   readonly keep?: (input: KeptInput) => Promise<Result<KeptRun>>;
 };
 
@@ -39,7 +39,7 @@ export type DesignRan<T> = { readonly card: string; readonly spend?: Spend; read
 export type ReadyFacts = { readonly criteria: readonly string[]; readonly oneWayDoor: readonly string[] };
 export type Steps = {
   readonly writer: Step<
-    RunInput & { readonly task: Task; readonly folder?: string },
+    RunInput & { readonly task: Task; readonly folder: string },
     {
       readonly head: string;
       readonly outcome: "done" | "asked" | "blocked" | "parked";

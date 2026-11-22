@@ -8,7 +8,6 @@ import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { Result } from "./core/forge/api.js";
-import { codeOf } from "./core/dispatch/records.js";
 import { initialProject, pluginConfigOf } from "./core/plugin/config.js";
 import { parseId } from "./core/plugin/pending.js";
 import { confirm, request, type Confirmed, type Requested, type RequestSetup } from "./core/plugin/request.js";
@@ -27,6 +26,7 @@ import { plainName, type SpecStore } from "./core/spec.js";
 import type { Forge } from "./core/forge/types.js";
 import { pluginSetup, type PluginIo } from "./plugin-cli.js";
 import type { Secrets } from "./core/plugin/registry.js";
+import { codeOf } from "./core/field.js";
 
 type Io = Omit<PluginIo, "pkg"> & { readonly secrets: Secrets };
 

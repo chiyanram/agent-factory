@@ -6,16 +6,11 @@
 //   "connectors": { "tracker.comment": "jira", "tracker.create": "jira", "notify": "discord" }
 //   "policy":     { "tracker.comment": { "mode": "allow" | "confirm" | "deny", "cap": 5 }, … }
 //
-// "plugins" was the old name of "connectors" (#232). A "plugins" that holds a map is still read as the connectors for
-// one release, and the settings layers warn about it; a "plugins" list is the plugins a project installs.
-//
 // A policy names only the writes the coordinator may request: tracker.comment, tracker.create, notify and spec.body,
 // whose mode is confirm or deny, never allow (policy.ts, #542). forge.write is the dispatcher's and has no policy here. A cap counts the writes since the ticket's latest approval (writes.ts).
 // What the file leaves out keeps the defaults (policy.ts); a field that is there but not valid is refused.
 
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
-import { isOldConnectors } from "../process/plugins.js";
 import { readProjectRaw } from "../project.js";
 import { isPoint, PLUGIN_NAME, type ExtensionPoint } from "./contract.js";
 import {
@@ -30,6 +25,7 @@ import {
   type PostPoint,
   type Rule,
 } from "./policy.js";
+import { prop } from "../field.js";
 
 export {
   DEFAULT_POLICY,
@@ -71,31 +67,14 @@ function pairOf([point, name]: readonly [string, unknown]): readonly [ExtensionP
   return isPoint(point) && typeof name === "string" && PLUGIN_NAME.test(name) ? [point, name] : BAD;
 }
 
-function connectorField(path: string, raw: object): Result<{ readonly name: string; readonly value: unknown }> {
-  const [connectors, plugins] = [prop(raw, "connectors"), prop(raw, "plugins")];
-  if (connectors !== undefined && isOldConnectors(plugins)) {
-    return failed(`${path}: "plugins" is the old name of "connectors"; keep only "connectors"`);
-  }
-  return isOldConnectors(plugins) && connectors === undefined
-    ? { kind: "ok", value: { name: "plugins", value: plugins } }
-    : { kind: "ok", value: { name: "connectors", value: connectors } };
-}
-
 function connectorsOf(path: string, raw: object): Result<PluginConfig["plugins"]> {
-  const field = connectorField(path, raw);
-  return field.kind === "failed" ? field : connectorMap(path, field.value);
-}
-
-function connectorMap(
-  path: string,
-  { name, value }: { readonly name: string; readonly value: unknown },
-): Result<PluginConfig["plugins"]> {
+  const value = prop(raw, "connectors");
   if (value === undefined) {
     return { kind: "ok", value: new Map() };
   }
   const pairs = isMap(value) ? Object.entries(value).map(pairOf) : [BAD];
   return pairs.includes(BAD)
-    ? failed(`${path}: "${name}" must map extension points to connector names, such as {"notify": "discord"}`)
+    ? failed(`${path}: "connectors" must map extension points to connector names, such as {"notify": "discord"}`)
     : { kind: "ok", value: new Map(pairs.filter((p): p is readonly [ExtensionPoint, string] => p !== BAD)) };
 }
 

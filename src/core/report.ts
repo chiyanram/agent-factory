@@ -5,8 +5,7 @@
 //   status     done | asked | blocked                      required
 //   evidence   [{criterion, command, result}], at least one  required when done
 //   questions  [{question, choices, recommended}], one to twenty, required when asked: every open question at once, each
-//              with 2 to 4 short choices and the index of the recommended one (#320). A plain "…" is still read, for one
-//              release, as a question with no choices; then it is refused.
+//              with 2 to 4 short choices and the index of the recommended one; a plain "…" is refused.
 //   deviations [{what, why, file, line}], at most ten, done only: each change of a type, signature or file placement
 //              from the approved design, posted by the host as a [writer] DEVIATION: note (ADR-0018, #430)
 //   blocker    "…"                                          required when blocked
@@ -44,14 +43,12 @@ export type Deviation = { readonly what: string; readonly why: string; readonly 
 
 export const DEVIATION = "DEVIATION:";
 
-export type Question =
-  | {
-      readonly kind: "choices";
-      readonly question: string;
-      readonly choices: readonly string[];
-      readonly recommended: number;
-    }
-  | { readonly kind: "plain"; readonly question: string };
+export type Question = {
+  readonly kind: "choices";
+  readonly question: string;
+  readonly choices: readonly string[];
+  readonly recommended: number;
+};
 
 export type Outcome =
   | {
@@ -202,16 +199,8 @@ function choiceQuestion(item: Field, what: string): Check<Question> {
     : recommendedOf(item.recommended, question.value, choices.value, what);
 }
 
-function plainQuestion(item: string, what: string): Check<Question> {
-  const plain = text(item, what);
-  return plain.kind === "ok" ? ok({ kind: "plain", question: plain.value }) : bad(plain.problem);
-}
-
 function questionOf(item: unknown, i: number): Check<Question> {
   const what = `question ${i + 1}`;
-  if (typeof item === "string") {
-    return plainQuestion(item, what);
-  }
   if (!isRecord(item)) {
     return bad(`${what} must be {question, choices, recommended}`);
   }
@@ -232,9 +221,7 @@ function listOf<T>(
 }
 
 export function questionsIn(value: unknown): Check<readonly Question[]> {
-  return listOf<Question>(value, "questions", MAX_QUESTIONS, (item, i) =>
-    typeof item === "string" ? bad(`question ${i + 1} must be {question, choices, recommended}`) : questionOf(item, i),
-  );
+  return listOf<Question>(value, "questions", MAX_QUESTIONS, questionOf);
 }
 
 function malformed(problem: string): Outcome {

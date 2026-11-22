@@ -41,7 +41,6 @@ import { keepActOn } from "./act-on.js";
 import { actedSince, foundOf, keepTracked, type Acted, type FoundByRule } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
-import { prop } from "../dispatch/records.js";
 import { BASELINE, lensPack, lensSetupOf, roundLenses, rubricText, touchedOf, type LensSetup } from "./finders.js";
 import {
   mergeFindings,
@@ -58,7 +57,7 @@ import type { RunLimits } from "./settings.js";
 import type { RoundPart } from "../dispatch/spend.js";
 import { deviationNotes } from "./deviations.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
-import { readProcess, type PluginDir, type Process } from "../process/read.js";
+import { readProcess, referencesDir, type PluginDir, type Process } from "../process/read.js";
 import { attempt } from "./safe.js";
 import { plainName, type SpecStore } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
@@ -78,6 +77,7 @@ import {
   type Sorted,
   type Verdict,
 } from "./verdicts.js";
+import { prop } from "../field.js";
 
 export const NEEDS_HUMAN = "needs-human";
 export const MAX_ROUNDS = 3;
@@ -222,7 +222,7 @@ async function reviewProcess(
   if (own.kind === "failed") {
     return own;
   }
-  const references = [own.value.dir, ...plugins.map((p) => p.dir)].find((d) => d !== "") ?? "";
+  const references = await referencesDir([own.value.dir, ...plugins.map((p) => p.dir)]);
   return references === ""
     ? { kind: "failed", reason: NO_REFERENCES }
     : { kind: "ok", value: { ...own.value, references } };
@@ -749,7 +749,7 @@ function summaryItems(sorted: readonly Sorted[], box: Box, criteria: readonly st
 }
 
 function freshProtected(ctx: Ctx, box: Box): readonly string[] {
-  return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)) && !ctx.past.listed.has(p));
+  return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)));
 }
 
 async function threadsAndLabel(

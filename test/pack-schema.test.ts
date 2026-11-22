@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ENGINE_KNOWS, readCard, ROLE_TOOLS, type Role } from "../src/core/process/cards.js";
-import { CATEGORIES, readGolden } from "../src/core/eval/golden.js";
-import { GRADES, SEVERITIES } from "../src/core/finding.js";
+import { CATEGORIES, readGolden, SEVERITIES } from "../src/core/eval/golden.js";
+import { GRADES } from "../src/core/finding.js";
 import { readFindings } from "../src/core/review/verdicts.js";
 import {
   frontmatterOf,
@@ -14,9 +14,9 @@ import {
   unknownToEngine,
   validate,
 } from "../src/core/process/pack-schema.js";
-import { prop } from "../src/core/dispatch/records.js";
 import { findProcess, readProcess, type PluginDir } from "../src/core/process/read.js";
 import { tempDir } from "./temp.js";
+import { prop } from "../src/core/field.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "tests", "fixtures");

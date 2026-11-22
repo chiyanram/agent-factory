@@ -9,8 +9,8 @@ import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../../forge/api.js";
-import { field } from "../../human-record.js";
 import { plainName } from "../../spec.js";
+import { prop } from "../../field.js";
 
 export type DoorConfig = {
   readonly guild: string;
@@ -31,7 +31,7 @@ async function statOf(path: string): Promise<Stats | "missing" | "unreadable"> {
   try {
     return await lstat(path);
   } catch (error: unknown) {
-    return field(error, "code") === "ENOENT" ? "missing" : "unreadable";
+    return prop(error, "code") === "ENOENT" ? "missing" : "unreadable";
   }
 }
 
@@ -104,8 +104,13 @@ export async function storeDoorToken(home: string, pasted: string): Promise<Resu
     await rename(temp, path);
     return { kind: "ok", value: path };
   } catch (error: unknown) {
-    await rm(temp, { force: true }).catch(() => undefined);
-    return failed(`cannot store the token in ${dir}: ${error instanceof Error ? error.name : "the write failed"}`);
+    const left = await rm(temp, { force: true }).then(
+      () => "",
+      (removing: unknown) => `; ${temp} is left: ${removing instanceof Error ? removing.name : "it cannot be removed"}`,
+    );
+    return failed(
+      `cannot store the token in ${dir}: ${error instanceof Error ? error.name : "the write failed"}${left}`,
+    );
   }
 }
 
@@ -122,12 +127,12 @@ function idMap(value: unknown, what: string, valid: (v: string) => boolean): Res
 }
 
 function configOf(value: unknown, path: string): Result<DoorConfig> {
-  const guild = field(value, "guild");
+  const guild = prop(value, "guild");
   if (typeof guild !== "string" || !SNOWFLAKE.test(guild)) {
     return failed(`${path}: guild must be the server's id`);
   }
-  const channels = idMap(field(value, "channels"), `${path}: channels`, plainName);
-  const people = idMap(field(value, "people"), `${path}: people`, (name) => name.trim() !== "");
+  const channels = idMap(prop(value, "channels"), `${path}: channels`, plainName);
+  const people = idMap(prop(value, "people"), `${path}: people`, (name) => name.trim() !== "");
   if (channels.kind === "failed") {
     return channels;
   }

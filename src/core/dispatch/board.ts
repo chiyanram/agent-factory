@@ -16,7 +16,7 @@ import type { Waiting } from "../forge/types.js";
 import { LANES, whoseTurn, type Lane } from "./next-step.js";
 import { isActivity, type Event } from "./records.js";
 import type { Decided } from "./tick.js";
-import { PARK_WAIT, type Action } from "./table.js";
+import type { Action } from "./table.js";
 import { OPERATOR, SESSION_WAITS, sessionWait, WAITING_LABEL } from "./waiting.js";
 import { shownAt, shownFor, UTC, type Zone } from "../zone.js";
 
@@ -33,6 +33,7 @@ export type BoardLine = {
   readonly waitsOn: WaitsOn;
   readonly since: string;
   readonly forMs: number;
+  readonly parkedUntil?: string;
 };
 
 function newestBy(events: readonly Event[], kind: "begun" | "approved"): string {
@@ -71,13 +72,28 @@ function brokenLine(ticket: string, reason: string): BoardLine {
 
 type Read = Exclude<Decided, { readonly kind: "broken" }>;
 
+function parkedUntil(d: Read & { readonly action: Action }): string {
+  const parked = d.state.runs.parked;
+  const usage = d.action.kind === "wait" && d.action.wait === "usage-limit";
+  return usage && parked.kind === "parked" ? parked.until : "none";
+}
+
 function flyingLine(d: Read, events: readonly Event[], now: number, describe: (a: Action) => string): BoardLine {
   const change = d.state.change.kind === "open" ? d.state.change.line.number : "none";
   const approved = d.approved === "none" ? { by: "", at: "" } : d.approved;
   const step = describe(d.action);
   const since = sinceOf(events, approved.at);
   const forMs = since === "" ? 0 : Math.max(0, now - Date.parse(since));
-  return { ticket: d.state.ticket, change, ...placed(d.action, events, approved.by, step), step, since, forMs };
+  const line: BoardLine = {
+    ticket: d.state.ticket,
+    change,
+    ...placed(d.action, events, approved.by, step),
+    step,
+    since,
+    forMs,
+  };
+  const until = parkedUntil(d);
+  return until === "none" ? line : { ...line, parkedUntil: until };
 }
 
 function lineOf(
@@ -155,21 +171,19 @@ function waitText(w: WaitsOn): string {
   return w.kind === "person" ? `${w.who}, who ${w.does}` : `the ${w.kind}: ${w.what}`;
 }
 
-function parkInZone(text: string, zone: Zone): string {
-  return text.replace(
-    new RegExp(`(${PARK_WAIT} )(\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ)`),
-    (_m, words: string, iso: string) => {
-      const utc = shownAt(iso, UTC);
-      const local = shownAt(iso, zone);
-      return `${words}${local === utc ? utc : `${local} (${utc})`}`;
-    },
-  );
+function parkInZone(text: string, until: string | undefined, zone: Zone): string {
+  if (until === undefined) {
+    return text;
+  }
+  const utc = shownAt(until, UTC);
+  const local = shownAt(until, zone);
+  return text.replace(until, local === utc ? utc : `${local} (${utc})`);
 }
 
 export function ticketText(l: BoardLine, zone: Zone, mark: string): readonly string[] {
   return [
-    `  ${l.ticket}  ${l.change === "none" ? "no PR" : `${mark}${l.change}`}  ${parkInZone(l.step, zone)}`,
-    `    waits on ${parkInZone(waitText(l.waitsOn), zone)}${l.since === "" ? "" : `, for ${shownFor(l.forMs)} since ${shownAt(l.since, zone)}`}`,
+    `  ${l.ticket}  ${l.change === "none" ? "no PR" : `${mark}${l.change}`}  ${parkInZone(l.step, l.parkedUntil, zone)}`,
+    `    waits on ${parkInZone(waitText(l.waitsOn), l.parkedUntil, zone)}${l.since === "" ? "" : `, for ${shownFor(l.forMs)} since ${shownAt(l.since, zone)}`}`,
   ];
 }
 

@@ -17,12 +17,12 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
-import { codeOf, prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
 import { plainName } from "../spec.js";
 import { pinImage } from "./choose.js";
 import type { PinnedImage } from "./types.js";
 import type { Docker } from "./vm.js";
+import { codeOf, prop } from "../field.js";
 
 export const BOX_FILE = "box.json";
 export const PROJECT_DOCKERFILE = "box.Dockerfile";

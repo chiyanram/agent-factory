@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { graphql, processRunner, rateLimitedUntil, readAnswer, rest, waitSeconds } from "../src/core/forge/api.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  graphql,
+  processRunner,
+  rateLimitedUntil,
+  readAnswer,
+  rest,
+  signalGroup,
+  waitSeconds,
+} from "../src/core/forge/api.js";
 import { fake, field, ok } from "./fake-forge.js";
 
 const GET = { path: "repos/o/r/pulls/12", method: "GET", body: { kind: "none" } } as const;
@@ -269,4 +277,27 @@ describe("processRunner (#228)", () => {
     expect(failed).toEqual({ code: 3, stdout: "", stderr: "no\n" });
     expect((await run({ ...LOUD, bin: "/nonexistent/bin", keep: "tail" })).code).not.toBe(0);
   });
+});
+
+describe("signalGroup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const failing = (code: string): void => {
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw Object.assign(new Error(`kill ${code}`), { code });
+    });
+  };
+
+  it.each([
+    { code: "ESRCH", failure: "" },
+    { code: "EPERM", failure: "cannot send SIGTERM to process group 424242: Error: kill EPERM\n" },
+  ])(
+    "should report a failure to stop a process group when the reason is not that the group already ended: $code",
+    ({ code, failure }) => {
+      failing(code);
+      expect(signalGroup(424242, "SIGTERM")).toBe(failure);
+    },
+  );
 });

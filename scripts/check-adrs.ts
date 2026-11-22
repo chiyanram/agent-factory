@@ -17,6 +17,9 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type * as DocNotes from "./doc-notes.js";
+
+const { ends, MARK, noteCut }: typeof DocNotes = await import(new URL("./doc-notes.ts", import.meta.url).href);
 
 const ADR_DIR = "docs/adr";
 const ADR_FILE = /^(\d{4})-.*\.md$/;
@@ -52,26 +55,6 @@ export function namedBack(adrs: readonly Adr[]): readonly string[] {
   );
 }
 
-const MARK = "**Today:**";
-
-function ends(line: string): boolean {
-  return /^\s*$|^\s*\||^#|^\s*([-*]|\d+\.)\s|^\s*```/.test(line);
-}
-
-function cellEnd(line: string, from: number): number {
-  const at = line.slice(from).search(/(?<!\\)\|/);
-  return at < 0 ? line.length : from + at;
-}
-
-function cutNote(line: string): { readonly frozen: string; readonly runs: boolean } {
-  const at = line.indexOf(MARK);
-  const before = line.slice(0, at);
-  if (!line.trimStart().startsWith("|")) {
-    return { frozen: before.trimEnd(), runs: true };
-  }
-  return { frozen: `${before.trimEnd()} ${line.slice(cellEnd(line, at)).trimStart()}`, runs: false };
-}
-
 // kept : a body's frozen text, the text that carries its decision: every line, each **Today:** note cut out from its
 // marker to the end of its paragraph, or of its cell in a table row (#605). Blank lines and trailing spaces carry no
 // decision, so a note removed with its paragraph leaves the rest the same. Pure.
@@ -81,9 +64,9 @@ function kept(body: string): readonly string[] {
   for (const line of body.split("\n")) {
     running = running && !ends(line);
     if (line.includes(MARK)) {
-      const cut = cutNote(line);
+      const cut = noteCut(line);
       out.push(cut.frozen);
-      running = cut.runs;
+      running = !cut.inRow;
     } else if (!running) {
       out.push(line.trimEnd());
     }

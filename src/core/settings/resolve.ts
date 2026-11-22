@@ -11,7 +11,6 @@
 // never quietly points another at the wrong place. A work project may not opt in to commits to its product repo (P9),
 // nor keep its specs on the git host.
 
-import { isOldConnectors, OLD_CONNECTORS } from "../process/plugins.js";
 import { pathKey } from "./lines.js";
 import { listText } from "./variables.js";
 import { KEYS, PROJECT_META, TEAM_META, type Key, type KeyClass } from "./keys.js";
@@ -326,10 +325,9 @@ export function resolve(input: Input): Resolution {
     (text): Problem => ({ level: "error", text }),
   );
   const unknown = input.layers.flatMap(unknownKeys);
-  const old = input.layers.flatMap(oldNames);
   const project = input.layers.find((l) => l.name === "project");
   const shadows = KEYS.flatMap((k) => overridden(k, context));
-  const problems = [...input.problems, ...errors, ...unknown, ...old, ...shadows];
+  const problems = [...input.problems, ...errors, ...unknown, ...shadows];
   return { values, problems, effective: effectiveOf(project, values) };
 }
 
@@ -351,12 +349,6 @@ function shadowed(id: string, env: string, entries: readonly Entry[]): readonly 
           text: `${id}: the variable ${env} (${show(machine.value)}) wins over ${where(file.source)} (${show(file.value)}); unset it to use the project file`,
         },
       ];
-}
-
-function oldNames(layer: FileLayer): readonly Problem[] {
-  const plugins: unknown = Reflect.get(layer.value, "plugins");
-  const place = where({ layer: layer.name, file: layer.file, line: layer.lines.get(pathKey(["plugins"])) ?? 0 });
-  return isOldConnectors(plugins) ? [{ level: "warning", text: `${place}: ${OLD_CONNECTORS}` }] : [];
 }
 
 function atWork(values: readonly Resolved[]): readonly string[] {

@@ -275,19 +275,12 @@ async function done(input: FinishInput, outcome: Extract<Outcome, { kind: "done"
 const LETTERS = "ABCD";
 
 function asking(q: Question, i: number): string {
-  if (q.kind === "plain") {
-    return `${i + 1}. ${q.question} (no choices: answer in words)`;
-  }
   const choices = q.choices.map((c, j) => `${LETTERS[j]}) ${c}${j === q.recommended ? " (recommended)" : ""}`);
   return `${i + 1}. ${q.question} ${choices.join(" · ")}`;
 }
 
-function howToAnswer(questions: readonly Question[]): string {
-  const lettered = questions.some((q) => q.kind === "choices");
-  return lettered
-    ? 'reply with a letter per question, such as "1A 2B", or "accept all" to take every recommended choice; a question with no choices takes words'
-    : 'reply in words, each answer after its number, such as "1: EUR"';
-}
+const HOW_TO_ANSWER =
+  'reply with a letter per question, such as "1A 2B", or "accept all" to take every recommended choice';
 
 function waitingFields(waiting: number): readonly PostField[] {
   return waiting > 0
@@ -311,7 +304,7 @@ export function questionRound(questions: readonly Question[]): {
 } {
   return {
     title: `OPEN: ${counted(questions.length)}`,
-    answer: { label: "answer", value: howToAnswer(questions) },
+    answer: { label: "answer", value: HOW_TO_ANSWER },
     items: questions.map(asking),
   };
 }
@@ -328,11 +321,20 @@ export function readsBackAs(note: Post, questions: readonly Question[]): string 
     : `question ${bad + 1} would not read back as written once posted: each question with its choices is cut at ${DEFAULT_FIELD_LIMIT} characters, and " · " or " A) " inside a text splits it; shorten or reword it`;
 }
 
+export type CheckedRound = { readonly questions: readonly Question[]; readonly post: Post };
+
+export function checkedRound(questions: readonly Question[]): Result<CheckedRound> {
+  const round = questionRound(questions);
+  const note: Post = { seat: "coordinator", title: round.title, fields: [round.answer], items: round.items };
+  const back = readsBackAs(note, questions);
+  return back === "" ? { kind: "ok", value: { questions, post: note } } : { kind: "failed", reason: back };
+}
+
 function readsBack(q: Question, back: Asked | undefined): boolean {
   if (back === undefined || !sameWords(back.text, q.question)) {
     return false;
   }
-  return q.kind === "choices" ? sameChoices(q, back) : back.choices.length === 0 && back.recommended === -1;
+  return sameChoices(q, back);
 }
 
 function sameWords(back: string, written: string): boolean {
@@ -350,10 +352,6 @@ function sameChoices(q: Extract<Question, { kind: "choices" }>, back: Asked): bo
 function askPost(input: FinishInput, posted: readonly Question[], waiting: number): Post {
   const run = runFields(input.ending);
   const next = waitingFields(waiting);
-  const [only] = posted;
-  if (posted.length === 1 && only?.kind === "plain") {
-    return { seat: "writer", title: `OPEN: ${only.question}`, fields: [...run, ...next], items: [] };
-  }
   const round = questionRound(posted);
   return { seat: "writer", title: round.title, fields: [...run, round.answer, ...next], items: round.items };
 }

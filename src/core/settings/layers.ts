@@ -12,12 +12,12 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { codeOf, prop } from "../dispatch/records.js";
 import { hostGit } from "../git.js";
 import { POLICY_POINTS } from "../plugin/policy.js";
 import { keyById, PROJECT_META, TEAM_META } from "./keys.js";
 import { keyLines } from "./lines.js";
 import { resolve, TEAM_MODES, type FileLayer, type Problem, type Resolution, type TeamMode } from "./resolve.js";
+import { codeOf, prop } from "../field.js";
 
 export type Pin = { readonly team: string; readonly commit: string };
 

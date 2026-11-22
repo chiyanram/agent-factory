@@ -15,7 +15,6 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { hostGit } from "../git.js";
-import { TEST_FILES } from "../ready/floor.js";
 
 export type HostKind = "github" | "gitlab";
 
@@ -39,7 +38,6 @@ export type Detected = {
   readonly hostName: string;
   readonly project: string;
   readonly builds: readonly Build[];
-  readonly testFiles: readonly string[] | "default";
   readonly integrationTests: boolean;
   readonly oneWayDoor: readonly { readonly glob: string; readonly tool: string }[];
   readonly ci: readonly string[];
@@ -175,14 +173,8 @@ async function ciIn(clone: string): Promise<readonly string[]> {
   return (await isThere(join(clone, ".gitlab-ci.yml"))) ? [...github.toSorted(), ".gitlab-ci.yml"] : github.toSorted();
 }
 
-const IT_GLOB = "**/src/integrationTest/**";
-
 async function integrationTestsIn(clone: string): Promise<boolean> {
   return isThere(join(clone, "src", "integrationTest"));
-}
-
-async function testFilesIn(clone: string): Promise<Detected["testFiles"]> {
-  return (await integrationTestsIn(clone)) && !TEST_FILES.includes(IT_GLOB) ? [...TEST_FILES, IT_GLOB] : "default";
 }
 
 export function toolsOf(file: string, text: string): readonly Tool[] {
@@ -251,7 +243,6 @@ export async function detect(dir: string, env: NodeJS.ProcessEnv): Promise<Resul
       hostName: host.name,
       project: remote.value.path,
       builds: await buildsIn(clone.value),
-      testFiles: await testFilesIn(clone.value),
       integrationTests: await integrationTestsIn(clone.value),
       oneWayDoor: await migrationsIn(clone.value),
       ci: await ciIn(clone.value),

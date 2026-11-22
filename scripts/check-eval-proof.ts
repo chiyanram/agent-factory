@@ -40,7 +40,7 @@ import { pathToFileURL } from "node:url";
 import type * as Bar from "../src/core/eval/bar.js";
 
 const bar: typeof Bar = await import(new URL("../src/core/eval/bar.ts", import.meta.url).href);
-const { aimProblems, baselineOf, countsOf, field, holdProblems } = bar;
+const { aimProblems, baselineOf, countsOf, field, holdProblems, partialWhy, ranOf } = bar;
 type Baseline = Bar.Baseline;
 
 export const PROMPTS = {
@@ -83,20 +83,13 @@ function parse(text: string): unknown {
   }
 }
 
-function entries(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
 export function errorProblems(value: unknown): readonly string[] {
-  return entries(field(value, "per_case")).flatMap((c) => {
-    const name = String(field(c, "case"));
-    const own = field(c, "error");
-    const runs = entries(field(c, "runs")).filter((r) => (field(r, "error") ?? "") !== "");
-    return [
-      ...((own ?? "") === "" ? [] : [`case ${name} has an error: ${String(own)}`]),
-      ...runs.map((r) => `case ${name} run ${String(field(r, "run"))} has an error: ${String(field(r, "error"))}`),
-    ].map((why) => `${why}; an errored run proves nothing (ADR-0021 N11)`);
-  });
+  const ran = ranOf(value);
+  return ran === undefined
+    ? [
+        "its per_case is not a list of cases, each with its case, its error and its runs, each run with its run and its error",
+      ]
+    : partialWhy(ran).map((why) => `${why}; an errored run proves nothing (ADR-0021 N11)`);
 }
 
 export function passProblems(value: unknown): readonly string[] {

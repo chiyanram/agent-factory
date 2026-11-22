@@ -32,6 +32,7 @@ import { PROTOCOL, pluginEnv, readResult } from "./contract.js";
 import { makeFakes, stringsIn, type FakeAnswer, type FakeCall } from "./fakes.js";
 import { DEFAULT_LIMITS, runPlugin, type Ran } from "./exec.js";
 import { inspect, type Entry, type Setup } from "./registry.js";
+import { prop } from "../field.js";
 
 export type Check = { readonly name: string; readonly ok: boolean; readonly detail: string };
 
@@ -96,9 +97,9 @@ type Fixture = {
 };
 
 function answerOf(value: unknown): FakeAnswer {
-  const code = field(value, "code");
-  const stdout = field(value, "stdout");
-  const stderr = field(value, "stderr");
+  const code = prop(value, "code");
+  const stdout = prop(value, "stdout");
+  const stderr = prop(value, "stderr");
   return {
     code: Number.isSafeInteger(code) ? Number(code) : 1,
     stdout: typeof stdout === "string" ? stdout : "",
@@ -135,24 +136,20 @@ function parsed(text: string): unknown {
   }
 }
 
-function field(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}
-
 function subset(expected: unknown, actual: unknown): boolean {
   return typeof expected === "object" && expected !== null
-    ? Object.entries(expected).every(([k, v]) => JSON.stringify(field(actual, k)) === JSON.stringify(v))
+    ? Object.entries(expected).every(([k, v]) => JSON.stringify(prop(actual, k)) === JSON.stringify(v))
     : false;
 }
 
 function opOf(input: unknown): string {
-  const op = field(input, "op");
+  const op = prop(input, "op");
   return typeof op === "string" ? op : "";
 }
 
 async function fixtureCheck(setup: Setup, entry: Entry, f: Fixture): Promise<{ check: Check; answer: Answer }> {
   const input = parsed(f.input);
-  const answer = await call(setup, entry, request(f.capability, opOf(input), field(input, "input")), f.answers);
+  const answer = await call(setup, entry, request(f.capability, opOf(input), prop(input, "input")), f.answers);
   const actual = answer.ran.kind === "exited" ? parsed(answer.ran.stdout) : undefined;
   const ok = subset(parsed(f.expected), actual);
   return { check: check(`fixture ${f.name}`, ok, ok ? kindOf(answer) : `got ${kindOf(answer)}`), answer };
@@ -203,17 +200,17 @@ function rendered(value: unknown): readonly string[] {
 }
 
 function textsOf(input: unknown): readonly string[] {
-  const text = field(input, "text");
+  const text = prop(input, "text");
   return [
     ...(typeof text === "string" ? [text] : []),
-    ...rendered(field(input, "post")),
-    ...rendered(field(input, "body")),
+    ...rendered(prop(input, "post")),
+    ...rendered(prop(input, "body")),
   ];
 }
 
 function swapped(value: unknown, key: string, swap: (v: unknown) => unknown): unknown {
   return typeof value === "object" && value !== null && Object.hasOwn(value, key)
-    ? { ...value, [key]: swap(field(value, key)) }
+    ? { ...value, [key]: swap(prop(value, key)) }
     : value;
 }
 
@@ -243,7 +240,7 @@ function fidelityProblem(answer: Answer, f: Fixture, texts: readonly string[]): 
 }
 
 async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown, name: string): Promise<Check> {
-  const inner = field(input, "input");
+  const inner = prop(input, "input");
   const answer = await call(setup, entry, request(f.capability, opOf(input), inner), f.answers);
   const problem = fidelityProblem(answer, f, textsOf(inner));
   return check(
@@ -255,7 +252,7 @@ async function fidelityOf(setup: Setup, entry: Entry, f: Fixture, input: unknown
 
 function isFidelityCase(entry: Entry, f: Fixture): boolean {
   const writes = entry.writes.some((w) => w === f.capability);
-  return writes && f.answers.length > 0 && textsOf(field(parsed(f.input), "input")).length > 0;
+  return writes && f.answers.length > 0 && textsOf(prop(parsed(f.input), "input")).length > 0;
 }
 
 async function fidelity(setup: Setup, entry: Entry, fixtures: readonly Fixture[]): Promise<readonly Check[]> {

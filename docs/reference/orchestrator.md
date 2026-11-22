@@ -156,7 +156,7 @@ the `waiting:operator` label on its issue ([`waiting.ts`](../../src/core/dispatc
 open issues with it through the `Forge` seam, writes a `waiting` line with the time the label went on, then pings once.
 A label taken off and put on again has a newer time and pings again; a ticket whose own turn is already needs you is
 recorded with no second ping; that holds only where ticket 12 is issue 12 (the project keeps its specs in issues). A
-project's git host plugin built before this read answers it unsupported, and shows no waiting session. The label is a session's claim, not a human record: nothing decides on it. A read that
+project's protocol 1 git host plugin may answer it unsupported, and shows no waiting session. The label is a session's claim, not a human record: nothing decides on it. A read that
 fails is logged and pings nothing. The orchestrator loop ends once no ticket is in flight, and a waiting session does not keep it
 running, so when no loop runs `agent-factory waiting <project>` sends the same record and ping
 ([`waiting-pass.ts`](../../src/core/dispatch/waiting-pass.ts)) under the pass lock, deciding each ticket as a pass does

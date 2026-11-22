@@ -12,7 +12,6 @@ import {
   CORE_PROPERTIES,
   CORE_REQUIRED,
   coreOf,
-  get,
   oneOf,
   settle,
   type Bucket,
@@ -20,6 +19,7 @@ import {
   type Verdict,
 } from "../finding.js";
 import type { Result } from "../forge/api.js";
+import { prop } from "../field.js";
 
 export type { Bucket, Grade } from "../finding.js";
 
@@ -63,15 +63,15 @@ function cut(value: unknown): string | undefined {
 
 function findingOf(raw: unknown, id: string): DesignFinding | undefined {
   const core = coreOf(raw, id, clip);
-  const decision = cut(get(raw, "decision"));
-  const verdict = oneOf(get(raw, "verdict"), VERDICTS);
+  const decision = cut(prop(raw, "decision"));
+  const verdict = oneOf(prop(raw, "verdict"), VERDICTS);
   return core === undefined || decision === undefined || verdict === undefined
     ? undefined
     : { ...core, source: "design", decision, verdict };
 }
 
 function listOf(output: unknown, name: string): readonly unknown[] | undefined {
-  const list = get(output, name);
+  const list = prop(output, name);
   return Array.isArray(list) && list.length <= MOST_FINDINGS ? list : undefined;
 }
 
@@ -85,10 +85,10 @@ export function readDesignFindings(output: unknown): Result<readonly DesignFindi
 }
 
 function keptOf(raw: unknown): Kept | undefined {
-  const id = cut(get(raw, "id"));
+  const id = cut(prop(raw, "id"));
   const finding = id === undefined ? undefined : findingOf(raw, id);
-  const bucket = oneOf(get(raw, "bucket"), BUCKETS);
-  const why = cut(get(raw, "why"));
+  const bucket = oneOf(prop(raw, "bucket"), BUCKETS);
+  const why = cut(prop(raw, "why"));
   return finding === undefined || bucket === undefined || why === undefined ? undefined : { ...finding, bucket, why };
 }
 
@@ -101,7 +101,7 @@ function recorded<T>(value: unknown, one: (raw: unknown) => T | undefined): read
 }
 
 function recordedFinding(raw: unknown): DesignFinding | undefined {
-  const id = cut(get(raw, "id"));
+  const id = cut(prop(raw, "id"));
   return id === undefined ? undefined : findingOf(raw, id);
 }
 

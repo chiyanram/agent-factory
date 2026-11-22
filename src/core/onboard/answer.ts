@@ -2,8 +2,8 @@
 // marked verified or inferred and cited where it can be. Model output is data: every field is checked, and every text
 // is cut to a length a brief can hold. The engine writes the rest of the brief itself (brief.ts).
 
-import { prop } from "../dispatch/records.js";
 import type { Result } from "../forge/api.js";
+import { prop } from "../field.js";
 
 export type Cite = { readonly file: string; readonly line: number };
 

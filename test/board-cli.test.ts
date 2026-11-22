@@ -7,6 +7,7 @@ import { specHash } from "../src/core/spec.js";
 import { NO_CAPS } from "../src/core/dispatch/caps.js";
 import { record } from "../src/core/dispatch/records.js";
 import { STEPS_TODAY } from "../src/core/dispatch/steps.js";
+import { noRunFolder } from "./run-folder.js";
 import { WAITING_LABEL } from "../src/core/dispatch/waiting.js";
 import { decideAll, type Decided, type TickSetup } from "../src/core/dispatch/tick.js";
 import { FORGE_OPS } from "../src/core/forge/ops.js";
@@ -209,7 +210,11 @@ describe("the board writes nothing (#487 AC-5)", () => {
   it("is a dry run on the read-only git host, with no step and no ping that could act, its log on stderr", async () => {
     const err: string[] = [];
     const writes: string[] = [];
-    const ran = { kind: "available" as const, run: async () => ({ kind: "failed" as const, reason: "ran" }) };
+    const ran = {
+      kind: "available" as const,
+      folder: noRunFolder,
+      run: async () => ({ kind: "failed" as const, reason: "ran" }),
+    };
     const given: TickSetup = {
       ...setup(recording({ team: [], open: [], merged: [] }, writes), []),
       dryRun: false,

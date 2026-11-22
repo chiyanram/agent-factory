@@ -17,6 +17,7 @@
 // known (#689 item 5); the read-only runs read none until #708.
 
 import { atWall, wallAt, type Zone } from "../zone.js";
+import { prop } from "../field.js";
 
 export type UsageLimit =
   | { readonly kind: "none" }
@@ -50,10 +51,6 @@ const RESET_ISO = /\bresets?(?:\s+at)?\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:
 
 const MOST_WAIT_MS = 31 * 86_400_000;
 const DAY_MS = 86_400_000;
-
-function prop(value: unknown, name: string): unknown {
-  return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
-}
 
 function isoSeconds(ms: number): string {
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");

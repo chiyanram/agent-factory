@@ -5,12 +5,13 @@
 // that timed out may have posted. One ticket's writes run one at a time behind <ticket>.lock. A log that does not
 // read is refused, never read as empty. Nothing here throws.
 
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Done, Result } from "../forge/api.js";
-import { codeOf, prop } from "../dispatch/records.js";
 import { attempt } from "../review/safe.js";
 import { isPolicyPoint, type PolicyPoint } from "./config.js";
+import { codeOf, prop } from "../field.js";
+import { takeLock } from "../lock.js";
 
 export type Where = { readonly home: string; readonly project: string; readonly ticket: string };
 
@@ -125,61 +126,20 @@ export function appendLine(where: Where, line: Line): Promise<Done> {
   }, `cannot write ${file}`);
 }
 
-type Take =
-  | { readonly kind: "took" }
-  | { readonly kind: "held" }
-  | { readonly kind: "failed"; readonly reason: string };
-
-async function takeLock(lock: string): Promise<Take> {
-  try {
-    await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-    await writeFile(lock, String(process.pid), { flag: "wx", mode: 0o600 });
-    return { kind: "took" };
-  } catch (error) {
-    return codeOf(error) === "EEXIST" ? { kind: "held" } : failed(`cannot write ${lock}`);
+export async function onTicket<T>(where: Where, change: () => Promise<Result<T>>): Promise<Result<T>> {
+  const lock = join(where.home, "writes", where.project, `${where.ticket}.lock`);
+  const took = await takeLock(lock);
+  if (took.kind === "failed") {
+    return took;
   }
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return codeOf(error) !== "ESRCH";
-  }
-}
-
-async function stale(lock: string): Promise<boolean> {
-  const held = await readFile(lock, "utf8").catch(() => "");
-  const pid = Number(held.trim());
-  return Number.isSafeInteger(pid) && pid > 0 && !alive(pid);
-}
-
-async function locked(lock: string, where: Where): Promise<Done> {
-  const first = await takeLock(lock);
-  const again = first.kind === "held" && (await stale(lock)) ? await retaken(lock) : first;
-  if (again.kind === "held") {
+  if (took.kind === "busy") {
     return failed(
       `another write on ${where.project}/${where.ticket} is running (${lock}); remove that file if none is`,
     );
   }
-  return again.kind === "took" ? { kind: "ok" } : again;
-}
-
-async function retaken(lock: string): Promise<Take> {
-  await rm(lock, { force: true }).catch(() => undefined);
-  return takeLock(lock);
-}
-
-export async function onTicket<T>(where: Where, change: () => Promise<Result<T>>): Promise<Result<T>> {
-  const lock = join(where.home, "writes", where.project, `${where.ticket}.lock`);
-  const took = await locked(lock, where);
-  if (took.kind === "failed") {
-    return took;
-  }
   try {
     return await change();
   } finally {
-    await rm(lock, { force: true }).catch(() => undefined);
+    await took.release();
   }
 }

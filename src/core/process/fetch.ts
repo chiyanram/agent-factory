@@ -9,11 +9,11 @@
 import { cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
 import type { Result } from "../forge/api.js";
-import { prop } from "../dispatch/records.js";
 import { hostGit, type GitResult } from "../git.js";
 import { attempt } from "../review/safe.js";
 import { COMMIT, marketplaceDir, matching, parsedJson, treeHash, type Pin } from "./pins.js";
 import type { PluginRef } from "./plugins.js";
+import { prop } from "../field.js";
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };

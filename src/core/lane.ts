@@ -27,10 +27,10 @@
 
 import type { Result } from "./forge/api.js";
 import { globRegex } from "./ci-files.js";
-import { prop } from "./dispatch/records.js";
 import { readProjectRaw } from "./project.js";
 import { above, type Lane } from "./lane-order.js";
 import { LANES, type Spec } from "./spec.js";
+import { prop } from "./field.js";
 
 export { above, heavier, raisedWhy } from "./lane-order.js";
 

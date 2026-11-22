@@ -9,6 +9,7 @@ import { EXTENSION_POINTS, readDescribe } from "../src/core/plugin/contract.js";
 import type { ModelRun } from "../src/core/review/model.js";
 import { settingName } from "../src/core/settings/machine.js";
 import { tempDir } from "./temp.js";
+import { stopOnceExited, stopOnceStarted } from "./started-first.js";
 
 const made: string[] = [];
 afterEach(() => {
@@ -105,7 +106,11 @@ describe("the Claude adapter's read-only run", () => {
       if (limit.kind === "failed") {
         throw new Error(limit.reason);
       }
-      const agent = openAgentCli({ env: { PATH: process.env.PATH, FACTORY_CLAUDE: stub.bin }, minuteMs: 300 });
+      const agent = openAgentCli({
+        env: { PATH: process.env.PATH, FACTORY_CLAUDE: stub.bin },
+        run: stopOnceStarted(stub.pidFile),
+        minuteMs: 300,
+      });
       const began = Date.now();
       const ran = await agent.readOnly({ ...RUN, folder: dir, limit: limit.value });
       expect(Date.now() - began).toBeLessThan(5000);
@@ -124,9 +129,17 @@ describe("the Claude adapter's read-only run", () => {
     const bin = join(dir, "claude");
     const pidFile = join(dir, "grandchild.pid");
     const result = { type: "result", is_error: false, structured_output: { ok: 1 }, total_cost_usd: 0.1 };
-    writeFileSync(bin, `#!/bin/sh\necho '${JSON.stringify(result)}'\nsleep 600 &\necho $! > ${pidFile}\nexit 0\n`);
+    const cliPid = join(dir, "cli.pid");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\necho $$ > ${cliPid}\necho '${JSON.stringify(result)}'\nsleep 600 &\necho $! > ${pidFile}\nexit 0\n`,
+    );
     chmodSync(bin, 0o755);
-    const agent = openAgentCli({ env: { PATH: process.env.PATH, FACTORY_CLAUDE: bin }, minuteMs: 300 });
+    const agent = openAgentCli({
+      env: { PATH: process.env.PATH, FACTORY_CLAUDE: bin },
+      run: stopOnceExited(cliPid),
+      minuteMs: 300,
+    });
     const ran = await agent.readOnly({ ...RUN, folder: dir, limit: { minutes: 1, setting: "FACTORY_FINDER_MINUTES" } });
     expect(ran).toMatchObject({ kind: "ok", value: { output: { ok: 1 } } });
     expect(await gone(Number(readFileSync(pidFile, "utf8").trim()))).toBe(true);
@@ -311,6 +324,7 @@ describe("the Claude adapter's sessions list", () => {
     const stub = hangingClaude(dir);
     const sessions = openAgentCli({
       env: { PATH: process.env.PATH, FACTORY_CLAUDE: stub.bin },
+      run: stopOnceStarted(stub.pidFile),
       sessionsMs: 300,
     }).sessions;
     expect(await sessions()).toEqual({

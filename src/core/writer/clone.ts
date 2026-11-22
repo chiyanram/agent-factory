@@ -290,15 +290,11 @@ export function runFolder(setup: Pick<CloneSetup, "runsDir">): Promise<Result<st
 
 export async function makeClone(
   setup: CloneSetup,
-  input: Files & { readonly start: Start; readonly dir?: string },
+  input: Files & { readonly start: Start; readonly dir: string },
 ): Promise<Result<Clone>> {
-  const dir: Result<string> = input.dir === undefined ? await runFolder(setup) : { kind: "ok", value: input.dir };
-  if (dir.kind === "failed") {
-    return dir;
-  }
-  const clone = await prepared(setup, { ...input, dir: dir.value });
+  const clone = await prepared(setup, input);
   if (clone.kind === "failed") {
-    await removeClone(dir.value);
+    await removeClone(input.dir);
   }
   return clone;
 }

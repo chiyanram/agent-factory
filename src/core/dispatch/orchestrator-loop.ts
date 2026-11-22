@@ -50,11 +50,10 @@ import { rateLimitedUntil, type Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { plainName } from "../spec.js";
 import { LOOP_END_FILE, LOOP_PID_FILE, type LoopEnded } from "./last-poll.js";
-import { inFlight, PARK_WAIT } from "./table.js";
+import { inFlight, PARK_WAIT, type WaitKind } from "./table.js";
 import { turnDue } from "./turn-ping.js";
 import {
   decideAll,
-  holder,
   lock,
   RUN_KINDS,
   runHoursEnd,
@@ -64,6 +63,7 @@ import {
   type Ran,
   type TickSetup,
 } from "./tick.js";
+import { holder } from "../lock.js";
 
 export const LOOP_GUARD: Guard = { file: LOOP_PID_FILE, what: "orchestrator loop" };
 export const MAX_FAILED_PASSES = 3;
@@ -128,12 +128,22 @@ export function flying(decided: readonly Decided[]): readonly string[] {
   );
 }
 
-export function waitingOn(decided: readonly Decided[]): ReadonlyMap<string, string> {
+export type Waited = { readonly said: string; readonly parkedUntil: number | "none" };
+
+function waitedOf(d: Exclude<Decided, { readonly kind: "broken" }>, wait: WaitKind, why: string): Waited {
+  const parked = d.state.runs.parked;
+  return {
+    said: wait === "ci" ? "waiting on CI" : `waiting: ${why}`,
+    parkedUntil: wait === "usage-limit" && parked.kind === "parked" ? Date.parse(parked.until) : "none",
+  };
+}
+
+export function waitingOn(decided: readonly Decided[]): ReadonlyMap<string, Waited> {
   return new Map(
     decided.flatMap((d) =>
       "kind" in d || d.action.kind !== "wait" || !inFlight(d.state)
         ? []
-        : [[d.state.ticket, /\bCI\b/.test(d.action.why) ? "waiting on CI" : `waiting: ${d.action.why}`] as const],
+        : [[d.state.ticket, waitedOf(d, d.action.wait, d.action.why)] as const],
     ),
   );
 }
@@ -142,7 +152,7 @@ type Step = {
   readonly kind: "pass";
   readonly ran: readonly Ran[];
   readonly flying: readonly string[];
-  readonly waits: ReadonlyMap<string, string>;
+  readonly waits: ReadonlyMap<string, Waited>;
   readonly setup: TickSetup;
 };
 
@@ -262,12 +272,9 @@ function next(loop: LoopSetup, count: Count, step: Result<Step>): After {
 }
 
 export function parkedUntil(step: Pick<Step, "flying" | "waits">): number | "none" {
-  const prefix = `waiting: ${PARK_WAIT} `;
-  const resets = step.flying.map((t) => {
-    const why = step.waits.get(t) ?? "";
-    return why.startsWith(prefix) ? Date.parse(why.slice(prefix.length)) : Number.NaN;
-  });
-  return resets.length > 0 && resets.every((r) => !Number.isNaN(r)) ? Math.min(...resets) : "none";
+  const resets = step.flying.map((t) => step.waits.get(t)?.parkedUntil ?? "none");
+  const known = resets.filter((r): r is number => r !== "none" && !Number.isNaN(r));
+  return resets.length > 0 && known.length === resets.length ? Math.min(...known) : "none";
 }
 
 function paced(loop: LoopSetup, step: Step, how: Pace): After {
@@ -293,7 +300,7 @@ function paced(loop: LoopSetup, step: Step, how: Pace): After {
     return { wait };
   }
   const named = step.flying.map((t) => {
-    const why = how.repeated.has(t) ? "its step failed the same way twice in a row" : (step.waits.get(t) ?? "");
+    const why = how.repeated.has(t) ? "its step failed the same way twice in a row" : (step.waits.get(t)?.said ?? "");
     return why === "" ? t : `${t} (${why})`;
   });
   loop.log(`in flight: ${named.join(", ")}; next pass in ${loop.pollMinutes} min`);

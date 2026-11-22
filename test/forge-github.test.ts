@@ -3,6 +3,7 @@ import { github, mergeableOf, pipeline } from "../src/core/forge/github.js";
 import type { Change } from "../src/core/forge/types.js";
 import type { Post } from "../src/core/post.js";
 import { fake, field, ok, type Scripted } from "./fake-forge.js";
+import { fakeToken } from "./planted.js";
 
 const project = { owner: "chiyanram", name: "ledger" };
 const post: Post = { seat: "reviewer", title: "Act on F1", fields: [], items: [] };
@@ -365,7 +366,7 @@ describe("single calls", () => {
   });
 
   it("note and lineFinding post no secret, anchored or not (#678)", async () => {
-    const token = `ghp_${"a1B2".repeat(9)}`;
+    const token = fakeToken("github-classic");
     const leaky: Post = { seat: "reviewer", title: `Act on F1: ${token}`, fields: [], items: [`uses ${token}`] };
     const change: Change = {
       number: 12,

@@ -20,9 +20,18 @@ import {
   tokenAge,
   type TokenStore,
 } from "../src/core/token/index.js";
+import type { CheckedToken } from "../src/core/token/rules.js";
 import { tempDir } from "./temp.js";
 
 const TOKEN = "sk-ant-oat01-AbCdEf0123456789_xyz-TOKEN";
+
+function checkedToken(text: string): CheckedToken {
+  const checked = checkToken(text);
+  if (checked.kind !== "ok") {
+    throw new Error(`the test token does not pass the check: ${checked.reason}`);
+  }
+  return checked.token;
+}
 const NOW = new Date("2026-11-07T10:00:00Z");
 const UID = process.getuid?.() ?? -1;
 
@@ -215,7 +224,9 @@ describe("the Linux file store", () => {
   const file = (): string => join(home, "secrets", "claude-token");
 
   it("stores the token readable by its owner only, and reads it back with its expiry", async () => {
-    expect(await store.put({ runner: "claude", token: secret(TOKEN), meta: metaFor(NOW) })).toEqual({ kind: "ok" });
+    expect(await store.put({ runner: "claude", token: checkedToken(TOKEN), meta: metaFor(NOW) })).toEqual({
+      kind: "ok",
+    });
     expect(statSync(file()).mode & 0o777).toBe(0o600);
     expect(statSync(join(home, "secrets")).mode & 0o777).toBe(0o700);
     expect(readFileSync(join(home, "tokens.json"), "utf8")).not.toContain(TOKEN);
@@ -232,7 +243,7 @@ describe("the Linux file store", () => {
   });
 
   it("refuses a token file that group or others can read", async () => {
-    await store.put({ runner: "claude", token: secret(TOKEN), meta: metaFor(NOW) });
+    await store.put({ runner: "claude", token: checkedToken(TOKEN), meta: metaFor(NOW) });
     chmodSync(file(), 0o644);
     expect(await store.get("claude")).toEqual({
       kind: "failed",
@@ -241,7 +252,7 @@ describe("the Linux file store", () => {
   });
 
   it("refuses a token file that is a symlink", async () => {
-    await store.put({ runner: "claude", token: secret(TOKEN), meta: metaFor(NOW) });
+    await store.put({ runner: "claude", token: checkedToken(TOKEN), meta: metaFor(NOW) });
     const other = join(home, "elsewhere");
     writeFileSync(other, `${TOKEN}\n`, { mode: 0o600 });
     rmSync(file());
@@ -250,13 +261,13 @@ describe("the Linux file store", () => {
   });
 
   it("refuses a token file of another user", async () => {
-    await store.put({ runner: "claude", token: secret(TOKEN), meta: metaFor(NOW) });
+    await store.put({ runner: "claude", token: checkedToken(TOKEN), meta: metaFor(NOW) });
     const vault = fileVault(home, { uid: UID + 1 });
     expect(await vault.read("claude")).toEqual({ kind: "failed", reason: expect.stringContaining("belongs to uid") });
   });
 
   it("gives the dispatcher no token when the expiry is gone", async () => {
-    await store.put({ runner: "claude", token: secret(TOKEN), meta: metaFor(NOW) });
+    await store.put({ runner: "claude", token: checkedToken(TOKEN), meta: metaFor(NOW) });
     rmSync(join(home, "tokens.json"));
     expect(await boxTokenFrom({ store, now: NOW })).toEqual({
       kind: "refused",
@@ -272,7 +283,7 @@ describe("the macOS Keychain store", () => {
       calls.push(c);
       return { code: 0, stdout: "", stderr: "" };
     };
-    expect(await keychainVault(run, {}).write("claude", secret(TOKEN))).toEqual({ kind: "ok" });
+    expect(await keychainVault(run, {}).write("claude", checkedToken(TOKEN))).toEqual({ kind: "ok" });
     expect(calls[0]?.args).toEqual(["-i"]);
     expect(calls[0]?.args.join(" ")).not.toContain(TOKEN);
     expect(calls[0]?.stdin).toBe(`add-generic-password -U -s agent-factory -a claude -w ${TOKEN}\n`);
@@ -311,7 +322,7 @@ describe("files the store writes", () => {
       env: {},
     });
     if (opened.kind !== "store") throw new Error(opened.reason);
-    await opened.store.put({ runner: "claude", token: secret(TOKEN), meta: metaFor(NOW) });
+    await opened.store.put({ runner: "claude", token: checkedToken(TOKEN), meta: metaFor(NOW) });
     expect(existsSync(join(home, "tokens.json"))).toBe(true);
     expect(readFileSync(join(home, "tokens.json"), "utf8")).not.toContain("sk-ant");
     rmSync(home, { recursive: true, force: true });
@@ -369,7 +380,7 @@ describe("the coordinator seat's own token (#550)", () => {
         kind: "missing",
         reason: expect.stringContaining("agent-factory setup claude --seat coordinator"),
       });
-      await vault.write("claude-coordinator", secret(TOKEN));
+      await vault.write("claude-coordinator", checkedToken(TOKEN));
       expect(existsSync(join(home, "secrets", "claude-coordinator-token"))).toBe(true);
       expect(await vault.read("claude")).toMatchObject({ kind: "missing" });
     } finally {
