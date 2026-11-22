@@ -6,7 +6,9 @@
 //   <exe> call       reads one JSON request on stdin: { protocol, capability, op, input }, and prints one JSON result
 //                    on stdout: { kind, … }, a sealed case of that capability; logs go to stderr
 //
-// The core speaks protocol major N and accepts N and N−1; a minor only adds optional fields (Terraform's rule). A
+// The core speaks protocol major N and accepts N and N−1; a minor only adds optional fields (Terraform's rule).
+// Protocol 2 makes a forge plugin give each open change's mergeable and answer the waiting read; a protocol 1 forge
+// plugin's answer is read as protocol 1 says (forge/plugin.ts). A
 // plugin may never ask for the model's or the cloud's logins, the factory's settings and tokens, the forge tokens (it
 // uses its CLI's own login), or a variable that makes a program load other code (ADR-0012 S6). Its cli may not name an
 // interpreter: a fake of one would stand in for the plugin, and the kit would test the fake.
@@ -16,7 +18,7 @@
 
 import type { Result } from "../forge/api.js";
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 export const SUPPORTED: readonly number[] = [PROTOCOL, PROTOCOL - 1].filter((p) => p >= 1);
 
 export const EXTENSION_POINTS = [

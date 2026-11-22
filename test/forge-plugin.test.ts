@@ -5,7 +5,7 @@ import { openProjectForge } from "../src/core/forge/index.js";
 import { pluginForge } from "../src/core/forge/plugin.js";
 import { reader } from "../src/core/forge/read.js";
 import { answer, described } from "../src/core/forge/serve.js";
-import { changeOf, changesOf } from "../src/core/forge/shapes.js";
+import { changeOf } from "../src/core/forge/shapes.js";
 import type { Change } from "../src/core/forge/types.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import { makeFakes, type FakeAnswer } from "../src/core/plugin/fakes.js";
@@ -268,30 +268,6 @@ describe("the forge as a plugin (#134 PR C)", () => {
     await fakes.remove();
   });
 
-  it("reads no waiting issue from a plugin built before the waiting read, which answers it unsupported", async () => {
-    const dir = join(root, "older");
-    mkdirSync(dir, { recursive: true });
-    const path = join(dir, "plugin");
-    writeFileSync(
-      path,
-      `#!${process.execPath}
-const out = (v) => process.stdout.write(JSON.stringify(v));
-if (process.argv[2] === "describe") { out(${JSON.stringify({ ...described("github", "1"), name: "older", cli: [] })}); process.exit(0); }
-let t = ""; process.stdin.on("data", (d) => (t += d)); process.stdin.on("end", () => {
-  const req = JSON.parse(t);
-  if (req.op === "waiting") { out({ kind: "unsupported", op: req.op }); return; }
-  out({ kind: "failed", reason: "no" });
-});
-`,
-    );
-    chmodSync(path, 0o755);
-    const setup: Setup = { home, env: { HOME: root }, path: NODE_DIR };
-    expect((await addPlugin(setup, path)).kind).toBe("ok");
-    const forge = pluginForge({ setup, plugin: "older", forge: "github", project: "a/b" });
-    expect(await forge.waiting({ label: "waiting:operator" })).toEqual({ kind: "ok", value: [] });
-    expect(await forge.me()).toMatchObject({ kind: "failed" });
-  });
-
   it("refuses an answer that is not the shape the interface says, or not the kind of its op", async () => {
     const dir = join(root, "odd");
     mkdirSync(dir, { recursive: true });
@@ -377,33 +353,68 @@ describe("serve: the plugin side (#134 PR C)", () => {
   });
 });
 
-describe("changesOf: an open change's mergeability over the plugin protocol (#103)", () => {
-  const open = (extra: Record<string, unknown>) => ({
-    team: [],
-    merged: [],
-    open: [
-      {
-        number: 4,
-        branch: "factory/T-4",
-        fork: false,
-        head: "h",
-        draft: true,
-        labels: [],
-        pipeline: { kind: "none" },
-        comments: [],
-        ...extra,
-      },
-    ],
+describe("a forge plugin's protocol decides how its changes and waiting answers are read", () => {
+  const OPEN = {
+    number: 4,
+    branch: "factory/T-4",
+    fork: false,
+    head: "h",
+    draft: true,
+    labels: [],
+    pipeline: { kind: "none" },
+    comments: [],
+  };
+  const WAITING = [{ number: 12, title: "board lists waiting sessions", since: "2026-11-20T10:00:00Z" }];
+
+  async function forgeOf(protocol: number, answers: { readonly changes: unknown; readonly waiting: unknown }) {
+    const dir = join(root, `protocol-${protocol}`);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "plugin");
+    writeFileSync(
+      path,
+      `#!${process.execPath}
+const out = (v) => process.stdout.write(JSON.stringify(v));
+if (process.argv[2] === "describe") { out(${JSON.stringify({ ...described("github", "1"), protocol, name: "older", cli: [] })}); process.exit(0); }
+const answers = ${JSON.stringify(answers)};
+let t = ""; process.stdin.on("data", (d) => (t += d)); process.stdin.on("end", () => out(answers[JSON.parse(t).op]));
+`,
+    );
+    chmodSync(path, 0o755);
+    const setup: Setup = { home, env: { HOME: root }, path: NODE_DIR };
+    expect((await addPlugin(setup, path)).kind).toBe("ok");
+    return pluginForge({ setup, plugin: "older", forge: "github", project: "a/b" });
+  }
+
+  const changes = (open: object) => ({ kind: "ok", value: { team: [], merged: [], open: [open] } });
+  const label = { label: "waiting:operator" };
+
+  it("AC-5 should read a protocol 2 forge plugin's open changes and waiting sessions when the plugin sends both", async () => {
+    const forge = await forgeOf(2, {
+      changes: changes({ ...OPEN, mergeable: "conflict" }),
+      waiting: { kind: "ok", value: WAITING },
+    });
+    expect(await forge.changes(label)).toMatchObject({ kind: "ok", value: { open: [{ mergeable: "conflict" }] } });
+    expect(await forge.waiting(label)).toEqual({ kind: "ok", value: WAITING });
   });
 
-  it("keeps what the plugin says, reads a plugin built before it as unknown, and refuses another word", () => {
-    const read = (extra: Record<string, unknown>) => {
-      const r = reader("test");
-      return r.done(changesOf(r, open(extra)));
-    };
-    expect(read({ mergeable: "conflict" })).toMatchObject({ kind: "ok", value: { open: [{ mergeable: "conflict" }] } });
-    expect(read({})).toMatchObject({ kind: "ok", value: { open: [{ mergeable: "unknown" }] } });
-    expect(read({ mergeable: "maybe" })).toMatchObject({ kind: "failed" });
+  it("AC-6 should refuse a protocol 2 forge plugin's answer when it lacks mergeable or answers unsupported for waiting sessions", async () => {
+    const forge = await forgeOf(2, { changes: changes(OPEN), waiting: { kind: "unsupported", op: "waiting" } });
+    expect(await forge.changes(label)).toMatchObject({ kind: "failed", reason: expect.stringContaining("mergeable") });
+    expect(await forge.waiting(label)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("answered unsupported"),
+    });
+  });
+
+  it("AC-7 should read a protocol 1 forge plugin as before when it lacks mergeable or answers unsupported for waiting sessions", async () => {
+    const forge = await forgeOf(1, { changes: changes(OPEN), waiting: { kind: "unsupported", op: "waiting" } });
+    expect(await forge.changes(label)).toMatchObject({ kind: "ok", value: { open: [{ mergeable: "unknown" }] } });
+    expect(await forge.waiting(label)).toEqual({ kind: "ok", value: [] });
+  });
+
+  it("refuses a mergeable word the protocol does not name, whatever the protocol", async () => {
+    const forge = await forgeOf(1, { changes: changes({ ...OPEN, mergeable: "maybe" }), waiting: {} });
+    expect(await forge.changes(label)).toMatchObject({ kind: "failed" });
   });
 });
 

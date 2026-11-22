@@ -8,6 +8,10 @@ timeout, the output cap and the end of the call kill whole, and with only `PATH`
 declared. A connector may not declare a model or cloud login, a git host token, a `FACTORY_*` setting or a loader
 variable (`LD_*`, `DYLD_*`, `NODE_*` and the like); each uses its own CLI's login (`src/core/plugin/`).
 
+The core speaks protocol 2 and still reads protocol 1. A protocol 2 git host connector gives each open change's
+`mergeable` and answers the `waiting` read. A protocol 1 one may leave `mergeable` out, which reads as unknown, and may
+answer `waiting` unsupported, which reads as no waiting session.
+
 A connector is the folder its file sits in. `plugin add` takes the sha256 of every file in that folder, copies the
 folder into `$FACTORY_HOME/plugins/<sha256>/` (mode 700) and records it in `$FACTORY_HOME/plugins.json` (mode 600);
 every call hashes the copy again and runs it, so a change to your own folder after review changes nothing. A file or
