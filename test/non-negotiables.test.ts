@@ -34,6 +34,7 @@ import { keyLines } from "../src/core/settings/lines.js";
 import { specHash } from "../src/core/spec.js";
 import { changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const H = "1".repeat(40);
@@ -314,7 +315,7 @@ const HOST_ENV: NodeJS.ProcessEnv = {
   HOME: "/home/op",
   GH_TOKEN: FAKE_TOKEN,
   GITHUB_TOKEN: FAKE_TOKEN,
-  GITLAB_TOKEN: `glpat-${"F".repeat(20)}`,
+  GITLAB_TOKEN: fakeToken("gitlab", "F".repeat(20)),
   FACTORY_GITHUB_APP_KEY: "/home/op/app.pem",
   CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-model-only",
 };

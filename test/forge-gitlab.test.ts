@@ -3,6 +3,7 @@ import { gitlab, mergeableOf, pipeline } from "../src/core/forge/gitlab.js";
 import type { Change } from "../src/core/forge/types.js";
 import type { Post } from "../src/core/post.js";
 import { fake, field, ok } from "./fake-forge.js";
+import { fakeToken } from "./planted.js";
 
 const project = "aruvii/agent-platform";
 const base = "projects/aruvii%2Fagent-platform";
@@ -313,7 +314,7 @@ describe("single calls", () => {
   });
 
   it("note and lineFinding post no secret, anchored or not (#678)", async () => {
-    const token = `glpat-${"Zq7".repeat(7)}`;
+    const token = fakeToken("gitlab");
     const leaky: Post = { seat: "reviewer", title: `Act on F1: ${token}`, fields: [], items: [`uses ${token}`] };
     const change: Change = {
       number: 12,

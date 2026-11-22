@@ -7,6 +7,7 @@ import { bodyPostOf, changeRequestOf } from "../src/core/forge/shapes.js";
 import { renderBody, renderPost, type BodyPost } from "../src/core/post.js";
 import { cleanBody, cutNote, onHost } from "../src/core/pr-body.js";
 import { fake, ok } from "./fake-forge.js";
+import { fakeToken } from "./planted.js";
 
 const J = "⁠";
 const HOST = "github.com";
@@ -281,8 +282,8 @@ describe("the Forge.setBody seam carries the cleaned PR body (#335)", () => {
 });
 
 describe("no secret in the posted PR body (#678; ADR-0012 S13, P4)", () => {
-  const TOKEN = `ghp_${"a1B2".repeat(9)}`;
-  const LAB = `glpat-${"Zq7".repeat(7)}`;
+  const TOKEN = fakeToken("github-classic");
+  const LAB = fakeToken("gitlab");
   const HIDDEN = String.fromCharCode(0x200b);
   const PEM = [
     "-----BEGIN OPENSSH PRIVATE KEY-----",

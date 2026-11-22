@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
+import { fakeToken } from "./planted.js";
 
 export type Handed = { readonly argv: readonly string[]; readonly env: Readonly<Record<string, string | undefined>> };
 export type Made = { readonly box: Box; readonly handed: () => readonly Handed[] };
@@ -38,7 +39,7 @@ export function boxContract(name: string, make: (host: NodeJS.ProcessEnv) => Mad
   describe(`box contract: ${name}`, () => {
     it("hands the run no host variable it was not given, by name or by value (#181; ADR-0012 S6, S15)", async () => {
       const canary = `canary-${randomUUID()}`;
-      const ghToken = `ghp_${randomUUID().replaceAll("-", "")}`;
+      const ghToken = fakeToken("github-classic", randomUUID().replaceAll("-", ""));
       const made = make({ ...HOST, FACTORY_CANARY: canary, GH_TOKEN: ghToken });
       const started = await made.box.start({ ...full, env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-declared" } });
       if (started.kind !== "started") throw new Error("start failed");

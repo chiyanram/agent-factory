@@ -48,6 +48,7 @@ import {
 import { GUARDRAIL_FLOOR } from "../src/core/process/guardrails.js";
 import { fakeBox, type FakeBox } from "./fake-box.js";
 import { project, type Project } from "./review-repo.js";
+import { fakeToken } from "./planted.js";
 
 const claudeArgv = (
   claude: Claude,
@@ -735,12 +736,8 @@ describe("the stall stop (#228)", () => {
   });
 });
 
-function fakeToken(prefix: string): string {
-  return [prefix].join("");
-}
-
 describe("a writer run that stops says why, even before a change exists (#62)", () => {
-  const TOKENS = `${fakeToken("sk-ant-")}oat01-AAAAbbbbCCCCdddd ${fakeToken("gho")}_ABCDEFGHIJKLMNOPQRSTUVWX Authorization: Bearer abc.def.ghi`;
+  const TOKENS = `${fakeToken("claude-oauth")} ${fakeToken("github-oauth")} Authorization: Bearer abc.def.ghi`;
 
   function failing(fake: FakeBox): Box {
     return {
@@ -832,7 +829,7 @@ describe("a writer run keeps its whole output as its trace (#487)", () => {
   };
 
   it("names the trace on the run's end, and keeps every line of its stream, scrubbed", async () => {
-    const said = { type: "assistant", text: `the key is ${fakeToken("sk-ant-")}oat01-AAAAbbbbCCCCdddd` };
+    const said = { type: "assistant", text: `the key is ${fakeToken("claude-oauth")}` };
     const stdout = `${JSON.stringify({ type: "system", subtype: "init" })}\n${JSON.stringify(said)}\n{"type":"result"}\n`;
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
     const out = valueOf(await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX));
@@ -894,9 +891,9 @@ describe("a writer run keeps its whole output as its trace (#487)", () => {
 describe("why.ts: the reason a person reads, made safe (#62)", () => {
   it("scrubs what looks like a token or a key, and keeps the words around it", () => {
     const text = [
-      `login ${fakeToken("sk-ant-")}oat01-abcDEF123_-xyz failed`,
-      `${fakeToken("gho")}_0123456789abcdefABCDEF ${fakeToken("ghp")}_0123456789abcdefABCDEF`,
-      `${fakeToken("github_pat")}_11ABCDEFG0123456789_abcdefghijklmnop`,
+      `login ${fakeToken("claude-oauth", "abcDEF123_-xyz")} failed`,
+      `${fakeToken("github-oauth", "0123456789abcdefABCDEF")} ${fakeToken("github-classic", "0123456789abcdefABCDEF")}`,
+      fakeToken("github-fine"),
       "curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig'",
       "CLAUDE_CODE_OAUTH_TOKEN=sk-xyz GH_TOKEN: plain-secret-value",
     ].join("\n");

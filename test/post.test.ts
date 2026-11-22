@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanField, renderPost, type Post } from "../src/core/post.js";
+import { fakeToken } from "./planted.js";
 
 function text(post: Post): string {
   const result = renderPost(post);
@@ -186,8 +187,8 @@ describe("renderPost", () => {
 });
 
 describe("renderPost: no secret in posted text (#678; ADR-0012 S13, P4)", () => {
-  const TOKEN = `ghp_${"a1B2".repeat(9)}`;
-  const KEY = `sk-ant-api03-${"x9".repeat(16)}`;
+  const TOKEN = fakeToken("github-classic");
+  const KEY = fakeToken("anthropic-key");
   const PEM = ["-----BEGIN RSA PRIVATE KEY-----", "MIIEowIBAAKCAQEA", "q2Vb7Y+ZkL", "-----END RSA PRIVATE KEY-----"];
 
   it("scrubs a token in the title, in a field and in an item, before it makes them inert", () => {

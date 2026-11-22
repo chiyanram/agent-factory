@@ -6,11 +6,12 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ALLOW, bashFiles, baseRef, COMMENTS, counts, raised, scan, type Allow } from "../scripts/check-musts.js";
 import { claudeEnv } from "../src/core/agent/claude.js";
+import { planted } from "./planted.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "scripts", "check-musts.ts");
-const DISABLE = ["// oxlint", "disable-next-line no-explicit-any"].join("-");
+const DISABLE = planted("oxlint-disable.txt").trimEnd();
 
 const findings = (file: string, text: string, allow: readonly Allow[] = []) =>
   scan([{ file, text }], allow).findings.map((f) => f.split(": ").slice(0, 2).join(": "));
@@ -51,7 +52,7 @@ describe("scan", () => {
     expect(findings("test/a.test.ts", `${DISABLE}\nconst x: any = 1;\n`)).toEqual([
       "test/a.test.ts:1: disable-comment",
     ]);
-    expect(findings("src/a.ts", ["/* @ts", "nocheck */\n// @ts", "expect-error\n"].join("-"))).toHaveLength(2);
+    expect(findings("src/a.ts", planted("ts-directives.txt"))).toHaveLength(2);
     expect(findings("tests/fixtures/x/a.ts", `${DISABLE}\n`)).toEqual([]);
   });
 

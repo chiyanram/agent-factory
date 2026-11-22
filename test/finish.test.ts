@@ -20,6 +20,7 @@ import { openAsks } from "../src/core/notes.js";
 import { renderPost, type Post } from "../src/core/post.js";
 import type { PushRequest } from "../src/core/push.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -352,7 +353,7 @@ describe("finishRun", () => {
   });
 
   it("posts no secret in a question, a blocker or a deviation, and a question with one still reads back (#678)", async () => {
-    const token = `ghp_${"a1B2".repeat(9)}`;
+    const token = fakeToken("github-classic");
     const log: Log = [];
     const leaky: Question = {
       kind: "choices",

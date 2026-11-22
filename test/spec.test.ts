@@ -17,6 +17,7 @@ import {
 import { issueStore, openOnce, specStoreKind, specStoreOf } from "../src/core/spec-store.js";
 import type { Result } from "../src/core/forge/api.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const GOOD = [
   "# PROJ-123: renewals refuse a reserved loan",
@@ -330,7 +331,7 @@ describe("postableSpec (#542)", () => {
   });
 
   it("refuses a body that holds something shaped like a secret, which a person's yes would post as it is (#678)", () => {
-    const token = `ghp_${"a1B2".repeat(9)}`;
+    const token = fakeToken("github-classic");
     expect(postableSpec(`${BODY}Use ${token} to clone.\n`)).toEqual([
       "the text holds something shaped like a secret (a token, a key or a login): take it out; nothing is sent",
     ]);

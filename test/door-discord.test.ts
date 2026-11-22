@@ -10,6 +10,7 @@ import { FakeDiscord, timersOf } from "./fake-discord.js";
 import { readDoorConfig, readDoorToken, storeDoorToken, doorDir } from "../src/core/door/discord/files.js";
 import { tempDir } from "./temp.js";
 import { prop } from "../src/core/field.js";
+import { fakeToken } from "./planted.js";
 
 const SPEC = [
   "# PROJ-1: renewals refuse a reserved loan",
@@ -41,7 +42,7 @@ const RAM = "300000000000000003";
 const ALICE = "300000000000000004";
 const STRANGER = "300000000000000005";
 const APP = "500000000000000001";
-const TOKEN = ["MTIzNDU2Nzg5MDEyMzQ1Njc4OQ", "GaBcDe", "abcdefghijklmnopqrstuvwxyz0123456789AB"].join(".");
+const TOKEN = fakeToken("discord-bot");
 
 let home = "";
 let now = 0;

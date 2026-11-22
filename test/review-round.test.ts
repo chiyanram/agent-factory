@@ -14,6 +14,7 @@ import { reviewStep, worstCase } from "../src/core/review/step.js";
 import type { RoundPart } from "../src/core/dispatch/spend.js";
 import type { RunInput } from "../src/core/dispatch/steps.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
+import { fakeToken } from "./planted.js";
 
 let p: Project;
 beforeEach(() => {
@@ -988,7 +989,7 @@ describe("reviewStep", () => {
 });
 
 describe("the review step keeps each pass's stream as its trace (#487)", () => {
-  const token = `${["sk-ant-"].join("")}oat01-AAAAbbbbCCCCdddd`;
+  const token = fakeToken("claude-oauth");
   const streaming =
     (m: Model): Model =>
     async (run) => {

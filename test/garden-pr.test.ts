@@ -3,10 +3,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseArgs, report, touchedOf } from "../scripts/garden-pr.js";
+import { planted } from "./planted.js";
 import { tempDir } from "./temp.js";
 
-const ESCAPE = ["export const x = 1 as", "any;"].join(" ");
-const MOCKED = ["vi.mock", '("x");\nit("a", () => { expect(f).toHaveBeenCalled', "(); });\n"].join("");
+const ESCAPE = planted("as-any.txt");
+const MOCKED = planted("mock-only.test.txt");
 
 const SCRIPT = join(import.meta.dirname, "..", "scripts", "garden-pr.ts");
 

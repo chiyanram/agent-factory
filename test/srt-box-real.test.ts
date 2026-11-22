@@ -167,11 +167,7 @@ describe.skipIf(skip !== "")(`srt runner on the real srt${skip === "" ? "" : ` (
   });
 
   it("makes a temp folder under the run's own temp folder, and cannot write to /tmp directly", async () => {
-    const made = await inSrt([
-      "node",
-      "-e",
-      "const os = require('os'); require('fs').mkdtempSync(os.tmpdir.call(os) + '/x')",
-    ]);
+    const made = await inSrt(["node", "-e", "const os = require('os'); require('fs').mkdtempSync(os.tmpdir() + '/x')"]);
     expect(made).toMatchObject({ kind: "exited", code: 0 });
     const direct = join("/tmp", `srt-write-${randomUUID()}`);
     expect(failed(await inSrt(["sh", "-c", `echo no > '${direct}'`]))).toBe(true);

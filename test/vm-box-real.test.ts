@@ -11,6 +11,7 @@ import { hostDocker } from "../src/core/box/docker.js";
 import type { Box, BoxSpec, PinnedImage } from "../src/core/box/types.js";
 import { vmBox } from "../src/core/box/vm.js";
 import { runProcess } from "../src/core/forge/api.js";
+import { fakeToken } from "./planted.js";
 
 const SECRET_LIKE = /TOKEN|KEY|SECRET|PASSWORD/i;
 
@@ -22,7 +23,10 @@ afterEach(async () => {
   await dockerCli(["network", "rm", network]);
 });
 
-const planted = { canary: `canary-${randomUUID()}`, ghToken: `ghp_${randomUUID().replaceAll("-", "")}` };
+const planted = {
+  canary: `canary-${randomUUID()}`,
+  ghToken: fakeToken("github-classic", randomUUID().replaceAll("-", "")),
+};
 const host = { ...process.env, FACTORY_CANARY: planted.canary, GH_TOKEN: planted.ghToken };
 
 type Opened =

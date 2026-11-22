@@ -11,6 +11,7 @@ import { renderPost, type Post } from "../src/core/post.js";
 import { makeFakes, type FakeAnswer } from "../src/core/plugin/fakes.js";
 import { addPlugin, type Setup } from "../src/core/plugin/registry.js";
 import { tempDir } from "./temp.js";
+import { fakeToken } from "./planted.js";
 
 const BUNDLED = join(import.meta.dirname, "..", "plugins");
 const NODE_DIR = dirname(process.execPath);
@@ -196,7 +197,7 @@ describe("the forge as a plugin (#134 PR C)", () => {
   });
 
   it("hands the plugin a note and a line finding with no secret in them (#678)", async () => {
-    const token = `ghp_${"a1B2".repeat(9)}`;
+    const token = fakeToken("github-classic");
     const leaky: Post = { seat: "reviewer", title: `one finding ${token}`, fields: [], items: [`uses ${token}`] };
     const { setup, fakes } = await bundled([http("201 Created", { id: 1 }), http("201 Created", { id: 2 })]);
     try {
