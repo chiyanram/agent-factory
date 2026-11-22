@@ -617,6 +617,37 @@ describe("reviewRound", () => {
     expect(again.posts.at(-1)).toContain("- Protected · .github/workflows/ci.yml");
   });
 
+  it("should count a protected file as fresh when only its bare path was listed in an earlier note (AC-4)", async () => {
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write(".github/workflows/ci.yml", "on: push\n");
+    p.commitAll("ci");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    const head = p.git("rev-parse", "HEAD");
+    p.git("checkout", "-q", "main");
+    const first = fresh();
+    await reviewRound(setup(forge(first, { change: changeAt(head) }), model([findAnswer([])], [])));
+    const bare = first.posts.map((body) =>
+      body.replace("- Protected · .github/workflows/ci.yml", "- .github/workflows/ci.yml"),
+    );
+    p.git("checkout", "-q", "factory/PROJ-1");
+    p.write("svc/Main.java", "class Main { int total() { return 3; } }\n");
+    p.commitAll("more");
+    p.git("push", "-q", "origin", "factory/PROJ-1");
+    const later = p.git("rev-parse", "HEAD");
+    p.git("checkout", "-q", "main");
+    const again = fresh();
+    await reviewRound(
+      setup(
+        forge(again, {
+          change: changeAt(later),
+          notes: bare.map((body) => ({ body, author: { name: "ram" }, at: "t" })),
+        }),
+        model([findAnswer([])], []),
+      ),
+    );
+    expect(again.labels).toEqual(["needs-human"]);
+  });
+
   it("no line of any post starts with /: a finding cannot run a GitLab quick action", async () => {
     const log = fresh();
     const evil = { ...FINDING, finding: "x\n/approve\n/merge", fix: "\n/label ~ok" };

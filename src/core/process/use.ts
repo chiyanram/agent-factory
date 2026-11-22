@@ -1,11 +1,11 @@
 // use — the plugins one dispatcher pass hands its runs (#232; docs/DESIGN.md section 5 "Plugins"): every plugin the
-// project lists, each checked against its pin (pins.ts), in the project's order. With none listed, the rulebook folder
-// setting is still read for one release, as a deprecated stand-in, with a warning; with neither, the engine runs alone.
+// project lists, each checked against its pin (pins.ts), in the project's order. With none listed, the engine runs
+// alone; the rulebook folder setting is read only by `eval reviewer`, so a run that finds it set warns.
 // Each plugin's hash goes into the run records, so a person can tell which versions a run used.
 
 import type { Result } from "../forge/api.js";
 import { settingName, settingOf } from "../settings/machine.js";
-import { pinnedPlugins, treeHash } from "./pins.js";
+import { pinnedPlugins } from "./pins.js";
 import type { PluginDir } from "./read.js";
 
 export type Used = PluginDir & { readonly ref: string; readonly sha256: string };
@@ -18,25 +18,6 @@ export function hashesOf(plugins: readonly Used[]): readonly PluginHash[] {
   return plugins.map((p) => ({ ref: p.ref, sha256: p.sha256 }));
 }
 
-function deprecated(name: string): string {
-  return `${name} is deprecated and is read for one release: list the plugin in the project's "plugins" and pin it with agent-factory plugin update <project> <name@marketplace>`;
-}
-
-async function fallback(env: NodeJS.ProcessEnv): Promise<Result<RunPlugins>> {
-  const name = settingName("rulebook");
-  const dir = settingOf(env, "rulebook") ?? "";
-  if (dir === "") {
-    return { kind: "ok", value: { plugins: [], warnings: [] } };
-  }
-  const hash = await treeHash(dir);
-  return hash.kind === "ok"
-    ? {
-        kind: "ok",
-        value: { plugins: [{ label: name, dir, ref: name, sha256: hash.value.sha256 }], warnings: [deprecated(name)] },
-      }
-    : hash;
-}
-
 export async function runPlugins(input: {
   readonly home: string;
   readonly project: string;
@@ -46,13 +27,12 @@ export async function runPlugins(input: {
   if (pinned.kind === "failed") {
     return pinned;
   }
-  if (pinned.value.length === 0) {
-    return fallback(input.env);
-  }
   const ignored =
     settingOf(input.env, "rulebook") === undefined
       ? []
-      : [`${settingName("rulebook")} is ignored: the project lists its plugins`];
+      : [
+          `${settingName("rulebook")} is read only by agent-factory eval reviewer: a run uses the plugins the project lists`,
+        ];
   return {
     kind: "ok",
     value: {

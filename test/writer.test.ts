@@ -917,7 +917,13 @@ describe("why.ts: the reason a person reads, made safe (#62)", () => {
     );
     expect(whyOf({ ...host, reason: "stuck", by: "writer" }, "anything")).toBe("stuck");
     expect(whyOf({ kind: "done", evidence: [] }, "x")).toBe("");
-    const asked = whyOf({ kind: "asked", questions: [{ kind: "plain", question: "which table?" }] }, "");
+    const asked = whyOf(
+      {
+        kind: "asked",
+        questions: [{ kind: "choices", question: "which table?", choices: ["a", "b"], recommended: 0 }],
+      },
+      "",
+    );
     expect(asked).toBe("the writer asked: which table?");
   });
 

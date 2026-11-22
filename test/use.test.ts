@@ -34,19 +34,12 @@ describe("the plugins a pass hands its runs (#232)", () => {
     expect(await used()).toEqual({ kind: "ok", value: { plugins: [], warnings: [] } });
   });
 
-  it("no plugin listed: the deprecated folder setting is read, hashed, and warned about", async () => {
+  it("should refuse the rulebook folder as a run's plugin with a warning that names the new form when the engine reads it (AC-1)", async () => {
     project();
-    const dir = folder("local");
-    const hash = await treeHash(dir);
-    const sha256 = hash.kind === "ok" ? hash.value.sha256 : "";
-    expect(await used({ FACTORY_RULEBOOK: dir })).toEqual({
+    expect(await used({ FACTORY_RULEBOOK: folder("local") })).toEqual({
       kind: "ok",
-      value: {
-        plugins: [{ label: "FACTORY_RULEBOOK", dir, ref: "FACTORY_RULEBOOK", sha256 }],
-        warnings: [expect.stringContaining("FACTORY_RULEBOOK is deprecated and is read for one release")],
-      },
+      value: { plugins: [], warnings: [expect.stringContaining("a run uses the plugins the project lists")] },
     });
-    expect((await used({ FACTORY_RULEBOOK: join(home, "none") })).kind).toBe("failed");
   });
 
   it("listed plugins win over the folder setting, each checked against its pin, in order", async () => {
@@ -65,7 +58,9 @@ describe("the plugins a pass hands its runs (#232)", () => {
       kind: "ok",
       value: {
         plugins: [{ label: "rulebook@chiyanram", dir, ref: "rulebook@chiyanram", sha256 }],
-        warnings: ["FACTORY_RULEBOOK is ignored: the project lists its plugins"],
+        warnings: [
+          "FACTORY_RULEBOOK is read only by agent-factory eval reviewer: a run uses the plugins the project lists",
+        ],
       },
     });
     expect(got.kind === "ok" && hashesOf(got.value.plugins)).toEqual([{ ref: "rulebook@chiyanram", sha256 }]);

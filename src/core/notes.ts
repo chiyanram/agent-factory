@@ -38,7 +38,6 @@ function same(a: string, b: string): boolean {
 }
 
 const SEAT_LINE = /^\[(writer|reviewer|coordinator)\] /;
-const OLD_LINE_FINDING = /^`[^`\n]+` \[(reviewer)\] /;
 const ASK_LINE = /^\[(coordinator|writer)\] OPEN:/;
 
 function firstLine(body: string): string {
@@ -46,7 +45,7 @@ function firstLine(body: string): string {
 }
 
 function seatOf(line: string): Seat | undefined {
-  return (SEAT_LINE.exec(line)?.[1] ?? OLD_LINE_FINDING.exec(line)?.[1]) as Seat | undefined;
+  return SEAT_LINE.exec(line)?.[1] as Seat | undefined;
 }
 
 export function classify(request: { readonly note: Note; readonly readers: Readers }): NoteKind {

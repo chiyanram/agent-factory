@@ -749,7 +749,7 @@ function summaryItems(sorted: readonly Sorted[], box: Box, criteria: readonly st
 }
 
 function freshProtected(ctx: Ctx, box: Box): readonly string[] {
-  return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)) && !ctx.past.listed.has(p));
+  return box.protected.filter((p) => !ctx.past.listed.has(protectedLine(p)));
 }
 
 async function threadsAndLabel(

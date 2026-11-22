@@ -47,12 +47,8 @@ describe("classify", () => {
     expect(classify({ note: note("LEE", "EUR"), readers })).toEqual({ kind: "person", member: true });
   });
 
-  it("a reviewer line finding in the old form, file:line before the prefix, is still the factory's", () => {
-    expect(classify({ note: note("ram", "`src/A.java:400` [reviewer] Act on F1"), readers })).toEqual({
-      kind: "agent",
-      seat: "reviewer",
-      ask: false,
-    });
+  it("should count a note in the bash reviewer's form as a person's note when it arrives on a pull request (AC-3)", () => {
+    expect(classify({ note: note("ram", "`src/A.java:400` [reviewer] Act on F1"), readers }).kind).toBe("person");
     expect(classify({ note: note("ram", "`src/A.java:400` [writer] OPEN: x"), readers }).kind).toBe("person");
   });
 

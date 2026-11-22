@@ -4,18 +4,17 @@
 //
 //   "plugins": ["rulebook@chiyanram", "team-rules@acme"]
 //
-// None listed is a good value: the engine runs alone, on its built-in process. A "plugins" that holds a map is the old
-// name of "connectors" (plugin/config.ts reads it); it lists no plugin.
+// None listed is a good value: the engine runs alone, on its built-in process. A "plugins" that holds a map is refused
+// with a message to rename it to "connectors", its old name.
 
 import type { Result } from "../forge/api.js";
 import { prop } from "../field.js";
 
-export function isOldConnectors(value: unknown): boolean {
+function isMap(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export const OLD_CONNECTORS =
-  '"plugins" holds a map of connectors, the old name of "connectors": rename it (read for one release, then an error)';
+const OLD_CONNECTORS = 'a map of connectors is no longer read under "plugins": rename the key to "connectors"';
 
 export type PluginRef = { readonly name: string; readonly marketplace: string };
 
@@ -49,16 +48,21 @@ function refsOf(value: unknown): readonly PluginRef[] | undefined {
 }
 
 export function checkPluginList(value: unknown): string {
-  return isOldConnectors(value) || refsOf(value) !== undefined ? "" : `${PLUGIN_LIST_HINT}, no name twice`;
+  if (isMap(value)) {
+    return OLD_CONNECTORS;
+  }
+  return refsOf(value) !== undefined ? "" : `${PLUGIN_LIST_HINT}, no name twice`;
 }
 
 export function pluginListOf(path: string, raw: object): Result<readonly PluginRef[]> {
   const value = prop(raw, "plugins");
-  if (value === undefined || isOldConnectors(value)) {
+  if (value === undefined) {
     return { kind: "ok", value: [] };
   }
   const refs = refsOf(value);
-  return refs === undefined
-    ? { kind: "failed", reason: `${path}: "plugins" must be ${PLUGIN_LIST_HINT}, no name twice` }
-    : { kind: "ok", value: refs };
+  if (refs !== undefined) {
+    return { kind: "ok", value: refs };
+  }
+  const why = isMap(value) ? OLD_CONNECTORS : `"plugins" must be ${PLUGIN_LIST_HINT}, no name twice`;
+  return { kind: "failed", reason: `${path}: ${why}` };
 }
