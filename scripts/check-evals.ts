@@ -10,10 +10,11 @@
 //
 //   node scripts/check-evals.ts [ROOT]     (make lint; the history must be there, so CI checks out with fetch-depth 0)
 //
-// git reads this repository's own history, not a project's, so it runs plain git, as check-links does. Runs on Node's
-// type stripping (Node 22.18+), so it uses only erasable TypeScript.
+// git reads this repository's own history, not a project's, so it runs plain git, as check-links does. The cases run
+// in a pool of POOL, each with its own scratch index, so the check's time grows by a quarter case, not a case. Runs on
+// Node's type stripping (Node 22.18+), so it uses only erasable TypeScript.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,10 +75,39 @@ function firstLine(stderr: string): string {
   return stderr.trim().split("\n")[0] ?? "";
 }
 
-function git(root: string, args: readonly string[], index: string): Git {
+function git(root: string, args: readonly string[], index: string): Promise<Git> {
   const env = index === "" ? process.env : { ...process.env, GIT_INDEX_FILE: index };
-  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 });
-  return { code: r.status ?? -1, out: r.stdout, err: firstLine(r.stderr) };
+  return new Promise((done) => {
+    const child = spawn("git", ["-C", root, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+    const [out, err]: [Buffer[], Buffer[]] = [[], []];
+    child.stdout.on("data", (b: Buffer) => out.push(b));
+    child.stderr.on("data", (b: Buffer) => err.push(b));
+    child.on("error", (e) => done({ code: -1, out: "", err: e.message }));
+    child.on("close", (code) =>
+      done({
+        code: code ?? -1,
+        out: Buffer.concat(out).toString("utf8"),
+        err: firstLine(Buffer.concat(err).toString("utf8")),
+      }),
+    );
+  });
+}
+
+export const POOL = 4;
+
+export async function inPool<T, R>(items: readonly T[], size: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < items.length; i = next++) {
+      const item = items[i];
+      if (item !== undefined) {
+        results[i] = await run(item);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+  return results;
 }
 
 function lineTotal(content: string): number {
@@ -86,34 +116,35 @@ function lineTotal(content: string): number {
 
 type Applied = ReadonlyMap<string, number>;
 
-function changedFiles(root: string, sha: string, index: string): Applied {
-  const names = git(root, ["diff", "--cached", "--name-only", "--no-renames", "-z", sha], index)
-    .out.split("\0")
+async function changedFiles(root: string, sha: string, index: string): Promise<Applied> {
+  const names = (await git(root, ["diff", "--cached", "--name-only", "--no-renames", "-z", sha], index)).out
+    .split("\0")
     .filter((n) => n !== "");
-  return new Map(names.map((n) => [n, lineTotal(git(root, ["show", `:${n}`], index).out)]));
+  const totals = await Promise.all(names.map(async (n) => lineTotal((await git(root, ["show", `:${n}`], index)).out)));
+  return new Map(names.map((n, i) => [n, totals[i] ?? 0]));
 }
 
-function inScratchIndex(root: string, sha: string, patch: string, index: string): Result<Applied> {
+async function inScratchIndex(root: string, sha: string, patch: string, index: string): Promise<Result<Applied>> {
   const steps: readonly (readonly [readonly string[], string])[] = [
     [["read-tree", sha], `cannot read the tree of ${sha}`],
     [["apply", "--cached", "--check", patch], "change.patch does not apply to base.sha"],
     [["apply", "--cached", patch], "change.patch does not apply to base.sha"],
   ];
   for (const [args, why] of steps) {
-    const r = git(root, args, index);
+    const r = await git(root, args, index);
     if (r.code !== 0) {
       return { kind: "failed", reason: `${why}: ${r.err}` };
     }
   }
-  return { kind: "ok", value: changedFiles(root, sha, index) };
+  return { kind: "ok", value: await changedFiles(root, sha, index) };
 }
 
-export function applied(root: string, sha: string, patch: string): Result<Applied> {
-  if (git(root, ["cat-file", "-e", `${sha}^{commit}`], "").code !== 0) {
+export async function applied(root: string, sha: string, patch: string): Promise<Result<Applied>> {
+  if ((await git(root, ["cat-file", "-e", `${sha}^{commit}`], "")).code !== 0) {
     return { kind: "failed", reason: `base.sha ${sha} is not a commit in this history (a shallow clone?)` };
   }
   const dir = mkdtempSync(join(realpathSync(tmpdir()), "factory-evals-"));
-  const result = inScratchIndex(root, sha, patch, join(dir, "index"));
+  const result = await inScratchIndex(root, sha, patch, join(dir, "index"));
   rmSync(dir, { recursive: true, force: true });
   return result;
 }
@@ -132,28 +163,28 @@ function read(dir: string, name: string): string {
   return readFileSync(join(dir, name), "utf8");
 }
 
-function goldenOf(dir: string, sha: string, root: string): readonly string[] {
+async function goldenOf(dir: string, sha: string, root: string): Promise<readonly string[]> {
   const golden = readGolden(read(dir, "golden.json"));
   if (golden.kind === "failed") {
     return [golden.reason];
   }
-  const files = applied(root, sha, join(dir, "change.patch"));
+  const files = await applied(root, sha, join(dir, "change.patch"));
   return files.kind === "failed" ? [files.reason] : placeProblems(golden.value, files.value);
 }
 
-function complete(root: string, dir: string, kind: string): readonly string[] {
+async function complete(root: string, dir: string, kind: string): Promise<readonly string[]> {
   const sha = read(dir, "base.sha").trim();
   const shaWhy = shaProblem(sha);
-  const deep = shaWhy === "" ? goldenOf(dir, sha, root) : [];
+  const deep = shaWhy === "" ? await goldenOf(dir, sha, root) : [];
   const golden = readGolden(read(dir, "golden.json"));
   const kindWhy = golden.kind === "ok" ? kindProblem(kind, golden.value) : "";
   return [shaWhy, ...deep, kindWhy].filter((w) => w !== "");
 }
 
-export function caseProblems(root: string, name: string, kind: string): readonly string[] {
+export async function caseProblems(root: string, name: string, kind: string): Promise<readonly string[]> {
   const dir = join(root, CASES, name);
   const missing = fileProblems(readdirSync(dir));
-  const found = missing.length === 0 ? complete(root, dir, kind) : missing;
+  const found = missing.length === 0 ? await complete(root, dir, kind) : missing;
   return found.map((w) => `${name}: ${w}`);
 }
 
@@ -164,7 +195,7 @@ function caseFolders(root: string): readonly string[] {
     .toSorted();
 }
 
-export function problems(root: string): readonly string[] {
+export async function problems(root: string): Promise<readonly string[]> {
   if (!existsSync(join(root, CASES))) {
     return [];
   }
@@ -174,13 +205,13 @@ export function problems(root: string): readonly string[] {
   const kindOf = new Map(rows.map((r) => [r.name, r.kind]));
   const found = [
     ...tableProblems(folders, rows),
-    ...folders.flatMap((f) => caseProblems(root, f, kindOf.get(f) ?? "")),
+    ...(await inPool(folders, POOL, (f) => caseProblems(root, f, kindOf.get(f) ?? ""))).flat(),
   ];
   return found.map((p) => `${CASES}/${p}`);
 }
 
 if (process.argv[1] === import.meta.filename) {
-  const found = problems(process.argv[2] ?? ".");
+  const found = await problems(process.argv[2] ?? ".");
   for (const p of found) {
     console.log(p);
   }

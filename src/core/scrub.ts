@@ -28,30 +28,37 @@ function namedValue(match: string, name: string, separator: string, value: strin
   return kept ? match : `${name}${separator}${SCRUBBED}`;
 }
 
-const SECRETS: readonly (readonly [RegExp, string | typeof namedValue])[] = [
-  [
+type Rule = (text: string) => string;
+
+function swap(pattern: RegExp, by: string): Rule {
+  return (text) => text.replace(pattern, by);
+}
+
+function named(pattern: RegExp): Rule {
+  return (text) => text.replace(pattern, namedValue);
+}
+
+const SECRETS: readonly Rule[] = [
+  swap(
     /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----|(?:\r?\n[A-Za-z0-9+/=]+(?=\r?\n|$))*)/g,
     SCRUBBED,
-  ],
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, `$1${SCRUBBED}@`],
-  [/\bsk-ant-[\w-]+/g, SCRUBBED],
-  [/\bsk-[\w-]{20,}/g, SCRUBBED],
-  [/\bgh[opsur]_\w{8,}/g, SCRUBBED],
-  [/\bgithub_pat_\w{8,}/g, SCRUBBED],
-  [/\bglpat-[\w-]{8,}/g, SCRUBBED],
-  [/\bxox[abeoprs]-[\w-]{8,}/g, SCRUBBED],
-  [/\bAKIA[0-9A-Z]{16}\b/g, SCRUBBED],
-  [/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]*/g, SCRUBBED],
-  [/\b(Bearer)\s+[\w.~+/=-]+/gi, `$1 ${SCRUBBED}`],
-  [new RegExp(`\\b(Authorization)(${SEPARATOR}(?:${SCHEME})?)(?!Bearer\\s)(${VALUE})`, "gi"), namedValue],
-  [new RegExp(`\\b(\\w*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY)\\w*)(${SEPARATOR})(${VALUE})`, "gi"), namedValue],
+  ),
+  swap(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, `$1${SCRUBBED}@`),
+  swap(/\bsk-ant-[\w-]+/g, SCRUBBED),
+  swap(/\bsk-[\w-]{20,}/g, SCRUBBED),
+  swap(/\bgh[opsur]_\w{8,}/g, SCRUBBED),
+  swap(/\bgithub_pat_\w{8,}/g, SCRUBBED),
+  swap(/\bglpat-[\w-]{8,}/g, SCRUBBED),
+  swap(/\bxox[abeoprs]-[\w-]{8,}/g, SCRUBBED),
+  swap(/\bAKIA[0-9A-Z]{16}\b/g, SCRUBBED),
+  swap(/\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]*/g, SCRUBBED),
+  swap(/\b(Bearer)\s+[\w.~+/=-]+/gi, `$1 ${SCRUBBED}`),
+  named(new RegExp(`\\b(Authorization)(${SEPARATOR}(?:${SCHEME})?)(?!Bearer\\s)(${VALUE})`, "gi")),
+  named(new RegExp(`\\b(\\w*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY)\\w*)(${SEPARATOR})(${VALUE})`, "gi")),
 ];
 
 export function scrubSecrets(text: string): string {
-  return SECRETS.reduce(
-    (t, [pattern, by]) => (typeof by === "string" ? t.replace(pattern, by) : t.replace(pattern, by)),
-    text,
-  );
+  return SECRETS.reduce((t, rule) => rule(t), text);
 }
 
 export function scrubbedJson(value: unknown, indent?: number): string {

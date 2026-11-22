@@ -928,7 +928,7 @@ describe("connectors and the plugin list (#232)", () => {
         { name: "team-rules", marketplace: "acme" },
       ],
     });
-    const bad = ["rulebook", "Rulebook@chiyanram", "a@b@c", "../x@y", "a..b@c", "", 7];
+    const bad = ["rulebook", "a@b@c", "../x@y", "a..b@c", ".a@b", "-a@b", "a b@c", "a/b@c", "", 7];
     for (const entry of bad) {
       expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({
         kind: "failed",
@@ -937,6 +937,16 @@ describe("connectors and the plugin list (#232)", () => {
     }
     expect(pluginListOf("/p.json", { plugins: ["a@x", "a@y"] })).toMatchObject({ kind: "failed" });
     expect(pluginListOf("/p.json", { plugins: "rulebook@chiyanram" })).toMatchObject({ kind: "failed" });
+  });
+
+  it("AC-17 should accept a plugin name when Claude Code accepts it, and refuse it when Claude Code refuses it", () => {
+    const long = `${"a".repeat(100)}@${"B".repeat(100)}`;
+    for (const entry of ["Rulebook@Chiyanram", "team_rules@acme.io", "a.b-c_d@0x", long]) {
+      expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({ kind: "ok" });
+    }
+    for (const entry of ["_a@b", "a@.b", "a@b..c", "a@b/c"]) {
+      expect(pluginListOf("/p.json", { plugins: [entry] })).toMatchObject({ kind: "failed" });
+    }
   });
 
   it("config check refuses two pinned plugins that each hold a process, naming both (#426)", async () => {

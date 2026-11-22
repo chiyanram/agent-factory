@@ -26,7 +26,7 @@
 
 import type { LaneProps } from "../lane.js";
 import { withFloor } from "./never.js";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readApproval } from "../approval.js";
 import { goAhead } from "../start.js";
@@ -215,6 +215,19 @@ async function approvalFor(where: {
 const NO_REFERENCES =
   'the review needs a plugin that holds its review references: list one in the project\'s "plugins" and pin it';
 
+async function holdsReferences(dir: string): Promise<boolean> {
+  const skills = dir === "" ? [] : await readdir(join(dir, "skills")).catch((): string[] => []);
+  const held = await Promise.all(
+    skills.map((s) =>
+      stat(join(dir, "skills", s, "references")).then(
+        (st) => st.isDirectory(),
+        () => false,
+      ),
+    ),
+  );
+  return held.includes(true);
+}
+
 async function reviewProcess(
   plugins: readonly PluginDir[],
 ): Promise<Result<Process & { readonly references: string }>> {
@@ -222,7 +235,9 @@ async function reviewProcess(
   if (own.kind === "failed") {
     return own;
   }
-  const references = [own.value.dir, ...plugins.map((p) => p.dir)].find((d) => d !== "") ?? "";
+  const dirs = [own.value.dir, ...plugins.map((p) => p.dir)];
+  const held = await Promise.all(dirs.map(holdsReferences));
+  const references = dirs[held.indexOf(true)] ?? "";
   return references === ""
     ? { kind: "failed", reason: NO_REFERENCES }
     : { kind: "ok", value: { ...own.value, references } };

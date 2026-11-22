@@ -41,6 +41,7 @@ function pass(over: Record<string, unknown> = {}, found = 8, hits = 0): Record<s
     inputs: { head: HEAD, models: MODELS, prompts: SHAS, rulebook: "unknown" },
     recall_at_act_on: { overall: { found, of: 10, recall: found / 10 } },
     clean_floor: { hits, findings: [] },
+    per_case: [],
     ...over,
   };
 }
@@ -48,10 +49,11 @@ function pass(over: Record<string, unknown> = {}, found = 8, hits = 0): Record<s
 function baseline(over: Record<string, unknown> = {}): Record<string, unknown> {
   const run = (n: number, matched: number, usd: number) => ({
     run: n,
+    error: "",
     cost_usd: usd,
     seeds: Array.from({ length: 5 }, (_, k) => ({ seed: k, matched: k < matched })),
   });
-  const perCase = [{ case: "c", kind: "seeded", seeds: 5, runs: [run(1, 2, 4), run(2, 3, 5)] }];
+  const perCase = [{ case: "c", kind: "seeded", seeds: 5, error: "", runs: [run(1, 2, 4), run(2, 3, 5)] }];
   return pass({ aim: null, cost_usd: 9, per_case: perCase, ...over }, 5);
 }
 
@@ -145,6 +147,18 @@ describe("proofProblems", () => {
     ]);
   });
 
+  it("AC-19 should refuse an eval proof that holds an errored case or run when its partial field says false", () => {
+    const errored = { case: "c", error: "", runs: [{ run: 1, error: "the review round failed" }] };
+    expect(passProblems(pass({ partial: false, per_case: [errored] }))).toEqual([
+      "c run 1: the review round failed; an errored run proves nothing (ADR-0021 N11)",
+    ]);
+    for (const perCase of [{ c: errored }, [{ case: "c", runs: {} }], [{ case: "c", error: "" }], undefined]) {
+      expect(passProblems(pass({ per_case: perCase }))).toEqual([
+        expect.stringContaining("its per_case is not a list of cases"),
+      ]);
+    }
+  });
+
   it("refuses a results file in which a case or a run errored, naming each; the same file without it passes (N11)", () => {
     const runs = (error: string) => [
       { run: 1, outcome: "posted", error: "", act_on: [], seeds: [] },
@@ -155,10 +169,10 @@ describe("proofProblems", () => {
       JSON.stringify(pass({ per_case: [{ ...clean(error), error: caseError }] }));
     const why = (text: string) => proofProblems(facts({ results: new Map([[RESULT, text]]) }));
     expect(why(doc("the review round failed"))).toEqual([
-      `a reviewer input changed (prompts/review-find.md): ${RESULT}: case clean-one run 2 has an error: the review round failed; an errored run proves nothing (ADR-0021 N11)`,
+      `a reviewer input changed (prompts/review-find.md): ${RESULT}: clean-one run 2: the review round failed; an errored run proves nothing (ADR-0021 N11)`,
     ]);
     expect(why(doc("", "cannot set up the clone"))).toEqual([
-      `a reviewer input changed (prompts/review-find.md): ${RESULT}: case clean-one has an error: cannot set up the clone; an errored run proves nothing (ADR-0021 N11)`,
+      `a reviewer input changed (prompts/review-find.md): ${RESULT}: clean-one: cannot set up the clone; an errored run proves nothing (ADR-0021 N11)`,
     ]);
     expect(why(doc(""))).toEqual([]);
   });

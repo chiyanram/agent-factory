@@ -22,8 +22,8 @@ import { deny, editScope } from "./core/edit-scope.js";
 import { scopesArg, writerScope } from "./core/writer/scope.js";
 import { lintEdit } from "./core/lint-edit.js";
 import { ask, grill, status, type AtHead } from "./core/loop.js";
-import { questionsIn, type Question } from "./core/report.js";
-import { questionRound, readsBackAs } from "./core/finish.js";
+import { questionsIn } from "./core/report.js";
+import { checkedRound, type CheckedRound } from "./core/finish.js";
 import { DEFAULT_CLAIM_LABEL } from "./core/poll.js";
 import { runInFolder } from "./core/agent/folder.js";
 import { settingOf } from "./core/settings/machine.js";
@@ -116,16 +116,16 @@ function grillParsed(positionals: readonly string[]): Parsed {
   }
   const [sha, file] = [word(positionals, 1), word(positionals, 2)];
   return async (io) => {
-    const questions = await questionsFrom(io.env, file);
-    if (questions.kind === "failed") {
-      io.err(`agent-factory grill: ${questions.reason}\n`);
+    const round = await questionsFrom(io.env, file);
+    if (round.kind === "failed") {
+      io.err(`agent-factory grill: ${round.reason}\n`);
       return 2;
     }
-    return onForge("grill", io, (forge) => grill({ forge, number, sha, questions: questions.value }));
+    return onForge("grill", io, (forge) => grill({ forge, number, sha, round: round.value }));
   };
 }
 
-export async function questionsFrom(env: NodeJS.ProcessEnv, file: string): Promise<Result<readonly Question[]>> {
+export async function questionsFrom(env: NodeJS.ProcessEnv, file: string): Promise<Result<CheckedRound>> {
   const home = homeOf(env);
   if (home.kind === "failed") {
     return home;
@@ -181,7 +181,7 @@ function under(real: string, base: string): boolean {
   return real !== "" && base !== "" && real.startsWith(`${base}${sep}`);
 }
 
-function questionsOfText(text: string): Result<readonly Question[]> {
+function questionsOfText(text: string): Result<CheckedRound> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -192,10 +192,7 @@ function questionsOfText(text: string): Result<readonly Question[]> {
   if (read.kind === "bad") {
     return { kind: "failed", reason: read.problem };
   }
-  const round = questionRound(read.value);
-  const note = { seat: "coordinator", title: round.title, fields: [round.answer], items: round.items } as const;
-  const back = readsBackAs(note, read.value);
-  return back === "" ? { kind: "ok", value: read.value } : { kind: "failed", reason: back };
+  return checkedRound(read.value);
 }
 
 function homeOf(env: NodeJS.ProcessEnv): Result<string> {

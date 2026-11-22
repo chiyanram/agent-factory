@@ -321,6 +321,15 @@ export function readsBackAs(note: Post, questions: readonly Question[]): string 
     : `question ${bad + 1} would not read back as written once posted: each question with its choices is cut at ${DEFAULT_FIELD_LIMIT} characters, and " · " or " A) " inside a text splits it; shorten or reword it`;
 }
 
+export type CheckedRound = { readonly questions: readonly Question[]; readonly post: Post };
+
+export function checkedRound(questions: readonly Question[]): Result<CheckedRound> {
+  const round = questionRound(questions);
+  const note: Post = { seat: "coordinator", title: round.title, fields: [round.answer], items: round.items };
+  const back = readsBackAs(note, questions);
+  return back === "" ? { kind: "ok", value: { questions, post: note } } : { kind: "failed", reason: back };
+}
+
 function readsBack(q: Question, back: Asked | undefined): boolean {
   if (back === undefined || !sameWords(back.text, q.question)) {
     return false;

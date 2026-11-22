@@ -4,12 +4,54 @@
 // cost, the spread of a run's cost times the runs. Recall is compared in whole numbers by cross-multiplying, never as
 // rounded floats, so a pass exactly on the line does not beat it. scripts/check-eval-proof.ts applies it; the harness
 // records a pass's aim. Cost is compared in whole hundredths of a cent, for the same reason, and only between passes
-// over the same cases. A leaf with no runtime imports, so the script loads it on Node's type stripping. Pure.
+// over the same cases. A partial pass is never proof: partialWhy says why, for the harness that writes a pass and for
+// the script that reads one back, which refuses a per_case it cannot read. A leaf with no runtime imports, so the
+// script loads it on Node's type stripping. Pure.
 
 import type { Tally } from "./results.js";
 
 export function field(value: unknown, name: string): unknown {
   return typeof value === "object" && value !== null ? (Reflect.get(value, name) as unknown) : undefined;
+}
+
+export type Ran = {
+  readonly runs: number;
+  readonly stopped: string;
+  readonly cases: readonly {
+    readonly case: { readonly name: string };
+    readonly error: string;
+    readonly runs: readonly { readonly run: number; readonly error: string }[];
+  }[];
+};
+
+export function partialWhy(p: Ran): readonly string[] {
+  const failed = p.cases.flatMap((c) => [
+    ...(c.error === "" ? [] : [`${c.case.name}: ${c.error}`]),
+    ...c.runs.filter((r) => r.error !== "").map((r) => `${c.case.name} run ${r.run}: ${r.error}`),
+  ]);
+  const short = p.cases.filter((c) => c.error === "" && c.runs.length < p.runs).length;
+  const missing =
+    p.stopped === "" ? [] : [p.stopped, ...(short > 0 ? [`${short} case(s) ran fewer than ${p.runs} runs`] : [])];
+  return [...missing, ...failed];
+}
+
+function runOf(value: unknown): Ran["cases"][number]["runs"][number] | undefined {
+  const [run, error] = [field(value, "run"), field(value, "error")];
+  return typeof run === "number" && typeof error === "string" ? { run, error } : undefined;
+}
+
+function caseOf(value: unknown): Ran["cases"][number] | undefined {
+  const [name, error, runs] = [field(value, "case"), field(value, "error"), field(value, "runs")];
+  const read = Array.isArray(runs) ? runs.map(runOf) : [undefined];
+  return typeof name === "string" && typeof error === "string" && !read.includes(undefined)
+    ? { case: { name }, error, runs: read.filter((r) => r !== undefined) }
+    : undefined;
+}
+
+export function ranOf(value: unknown): Ran | undefined {
+  const cases = field(value, "per_case");
+  const read = Array.isArray(cases) ? cases.map(caseOf) : [undefined];
+  return read.includes(undefined) ? undefined : { runs: 0, stopped: "", cases: read.filter((c) => c !== undefined) };
 }
 
 export type Aim = "quality" | "cost";

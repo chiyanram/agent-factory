@@ -7,8 +7,7 @@
 //   ask        one "[writer] OPEN: <question>" note, which poll counts as an open ask; the same head rule
 //   grill      one "[coordinator] OPEN: N questions" note, an item per question; the same head rule
 
-import { questionRound } from "./finish.js";
-import type { Question } from "./report.js";
+import type { CheckedRound } from "./finish.js";
 import type { Result } from "./forge/api.js";
 import type { Change, Forge } from "./forge/types.js";
 import type { Post, Seat } from "./post.js";
@@ -90,19 +89,17 @@ export function ask(input: AtHead): Promise<Result<string>> {
   return noteAtHead(input, { seat: "writer", title: (t) => `OPEN: ${t}`, what: "a question", verb: "asked" });
 }
 
-export function grill(
-  input: Omit<AtHead, "text"> & { readonly questions: readonly Question[] },
-): Promise<Result<string>> {
-  const round = questionRound(input.questions);
+export function grill(input: Omit<AtHead, "text"> & { readonly round: CheckedRound }): Promise<Result<string>> {
+  const { post, questions } = input.round;
   return noteAtHead(
-    { ...input, text: round.title },
+    { ...input, text: post.title },
     {
-      seat: "coordinator",
+      seat: post.seat,
       title: (t) => t,
       what: "a round of questions",
-      verb: `asked ${input.questions.length} question(s) on`,
-      fields: [round.answer],
-      items: round.items,
+      verb: `asked ${questions.length} question(s) on`,
+      fields: post.fields,
+      items: post.items,
     },
   );
 }

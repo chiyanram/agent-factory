@@ -4,6 +4,10 @@
 //
 //   "plugins": ["rulebook@chiyanram", "team-rules@acme"]
 //
+// A name and a marketplace follow Claude Code's install rule: a letter or digit, then letters, digits, dots, dashes and
+// underscores (https://code.claude.com/docs/en/plugins/marketplace-reference.md). No ".." is allowed, so either one is
+// safe as a folder name.
+//
 // None listed is a good value: the engine runs alone, on its built-in process. A "plugins" that holds a map is refused
 // with a message to rename it to "connectors", its old name.
 
@@ -18,7 +22,7 @@ const OLD_CONNECTORS = 'a map of connectors is no longer read under "plugins": r
 
 export type PluginRef = { readonly name: string; readonly marketplace: string };
 
-const PART = "[a-z0-9][a-z0-9._-]{0,63}";
+const PART = "[A-Za-z0-9][A-Za-z0-9._-]*";
 const REF = new RegExp(`^${PART}@${PART}$`);
 
 export const PLUGIN_LIST_HINT = 'a list of plugins, each name@marketplace, such as ["rulebook@chiyanram"]';

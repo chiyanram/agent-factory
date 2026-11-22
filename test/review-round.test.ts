@@ -314,6 +314,21 @@ describe("reviewRound", () => {
     expect(log.posts.at(-1)).toContain("No findings");
   });
 
+  it("AC-20 should refuse a review setup before the round when no pinned plugin holds review references", async () => {
+    const empty = { label: "team@acme", dir: join(p.root, "empty-plugin") };
+    mkdirSync(join(empty.dir, "skills", "flow"), { recursive: true });
+    const log = fresh();
+    expect(await reviewRound(setup(forge(log), model([], []), { plugins: [empty] }))).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("needs a plugin that holds its review references"),
+    });
+    expect(log.posts).toEqual([]);
+    await reviewRound(
+      setup(forge(log), model([findAnswer([])], []), { plugins: [empty, { label: "rulebook", dir: RULEBOOK }] }),
+    );
+    expect(log.posts.at(-1)).toContain("No findings");
+  });
+
   it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {
     const bare = join(p.root, "bare-find.md");
     writeFileSync(bare, "Find what breaks. Report each finding.\n");
