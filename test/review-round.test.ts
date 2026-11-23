@@ -11,6 +11,7 @@ import { readAnswer } from "../src/core/agent/claude.js";
 import type { Model, ModelResult, ModelRun } from "../src/core/review/model.js";
 import { reviewRound, type ReviewSetup } from "../src/core/review/round.js";
 import { reviewStep, worstCase } from "../src/core/review/step.js";
+import { REVIEW_MODELS } from "../src/core/review/pinned.js";
 import type { RoundPart } from "../src/core/dispatch/spend.js";
 import type { RunInput } from "../src/core/dispatch/steps.js";
 import { approveSpec, changeAt, project, RULEBOOK, specText, writeSpec, type Project } from "./review-repo.js";
@@ -955,6 +956,10 @@ describe("reviewStep", () => {
         found: { ERR1: { act_on: 1 } },
         spend: { usd: 0.2, tokens: 20 },
         split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.1, tokens: 10 } },
+        runs: [
+          { part: "baseline", cli: "claude", asked: expect.any(String) },
+          { part: "verify", cli: "claude", asked: expect.any(String) },
+        ],
       },
     });
     const movedStep = reviewStep({
@@ -1084,6 +1089,76 @@ describe("the review step keeps each pass's stream as its trace (#487)", () => {
     } finally {
       Date.now = now;
     }
+  });
+
+  it("names each run's part, CLI, asked model and the version and model its init event reported (#902)", async () => {
+    const logic = { ...FINDING, kind: "logic", axis: "spec", rule: "correctness", finding: "AC1 not met", line: 2 };
+    const m = model([findAnswer([FINDING, logic]), verdicts([]), verdicts([])], []);
+    const asked: string[] = [];
+    const reporting: Model = async (run) => {
+      asked.push(run.model);
+      const ran = await m(run);
+      const init = { type: "system", subtype: "init", model: `${run.model}-ran`, claude_code_version: "9.9.9" };
+      const stream = `${JSON.stringify(init)}\n`;
+      return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, stream } } : { ...ran, stream };
+    };
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: reporting,
+      sessions: none,
+    });
+    expect(step).toMatchObject({
+      named: {
+        cli: "claude",
+        asks: { find: REVIEW_MODELS.find, rule: REVIEW_MODELS.rule, logic: REVIEW_MODELS.logic },
+      },
+    });
+    const out = step.kind === "available" ? await step.run(input()) : step;
+    const named = (part: string, id: string) => ({
+      part,
+      cli: "claude",
+      asked: id,
+      version: "9.9.9",
+      model: `${id}-ran`,
+    });
+    expect(asked).toHaveLength(3);
+    const [find = "", first = "", second = ""] = asked;
+    expect(out).toMatchObject({
+      kind: "ok",
+      value: { runs: [named("baseline", find), named("verify", first), named("verify", second)] },
+    });
+    expect(new Set(asked.slice(1))).toEqual(new Set([REVIEW_MODELS.rule, REVIEW_MODELS.logic]));
+  });
+
+  it("names a failed pass's run beside the spend it gives back, with no version or model it did not report", async () => {
+    const found = model([findAnswer([FINDING])], []);
+    let calls = 0;
+    const failing: Model = async (run) => {
+      calls += 1;
+      return calls === 1 ? found(run) : { kind: "failed", reason: "error_max_budget_usd", answer: undefined };
+    };
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: failing,
+      sessions: none,
+    });
+    const out = step.kind === "available" ? await step.run(input()) : step;
+    expect(out).toMatchObject({
+      kind: "failed",
+      runs: [
+        { part: "baseline", cli: "claude", asked: expect.any(String) },
+        { part: "verify", cli: "claude", asked: expect.any(String) },
+      ],
+    });
+    expect(JSON.stringify(out)).not.toContain('"version"');
   });
 
   it("a round whose pass fails still names the traces it kept, the failed pass's too", async () => {

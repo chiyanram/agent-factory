@@ -28,7 +28,8 @@
 // names copilot is refused (switch.ts). #697 checks a real run, its exit code, COPILOT_GITHUB_TOKEN alone, whether
 // view, grep and glob need an allow rule in -p, what the usage file holds and what --max-ai-credits does, then turns
 // it on. Its trace is the final answer only, not a tool-call stream (#697). It runs the host's copilot from PATH,
-// unpinned, on the host rather than a runner (#493, #674).
+// unpinned, on the host rather than a runner (#493, #674). Its run record names no CLI, version or model, since its
+// -s output has no init event (agent/ran.ts); #697 records them when it turns the run on.
 
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";

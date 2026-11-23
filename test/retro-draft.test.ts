@@ -148,7 +148,7 @@ describe("retro --draft", () => {
     expect(args[args.indexOf("--tools") + 1]).toBe("Read,Grep,Glob");
     expect(args[args.indexOf("--max-budget-usd") + 1]).toBe("10");
     const env = claudeEnv({ PATH: "/bin", GH_TOKEN: "t", GITLAB_TOKEN: "t", FACTORY_HOME: home, HOME: "/h" });
-    expect(Object.keys(env).toSorted()).toEqual(["AGENT_FACTORY_MODEL_RUN", "HOME", "PATH"]);
+    expect(Object.keys(env).toSorted()).toEqual(["AGENT_FACTORY_MODEL_RUN", "DISABLE_AUTOUPDATER", "HOME", "PATH"]);
   });
 
   it("numbers the drafts after the ones already there that day", async () => {

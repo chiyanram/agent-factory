@@ -97,6 +97,7 @@ import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
 import { periodsAt, readSpends, totalOf } from "./usage.js";
 import { approvalKey, sharedNote } from "./shared.js";
+import { namedField, runsField, type Named, type RunNamed } from "../agent/ran.js";
 import { BRANCH_PREFIX, type DesignRan, type ReadyFacts, type Steps, type Unavailable } from "./steps.js";
 import {
   decide,
@@ -791,6 +792,7 @@ async function begin(
       head: headOf(state),
       plugins: usedBy(setup),
       ...named,
+      ...namedField(step.named),
     },
   });
   const claimed = started.kind === "ok" ? await claim(setup, state) : started;
@@ -835,6 +837,7 @@ function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Even
     said,
     ...(parkedTask === undefined ? {} : { task: parkedTask }),
     ...spentAndTrace(value.spend, value.trace),
+    ...runsField(value.runs),
   };
 }
 
@@ -896,10 +899,11 @@ async function startCheck(
   state: TicketState,
   phase: "ready" | "review" | "verify",
   head: string,
+  named?: Named,
 ): Promise<Done> {
   return record({
     where: where(setup, state),
-    event: { at: at(setup), kind: "started", phase, mode: "none", head, plugins: usedBy(setup) },
+    event: { at: at(setup), kind: "started", phase, mode: "none", head, plugins: usedBy(setup), ...namedField(named) },
   });
 }
 
@@ -1038,7 +1042,7 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
   if (held !== "go") {
     return held;
   }
-  const started = await startCheck(setup, state, "review", head);
+  const started = await startCheck(setup, state, "review", head, step.named);
   if (started.kind !== "ok") {
     return started;
   }
@@ -1061,6 +1065,7 @@ function reviewEnded(
     readonly citesNotFound?: number;
     readonly found?: FoundByRule;
     readonly traces?: readonly string[];
+    readonly runs?: readonly RunNamed[];
   },
 ): Promise<Done> {
   return record({
@@ -1075,6 +1080,7 @@ function reviewEnded(
       ...ratings(value),
       ...counts(value),
       ...tracesIn(value),
+      ...runsField(value.runs),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
     },
   });
@@ -1119,7 +1125,16 @@ async function failedSpent(
   if (spend.usd > 0 || spend.tokens > 0) {
     const kept = await record({
       where: where(setup, state),
-      event: { at: at(setup), kind: "spent", phase, head, spend, ...splitIn(ran), ...tracesIn(ran) },
+      event: {
+        at: at(setup),
+        kind: "spent",
+        phase,
+        head,
+        spend,
+        ...splitIn(ran),
+        ...tracesIn(ran),
+        ...runsField(ran.runs),
+      },
     });
     if (kept.kind === "failed") {
       setup.log(`${state.ticket}: the failed ${phase} run's spend was not recorded: ${kept.reason}`);
@@ -1213,6 +1228,7 @@ function designEnded(
     card: v.card,
     ...(v.spend === undefined ? {} : { spend: v.spend }),
     ...(v.trace === undefined ? {} : { trace: v.trace }),
+    ...runsField(v.runs),
   };
   return v.kind === "failed"
     ? { ...base, outcome: "failed", why: v.why, findings: [], kept: [], ...extras, ...finalField(v.final) }
@@ -1249,7 +1265,14 @@ async function runDesign(setup: TickSetup, state: TicketState, a: DesignAction):
   }
   const started = await record({
     where: where(setup, state),
-    event: { at: at(setup), kind: "started", phase: DESIGN_PHASE[a.step], mode: "none", head: "" },
+    event: {
+      at: at(setup),
+      kind: "started",
+      phase: DESIGN_PHASE[a.step],
+      mode: "none",
+      head: "",
+      ...namedField(step.named),
+    },
   });
   return started.kind === "ok" ? designRan(setup, state, a) : started;
 }

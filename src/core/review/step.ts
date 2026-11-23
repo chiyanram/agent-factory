@@ -8,6 +8,8 @@
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 // Each pass's stream is kept as its trace beside the ticket's records (dispatch/trace.ts, #487), and the round's line
 // names them. A trace that cannot be kept loses the trace, never the pass.
+// Each model run is also named, by its part (a finder's lens or verify), the model it asked for and what its CLI's
+// init event reported (agent/ran.ts).
 
 import type { PluginDir } from "../process/read.js";
 import type { Result } from "../forge/api.js";
@@ -20,7 +22,9 @@ import { lensSetupOf, roundLenses } from "./finders.js";
 import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
 import type { Where } from "../dispatch/records.js";
 import { keepTrace, type TraceAt } from "../dispatch/trace.js";
-import { paths, reviewSetup } from "./settings.js";
+import { paths, reviewModels, reviewSetup } from "./settings.js";
+import { namedIn, runsField, type RunNamed } from "../agent/ran.js";
+import { openAgentCli } from "../agent/index.js";
 import {
   addRoundSpend,
   addSpend,
@@ -67,7 +71,14 @@ function actOnOf(outcome: Outcome): ActOn {
   return mapAs(outcome.kind, outcome);
 }
 
-type Meter = { spend: Spend; split: RoundSpend };
+type Meter = { spend: Spend; split: RoundSpend; readonly cli: string; readonly runs: RunNamed[] };
+
+function partName(part: RoundPart | undefined): { readonly part?: string } {
+  if (part === undefined) {
+    return {};
+  }
+  return { part: part.kind === "finder" ? part.lens : "verify" };
+}
 
 function metered(model: Model, meter: Meter): Model {
   return async (run) => {
@@ -75,6 +86,8 @@ function metered(model: Model, meter: Meter): Model {
     const spent = ran.kind === "ok" ? { usd: ran.value.costUsd, tokens: ran.value.tokens } : spendOf(ran.answer);
     meter.spend = addSpend(meter.spend, spent);
     meter.split = run.part === undefined ? meter.split : addRoundSpend(meter.split, run.part, spent);
+    const stream = ran.kind === "ok" ? ran.value.stream : ran.stream;
+    meter.runs.push({ ...partName(run.part), cli: meter.cli, asked: run.model, ...namedIn(stream) });
     return ran;
   };
 }
@@ -143,19 +156,21 @@ export function reviewStep(input: {
     return { kind: "unavailable", reason: `the reviewer is not set up: ${p.reason}` };
   }
   const { home, maxUsd } = p.value;
+  const cli = openAgentCli({ env: input.env }).name;
   return {
     kind: "available",
+    named: { cli, asks: reviewModels(input.env) },
     worstUsd: () => worstUsd({ home, project: input.project, maxUsd }),
     run: async (run) => {
       if (run.change.kind !== "open") {
         return { kind: "failed", reason: "no open change to review" };
       }
       const setup = reviewSetup({ ...input, number: run.change.line.number, paths: p.value });
-      const meter: Meter = { spend: NO_SPEND, split: NO_ROUND_SPEND };
+      const meter: Meter = { spend: NO_SPEND, split: NO_ROUND_SPEND, cli, runs: [] };
       const into: Traced = { where: { home, project: input.project, ticket: run.ticket }, names: [], last: 0 };
       const round = await reviewRound({ ...setup, model: traced(metered(setup.model, meter), into) });
       const mapped = round.kind === "ok" ? actOnOf(round.value) : round;
-      const spent = { spend: meter.spend, ...splitOf(meter), ...tracesOf(into) };
+      const spent = { spend: meter.spend, ...splitOf(meter), ...tracesOf(into), ...runsField(meter.runs) };
       return mapped.kind === "ok" ? { kind: "ok", value: { ...mapped.value, ...spent } } : { ...mapped, ...spent };
     },
   };

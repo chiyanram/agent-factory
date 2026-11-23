@@ -888,6 +888,74 @@ describe("a writer run keeps its whole output as its trace (#487)", () => {
   });
 });
 
+const INIT = JSON.stringify({
+  type: "system",
+  subtype: "init",
+  model: "claude-model-id",
+  claude_code_version: "9.9.9",
+});
+
+describe("a writer run names its CLI, version and model (#902)", () => {
+  it("names one run: the CLI, the model it asked for (default when unset), and what the init event reported", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: `${INIT}\n`, stderr: "" }] });
+    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    expect(valueOf(out).runs).toEqual([
+      { cli: "claude", asked: "default", version: "9.9.9", model: "claude-model-id" },
+    ]);
+  });
+
+  it("keeps an init event the box streams in two chunks", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    const base = writer(fake, { commit: true, report: DONE, exit: 0 }, []);
+    const cut = Math.floor(INIT.length / 2);
+    const box: Box = {
+      ...base,
+      run: async (call) => {
+        call.command.watch?.(INIT.slice(0, cut));
+        call.command.watch?.(`${INIT.slice(cut)}\n`);
+        return base.run(call);
+      },
+    };
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(valueOf(out).runs).toEqual([
+      { cli: "claude", asked: "default", version: "9.9.9", model: "claude-model-id" },
+    ]);
+  });
+
+  it("names the model the run asked for, and no version or model when the stream has no init event", async () => {
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: '{"type":"system"}\n', stderr: "" }] });
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []);
+    const asked = { ...s, settings: { ...s.settings, claude: { maxUsd: "2", model: "opus-x" } } };
+    expect(valueOf(await run(asked, FIX)).runs).toEqual([{ cli: "claude", asked: "opus-x" }]);
+  });
+
+  it("names the run on a failure after it, beside what it spent", async () => {
+    const stdout = `${INIT}\n{"type":"result","total_cost_usd":0.2,"usage":{"input_tokens":5}}\n`;
+    const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout, stderr: "" }] });
+    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []);
+    const out = await run({ ...s, pusher: async () => ({ kind: "failed", reason: "the push failed" }) }, FIX);
+    expect(out).toMatchObject({
+      kind: "failed",
+      runs: [{ cli: "claude", asked: "default", version: "9.9.9", model: "claude-model-id" }],
+    });
+  });
+
+  it("names no run whose box never started", async () => {
+    const fake = fakeBox({ runs: [] });
+    const box: Box = { ...fake.box, start: async () => ({ kind: "failed", reason: "no container runtime" }) };
+    const out = await run(setup(box, forge(), []), FIX);
+    expect(out.kind === "ok" ? out.value : out).not.toHaveProperty("runs");
+  });
+
+  it("names the CLI and the model it asks for before the run starts", () => {
+    const s = setup(writer(fakeBox({ runs: [] }), { commit: true, report: DONE, exit: 0 }, []), forge(), []);
+    const step = writerStep({ kind: "ok", value: s });
+    expect(step).toMatchObject({ named: { cli: "claude", asks: { writer: "default" } } });
+    const pinned = { ...s, settings: { ...s.settings, claude: { maxUsd: "2", model: "opus-x" } } };
+    expect(writerStep({ kind: "ok", value: pinned })).toMatchObject({ named: { asks: { writer: "opus-x" } } });
+  });
+});
+
 describe("why.ts: the reason a person reads, made safe (#62)", () => {
   it("scrubs what looks like a token or a key, and keeps the words around it", () => {
     const text = [
