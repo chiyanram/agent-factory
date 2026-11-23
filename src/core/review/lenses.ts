@@ -1,4 +1,4 @@
-// lenses — which finders a review round runs, and how their findings become one list (#237; docs/DESIGN.md sections 3
+// lenses — which finders a review round runs, and how their findings become one list (docs/explanation/architecture.md sections 3
 // and 5; decided on #30, v4 D-F5 = A). Pure: the round reads the settings, the lane and the diff, and passes them in.
 //
 //   pickLenses     the blast radius. A lens applies when its `lanes` hold the change's lane and its `paths` match a
@@ -12,7 +12,7 @@
 //                  grades tie, as the rulebook's verify-pass card says. It names every lens that reported it, and the
 //                  list is renumbered F1…Fn for the one verify pass.
 //   uniqueByLens   per lens, the verified findings no other lens reported, so a lens that adds none after 20 PRs can be
-//                  retired (DESIGN.md section 6). Dismissed findings do not count.
+//                  retired (docs/explanation/measurement.md). Dismissed findings do not count.
 //
 // The round (round.ts) runs one finder per picked lens with what finders.ts gives it, and keeps uniqueByLens with the
 // head; the instructions are still the engine's prompts, not the finder role card, until the eval baseline (#216).

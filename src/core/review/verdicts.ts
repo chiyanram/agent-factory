@@ -5,7 +5,7 @@
 // (the Martian categories, ADR-0015 R2), and keeps its severity, how much it matters (decided on #218, 2026-11-09).
 // A Spec finding names the acceptance criterion it fails as its rule, AC<n>; the round quotes that line from the
 // approved spec, never from the model (#219).
-// The finding contract is docs/DESIGN.md's (decided on #237, 2026-11-09): the finder gives its grade, cited, walked or
+// The finding contract is docs/explanation/architecture.md's: the finder gives its grade, cited, walked or
 // ran, and the evidence behind it; the engine adds the lens, the one the finder run was for, never the model's word.
 // The finding is ADR-0017's shared record (finding.ts): the core every finding has, and the review's own part here.
 // The verify pass's verdict and its schema are shared with the design review, and live there too. The engine only

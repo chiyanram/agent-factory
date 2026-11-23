@@ -1,8 +1,8 @@
 // approval — the human's go-ahead for one ticket, bound to the exact spec they saw (#104; ADR-0012 S1, W1).
 //
-// An approval is a permission given on this machine, not a forge or Jira note ([review 3 on map #30]). The human says
-// "approve PROJ-123"; the coordinator runs `agent-factory approve <project> <ticket> <hash>`, which sits in the
-// harness `ask` list only, so the prompt shows the ticket and the spec hash and only the human can confirm it. The
+// An approval is a permission given on this machine, not a forge or Jira note. The human runs
+// `agent-factory approve <project> <ticket> <hash>` at a front door (the terminal, or the Discord door's /approve);
+// the coordinator's settings deny it, and the door seam refuses it from inside a model run. The
 // record goes to <home>/approvals/<project>/<ticket>.json with the spec's hash, who approved and when.
 //
 // The dispatcher (#103) starts work only while the spec still has the approved hash: a spec edited after approval is

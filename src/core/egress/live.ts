@@ -76,7 +76,7 @@ async function inRunner(input: LiveInput, folder: string): Promise<Result<readon
     return {
       kind: "failed",
       reason:
-        "the srt runner keeps its own proxy, and this check needs a vm runner; on the laptop run the srt check (GUIDE.md, Check the srt runner)",
+        "the srt runner keeps its own proxy, and this check needs a vm runner; on the laptop run the srt check (docs/how-to/check-the-runner.md, Check the srt runner)",
     };
   }
   const setup: BoxSetup = { ...input.setup, egress: () => Promise.resolve(egress) };

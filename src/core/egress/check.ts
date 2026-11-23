@@ -1,7 +1,7 @@
 // check — the live egress checks of #130's Done when, planned and read here; live.ts runs them in a real runner on the
 // project's internal network. Pure. Each check is one command in the runner (the probe, probe.ts, or the runner's own
 // docker) and a reading of what it printed. Only a real Docker host can prove them, so `agent-factory egress check`
-// runs them on the VM (GUIDE.md "Check the egress proxy").
+// runs them on the VM (docs/how-to/check-the-runner.md "Check the egress proxy").
 
 import type { Ran } from "../box/types.js";
 import type { ProxyAddress } from "./env.js";

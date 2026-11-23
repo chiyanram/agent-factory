@@ -6,7 +6,7 @@
 // already covers is dropped, because Squid refuses a list that names the same host twice.
 //
 // A git host is refused, with every subdomain and any dotted entry that covers it: the runner holds no git host login
-// and needs none, because the host clones, pushes and posts (docs/DESIGN.md "Runners", P4). The public ones always;
+// and needs none, because the host clones, pushes and posts (docs/explanation/architecture.md "Runners", P4). The public ones always;
 // the project's own, such as a company GitLab, on every list too: every caller names it, as ownGitHosts reads it, and
 // the parameter has no default, so a new caller cannot leave it out (#485).
 

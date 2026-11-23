@@ -223,7 +223,7 @@ settings:
   FACTORY_CLAIM_LABEL  the label a claimed change carries (default agent::claimed)
   FACTORY_GH           the gh to call (default gh); FACTORY_GLAB the glab to call (default glab)
   FACTORY_IDENTITY     own (default: your gh or glab login) or app (a GitHub App whose key the factory user holds)
-  FACTORY_BOX          where a box runs: vm (Docker with Sysbox on this host)
+  FACTORY_BOX          the runner: none (starts no run), srt (Anthropic's sandbox runtime) or vm (Docker with Sysbox)
   FACTORY_REPO         the project's clone on this host, an absolute path; the project file's clone
   FACTORY_DEFAULT_PROJECT  the project a command that names none acts on; agent-factory coordinator sets it (#382)
   FACTORY_EGRESS_IMAGE   the egress proxy's Squid image, name@sha256:<digest> (default: a pinned ubuntu/squid)

@@ -1,5 +1,5 @@
 // settings-cli — `agent-factory config show | check <project>` and `agent-factory team update <project> [<commit>]`
-// (#229; docs/DESIGN.md section 5 "Settings"). The settings live in the factory home, never in the product repo, and
+// (docs/explanation/architecture.md section 5 "Settings"). The settings live in the factory home, never in the product repo, and
 // these commands are for the human: the coordinator's deny list covers the user and team settings (#227).
 //
 //   config show    every key: its value, the layer and `file:line` it came from, its class, and the team's mode

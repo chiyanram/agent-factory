@@ -153,8 +153,8 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
   ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)). **Today:** their rule IDs carry no plugin
   name.
 
-**The process plugin** holds the lanes, as data, and one role card per role. The rulebook's crq is the first such plugin,
-and the engine ships a small default one.
+**The process plugin** holds the lanes, as data, and one role card per role. The rulebook's crq is the first such plugin.
+The engine ships no plugin: with none, it uses its built-in lanes, review baseline and role cards (`prompts/roles/`).
 - **The approval floor:** a lanes file can make a lane stricter, never drop the approval for any lane above tiny.
 - **The roles:** coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro and
   onboarder. **Today:** the engine starts no cleanup run; a person runs cleanup by hand.
@@ -162,7 +162,9 @@ and the engine ships a small default one.
   `hand_off` and `enforced_guardrails` (IDs from a closed list); `input`, `steps` and `rules` are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
 
 **Connectors** are the engine's swappable parts (ADR-0014). Each has a dry mode that shows what it would write and writes
-nothing. Each passes the shared test kit: approve, stale after an edit, refuse a bot.
+nothing. Each passes the shared test kit, `agent-factory plugin test`: the handshake, its fixtures, bad input and an unknown op,
+one JSON object on stdout, no declared env value or token in an answer, and each write's text reaching its CLI whole
+([Connectors](../reference/connectors.md)).
 
 **The agent CLI** is no connector: it decides the trust boundary of a model run, so its adapter lives in the engine,
 like the git host seam ([ADR-0022](../adr/0022-agent-cli-adapter-in-core.md)). `src/core/agent/` builds each run's

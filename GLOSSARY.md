@@ -82,9 +82,10 @@ _Avoid_: MR, merge request (outside the GitLab adapter)
 **Observability platform**: where runs send logs and status for a human to read. Today: none; the run records and
 notes are enough.
 
-**Connector**: one of the engine's swappable parts, a small program behind a fixed contract (ADR-0014): approval,
-gate, agent CLI, runner. A front door is not one (ADR-0023). Each has a dry mode. In code: `src/core/plugin/`,
-`plugins/`.
+**Connector**: one of the engine's swappable parts, a small program behind a fixed contract (ADR-0014), for one or
+more capabilities: the git host (`forge.read`, `forge.write`), a tracker (`tracker.comment`, `tracker.create`) and
+pings (`notify`); the contract also names `context.read` and `box`, which nothing calls yet. The agent CLI is not one
+(ADR-0022), nor is a front door (ADR-0023). Each has a dry mode. In code: `src/core/plugin/`, `plugins/`.
 _Avoid_: plugin (for a connector)
 
 **Plugin**: a normal Claude Code plugin a project installs, `name@marketplace`, for rules or process. Listed in the
@@ -205,7 +206,7 @@ to the project home.
 **Factory bot**: the code-only bot (no AI) behind the Discord front door, with its own OS user and token.
 
 **Process plugin**: a plugin that holds the lanes file and the role cards. The rulebook's crq is the first. The engine
-ships a small default.
+ships no plugin: with none, it uses its built-in lanes, review baseline and role cards.
 _Avoid_: pack, process pack
 
 **Project home**: outside the product repo: the settings file `~/.factory/projects/<project>.json` and the folder

@@ -26,7 +26,7 @@
 //   env         the host's PATH and locale, the private HOME, the temp folder and the spec's own variables; no other
 //               host variable
 //
-// S7: the version is pinned. A new pin is a PR that reviews srt's release and passes the laptop check (GUIDE.md "Check
+// S7: the version is pinned. A new pin is a PR that reviews srt's release and passes the laptop check (docs/how-to/check-the-runner.md "Check
 // the srt runner"). The probe refuses a missing srt, another version, and a platform srt does not sandbox.
 
 import { join } from "node:path";

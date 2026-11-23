@@ -10,10 +10,10 @@ through the separate door bot ([Set up the Discord door](set-up-discord-door.md)
 - You make one thread per ticket by hand. The session sees the channel and all its threads, and relays your words to
   each ticket's own session, quoting them exactly.
 - Chat is data (P5). The session runs in `dontAsk` mode: anything that would ask for a permission is refused, so the
-  plugin's permission relay (DM buttons and `yes <id>` replies) never fires. Run `agent-factory confirm` and the other
-  asked commands at a terminal. **Today:** the relay stays off until the hand test #729 shows it is safe.
+  plugin's permission relay (DM buttons and `yes <id>` replies) never fires. Run `agent-factory confirm`, and each command
+  the wall neither allows nor denies (`usage`, `trace`, `config` and the like), at a terminal. **Today:** the relay stays off; #823 replaces it with the door bot recording thread replies.
 - A relay to a ticket's session carries answers only. Type an approval, a waiver or a yes to commit and push in that
-  ticket's session or thread, or use the door bot.
+  ticket's session or thread. The door bot takes an approval (`/approve`), never a waiver, which stays at the terminal.
 
 **Check against #729:** the operator's hand test has not run these steps yet. Each step it checks is marked *(to
 check)*. **Today:** the service that keeps the session up is #748, so for now run it in a terminal.
@@ -72,7 +72,7 @@ The launch refuses, before Claude starts:
 - a channel `allowFrom` that is empty or not the same people as `allowFrom`. The plugin lets anyone who passes the
   channel's gate answer a permission prompt by text (`yes <id>`), so with an empty list anyone in the channel could
   allow a tool call if the relay were on. It stays off, and this list is the second guard. **Today:** this rests on a
-  reading of the plugin's code that #729 confirms;
+  reading of the plugin's code that no test has checked; #823 replaces the relay;
 - pending pairings, and a file or folder that group or others can write.
 
 List the same people as the door's `people.json`. The guided setup that writes both from one list is #744.

@@ -1,5 +1,5 @@
 // brief — brief.md and glossary.md, written from the onboarder's answer and what the engine read itself (#235;
-// docs/DESIGN.md section 5 "Project knowledge"). Every line is marked verified or inferred:
+// docs/explanation/architecture.md section 5 "Project knowledge"). Every line is marked verified or inferred:
 //
 //   project rules        the engine's alone: each MUST of the root AGENTS.md and CLAUDE.md, read by the engine itself
 //                        (musts.ts), one line each, verified at its file:line

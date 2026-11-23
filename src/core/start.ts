@@ -1,4 +1,4 @@
-// start — the human's START for one ticket (#227; docs/DESIGN.md section 3, P8: nothing starts unless a human starts
+// start — the human's START for one ticket (docs/explanation/architecture.md section 3, P8: nothing starts unless a human starts
 // it). START opens a ticket: the coordinator researches, asks and writes the spec, and the design and its review run
 // where the lane needs them. In the tiny lane START is also what lets the build begin; the bug, feature and one-way-door
 // lanes need an approval as well (approval.ts), and the approval floor never drops it.

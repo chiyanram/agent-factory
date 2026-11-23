@@ -44,6 +44,5 @@ which hold the claim sheets with every row.
 ## What no principle covers
 
 - Runners on other operating systems for native simulators: no project needs them.
-- Codebase health measured over time: P20 stands, and a measure is chosen once real numbers exist (#495).
 - An AI judge scoring real runs: P10's outcome signals are the measure while volume is low.
 - Who may approve, and trusted authors, in a team: deferred until a team uses the factory.

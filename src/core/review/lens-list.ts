@@ -1,4 +1,4 @@
-// lens-list — the project's lenses as the settings hold them, the key "review.lenses" (#237; docs/DESIGN.md section 5).
+// lens-list — the project's lenses as the settings hold them, the key "review.lenses" (docs/explanation/architecture.md section 5).
 // A leaf the settings keys import: it reads and checks the value, and nothing else.
 //
 //   {"review": {"lenses": [

@@ -1,4 +1,4 @@
-// step — the design review's two runs as the dispatcher's steps (#236; docs/DESIGN.md section 3). Each run is a fresh,
+// step — the design review's two runs as the dispatcher's steps (docs/explanation/architecture.md section 3). Each run is a fresh,
 // read-only model run in a folder of its own, the same model seam the automated review uses (review/model.ts: claude
 // --restricted, the Read, Grep and Glob tools only, no MCP server, no forge token, structured output):
 //

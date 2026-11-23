@@ -1,4 +1,4 @@
-// plugins — the project's plugin list (#232; docs/DESIGN.md section 5 "Plugins"): the normal Claude Code plugins a
+// plugins — the project's plugin list (docs/explanation/architecture.md section 5 "Plugins"): the normal Claude Code plugins a
 // project installs, each named `name@marketplace`, in the order the project lists them. A locked settings key (#229),
 // so a user layer cannot drop or swap the process plugin. Read from the settings layers, never a repo file.
 //

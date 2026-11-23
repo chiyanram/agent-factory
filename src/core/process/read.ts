@@ -1,4 +1,4 @@
-// read — the process a project runs on (#232; docs/DESIGN.md section 5 "The process plugin"): the lanes and the
+// read — the process a project runs on (docs/explanation/architecture.md section 5 "The process plugin"): the lanes and the
 // review baseline, read from the one plugin that holds a process, or the engine's built-in process when none does.
 // The engine runs alone: with no plugin, or with plugins that hold no process, every value is the built-in one. A
 // project whose plugins hold two processes is refused, naming each plugin, never run on the first one (#426).

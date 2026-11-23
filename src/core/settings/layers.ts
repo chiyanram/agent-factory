@@ -1,4 +1,4 @@
-// layers — the settings files, read on the host before every run (#229; docs/DESIGN.md section 5 "Settings"). All
+// layers — the settings files, read on the host before every run (docs/explanation/architecture.md section 5 "Settings"). All
 // live in the factory home, outside the product repo, so a branch never chooses its own settings (ADR-0012 S12), and
 // no run's agent is ever handed them:
 //

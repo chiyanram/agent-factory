@@ -1,4 +1,4 @@
-// caps — the limits on what runs may spend (#131; docs/DESIGN.md section 3 "Limits"; ADR-0012 S16). Each is a cap-class
+// caps — the limits on what runs may spend (docs/explanation/architecture.md section 3 "Limits"; ADR-0012 S16). Each is a cap-class
 // settings key, so the lowest layer wins, read through settings/machine.ts settingOf:
 //
 //   per run          caps.usdPerRun: claude --max-budget-usd on each model run (writer/settings.ts, review/settings.ts)

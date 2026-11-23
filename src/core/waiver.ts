@@ -1,4 +1,4 @@
-// waiver — a human's waiver of the test checks at one head (#231; docs/DESIGN.md section 5, "Tests are judged twice").
+// waiver — a human's waiver of the test checks at one head (docs/explanation/architecture.md section 5, "Tests are judged twice").
 //
 // The test checks (ready/floor.ts) stop a change that removes a test, adds a skip, removes assertions or changes a judge
 // file. Such a stop goes to a person (needs-human) with the hits listed, never back to the writer. A person who agrees

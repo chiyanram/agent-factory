@@ -1,5 +1,5 @@
 // pins — each listed plugin pinned by commit and hash in the factory home, and checked against its hash before every
-// run (#232; docs/DESIGN.md section 5 "Plugins"). Nothing here touches a product repo.
+// run (docs/explanation/architecture.md section 5 "Plugins"). Nothing here touches a product repo.
 //
 //   <home>/marketplaces/<marketplace>/                   the marketplace's git clone, made by the operator (as a team's)
 //   <home>/plugins/<marketplace>/<name>/<sha256>/        one fetched version of a plugin, by its hash

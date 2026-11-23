@@ -1,4 +1,4 @@
-// design — where a ticket's design review stands (#236; docs/DESIGN.md section 3). In a lane whose lanes entry says
+// design — where a ticket's design review stands (docs/explanation/architecture.md section 3). In a lane whose lanes entry says
 // designReview, the orchestrator runs, after the coordinator writes the spec and its design and before the human's
 // approval:
 //

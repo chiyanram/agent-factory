@@ -1,4 +1,4 @@
-// keys — every settings key, and its class, fixed in code (#229; docs/DESIGN.md section 5 "Settings"). The class says
+// keys — every settings key, and its class, fixed in code (docs/explanation/architecture.md section 5 "Settings"). The class says
 // how the layers combine (resolve.ts):
 //
 //   ladder      the strictest value wins; a lower layer may only climb      (dry run, a policy mode)
