@@ -295,7 +295,7 @@ describe("claudeEnv (ADR-0012 S6)", () => {
     });
   });
 
-  it("turns the CLI's self-update off, so no run updates its CLI mid-run (#902)", () => {
+  it("turns the CLI's self-update off, so no run updates its CLI mid-run", () => {
     expect(claudeEnv({ DISABLE_AUTOUPDATER: "0" }).DISABLE_AUTOUPDATER).toBe("1");
   });
 });

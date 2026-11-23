@@ -895,7 +895,7 @@ const INIT = JSON.stringify({
   claude_code_version: "9.9.9",
 });
 
-describe("a writer run names its CLI, version and model (#902)", () => {
+describe("a writer run names its CLI, version and model", () => {
   it("names one run: the CLI, the model it asked for (default when unset), and what the init event reported", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: `${INIT}\n`, stderr: "" }] });
     const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);

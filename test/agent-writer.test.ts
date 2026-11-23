@@ -50,7 +50,7 @@ function call(tools: readonly string[]): WriterCall {
 }
 
 describe("the writer behind the agent CLI seam (#688)", () => {
-  it("turns the CLI's self-update off and names its CLI (#902)", () => {
+  it("turns the CLI's self-update off and names its CLI", () => {
     const writer = openAgentCli({ env: {} }).writer;
     expect(writer.env.DISABLE_AUTOUPDATER).toBe("1");
     expect(writer.name).toBe("claude");

@@ -174,7 +174,7 @@ describe("the design review's runs (#236)", () => {
     });
   });
 
-  it("names each run's CLI, the model it asked for, and what its init event reported, a failed run's too (#902)", async () => {
+  it("names each run's CLI, the model it asked for, and what its init event reported, a failed run's too", async () => {
     const init = { type: "system", subtype: "init", model: "opus-ran", claude_code_version: "9.9.9" };
     const stream = `${JSON.stringify(init)}\n{"type":"result"}\n`;
     const streaming: Model = async (run) => {

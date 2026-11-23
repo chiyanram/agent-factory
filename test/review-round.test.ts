@@ -1091,7 +1091,7 @@ describe("the review step keeps each pass's stream as its trace (#487)", () => {
     }
   });
 
-  it("names each run's part, CLI, asked model and the version and model its init event reported (#902)", async () => {
+  it("names each run's part, CLI, asked model and the version and model its init event reported", async () => {
     const logic = { ...FINDING, kind: "logic", axis: "spec", rule: "correctness", finding: "AC1 not met", line: 2 };
     const m = model([findAnswer([FINDING, logic]), verdicts([]), verdicts([])], []);
     const asked: string[] = [];

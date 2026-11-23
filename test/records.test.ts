@@ -54,7 +54,7 @@ describe("the torn-line set-aside", () => {
   });
 });
 
-describe("what a run record names: the CLI, its version and the model (#902)", () => {
+describe("what a run record names: the CLI, its version and the model", () => {
   const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
   const file = () => join(home, "runs", "ledger", "PROJ-1.jsonl");
   const at = "2026-11-23T09:00:00Z";

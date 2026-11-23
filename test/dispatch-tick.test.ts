@@ -909,7 +909,7 @@ describe("tick", () => {
     expect(summary.spent).toEqual({ usd: 0.3, tokens: 900 });
   });
 
-  it("a writer run's started line names its CLI and asked model, and its end line the run (#902)", async () => {
+  it("a writer run's started line names its CLI and asked model, and its end line the run", async () => {
     await approved();
     const runs = [{ cli: "claude", asked: "default", version: "9.9.9", model: "claude-model-id" }];
     const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, runs };
@@ -936,7 +936,7 @@ describe("tick", () => {
     });
   });
 
-  it("a parked writer run names the run on its parked line (#902)", async () => {
+  it("a parked writer run names the run on its parked line", async () => {
     await approved();
     const runs = [{ cli: "claude", asked: "default", version: "9.9.9" }];
     const parked = { until: "unknown", said: "limit" };
@@ -951,7 +951,7 @@ describe("tick", () => {
     expect(events.find((e) => e.kind === "parked")).toMatchObject({ runs });
   });
 
-  it("a writer run that fails after it ran names the run on its spent line (#902)", async () => {
+  it("a writer run that fails after it ran names the run on its spent line", async () => {
     await approved();
     const runs = [{ cli: "claude", asked: "default" }];
     const steps: Steps = {
@@ -1438,7 +1438,7 @@ describe("tick", () => {
     });
   });
 
-  it("names the CLI and asked model on a model run's started line, and each run on its end line (#902)", async () => {
+  it("names the CLI and asked model on a model run's started line, and each run on its end line", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
     const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
@@ -1474,7 +1474,7 @@ describe("tick", () => {
     expect(events.find((e) => e.kind === "review-ended")).toMatchObject({ runs });
   });
 
-  it("names the runs of a failed review round on its spent line (#902)", async () => {
+  it("names the runs of a failed review round on its spent line", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
     const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
@@ -2517,7 +2517,7 @@ describe("the design review and the cleanup run (#236)", () => {
     return log;
   };
 
-  it("a design run's started line names its CLI and asked model, and its design-ended line the run (#902)", async () => {
+  it("a design run's started line names its CLI and asked model, and its design-ended line the run", async () => {
     spec("feature");
     await started();
     const base = designSteps([]);
