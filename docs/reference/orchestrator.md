@@ -88,6 +88,31 @@ and verify passes still read `prompts/review-find.md` and `prompts/review-verify
 cards: they and `prompts/eval-judge.md` stay until the automated review's eval has a baseline
 (`scripts/check-eval-proof.ts`).
 
+## What a run record names
+
+Each model run's record names the agent CLI that ran it, the CLI's version and the model (`src/core/agent/ran.ts`).
+A model run is an implementer run (any build run), an automated review round, or a design review's design-reviewer or
+verify run; a ready check and the local verifier run no model, so their lines name none of this.
+
+- The `started` line names `cli` and `asks`: the model each part of the run asked for. An implementer run names
+  `{"writer": <id>}`, or `default` when `FACTORY_WRITER_MODEL` is unset; a review round names its three settings,
+  `{"find", "rule", "logic"}`; a design run names `{"design": <id>}`.
+- The end line (`writer-ended`, `review-ended`, `design-ended`, `spent` or `parked`) names `runs`: one entry per model
+  run, each with `cli`, `asked`, and the `version` and `model` the CLI's own init event reported
+  (`claude_code_version` and `model`). A review round's entries also name their `part`: the finder's lens, or
+  `verify` for a verify run, one per kind of finding, so a round can hold two.
+- A run whose stream has no init event keeps `cli` and `asked` and has no `version` or `model`: read that as
+  unreported, never as a guess. A run that died before its end line keeps its init event only in its trace.
+- Every Claude run starts with `DISABLE_AUTOUPDATER=1`, so no run updates its CLI mid-run.
+
+The fields are optional. A line without them reads as before, and a value of the wrong shape is dropped on read, not
+failed, since no count, cap or decision reads them. `board`, `usage` and every other print show none of them yet.
+
+**Rollback:** nothing to delete: older code reads past `cli`, `asks` and `runs`.
+
+**Today:** only Claude runs name these. A Copilot run's `-s` output has no init event, so it records no version or
+model until #697 turns that run on.
+
 ## Answers
 
 A `[writer] OPEN:` note asks one numbered round, each question with its lettered choices (one marked recommended) or

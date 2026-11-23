@@ -40,6 +40,7 @@ import { keepLeft } from "../left.js";
 import { readTools, TARGET_REF, toolLines } from "./tools.js";
 import { scopesOf } from "./scope.js";
 import type { ClaudeWriter } from "../agent/claude-writer.js";
+import { DEFAULT_MODEL, runsField, type RunNamed } from "../agent/ran.js";
 import { knownFor, type Known } from "../onboard/known.js";
 import { knowledgeLines, runPrompt, type RunMode } from "./prompt.js";
 import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js";
@@ -101,6 +102,7 @@ export type WriterOut = {
   readonly why?: string;
   readonly output?: string;
   readonly trace?: string;
+  readonly runs?: readonly RunNamed[];
 };
 
 function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
@@ -494,7 +496,15 @@ async function inClone(
       ? await finished(setup, input, p, { clone: clone.value, ended: ended.value, mode: work.mode })
       : ended;
   const out = spentOn(await withOutput(setup, input, ended, withStale(withCard(result, work), known)), ended);
-  return afterRun(input, clone.value.dir, out, ended);
+  return withRuns(await afterRun(input, clone.value.dir, out, ended), ended);
+}
+
+function withRuns(
+  out: Result<WriterOut> | FailedSpent,
+  ended: Result<Ended> | FailedSpent,
+): Result<WriterOut> | FailedSpent {
+  const runs = runsField(ended.kind === "ok" ? ended.value.runs : "runs" in ended ? ended.runs : undefined);
+  return out.kind === "ok" ? { kind: "ok", value: { ...out.value, ...runs } } : { ...out, ...runs };
 }
 
 async function afterRun(
@@ -758,8 +768,10 @@ export function writerStep(setup: Result<WriterSetup>): Steps["writer"] {
     return { kind: "unavailable", reason: setup.reason };
   }
   const s = setup.value;
+  const model = s.settings.claude.model;
   return {
     kind: "available",
+    named: { cli: s.agent.name, asks: { writer: model === "" ? DEFAULT_MODEL : model } },
     run: (input) => runIn(s, input),
     folder: () => runFolder(s.box),
     keep: keepLeft({

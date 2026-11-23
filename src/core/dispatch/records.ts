@@ -20,6 +20,10 @@
 // A writer "ended" line names the run's trace, a plain file name in <ticket>/ (trace.ts); a "spent" line names
 // the failed run's traces.
 //
+// A model run's "started" line names its CLI and the model it asked for (cli, asks); its end line (ended, "spent",
+// "parked", "design-ended") names each run's CLI, asked model, and the version and model the CLI reported (runs). A
+// value of the wrong shape there is dropped, not failed, since no count, cap or decision reads it (agent/ran.ts).
+//
 // A design review runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
 // a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
 // findings or what the verify pass kept, and its spend, whether it finished or failed. design.ts reads them per hashes.
@@ -50,6 +54,7 @@ import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
 import type { Lane as TurnLane } from "./next-step.js";
 import { prop, codeOf } from "../field.js";
+import { asksOf, runsField, runsOf, type Asks, type RunNamed } from "../agent/ran.js";
 import type { HeldLock } from "../lock.js";
 
 export type Phase = "writer" | "ready" | "review" | "verify" | "design-review" | "design-verify" | "onboard";
@@ -121,6 +126,8 @@ export type Event =
       readonly head: string;
       readonly plugins?: readonly PluginHash[];
       readonly folder?: string;
+      readonly cli?: string;
+      readonly asks?: Asks;
     }
   | {
       readonly at: string;
@@ -139,6 +146,7 @@ export type Event =
       readonly why?: string;
       readonly output?: string;
       readonly trace?: string;
+      readonly runs?: readonly RunNamed[];
     }
   | {
       readonly at: string;
@@ -172,6 +180,7 @@ export type Event =
       readonly citesNotFound?: number;
       readonly found?: FoundByRule;
       readonly traces?: readonly string[];
+      readonly runs?: readonly RunNamed[];
     }
   | {
       readonly at: string;
@@ -182,6 +191,7 @@ export type Event =
       readonly copilot?: CopilotRuns;
       readonly split?: RoundSpend;
       readonly traces?: readonly string[];
+      readonly runs?: readonly RunNamed[];
     }
   | {
       readonly at: string;
@@ -194,6 +204,7 @@ export type Event =
       readonly spend?: Spend;
       readonly copilot?: CopilotRuns;
       readonly trace?: string;
+      readonly runs?: readonly RunNamed[];
     }
   | {
       readonly at: string;
@@ -212,6 +223,7 @@ export type Event =
       readonly lane?: Lane;
       readonly planned?: readonly string[];
       readonly trace?: string;
+      readonly runs?: readonly RunNamed[];
     }
   | {
       readonly at: string;
@@ -312,7 +324,17 @@ function startedOf(raw: unknown, at: string): Event | Bad {
   if (phase === BAD || mode === BAD || head === BAD) {
     return BAD;
   }
-  return { at, kind: "started", phase, mode, head, ...pluginsOf(raw), ...folderOf(raw) };
+  return { at, kind: "started", phase, mode, head, ...pluginsOf(raw), ...folderOf(raw), ...namedOf(raw) };
+}
+
+function namedOf(raw: unknown): { readonly cli?: string; readonly asks?: Asks } {
+  const cli = prop(raw, "cli");
+  const asks = asksOf(prop(raw, "asks"));
+  return { ...(typeof cli === "string" ? { cli } : {}), ...(asks === undefined ? {} : { asks }) };
+}
+
+function runsIn(raw: unknown): { readonly runs?: readonly RunNamed[] } {
+  return runsField(runsOf(prop(raw, "runs")));
 }
 
 function pluginsOf(raw: unknown): { readonly plugins?: readonly PluginHash[] } {
@@ -429,7 +451,7 @@ function spentOf(raw: unknown, at: string): Event | Bad {
     return BAD;
   }
   const extras = spentExtras(raw);
-  return spend === BAD || extras === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...extras };
+  return spend === BAD || extras === BAD ? BAD : { at, kind: "spent", phase, head, spend, ...extras, ...runsIn(raw) };
 }
 
 function spentExtras(raw: unknown): Pick<Extract<Event, { kind: "spent" }>, "split" | "traces" | "copilot"> | Bad {
@@ -580,7 +602,7 @@ export function spentAndTrace(
 function parkedOf(raw: unknown, at: string): Event | Bad {
   const parts = parkedParts(raw);
   const extras = parkedExtras(raw);
-  return parts === BAD || extras === BAD ? BAD : { at, kind: "parked", ...parts, ...extras };
+  return parts === BAD || extras === BAD ? BAD : { at, kind: "parked", ...parts, ...extras, ...runsIn(raw) };
 }
 
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
@@ -590,7 +612,7 @@ function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const extras = writerExtras(raw);
   return mode === BAD || outcome === BAD || parts === BAD || extras === BAD
     ? BAD
-    : { at, kind: "writer-ended", mode, outcome, ...parts, ...extras };
+    : { at, kind: "writer-ended", mode, outcome, ...parts, ...extras, ...runsIn(raw) };
 }
 
 type DesignParts = Pick<Extract<Event, { kind: "design-ended" }>, "step" | "spec" | "design" | "outcome" | "why">;
@@ -619,7 +641,7 @@ function designEndedOf(raw: unknown, at: string): Event | Bad {
   }
   return findings === undefined || kept === undefined
     ? BAD
-    : { at, kind: "design-ended", ...parts, findings, kept, ...extras };
+    : { at, kind: "design-ended", ...parts, findings, kept, ...extras, ...runsIn(raw) };
 }
 
 function designExtras(raw: unknown): (ReturnType<typeof writerExtras> & DesignOptional) | Bad {
@@ -882,7 +904,7 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
   return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
     ? BAD
-    : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good) };
+    : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good), ...runsIn(raw) };
 }
 
 function optionalText(raw: unknown, name: "asked" | "chosen"): { readonly [k: string]: string } | "bad" {

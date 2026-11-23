@@ -55,6 +55,7 @@ import {
   type Stream,
 } from "../dispatch/spend.js";
 import type { TraceSink } from "../dispatch/trace.js";
+import { DEFAULT_MODEL, runsField, type Reported, type RunNamed } from "../agent/ran.js";
 
 export type Completion = { readonly pollMs: number; readonly windowMs: number; readonly graceMs: number };
 
@@ -82,6 +83,7 @@ export type Ended = {
   readonly tip: string;
   readonly patch: string;
   readonly spend: Spend | "unmeasured";
+  readonly runs: readonly RunNamed[];
   readonly pr?: string;
   readonly said: string;
   readonly output: readonly string[];
@@ -174,6 +176,7 @@ export function quietAfter(input: {
 type InBox = {
   readonly end: RunEnd;
   readonly spend: Spend | "unmeasured";
+  readonly reported?: Reported;
   readonly said: string;
   readonly output: readonly string[];
   readonly limit: UsageLimit;
@@ -213,7 +216,13 @@ async function inBox(run: WriterRun): Promise<InBox> {
   });
   const end = await watched(run, running, heard);
   const stopped = await stoppedEnd(run, session.value, running, { end, heard });
-  return { end: stopped, spend: streamSpend(heard.stream), ...lastWords(end, heard), limit: limitOf(run, end, heard) };
+  return {
+    end: stopped,
+    spend: streamSpend(heard.stream),
+    reported: heard.stream.init ?? {},
+    ...lastWords(end, heard),
+    limit: limitOf(run, end, heard),
+  };
 }
 
 function limitOf(run: WriterRun, end: Watched, heard: Heard): UsageLimit {
@@ -388,18 +397,25 @@ async function outcomeOf(run: WriterRun, end: RunEnd, limit: UsageLimit): Promis
   });
 }
 
+function runsOf(run: WriterRun, reported: Reported | undefined): readonly RunNamed[] {
+  const asked = run.call.claude.model === "" ? DEFAULT_MODEL : run.call.claude.model;
+  return reported === undefined ? [] : [{ cli: run.agent.name, asked, ...reported }];
+}
+
 export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedSpent> {
-  const { end, spend, said: words, output, limit } = await inBox(run);
+  const { end, spend, reported, said: words, output, limit } = await inBox(run);
+  const runs = runsOf(run, reported);
   const outcome = await outcomeOf(run, end, limit);
   const pr = await prOf(run, outcome);
   const tip = await committed(run);
   const paths = tip.kind === "ok" ? await changedPaths(run, tip.value.tip) : tip;
   if (tip.kind === "failed" || paths.kind === "failed") {
-    return spentFailure(`cannot read what the run committed: ${reasonOf(tip, paths)}`, spend);
+    const failed = spentFailure(`cannot read what the run committed: ${reasonOf(tip, paths)}`, spend);
+    return { ...failed, ...runsField(runs) };
   }
   const final = scoped(outcome, outsideScope(paths.value, run.scopes), run.scopes);
   return {
     kind: "ok",
-    value: { outcome: final, ending: endingOf(end), spend, said: words, output, ...pr, ...tip.value },
+    value: { outcome: final, ending: endingOf(end), spend, runs, said: words, output, ...pr, ...tip.value },
   };
 }

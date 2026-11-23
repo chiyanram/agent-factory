@@ -160,7 +160,7 @@ function prompts(env: NodeJS.ProcessEnv): ReviewSetup["prompts"] {
   };
 }
 
-function models(env: NodeJS.ProcessEnv): ReviewSetup["models"] {
+export function reviewModels(env: NodeJS.ProcessEnv): ReviewSetup["models"] {
   return {
     find: settingOf(env, MODEL_KEYS.find) ?? REVIEW_MODELS.find,
     rule: settingOf(env, MODEL_KEYS.rule) ?? REVIEW_MODELS.rule,
@@ -195,7 +195,7 @@ export function reviewSetup(input: {
     recordsDir: recordsDirOf(p.repo),
     runsDir: join(p.home, "review-runs"),
     prompts: prompts(env),
-    models: models(env),
+    models: reviewModels(env),
     maxUsd: p.maxUsd,
     limits: p.limits,
     model: input.model ?? agent.readOnly,

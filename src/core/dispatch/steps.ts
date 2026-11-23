@@ -3,6 +3,7 @@
 // (writer/step.ts, ready/steps.ts, review/step.ts, design/step.ts) and import this file, not the pass.
 
 import type { Acted, FoundByRule } from "../review/acted-on.js";
+import type { Named, RunNamed } from "../agent/ran.js";
 import type { DesignFinding, Kept } from "../design/findings.js";
 import type { Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
@@ -21,6 +22,7 @@ export type Step<I, O, F = never, X = unknown> =
   | ({ readonly kind: "available"; readonly run: (input: I) => Promise<Result<O> | F> } & X);
 
 export type WriterExtras = {
+  readonly named?: Named;
   readonly folder: () => Promise<Result<string>>;
   readonly keep?: (input: KeptInput) => Promise<Result<KeptRun>>;
 };
@@ -32,10 +34,12 @@ export type DesignInput = {
   readonly design: string;
   readonly earlier?: readonly EarlierRound[];
 };
-export type DesignRan<T> = { readonly card: string; readonly spend?: Spend; readonly trace?: string } & (
-  | ({ readonly kind: "done" } & T)
-  | { readonly kind: "failed"; readonly why: string; readonly final?: true }
-);
+export type DesignRan<T> = {
+  readonly card: string;
+  readonly spend?: Spend;
+  readonly trace?: string;
+  readonly runs?: readonly RunNamed[];
+} & (({ readonly kind: "done" } & T) | { readonly kind: "failed"; readonly why: string; readonly final?: true });
 export type ReadyFacts = { readonly criteria: readonly string[]; readonly oneWayDoor: readonly string[] };
 export type Steps = {
   readonly writer: Step<
@@ -54,6 +58,7 @@ export type Steps = {
       readonly why?: string;
       readonly output?: string;
       readonly trace?: string;
+      readonly runs?: readonly RunNamed[];
     },
     FailedSpent,
     WriterExtras
@@ -66,6 +71,7 @@ export type Steps = {
     | Unavailable
     | {
         readonly kind: "available";
+        readonly named?: Named;
         readonly worstUsd?: () => Promise<Result<number | "unbounded">>;
         readonly run: (input: RunInput) => Promise<
           | Result<{
@@ -77,15 +83,23 @@ export type Steps = {
               readonly citesNotFound?: number;
               readonly found?: FoundByRule;
               readonly traces?: readonly string[];
+              readonly runs?: readonly RunNamed[];
             }>
           | FailedSpent
         >;
       };
   readonly verify: Step<RunInput, { readonly passed: boolean }>;
-  readonly designReview: Step<DesignInput, DesignRan<{ readonly findings: readonly DesignFinding[] }>>;
+  readonly designReview: Step<
+    DesignInput,
+    DesignRan<{ readonly findings: readonly DesignFinding[] }>,
+    never,
+    { readonly named?: Named }
+  >;
   readonly designVerify: Step<
     DesignInput & { readonly findings: readonly DesignFinding[] },
-    DesignRan<{ readonly kept: readonly Kept[] }>
+    DesignRan<{ readonly kept: readonly Kept[] }>,
+    never,
+    { readonly named?: Named }
   >;
 };
 

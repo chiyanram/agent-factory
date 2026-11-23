@@ -174,6 +174,30 @@ describe("the design review's runs (#236)", () => {
     });
   });
 
+  it("names each run's CLI, the model it asked for, and what its init event reported, a failed run's too", async () => {
+    const init = { type: "system", subtype: "init", model: "opus-ran", claude_code_version: "9.9.9" };
+    const stream = `${JSON.stringify(init)}\n{"type":"result"}\n`;
+    const streaming: Model = async (run) => {
+      const ran = await model([], [{ findings: [FINDING] }])(run);
+      return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, stream } } : ran;
+    };
+    const steps = designSteps({ kind: "ok", value: setup(streaming) });
+    expect(steps.designReview).toMatchObject({ named: { cli: "claude", asks: { design: "opus" } } });
+    expect(steps.designVerify).toMatchObject({ named: { cli: "claude", asks: { design: "opus" } } });
+    if (steps.designReview.kind !== "available") throw new Error("unavailable");
+    expect(await steps.designReview.run(input())).toMatchObject({
+      kind: "ok",
+      value: { runs: [{ cli: "claude", asked: "opus", version: "9.9.9", model: "opus-ran" }] },
+    });
+    const failing: Model = async () => ({ kind: "failed", reason: "error_max_budget_usd", answer: {} });
+    const failed = designSteps({ kind: "ok", value: setup(failing) });
+    if (failed.designReview.kind !== "available") throw new Error("unavailable");
+    expect(await failed.designReview.run(input())).toMatchObject({
+      kind: "ok",
+      value: { kind: "failed", runs: [{ cli: "claude", asked: "opus" }] },
+    });
+  });
+
   it("a model that streams nothing keeps no trace", async () => {
     const steps = designSteps({ kind: "ok", value: setup(model([], [{ findings: [] }])) });
     if (steps.designReview.kind !== "available") throw new Error("unavailable");

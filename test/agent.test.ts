@@ -190,7 +190,7 @@ describe("the Claude adapter's read-only run", () => {
     const [call] = calls;
     expect(call?.bin).toBe("/opt/claude");
     expect(call?.cwd).toBe("/x");
-    expect(call?.env).toEqual({ PATH: "/bin", HOME: "/h", AGENT_FACTORY_MODEL_RUN: "1" });
+    expect(call?.env).toEqual({ PATH: "/bin", HOME: "/h", AGENT_FACTORY_MODEL_RUN: "1", DISABLE_AUTOUPDATER: "1" });
     expect(call?.args).toEqual([
       "-p",
       "-n",
@@ -284,11 +284,19 @@ describe("claudeEnv (ADR-0012 S6)", () => {
       PATH: "/bin",
       ANTHROPIC_MODEL: "m",
       AGENT_FACTORY_MODEL_RUN: "1",
+      DISABLE_AUTOUPDATER: "1",
     });
   });
 
   it("marks the run as a model run, so the door seam refuses a person's word from it (#713)", () => {
-    expect(claudeEnv({ AGENT_FACTORY_MODEL_RUN: "" })).toEqual({ AGENT_FACTORY_MODEL_RUN: "1" });
+    expect(claudeEnv({ AGENT_FACTORY_MODEL_RUN: "" })).toEqual({
+      AGENT_FACTORY_MODEL_RUN: "1",
+      DISABLE_AUTOUPDATER: "1",
+    });
+  });
+
+  it("turns the CLI's self-update off, so no run updates its CLI mid-run", () => {
+    expect(claudeEnv({ DISABLE_AUTOUPDATER: "0" }).DISABLE_AUTOUPDATER).toBe("1");
   });
 });
 

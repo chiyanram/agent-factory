@@ -909,6 +909,65 @@ describe("tick", () => {
     expect(summary.spent).toEqual({ usd: 0.3, tokens: 900 });
   });
 
+  it("a writer run's started line names its CLI and asked model, and its end line the run", async () => {
+    await approved();
+    const runs = [{ cli: "claude", asked: "default", version: "9.9.9", model: "claude-model-id" }];
+    const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, runs };
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        named: { cli: "claude", asks: { writer: "default" } },
+        folder: noRunFolder,
+        run: async () => ({ kind: "ok", value }),
+      },
+    };
+    await tick(setup({ team, open: [], merged: [] }, [], { steps }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: [
+        { kind: "begun" },
+        { kind: "approved" },
+        { kind: "turn", to: "factory" },
+        { kind: "started", phase: "writer", cli: "claude", asks: { writer: "default" } },
+        { kind: "writer-ended", runs },
+      ],
+    });
+  });
+
+  it("a parked writer run names the run on its parked line", async () => {
+    await approved();
+    const runs = [{ cli: "claude", asked: "default", version: "9.9.9" }];
+    const parked = { until: "unknown", said: "limit" };
+    const value = { head: H, outcome: "parked" as const, parked, patch: "", evidence: [], hung: false, runs };
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "ok", value }) },
+    };
+    await tick(setup({ team, open: [], merged: [] }, [], { steps }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    const events = read.kind === "ok" ? read.value : [];
+    expect(events.find((e) => e.kind === "parked")).toMatchObject({ runs });
+  });
+
+  it("a writer run that fails after it ran names the run on its spent line", async () => {
+    await approved();
+    const runs = [{ cli: "claude", asked: "default" }];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      writer: {
+        kind: "available",
+        folder: noRunFolder,
+        run: async () => ({ kind: "failed", reason: "the push failed", spend: { usd: 0.3, tokens: 9 }, runs }),
+      },
+    };
+    await tick(setup({ team, open: [], merged: [] }, [], { steps }));
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    const events = read.kind === "ok" ? read.value : [];
+    expect(events.find((e) => e.kind === "spent")).toMatchObject({ runs });
+  });
+
   it("a writer run's end names its trace, and the record reads it back (#487)", async () => {
     await approved();
     const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
@@ -1377,6 +1436,63 @@ describe("tick", () => {
       found: { CR1: { act_on: 1 }, logic: { noted: 2 } },
       traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
     });
+  });
+
+  it("names the CLI and asked model on a model run's started line, and each run on its end line", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    const runs = [
+      { part: "errors", cli: "claude", asked: "find-id", version: "9.9.9", model: "find-id" },
+      { part: "verify", cli: "claude", asked: "rule-id" },
+    ];
+    const asks = { find: "find-id", rule: "rule-id", logic: "logic-id" };
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      ready: {
+        kind: "available",
+        run: async () => ({ kind: "ok", value: { passed: true, why: "", human: false } }),
+      },
+      review: {
+        kind: "available",
+        named: { cli: "claude", asks },
+        run: async () => ({ kind: "ok", value: { actOn: 0, spend: { usd: 0.3, tokens: 40 }, runs } }),
+      },
+    };
+    const pass = (now: string) =>
+      tick(setup({ team, open: [open()], merged: [] }, [], { steps, now: () => Date.parse(now) }));
+    await pass("2026-11-07T10:00:00Z");
+    await pass("2026-11-07T10:01:00Z");
+    const read = await readRecords(where);
+    const events = read.kind === "ok" ? read.value : [];
+    const startedLine = (phase: string) => events.find((e) => e.kind === "started" && e.phase === phase);
+    expect(startedLine("ready")).toBeDefined();
+    expect(startedLine("ready")).not.toHaveProperty("cli");
+    expect(startedLine("ready")).not.toHaveProperty("asks");
+    expect(startedLine("review")).toMatchObject({ cli: "claude", asks });
+    expect(events.find((e) => e.kind === "review-ended")).toMatchObject({ runs });
+  });
+
+  it("names the runs of a failed review round on its spent line", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    const runs = [{ part: "errors", cli: "claude", asked: "find-id" }];
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: {
+        kind: "available",
+        run: async () => ({ kind: "failed", reason: "a pass failed", spend: { usd: 0.1, tokens: 5 }, runs }),
+      },
+    };
+    await tick(setup({ team, open: [open()], merged: [] }, [], { steps }));
+    const read = await readRecords(where);
+    const events = read.kind === "ok" ? read.value : [];
+    expect(events.find((e) => e.kind === "started" && e.phase === "review")).not.toHaveProperty("cli");
+    expect(events.find((e) => e.kind === "spent")).toMatchObject({ phase: "review", runs });
   });
 
   it("keeps a run's spend; a line from before #131 has none; a spend that is not two amounts fails the read", async () => {
@@ -2400,6 +2516,34 @@ describe("the design review and the cleanup run (#236)", () => {
     );
     return log;
   };
+
+  it("a design run's started line names its CLI and asked model, and its design-ended line the run", async () => {
+    spec("feature");
+    await started();
+    const base = designSteps([]);
+    const review = base.designReview;
+    if (review.kind !== "available") throw new Error("unavailable");
+    const runs = [{ cli: "claude", asked: "opus", version: "9.9.9", model: "opus-ran" }];
+    const steps: Steps = {
+      ...base,
+      designReview: {
+        kind: "available",
+        named: { cli: "claude", asks: { design: "opus" } },
+        run: async (input) => {
+          const ran = await review.run(input);
+          return ran.kind === "ok" ? { kind: "ok", value: { ...ran.value, runs } } : ran;
+        },
+      },
+    };
+    await pass(steps, "2026-11-07T09:00:00Z");
+    const read = await readRecords(where());
+    const events = read.kind === "ok" ? read.value : [];
+    expect(events.find((e) => e.kind === "started" && e.phase === "design-review")).toMatchObject({
+      cli: "claude",
+      asks: { design: "opus" },
+    });
+    expect(events.find((e) => e.kind === "design-ended")).toMatchObject({ runs });
+  });
 
   it("a feature-lane ticket: coordinator's spec → design review → verify pass → posted → waits for the approval → build", async () => {
     const text = spec("feature");

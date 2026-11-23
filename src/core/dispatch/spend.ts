@@ -6,10 +6,13 @@
 // A run that ends with no result event (a stall, a timeout, a box that failed) reports nothing: its record carries no
 // spend, and `usage` counts it as unmeasured, never as free.
 //
+// The stream also keeps the CLI's first init event, which names the CLI's version and the model it ran (agent/ran.ts).
+//
 // RunKind and RUN_KINDS live here, a leaf, so the records parser can import them with no import cycle.
 
 import { NO_WINDOWS, windowsOf, type Windows } from "../agent/usage-limit.js";
 import { prop } from "../field.js";
+import { initIn, type Reported, type RunNamed } from "../agent/ran.js";
 
 export type Spend = { readonly usd: number; readonly tokens: number };
 
@@ -48,6 +51,7 @@ export type FailedSpent = {
   readonly spend?: Spend;
   readonly split?: RoundSpend;
   readonly traces?: readonly string[];
+  readonly runs?: readonly RunNamed[];
 };
 
 export function spentFailure(reason: string, spend: Spend | "unmeasured"): FailedSpent {
@@ -92,7 +96,12 @@ export function addRoundSpend(round: RoundSpend, part: RoundPart, spend: Spend):
 
 const MOST_LINE_CHARS = 1024 * 1024;
 
-export type Stream = { readonly partial: string; readonly result: unknown; readonly windows: Windows };
+export type Stream = {
+  readonly partial: string;
+  readonly result: unknown;
+  readonly windows: Windows;
+  readonly init?: Reported;
+};
 
 export const NO_STREAM: Stream = { partial: "", result: undefined, windows: NO_WINDOWS };
 
@@ -117,7 +126,13 @@ export function streamOf(stream: Stream, chunk: string): Stream {
     .filter((l) => l.includes('"rate_limit_event"'))
     .map(parsed)
     .reduce(windowsOf, stream.windows);
-  return { partial: partial.length > MOST_LINE_CHARS ? "" : partial, result, windows };
+  const kept = partial.length > MOST_LINE_CHARS ? "" : partial;
+  return { partial: kept, result, windows, ...initField(stream.init, lines) };
+}
+
+function initField(init: Reported | undefined, lines: readonly string[]): { readonly init?: Reported } {
+  const first = init ?? lines.map(initIn).find((e) => e !== undefined);
+  return first === undefined ? {} : { init: first };
 }
 
 export function streamSpend(stream: Stream): Spend | "unmeasured" {

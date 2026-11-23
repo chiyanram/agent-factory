@@ -12,7 +12,8 @@
 // Never resumed, never continued: every pass is a new session. The host keeps the run's time: past its limit the CLI
 // and everything it started are stopped, and the run answers failed with the reason (ADR-0012 S7).
 //
-// The CLI gets only the environment it needs (CLAUDE_ENV): no git host token, no FACTORY_* (ADR-0012 S2, S6).
+// The CLI gets only the environment it needs (CLAUDE_ENV): no git host token, no FACTORY_* (ADR-0012 S2, S6). Every
+// run it starts has DISABLE_AUTOUPDATER=1, so no run updates its CLI mid-run and the version its record names holds.
 //
 // A CLI that answered and exited stands, even when a process it left holds its output open past the limit. A sessions
 // list that does not come in time fails, so a caller never reads "unknown" as "none".
@@ -112,7 +113,7 @@ export function claudeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     ([name, value]) =>
       value !== undefined && (CLAUDE_ENV.has(name) || name.startsWith("LC_") || name.startsWith("ANTHROPIC_")),
   );
-  return { ...Object.fromEntries(kept), ...MODEL_RUN_MARK };
+  return { ...Object.fromEntries(kept), ...MODEL_RUN_MARK, DISABLE_AUTOUPDATER: "1" };
 }
 
 export type ClaudeSetup = {

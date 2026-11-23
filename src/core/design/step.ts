@@ -31,6 +31,8 @@ import type { Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import { spendOf, type Spend } from "../dispatch/spend.js";
 import { keepTrace } from "../dispatch/trace.js";
+import { namedIn, runsField, type RunNamed } from "../agent/ran.js";
+import { openAgentCli } from "../agent/index.js";
 import { inputsOf, readCard, type Card, type Part, type Role } from "../process/cards.js";
 import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
@@ -243,7 +245,7 @@ async function inFolder<T>(setup: DesignSetup, work: (run: string) => Promise<Ra
   }
 }
 
-type Traced = { readonly ran: ModelResult; readonly trace?: string };
+type Traced = { readonly ran: ModelResult; readonly trace?: string; readonly runs: readonly RunNamed[] };
 
 async function modelRun(
   setup: DesignSetup,
@@ -255,7 +257,13 @@ async function modelRun(
   const name = call.kind === "design-review" ? `design-reviewer-${call.ticket}` : `verify-pass-${call.ticket}`;
   const limit = call.kind === "design-review" ? setup.limits.review : setup.limits.verify;
   const ran = await modelCall(setup, card, run, { schema: call.schema, name, limit }, again);
-  return { ran, ...(await tracedRun(setup, call, ran.kind === "ok" ? ran.value.stream : ran.stream)) };
+  const stream = ran.kind === "ok" ? ran.value.stream : ran.stream;
+  const runs = [{ cli: cliOf(setup), asked: setup.modelName, ...namedIn(stream) }];
+  return { ran, runs, ...(await tracedRun(setup, call, stream)) };
+}
+
+function cliOf(setup: DesignSetup): string {
+  return openAgentCli({ env: setup.env }).name;
 }
 
 async function tracedRun(
@@ -302,6 +310,7 @@ function answered<T>(card: Card, traced: Traced, read: (output: unknown) => Resu
     card: card.sha256,
     ...(spend === undefined ? {} : { spend }),
     ...(traced.trace === undefined ? {} : { trace: traced.trace }),
+    ...runsField(traced.runs),
   };
   if (ran.kind === "failed") {
     return { ...base, kind: "failed", why: `the model run failed: ${ran.reason}` };
@@ -402,8 +411,9 @@ export function designSteps(setup: Result<DesignSetup>): Pick<Steps, "designRevi
     const off = { kind: "unavailable", reason: setup.reason } as const;
     return { designReview: off, designVerify: off };
   }
+  const named = { cli: cliOf(setup.value), asks: { design: setup.value.modelName } };
   return {
-    designReview: { kind: "available", run: (input) => review(setup.value, input) },
-    designVerify: { kind: "available", run: (input) => verify(setup.value, input) },
+    designReview: { kind: "available", named, run: (input) => review(setup.value, input) },
+    designVerify: { kind: "available", named, run: (input) => verify(setup.value, input) },
   };
 }

@@ -160,6 +160,7 @@ export function writerSettings(policy: WriterPolicy): FileText {
 }
 
 export type ClaudeWriter = {
+  readonly name: "claude";
   readonly env: Readonly<Record<string, string>>;
   readonly bin: (place: BoxPlace) => string;
   readonly argv: (call: WriterCall, place: BoxPlace) => Argv;
@@ -169,6 +170,7 @@ export type ClaudeWriter = {
 
 export function claudeWriter(bin: string): ClaudeWriter {
   return {
+    name: "claude",
     env: WRITER_ENV,
     bin: (place) => writerBin(bin, place),
     argv: (call, place) => writerArgv(bin, call, place),

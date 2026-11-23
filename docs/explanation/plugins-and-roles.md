@@ -17,7 +17,7 @@ swappable part, are in [Connectors](../reference/connectors.md).
         │                  (read-only) ──▶ claude --plugin-dir; any other run: the engine reads the card and rubrics
         │
         ▼
- run record "started": each plugin and its hash
+ run record "started": each plugin and its hash, the agent CLI and the model it asked for
 ```
 
 - **The engine runs alone.** With no plugin, it uses its built-in lanes, review baseline and role cards
