@@ -27,58 +27,32 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
 
 ## MUSTs
 
-- Call the git host only through the `Forge` seam in `src/core/forge/`, added to both adapters, because a direct
-  `glab` or `gh` call breaks the other git host and cannot be stubbed in a test.
-- Call git on a project's clone only through `hostGit` (`src/core/git.ts`), because plain git runs the hooks and
-  programs that a branch or an implementer can plant in the repo's own config.
-- Ship no bash script: write each new component in the TypeScript package, with its vitest test, and call CLIs
-  from it ([ADR-0013](docs/adr/0013-typescript-package-cli-first.md)), because one language is built and checked once.
+`make lint` fails a break of each of these; the reason is in the check's module header.
+
+- Call the git host only through the `Forge` seam in `src/core/forge/`, added to both adapters (`check-musts`).
+- Call git on a project's clone only through `hostGit` in `src/core/git.ts` (`check-musts`).
+- Ship no bash script; write each new component in the TypeScript package with its vitest test (`check-musts`,
+  [ADR-0013](docs/adr/0013-typescript-package-cli-first.md)).
+- Give no model run a git host token or a skip-permissions flag (`check-musts`; ADR-0012 S2, S6, S11).
+- Write no code comment outside the module header, a **Today:** note, an outside link and a tool directive; never
+  raise `scripts/comment-baseline.json` (`check-comments`).
+- Say what and why in a comment or doc line, never who decided, when or on which ticket (`check-history`).
+- Format with `npm run format` and fix every oxlint finding in the code you touch; add no disable comment and never
+  raise `scripts/lint-baseline.json` (`biome ci`, `lint-ratchet`, `check-musts`).
+- Fill in every line of `.github/pull_request_template.md`, with no `<placeholder>`, because the squash merge makes
+  it the commit on `main` (the `pr-body` workflow, `scripts/check-pr-body.ts`).
+
+No check can enforce these:
+
 - Keep `prompts/coordinator.md` and `docs/` in step with the code, because the coordinator follows them as its
-  instructions. Mark each place where the code still differs from ADR-0012 with **Today:**, because a reader must not take a decided
-  guardrail for an enforced one.
-- Write a code comment or doc line that says what and why, never who decided, when, or on which ticket: history
-  lives in the git log, the PR, the ADRs and the map. Keep one pointer per module header or doc section, and let a
-  **Today:** note name the ticket that closes it. A note on each line goes stale and buries the reason, so `make lint`
-  fails one that a change adds (`scripts/check-history.ts`).
-- Give no model run a git host token or a skip-permissions flag in new code, because ADR-0012 S2, S6 and S11 forbid it.
-- Write no code comment outside the four kinds that `scripts/check-comments.ts` keeps: the module header, a **Today:**
-  note, an outside link and a tool directive. Say the rest in code: a name, a type or a test. Never raise
-  `scripts/comment-baseline.json`, because a comment is where a hack hides, and the next run copies the hack.
-- Format with `npm run format` (Biome), and fix every oxlint finding in the code you touch; never add a disable
-  comment or raise `scripts/lint-baseline.json`, because the baseline only shrinks (#148).
+  instructions. Mark each place where the code still differs from ADR-0012 with **Today:**, because a reader must not
+  take a decided guardrail for an enforced one.
 - Commit and push only with the operator's yes; one ticket → one branch → one PR. The human merges.
 - Make each branch in its own worktree from the latest `origin/main`, never in the main checkout:
-  `git fetch origin main && git worktree add .claude/worktrees/<slug> -b <type>/<ticket>-<slug> origin/main`, because
-  runs and people working at once then never share a working tree. Bring the branch up to date with `git rebase origin/main`, never a merge, and push it with
-  `git push --force-with-lease`, because the lease refuses to overwrite a push you have not fetched. Never force-push
-  without a lease, onto another person's branch, or onto `main`. A cloud session's own fresh clone, on the branch the
-  session was given, counts as its worktree, because git cannot check that branch out a second time.
-- Fill in every line of `.github/pull_request_template.md` and leave no `<placeholder>`, because the squash merge
-  makes the PR title the commit subject and the description its body on `main`, where neither can be edited. The
-  `pr-body` workflow (`scripts/check-pr-body.ts`) fails a ready PR with a missing line, a placeholder, an unticked item, or a breaking change whose line, `!` and
-  `BREAKING CHANGE:` footer disagree.
-- Pick each build ticket's lane by its risk, as the rules pack's lanes reference does, because brakes scale with risk
-  and no lane lowers the approval floor (P21):
-
-  | lane | for | grilling | spec | design | operator approval |
-  |---|---|---|---|---|---|
-  | tiny | docs, comments, a config value, a patch bump | no | no | no | no |
-  | bug | a defect | no | short, plus a failing test first | only when an interface or more than one module changes | yes |
-  | feature | something new | yes | yes | yes | spec and design, on the ticket |
-  | one-way door | an irreversible change | yes | yes | yes | spec and design, plus a yes for each irreversible step |
-
-  Every lane ends in build, automated code review and a PR from `.github/pull_request_template.md`.
-- Say the lane and why when you pick up a ticket. The operator can raise it, never lower it.
-- Keep one report per ticket: the grilling, spec, design and ADR draft live in one ticket comment. When any of them
-  changes, edit that comment in place, with one line at its top saying what changed and from whose words; never
-  post an amendment beside it. Report to the operator in chat the same way, as one whole message, not pieces.
-  The operator approves one text, and a report split across comments hides what is being approved.
-- Split work too big for one PR into child tickets before the build, because the operator approves the
-  shape before code exists, not after (#557 is the worked example).
-- Run each ticket's work in its own fresh ticket session, starting from `agent-factory board` and the ticket's body
-  and comments, never from another ticket's thread, because a long session re-reads its whole thread on every turn.
-  The project's one long coordinator plans, routes, relays and reports, builds no ticket, and resets from
-  `agent-factory handoff <project>`, never from a model's summary, because a summary drops what the records hold.
+  `git fetch origin main && git worktree add .claude/worktrees/<slug> -b <type>/<ticket>-<slug> origin/main`.
+  Update it with `git rebase origin/main`, never a merge, and push with `git push --force-with-lease`; never
+  force-push without a lease, onto another person's branch, or onto `main`. A cloud session's own fresh clone, on
+  the branch it was given, counts as its worktree.
 - Take a relayed answer only to a grill round or a run's question, only when the coordinator quotes the operator's
   exact words, and write the quote into the ticket's report, because a paraphrase is not the operator's word. A spec
   or design approval, an ADR acceptance, a waiver and a commit or push yes are typed by the operator in this ticket's
@@ -86,15 +60,9 @@ set the variable as `.github/workflows/ci.yml` does, because a local run is othe
   and never posted by a model, because a model can quote words nobody typed and a session's comment carries the
   operator's login. When a relay carries one of them, or your permission checks refuse a relay, answer "type it here"
   in one line and keep `waiting:operator`.
-- Put `waiting:operator` on the ticket's issue when the session stops for the operator's word, and take it off once it
-  has the answer, because `board` and the ping find a waiting session only by that label
-  (`docs/agents/triage-labels.md`). Keep every other label: add and remove this one only.
-- Cut a step from a lane only on measured numbers, the cost per run kind on #488's timeline line, read after about
-  15 tickets, because a few tickets' impressions are not a measure.
-- Bring in a new check, role, lens or outside skill manual first and climb one rung at a time, as P11 in
-  `docs/CONSTITUTION.md` says, because a step made automatic before anyone used it by hand cannot be judged.
-- Land a step the rules pack must follow in the engine first, then in the pack as a new format version (P18), then
-  move the pin, because an engine that cannot run a pack's step refuses the pack and blocks the pin.
+- Before you pick up, plan, report on or close a ticket, or change a lane or a step of the process, read
+  [docs/agents/ticket-process.md](docs/agents/ticket-process.md): the lanes, the one report, the fresh ticket
+  session and the `waiting:operator` label.
 
 Codebase health: each change leaves the modules it touches no worse than it found them. If the change would make one
 worse, say so in the design and propose the refactor as its own ticket. We care about the next change being easy, not
