@@ -1,26 +1,29 @@
-// plugin-pin-cli — `agent-factory plugin update <project> <name@marketplace> [<commit>]` (docs/explanation/architecture.md section 5
-// "Plugins": updating is deliberate). It fetches the marketplace's clone (or takes the given commit, and fetches a full
-// commit the clone lacks, #607), copies the plugin into the store by its hash, shows what changes against the pin,
-// then runs config check and reads the process of the project's plugins with the new version in. Only when both pass
-// does it move the pin. The eval set is not run here: `agent-factory eval reviewer` runs it, and spends money.
+// plugin-pin-cli — `agent-factory plugin update <project> <name@marketplace> [<commit>] [--reason <why>]`
+// (docs/explanation/architecture.md section 5 "Plugins": updating is deliberate). It fetches the marketplace's clone
+// (or takes the given commit, and fetches a full commit the clone lacks), copies the plugin into the store by its hash
+// and shows what changes against the pin. Then the eval gate (core/eval/pin-proof.ts, ADR-0020) sizes that change: a
+// change to the review needs a proof that covers it, or the move is refused with the cost of the eval and the command
+// that runs it; a change no eval can prove yet needs the reason the person types. Last it runs config check and reads
+// the process of the project's plugins with the new version in. Only when all pass does it move the pin, with the
+// gate's record. The eval is not run here: `agent-factory eval pin` runs it, and spends money.
 
-import { access } from "node:fs/promises";
 import type { Result } from "./core/forge/api.js";
-import { changedFiles, fetchPlugin, folderCounts, targetCommit, type Fetched } from "./core/process/fetch.js";
+import { evalCaps } from "./core/eval/harness.js";
+import { baseOf, ENGINE_ROOT, gateMove, sizeLines, type Gate } from "./core/eval/pin-proof.js";
+import { estimateLines, planSlice } from "./core/eval/slice.js";
+import { fetchListed, folderCounts, listedRef, type Fetched } from "./core/process/fetch.js";
 import {
+  enginePackPin,
   listedPlugins,
-  marketplaceDir,
   pinnedDirs,
   readPins,
-  storeDir,
-  treeHash,
   writePins,
+  type PackPin,
   type Pin,
   type Pins,
 } from "./core/process/pins.js";
 import { refText, type PluginRef } from "./core/process/plugins.js";
 import { readProcess } from "./core/process/read.js";
-import { plainName } from "./core/spec.js";
 import { checkProblems } from "./settings-cli.js";
 
 export type PinIo = {
@@ -29,6 +32,8 @@ export type PinIo = {
   readonly err: (text: string) => void;
   readonly home: string;
 };
+
+export type PinOptions = { readonly reason?: string; readonly enginePin?: Result<PackPin> };
 
 function fail(io: PinIo, reason: string): number {
   io.err(`agent-factory plugin update: ${reason}\n`);
@@ -41,43 +46,15 @@ function pinLine(pin: Pin | undefined): string {
     : `${pin.commit.slice(0, 12)} ${pin.version || "(no version)"} sha256:${pin.sha256.slice(0, 12)}`;
 }
 
-async function listedRef(io: PinIo, project: string, word: string): Promise<Result<PluginRef>> {
-  if (!plainName(project)) {
-    return { kind: "failed", reason: `${JSON.stringify(project)} is not a plain project name` };
-  }
-  const refs = await listedPlugins({ home: io.home, project, env: io.env });
-  const ref = refs.kind === "ok" ? refs.value.find((r) => refText(r) === word) : undefined;
-  if (refs.kind === "failed") {
-    return refs;
-  }
-  return ref === undefined
-    ? { kind: "failed", reason: `the project ${project} does not list ${JSON.stringify(word)} in "plugins"` }
-    : { kind: "ok", value: ref };
-}
-
-async function fetched(io: PinIo, ref: PluginRef, given: string | undefined): Promise<Result<Fetched>> {
-  const market = marketplaceDir(io.home, ref.marketplace);
-  if (
-    !(await access(market).then(
-      () => true,
-      () => false,
-    ))
-  ) {
-    return { kind: "failed", reason: `no marketplace clone at ${market}: git clone the marketplace there first` };
-  }
-  const commit = await targetCommit(io.env, market, given);
-  return commit.kind === "ok" ? fetchPlugin({ home: io.home, env: io.env, ref, commit: commit.value }) : commit;
-}
-
-async function changedSince(io: PinIo, ref: PluginRef, before: Pin, after: Fetched): Promise<readonly string[]> {
-  const old = await treeHash(storeDir(io.home, ref, before.sha256));
-  return changedFiles(old.kind === "ok" ? old.value.files : [], after.files);
-}
-
-async function showChange(io: PinIo, ref: PluginRef, before: Pin | undefined, after: Fetched): Promise<void> {
-  const lines = before === undefined ? folderCounts(after.files) : await changedSince(io, ref, before, after);
+function showChange(io: PinIo, ref: PluginRef, before: Pin | undefined, after: Fetched, gate: Gate): void {
+  const lines = before === undefined ? folderCounts(after.files) : gate.changed;
   io.out(`${refText(ref)}: ${pinLine(before)} -> ${pinLine(after)}\n`);
   io.out(lines.length === 0 ? "no file changes\n" : lines.map((l) => `${l}\n`).join(""));
+  io.out(
+    sizeLines(gate.sized)
+      .map((l) => `${l}\n`)
+      .join(""),
+  );
 }
 
 async function checked(io: PinIo, project: string, pins: Pins): Promise<readonly string[]> {
@@ -92,7 +69,67 @@ async function checked(io: PinIo, project: string, pins: Pins): Promise<readonly
   ];
 }
 
-async function moved(io: PinIo, project: string, ref: PluginRef, f: Fetched): Promise<number> {
+type Move = {
+  readonly project: string;
+  readonly ref: PluginRef;
+  readonly pins: Pins;
+  readonly before: Pin | undefined;
+  readonly f: Fetched;
+  readonly options: PinOptions;
+};
+
+async function estimate(io: PinIo): Promise<readonly string[]> {
+  const caps = evalCaps(io.env);
+  const planned = await planSlice({ root: ENGINE_ROOT, runUsd: caps.runUsd, judgeUsd: caps.judgeUsd });
+  return planned.kind === "ok"
+    ? estimateLines(planned.value.estimate)
+    : [`no cost estimate here: ${planned.reason}; eval pin shows it from an agent-factory checkout`];
+}
+
+async function refused(io: PinIo, m: Move, gate: Gate): Promise<number> {
+  io.err(gate.problems.map((p) => `error: ${p}\n`).join(""));
+  if (gate.needsProof) {
+    const lines = await estimate(io);
+    const reason = m.options.reason ? ` --reason ${JSON.stringify(m.options.reason)}` : "";
+    io.err(
+      [...lines, `run the eval first: agent-factory eval pin ${m.project} ${refText(m.ref)} ${m.f.commit}${reason}`]
+        .map((l) => `${l}\n`)
+        .join(""),
+    );
+  }
+  return fail(io, `the eval gate refused it; the pin stays at ${pinLine(m.before)}`);
+}
+
+async function gated(io: PinIo, m: Move): Promise<Gate> {
+  const places = [io.home, ENGINE_ROOT];
+  const engine = m.options.enginePin ?? (await enginePackPin(ENGINE_ROOT));
+  const base = await baseOf({ home: io.home, env: io.env, places, ref: m.ref, before: m.before, after: m.f, engine });
+  return gateMove({ places, ref: m.ref, base, after: m.f, reason: m.options.reason ?? "" });
+}
+
+async function checkedMove(io: PinIo, m: Move): Promise<number> {
+  const gate = await gated(io, m);
+  showChange(io, m.ref, m.before, m.f, gate);
+  if (gate.record === undefined) {
+    return refused(io, m, gate);
+  }
+  return checkedPin(io, m, { commit: m.f.commit, version: m.f.version, sha256: m.f.sha256, proof: gate.record });
+}
+
+async function checkedPin(io: PinIo, m: Move, pin: Pin): Promise<number> {
+  const next: Pins = { ...m.pins, [refText(m.ref)]: pin };
+  const errors = await checked(io, m.project, next);
+  if (errors.length > 0) {
+    io.err(errors.map((e) => `error: ${e}\n`).join(""));
+    return fail(io, `the check failed; the pin stays at ${pinLine(m.before)}`);
+  }
+  const written = await writePins(io.home, m.project, next);
+  return written.kind === "ok"
+    ? (io.out(`pinned ${refText(m.ref)} at ${pinLine(pin)}; the next ticket uses it\n`), 0)
+    : fail(io, written.reason);
+}
+
+async function moved(io: PinIo, project: string, ref: PluginRef, f: Fetched, options: PinOptions): Promise<number> {
   const pins = await readPins(io.home, project);
   if (pins.kind === "failed") {
     return fail(io, pins.reason);
@@ -102,36 +139,20 @@ async function moved(io: PinIo, project: string, ref: PluginRef, f: Fetched): Pr
     io.out(`${refText(ref)} is already pinned at ${pinLine(before)}\n`);
     return 0;
   }
-  return checkedMove(io, { project, ref, pins: pins.value, before, f });
+  return checkedMove(io, { project, ref, pins: pins.value, before, f, options });
 }
 
-type Move = {
-  readonly project: string;
-  readonly ref: PluginRef;
-  readonly pins: Pins;
-  readonly before: Pin | undefined;
-  readonly f: Fetched;
-};
-
-async function checkedMove(io: PinIo, { project, ref, pins, before, f }: Move): Promise<number> {
-  await showChange(io, ref, before, f);
-  const next: Pins = { ...pins, [refText(ref)]: { commit: f.commit, version: f.version, sha256: f.sha256 } };
-  const errors = await checked(io, project, next);
-  if (errors.length > 0) {
-    io.err(errors.map((e) => `error: ${e}\n`).join(""));
-    return fail(io, `the check failed; the pin stays at ${pinLine(before)}`);
+export async function pinUpdate(
+  io: PinIo,
+  project: string,
+  word: string,
+  commit: string | undefined,
+  options: PinOptions = {},
+): Promise<number> {
+  const ref = await listedRef({ home: io.home, env: io.env, project, word });
+  if (ref.kind === "failed") {
+    return fail(io, ref.reason);
   }
-  const written = await writePins(io.home, project, next);
-  return written.kind === "ok"
-    ? (io.out(`pinned ${refText(ref)} at ${pinLine(next[refText(ref)])}; the next ticket uses it\n`), 0)
-    : fail(io, written.reason);
-}
-
-export async function pinUpdate(io: PinIo, project: string, word: string, commit: string | undefined): Promise<number> {
-  const ref = await listedRef(io, project, word);
-  const got = ref.kind === "ok" ? await fetched(io, ref.value, commit) : ref;
-  if (got.kind === "failed" || ref.kind === "failed") {
-    return fail(io, got.kind === "failed" ? got.reason : "");
-  }
-  return moved(io, project, ref.value, got.value);
+  const got = await fetchListed({ home: io.home, env: io.env, ref: ref.value, commit });
+  return got.kind === "failed" ? fail(io, got.reason) : moved(io, project, ref.value, got.value, options);
 }

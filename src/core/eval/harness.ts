@@ -9,6 +9,9 @@
 // starts, and stops before any run that would not fit under it, marked partial (#483). It runs on the host, as
 // the production review does, never in CI.
 //
+// A pin move's targeted pass (slice.ts) runs only the cases it names, with fewer runs, on a plugin's store copy, which
+// has no git commit of its own, so the caller names the commit, and writes the pass where the caller says.
+//
 // The operator's approval of a case in cases.md stands for the approval of its spec, so the pass writes that approval
 // in its own home, never the real factory home. Its clones and run folders live in a private folder, never under a
 // world-writable /tmp.
@@ -40,7 +43,7 @@ import {
   type Plan,
   type Purse,
 } from "./budget.js";
-import { choose, readCase, readRows, specOf, CASES_DIR, type Case } from "./cases.js";
+import { choose, readCase, readRows, specOf, CASES_DIR, type Case, type Chosen } from "./cases.js";
 import { throwaway, type Cloned } from "./clone.js";
 import { evalChange, evalForge } from "./forge.js";
 import type { Row } from "./golden.js";
@@ -72,6 +75,10 @@ export type EvalInput = {
   readonly settings: EvalSettings;
   readonly now: Date;
   readonly log: (line: string) => void;
+  readonly only?: readonly string[];
+  readonly runs?: number;
+  readonly rulebookCommit?: string;
+  readonly resultsDir?: string;
 };
 
 export type Written = { readonly path: string; readonly partial: boolean; readonly proof: boolean };
@@ -84,7 +91,9 @@ export function evalSettings(
   return limits.kind === "ok" ? { kind: "ok", value: { ...evalCaps(env), limits: limits.value, ...flags } } : limits;
 }
 
-function evalCaps(env: NodeJS.ProcessEnv): Pick<EvalSettings, "runUsd" | "judgeUsd" | "judgeModel" | "judgePrompt"> {
+export function evalCaps(
+  env: NodeJS.ProcessEnv,
+): Pick<EvalSettings, "runUsd" | "judgeUsd" | "judgeModel" | "judgePrompt"> {
   return {
     runUsd: settingOf(env, "caps.usdPerRun") || "2",
     judgeUsd: settingOf(env, "eval.judgeUsdPerRun") || "0.50",
@@ -116,21 +125,26 @@ async function cases(root: string, rows: readonly Row[]): Promise<Result<readonl
   return { kind: "ok", value: out };
 }
 
-function planOf(list: readonly Case[], s: EvalSettings): Plan {
+function runsOf(input: EvalInput): number {
+  return input.runs ?? RUNS;
+}
+
+function planOf(list: readonly Case[], input: EvalInput): Plan {
+  const s = input.settings;
   return {
     seeds: list.map((c) => c.golden.length),
-    runs: RUNS,
+    runs: runsOf(input),
     runUsd: dollars(s.runUsd),
     judgeUsd: dollars(s.judgeUsd),
   };
 }
 
 function afford(list: readonly Case[], input: EvalInput): void {
-  const plan = planOf(list, input.settings);
+  const plan = planOf(list, input);
   const worst = worstCase(plan);
   const over = worst > CAP_USD ? "; over the cap, so it may stop there with a partial result, never proof" : "";
   input.log(
-    `eval reviewer: ${list.length} case(s) × ${RUNS} runs; at most $${worst.toFixed(2)} (each review run capped at $${input.settings.runUsd}, each judge run at $${input.settings.judgeUsd}), about $${typical(plan).toFixed(2)} at $0.84 a round; cap $${CAP_USD}${over}`,
+    `eval reviewer: ${list.length} case(s) × ${runsOf(input)} runs; at most $${worst.toFixed(2)} (each review run capped at $${input.settings.runUsd}, each judge run at $${input.settings.judgeUsd}), about $${typical(plan).toFixed(2)} at $0.84 a round; cap $${CAP_USD}${over}`,
   );
 }
 
@@ -153,7 +167,7 @@ async function inputsOf(ctx: Ctx, setup: ReviewSetup): Promise<Result<Inputs>> {
   if (!/^[0-9a-f]{40}$/.test(head)) {
     return { kind: "failed", reason: `cannot read the commit ${ctx.root} is at` };
   }
-  const rulebook = await git(ctx.rulebook, ctx.env, ["rev-parse", "HEAD"]);
+  const rulebook = ctx.rulebookCommit ?? (await git(ctx.rulebook, ctx.env, ["rev-parse", "HEAD"]));
   return {
     kind: "ok",
     value: {
@@ -261,7 +275,7 @@ async function runs(ctx: Ctx, c: Case, cloned: Cloned, home: string): Promise<re
     limit: ctx.settings.limits.judge,
   });
   const out: RunRecord[] = [];
-  for (let run = 1; run <= RUNS; run++) {
+  for (let run = 1; run <= runsOf(ctx); run++) {
     if (!ctx.purse.reserve(RUNS_PER_ROUND * dollars(ctx.settings.runUsd), `${c.name} run ${run}'s review round`)) {
       break;
     }
@@ -289,8 +303,7 @@ async function oneCase(ctx: Ctx, c: Case): Promise<CaseRecord> {
   return { case: c, error: "", runs: done };
 }
 
-async function resultsPath(root: string, date: string, head: string): Promise<string> {
-  const dir = join(root, CASES_DIR, "results");
+async function resultsPath(dir: string, date: string, head: string): Promise<string> {
   await mkdir(dir, { recursive: true });
   const name = `${date}-${head.slice(0, 12)}`;
   for (let n = 1; ; n++) {
@@ -305,6 +318,17 @@ async function resultsPath(root: string, date: string, head: string): Promise<st
   }
 }
 
+function onlyThese(all: Chosen, only: readonly string[] | undefined): Chosen {
+  if (only === undefined) {
+    return all;
+  }
+  const left = all.run.filter((r) => !only.includes(r.name));
+  return {
+    run: all.run.filter((r) => only.includes(r.name)),
+    skipped: [...all.skipped, ...left.map((r) => Object.assign({}, r, { status: "not in the slice" }))],
+  };
+}
+
 type Started = { readonly ctx: Ctx; readonly list: readonly Case[]; readonly skipped: readonly Row[] };
 
 async function chosenCases(
@@ -314,7 +338,7 @@ async function chosenCases(
   if (rows.kind === "failed") {
     return rows;
   }
-  const chosen = choose(rows.value, input.settings.drafts);
+  const chosen = onlyThese(choose(rows.value, input.settings.drafts), input.only);
   const draft = chosen.skipped.filter((r) => r.status === "draft").length;
   input.log(
     `eval reviewer: ${chosen.run.length} case(s) to run; ${chosen.skipped.length} skipped (${draft} draft: only cases the operator approved in cases.md count; --drafts runs them too, never as proof)`,
@@ -358,6 +382,10 @@ export async function evalReviewer(input: EvalInput): Promise<Result<Written>> {
   }
 }
 
+function resultsDirOf(ctx: Ctx): string {
+  return ctx.resultsDir ?? join(ctx.root, CASES_DIR, "results");
+}
+
 async function pass(ctx: Ctx, list: readonly Case[], skipped: readonly Row[]): Promise<Result<Written>> {
   const probe = setupFor(ctx, { repo: ctx.root, head: "", branch: "" }, ctx.work, 1, "");
   const inputs = await inputsOf(ctx, probe);
@@ -375,7 +403,7 @@ async function pass(ctx: Ctx, list: readonly Case[], skipped: readonly Row[]): P
   const doc = document({
     date,
     inputs: inputs.value,
-    runs: RUNS,
+    runs: runsOf(ctx),
     cap: CAP_USD,
     spent: ctx.purse.spent(),
     stopped: ctx.purse.stopped(),
@@ -387,7 +415,7 @@ async function pass(ctx: Ctx, list: readonly Case[], skipped: readonly Row[]): P
     ],
     cases: records,
   });
-  const path = await resultsPath(ctx.root, date, inputs.value.head);
+  const path = await resultsPath(resultsDirOf(ctx), date, inputs.value.head);
   const wrote = await attempt(() => writeFile(path, `${JSON.stringify(doc, null, 2)}\n`), `cannot write ${path}`);
   return wrote.kind === "ok"
     ? { kind: "ok", value: { path, partial: doc.partial === true, proof: doc.proof === true } }

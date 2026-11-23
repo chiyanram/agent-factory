@@ -33,7 +33,10 @@ agent-factory init            # the project's name defaults to the clone folder'
    engine is tested with, the one its `.github/rules-pack.json` names (it ships in the package), never at the skills
    `HEAD`; the fix it prints names that commit too. A plugin from any other marketplace is pinned at its `HEAD`.
    A first pin shows a count of files per folder (`+ 12 files in skills/crq`), not every file; a later update shows
-   each file it adds, removes or changes.
+   each file it adds, removes or changes, and the eval that change needs (ADR-0020). A `chiyanram` plugin's first
+   pin is sized against the engine's commit, so it needs no eval of its own. A plugin from another marketplace has
+   no base, so every file counts: init cannot give the reason such a pin needs, and prints the
+   `agent-factory plugin update` to run with `--reason` (or after `agent-factory eval pin`).
    `agent-factory plugin update <project> <name@marketplace>` later moves a pin to the marketplace's `HEAD`; to go
    back to the tested pack, name the engine's commit:
    `agent-factory plugin update <project> rulebook@chiyanram <the commit in .github/rules-pack.json>`.

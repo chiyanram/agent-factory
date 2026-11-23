@@ -960,7 +960,10 @@ describe("connectors and the plugin list (#232)", () => {
     writeFileSync(join(home, "projects", "ledger.plugins.json"), text(Object.fromEntries(pins)));
     writeProject({ ...BASE, plugins: ["team@acme", "rules@acme", "other@acme"] });
     discordOn();
-    expect(await cli(["config", "check", "ledger"])).toMatchObject({ code: 0, err: "" });
+    const one = await cli(["config", "check", "ledger"]);
+    expect(one.code).toBe(0);
+    expect(one.err).not.toContain("error:");
+    expect(one.err).toContain("warning: team@acme at sha256:aaaaaaaaaaaa has no eval proof (ADR-0020)");
 
     const both = [...pins, pin("other", "d".repeat(64), true)];
     writeFileSync(join(home, "projects", "ledger.plugins.json"), text(Object.fromEntries(both)));

@@ -13,7 +13,11 @@ Some systems let the agent write lessons into its own skills; that lets a model 
 
 1. Record the first baseline (#216) on the 29 approved golden cases.
 2. `plugin update` moves a pin only when an eval result exists for that exact plugin hash and shows no drop against
-   the baseline. A human runs the eval, since it spends money; the pin move checks the proof.
+   the baseline. A human runs the eval, since it spends money; the pin move checks the proof. **Today:** the eval is
+   sized by what the move changes (`agent-factory eval pin`, `src/core/eval/pin-size.ts`): a change to the review
+   needs a one-run targeted pass held to the baseline on its cases; a change no eval can prove yet (the implementer card,
+   with no implementer eval until #824, and the cards and files no eval tests) moves only on a reason the person types, and
+   the pin shows as unproven until a proof covers it; no held-out slice runs with it (#599).
 3. A lesson is one skills PR with three parts: the rule, a new golden case or role scenario built from the failure,
    and a review-by date. A lesson PR may not change the judge or the existing cases.
 4. A held-out slice of cases, which the lesson's author never sees, runs only at the gate.

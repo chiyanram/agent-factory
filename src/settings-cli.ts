@@ -6,7 +6,8 @@
 //   config check   the layers resolved and the project file's readers run on the result, and the pinned plugins looked
 //                  at for a second process (#426): exit 0, or 1 with each error
 //                  (a clone whose origin is not the project's repo is one of those errors: core/origin.ts), and each
-//                  Claude Code plugin the factory knows read back: its state, a warning when it is not on
+//                  Claude Code plugin the factory knows read back: its state, a warning when it is not on; and a
+//                  warning for each pin with no eval proof (core/eval/pin-proof.ts), which never fails the check
 //   team update    the resolved values at the team's new commit against the pinned one, a check, then the pin moved
 
 import { readFile, rename, writeFile } from "node:fs/promises";
@@ -17,7 +18,8 @@ import { hostGit } from "./core/git.js";
 import { originProblem } from "./core/origin.js";
 import { pluginConfigOf } from "./core/plugin/config.js";
 import { pinnedDirs, readPins } from "./core/process/pins.js";
-import { pluginListOf } from "./core/process/plugins.js";
+import { pluginListOf, refText } from "./core/process/plugins.js";
+import { ENGINE_ROOT, pinProof } from "./core/eval/pin-proof.js";
 import { findProcess } from "./core/process/read.js";
 import { projectPath, readyFieldsOf } from "./core/project.js";
 import { layered, readTeamAt, teamDir, type Layered, type Pin, type Read } from "./core/settings/layers.js";
@@ -91,6 +93,26 @@ async function processProblems(
   }
   const found = await findProcess(pinnedDirs(home, refs.kind === "ok" ? refs.value : [], pins.value));
   return found.kind === "failed" ? [{ level: "error", text: found.reason }] : [];
+}
+
+async function proofProblems(
+  home: string,
+  project: string,
+  path: string,
+  effective: object,
+): Promise<readonly Problem[]> {
+  const refs = pluginListOf(path, effective);
+  const pins = await readPins(home, project);
+  if (refs.kind === "failed" || pins.kind === "failed") {
+    return [];
+  }
+  const found = await Promise.all(
+    refs.value.map(async (ref) => {
+      const pin = pins.value[refText(ref)];
+      return pin === undefined ? "" : pinProof([home, ENGINE_ROOT], ref, pin);
+    }),
+  );
+  return found.filter((why) => why !== "").map((text) => ({ level: "warning", text }));
 }
 
 async function cloneProblems(env: NodeJS.ProcessEnv): Promise<readonly Problem[]> {
@@ -227,6 +249,7 @@ async function check(io: SettingsIo, project: string): Promise<number> {
   const problems = [
     ...allProblems(loaded.value.path, layers, io.env),
     ...(await processProblems(io.home, project, loaded.value.path, layers.effective)),
+    ...(await proofProblems(io.home, project, loaded.value.path, layers.effective)),
     ...(await cloneProblems(runEnv(io.env, layers))),
     ...plugins.problems,
   ];

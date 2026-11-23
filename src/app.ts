@@ -94,6 +94,7 @@ import { pluginCommand, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
+import { EVAL_PIN_HELP, evalPinCommand } from "./eval-pin-cli.js";
 import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
 import { coordinatorBrief, type CoordinatorPlaces } from "./core/coordinator.js";
 import { recordStart, recordTurn, type TurnIo } from "./core/coordinator-turns.js";
@@ -194,8 +195,10 @@ export const HELP_COMMANDS = `  poll                         one line of facts p
                                a reset below the client's compaction; it always exits 0
   plugin add <path|name>       register a plugin: run its describe, record its absolute path and sha256 (#134)
   plugin update <name> [<sha>] test a new version and show its hash and new writes; record it with that hash
-  plugin update <project> <name@marketplace> [<commit>]
-                               fetch a listed plugin, show the change, run config check, then move its pin (#232)
+  plugin update <project> <name@marketplace> [<commit>] [--reason <why>]
+                               fetch a listed plugin, show the change and the eval it needs, refuse it with no eval
+                               proof that covers that (agent-factory eval pin), run config check, then move its pin;
+                               --reason is needed when it changes a card no eval tests yet, and the pin keeps it
   plugin test <path|name>      the contract test kit: handshake, fixtures, bad input, unknown op, stdout, env, tokens
   plugin list                  the registered plugins
   config show <project>        every settings key: its value, layer, file:line and class (--json: as JSON)
@@ -205,7 +208,7 @@ export const HELP_COMMANDS = `  poll                         one line of facts p
 ${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${HANDOFF_HELP}${WAITING_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}`;
+${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EVAL_PIN_HELP}${EGRESS_HELP}`;
 
 const HELP_TAIL = `options:
   --help      show this help
@@ -242,6 +245,7 @@ type Args = {
   readonly repo: string | undefined;
   readonly discord: boolean;
   readonly seat: string | undefined;
+  readonly reason: string | undefined;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -1498,13 +1502,14 @@ function discordFits(discord: boolean, project: string | undefined, runner: "cla
   return !discord || (project !== undefined && runner === "claude");
 }
 
-async function pluginCli({ positionals, io }: Args): Promise<number> {
+async function pluginCli({ positionals, reason, io }: Args): Promise<number> {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {
     io.err(`agent-factory plugin: ${home.reason}\n`);
     return 1;
   }
-  return pluginCommand(positionals, { env: io.env, out: io.out, err: io.err, home: home.path, pkg: PKG });
+  const pluginIo = { env: io.env, out: io.out, err: io.err, home: home.path, pkg: PKG };
+  return pluginCommand(positionals, reason === undefined ? pluginIo : { ...pluginIo, reason });
 }
 
 function settingsIo(io: Io, json: boolean, name: string): SettingsIo | undefined {
@@ -1881,9 +1886,13 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
   });
 }
 
+function evalCli(argv: readonly string[], io: Io): Promise<number> {
+  return argv[0] === "pin" ? evalPinCommand(argv.slice(1), io) : evalCommand(argv, io);
+}
+
 export function runCli(argv: readonly string[], io: Io): Promise<number> {
   if (argv[0] === "eval") {
-    return evalCommand(argv.slice(1), io);
+    return evalCli(argv.slice(1), io);
   }
   if (argv[0] === "egress") {
     return egressCli(argv.slice(1), io);
@@ -1909,6 +1918,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       repo: { type: "string" },
       discord: { type: "boolean" },
       seat: { type: "string" },
+      reason: { type: "string" },
       all: { type: "boolean" },
     },
   });
@@ -1933,6 +1943,7 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
     repo: values.repo,
     discord: values.discord === true,
     seat: values.seat,
+    reason: values.reason,
     positionals: positionals.slice(1),
     io,
   });
