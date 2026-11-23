@@ -10,7 +10,7 @@ sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issue
 2. Run `agent-factory coordinator [<project>]`. It starts Claude Code there with `--setting-sources project`, so the allow rules of your
    own user settings do not apply; `agent-factory coordinator [<project>] copilot` starts Copilot CLI with its command rules as flags (see Today below).
    It needs no `FACTORY_*` export (#382): the session is for the project you name, or the only one in
-   `$FACTORY_HOME/projects`, and each command it runs (`poll`, `status`, `ask`, `grill`) reads
+   `$FACTORY_HOME/projects`, and each command it runs (`poll`, `status`, `grill`) reads
    that project's `gitHost`, `gitHostProject` and `clone` from its project file. With several projects and none named,
    it starts with no default, and each command names its project (`agent-factory poll ledger`). For the ledger pilot:
 
@@ -20,11 +20,12 @@ sessions are left alone ([#106](https://github.com/chiyanram/agent-factory/issue
 
 The wall (`src/core/coordinator.ts`):
 
-- **Runs with no prompt:** `agent-factory poll`, `board`, `spec`, `approval`, `status`, `grill` and `retro` (not `retro --draft`, which spends on a model run and is denied), with or without the project word
+- **Runs with no prompt:** `agent-factory poll`, `board`, `handoff`, `waiting`, `spec`, `approval`, `status`, `grill` and `retro` (not `retro --draft`, which spends on a model run and is denied), with or without the project word
   (`agent-factory poll ledger`), and `agent-factory request`, whose
   write the project's policy decides in code ([Writes](../reference/connectors.md#writes)).
 - **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it.
-  Nothing else asks.
+  So does every command the wall neither allows nor denies, such as `usage`, `trace`, `config`, `team` and `box`, as
+  Claude Code's default mode asks. Under `--discord` the session runs in `dontAsk`, so each of these is refused.
 - **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
   STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
   Run them from a plain terminal, not as `!agent-factory …` inside Claude Code: the door seam refuses a person's word
