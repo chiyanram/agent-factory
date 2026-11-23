@@ -10,7 +10,7 @@
 //   needs_human  the change carries needs-human
 //   stop         the time of a maintainer's last "/stop" (a note whose first line is exactly that), in ISO 8601 UTC,
 //                else no; "undated" when its time does not parse. The dispatcher holds the change while that stop is
-//                newer than the ticket's local approval, so approving again lifts it.
+//                newer than the ticket's START (tiny) or local approval, so a new START or approval lifts it.
 //   asks         [coordinator] OPEN: and [writer] OPEN: notes with no note from a project member after them (#128)
 //   malformed_asks  shown only when an open ask is malformed: a round whose items do not match its title (#517)
 //   conflict     yes when the change does not merge into its target as it stands, no when it does, unknown while the
