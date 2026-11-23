@@ -1,4 +1,4 @@
-// spend — what one model run spent, as the agent CLI reports it (#131; docs/DESIGN.md section 3 "Limits"). Every run
+// spend — what one model run spent, as the agent CLI reports it (docs/explanation/architecture.md section 3 "Limits"). Every run
 // records its spend in its run record: the writer from the result event of its stream-json output, the reviewer from
 // each pass's JSON answer. The tokens are what the CLI counted; the dollar figure is the CLI's own, which on a
 // subscription need not be what the subscription is charged, so the caps there count tokens.

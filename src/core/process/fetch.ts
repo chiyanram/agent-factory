@@ -1,5 +1,5 @@
 // fetch — one version of a plugin, fetched from its marketplace's clone in the factory home and copied into the store
-// by its hash (#232; docs/DESIGN.md section 5 "Plugins"). The marketplace names each plugin's folder in
+// by its hash (docs/explanation/architecture.md section 5 "Plugins"). The marketplace names each plugin's folder in
 // .claude-plugin/marketplace.json ("source": "./plugins/<name>"), which must be a folder inside the marketplace. Every
 // git call goes through hostGit; the checkout is a worktree of the marketplace's clone, removed after the copy.
 // Nothing is pinned here: `agent-factory plugin update` shows the change, checks it, then moves the pin. Only a full

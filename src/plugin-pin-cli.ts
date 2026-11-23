@@ -1,4 +1,4 @@
-// plugin-pin-cli — `agent-factory plugin update <project> <name@marketplace> [<commit>]` (#232; docs/DESIGN.md section 5
+// plugin-pin-cli — `agent-factory plugin update <project> <name@marketplace> [<commit>]` (docs/explanation/architecture.md section 5
 // "Plugins": updating is deliberate). It fetches the marketplace's clone (or takes the given commit, and fetches a full
 // commit the clone lacks, #607), copies the plugin into the store by its hash, shows what changes against the pin,
 // then runs config check and reads the process of the project's plugins with the new version in. Only when both pass

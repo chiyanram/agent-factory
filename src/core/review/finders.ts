@@ -1,4 +1,4 @@
-// finders — what each finder run of a review round is given: its lens, its rubric and its pack (#237; docs/DESIGN.md
+// finders — what each finder run of a review round is given: its lens, its rubric and its pack (docs/explanation/architecture.md
 // sections 3 and 5). The round (round.ts) picks the lenses with pickLenses and runs one fresh finder per lens; this
 // module reads the settings the pick needs, each lens's rubric, and writes the lens into the pack.
 //

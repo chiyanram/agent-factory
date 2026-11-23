@@ -1,4 +1,4 @@
-// lane — how much process a change gets, set by code (#230; docs/DESIGN.md section 3 "Lane", section 5 "The approval
+// lane — how much process a change gets, set by code (docs/explanation/architecture.md section 3 "Lane", section 5 "The approval
 // floor"; rulebook crq LN1, LN2). The coordinator proposes the lane in the spec's "## Lane"; the engine checks it twice
 // and can only raise it, never lower it:
 //

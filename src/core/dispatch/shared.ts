@@ -1,4 +1,4 @@
-// shared — the shared copy of an approval (#227; docs/DESIGN.md section 4). Per project, the git host identity the
+// shared — the shared copy of an approval (docs/explanation/architecture.md section 4). Per project, the git host identity the
 // factory posts with puts one templated note on the ticket's PR for each approval:
 //
 //   [coordinator] approved by <human> via <door>, spec <hash>, design <hash or none>

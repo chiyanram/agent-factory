@@ -1,4 +1,4 @@
-// use — the plugins one dispatcher pass hands its runs (#232; docs/DESIGN.md section 5 "Plugins"): every plugin the
+// use — the plugins one dispatcher pass hands its runs (docs/explanation/architecture.md section 5 "Plugins"): every plugin the
 // project lists, each checked against its pin (pins.ts), in the project's order. With none listed, the engine runs
 // alone; the rulebook folder setting is read only by `eval reviewer`, so a run that finds it set warns.
 // Each plugin's hash goes into the run records, so a person can tell which versions a run used.
