@@ -58,7 +58,8 @@ connector checks. A setting the connector cannot honour stops the pass instead o
 `FACTORY_GLAB`, `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GH_HOST`, `GITLAB_TOKEN`, `GITLAB_HOST`, and a
 `FACTORY_FORGE_HOST` other than github.com or gitlab.com. **Today:**
 
-- Only `dispatch` opts in; `review`, `poll`, `status` and the loop commands still use the built-in adapter.
+- `review`, `poll` and the coordinator's note commands (`status`, `ask`, `grill`) still use the built-in adapter; the
+  others, `dispatch`, `board`, `handoff`, `waiting`, `onboard` and `request` among them, go through the connector.
 - `FACTORY_IDENTITY=app` with a git host connector is refused: the App's token would have to reach the connector, and
   none may hold one (ADR-0014 P11). App projects keep the built-in adapter.
 - A project on GitHub Enterprise or a self-managed GitLab keeps the built-in adapter, since the connector gets no host
@@ -155,7 +156,8 @@ a person's edit in between is never written over. A change to an approved ticket
 - The pending requests and the write log belong to your own user, so the coordinator's settings deny editing them,
   but a command its Bash rules do not name could still change them; they move to the `factory` OS user with the
   approvals (ADR-0012 S2).
-- No tracker or chat connector is bundled yet, so a write needs a connector you add yourself.
+- No tracker connector is bundled yet, so a `tracker.comment` or `tracker.create` write needs a connector you add
+  yourself; `notify` can use the bundled `discord` ([Pings](#pings)).
 - Kept requests never expire; one made under an earlier approval is refused at `confirm`, but its file stays in
   `pending/` until you remove it.
 

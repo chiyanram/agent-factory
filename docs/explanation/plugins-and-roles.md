@@ -13,14 +13,15 @@ swappable part, are in [Connectors](../reference/connectors.md).
  $FACTORY_HOME/marketplaces/<marketplace>   ──copy──▶  $FACTORY_HOME/plugins/<marketplace>/<name>/<sha256>/
         │                                               pin: commit + hash in projects/<project>.plugins.json
         ▼  each dispatch pass
- hash checked again ──▶ copied into the run's clone as .factory/plugins/<n> (read-only) ──▶ claude --plugin-dir
+ hash checked again ──▶ an implementer, test-first or cleanup run: copied into its clone as .factory/plugins/<n>
+        │                  (read-only) ──▶ claude --plugin-dir; any other run: the engine reads the card and rubrics
         │
         ▼
  run record "started": each plugin and its hash
 ```
 
 - **The engine runs alone.** With no plugin, it uses its built-in lanes, review baseline and role cards
-  (`prompts/roles/`).
+  (`prompts/roles/`). The retro has no built-in card, so `retro --draft` needs the process plugin's.
 - **A plugin is a normal Claude Code plugin.** Its skills and references are what the runs read. The rulebook
   (`rulebook@chiyanram`, from [chiyanram/skills](https://github.com/chiyanram/skills)) is one plugin, not a dependency.
 - **The process plugin** is the one listed plugin that holds `skills/<skill>/process/lanes.json`
@@ -44,7 +45,8 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 | `input`, `steps`, `rules` | reads no meaning | text the model reads. `next` is dropped, because the lanes hold the flow. **Today:** a card that still has it is read for one release |
 
 The engine starts a run from a card for seven roles: implementer, test-first, cleanup, design-reviewer, verify pass,
-onboarder and retro. Every run record carries the card's hash. **Today:** no orchestrator rule starts a cleanup run; a person
+onboarder and retro. Every run record carries the card's hash. A person starts the retro run, with
+`agent-factory retro <project> --draft`; no pass starts one. **Today:** no orchestrator rule starts a cleanup run; a person
 runs cleanup by hand.
 
 ## The rules pack's own format
