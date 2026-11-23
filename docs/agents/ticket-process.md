@@ -42,7 +42,7 @@ has the answer, because `board` and the ping find a waiting session only by that
 
 ## Change the process
 
-Cut a step from a lane only on measured numbers, the cost per run kind on #488's timeline line, read after about 15
+Cut a step from a lane only on measured numbers, the cost per run kind on the run timeline, read after about 15
 tickets, because a few tickets' impressions are not a measure.
 
 Bring in a new check, role, lens or outside skill manual first and climb one rung at a time, as P11 in
