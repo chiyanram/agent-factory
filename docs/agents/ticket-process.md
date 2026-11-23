@@ -27,7 +27,7 @@ amendment beside it. Report to the operator in chat the same way, as one whole m
 approves one text, and a report split across comments hides what is being approved.
 
 Split work too big for one PR into child tickets before the build, because the operator approves the shape before code
-exists, not after (#557 is the worked example).
+exists, not after.
 
 ## Sessions
 
