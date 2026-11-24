@@ -1,21 +1,22 @@
-// eval-cli — `agent-factory eval reviewer` on the command line (ADR-0015 E7, #215): the eval pass of the automated
+// eval-cli — `agent-factory eval reviewer` on the command line (ADR-0015 E7, #215), and the route to `eval pin`
+// (eval-pin-cli.ts): the eval pass of the automated
 // review over the golden set, on the host, through the same agent CLI as the production review. It spends on model
 // runs, so it never runs in CI or in a dry run, and it is refused before it spends when it could pass the $100 cap.
 // Its clones go in a fresh private folder under the factory home, never /tmp, where anyone could plant a CLAUDE.md
 // above a run folder.
 
-import { mkdir, mkdtemp } from "node:fs/promises";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import type { Result } from "./core/forge/api.js";
 import { AIMS, type Aim } from "./core/eval/bar.js";
 import { evalReviewer, evalSettings, type EvalInput, type EvalSettings, type Written } from "./core/eval/harness.js";
 import { openAgentCli } from "./core/agent/index.js";
-import { unpinnedModel } from "./core/review/settings.js";
-import { settingName, settingOf } from "./core/settings/machine.js";
+import { settingOf } from "./core/settings/machine.js";
+import { refusal, workDir, type EvalIo } from "./eval-host.js";
+import { EVAL_PIN_HELP, evalPinCommand } from "./eval-pin-cli.js";
 
-export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--aim quality|cost]
+export type { EvalIo } from "./eval-host.js";
+
+const REVIEWER_HELP = `  eval reviewer [<repo>] [--drafts] [--aim quality|cost]
                                the automated review's eval (ADR-0015): each case the operator approved in
                                evals/reviewer/cases.md, 3 runs of the real review round on a throwaway clone, Act on
                                findings matched with the seeds by place and judge; writes
@@ -26,13 +27,6 @@ export const EVAL_HELP = `  eval reviewer [<repo>] [--drafts] [--aim quality|cos
                                the noise; cost, a cheaper pass. Leave it out for a baseline. Host
                                only: refused in CI. A human runs it; the coordinator's settings deny it. Exit 0 written, 3 written but partial, 1 refused
 `;
-
-export type EvalIo = {
-  readonly env: NodeJS.ProcessEnv;
-  readonly out: (text: string) => void;
-  readonly err: (text: string) => void;
-  readonly readLine?: (prompt: string) => Promise<string>;
-};
 
 type Parsed = {
   readonly root: string;
@@ -61,53 +55,6 @@ function reviewerOf(positionals: readonly string[], drafts: boolean, aim: Aim | 
 
 function aimOf(value: string | undefined): Aim | "none" | "bad" {
   return value === undefined ? "none" : (AIMS.find((a) => a === value) ?? "bad");
-}
-
-const DOLLARS = /^\d+(\.\d+)?$/;
-
-function inCi(env: NodeJS.ProcessEnv): boolean {
-  return !["", "false"].includes(env.CI ?? "");
-}
-
-function badDollars(env: NodeJS.ProcessEnv): string {
-  const caps = ["caps.usdPerRun", "eval.judgeUsdPerRun"] as const;
-  const bad = caps.find((id) => !DOLLARS.test(settingOf(env, id) || "0"));
-  return bad === undefined
-    ? ""
-    : `${settingName(bad)} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(settingOf(env, bad))}`;
-}
-
-function noRulebook(env: NodeJS.ProcessEnv, needed: boolean): boolean {
-  return needed && !isAbsolute(settingOf(env, "rulebook") ?? "");
-}
-
-export function refusal(env: NodeJS.ProcessEnv, needs: { readonly rulebook: boolean } = { rulebook: true }): string {
-  const bad = badDollars(env);
-  const alias = unpinnedModel(env, ["review.findModel", "review.ruleModel", "review.logicModel", "eval.judgeModel"]);
-  const checks: readonly (readonly [boolean, string])[] = [
-    [inCi(env), "it runs on the host, never in CI: CI holds no model token (ADR-0015 E10)"],
-    [
-      settingOf(env, "dryRun") === "1",
-      "FACTORY_DRY_RUN is set, and an eval spends on model runs; run it without the dry run",
-    ],
-    [bad !== "", bad],
-    [alias !== "", `${alias}: a pass with an alias proves nothing about the model it ran (ADR-0015 E9)`],
-    [noRulebook(env, needs.rulebook), "FACTORY_RULEBOOK must be the rulebook plugin folder, an absolute path"],
-  ];
-  return checks.find(([refused]) => refused)?.[1] ?? "";
-}
-
-export async function workDir(env: NodeJS.ProcessEnv): Promise<Result<string>> {
-  const home = env.FACTORY_HOME ?? join(homedir(), ".factory");
-  if (!isAbsolute(home)) {
-    return { kind: "failed", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(home)}` };
-  }
-  try {
-    await mkdir(home, { recursive: true, mode: 0o700 });
-    return { kind: "ok", value: await mkdtemp(join(home, "eval-")) };
-  } catch {
-    return { kind: "failed", reason: `cannot make a folder for the pass in ${home}` };
-  }
 }
 
 async function run(p: Parsed, s: EvalSettings, io: EvalIo): Promise<number> {
@@ -145,7 +92,13 @@ function note(w: Written): string {
   return w.proof ? "" : " (draft cases: not proof)";
 }
 
-export async function evalCommand(argv: readonly string[], io: EvalIo): Promise<number> {
+export const EVAL_HELP = `${REVIEWER_HELP}${EVAL_PIN_HELP}`;
+
+export function evalCommand(argv: readonly string[], io: EvalIo): Promise<number> {
+  return argv[0] === "pin" ? evalPinCommand(argv.slice(1), io) : reviewerCommand(argv, io);
+}
+
+async function reviewerCommand(argv: readonly string[], io: EvalIo): Promise<number> {
   const p = parsed(argv);
   if (p === "usage") {
     io.err(`usage: agent-factory eval reviewer [<repo>] [--drafts] [--aim quality|cost]\n`);

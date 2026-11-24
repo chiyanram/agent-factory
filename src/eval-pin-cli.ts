@@ -35,7 +35,7 @@ import { field } from "./core/eval/bar.js";
 import { fetchListed, listedRef, type Fetched } from "./core/process/fetch.js";
 import { enginePackPin, readPins, type Pins } from "./core/process/pins.js";
 import { refText, type PluginRef } from "./core/process/plugins.js";
-import { refusal, workDir, type EvalIo } from "./eval-cli.js";
+import { refusal, workDir, type EvalIo } from "./eval-host.js";
 
 export const EVAL_PIN_HELP = `  eval pin <project> <name@marketplace> [<commit>] [--repo <path>] [--reason <why>] [--commit-proof]
                                the eval a plugin pin move needs (ADR-0020): fetches that version, sizes what it

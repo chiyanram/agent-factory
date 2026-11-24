@@ -90,11 +90,10 @@ import {
   projectWord,
 } from "./loop-cli.js";
 import { chosenProject, DEFAULT_PROJECT, projectNames } from "./core/which-project.js";
-import { pluginCommand, pluginSetup } from "./plugin-cli.js";
+import { pluginCli, pluginSetup } from "./plugin-cli.js";
 import { dryNotify, NO_NOTIFY, notifyPluginOf, pluginNotify, webhookSecrets, type Notify } from "./core/notify.js";
 import { REQUEST_COMMANDS, REQUEST_HELP } from "./request-cli.js";
 import { EVAL_HELP, evalCommand } from "./eval-cli.js";
-import { EVAL_PIN_HELP, evalPinCommand } from "./eval-pin-cli.js";
 import { EGRESS_HELP, egressCommand } from "./egress-cli.js";
 import { coordinatorBrief, type CoordinatorPlaces } from "./core/coordinator.js";
 import { recordStart, recordTurn, type TurnIo } from "./core/coordinator-turns.js";
@@ -208,7 +207,7 @@ export const HELP_COMMANDS = `  poll                         one line of facts p
 ${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${HANDOFF_HELP}${WAITING_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile
                                if there is one) and pin its ID in <home>/projects/<project>/box.json; run it again
                                after an upgrade
-${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EVAL_PIN_HELP}${EGRESS_HELP}`;
+${INIT_HELP}${LOOP_HELP}${EVAL_HELP}${EGRESS_HELP}`;
 
 const HELP_TAIL = `options:
   --help      show this help
@@ -245,7 +244,6 @@ type Args = {
   readonly repo: string | undefined;
   readonly discord: boolean;
   readonly seat: string | undefined;
-  readonly reason: string | undefined;
   readonly positionals: readonly string[];
   readonly io: Io;
 };
@@ -1502,16 +1500,6 @@ function discordFits(discord: boolean, project: string | undefined, runner: "cla
   return !discord || (project !== undefined && runner === "claude");
 }
 
-async function pluginCli({ positionals, reason, io }: Args): Promise<number> {
-  const home = factoryHome(io.env);
-  if (home.kind === "refused") {
-    io.err(`agent-factory plugin: ${home.reason}\n`);
-    return 1;
-  }
-  const pluginIo = { env: io.env, out: io.out, err: io.err, home: home.path, pkg: PKG };
-  return pluginCommand(positionals, reason === undefined ? pluginIo : { ...pluginIo, reason });
-}
-
 function settingsIo(io: Io, json: boolean, name: string): SettingsIo | undefined {
   const home = factoryHome(io.env);
   if (home.kind === "refused") {
@@ -1815,7 +1803,6 @@ const COMMANDS: readonly Command[] = [
   { name: "onboard", run: onboardCli },
   { name: "setup", run: setupCommand },
   { name: "coordinator", run: coordinatorCommand },
-  { name: "plugin", run: pluginCli },
   { name: "box", run: boxCommand },
   { name: "config", run: configCli },
   { name: "team", run: teamCli },
@@ -1828,11 +1815,16 @@ const COMMANDS: readonly Command[] = [
   { name: "writer-scope", run: ({ positionals, io }: Args) => writerScopeCommand(positionals, io) },
 ];
 
+const OWN_ARGS: Readonly<Record<string, (argv: readonly string[], io: Io) => Promise<number> | number>> = {
+  eval: evalCommand,
+  egress: egressCli,
+  plugin: pluginCli,
+};
+
 export const COMMAND_NAMES: readonly string[] = [
   ...COMMANDS.map((c) => c.name),
   ...Object.keys(REQUEST_COMMANDS),
-  "eval",
-  "egress",
+  ...Object.keys(OWN_ARGS),
 ];
 
 export const INTERNAL: ReadonlySet<string> = new Set([
@@ -1886,18 +1878,10 @@ function ownOptions(argv: readonly string[], io: Io): Promise<number> | undefine
   });
 }
 
-function evalCli(argv: readonly string[], io: Io): Promise<number> {
-  return argv[0] === "pin" ? evalPinCommand(argv.slice(1), io) : evalCommand(argv, io);
-}
-
 export function runCli(argv: readonly string[], io: Io): Promise<number> {
-  if (argv[0] === "eval") {
-    return evalCli(argv.slice(1), io);
-  }
-  if (argv[0] === "egress") {
-    return egressCli(argv.slice(1), io);
-  }
-  return ownOptions(argv, io) ?? mainCli(argv, io);
+  const [name = ""] = argv;
+  const own = Object.hasOwn(OWN_ARGS, name) ? OWN_ARGS[name] : undefined;
+  return own === undefined ? (ownOptions(argv, io) ?? mainCli(argv, io)) : Promise.resolve(own(argv.slice(1), io));
 }
 
 async function mainCli(argv: readonly string[], io: Io): Promise<number> {
@@ -1918,7 +1902,6 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
       repo: { type: "string" },
       discord: { type: "boolean" },
       seat: { type: "string" },
-      reason: { type: "string" },
       all: { type: "boolean" },
     },
   });
@@ -1943,7 +1926,6 @@ async function mainCli(argv: readonly string[], io: Io): Promise<number> {
     repo: values.repo,
     discord: values.discord === true,
     seat: values.seat,
-    reason: values.reason,
     positionals: positionals.slice(1),
     io,
   });

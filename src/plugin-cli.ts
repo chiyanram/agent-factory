@@ -1,10 +1,13 @@
 // plugin-cli — `agent-factory plugin add | update | test | list` (#134; ADR-0014 P2, P8, P10). A plugin is named by its
 // absolute path, or by the name of one bundled with the package (<package>/plugins/<name>/plugin). Nothing is fetched
 // from the network. `update <project> <name@marketplace>` pins a project's Claude Code plugin (plugin-pin-cli.ts). `update <name>` runs the test kit and shows the new version's hash and the writes it adds;
-// `update <name> <sha256>` records it, only when that is still the hash.
+// `update <name> <sha256>` records it, only when that is still the hash. It reads its own flags (--reason), so the
+// main command line does not carry them.
 
 import { access, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { parseArgs } from "node:util";
+import { factoryHome, PKG } from "./cli-common.js";
 import type { Result } from "./core/forge/api.js";
 import { PLUGIN_NAME } from "./core/plugin/contract.js";
 import { testPlugin, type Check } from "./core/plugin/kit.js";
@@ -163,6 +166,32 @@ const VERBS: Readonly<Record<string, { readonly words: readonly number[]; readon
   test: { words: [1], run: (io, [word = ""]) => test(io, word) },
   list: { words: [0], run: (io) => list(io) },
 };
+
+function pluginArgs(argv: readonly string[]): { readonly positionals: string[]; readonly reason: string } | "usage" {
+  try {
+    const { values, positionals } = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      options: { reason: { type: "string", default: "" } },
+    });
+    return { positionals, reason: values.reason };
+  } catch {
+    return "usage";
+  }
+}
+
+export function pluginCli(
+  argv: readonly string[],
+  io: Pick<PluginIo, "env" | "out" | "err">,
+): Promise<number> | number {
+  const home = factoryHome(io.env);
+  const args = pluginArgs(argv);
+  if (home.kind === "refused" || args === "usage") {
+    io.err(home.kind === "refused" ? `agent-factory plugin: ${home.reason}\n` : USAGE);
+    return home.kind === "refused" ? 1 : 64;
+  }
+  return pluginCommand(args.positionals, { ...io, home: home.path, pkg: PKG, reason: args.reason });
+}
 
 export function pluginCommand(positionals: readonly string[], io: PluginIo): Promise<number> | number {
   const [verb = "", ...args] = positionals;
