@@ -25,14 +25,13 @@ const SPEC = [
   "",
   "## Design",
   "",
-  "See design.md.",
+  "A reservation check in RenewalService.",
   "",
   "## Lane",
   "",
   "feature",
   "",
 ].join("\n");
-const DESIGN = "# Design\n\nA reservation check in RenewalService.\n";
 
 const GUILD = "100000000000000001";
 const CHANNEL = "200000000000000002";
@@ -58,7 +57,6 @@ beforeEach(() => {
   home = tempDir("factory-door-discord-");
   mkdirSync(specDir(), { recursive: true });
   writeFileSync(join(specDir(), "spec.md"), SPEC);
-  writeFileSync(join(specDir(), "design.md"), DESIGN);
   now = Date.parse("2026-11-17T10:00:00Z");
   nonces = 0;
   branch = { kind: "ok", value: false };
@@ -215,25 +213,22 @@ describe("/start asks first when the ticket's branch is on the git host (#731)",
   });
 });
 
-describe("/approve binds the hashes the person was shown (#731)", () => {
-  it("shows the lane, both full hashes and both texts, then approves exactly those on Confirm", async () => {
+describe("/approve binds the hash the person was shown (#731)", () => {
+  it("shows the lane, the hash and the spec with its ## Design, then approves exactly that hash on Confirm", async () => {
     const door = discordDoor(deps());
     const shown = await door.handle(command("approve", "PROJ-1"));
     expect(shown.text).toContain("lane feature");
-    expect(shown.text).toContain(specHash(SPEC));
-    expect(shown.text).toContain(specHash(DESIGN));
-    expect(shown.files.map((f) => f.name)).toEqual(["PROJ-1-spec.md", "PROJ-1-design.md"]);
+    expect(shown.text).toContain(`the hash ${specHash(SPEC)}`);
+    expect(shown.files.map((f) => f.name)).toEqual(["PROJ-1-spec.md"]);
     expect(shown.files[0]?.text).toBe(SPEC);
     expect(records()).toEqual([]);
     const done = await door.handle(click(confirmOf(shown)));
     expect(done.text).toContain("approved ledger/PROJ-1");
     const record: unknown = JSON.parse(readFileSync(join(home, "approvals", "ledger", "PROJ-1.json"), "utf8"));
-    expect(record).toMatchObject({
-      by: "Ram",
-      via: "discord",
-      spec_hash: specHash(SPEC),
-      design_hash: specHash(DESIGN),
-    });
+    expect(record).toEqual(
+      expect.objectContaining({ version: 3, by: "Ram", via: "discord", spec_hash: specHash(SPEC) }),
+    );
+    expect(record).not.toHaveProperty("design_hash");
     expect(after).toEqual(["ledger"]);
   });
 
@@ -257,13 +252,13 @@ describe("/approve binds the hashes the person was shown (#731)", () => {
     expect(records()).toEqual([]);
   });
 
-  it("refuses a stale design: the design edited between /approve and Confirm", async () => {
+  it("refuses a Confirm while a design.md is left beside the spec, since nobody approves around it", async () => {
     const door = discordDoor(deps());
     const shown = await door.handle(command("approve", "PROJ-1"));
-    writeFileSync(join(specDir(), "design.md"), `${DESIGN}\nAnd a second check.\n`);
+    writeFileSync(join(specDir(), "design.md"), "# Design\n\nA second check.\n");
     const reply = await door.handle(click(confirmOf(shown)));
     refused(reply);
-    expect(reply.text).toContain("design's hash is now");
+    expect(reply.text).toContain("move its text into the spec's '## Design'");
     expect(records()).toEqual([]);
   });
 
@@ -292,16 +287,6 @@ describe("/approve binds the hashes the person was shown (#731)", () => {
     const reply = await discordDoor(deps()).handle(command("approve", "PROJ-1"));
     refused(reply);
     expect(reply.confirm).toBeUndefined();
-  });
-
-  it("binds none when the ticket has no design", async () => {
-    rmSync(join(specDir(), "design.md"));
-    const door = discordDoor(deps());
-    const shown = await door.handle(command("approve", "PROJ-1"));
-    expect(shown.files.map((f) => f.name)).toEqual(["PROJ-1-spec.md"]);
-    await door.handle(click(confirmOf(shown)));
-    const record: unknown = JSON.parse(readFileSync(join(home, "approvals", "ledger", "PROJ-1.json"), "utf8"));
-    expect(record).toMatchObject({ design_hash: "none" });
   });
 });
 
@@ -393,7 +378,7 @@ describe("the gateway answers each interaction ephemerally (#731)", () => {
     expect(edit).toMatchObject({
       method: "PATCH",
       path: `/webhooks/${APP}/interaction-token/messages/@original`,
-      files: [{ name: "PROJ-1-spec.md" }, { name: "PROJ-1-design.md" }],
+      files: [{ name: "PROJ-1-spec.md" }],
       json: { flags: 64, components: [{ components: [{ custom_id: expect.stringMatching(/^confirm:/) }] }] },
     });
     await gateway.stop();
@@ -457,9 +442,6 @@ describe("no log line or reply holds the token (#731)", () => {
     refused(reply);
     expect(reply.text).toContain("shaped like a secret");
     expect(reply.confirm).toBeUndefined();
-    writeFileSync(join(specDir(), "spec.md"), SPEC);
-    writeFileSync(join(specDir(), "design.md"), `${DESIGN}\npassword: hunter22\n`);
-    refused(await discordDoor(deps()).handle(command("approve", "PROJ-1")));
   });
 });
 

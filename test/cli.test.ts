@@ -70,7 +70,7 @@ describe("agent-factory spec", () => {
     const run = await cli(["spec", "ledger", "PROJ-1"]);
     expect(run).toMatchObject({
       code: 0,
-      out: `spec ledger/PROJ-1 ${specHash(SPEC)} ${join(home, "specs", "ledger", "PROJ-1", "spec.md")}\ndesign none\n`,
+      out: `spec ledger/PROJ-1 ${specHash(SPEC)} ${join(home, "specs", "ledger", "PROJ-1", "spec.md")}\n`,
     });
   });
 
@@ -172,7 +172,7 @@ describe("agent-factory approve and approval", () => {
     expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(4);
     const approved = await cli(["approve", "ledger", "PROJ-1", hash]);
     expect(approved.code).toBe(0);
-    expect(approved.out).toMatch(new RegExp(`^approved ledger/PROJ-1 spec ${hash} design none by `));
+    expect(approved.out).toMatch(new RegExp(`^approved ledger/PROJ-1, the hash ${hash}, by `));
     expect((await cli(["approval", "ledger", "PROJ-1"])).code).toBe(0);
     writeSpec(SPEC.replace("It works.", "It works, fast."));
     const stale = await cli(["approval", "ledger", "PROJ-1"]);
@@ -180,16 +180,30 @@ describe("agent-factory approve and approval", () => {
     expect(stale.out).toContain("approve again");
   });
 
-  it("spec prints the design's hash, approve needs it, and an edit to the design makes the approval stale (#227)", async () => {
+  it("spec and approve name a design.md left beside the spec; approve takes one hash, never a second", async () => {
     writeSpec(SPEC);
-    const design = "# Design\n\nOne table.\n";
-    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), design);
-    expect((await cli(["spec", "ledger", "PROJ-1"])).out).toContain(`\ndesign ${specHash(design)}\n`);
-    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC)])).err).toContain("design's hash is now");
-    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC), specHash(design)])).code).toBe(0);
-    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), `${design}Two tables.\n`);
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), "# Design\n\nOne table.\n");
+    expect(await cli(["spec", "ledger", "PROJ-1"])).toMatchObject({
+      code: 2,
+      err: expect.stringContaining("move its text into the spec's '## Design' section"),
+    });
+    expect((await cli(["approve", "ledger", "PROJ-1", specHash(SPEC)])).err).toContain("delete the file");
+    rmSync(join(home, "specs", "ledger", "PROJ-1", "design.md"));
+    const two = await cli(["approve", "ledger", "PROJ-1", specHash(SPEC), "none"]);
+    expect(two).toMatchObject({ code: 64, err: expect.stringContaining("give the one hash") });
+  });
+
+  it("approval says stale (3) for a record that bound a design file, and names the move", async () => {
+    writeSpec(SPEC);
+    mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
+    const old = { version: 2, kind: "approval", project: "ledger", ticket: "PROJ-1", spec_hash: specHash(SPEC) };
+    const record = { ...old, design_hash: "d".repeat(64), by: "ram", via: "terminal", at: "t" };
+    writeFileSync(join(home, "approvals", "ledger", "PROJ-1.json"), JSON.stringify(record));
     const stale = await cli(["approval", "ledger", "PROJ-1"]);
-    expect(stale).toMatchObject({ code: 3, out: expect.stringContaining("approved design") });
+    expect(stale).toMatchObject({
+      code: 3,
+      out: expect.stringContaining("the design moved into the spec's ## Design"),
+    });
   });
 
   it("approve refuses a short hash or a changed spec (1), and prints its usage when arguments are missing (64)", async () => {
@@ -533,7 +547,7 @@ describe("the issue spec store (#381)", () => {
     issue(ISSUE.replaceAll("\n", "\r\n"));
     const hash = specHash(ISSUE);
     const read = await cli(["spec", "ledger", "2"], env());
-    expect(read).toMatchObject({ code: 0, out: `spec ledger/2 ${hash} issue #2 of a/ledger\ndesign none\n` });
+    expect(read).toMatchObject({ code: 0, out: `spec ledger/2 ${hash} issue #2 of a/ledger\n` });
     expect((await cli(["approve", "ledger", "2", hash, "--no-loop"], env())).code).toBe(0);
     expect((await cli(["approval", "ledger", "2"], env())).code).toBe(0);
     issue(ISSUE.replace("It works.", "It works, fast."));

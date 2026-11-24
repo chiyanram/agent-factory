@@ -63,7 +63,7 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
     START.
 - **Approval** lets the build begin, in the bug, feature and one-way-door lanes. Tiny needs START only.
   - Any human may approve, never a bot. A team may name its approvers.
-  - The approval binds the spec and design hashes, and any edit makes it stale.
+  - The approval binds one hash, the spec's, its `## Design` section included, and any edit makes it stale.
   - A one-way door lists each irreversible step, and the approval covers each one.
   - For team agreement, the developer opens a draft spec PR: the spec in its description, one empty commit. The PR's
     approval is the record (`via: "pr"`).
@@ -180,7 +180,7 @@ come from its role card's guardrails. **Today:** the coordinator still builds it
 | spec | intent · lane · acceptance criteria (numbered `AC-n`, [Spec, design and project knowledge](spec-and-knowledge.md)) · design link · out of scope · planned files (optional) |
 | report | `.factory/report.json`: `done` with evidence per AC (and an optional `deferred` list), `asked` with questions, or `blocked` |
 | PR body | the engine's own lines (spec hash, approval, deferred list), then `.factory/pr.md`, written by the implementer and posted by the host only through the cleaner, which also scrubs anything shaped like a secret (ADR-0012 S13; P4) |
-| approval record | ticket, spec hash, design hash, by, via, at; also START and test-change records |
+| approval record | ticket, spec hash, by, via, at (an older record's design hash reads through a mapping); also START and test-change records |
 | evidence row | criterion · command · result |
 | finding | id, lens, axis, kind, file, line, rule, category (bug, security, test_gap…), severity (blocker, warning, nit), grade (how strong the proof is: `cited`, `walked` or `ran`), evidence (the proof itself), finding (the plain description), fix; the finder gives all but the lens, which the engine adds |
 | verdict | id, bucket (`act_on`, `consider`, `noted`, `dismissed`), why |

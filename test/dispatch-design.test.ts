@@ -17,7 +17,6 @@ import { keep, readDesignFindings, toVerify, type DesignFinding } from "../src/c
 import type { Waiting } from "../src/core/dispatch/table.js";
 
 const S = "a".repeat(64);
-const D = "none";
 const NOW = Date.parse("2026-11-07T10:00:00Z");
 
 const started = (at: string, phase: "design-review" | "design-verify"): Event => ({
@@ -38,7 +37,6 @@ const ended = (
   kind: "design-ended",
   step,
   spec,
-  design: D,
   outcome,
   why: outcome === "failed" ? "the model failed" : "",
   findings: [],
@@ -51,7 +49,6 @@ function designEnd(at: string): Extract<Event, { kind: "design-ended" }> {
     kind: "design-ended",
     step: "review",
     spec: S,
-    design: D,
     outcome: "done",
     why: "",
     findings: [],
@@ -61,23 +58,32 @@ function designEnd(at: string): Extract<Event, { kind: "design-ended" }> {
 
 const FEATURE = { lane: "feature", planned: ["src/a.ts"] } as const;
 const view = (events: readonly Event[], approvedAt = "", read: SpecRead = FEATURE, raised: Waiting | "none" = "none") =>
-  designView({ events, spec: S, design: D, read, raised, approvedAt, now: NOW });
+  designView({ events, spec: S, read, raised, approvedAt, now: NOW });
 
 describe("designView (#236)", () => {
   it("runs the design-reviewer first, then the verify pass, then is done", () => {
-    expect(view([])).toEqual({ kind: "run", step: "review", spec: S, design: D });
+    expect(view([])).toEqual({ kind: "run", step: "review", spec: S });
     const reviewed = [
       started("2026-11-07T09:00:00Z", "design-review"),
       ended("2026-11-07T09:01:00Z", "review", "done"),
     ];
-    expect(view(reviewed)).toEqual({ kind: "run", step: "verify", spec: S, design: D });
+    expect(view(reviewed)).toEqual({ kind: "run", step: "verify", spec: S });
     const verified = [...reviewed, ended("2026-11-07T09:02:00Z", "verify", "done")];
     expect(view(verified)).toEqual({ kind: "done" });
   });
 
-  it("an edit to the spec is new hashes: the review runs afresh", () => {
+  it("an old line with design none counts at its spec hash; one that read a design file is no round of this hash", () => {
+    const reviewed = (design: string) => [
+      started("2026-11-07T09:00:00Z", "design-review"),
+      { ...ended("2026-11-07T09:01:00Z", "review", "done"), design },
+    ];
+    expect(view(reviewed("none"))).toEqual({ kind: "run", step: "verify", spec: S });
+    expect(view(reviewed("c".repeat(64)))).toEqual({ kind: "run", step: "review", spec: S });
+  });
+
+  it("an edit to the spec is a new hash: the review runs afresh", () => {
     const old = [ended("2026-11-07T09:01:00Z", "review", "done", "b".repeat(64))];
-    expect(view(old)).toEqual({ kind: "run", step: "review", spec: S, design: D });
+    expect(view(old)).toEqual({ kind: "run", step: "review", spec: S });
   });
 
   it("an approval before the verify pass ended waits for an approval after it", () => {
@@ -104,7 +110,7 @@ describe("designView (#236)", () => {
       final: true,
     } as const;
     expect(view([cite])).toEqual({ kind: "stopped", step: "review", why: "a cite does not hold" });
-    expect(view([{ ...cite, spec: "b".repeat(64) }])).toEqual({ kind: "run", step: "review", spec: S, design: D });
+    expect(view([{ ...cite, spec: "b".repeat(64) }])).toEqual({ kind: "run", step: "review", spec: S });
   });
 
   it("a final failure reads back from the record; a final that is not a boolean is a bad line", async () => {
@@ -115,6 +121,22 @@ describe("designView (#236)", () => {
       expect((await record({ where, event: cite })).kind).toBe("ok");
       expect(await readRecords(where)).toEqual({ kind: "ok", value: [cite] });
       appendFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `${JSON.stringify({ ...cite, final: "yes" })}\n`);
+      expect((await readRecords(where, { warn: () => undefined })).kind).toBe("failed");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("an old design-ended line keeps the design hash it read; a design that is not text is a bad line", async () => {
+    const home = tempDir("factory-design-old-");
+    try {
+      const where = { home, project: "ledger", ticket: "PROJ-1" };
+      const old = { ...ended("2026-11-07T09:00:00Z", "review", "done"), design: "c".repeat(64) };
+      expect((await record({ where, event: ended("2026-11-07T08:00:00Z", "review", "done") })).kind).toBe("ok");
+      appendFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `${JSON.stringify(old)}\n`);
+      const read = await readRecords(where);
+      expect(read).toEqual({ kind: "ok", value: [ended("2026-11-07T08:00:00Z", "review", "done"), old] });
+      appendFileSync(join(home, "runs", "ledger", "PROJ-1.jsonl"), `${JSON.stringify({ ...old, design: 7 })}\n`);
       expect((await readRecords(where, { warn: () => undefined })).kind).toBe("failed");
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -188,7 +210,6 @@ describe("the design review converges (#489)", () => {
       kind: "run",
       step: "review",
       spec: S,
-      design: D,
     });
     expect(view([round("2026-11-07T09:02:00Z", OLD, consider)])).toEqual({ kind: "done" });
     expect(view([round("2026-11-07T09:02:00Z", OLD, [])])).toEqual({ kind: "done" });
@@ -196,15 +217,15 @@ describe("the design review converges (#489)", () => {
 
   it("stops at 2 rounds: the person is told once that the cap skipped a review, then decides", () => {
     const two = [round("2026-11-07T08:02:00Z", OLDER, actOn), round("2026-11-07T09:02:00Z", OLD, actOn)];
-    expect(view(two)).toEqual({ kind: "note", spec: S, design: D, why: ROUND_CAP });
-    const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, design: D, why: ROUND_CAP };
+    expect(view(two)).toEqual({ kind: "note", spec: S, why: ROUND_CAP });
+    const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, why: ROUND_CAP };
     expect(view([...two, told])).toEqual({ kind: "done" });
   });
 
   it("reviews again after the cap when the lane rose or the Planned files changed since the last round", () => {
     const at = (spec: string, time: string): Event => ({ ...round(time, spec, actOn), ...FEATURE });
     const two = [at(OLDER, "2026-11-07T08:02:00Z"), at(OLD, "2026-11-07T09:02:00Z")];
-    const run = { kind: "run", step: "review", spec: S, design: D };
+    const run = { kind: "run", step: "review", spec: S };
     expect(view(two, "", { ...FEATURE, lane: "one-way door" })).toEqual(run);
     expect(view(two, "", { ...FEATURE, planned: ["src/a.ts", "db/V2.sql"] })).toEqual(run);
     expect(view(two, "", { lane: "bug", planned: ["src/a.ts"] })).toMatchObject({ kind: "note", why: ROUND_CAP });
@@ -216,8 +237,8 @@ describe("the design review converges (#489)", () => {
     const files = (f: string) => ({ lane: "feature", planned: [f] }) as const;
     const r = (spec: string, time: string, f: string): Event => ({ ...round(time, spec, actOn), ...files(f) });
     const ab = [r("d".repeat(64), "2026-11-07T08:02:00Z", "a.ts"), r(OLD, "2026-11-07T09:02:00Z", "b.ts")];
-    expect(view(ab, "", files("a.ts"))).toEqual({ kind: "note", spec: S, design: D, why: ROUND_CAP });
-    const run = { kind: "run", step: "review", spec: S, design: D };
+    expect(view(ab, "", files("a.ts"))).toEqual({ kind: "note", spec: S, why: ROUND_CAP });
+    const run = { kind: "run", step: "review", spec: S };
     expect(view(ab, "", files("c.ts"))).toEqual(run);
     const four = [
       ...ab,
@@ -226,14 +247,14 @@ describe("the design review converges (#489)", () => {
     ];
     expect(four).toHaveLength(MAX_DESIGN_ROUNDS + MAX_MOVED_REVIEWS);
     expect(view(four.slice(0, 3), "", files("d.ts"))).toEqual(run);
-    expect(view(four, "", files("e.ts"))).toEqual({ kind: "note", spec: S, design: D, why: ROUND_CAP });
+    expect(view(four, "", files("e.ts"))).toEqual({ kind: "note", spec: S, why: ROUND_CAP });
   });
 
   it("holds the review while the Planned files need a heavier lane: the person is told once, then it waits", () => {
     const why = "the lane is raised from feature to one-way door (db/V2.sql …)";
     const raised = { wait: "lane-raised", why } as const;
-    expect(view([], "", FEATURE, raised)).toEqual({ kind: "note", spec: S, design: D, why });
-    const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, design: D, why };
+    expect(view([], "", FEATURE, raised)).toEqual({ kind: "note", spec: S, why });
+    const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, why };
     expect(view([told], "", FEATURE, raised)).toEqual({ kind: "held", wait: "lane-raised", why });
   });
 
@@ -241,11 +262,10 @@ describe("the design review converges (#489)", () => {
     const opened = { ...finding, id: "D2", verdict: "open" as const, decision: "the currency" };
     const review: Event = { ...designEnd("2026-11-07T09:01:00Z"), spec: OLD, findings: [finding, opened] };
     const verified: Event = { ...round("2026-11-07T09:02:00Z", OLD, actOn), ...FEATURE };
-    expect(roundsBefore([review, verified], { spec: S, design: D })).toEqual([
+    expect(roundsBefore([review, verified], { spec: S })).toEqual([
       {
         round: 1,
         spec: OLD,
-        design: D,
         ...FEATURE,
         findings: [finding, opened],
         kept: actOn,
@@ -261,7 +281,7 @@ describe("the design review converges (#489)", () => {
         { ...designEnd("2026-11-07T09:01:00Z"), spec: OLD, findings: [finding, opened] },
         round("2026-11-07T09:02:00Z", OLD, actOn),
       ],
-      { spec: S, design: D },
+      { spec: S },
     );
     const again = [
       { ...finding, id: "D1" },
@@ -276,7 +296,7 @@ describe("the design review converges (#489)", () => {
         { ...designEnd("2026-11-07T09:01:00Z"), spec: OLD, findings: [opened] },
         round("2026-11-07T09:02:00Z", OLD, answered),
       ],
-      { spec: S, design: D },
+      { spec: S },
     );
     expect(dropRepeats([{ ...opened, decision: "the currency" }], asked).dropped).toBe(1);
   });

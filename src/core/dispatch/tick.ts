@@ -28,8 +28,8 @@
 // The ticket list is every ticket with a START record, an approval record, or a factory/<ticket> PR. What lets
 // the build begin is a human's word: a START and an approval, or in the tiny lane a START alone (table.ts). An
 // approval with no START waits. The newer of the two records is when the counts start afresh. The shared copy is a
-// note the project's own git host identity posts, `approved by <human> via <door>, spec <hash>, design <hash|none>`,
-// for people to see. It never starts anything: the orchestrator decides only from the local records.
+// note the project's own git host identity posts, `approved by <human> via <door>, the hash <hash>`, for people to
+// see. It never starts anything: the orchestrator decides only from the local records.
 
 import type { PluginHash } from "../process/use.js";
 import { heldBy, quarantineItems, quarantineLine, type Held, type Quarantined } from "../process/quarantine.js";
@@ -96,7 +96,7 @@ import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.j
 import { openAt } from "./hours.js";
 import { settingName } from "../settings/machine.js";
 import { periodsAt, readSpends, totalOf } from "./usage.js";
-import { approvalKey, sharedNote } from "./shared.js";
+import { approvalKey, legacyKey, sharedNote } from "./shared.js";
 import { namedField, runsField, type Named, type RunNamed } from "../agent/ran.js";
 import { BRANCH_PREFIX, type DesignRan, type ReadyFacts, type Steps, type Unavailable } from "./steps.js";
 import {
@@ -311,8 +311,8 @@ async function waiverOf(setup: TickSetup, ticket: string): Promise<Result<Waiver
 }
 
 function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none"): boolean {
-  const key = approved === "none" ? "" : approvalKey(approved);
-  return events.some((e) => e.kind === "shared" && e.approval === key);
+  const keys = approved === "none" ? [] : [approvalKey(approved), legacyKey(approved)];
+  return events.some((e) => e.kind === "shared" && keys.includes(e.approval));
 }
 
 const DESIGN_KINDS: ReadonlySet<ApprovalView["kind"]> = new Set(["unapproved", "stale", "approved"]);
@@ -334,7 +334,6 @@ async function designOf(setup: TickSetup, ticket: string, said: Said, events: re
   return designView({
     events,
     spec: spec.spec.hash,
-    design: spec.design,
     read: { lane: spec.spec.lane, planned: spec.spec.planned },
     raised: await raisedOf(setup, spec.spec),
     approvedAt,
@@ -1147,7 +1146,7 @@ type DesignAction = Extract<Action, { kind: "design" }>;
 
 async function earlierOf(setup: TickSetup, state: TicketState, a: DesignAction): Promise<readonly EarlierRound[]> {
   const events = await readRecords(where(setup, state), { warn: setup.log, ...asideOf(setup) });
-  return events.kind === "ok" ? roundsBefore(events.value, { spec: a.spec, design: a.design }) : [];
+  return events.kind === "ok" ? roundsBefore(events.value, { spec: a.spec }) : [];
 }
 
 function earlierField(rounds: readonly EarlierRound[]): { readonly earlier?: readonly EarlierRound[] } {
@@ -1182,11 +1181,11 @@ async function designFindings(
       e.step === "review" &&
       e.outcome === "done" &&
       e.spec === a.spec &&
-      e.design === a.design,
+      e.design === undefined,
   );
   return review?.kind === "design-ended"
     ? { kind: "ok", value: review.findings }
-    : { kind: "failed", reason: "the design-reviewer's findings at this spec and design are gone" };
+    : { kind: "failed", reason: "the design-reviewer's findings at this spec are gone" };
 }
 
 type DesignEnded = Extract<Event, { kind: "design-ended" }>;
@@ -1217,7 +1216,6 @@ function designEnded(
     kind: "design-ended",
     step: a.step,
     spec: a.spec,
-    design: a.design,
     ...readField(read),
   } as const;
   if (ran.kind === "failed") {
@@ -1241,7 +1239,7 @@ async function runDesignStep(
   a: DesignAction,
 ): Promise<Result<DesignRan<{ readonly findings?: readonly DesignFinding[]; readonly kept?: readonly Kept[] }>>> {
   const rounds = await earlierOf(setup, state, a);
-  const input = { ticket: state.ticket, spec: a.spec, design: a.design, ...earlierField(rounds) };
+  const input = { ticket: state.ticket, spec: a.spec, ...earlierField(rounds) };
   if (a.step === "review") {
     const step = setup.steps.designReview;
     return step.kind === "available"
@@ -1291,7 +1289,7 @@ async function designRan(setup: TickSetup, state: TicketState, a: DesignAction):
 
 async function readAt(setup: TickSetup, state: TicketState, a: DesignAction): Promise<SpecRead | "none"> {
   const current = await currentSpec(ticketAt(setup, state.ticket));
-  return current.kind === "spec" && current.spec.hash === a.spec && current.design === a.design
+  return current.kind === "spec" && current.spec.hash === a.spec
     ? { lane: current.spec.lane, planned: current.spec.planned }
     : "none";
 }
@@ -1300,7 +1298,7 @@ function designNote(setup: TickSetup, state: TicketState, a: DesignNoteAction): 
   setup.log(`${state.ticket}: design review: ${a.why}`);
   return record({
     where: where(setup, state),
-    event: { at: at(setup), kind: "design-noted", spec: a.spec, design: a.design, why: a.why },
+    event: { at: at(setup), kind: "design-noted", spec: a.spec, why: a.why },
   });
 }
 
@@ -1319,10 +1317,7 @@ export function designPost(ended: DesignEnded): Post {
   return {
     seat: "coordinator",
     title: `design review: ${counted}; read them, then approve`,
-    fields: [
-      { label: "spec", value: ended.spec },
-      { label: "design", value: ended.design },
-    ],
+    fields: [{ label: "the hash", value: ended.spec }],
     items: ended.kept.map(keptLine),
   };
 }

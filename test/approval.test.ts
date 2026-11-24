@@ -47,18 +47,17 @@ beforeEach(() => {
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
 describe("approve", () => {
-  it("records the approval with the spec's full hash, the design's (none here), who, the front door and when", async () => {
+  it("records the approval with the spec's one full hash, who, the front door and when", async () => {
     writeSpec(SPEC);
     const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "2026-11-07T09:12:00Z" });
     expect(result).toMatchObject({ kind: "approved", path: join(home, "approvals", "ledger", "PROJ-123.json") });
     const record = JSON.parse(readFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), "utf8"));
     expect(record).toEqual({
-      version: 2,
+      version: 3,
       kind: "approval",
       project: "ledger",
       ticket: "PROJ-123",
       spec_hash: specHash(SPEC),
-      design_hash: "none",
       by: "ram",
       via: "terminal",
       at: "2026-11-07T09:12:00Z",
@@ -174,48 +173,61 @@ describe("approvalState", () => {
   });
 });
 
-describe("the design hash (#227)", () => {
-  it("binds the design beside the spec: approve needs its hash, and an edit to it makes the approval stale", async () => {
-    writeSpec(SPEC);
-    writeDesign(DESIGN);
-    const without = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
-    expect(without.kind === "refused" ? without.reason : "").toContain("design's hash is now");
-    const done = await approve({
-      where: where(),
-      seenHash: seen(SPEC),
-      seenDesign: specHash(DESIGN),
-      by: "ram",
-      via: "discord",
-      at: "t",
-    });
-    expect(done).toMatchObject({ kind: "approved", record: { design_hash: specHash(DESIGN), via: "discord" } });
-    expect(await approvalState(where())).toMatchObject({ kind: "approved" });
-    writeDesign(DESIGN.replace("RenewalService", "LoanService"));
-    expect(await approvalState(where())).toMatchObject({
-      kind: "stale",
-      part: "design",
-      approvedHash: specHash(DESIGN),
-    });
-  });
-
-  it("refuses a design with a character that does not show", async () => {
-    writeSpec(SPEC);
-    writeDesign("# Design\n\nhidden\u200b here\n");
-    const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
-    expect(result.kind === "refused" ? result.reason : "").toContain("do not show");
-  });
-
-  it("reads a record written before #227 as one that bound no design and came from the terminal", async () => {
-    writeSpec(SPEC);
+describe("the design is the spec's ## Design: one hash", () => {
+  const recordFile = (value: object): void => {
     mkdirSync(join(home, "approvals", "ledger"), { recursive: true });
-    const old = { version: 1, project: "ledger", ticket: "PROJ-123", spec_hash: specHash(SPEC), by: "ram", at: "t" };
-    writeFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), JSON.stringify(old));
-    expect(await approvalState(where())).toMatchObject({
-      kind: "approved",
-      record: { version: 2, design_hash: "none", via: "terminal" },
-    });
+    writeFileSync(join(home, "approvals", "ledger", "PROJ-123.json"), JSON.stringify(value));
+  };
+  const v2 = (design: string) => ({
+    version: 2,
+    kind: "approval",
+    project: "ledger",
+    ticket: "PROJ-123",
+    spec_hash: specHash(SPEC),
+    design_hash: design,
+    by: "ram",
+    via: "discord",
+    at: "t",
+  });
+  const FEATURE = SPEC.replace("\nbug\n", "\nfeature\n");
+
+  it("refuses while a design.md is still beside the spec, and names the move", async () => {
+    writeSpec(SPEC);
     writeDesign(DESIGN);
-    expect(await approvalState(where())).toMatchObject({ kind: "stale", part: "design" });
+    const result = await approve({ where: where(), seenHash: seen(SPEC), by: "ram", at: "t" });
+    expect(result.kind === "refused" ? result.reason : "").toContain("move its text into the spec's '## Design'");
+    expect(existsSync(join(home, "approvals"))).toBe(false);
+  });
+
+  it("refuses a feature spec whose ## Design is none, naming the lane", async () => {
+    writeSpec(FEATURE);
+    const result = await approve({ where: where(), seenHash: seen(FEATURE), by: "ram", at: "t" });
+    expect(result.kind === "refused" ? result.reason : "").toContain("the feature lane needs a design");
+  });
+
+  it("reads a version 1 record, or a version 2 one with design none, as approved on the spec's hash", async () => {
+    writeSpec(SPEC);
+    recordFile({ version: 1, project: "ledger", ticket: "PROJ-123", spec_hash: specHash(SPEC), by: "ram", at: "t" });
+    expect(await approvalState(where())).toMatchObject({ kind: "approved", record: { version: 3, via: "terminal" } });
+    recordFile(v2("none"));
+    expect(await approvalState(where())).toMatchObject({ kind: "approved", record: { version: 3, via: "discord" } });
+  });
+
+  it("reads a version 2 record that bound a design file as stale: the design moved, approve again", async () => {
+    writeSpec(SPEC);
+    recordFile(v2(specHash(DESIGN)));
+    expect(await approvalState(where())).toEqual({
+      kind: "stale",
+      part: "design moved",
+      approvedHash: specHash(DESIGN),
+      currentHash: specHash(SPEC),
+    });
+  });
+
+  it("refuses a version 3 record that still carries a design hash", async () => {
+    writeSpec(SPEC);
+    recordFile({ ...v2("none"), version: 3 });
+    expect(await approvalState(where())).toMatchObject({ kind: "refused" });
   });
 
   it("refuses a version 2 record with a front door the factory does not know", async () => {

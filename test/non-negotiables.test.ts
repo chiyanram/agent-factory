@@ -201,7 +201,7 @@ const RUNS: readonly Summary[] = [
 
 const DESIGNS: readonly DesignView[] = [
   { kind: "off" },
-  { kind: "run", step: "review", spec: "a".repeat(64), design: "none" },
+  { kind: "run", step: "review", spec: "a".repeat(64) },
   { kind: "stopped", step: "review", why: "3 failures" },
   { kind: "done" },
 ];

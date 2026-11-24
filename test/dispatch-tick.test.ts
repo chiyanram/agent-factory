@@ -43,7 +43,7 @@ const SPEC = (lane: string) =>
     "",
     "## Design",
     "",
-    "none",
+    "One check in the service; no new module.",
     "",
     "## Lane",
     "",
@@ -61,7 +61,7 @@ const NO_DESIGN_REVIEW = DEFAULT_LANES.map((l) => ({
   designReview: false,
 }));
 const COPY = (ticket: string, lane = "feature") =>
-  `[coordinator] approved by ram via terminal, spec ${specHash(SPEC(lane).replace("PROJ-1", ticket))}, design none`;
+  `[coordinator] approved by ram via terminal, the hash ${specHash(SPEC(lane).replace("PROJ-1", ticket))}`;
 let home = "";
 
 async function approved(ticket = "PROJ-1", lane = "feature"): Promise<void> {
@@ -1289,7 +1289,7 @@ describe("tick", () => {
         kind: "needs-you",
         ticket: "PROJ-1",
         change: 12,
-        why: "the spec or its design changed after its approval",
+        why: "the spec changed after its approval, or its approval bound a design file",
         next: "approves the spec again: agent-factory approve <project> <ticket> <hash>",
       },
       { kind: "ready", ticket: "PROJ-3", change: 14, head: H },
@@ -1891,7 +1891,7 @@ describe("START and approval (#227)", () => {
     await approvedAt(text, "2026-11-07T09:00:00Z");
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", "423"));
     expect(await decisions()).toEqual([
-      "log PROJ-1: wait: the spec or its design changed after its approval (dry run)",
+      "log PROJ-1: wait: the spec changed after its approval, or its approval bound a design file (dry run)",
     ]);
     mkdirSync(join(home, "starts", "ledger"), { recursive: true });
     writeFileSync(join(home, "starts", "ledger", "PROJ-2.json"), JSON.stringify({ kind: "start", ticket: "PROJ-2" }));
@@ -1990,6 +1990,16 @@ describe("START and approval (#227)", () => {
     expect(await notes()).toEqual([]);
     await approvedAt(text, "2026-11-07T09:00:00Z");
     expect(await notes()).toEqual([`note #12 ${COPY("PROJ-1")}`]);
+  });
+
+  it("an approval shared under its old key, with the design none, is not posted again", async () => {
+    const text = spec("feature");
+    await approvedAt(text, "2026-11-07T08:00:00Z");
+    const old = `${specHash(text)} none 2026-11-07T08:00:00Z`;
+    await record({ where: where(), event: { at: "2026-11-07T08:01:00Z", kind: "shared", approval: old } });
+    const log: string[] = [];
+    await tick(setup({ team, open: [open({ labels: [] })], merged: [] }, log));
+    expect(log.filter((l) => l.startsWith("note"))).toEqual([]);
   });
 
   it("a shared copy that fails to post is printed, and the pass goes on", async () => {
@@ -2471,7 +2481,7 @@ describe("the design review and the cleanup run (#236)", () => {
       designReview: {
         kind: "available",
         run: async (input) => {
-          seen.push(`review ${input.spec.slice(0, 8)} ${input.design}`);
+          seen.push(`review ${input.spec.slice(0, 8)}`);
           return {
             kind: "ok",
             value: {
@@ -2553,7 +2563,7 @@ describe("the design review and the cleanup run (#236)", () => {
     const steps = designSteps(seen);
     const first = await pass(steps, "2026-11-07T09:00:00Z");
     expect(first).toContain(`log PROJ-1: design review at spec ${specHash(text).slice(0, 8)}`);
-    expect(seen).toEqual([`review ${specHash(text).slice(0, 8)} none`]);
+    expect(seen).toEqual([`review ${specHash(text).slice(0, 8)}`]);
     const second = await pass(steps, "2026-11-07T09:01:00Z", pings);
     expect(seen.at(-1)).toBe("verify D1");
     expect(second).toContain(
@@ -2630,7 +2640,6 @@ describe("the design review and the cleanup run (#236)", () => {
     const round = {
       round: 1,
       spec: specHash(text),
-      design: "none",
       lane: "feature",
       planned: [],
       findings: [finding, { ...finding, id: "D2", verdict: "aligned" }],

@@ -10,10 +10,13 @@
 // hash the human saw, and approve refuses unless the spec on disk has exactly that hash: a prefix could be matched by a
 // second, different spec in minutes (a review of the first version found a 12-character collision).
 //
-// The approval binds the design too (#227): the hash of the ticket's design file beside the spec, or "none" when it has
-// none (spec.ts designHash). An edit to the spec or to the design makes the approval stale, and approve refuses unless
-// the design on disk has exactly the design hash the human confirmed. The record names the front door it came through
-// (`via`: terminal, discord or pr). A record written before #227 (version 1) bound no design and came from the terminal.
+// The design is the spec's own ## Design section (spec.ts), so the spec's hash is the one hash an approval binds. A
+// record written when a design file beside the spec had its own hash reads through recordOf's mapping: version 1, or
+// version 2 with design "none", is the spec's hash alone; version 2 with a real design hash reads as stale ("design
+// moved"), because the person approved a text that is no longer read. Approve refuses a spec in a lane that needs a
+// design and has none, and a design.md still beside the spec (spec.ts beforeApproval). The review reads a record that
+// bound a design file as no approval at all (readBound). The record names the front door it came through (`via`:
+// terminal, discord or pr); a version 1 record came from the terminal.
 //
 // Approval is what lets the build begin in the bug, feature and one-way-door lanes; tiny needs a START only (start.ts).
 // The AI never approves: `agent-factory approve` is on the coordinator's deny list (coordinator.ts, #227), and the
@@ -25,8 +28,8 @@
 import { join } from "node:path";
 import { isVia, readRecordFile, writeRecordFile, type Via } from "./human-record.js";
 import {
+  beforeApproval,
   checkSpec,
-  designHash,
   NO_DESIGN,
   plainName,
   readSpec,
@@ -38,12 +41,11 @@ import {
 import { prop } from "./field.js";
 
 export type ApprovalRecord = {
-  readonly version: 2;
+  readonly version: 3;
   readonly kind: "approval";
   readonly project: string;
   readonly ticket: string;
   readonly spec_hash: string;
-  readonly design_hash: string;
   readonly by: string;
   readonly via: Via;
   readonly at: string;
@@ -54,7 +56,6 @@ export type Where = { readonly home: string; readonly store?: SpecStore } & Tick
 export type ApproveRequest = {
   readonly where: Where;
   readonly seenHash: string;
-  readonly seenDesign?: string;
   readonly by: string;
   readonly via?: Via;
   readonly at: string;
@@ -66,7 +67,7 @@ export type ApprovalState =
   | { readonly kind: "approved"; readonly record: ApprovalRecord; readonly spec: Spec }
   | {
       readonly kind: "stale";
-      readonly part: "spec" | "design";
+      readonly part: "spec" | "design moved";
       readonly approvedHash: string;
       readonly currentHash: string;
     }
@@ -90,10 +91,7 @@ function storeOf(where: Where): SpecStore {
   return where.store ?? { kind: "local", root: join(where.home, "specs") };
 }
 
-export type Current =
-  | { readonly kind: "spec"; readonly spec: Spec; readonly design: string }
-  | { readonly kind: "missing" }
-  | Refused;
+export type Current = { readonly kind: "spec"; readonly spec: Spec } | { readonly kind: "missing" } | Refused;
 
 export async function currentSpec(where: Where): Promise<Current> {
   const read = await readSpec({ store: storeOf(where), project: where.project, ticket: where.ticket });
@@ -104,29 +102,24 @@ export async function currentSpec(where: Where): Promise<Current> {
   if (checked.kind !== "ok") {
     return { kind: "refused", reason: `the spec is not ready: ${checked.problems.join("; ")}` };
   }
-  const design = await designHash({ store: storeOf(where), project: where.project, ticket: where.ticket });
-  return design.kind === "design" ? { kind: "spec", spec: checked.spec, design: design.hash } : design;
+  return { kind: "spec", spec: checked.spec };
 }
 
-type Confirmed = { readonly kind: "spec"; readonly spec: Spec; readonly design: string } | Refused;
+type Confirmed = { readonly kind: "spec"; readonly spec: Spec } | Refused;
 
-function seenDesign(request: ApproveRequest): string {
-  return request.seenDesign ?? NO_DESIGN;
-}
-
-function sameAsSeen(request: ApproveRequest, current: Extract<Current, { kind: "spec" }>): Confirmed {
+async function sameAsSeen(request: ApproveRequest, current: Extract<Current, { kind: "spec" }>): Promise<Confirmed> {
   if (current.spec.hash !== request.seenHash) {
     return {
       kind: "refused",
       reason: `the spec's hash is now ${current.spec.hash}, not the one you confirmed: it changed; look at it again`,
     };
   }
-  return current.design === seenDesign(request)
-    ? current
-    : {
-        kind: "refused",
-        reason: `the design's hash is now ${current.design}, not the one you confirmed (${seenDesign(request)}): look at it again`,
-      };
+  const { where } = request;
+  const problems = await beforeApproval(
+    { store: storeOf(where), project: where.project, ticket: where.ticket },
+    current.spec,
+  );
+  return problems.length === 0 ? current : { kind: "refused", reason: `the spec is not ready: ${problems.join("; ")}` };
 }
 
 async function confirmedSpec(request: ApproveRequest): Promise<Confirmed> {
@@ -153,12 +146,11 @@ export async function approve(request: ApproveRequest): Promise<Approve> {
   }
   const { project, ticket } = request.where;
   const record: ApprovalRecord = {
-    version: 2,
+    version: 3,
     kind: "approval",
     project,
     ticket,
     spec_hash: confirmed.spec.hash,
-    design_hash: confirmed.design,
     by: request.by,
     via: request.via ?? "terminal",
     at: request.at,
@@ -179,51 +171,66 @@ function recordProblems(r: unknown, where: Where): readonly boolean[] {
   ];
 }
 
-function secondProblems(r: unknown): readonly boolean[] {
+function laterProblems(r: unknown): readonly boolean[] {
+  return [prop(r, "kind") === "approval", isVia(prop(r, "via"))];
+}
+
+function versionProblems(r: unknown): readonly boolean[] {
   const design = prop(r, "design_hash");
-  return [prop(r, "kind") === "approval", design === NO_DESIGN || hash(design), isVia(prop(r, "via"))];
+  switch (prop(r, "version")) {
+    case 1:
+      return [];
+    case 2:
+      return [...laterProblems(r), design === NO_DESIGN || hash(design)];
+    case 3:
+      return [...laterProblems(r), design === undefined];
+    default:
+      return [false];
+  }
 }
 
 function asRecord(r: unknown): ApprovalRecord {
   const v = (name: string): string => String(prop(r, name));
   const via = prop(r, "via");
-  const second = prop(r, "version") === 2;
   return {
-    version: 2,
+    version: 3,
     kind: "approval",
     project: v("project"),
     ticket: v("ticket"),
     spec_hash: v("spec_hash"),
-    design_hash: second ? v("design_hash") : NO_DESIGN,
     by: v("by"),
-    via: second && isVia(via) ? via : "terminal",
+    via: prop(r, "version") !== 1 && isVia(via) ? via : "terminal",
     at: v("at"),
   };
 }
 
-function recordOf(value: unknown, where: Where): ApprovalRecord | "bad" {
-  const version = prop(value, "version");
-  const checks = [...recordProblems(value, where), ...(version === 2 ? secondProblems(value) : [version === 1])];
-  return checks.every(Boolean) ? asRecord(value) : "bad";
+function movedOf(r: unknown): { readonly moved?: string } {
+  const design = prop(r, "design_hash");
+  return prop(r, "version") === 2 && design !== NO_DESIGN ? { moved: String(design) } : {};
 }
 
-export type Stored =
-  | { readonly kind: "record"; readonly record: ApprovalRecord }
-  | { readonly kind: "missing" }
-  | Refused;
+type Mapped = { readonly record: ApprovalRecord; readonly moved?: string };
+
+function recordOf(value: unknown, where: Where): Mapped | "bad" {
+  const checks = [...recordProblems(value, where), ...versionProblems(value)];
+  return checks.every(Boolean) ? { record: asRecord(value), ...movedOf(value) } : "bad";
+}
+
+export type Stored = ({ readonly kind: "record" } & Mapped) | { readonly kind: "missing" } | Refused;
 
 async function readRecord(path: string, where: Where): Promise<Stored> {
   const file = await readRecordFile(path);
   if (file.kind !== "json") {
     return file;
   }
-  const record = recordOf(file.value, where);
-  return record === "bad"
+  const mapped = recordOf(file.value, where);
+  return mapped === "bad"
     ? { kind: "refused", reason: `${path} is not an approval record for ${where.project}/${where.ticket}` }
-    : { kind: "record", record };
+    : { kind: "record", ...mapped };
 }
 
-function compare(record: ApprovalRecord, current: Current, where: Where): ApprovalState {
+function compare(stored: Mapped, current: Current, where: Where): ApprovalState {
+  const { record } = stored;
   if (current.kind !== "spec") {
     return current.kind === "missing"
       ? { kind: "refused", reason: `${where.project}/${where.ticket} is approved, but its spec is gone` }
@@ -232,9 +239,9 @@ function compare(record: ApprovalRecord, current: Current, where: Where): Approv
   if (current.spec.hash !== record.spec_hash) {
     return { kind: "stale", part: "spec", approvedHash: record.spec_hash, currentHash: current.spec.hash };
   }
-  return current.design === record.design_hash
+  return stored.moved === undefined
     ? { kind: "approved", record, spec: current.spec }
-    : { kind: "stale", part: "design", approvedHash: record.design_hash, currentHash: current.design };
+    : { kind: "stale", part: "design moved", approvedHash: stored.moved, currentHash: current.spec.hash };
 }
 
 export async function readApproval(where: Where): Promise<Stored> {
@@ -242,7 +249,18 @@ export async function readApproval(where: Where): Promise<Stored> {
   return path.kind === "path" ? readRecord(path.path, where) : path;
 }
 
+export async function readBound(where: Where): Promise<Stored> {
+  const stored = await readApproval(where);
+  return stored.kind === "record" && stored.moved !== undefined ? { kind: "missing" } : stored;
+}
+
+export function staleWhy(name: string, state: Extract<ApprovalState, { kind: "stale" }>): string {
+  return state.part === "design moved"
+    ? `stale ${name}: the approval bound design ${state.approvedHash}, a file beside the spec; the design moved into the spec's ## Design; approve again`
+    : `stale ${name}: approved the hash ${state.approvedHash}, now ${state.currentHash}; approve again`;
+}
+
 export async function approvalState(where: Where): Promise<ApprovalState> {
   const stored = await readApproval(where);
-  return stored.kind === "record" ? compare(stored.record, await currentSpec(where), where) : stored;
+  return stored.kind === "record" ? compare(stored, await currentSpec(where), where) : stored;
 }

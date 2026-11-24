@@ -3,9 +3,9 @@
 // refused there too.
 //
 // /start writes START, and asks for a Confirm first when factory/<ticket> is on the git host, as the terminal does.
-// /approve shows the lane, both full hashes and both texts (shown.ts), and binds them to a one-use nonce held in memory
-// for ten minutes; a Confirm by the same person approves exactly those hashes, so `approve` refuses a spec or design
-// edited in between. /board is read only. Waive and merge stay off Discord. A restart drops every pending Confirm.
+// /approve shows the lane, the full hash and the spec's text, its ## Design included (shown.ts), and binds the hash to a
+// one-use nonce held in memory for ten minutes; a Confirm by the same person approves exactly that hash, so `approve`
+// refuses a spec edited in between. /board is read only. Waive and merge stay off Discord. A restart drops every pending Confirm.
 
 import type { Result } from "../../forge/api.js";
 import type { Where } from "../../approval.js";
@@ -51,7 +51,6 @@ type Pending =
       readonly ticket: string;
       readonly user: string;
       readonly spec: string;
-      readonly design: string;
     };
 
 type Held = Pending & { readonly until: number };
@@ -74,9 +73,8 @@ function nonceOf(customId: string): string {
 function approveText(project: string, ticket: string, seen: Shown): string {
   return [
     `Approve ${project}/${ticket}, lane ${seen.lane}: ${seen.title}`,
-    `spec   ${seen.spec}`,
-    `design ${seen.design}`,
-    "The spec and design are attached. Confirm within 10 minutes approves exactly these hashes; an edit to either before then makes Confirm refuse.",
+    `the hash ${seen.spec}`,
+    "The spec is attached, its ## Design included. Confirm within 10 minutes approves exactly this hash; an edit to the spec before then makes Confirm refuse.",
   ].join("\n");
 }
 
@@ -142,17 +140,14 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
       return refused(seen.reason);
     }
     const { project, user } = at;
-    const confirm = hold({ kind: "approve", project, ticket, user, spec: seen.spec, design: seen.design });
-    const files: Attached[] = [
-      { name: `${ticket}-spec.md`, text: seen.specText },
-      ...(seen.designText === undefined ? [] : [{ name: `${ticket}-design.md`, text: seen.designText }]),
-    ];
+    const confirm = hold({ kind: "approve", project, ticket, user, spec: seen.spec });
+    const files: Attached[] = [{ name: `${ticket}-spec.md`, text: seen.specText }];
     return { text: approveText(project, ticket, seen), files, confirm };
   };
 
   const approved = async (at: At, p: Extract<Pending, { kind: "approve" }>): Promise<Said> => {
     const where = at.door.specs(p.ticket);
-    const request = (w: Where) => ({ where: w, seenHash: p.spec, seenDesign: p.design, at: stamp() });
+    const request = (w: Where) => ({ where: w, seenHash: p.spec, at: stamp() });
     const result =
       where.kind === "ok"
         ? await approveAs(at.person, request(where.value), deps.env)
@@ -162,7 +157,7 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
     }
     await at.door.after();
     const r = result.record;
-    return said(`approved ${p.project}/${p.ticket} spec ${r.spec_hash} design ${r.design_hash} by ${r.by} at ${r.at}`);
+    return said(`approved ${p.project}/${p.ticket}, the hash ${r.spec_hash}, by ${r.by} at ${r.at}`);
   };
 
   const confirmed = (at: At, customId: string): Promise<Said> => {

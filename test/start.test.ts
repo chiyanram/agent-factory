@@ -97,52 +97,60 @@ describe("start (#227)", () => {
   });
 });
 
-describe("the shared copy of an approval (#227)", () => {
+describe("the shared copy of an approval", () => {
   const record: ApprovalRecord = {
-    version: 2,
+    version: 3,
     kind: "approval",
     project: "ledger",
     ticket: "PROJ-1",
     spec_hash: "a".repeat(64),
-    design_hash: "none",
     by: "ram @team",
     via: "pr",
     at: "2026-11-09T08:00:00Z",
   };
+  const at = "2026-11-09T08:01:00Z";
 
-  it("is one templated line naming the human, the door and both hashes, cleaned by the posting template", () => {
+  it("is one templated line naming the human, the door and the hash, cleaned by the posting template", () => {
     const text = renderPost(sharedNote(record));
     expect(text).toEqual({
       kind: "ok",
-      text: `[coordinator] approved by ram @⁠team via pr, spec ${"a".repeat(64)}, design none`,
+      text: `[coordinator] approved by ram @⁠team via pr, the hash ${"a".repeat(64)}`,
     });
-    expect(approvalKey(record)).toBe(`${"a".repeat(64)} none 2026-11-09T08:00:00Z`);
+    expect(approvalKey(record)).toBe(`${"a".repeat(64)} 2026-11-09T08:00:00Z`);
   });
 
   it("is trusted only when the project's own factory identity posted it", () => {
-    const rendered = renderPost(sharedNote({ ...record, design_hash: "b".repeat(64) }));
+    const rendered = renderPost(sharedNote(record));
     const body = rendered.kind === "ok" ? rendered.text : "";
-    const at = "2026-11-09T08:01:00Z";
     expect(sharedCopy({ body, author: { name: "Factory-Bot" }, at }, "factory-bot")).toEqual({
       by: "ram @⁠team",
       via: "pr",
       spec: "a".repeat(64),
-      design: "b".repeat(64),
       at,
     });
     expect(sharedCopy({ body, author: { name: "mallory" }, at }, "factory-bot")).toBe("none");
     expect(
       sharedCopy(
-        { body: "[coordinator] approved by x via bot, spec 1, design none", author: { name: "factory-bot" }, at },
+        { body: "[coordinator] approved by x via bot, the hash 1", author: { name: "factory-bot" }, at },
         "factory-bot",
       ),
     ).toBe("none");
+  });
+
+  it("still reads a note posted when the approval bound a design hash as well", () => {
+    const body = `[coordinator] approved by ram via pr, spec ${"a".repeat(64)}, design ${"b".repeat(64)}`;
+    expect(sharedCopy({ body, author: { name: "factory-bot" }, at }, "factory-bot")).toEqual({
+      by: "ram",
+      via: "pr",
+      spec: "a".repeat(64),
+      at,
+    });
   });
 });
 
 describe("goAhead: what lets the build begin (#227)", () => {
   const spec = (lane: string): string => {
-    const text = `# PROJ-1: t\n\n## Intent\n\nDo it.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nnone\n\n## Lane\n\n${lane}\n`;
+    const text = `# PROJ-1: t\n\n## Intent\n\nDo it.\n\n## Acceptance criteria\n\n1. It works.\n\n## Design\n\nOne check in the service; no new module.\n\n## Lane\n\n${lane}\n`;
     mkdirSync(join(home, "specs", "ledger", "PROJ-1"), { recursive: true });
     writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text);
     return text;

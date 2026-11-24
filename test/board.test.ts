@@ -39,12 +39,11 @@ const done: Summary = {
 };
 
 const APPROVAL: ApprovalRecord = {
-  version: 2,
+  version: 3,
   kind: "approval",
   project: "ledger",
   ticket: "PROJ-1",
   spec_hash: "s",
-  design_hash: "none",
   by: "mo",
   via: "terminal",
   at: "2026-11-13T08:00:00Z",
@@ -226,7 +225,6 @@ describe("the board's lanes (#671)", () => {
             action: {
               kind: "design-note" as const,
               spec: "s",
-              design: "none",
               why: "no further design review (round cap): the person decides",
             },
           };

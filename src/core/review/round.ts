@@ -28,7 +28,7 @@ import type { LaneProps } from "../lane.js";
 import { withFloor } from "./never.js";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readApproval } from "../approval.js";
+import { readBound } from "../approval.js";
 import { goAhead } from "../start.js";
 import { BRANCH_PREFIX } from "../dispatch/steps.js";
 import type { Done, Result } from "../forge/api.js";
@@ -197,7 +197,7 @@ async function approvalFor(where: {
   readonly lanes: readonly LaneProps[];
   readonly store: SpecStore;
 }): Promise<Result<Approval>> {
-  const stored = await readApproval(where);
+  const stored = await readBound(where);
   if (stored.kind !== "missing") {
     return stored.kind === "refused"
       ? failed(stored.reason)

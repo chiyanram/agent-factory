@@ -17,8 +17,7 @@ let home = "";
 beforeEach(() => {
   p = project("feat/x");
   home = join(p.root, "home-d");
-  writeSpec(home, specText());
-  writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), "# Design\n\nOne table per ticket.\n");
+  writeSpec(home, specText("One table per ticket."));
 });
 afterEach(() => rmSync(p.root, { recursive: true, force: true }));
 
@@ -89,8 +88,8 @@ function setup(m: Model): DesignSetup {
   };
 }
 
-const DESIGN = () => specHash("# Design\n\nOne table per ticket.\n");
-const input = () => ({ ticket: "PROJ-1", spec: specHash(specText()), design: DESIGN() });
+const SPEC = () => specText("One table per ticket.");
+const input = () => ({ ticket: "PROJ-1", spec: specHash(SPEC()) });
 
 function bothRuns(steps: ReturnType<typeof designSteps>) {
   const [review, verify] = [steps.designReview, steps.designVerify];
@@ -102,7 +101,7 @@ function bothRuns(steps: ReturnType<typeof designSteps>) {
 function earlierSeen(
   seen: readonly Seen[],
   i: number,
-): { rounds: unknown; previous: { spec: string; design: string } } {
+): { rounds: unknown; previous: { spec: string; design?: string } | null } {
   return JSON.parse(seen[i]?.earlier ?? "{}");
 }
 
@@ -131,7 +130,7 @@ describe("designSetup's time limits (P7)", () => {
 });
 
 describe("the design review's runs (#236)", () => {
-  it("the design-reviewer reads the spec, the design and the code at the default branch, read-only, from its card", async () => {
+  it("the design-reviewer reads the spec, its ## Design included, and the code at the default branch, read-only, from its card", async () => {
     const seen: Seen[] = [];
     const steps = designSteps({
       kind: "ok",
@@ -144,7 +143,7 @@ describe("the design review's runs (#236)", () => {
       value: { kind: "done", card: expect.stringMatching(/^[0-9a-f]{64}$/), spend: { usd: 0.25, tokens: 400 } },
     });
     expect(done(out).findings.map((f) => f.id)).toEqual(["D1", "D2"]);
-    expect(seen[0]?.files).toEqual(["code", "design.md", "spec.md"]);
+    expect(seen[0]?.files).toEqual(["code", "spec.md"]);
     const prompt = String(seen[0]?.run.prompt);
     expect(prompt).toMatch(/^# Design-reviewer/);
     expect(prompt).toContain(FLOOR);
@@ -214,7 +213,7 @@ describe("the design review's runs (#236)", () => {
     expect(String(seen[0]?.run.prompt)).not.toContain(AGAIN);
   });
 
-  it("a re-review and its verify pass get earlier.json: every round, and the spec and design text the last one read", async () => {
+  it("a re-review and its verify pass get earlier.json: every round, and the spec text the last one read", async () => {
     const seen: Seen[] = [];
     const conflict = { ...FINDING, id: "D1" };
     const steps = designSteps({
@@ -226,12 +225,11 @@ describe("the design review's runs (#236)", () => {
     const { review, verify } = bothRuns(steps);
     done(await review(input()));
     const first = input();
-    writeSpec(home, specText().replace("SPEC-INTENT: an order's total", "SPEC-INTENT: an order's net total"));
+    writeSpec(home, SPEC().replace("SPEC-INTENT: an order's total", "SPEC-INTENT: an order's net total"));
     const earlier: readonly EarlierRound[] = [
       {
         round: 1,
         spec: first.spec,
-        design: first.design,
         lane: "feature",
         planned: [],
         findings: [conflict],
@@ -241,7 +239,7 @@ describe("the design review's runs (#236)", () => {
     ];
     const second = {
       ...input(),
-      spec: specHash(specText().replace("an order's total", "an order's net total")),
+      spec: specHash(SPEC().replace("an order's total", "an order's net total")),
       earlier,
     };
     done(await review(second));
@@ -252,19 +250,27 @@ describe("the design review's runs (#236)", () => {
     ] as const) {
       const read = earlierSeen(seen, i);
       expect(read.rounds).toEqual(earlier);
-      expect(read.previous.spec).toContain("SPEC-INTENT: an order's total is the sum");
-      expect(read.previous.design).toBe("# Design\n\nOne table per ticket.\n");
+      expect(read.previous).toEqual({ spec: expect.stringContaining("SPEC-INTENT: an order's total is the sum") });
       expect(promptSeen(seen, i)).toContain(told);
     }
   });
 
-  it("a cite in the design that does not hold stops the design-reviewer before any model runs (#489)", async () => {
-    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "design.md"), "# Design\n\nsee svc/Main.java:9@0000000\n");
+  it("a re-review whose last round left no text snapshot gets earlier.json with no previous", async () => {
+    const seen: Seen[] = [];
+    const steps = designSteps({ kind: "ok", value: setup(model(seen, [{ findings: [] }])) });
+    const { review } = bothRuns(steps);
+    const round = { round: 1, spec: "c".repeat(64), design: "d".repeat(64), findings: [], kept: [], dismissed: [] };
+    done(await review({ ...input(), earlier: [round] }));
+    expect(earlierSeen(seen, 0)).toEqual({ rounds: [round], previous: null });
+  });
+
+  it("a cite in the ## Design that does not hold stops the design-reviewer before any model runs (#489)", async () => {
+    const cited = specText("A check in svc/Main.java:9@0000000.");
+    writeSpec(home, cited);
     const seen: Seen[] = [];
     const steps = designSteps({ kind: "ok", value: setup(model(seen, [{ findings: [] }])) });
     if (steps.designReview.kind !== "available") throw new Error("unavailable");
-    const design = specHash("# Design\n\nsee svc/Main.java:9@0000000\n");
-    expect(await steps.designReview.run({ ...input(), design })).toMatchObject({
+    expect(await steps.designReview.run({ ...input(), spec: specHash(cited) })).toMatchObject({
       kind: "ok",
       value: {
         kind: "failed",
@@ -291,7 +297,7 @@ describe("the design review's runs (#236)", () => {
     ];
     const out = await steps.designVerify.run({ ...input(), findings });
     expect(done(out).kept.map((k) => [k.id, k.bucket])).toEqual([["D1", "act_on"]]);
-    expect(seen[0]?.files).toEqual(["code", "design.md", "findings.json", "spec.md"]);
+    expect(seen[0]?.files).toEqual(["code", "findings.json", "spec.md"]);
     expect(seen.map((s) => s.run.limit)).toEqual([LIMITS.verify]);
     expect(JSON.parse(String(seen[0]?.findings))).toHaveLength(2);
     expect(seen[0]?.run.prompt).toMatch(/^# Verify pass/);
@@ -323,7 +329,7 @@ describe("the design review's runs (#236)", () => {
     ]);
   });
 
-  it("checks a cite of the spec or the design against their own text, not the repo (#485)", async () => {
+  it("checks a cite of the spec against its own text, not the repo; a design.md the run never read is no cite (#485)", async () => {
     const verdicts = {
       verdicts: ["D1", "D2", "D3"].map((id) => ({ id, bucket: "act_on", why: "it holds" })),
     };
@@ -331,13 +337,13 @@ describe("the design review's runs (#236)", () => {
     if (steps.designVerify.kind !== "available") throw new Error("unavailable");
     const findings: readonly DesignFinding[] = [
       { ...FINDING, id: "D1", file: "spec.md", line: 3 },
-      { ...FINDING, id: "D2", file: "design.md", line: 3 },
-      { ...FINDING, id: "D3", file: "design.md", line: 40 },
+      { ...FINDING, id: "D2", file: "spec.md", line: 400 },
+      { ...FINDING, id: "D3", file: "design.md", line: 3 },
     ];
     const kept = done(await steps.designVerify.run({ ...input(), findings })).kept;
     expect(kept.map((k) => [k.id, k.bucket])).toEqual([
       ["D1", "act_on"],
-      ["D2", "act_on"],
+      ["D2", "noted"],
       ["D3", "noted"],
     ]);
   });
@@ -345,7 +351,7 @@ describe("the design review's runs (#236)", () => {
   it("checks the cites against what the run read, even when the spec is edited while the verify pass runs", async () => {
     const verdicts = { verdicts: [{ id: "D1", bucket: "act_on", why: "it holds" }] };
     const editing: Model = async (run) => {
-      writeSpec(home, `${specText()}\nedited while the run ran\n`);
+      writeSpec(home, `${SPEC()}\nedited while the run ran\n`);
       return model([], [verdicts])(run);
     };
     const steps = designSteps({ kind: "ok", value: setup(editing) });

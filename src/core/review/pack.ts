@@ -4,7 +4,7 @@
 //   1 head · patch-id · merge-base       2 the change: its description, as data, and the diff against the merge-base,
 //   3 rules from the default branch        or, from round 2, the interdiff since the last reviewed head (a range-diff
 //   4 baseline review checks + lens        when the branch was rebased)
-//   5 intent and acceptance criteria: the approved spec   6 the design the approved spec links, and the build's
+//   5 intent and acceptance criteria: the approved spec   6 the spec's ## Design, what it links, and the build's
 //                                                           deviation notes (ADR-0018, #430)
 //   7 rule files this change edits, flagged for the human
 // The contract is the ticket's spec, read from the project's spec store, never the change description: the change body
@@ -437,9 +437,10 @@ async function linkedSection(p: Parts): Promise<string> {
     return "\nNo design: the spec's ## Design is none.\n";
   }
   const d = designs(c.spec.design);
+  const own = `\nThe design is the approved spec's ## Design section, bound by its hash:\n${fence({ title: "design", text: c.spec.design, info: "markdown" })}`;
   return d.files.length + d.urls.length === 0
-    ? `\nThe spec's ## Design names no file or link:\n${fence({ title: "design", text: c.spec.design, info: "markdown" })}`
-    : linkedDesign(p, d);
+    ? own
+    : `${own}\nLinked from ## Design, for context; the approval does not bind them:\n${await linkedDesign(p, d)}`;
 }
 
 function specSection(p: Parts): string {
@@ -535,7 +536,7 @@ async function render(p: Parts): Promise<Result<string>> {
     `\n## 3 · Rules from ${input.defaultBranch}\n${s.value.rules}`,
     `\n## 4 · Baseline review checks and correctness lens\n${s.value.baseline}\nCorrectness lens: every correctness finding names its input, state and wrong result.\n`,
     `\n## 5 · Intent and acceptance criteria (the approved spec)\n${specSection(p)}`,
-    `\n## 6 · The design the approved spec links\n${await designSection(p)}`,
+    `\n## 6 · The approved spec's design\n${await designSection(p)}`,
     `\n## 7 · Rule files this change edits\n\n${s.value.edits}`,
   ];
   return { kind: "ok", value: text.join("") };
