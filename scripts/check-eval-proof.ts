@@ -21,10 +21,15 @@
 // --approval (make lint), the new baseline must itself be a proof pass with 0 clean-floor hits.
 //
 // The reviewer inputs today are the prompts below. A results file must also have run with the model pins. The pins
-// file itself becomes a reviewer input with the first baseline (#216): until then no change to it can be proven, and
-// it lands before the baseline (ADR-0015, build order 1 before 4). The rulebook's pin is the project's plugin pin,
-// kept in the factory home and not in this repository (#232), so inputs.rulebook is not checked here yet. No model
-// call, no token: it reads git, JSON and the model pins' leaf module only.
+// file itself becomes a reviewer input with the first baseline: until then no change to it can be proven, and it lands
+// before the baseline (ADR-0015, build order 1 before 4).
+//
+// The engine's own rules-pack pin (.github/rules-pack.json) moves only with a proof (ADR-0020): the change must hold,
+// or main already hold, an evals/pins/<name@marketplace>/<sha256>.json that agent-factory eval pin --commit-proof wrote
+// for the new commit, from the old pin as its base: a size that covers the review when its own changed paths touch the
+// review (src/core/eval/pin-size.ts), and a reason when they touch what no eval can prove yet. When FACTORY_RULES_PACK names a
+// checkout of the new commit, as in CI, the plugin's tree hash is computed there and must be the proof's sha256. No
+// model call, no token: it reads git, JSON and leaf modules only.
 //
 //   node scripts/check-eval-proof.ts [ROOT]                (make lint)
 //   node scripts/check-eval-proof.ts --approval [ROOT]     (eval-approval.yml)
@@ -39,7 +44,12 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as Bar from "../src/core/eval/bar.js";
 
+import type * as PinSize from "../src/core/eval/pin-size.js";
+import type * as Tree from "../src/core/process/tree.js";
+
 const bar: typeof Bar = await import(new URL("../src/core/eval/bar.ts", import.meta.url).href);
+const pinSize: typeof PinSize = await import(new URL("../src/core/eval/pin-size.ts", import.meta.url).href);
+const tree: typeof Tree = await import(new URL("../src/core/process/tree.ts", import.meta.url).href);
 const { aimProblems, baselineOf, countsOf, field, holdProblems, partialWhy, ranOf } = bar;
 type Baseline = Bar.Baseline;
 
@@ -73,7 +83,14 @@ export type Facts = {
   readonly models: Readonly<Record<ModelKey, string>>;
   readonly onBranch: (sha: string) => boolean;
   readonly labels: readonly string[] | undefined;
+  readonly rulesPack: { readonly before: string | undefined; readonly after: string | undefined };
+  readonly pinProofs: ReadonlyMap<string, string>;
+  readonly packHash: string | undefined;
 };
+
+export const RULES_PACK = ".github/rules-pack.json";
+export const PIN_PROOFS = "evals/pins";
+const ENGINE_MARKET = "chiyanram";
 
 function parse(text: string): unknown {
   try {
@@ -155,6 +172,92 @@ export function proofProblems(facts: Facts): readonly string[] {
   return proven(facts, b).map((why) => `${head}: ${why}`);
 }
 
+type PackPin = { readonly commit: string; readonly ref: string };
+
+function textAt(value: unknown, name: string): string {
+  const v = field(value, name);
+  return typeof v === "string" ? v : "";
+}
+
+function packPin(text: string | undefined): PackPin | undefined {
+  const value = parse(text ?? "");
+  const [commit, tag] = [textAt(value, "commit"), textAt(value, "tag")];
+  return SHA.test(commit) && tag.includes("--") ? { commit, ref: `${tag.split("--")[0]}@${ENGINE_MARKET}` } : undefined;
+}
+
+function list(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function needOf(value: unknown): PinSize.Sized {
+  const changed = list(field(value, "changed")).map(String);
+  const baseline = list(field(value, "baseline")).map((p) => ({
+    domain: String(field(p, "domain")),
+    reference: String(field(p, "reference")),
+  }));
+  return pinSize.sizeOf(changed, baseline);
+}
+
+function reviewCovered(value: unknown, need: PinSize.Sized): boolean {
+  const have = pinSize.SIZES.find((s) => s === field(value, "size"));
+  return need.review.length === 0 || (have !== undefined && pinSize.covers(have, "review"));
+}
+
+function sizeProblems(value: unknown): readonly string[] {
+  const need = needOf(value);
+  const rest = [...need.writer, ...need.other, ...need.uncovered];
+  const reason = field(value, "reason");
+  const noReason = typeof reason !== "string" || reason.trim() === "";
+  return [
+    ...(reviewCovered(value, need)
+      ? []
+      : [
+          `its size ${String(field(value, "size"))} does not cover the review its changed paths need (${need.review.join(", ")})`,
+        ]),
+    ...(rest.length > 0 && noReason
+      ? [`it changed files no eval can prove yet (${rest.join(", ")}) and gives no reason`]
+      : []),
+  ];
+}
+
+function pinProofProblems(text: string, before: PackPin | undefined, facts: Facts): readonly string[] {
+  const value = parse(text);
+  const sha256 = field(value, "sha256");
+  const base = field(field(value, "base"), "commit");
+  return [
+    ...sizeProblems(value),
+    ...(before === undefined || base === before.commit
+      ? []
+      : [`its base is ${String(base)}, not the old pin ${before.commit}`]),
+    ...(facts.packHash === undefined || facts.packHash === sha256
+      ? []
+      : [`its sha256 ${String(sha256)} is not the tree hash of the pinned pack (${facts.packHash})`]),
+  ];
+}
+
+export function rulesPackProblems(facts: Facts): readonly string[] {
+  if (facts.rulesPack.after === facts.rulesPack.before) {
+    return [];
+  }
+  const after = packPin(facts.rulesPack.after);
+  if (after === undefined) {
+    return [`${RULES_PACK} changed and names no full commit and tag`];
+  }
+  const head = `${RULES_PACK} moved to ${after.commit}`;
+  const before = packPin(facts.rulesPack.before);
+  const dir = `${PIN_PROOFS}/${after.ref}/`;
+  const proofs = [...facts.pinProofs].filter(
+    ([f, text]) => f.startsWith(dir) && field(parse(text), "commit") === after.commit,
+  );
+  if (proofs.length === 0) {
+    return [
+      `${head}, and no ${dir}<sha256>.json is a proof for that commit: run agent-factory eval pin with --commit-proof and commit it (ADR-0020)`,
+    ];
+  }
+  const each = proofs.map(([f, text]) => ({ f, why: pinProofProblems(text, before, facts) }));
+  return each.some((e) => e.why.length === 0) ? [] : each.flatMap((e) => e.why.map((w) => `${head}: ${e.f}: ${w}`));
+}
+
 function approval(labels: readonly string[] | undefined): readonly string[] {
   if (labels === undefined) {
     return [
@@ -230,12 +333,39 @@ async function modelPins(root: string): Promise<Readonly<Record<ModelKey, string
   };
 }
 
+function filesUnder(root: string, dir: string): ReadonlyMap<string, string> {
+  const listed = git(root, ["ls-files", "-z", "-c", "-o", "--exclude-standard", "--", dir])
+    .out.split("\0")
+    .filter((f) => f !== "" && existsSync(join(root, f)));
+  return new Map(listed.map((f) => [f, read(root, f) ?? ""]));
+}
+
+export async function packHashOf(pack: string, ref: string): Promise<string | undefined> {
+  const name = ref.split("@")[0] ?? "";
+  const market = parse(read(pack, ".claude-plugin/marketplace.json") ?? "");
+  const source = field(
+    list(field(market, "plugins")).find((p) => field(p, "name") === name),
+    "source",
+  );
+  if (typeof source !== "string") {
+    return undefined;
+  }
+  return tree.hashTree(join(pack, source)).then(
+    (h) => h.sha256,
+    () => undefined,
+  );
+}
+
 async function readFacts(root: string, base: string, env: NodeJS.ProcessEnv): Promise<Facts> {
   const pairs = nameStatus(git(root, ["diff", "--name-status", "--no-renames", "-z", base]).out);
   const untracked = git(root, ["ls-files", "-z", "-o", "--exclude-standard"])
     .out.split("\0")
     .filter((f) => f !== "");
   const added = [...pairs.filter(([s]) => s === "A").map(([, f]) => f), ...untracked];
+  const shown = git(root, ["show", `${base}:${RULES_PACK}`]);
+  const rulesPack = { before: shown.code === 0 ? shown.out : undefined, after: read(root, RULES_PACK) };
+  const after = packPin(rulesPack.after);
+  const pack = env.FACTORY_RULES_PACK ?? "";
   return {
     changed: [...pairs.map(([, f]) => f), ...untracked],
     added,
@@ -245,6 +375,9 @@ async function readFacts(root: string, base: string, env: NodeJS.ProcessEnv): Pr
     models: await modelPins(root),
     onBranch: (sha) => git(root, ["merge-base", "--is-ancestor", sha, "HEAD"]).code === 0,
     labels: eventLabels(env),
+    rulesPack,
+    pinProofs: filesUnder(root, PIN_PROOFS),
+    packHash: pack === "" || after === undefined ? undefined : await packHashOf(pack, after.ref),
   };
 }
 
@@ -262,7 +395,7 @@ async function main(root: string, env: NodeJS.ProcessEnv, approvalOnly: boolean)
     );
   }
   const f = await readFacts(root, base.out.trim(), env);
-  return [...baselineProblems(f), ...proofProblems(f)];
+  return [...baselineProblems(f), ...proofProblems(f), ...rulesPackProblems(f)];
 }
 
 if (process.argv[1] === import.meta.filename) {

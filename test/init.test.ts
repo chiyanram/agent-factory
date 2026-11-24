@@ -11,7 +11,7 @@ import { answersOf, type Question } from "../src/core/init/round.js";
 import { projectPath, runSettings } from "../src/core/project.js";
 import { layered, refusals } from "../src/core/settings/layers.js";
 import type { Result } from "../src/core/forge/api.js";
-import { enginePackPin, type PackPin } from "../src/core/process/pins.js";
+import { enginePackPin, pinsPath, type PackPin } from "../src/core/process/pins.js";
 import { initCommand, KNOWN_MARKETS, type InitIo } from "../src/init-cli.js";
 import { commitMarket, GIT_ENV, LANES } from "./market.js";
 import { tempDir } from "./temp.js";
@@ -742,17 +742,20 @@ describe("init pins chiyanram's plugins at the engine's rules-pack pin (#607)", 
     expect(pins()).toHaveProperty(["rulebook@chiyanram", "commit"], later);
   });
 
-  it("AC-2: pins a plugin from another marketplace at its HEAD, as before", async () => {
+  it("pins the engine's rulebook with no eval, and sizes another marketplace's first pin against no base", async () => {
     token("2027-11-01T00:00:00Z");
     market();
     teamMarket("first");
-    const teamHead = teamMarket("the team's newest");
+    teamMarket("the team's newest");
     mkdirSync(join(home, "projects"), { recursive: true });
     writeFileSync(projectPath(home, "ledger"), JSON.stringify({ plugins: ["rulebook@chiyanram", "teamrules@team"] }));
     const ran = await init(ledger(), { yes: true, markets: { team: join(root, "team", "origin") } });
-    expect(ran.code).toBe(0);
+    expect(ran.code).toBe(1);
     expect(pins()).toHaveProperty(["rulebook@chiyanram", "commit"], pinnedCommit);
-    expect(pins()).toHaveProperty(["teamrules@team", "commit"], teamHead);
+    expect(pins()).toHaveProperty(["rulebook@chiyanram", "proof", "size"], "none");
+    expect(pins()).not.toHaveProperty(["teamrules@team"]);
+    expect(ran.err).toContain("there is no implementer eval yet (#824)");
+    expect(ran.out).toContain("✗ plugin teamrules@team: plugin update failed (above)");
   });
 
   it("AC-1b: the printed fix names the engine's commit, so a no never points at HEAD", async () => {
@@ -761,9 +764,9 @@ describe("init pins chiyanram's plugins at the engine's rules-pack pin (#607)", 
     expect(ran.out).toContain(`fix: agent-factory plugin update ledger rulebook@chiyanram ${pinnedCommit}`);
   });
 
-  it("a bad pin file fails only chiyanram's pin, with the reason; a team pack still pins", async () => {
+  it("a bad pin file fails chiyanram's pin with the reason, and the team pack still goes to its own gate", async () => {
     token("2027-11-01T00:00:00Z");
-    const teamHead = teamMarket("first");
+    teamMarket("first");
     mkdirSync(join(home, "projects"), { recursive: true });
     writeFileSync(projectPath(home, "ledger"), JSON.stringify({ plugins: ["rulebook@chiyanram", "teamrules@team"] }));
     const ran = await init(ledger(), {
@@ -773,8 +776,9 @@ describe("init pins chiyanram's plugins at the engine's rules-pack pin (#607)", 
     });
     expect(ran.code).toBe(1);
     expect(ran.out).toContain("✗ plugin rulebook@chiyanram: /pkg/.github/rules-pack.json: must hold a full commit");
-    expect(pins()).not.toHaveProperty(["rulebook@chiyanram"]);
-    expect(pins()).toHaveProperty(["teamrules@team", "commit"], teamHead);
+    expect(existsSync(pinsPath(home, "ledger"))).toBe(false);
+    expect(ran.out).toContain("✗ plugin teamrules@team: plugin update failed (above)");
+    expect(ran.err).toContain("there is no implementer eval yet (#824)");
   });
 
   it("the marketplace init clones for chiyanram is the repo the engine's pin names", async () => {

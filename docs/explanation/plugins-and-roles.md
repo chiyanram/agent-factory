@@ -9,7 +9,8 @@ swappable part, are in [Connectors](../reference/connectors.md).
 ```text
  project file "plugins": ["rulebook@chiyanram"]          a locked key: a user layer cannot drop or swap it
         │
-        ▼  agent-factory plugin update <project> <name@marketplace> [<commit>]      a human runs it
+        ▼  agent-factory plugin update <project> <name@marketplace> [<commit>]      a human runs it, after
+        │  agent-factory eval pin … when the change needs a proof (ADR-0020)
  $FACTORY_HOME/marketplaces/<marketplace>   ──copy──▶  $FACTORY_HOME/plugins/<marketplace>/<name>/<sha256>/
         │                                               pin: commit + hash in projects/<project>.plugins.json
         ▼  each dispatch pass
@@ -103,5 +104,5 @@ Decided, not built:
 | `tests-read-only` and `own-hunks` join the guardrail IDs with the code that enforces them; plain-text `enforced_guardrails` and `next` are refused one release after the closed list of IDs | each ID lands with the code that enforces it. **Today:** no open ticket builds that code yet (#674) |
 | plugins other than the process plugin add rules only, and their rule IDs carry the plugin's name | two plugins that disagree in prose cannot be settled by list order |
 | the finder runs from its card, with its schema; the review's verify prompt asks for a lower severity and grade | a project cannot replace the finder. **Today:** no open ticket builds this yet (#674) |
-| a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline | today `plugin update` runs `config check` only, no eval |
+| a plugin pin moves only when an eval result for that exact plugin hash shows no drop against the baseline | a worse rule must not ship unseen. **Today:** the eval is sized by what the move changes; a change no eval can prove yet (the implementer card, with no implementer eval until #824) moves on a typed reason and shows as unproven, and no held-out slice runs (#599) |
 | with the Copilot runner (#493), `.github/skills/`, `.github/copilot-instructions.md` and `.github/instructions/` join the agent settings the host push protects | Copilot reads them; a run could plant one |

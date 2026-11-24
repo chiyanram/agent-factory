@@ -6,13 +6,14 @@
 // commit is fetched, so no word is read as a ref or an option. A first pin shows one file count per folder, so a person
 // reads the plugin's shape; a later pin shows each changed file.
 
-import { cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
 import { attempt } from "../review/safe.js";
-import { COMMIT, marketplaceDir, matching, parsedJson, treeHash, type Pin } from "./pins.js";
-import type { PluginRef } from "./plugins.js";
+import { plainName } from "../spec.js";
+import { COMMIT, listedPlugins, marketplaceDir, matching, parsedJson, treeHash, type Pin } from "./pins.js";
+import { refText, type PluginRef } from "./plugins.js";
 import { prop } from "../field.js";
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
@@ -158,4 +159,41 @@ export function changedFiles(before: readonly string[], after: readonly string[]
   const removed = [...b.keys()].filter((p) => !a.has(p)).map((p) => `- ${p}`);
   const changed = [...a.keys()].filter((p) => b.has(p) && b.get(p) !== a.get(p)).map((p) => `~ ${p}`);
   return [...added, ...removed, ...changed].toSorted((x, y) => x.slice(2).localeCompare(y.slice(2)));
+}
+
+export async function listedRef(input: {
+  readonly home: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly project: string;
+  readonly word: string;
+}): Promise<Result<PluginRef>> {
+  if (!plainName(input.project)) {
+    return failed(`${JSON.stringify(input.project)} is not a plain project name`);
+  }
+  const refs = await listedPlugins(input);
+  if (refs.kind === "failed") {
+    return refs;
+  }
+  const ref = refs.value.find((r) => refText(r) === input.word);
+  return ref === undefined
+    ? failed(`the project ${input.project} does not list ${JSON.stringify(input.word)} in "plugins"`)
+    : { kind: "ok", value: ref };
+}
+
+export async function fetchListed(input: {
+  readonly home: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly ref: PluginRef;
+  readonly commit: string | undefined;
+}): Promise<Result<Fetched>> {
+  const market = marketplaceDir(input.home, input.ref.marketplace);
+  const there = await access(market).then(
+    () => true,
+    () => false,
+  );
+  if (!there) {
+    return failed(`no marketplace clone at ${market}: git clone the marketplace there first`);
+  }
+  const commit = await targetCommit(input.env, market, input.commit);
+  return commit.kind === "ok" ? fetchPlugin({ ...input, commit: commit.value }) : commit;
 }

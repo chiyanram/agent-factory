@@ -123,7 +123,7 @@ function baselineOf(path: string, raw: unknown): Result<readonly Pointer[]> {
     : failed(`${path}: "baseline" must list {"skill", "reference"}, each a plain name`);
 }
 
-async function baselineAt(dir: string): Promise<Result<readonly Pointer[]>> {
+export async function baselineAt(dir: string): Promise<Result<readonly Pointer[]>> {
   const path = join(dir, "review.json");
   const raw = await jsonAt(path);
   if (raw.kind !== "ok") {

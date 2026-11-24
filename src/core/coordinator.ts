@@ -316,6 +316,7 @@ const NEVER_LET = [
   "agent-factory waive PROJ PROJ-1 0",
   "agent-factory door discord",
   "agent-factory eval reviewer",
+  "agent-factory eval pin PROJ rulebook@chiyanram",
   "agent-factory dispatch PROJ",
   "agent-factory review PROJ 1",
   "agent-factory setup coordinator",

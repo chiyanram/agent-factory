@@ -27,7 +27,7 @@ import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { readKnowledge } from "./core/onboard/home.js";
 import { initialProject } from "./core/plugin/config.js";
-import { marketplaceDir, readPins, type PackPin } from "./core/process/pins.js";
+import { ENGINE_MARKET, marketplaceDir, readPins, type PackPin } from "./core/process/pins.js";
 import { pluginListOf, refText, type PluginRef } from "./core/process/plugins.js";
 import { projectPath } from "./core/project.js";
 import { userPath } from "./core/settings/layers.js";
@@ -341,8 +341,6 @@ async function pinnedAt(io: InitIo, name: string, word: string): Promise<string>
   return pin === undefined ? "" : pin.commit.slice(0, 12);
 }
 
-const ENGINE_MARKET = "chiyanram";
-
 function pinCommit(io: InitIo, ref: PluginRef): Result<string | undefined> {
   if (ref.marketplace !== ENGINE_MARKET) {
     return { kind: "ok", value: undefined };
@@ -386,7 +384,7 @@ async function pinNow(
   if (market.kind === "failed") {
     return { ok: false, line: `plugin ${word}: ${market.reason}`, fix: how };
   }
-  const code = await pinUpdate(io, name, word, commit);
+  const code = await pinUpdate(io, name, word, commit, { enginePin: io.enginePin });
   return code === 0
     ? { ok: true, line: `plugin ${word} pinned`, fix: "" }
     : { ok: false, line: `plugin ${word}: plugin update failed (above)`, fix: how };

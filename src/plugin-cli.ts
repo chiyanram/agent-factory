@@ -25,6 +25,7 @@ export type PluginIo = {
   readonly err: (text: string) => void;
   readonly home: string;
   readonly pkg: string;
+  readonly reason?: string;
 };
 
 export async function pluginPath(path: string): Promise<string> {
@@ -137,13 +138,17 @@ async function list(io: PluginIo): Promise<number> {
 }
 
 const USAGE =
-  "usage: agent-factory plugin add <path|bundled name> | update <name> [<sha256>] | update <project> <name@marketplace> [<commit>] | test <path|name> | list\n";
+  "usage: agent-factory plugin add <path|bundled name> | update <name> [<sha256>] | update <project> <name@marketplace> [<commit>] [--reason <why>] | test <path|name> | list\n";
 
 type Verb = (io: PluginIo, args: readonly string[]) => Promise<number>;
 
+function reasonOf(io: PluginIo): { readonly reason: string } {
+  return { reason: io.reason ?? "" };
+}
+
 function updateVerb(io: PluginIo, [first = "", second, third]: readonly string[]): Promise<number> {
   if (second?.includes("@") === true) {
-    return pinUpdate(io, first, second, third);
+    return pinUpdate(io, first, second, third, reasonOf(io));
   }
   return third === undefined ? connectorUpdate(io, first, second) : (io.err(USAGE), Promise.resolve(64));
 }

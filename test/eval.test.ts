@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { runCli } from "../src/app.js";
 import { capped, costOf, dollars, purse, worstCase } from "../src/core/eval/budget.js";
 import { choose, prText, specOf, type Case } from "../src/core/eval/cases.js";
-import { evalReviewer, evalSettings, RUNS, type EvalSettings } from "../src/core/eval/harness.js";
+import { evalReviewer, evalSettings, RUNS, type EvalInput, type EvalSettings } from "../src/core/eval/harness.js";
 import { isMatch, matchRun, nearby, readJudgment, type Judge } from "../src/core/eval/judge.js";
 import { blobSha } from "../src/core/eval/results.js";
 import type { ActOn } from "../src/core/review/act-on.js";
@@ -167,9 +167,10 @@ function settings(over: Partial<EvalSettings> = {}): EvalSettings {
   return { ...s.value, ...over };
 }
 
-async function pass(model: Model, s: EvalSettings = settings()) {
+async function pass(model: Model, s: EvalSettings = settings(), more: Partial<EvalInput> = {}) {
   const log: string[] = [];
   const out = await evalReviewer({
+    ...more,
     root,
     env,
     work: join(env.HOME ?? "", ".factory", "eval-x"),
@@ -237,6 +238,31 @@ describe("eval reviewer", { timeout: 60_000 }, () => {
     expect(r.cost_usd).toBeCloseTo(seen.length * 0.1);
     expect(log.join("\n")).toContain("1 draft");
     expect(existsSync(join(env.HOME ?? "", ".factory", "eval-x"))).toBe(false);
+  });
+
+  it("runs only the named cases, with the runs asked for, on a named rulebook commit, into the folder asked for", async () => {
+    const seen: ModelRun[] = [];
+    const into = join(env.HOME ?? "", "slice");
+    const rulebookCommit = "d".repeat(40);
+    const more = { only: ["seeded-one"], runs: 1, rulebookCommit, resultsDir: into };
+    const { out } = await pass(
+      fakeModel({ lines: { SEEDED: 11 }, confidence: 0.9, cost: 0.1 }, seen),
+      settings(),
+      more,
+    );
+    const path = out.kind === "ok" ? out.value.path : "";
+    expect(dirname(path)).toBe(into);
+    const r = results(path);
+    expect(r.cases.ran).toEqual(["seeded-one"]);
+    expect(r.cases.skipped).toEqual([
+      { case: "draft-one", status: "draft" },
+      { case: "clean-one", status: "not in the slice" },
+    ]);
+    expect(r.runs_per_case).toBe(1);
+    expect(r.recall_at_act_on.overall).toEqual({ found: 1, of: 1, recall: 1 });
+    expect(r.inputs.rulebook).toBe(rulebookCommit);
+    expect(r.proof).toBe(true);
+    expect(existsSync(join(root, "evals", "reviewer", "results"))).toBe(false);
   });
 
   it("matches only within 5 lines, and only when the judge is at least 0.7 sure", async () => {

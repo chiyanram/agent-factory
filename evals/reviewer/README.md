@@ -132,8 +132,8 @@ With no `baseline.json`, or one with fewer than two runs to measure the noise by
 **Today:** `src/core/review/pinned.ts` is not a reviewer input, so a change to the review's models needs no eval pass
 (#611).
 
-**Today:** `inputs.rulebook` is not checked: the rulebook's pin is the project's plugin pin, kept in the factory home,
-not here, and #611 decides whether the check reads it.
+**Today:** `inputs.rulebook` of a reviewer-input pass is not checked (#611). The rulebook's pins are checked by their
+own proof, below.
 
 **A change to `baseline.json`** needs the operator's approval: the pull request label `eval-baseline-approved`, which
 CI's `eval-approval` job reads from the pull request event (`check-eval-proof.ts --approval`). It runs when a label
@@ -141,3 +141,42 @@ changes, so adding the label re-runs that one job. Only the operator adds it; an
 `--approval` run has no event, so it refuses a baseline change; `make lint` checks the rest. The new baseline is a copy of a results file that is proof and has 0 clean-floor hits,
 whose noise can be measured (two or more runs, each holding the same seeds), and that was run with no `--aim`, since a
 baseline proves no change.
+
+## A pin move's eval
+
+A plugin pin moves only with an eval proof bound to the plugin's sha256, the tree hash the pin holds
+([ADR-0020](../../docs/adr/0020-eval-gate-on-plugin-pins.md)). The eval is sized by what the move changes against the
+old pin (`src/core/eval/pin-size.ts`); a `chiyanram` plugin's first pin is sized against the engine's commit:
+
+| size | the move changes | what it needs |
+|---|---|---|
+| none | only `README*`, `CHANGELOG*`, `LICENSE*`, `docs/`, `evals/`, `tests/`, `.github/` | `config check`, as every move runs |
+| review | a reference the review baseline points to, `review.json`, or the finder and verify-pass cards | a targeted review pass that holds |
+| writer | the implementer card | the implementer eval |
+| both | review and writer files, or any path the map does not name | both |
+
+The test-first, cleanup, design-reviewer, onboarder and retro cards, the plugin's manifest and the process files
+`config check` reads are tested by no eval: they add no size. A move that changes them, or the implementer card, moves
+only with a reason the person types (`--reason`), which the pin keeps, and the pin then shows as unproven in
+`config check` until a proof covers it. **Today:** there is no implementer eval yet (#824), so the implementer card always
+needs a reason.
+
+```bash
+agent-factory eval pin <project> <name@marketplace> [<commit>] [--reason <why>] [--commit-proof]
+agent-factory plugin update <project> <name@marketplace> [<commit>] [--reason <why>]
+```
+
+**The targeted pass** (`src/core/eval/slice.ts`) runs one run each of every approved case with no seed, then, in
+`cases.md` order, each approved case with a seed of a category no earlier case in it has: 16 cases and about $7.85 on
+today's baseline. It holds when the seeds found are not fewer than the baseline's lowest single run over the same cases
+and the clean floor has 0 hits. It has no aim and reads no noise, so it is a weaker bar than a reviewer-input change
+meets. `eval pin` prints the cases, the typical cost (the baseline's mean per case-run × runs) and the worst case
+(every run at its cap), and asks before it spends; `plugin update` prints the same when it refuses for lack of a proof.
+**Today:** no held-out slice runs with it (#599).
+
+**Where a proof lives.** A project's proof goes to `<home>/evals/pins/<name@marketplace>/<sha256>.json`. The proof
+for the engine's own pin (`.github/rules-pack.json`) is committed here in `evals/pins/` (`--commit-proof`), and
+`check-eval-proof.ts` refuses a move of that pin with no proof for the new commit, from the old pin as its base, whose
+size covers the review its changed paths touch, with a reason for the rest; with `FACTORY_RULES_PACK` set, as in CI,
+it also checks the proof's sha256 against the pack. A proof of size none for that pin spends nothing.
+

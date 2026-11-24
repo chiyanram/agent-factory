@@ -15,8 +15,11 @@ import {
   nameStatus,
   passProblems,
   proofProblems,
+  packHashOf,
+  rulesPackProblems,
   type Facts,
 } from "../scripts/check-eval-proof.js";
+import { treeHash } from "../src/core/process/pins.js";
 import { tempDir } from "./temp.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -58,6 +61,10 @@ function baseline(over: Record<string, unknown> = {}): Record<string, unknown> {
 }
 
 const RESULT = "evals/reviewer/results/2026-11-09-aaaaaaaaaaaa.json";
+const OLD_PACK = "e".repeat(40);
+const NEW_PACK = "f".repeat(40);
+const packJson = (commit: string) => JSON.stringify({ repo: "r", commit, tag: "rulebook--v9.0.0" });
+const PACK_PIN = packJson(OLD_PACK);
 
 function facts(over: Partial<Facts> = {}): Facts {
   return {
@@ -69,6 +76,9 @@ function facts(over: Partial<Facts> = {}): Facts {
     models: MODELS,
     onBranch: (sha) => sha === HEAD,
     labels: undefined,
+    rulesPack: { before: PACK_PIN, after: PACK_PIN },
+    pinProofs: new Map(),
+    packHash: undefined,
     ...over,
   };
 }
@@ -193,6 +203,83 @@ describe("proofProblems", () => {
     expect(proofProblems(facts({ baseline: JSON.stringify(pass({}, 5)) }))).toEqual([
       `a reviewer input changed (prompts/review-find.md), and ${BASELINE} has no per_case of two or more runs, each holding the same seeds, to measure the noise by (ADR-0021)`,
     ]);
+  });
+});
+
+describe("rulesPackProblems: the engine's own pin moves only with a proof", () => {
+  const SHA = "a".repeat(64);
+  const PROOF = `evals/pins/rulebook@chiyanram/${SHA}.json`;
+  const review = "+ skills/crq/references/code-review.md";
+  const proof = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      ref: "rulebook@chiyanram",
+      commit: NEW_PACK,
+      sha256: SHA,
+      base: { commit: OLD_PACK, sha256: "b".repeat(64) },
+      changed: [review],
+      baseline: [{ domain: "crq", reference: "code-review" }],
+      size: "review",
+      uncovered: [],
+      reason: "",
+      ...over,
+    });
+  const moved = (proofs: ReadonlyMap<string, string>, packHash?: string) =>
+    facts({ changed: [], rulesPack: { before: PACK_PIN, after: packJson(NEW_PACK) }, pinProofs: proofs, packHash });
+
+  it("leaves a change that does not move the pin alone", () => {
+    expect(rulesPackProblems(facts({ changed: [] }))).toEqual([]);
+  });
+
+  it("refuses a move with no proof for the new commit", () => {
+    const wrong = new Map([[PROOF, proof({ commit: OLD_PACK })]]);
+    for (const proofs of [new Map<string, string>(), wrong]) {
+      expect(rulesPackProblems(moved(proofs))[0]).toContain(
+        `.github/rules-pack.json moved to ${NEW_PACK}, and no evals/pins/rulebook@chiyanram/<sha256>.json`,
+      );
+    }
+  });
+
+  it("passes a proof whose size covers its paths, from the old pin, with the pack's hash", () => {
+    expect(rulesPackProblems(moved(new Map([[PROOF, proof()]])))).toEqual([]);
+    expect(rulesPackProblems(moved(new Map([[PROOF, proof()]]), SHA))).toEqual([]);
+  });
+
+  it("names each way a proof fails: its size, its base, a missing reason, and the pack's hash", () => {
+    const why = (over: Record<string, unknown>, hash?: string) =>
+      rulesPackProblems(moved(new Map([[PROOF, proof(over)]]), hash)).join("\n");
+    expect(why({ size: "none" })).toContain("its size none does not cover the review its changed paths need");
+    const writer = { changed: ["~ skills/crq/process/roles/implementer.md"], size: "none" };
+    expect(why(writer)).toContain(
+      "no eval can prove yet (skills/crq/process/roles/implementer.md) and gives no reason",
+    );
+    expect(why({ ...writer, reason: "by hand" })).toBe("");
+    expect(why({ base: { commit: "1".repeat(40) } })).toContain(`not the old pin ${OLD_PACK}`);
+    expect(why({ changed: ["~ .claude-plugin/plugin.json"], size: "none" })).toContain("gives no reason");
+    expect(why({ changed: ["~ .claude-plugin/plugin.json"], size: "none", reason: "a version bump" })).toBe("");
+    expect(why({}, "c".repeat(64))).toContain("is not the tree hash of the pinned pack");
+  });
+
+  it("hashes the pack's plugin folder the way a pin does", async () => {
+    const pack = tempDir("pack-hash-");
+    try {
+      mkdirSync(join(pack, ".claude-plugin"), { recursive: true });
+      mkdirSync(join(pack, "plugins", "rulebook", "skills"), { recursive: true });
+      writeFileSync(
+        join(pack, ".claude-plugin", "marketplace.json"),
+        JSON.stringify({ plugins: [{ name: "rulebook", source: "./plugins/rulebook" }] }),
+      );
+      writeFileSync(join(pack, "plugins", "rulebook", "skills", "a.md"), "a");
+      const pinned = await treeHash(join(pack, "plugins", "rulebook"));
+      expect(await packHashOf(pack, "rulebook@chiyanram")).toBe(pinned.kind === "ok" ? pinned.value.sha256 : "-");
+      expect(await packHashOf(pack, "toolbox@chiyanram")).toBeUndefined();
+    } finally {
+      rmSync(pack, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a pin that names no full commit", () => {
+    const bad = facts({ rulesPack: { before: PACK_PIN, after: "{}" } });
+    expect(rulesPackProblems(bad)).toEqual([".github/rules-pack.json changed and names no full commit and tag"]);
   });
 });
 

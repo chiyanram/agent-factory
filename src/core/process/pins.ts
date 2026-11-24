@@ -9,8 +9,7 @@
 // next run, and the run refuses it. A plugin the list names but no pin holds is refused too: only `agent-factory plugin
 // update` fetches a version (fetch.ts) and moves a pin (plugin-pin-cli.ts).
 
-import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { readProjectRaw, sidePath } from "../project.js";
@@ -18,13 +17,22 @@ import { attempt } from "../review/safe.js";
 import { pluginListOf, refText, type PluginRef } from "./plugins.js";
 import type { PluginDir } from "./read.js";
 import { prop } from "../field.js";
+import { SIZES, type Size } from "../eval/pin-size.js";
+import { hashTree } from "./tree.js";
 
-export type Pin = { readonly commit: string; readonly version: string; readonly sha256: string };
+export type Proven = { readonly size: Size; readonly proven: string; readonly reason: string };
+export type Pin = {
+  readonly commit: string;
+  readonly version: string;
+  readonly sha256: string;
+  readonly proof?: Proven;
+};
 export type Pins = Readonly<Record<string, Pin>>;
 export type Pinned = PluginDir & { readonly ref: string; readonly pin: Pin };
 
 export const COMMIT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
-const SHA256 = /^[0-9a-f]{64}$/;
+export const SHA256 = /^[0-9a-f]{64}$/;
+export const ENGINE_MARKET = "chiyanram";
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
@@ -49,48 +57,42 @@ export function pinnedDirs(home: string, refs: readonly PluginRef[], pins: Pins)
   });
 }
 
-async function fileLines(dir: string, under: string): Promise<readonly string[]> {
-  const lines: string[] = [];
-  for (const name of (await readdir(join(dir, under))).toSorted()) {
-    lines.push(...(await entryLines(dir, under === "" ? name : `${under}/${name}`)));
-  }
-  return lines;
-}
-
-async function entryLines(dir: string, path: string): Promise<readonly string[]> {
-  const s = await lstat(join(dir, path));
-  if (s.isDirectory()) {
-    return fileLines(dir, path);
-  }
-  if (!s.isFile()) {
-    throw new Error(`${path} is not a plain file`);
-  }
-  const sum = createHash("sha256")
-    .update(await readFile(join(dir, path)))
-    .digest("hex");
-  return [`${s.mode & 0o111 ? "x" : "-"} ${sum} ${path}`];
-}
-
 export async function treeHash(
   dir: string,
 ): Promise<Result<{ readonly sha256: string; readonly files: readonly string[] }>> {
-  return attempt(async () => {
-    const files = await fileLines(dir, "");
-    return { sha256: createHash("sha256").update(files.join("\n")).digest("hex"), files };
-  }, `cannot hash ${dir}: it must be a folder of plain files, with no symlink`);
+  return attempt(() => hashTree(dir), `cannot hash ${dir}: it must be a folder of plain files, with no symlink`);
 }
 
 export function matching(value: unknown, pattern: RegExp): string | undefined {
   return typeof value === "string" && pattern.test(value) ? value : undefined;
 }
 
-function pinOf(value: unknown): Pin | undefined {
+function provenOf(value: unknown): Proven | "bad" | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const size = SIZES.find((s) => s === prop(value, "size"));
+  const proven = matching(prop(value, "proven"), /^(?:[0-9a-f]{64})?$/);
+  const reason = matching(prop(value, "reason"), /^/);
+  return size === undefined || proven === undefined || reason === undefined ? "bad" : { size, proven, reason };
+}
+
+function barePinOf(value: unknown): Pin | undefined {
   const commit = matching(prop(value, "commit"), COMMIT);
   const version = matching(prop(value, "version"), /^/);
   const sha256 = matching(prop(value, "sha256"), SHA256);
   return commit === undefined || version === undefined || sha256 === undefined
     ? undefined
     : { commit, version, sha256 };
+}
+
+function pinOf(value: unknown): Pin | undefined {
+  const pin = barePinOf(value);
+  const proof = provenOf(prop(value, "proof"));
+  if (pin === undefined || proof === "bad") {
+    return undefined;
+  }
+  return proof === undefined ? pin : { ...pin, proof };
 }
 
 export function parsedJson(text: string): unknown {
@@ -112,7 +114,9 @@ export async function readPins(home: string, project: string): Promise<Result<Pi
   const good = pins.flatMap(([ref, pin]) => (pin === undefined ? [] : [[ref, pin] as const]));
   return good.length === pins.length
     ? { kind: "ok", value: Object.fromEntries(good) }
-    : failed(`${path}: must map each name@marketplace to {"commit", "version", "sha256"}`);
+    : failed(
+        `${path}: must map each name@marketplace to {"commit", "version", "sha256"}, and an optional "proof" {"size", "proven", "reason"}`,
+      );
 }
 
 export type PackPin = { readonly repo: string; readonly commit: string; readonly tag: string };

@@ -31,6 +31,7 @@ export type EvalIo = {
   readonly env: NodeJS.ProcessEnv;
   readonly out: (text: string) => void;
   readonly err: (text: string) => void;
+  readonly readLine?: (prompt: string) => Promise<string>;
 };
 
 type Parsed = {
@@ -76,7 +77,11 @@ function badDollars(env: NodeJS.ProcessEnv): string {
     : `${settingName(bad)} must be a dollar amount such as 2 or 0.50, got ${JSON.stringify(settingOf(env, bad))}`;
 }
 
-export function refusal(env: NodeJS.ProcessEnv): string {
+function noRulebook(env: NodeJS.ProcessEnv, needed: boolean): boolean {
+  return needed && !isAbsolute(settingOf(env, "rulebook") ?? "");
+}
+
+export function refusal(env: NodeJS.ProcessEnv, needs: { readonly rulebook: boolean } = { rulebook: true }): string {
   const bad = badDollars(env);
   const alias = unpinnedModel(env, ["review.findModel", "review.ruleModel", "review.logicModel", "eval.judgeModel"]);
   const checks: readonly (readonly [boolean, string])[] = [
@@ -87,15 +92,12 @@ export function refusal(env: NodeJS.ProcessEnv): string {
     ],
     [bad !== "", bad],
     [alias !== "", `${alias}: a pass with an alias proves nothing about the model it ran (ADR-0015 E9)`],
-    [
-      !isAbsolute(settingOf(env, "rulebook") ?? ""),
-      "FACTORY_RULEBOOK must be the rulebook plugin folder, an absolute path",
-    ],
+    [noRulebook(env, needs.rulebook), "FACTORY_RULEBOOK must be the rulebook plugin folder, an absolute path"],
   ];
   return checks.find(([refused]) => refused)?.[1] ?? "";
 }
 
-async function workDir(env: NodeJS.ProcessEnv): Promise<Result<string>> {
+export async function workDir(env: NodeJS.ProcessEnv): Promise<Result<string>> {
   const home = env.FACTORY_HOME ?? join(homedir(), ".factory");
   if (!isAbsolute(home)) {
     return { kind: "failed", reason: `FACTORY_HOME must be an absolute path, got ${JSON.stringify(home)}` };
