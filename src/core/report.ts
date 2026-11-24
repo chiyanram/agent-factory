@@ -11,7 +11,9 @@
 //   blocker    "…"                                          required when blocked
 //
 // Anything else is blocked, with the reason: a missing, unreadable or malformed report, an unknown status, a field the
-// schema does not name, a non-zero exit, a timeout, a stall, a cap hit, or a box that failed. No outcome is guessed.
+// schema does not name, a non-zero exit, a timeout, a stall, or a box that failed. No outcome is guessed. endReasonOf
+// names how the run ended for its record line (end-reason.ts): the report's own word after a clean end, how the run
+// stopped otherwise, and output_invalid when a clean end left no report the host could read.
 //
 // The writer controls its worktree, so the read is careful: .factory and the report must be a real folder and a real
 // regular file (never a symlink, which could point the host at ~/.ssh), at most 64 KiB. Decide from it only once the
@@ -25,6 +27,7 @@ import { lstat, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { MOST_QUESTIONS } from "./answers.js";
 import { cleanField } from "./post.js";
+import type { EndReason } from "./end-reason.js";
 
 export const REPORT_PATH = ".factory/report.json";
 export const MAX_REPORT_BYTES = 64 * 1024;
@@ -66,7 +69,6 @@ export type RunEnd =
   | { readonly kind: "hungAfterReport"; readonly windowSeconds: number }
   | { readonly kind: "timedOut"; readonly seconds: number }
   | { readonly kind: "stalled"; readonly seconds: number; readonly last: readonly string[] }
-  | { readonly kind: "cap"; readonly what: string }
   | { readonly kind: "failed"; readonly reason: string };
 
 export type Ending =
@@ -365,8 +367,6 @@ function ended(end: RunEnd): string {
       return `the run was stopped after ${end.seconds}s`;
     case "stalled":
       return `the run printed nothing for ${spoken(end.seconds)}; the host stopped it`;
-    case "cap":
-      return `the run hit a cap: ${end.what}`;
     case "failed":
       return `the box failed: ${end.reason}`;
   }
@@ -388,6 +388,29 @@ export function decide(input: { readonly end: RunEnd; readonly file: ReportFile 
     case "text":
       return parseReport(input.file.text);
   }
+}
+
+const STOPPED: Readonly<Record<Exclude<RunEnd["kind"], "exited" | "hungAfterReport">, EndReason>> = {
+  timedOut: "timed_out",
+  stalled: "stalled",
+  failed: "launch_failed",
+};
+
+function cleanReason(outcome: Outcome): EndReason {
+  if (outcome.kind === "blocked") {
+    return outcome.by === "writer" ? "blocked" : "output_invalid";
+  }
+  return outcome.kind === "parked" ? "usage_limit" : outcome.kind;
+}
+
+export function endReasonOf(end: RunEnd, outcome: Outcome): EndReason {
+  if (outcome.kind === "parked") {
+    return "usage_limit";
+  }
+  if (end.kind === "exited" || end.kind === "hungAfterReport") {
+    return cleanEnd(end) ? cleanReason(outcome) : "launch_failed";
+  }
+  return STOPPED[end.kind];
 }
 
 type Dir =

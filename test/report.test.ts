@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   decide,
+  endReasonOf,
   loadReport,
   MAX_REPORT_BYTES,
   parseReport,
@@ -70,7 +71,7 @@ describe("decide (#109 done-when)", () => {
     }
   });
 
-  it("a non-zero exit, a timeout, a cap and a failed box are blocked, even with a valid done report", () => {
+  it("a non-zero exit, a timeout and a failed box are blocked, even with a valid done report", () => {
     expect(decide({ end: { kind: "exited", code: 2 }, file: file(DONE) })).toEqual({
       kind: "blocked",
       reason: "the run exited 2",
@@ -80,14 +81,42 @@ describe("decide (#109 done-when)", () => {
       kind: "blocked",
       reason: "the run was stopped after 3600s",
     });
-    expect(decide({ end: { kind: "cap", what: "max turns 80" }, file: file(DONE) })).toMatchObject({
-      kind: "blocked",
-      reason: "the run hit a cap: max turns 80",
-    });
     expect(decide({ end: { kind: "failed", reason: "docker is not running" }, file: file(DONE) })).toMatchObject({
       kind: "blocked",
       reason: "the box failed: docker is not running",
     });
+  });
+});
+
+describe("endReasonOf: how a writer run ended", () => {
+  const stalled = { kind: "stalled", seconds: 300, last: [] } as const;
+  const hung = { kind: "hungAfterReport", windowSeconds: 60 } as const;
+  const reasonFor = (end: Parameters<typeof decide>[0]["end"], report: ReportFile) =>
+    endReasonOf(end, decide({ end, file: report }));
+
+  it("gives the report's own word when the run ended cleanly", () => {
+    expect(reasonFor(ok, file(DONE))).toBe("done");
+    expect(reasonFor(hung, file(DONE))).toBe("done");
+    expect(reasonFor(ok, file({ status: "asked", questions: [CURRENCY] }))).toBe("asked");
+    expect(reasonFor(ok, file({ status: "blocked", blocker: "no access to the staging database" }))).toBe("blocked");
+  });
+
+  it("names how the run stopped, whatever its report says", () => {
+    expect(reasonFor({ kind: "timedOut", seconds: 3600 }, file(DONE))).toBe("timed_out");
+    expect(reasonFor(stalled, file(DONE))).toBe("stalled");
+    expect(reasonFor({ kind: "failed", reason: "docker is not running" }, file(DONE))).toBe("launch_failed");
+    expect(reasonFor({ kind: "exited", code: 2 }, file(DONE))).toBe("launch_failed");
+  });
+
+  it("calls a missing, unreadable or malformed report invalid output", () => {
+    expect(reasonFor(ok, { kind: "missing" })).toBe("output_invalid");
+    expect(reasonFor(ok, { kind: "unreadable", reason: "it is a symlink" })).toBe("output_invalid");
+    expect(reasonFor(ok, file("not json"))).toBe("output_invalid");
+    expect(reasonFor(ok, file({ status: "finished" }))).toBe("output_invalid");
+  });
+
+  it("calls a parked run the usage limit", () => {
+    expect(endReasonOf(ok, { kind: "parked", until: "unknown", said: "limit reached" })).toBe("usage_limit");
   });
 });
 

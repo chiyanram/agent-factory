@@ -398,16 +398,30 @@ describe("records: evidence", () => {
 });
 
 describe("tick", () => {
-  it("today the writer's step is not built: the pass says so and records nothing, so the next pass decides the same", async () => {
+  it("today the writer's step is not built: the pass says so and records the refusal once, so the next pass decides the same", async () => {
     await approved();
-    const log: string[] = [];
-    expect(await tick(setup({ team, open: [], merged: [] }, log))).toMatchObject({ kind: "ok" });
-    expect(log).toEqual([
+    const passed = async () => {
+      const log: string[] = [];
+      expect(await tick(setup({ team, open: [], merged: [] }, log))).toMatchObject({ kind: "ok" });
+      return log;
+    };
+    const decided = [
       "log PROJ-1: writer (fix): approved; no run yet",
       "log PROJ-1: unavailable: the writer's box is not built yet (#113)",
-    ]);
+    ];
+    expect(await passed()).toEqual(decided);
+    expect(await passed()).toEqual(decided);
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
-    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual(["begun", "approved", "turn"]);
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual([
+      "begun",
+      "approved",
+      "turn",
+      "setup-refused",
+    ]);
+    expect(read.kind === "ok" ? read.value.at(-1) : read).toMatchObject({
+      phase: "writer",
+      why: "the writer's box is not built yet (#113)",
+    });
   });
 
   it("an available writer: claims the change, records the start and the end with its spend; one run per pass", async () => {
@@ -959,19 +973,37 @@ describe("tick", () => {
       writer: {
         kind: "available",
         folder: noRunFolder,
-        run: async () => ({ kind: "failed", reason: "the push failed", spend: { usd: 0.3, tokens: 9 }, runs }),
+        run: async () => ({
+          kind: "failed",
+          reason: "the push failed",
+          spend: { usd: 0.3, tokens: 9 },
+          runs,
+          end: "done",
+        }),
       },
     };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     const events = read.kind === "ok" ? read.value : [];
-    expect(events.find((e) => e.kind === "spent")).toMatchObject({ runs });
+    expect(events.find((e) => e.kind === "spent")).toMatchObject({
+      runs,
+      spend: { usd: 0.3, tokens: 9 },
+      reason: "done",
+    });
   });
 
   it("a writer run's end names its trace, and the record reads it back (#487)", async () => {
     await approved();
     const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
-    const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, trace };
+    const value = {
+      head: H,
+      outcome: "blocked" as const,
+      patch: "",
+      evidence: [],
+      hung: false,
+      trace,
+      reason: "stalled" as const,
+    };
     const steps: Steps = {
       ...STEPS_TODAY,
       writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "ok", value }) },
@@ -985,7 +1017,7 @@ describe("tick", () => {
         { kind: "approved" },
         { kind: "turn", to: "factory" },
         { kind: "started" },
-        { kind: "writer-ended", trace },
+        { kind: "writer-ended", trace, outcome: "blocked", hung: false, reason: "stalled" },
       ],
     });
   });
@@ -1051,6 +1083,11 @@ describe("tick", () => {
     const first: string[] = [];
     await tick(setup(changes, first, { steps }));
     expect(first).toContain("log PROJ-1: failed: the box died");
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.slice(-2) : read).toEqual([
+      expect.objectContaining({ kind: "started", phase: "writer" }),
+      { at: expect.any(String), kind: "spent", phase: "writer", head: H, reason: "unknown" },
+    ]);
     const second: string[] = [];
     await tick(setup(changes, second, { steps }));
     expect(second).toContain("label +needs-human #12");
@@ -1058,6 +1095,83 @@ describe("tick", () => {
       /^note #12 \[coordinator\] blocked: the writer run started at .* never ended/,
     );
   });
+
+  it("a failed run that measured nothing writes its spent line with no spend, so it is neither spending nor activity", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: { kind: "available", run: async () => ({ kind: "failed", reason: "no pack", spend: NO_SPEND }) },
+    };
+    await tick(setup({ team, open: [open()], merged: [] }, [], { steps }));
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.at(-1) : read).toEqual({
+      at: expect.any(String),
+      kind: "spent",
+      phase: "review",
+      head: H,
+      reason: "unknown",
+    });
+  });
+
+  const failing = {
+    kind: "available",
+    run: async () => ({ kind: "failed" as const, reason: "the box died" }),
+  } as const;
+  const readyPassed: Event = { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" };
+  const reviewed: Event = { at: "2026-11-07T09:06:00Z", kind: "review-ended", head: H, actOn: 0 };
+  const failedRuns = [
+    { phase: "ready", steps: { ...STEPS_TODAY, ready: failing }, before: [], over: {}, line: {}, reason: "unknown" },
+    {
+      phase: "verify",
+      steps: { ...STEPS_TODAY, verify: failing },
+      before: [readyPassed, reviewed],
+      over: { gate: "local" },
+      line: { pipeline: { kind: "none" } },
+      reason: "unknown",
+    },
+    {
+      phase: "review",
+      steps: {
+        ...STEPS_TODAY,
+        review: { kind: "available", run: async () => ({ kind: "failed", reason: "stopped", end: "timed_out" }) },
+      },
+      before: [readyPassed],
+      over: {},
+      line: {},
+      reason: "timed_out",
+    },
+  ] as const satisfies readonly {
+    readonly phase: "ready" | "verify" | "review";
+    readonly steps: Steps;
+    readonly before: readonly Event[];
+    readonly over: Partial<TickSetup>;
+    readonly line: Partial<OpenChange>;
+    readonly reason: string;
+  }[];
+
+  it.each(failedRuns)(
+    "a $phase run that fails writes one spent line with its reason, and the ticket still reads as interrupted",
+    async (c) => {
+      await approved();
+      const where = { home, project: "ledger", ticket: "PROJ-1" };
+      const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+      for (const event of [{ at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } as const, ...c.before]) {
+        await record({ where, event });
+      }
+      await tick(setup({ team, open: [open(c.line)], merged: [] }, [], { steps: c.steps, ...c.over }));
+      const read = await readRecords(where);
+      const events = read.kind === "ok" ? read.value : [];
+      expect(events.slice(-2)).toEqual([
+        expect.objectContaining({ kind: "started", phase: c.phase }),
+        { at: expect.any(String), kind: "spent", phase: c.phase, head: H, reason: c.reason },
+      ]);
+      expect(summarize({ events, since: "2026-11-07T08:00:00Z" }).interrupted).toMatchObject({ phase: c.phase });
+    },
+  );
 
   it("two failures in a row skip the step until each nextTry (#228)", async () => {
     await approved();
@@ -1435,6 +1549,7 @@ describe("tick", () => {
       citesNotFound: 1,
       found: { CR1: { act_on: 1 }, logic: { noted: 2 } },
       traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
+      reason: "done",
     });
   });
 
@@ -1563,6 +1678,7 @@ describe("tick", () => {
       kind: "ready-ended",
       passed: false,
       why: "row 1 (AC1): make test exited 2",
+      reason: "done",
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-1" },
@@ -1585,6 +1701,7 @@ describe("tick", () => {
     expect(verified).toEqual([H]);
     const after = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(after.kind === "ok" ? after.value.slice(-2).map((e) => e.kind) : []).toEqual(["started", "verify-ended"]);
+    expect(after.kind === "ok" ? after.value.at(-1) : undefined).toMatchObject({ passed: true, reason: "done" });
   });
 
   it("a dry run decides every ticket and acts on none", async () => {
@@ -2205,6 +2322,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
         head: H,
         spend: { usd: 1.5, tokens: 200 },
         split: { finders: { errors: { usd: 0.5, tokens: 80 } }, verify: { usd: 1, tokens: 120 } },
+        reason: "unknown",
       },
     ]);
     const summary = summarize({ events, since: "2026-11-07T08:00:00Z" });
@@ -2259,6 +2377,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     expect(rounds).toEqual([]);
     const read = await readRecords(where);
     expect((read.kind === "ok" ? read.value : []).map((e) => e.kind)).not.toContain("started");
+    expect((read.kind === "ok" ? read.value : []).map((e) => e.kind)).not.toContain("setup-refused");
     await tick(setup({ team, open: [open()], merged: [] }, [], { steps: review("unbounded"), caps: caps({ ticket }) }));
     expect(rounds).toEqual(["PROJ-1"]);
   });
@@ -2555,6 +2674,30 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(events.find((e) => e.kind === "design-ended")).toMatchObject({ runs });
   });
 
+  it("a failed design run's line names how the model run ended, else unknown", async () => {
+    spec("feature");
+    await started();
+    const base = designSteps([]);
+    const failedWith = (end?: "timed_out"): Steps => ({
+      ...base,
+      designReview: {
+        kind: "available",
+        run: async () => ({
+          kind: "ok",
+          value: { kind: "failed", card: CARD, why: "the model run failed", ...(end === undefined ? {} : { end }) },
+        }),
+      },
+    });
+    await pass(failedWith("timed_out"), "2026-11-07T09:00:00Z");
+    await pass(failedWith(), "2026-11-07T09:01:00Z");
+    const read = await readRecords(where());
+    const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
+    expect(ends.map((e) => [e.outcome, e.reason])).toEqual([
+      ["failed", "timed_out"],
+      ["failed", "unknown"],
+    ]);
+  });
+
   it("a feature-lane ticket: coordinator's spec → design review → verify pass → posted → waits for the approval → build", async () => {
     const text = spec("feature");
     await started();
@@ -2572,9 +2715,9 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(pings).toEqual([]);
     const read = await readRecords(where());
     const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
-    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd, e.trace])).toEqual([
-      ["review", "done", CARD, 0.4, "design-review-2026-11-07T09-00-00-000Z.jsonl"],
-      ["verify", "done", CARD, 0.2, undefined],
+    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd, e.trace, e.reason])).toEqual([
+      ["review", "done", CARD, 0.4, "design-review-2026-11-07T09-00-00-000Z.jsonl", "done"],
+      ["verify", "done", CARD, 0.2, undefined, "done"],
     ]);
     const third = await pass(steps, "2026-11-07T09:02:00Z", pings);
     expect(third).toEqual(["log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only"]);
@@ -3018,6 +3161,7 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
       until: UNTIL,
       said: SAID,
       task: { kind: "fix" },
+      reason: "usage_limit",
     });
     expect(log).toContain(`log PROJ-1: writer parked: the provider's usage limit lasts until ${UNTIL}: ${SAID}`);
     await pass("2026-11-07T11:00:00Z");

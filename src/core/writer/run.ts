@@ -22,7 +22,8 @@
 //     closes it
 //   8 a run that exited is read for the provider's usage limit by the agent CLI's own reader
 //     (agent/usage-limit.ts): one that hit it ends parked, decided from what the CLI printed, never from its report
-// Every box failure is a blocked outcome with the reason, never a guess. Nothing here throws.
+// Every box failure is a blocked outcome with the reason, never a guess, and the run's end names how it ended for its
+// record line (report.ts endReasonOf). Nothing here throws.
 
 import type { ClaudeWriter, WriterCall } from "../agent/claude-writer.js";
 import { refusedLogin } from "../agent/login.js";
@@ -32,6 +33,7 @@ import { hostGit, type GitResult } from "../git.js";
 import {
   decide,
   endingOf,
+  endReasonOf,
   loadFactoryFile,
   loadReport,
   validReport,
@@ -40,6 +42,7 @@ import {
   type RunEnd,
 } from "../report.js";
 import { PR_BODY_PATH } from "../pr-body.js";
+import type { EndReason } from "../end-reason.js";
 import type { Ran, Session } from "../box/index.js";
 import { startBox, type BoxSetup } from "../ready/boxrun.js";
 import { RENEW } from "../token/rules.js";
@@ -88,6 +91,7 @@ export type Ended = {
   readonly said: string;
   readonly output: readonly string[];
   readonly trace?: string;
+  readonly reason: EndReason;
 };
 
 export function runEnd(ran: Ran): RunEnd {
@@ -406,16 +410,17 @@ export async function writerRun(run: WriterRun): Promise<Result<Ended> | FailedS
   const { end, spend, reported, said: words, output, limit } = await inBox(run);
   const runs = runsOf(run, reported);
   const outcome = await outcomeOf(run, end, limit);
+  const reason = endReasonOf(end, outcome);
   const pr = await prOf(run, outcome);
   const tip = await committed(run);
   const paths = tip.kind === "ok" ? await changedPaths(run, tip.value.tip) : tip;
   if (tip.kind === "failed" || paths.kind === "failed") {
-    const failed = spentFailure(`cannot read what the run committed: ${reasonOf(tip, paths)}`, spend);
+    const failed = spentFailure(`cannot read what the run committed: ${reasonOf(tip, paths)}`, spend, reason);
     return { ...failed, ...runsField(runs) };
   }
   const final = scoped(outcome, outsideScope(paths.value, run.scopes), run.scopes);
   return {
     kind: "ok",
-    value: { outcome: final, ending: endingOf(end), spend, runs, said: words, output, ...pr, ...tip.value },
+    value: { outcome: final, ending: endingOf(end), spend, runs, said: words, output, reason, ...pr, ...tip.value },
   };
 }

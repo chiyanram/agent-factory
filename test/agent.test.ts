@@ -117,6 +117,7 @@ describe("the Claude adapter's read-only run", () => {
       expect(ran).toMatchObject({
         kind: "failed",
         reason: `stopped at its 1-minute limit (${variable})`,
+        end: "timed_out",
         stream: expect.stringContaining('"subtype":"init"'),
       });
       expect(await gone(Number(readFileSync(stub.pidFile, "utf8").trim()))).toBe(true);
@@ -275,6 +276,19 @@ describe("readAnswer", () => {
       reason:
         "the claude login was refused (HTTP 401); run claude and sign in with /login; unset a stale ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN in your shell; success: Failed to authenticate. API Error: 401 OAuth access token is invalid.",
     });
+  });
+});
+
+describe("readAnswer: how a failed run ended", () => {
+  it("is a launch failure when the CLI gave no result event", () => {
+    expect(readAnswer({ code: 1, stdout: "", stderr: "boom" })).toMatchObject({ end: "launch_failed" });
+  });
+
+  it("is invalid output when the result holds no structured answer", () => {
+    const errored = '{"type":"result","is_error":true,"result":"no"}\n';
+    const empty = '{"type":"result","is_error":false,"result":"text only"}\n';
+    expect(readAnswer({ code: 1, stdout: errored, stderr: "" })).toMatchObject({ end: "output_invalid" });
+    expect(readAnswer({ code: 0, stdout: empty, stderr: "" })).toMatchObject({ end: "output_invalid" });
   });
 });
 

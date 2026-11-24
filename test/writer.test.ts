@@ -474,7 +474,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();
     const out = await run(setup(writer(fake, { commit: false, report: DONE, exit: 0 }, []), told, []), FIX);
-    expect(out).toMatchObject({ kind: "ok", value: { patch: "", outcome: "done" } });
+    expect(out).toMatchObject({ kind: "ok", value: { patch: "", outcome: "done", reason: "done" } });
     expect(told.log).toEqual([]);
   });
 
@@ -482,7 +482,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();
     const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 1 }, []), told, []), FIX);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", reason: "launch_failed" } });
     expect(told.log).toContain("label 41 needs-human");
     expect(told.log.at(-1)).toMatch(/note 41 .*blocked: the run exited 1/);
   });
@@ -506,6 +506,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
         outcome: "parked",
         parked: { until: new Date(reset * 1000).toISOString().replace(".000Z", "Z"), said },
         evidence: [],
+        reason: "usage_limit",
       },
     });
     expect(told.log.filter((l) => l.includes("needs-human") || l.startsWith("note"))).toEqual([]);
@@ -535,7 +536,7 @@ describe("the writer step: a ticket's first run (#113)", () => {
     };
     const told = forge();
     const out = await run(setup(box, told, []), FIX);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", evidence: [] } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", evidence: [], reason: "launch_failed" } });
     expect(told.log.at(-1)).toMatch(/note 41 .*the box did not stop: docker rm timed out/);
   });
 });
@@ -578,7 +579,7 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const box = after(fake, 60, () => ({ kind: "timedOut", seconds: 3600 }));
     const out = await run(setup(box, forge(), []), FIX);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", hung: true } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "done", hung: true, reason: "done" } });
   });
 
   it("decides from the report read after the stop: one the writer spoiled in the window is blocked", async () => {
@@ -589,7 +590,7 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     });
     const box: Box = { ...spoiled, stop: async (session) => fake.box.stop(session) };
     const out = await run(setup(box, forge(), []), FIX);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: true } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: true, reason: "output_invalid" } });
   });
 
   it("ends a run that never ends and wrote no valid report at the host's deadline: timed out, blocked", async () => {
@@ -602,7 +603,7 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const began = Date.now();
     const out = await run({ ...s, settings: { ...s.settings, timeoutSeconds: 0 } }, FIX);
     expect(Date.now() - began).toBeLessThan(STALL_MS);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false, reason: "timed_out" } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
   });
 
@@ -631,7 +632,7 @@ describe("the completion window (#182; ADR-0012 S13)", () => {
     const began = Date.now();
     const out = await run(setup(timedOut, told, []), FIX);
     expect(Date.now() - began).toBeGreaterThanOrEqual(390);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false, reason: "timed_out" } });
   });
 
   it("never opens the window on a report the schema refuses", async () => {
@@ -685,7 +686,7 @@ describe("the stall stop (#228)", () => {
     const out = await run({ ...s, settings: { ...s.settings, stallMs: STALL } }, FIX);
     expect(Date.now() - began).toBeGreaterThanOrEqual(STALL);
     expect(Date.now() - began).toBeLessThan(STALL_MS);
-    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false } });
+    expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked", hung: false, reason: "stalled" } });
     expect(fake.calls.filter((c) => c.op === "stop")).toHaveLength(1);
     expect(told.log).toContain("label 41 needs-human");
     const post = told.posts.at(-1) ?? "";
@@ -783,7 +784,7 @@ describe("a writer run that stops says why, even before a change exists (#62)", 
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const told = forge();
     const out = valueOf(await run(setup(failing(fake), told, []), FIX));
-    expect(out).toMatchObject({ outcome: "blocked", patch: "" });
+    expect(out).toMatchObject({ outcome: "blocked", patch: "", reason: "launch_failed" });
     expect(out.why).toBe("the run exited 1; the run said: Error: Invalid API key · Please run /login");
     expect(told.log).toEqual([]);
     const file = out.output ?? "";
@@ -795,12 +796,30 @@ describe("a writer run that stops says why, even before a change exists (#62)", 
     expect(kept).toContain("[scrubbed]");
   });
 
+  it("names how the run ended: asked, no report, a box that failed", async () => {
+    const asked = { status: "asked", questions: [{ question: "Which loan?", choices: ["A", "B"], recommended: 0 }] };
+    const askedBox = writer(
+      fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] }),
+      {
+        commit: false,
+        report: asked,
+        exit: 0,
+      },
+      [],
+    );
+    expect(valueOf(await run(setup(askedBox, forge(), []), FIX))).toMatchObject({ outcome: "asked", reason: "asked" });
+    const silent = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
+    expect(valueOf(await run(setup(silent.box, forge(), []), FIX))).toMatchObject({ reason: "output_invalid" });
+    const broken = fakeBox({ runs: [{ kind: "failed", reason: "docker is not running" }] });
+    expect(valueOf(await run(setup(broken.box, forge(), []), FIX))).toMatchObject({ reason: "launch_failed" });
+  });
+
   it("a blocked report: why is the writer's blocker, and no output is kept", async () => {
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
     const report = { status: "blocked", blocker: "the spec names no endpoint to change" };
     const box = writer(fake, { commit: false, report, exit: 0 }, []);
     const out = valueOf(await run(setup(box, forge(), []), FIX));
-    expect(out).toMatchObject({ outcome: "blocked", why: "the spec names no endpoint to change" });
+    expect(out).toMatchObject({ outcome: "blocked", why: "the spec names no endpoint to change", reason: "blocked" });
     expect(out.output).toBeUndefined();
   });
 
@@ -1110,7 +1129,7 @@ describe("the writer step: a later run on the change", () => {
     const handed = await run(setup(none.box, told, []), { kind: "ci-red", head: p.head2 }, openLine());
     expect(handed).toEqual({
       kind: "ok",
-      value: { head: p.head2, outcome: "blocked", patch: "", evidence: [], hung: false },
+      value: { head: p.head2, outcome: "blocked", patch: "", evidence: [], hung: false, reason: "setup_refused" },
     });
     expect(told.log).toEqual([
       "label 12 needs-human",

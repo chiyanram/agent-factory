@@ -1,9 +1,11 @@
 // model — one fresh, read-only model run, as the review, the design review, the onboarder, the retro draft and the eval
 // judge ask for it. Which agent CLI answers it, with which argv, and how the run is stopped at its limit is the agent
 // seam's business (src/core/agent/, ADR-0022). A test passes its own Model. A failed run still gives back what the CLI
-// answered, so a pass that failed for its budget is kept and counted.
+// answered, so a pass that failed for its budget is kept and counted, and names how it ended where the adapter can
+// tell (end-reason.ts).
 
 import type { RoundPart } from "../dispatch/spend.js";
+import type { EndReason } from "../end-reason.js";
 
 export type RunLimit = {
   readonly minutes: number;
@@ -32,6 +34,12 @@ export type ModelAnswer = {
 
 export type ModelResult =
   | { readonly kind: "ok"; readonly value: ModelAnswer }
-  | { readonly kind: "failed"; readonly reason: string; readonly answer: unknown; readonly stream?: string };
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+      readonly answer: unknown;
+      readonly stream?: string;
+      readonly end?: EndReason;
+    };
 
 export type Model = (run: ModelRun) => Promise<ModelResult>;

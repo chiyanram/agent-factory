@@ -92,6 +92,19 @@ describe("a merge's timeline (#488 AC-1)", () => {
     expect(line.unmeasured).toBe(1);
   });
 
+  it("is the same line for records that also hold reasons, a refused setup and an unmeasured failed run", () => {
+    const merged = { number: 9, at: "2026-11-13T12:00:00Z" };
+    const withNew: readonly Event[] = [
+      ...EVENTS.slice(0, -1).map((e) =>
+        e.kind === "writer-ended" || e.kind === "review-ended" ? Object.assign({}, e, { reason: "done" as const }) : e,
+      ),
+      { at: "2026-11-13T11:45:00Z", kind: "setup-refused", phase: "verify", why: "the local verifier is not set up" },
+      { at: "2026-11-13T11:46:00Z", kind: "spent", phase: "verify", head: H, reason: "unknown" },
+      ...EVENTS.slice(-1),
+    ];
+    expect(timelineOf(withNew, merged)).toEqual(timelineOf(EVENTS, merged));
+  });
+
   it("names each rescue: the hand-over a person took back, its wait and why", () => {
     expect(line.rescues).toEqual([
       { at: "2026-11-13T11:10:00Z", waitedMs: 3_600_000, why: "the writer asked for a person", by: "mo" },

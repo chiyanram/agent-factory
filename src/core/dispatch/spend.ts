@@ -4,7 +4,8 @@
 // subscription need not be what the subscription is charged, so the caps there count tokens.
 //
 // A run that ends with no result event (a stall, a timeout, a box that failed) reports nothing: its record carries no
-// spend, and `usage` counts it as unmeasured, never as free.
+// spend, and `usage` counts it as unmeasured, never as free. A failed run also names how it ended where its step can
+// tell (end-reason.ts), for its "spent" line.
 //
 // The stream also keeps the CLI's first init event, which names the CLI's version and the model it ran (agent/ran.ts).
 //
@@ -13,6 +14,7 @@
 import { NO_WINDOWS, windowsOf, type Windows } from "../agent/usage-limit.js";
 import { prop } from "../field.js";
 import { initIn, type Reported, type RunNamed } from "../agent/ran.js";
+import type { EndReason } from "../end-reason.js";
 
 export type Spend = { readonly usd: number; readonly tokens: number };
 
@@ -52,10 +54,12 @@ export type FailedSpent = {
   readonly split?: RoundSpend;
   readonly traces?: readonly string[];
   readonly runs?: readonly RunNamed[];
+  readonly end?: EndReason;
 };
 
-export function spentFailure(reason: string, spend: Spend | "unmeasured"): FailedSpent {
-  return spend === "unmeasured" ? { kind: "failed", reason } : { kind: "failed", reason, spend };
+export function spentFailure(reason: string, spend: Spend | "unmeasured", end?: EndReason): FailedSpent {
+  const ended = end === undefined ? {} : { end };
+  return spend === "unmeasured" ? { kind: "failed", reason, ...ended } : { kind: "failed", reason, spend, ...ended };
 }
 
 const TOKEN_FIELDS = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"];
