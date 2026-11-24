@@ -23,8 +23,9 @@ and exits: `status` `done` with `evidence` rows (criterion, command, result), `a
   the run's task. See [The provider's usage limit](#the-providers-usage-limit).
 
 A missing, unreadable or malformed
-report, any other field, a non-zero exit, a timeout, a cap or a failed runner is `blocked` with the reason; a reason
-never quotes the report. The host decides from the report only after the runner has stopped, never through a
+report, any other field, a non-zero exit, a timeout, a stall or a failed runner is `blocked` with the reason; a
+reason never quotes the report. Its record line also names how it ended (see
+[How a run record says why the run ended](#how-a-run-record-says-why-the-run-ended)). The host decides from the report only after the runner has stopped, never through a
 symlink, and refuses to push when any new commit touches `.factory` (`excludeFactory` keeps it out of `git add`).
 While the implementer runs, the host looks for a report the schema accepts every 5 s; once one is there, the
 implementer has a 60 s completion window. An implementer still running at its end (a child such as `gh` or an MCP
@@ -70,9 +71,9 @@ The caps then hold before each run, never during one (`src/core/dispatch/caps.ts
 the CLI's `--max-budget-usd`; per ticket, a ticket at its cap goes to `needs-human` with its spend shown; per project
 and day, and at the window share, the pass starts no run, records each held one as unavailable, and sends one notice
 per day or window. A run already going is never stopped for a cap, so a cap can be passed by the run that reaches it.
-A review round that fails after it spent (a pass at its budget, say) writes a `spent` line with what every pass spent,
-the failed one's too: its start still reads as a run that never ended, so a person looks, and its spend counts toward
-the caps and `usage`.
+A review round that fails (a pass at its budget, say) writes a `spent` line with what every pass spent, the failed
+one's too: its start still reads as a run that never ended, so a person looks, and its spend counts toward the caps and
+`usage`.
 Every implementer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
 in `src/core/writer/prompt.ts`), so nothing is left in the background when the run ends.
 Every build run starts from its role card (#232): test-first, the implementer (fix, rework, CI and merge runs) or
@@ -112,6 +113,46 @@ failed, since no count, cap or decision reads them. `board`, `usage` and every o
 
 **Today:** only Claude runs name these. A Copilot run's `-s` output has no init event, so it records no version or
 model until #697 turns that run on.
+
+## How a run record says why the run ended
+
+Each line that ends a run names how it ended in `reason`, one value from a closed list (`src/core/end-reason.ts`):
+
+| reason | the run |
+|---|---|
+| `done` | finished its task; a check ran to its result, pass or fail |
+| `asked` | asked a question |
+| `blocked` | says it cannot go on, with its why |
+| `setup_refused` | never started: a refused step, an implementer hand-over, or a failure before the runner |
+| `launch_failed` | its CLI or runner did not start, or the CLI exited with an error before it answered |
+| `timed_out` | ran out of time |
+| `stalled` | printed nothing for the stall time |
+| `usage_limit` | was refused by the provider and parked |
+| `output_invalid` | gave an answer or a report that is missing or fails its schema |
+| `oom_killed` | went over its runner's memory cap |
+| `stopped` | was stopped by a person |
+| `unknown` | ended in a way nothing classifies, or is an old line that cannot be told apart |
+
+- The lines are `writer-ended`, `design-ended`, `review-ended`, `ready-ended`, `verify-ended`, `parked` and `spent`.
+  `outcome`, `passed`, `actOn`, `hung` and `why` still decide what the table does; `reason` only records. An
+  implementer run that finished and whose push a guard then refused stays `outcome: "blocked"` with `reason: "done"`.
+- An implementer, review, ready or verify run that fails always writes its `spent` line, with its `reason`, and with
+  `spend` only when the run was measured. The line ends nothing, so the ticket still reads as a run that never ended
+  and goes to a person.
+- A step that cannot run writes `{"kind": "setup-refused", "phase", "why"}`, once per cause: not again while the
+  ticket's newest refusal since its last `started` line names the same phase and why. A step held by a cap or the run
+  hours writes none. The pass tries the step again as before.
+- Neither a `setup-refused` line nor a `spent` line with no `spend` counts as activity or as spending, so `board`,
+  `usage` and the merge timeline print what they printed before.
+- A line written without `reason` reads through a mapping from its old fields, never from its `why`: an implementer's
+  `done` and `asked` keep their word and its `blocked` is `unknown`; a design run's `done` is `done` and its `failed` is
+  `unknown`; a review, ready or verify line is `done`; `parked` is `usage_limit`; `spent` is `unknown`. A `reason`
+  not on the list fails the read with its line number.
+
+**Rollback:** before older code reads the ledger again, remove every `setup-refused` line and every `spent` line
+without `spend` from `$FACTORY_HOME/runs/*/*.jsonl`. Older code refuses both, and it reads past `reason`.
+
+**Today:** nothing writes `oom_killed` (#855) or `stopped` (#770).
 
 ## Answers
 

@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readRecords, record, tornPath } from "../src/core/dispatch/records.js";
+import {
+  closedReason,
+  EMPTY,
+  isActivity,
+  readRecords,
+  record,
+  summarize,
+  tornPath,
+  type Event,
+} from "../src/core/dispatch/records.js";
 import { takeLock, type HeldLock } from "../src/core/lock.js";
 import { tempDir } from "./temp.js";
 
@@ -126,5 +135,127 @@ describe("what a run record names: the CLI, its version and the model", () => {
     const started = { at, kind: "started", phase: "ready", mode: "none", head };
     written([{ ...started, later: { any: "thing" } }]);
     expect(await readRecords(where())).toEqual({ kind: "ok", value: [started] });
+  });
+});
+
+describe("the closed reason on every line that ends a run", () => {
+  const where = () => ({ home, project: "ledger", ticket: "PROJ-1" });
+  const file = () => join(home, "runs", "ledger", "PROJ-1.jsonl");
+  const at = "2026-11-23T09:00:00Z";
+  const head = "a".repeat(40);
+  const writer = {
+    at,
+    kind: "writer-ended",
+    mode: "fix",
+    head,
+    outcome: "blocked",
+    patch: "",
+    evidence: [],
+    hung: false,
+  } as const;
+  const design = {
+    at,
+    kind: "design-ended",
+    step: "review",
+    spec: "s",
+    design: "d",
+    outcome: "failed",
+    why: "the model run failed",
+    findings: [],
+    kept: [],
+  } as const;
+  const ready = { at, kind: "ready-ended", head, passed: false, why: "a row failed" } as const;
+  const verify = { at, kind: "verify-ended", head, passed: true } as const;
+  const review = { at, kind: "review-ended", head, actOn: 2 } as const;
+  const parked = { at, kind: "parked", phase: "writer", head, until: "unknown", said: "limit" } as const;
+  const spent = { at, kind: "spent", phase: "review", head, spend: { usd: 0.5, tokens: 10 } } as const;
+
+  function written(events: readonly unknown[]): void {
+    mkdirSync(join(home, "runs", "ledger"), { recursive: true });
+    writeFileSync(file(), events.map((e) => `${JSON.stringify(e)}\n`).join(""));
+  }
+
+  it("reads back the reason on each line that ends a run, as written", async () => {
+    const lines: readonly Event[] = [
+      { ...writer, reason: "stalled" },
+      { ...design, reason: "timed_out" },
+      { ...ready, reason: "done" },
+      { ...verify, reason: "done" },
+      { ...review, reason: "done" },
+      { ...parked, reason: "usage_limit" },
+      { ...spent, reason: "launch_failed" },
+    ];
+    for (const line of lines) {
+      expect(await record({ where: where(), event: line })).toEqual({ kind: "ok" });
+    }
+    expect(await readRecords(where())).toEqual({ kind: "ok", value: lines });
+  });
+
+  it("fails the read, with its line number, on a reason that is not on the list", async () => {
+    written([writer, { ...review, reason: "no_room" }]);
+    expect(await readRecords(where())).toEqual({
+      kind: "failed",
+      reason: `${file()} line 2 is not a record; fix or remove it`,
+    });
+  });
+
+  it("reads a failed run's spent line that has no spend", async () => {
+    const unmeasured = { at, kind: "spent", phase: "verify", head, reason: "unknown" } as const;
+    written([unmeasured]);
+    expect(await readRecords(where())).toEqual({ kind: "ok", value: [unmeasured] });
+  });
+
+  it("reads a setup-refused line, and fails one with no phase or why", async () => {
+    const refused = { at, kind: "setup-refused", phase: "review", why: "the reviewer is not set up" } as const;
+    written([refused]);
+    expect(await readRecords(where())).toEqual({ kind: "ok", value: [refused] });
+    written([{ at, kind: "setup-refused", phase: "review" }]);
+    expect(await readRecords(where())).toMatchObject({ kind: "failed" });
+  });
+
+  it("maps a line written without a reason from its old fields only, never from its why", () => {
+    expect(closedReason({ ...writer, outcome: "done" })).toBe("done");
+    expect(closedReason({ ...writer, outcome: "asked" })).toBe("asked");
+    expect(closedReason({ ...writer, why: "the run was stopped after 3600s" })).toBe("unknown");
+    expect(closedReason({ ...design, outcome: "done" })).toBe("done");
+    expect(closedReason(design)).toBe("unknown");
+    expect([review, ready, verify].map(closedReason)).toEqual(["done", "done", "done"]);
+    expect(closedReason(parked)).toBe("usage_limit");
+    expect(closedReason(spent)).toBe("unknown");
+  });
+
+  it("gives a line's own reason first, and none for a line that ends no run", () => {
+    expect(closedReason({ ...writer, reason: "stalled" })).toBe("stalled");
+    expect(closedReason({ at, kind: "started", phase: "writer", mode: "fix", head })).toBeUndefined();
+    expect(closedReason({ at, kind: "setup-refused", phase: "writer", why: "no box" })).toBeUndefined();
+  });
+
+  it("counts neither a setup-refused line nor a spent line with no spend as activity", () => {
+    expect(isActivity({ at, kind: "setup-refused", phase: "writer", why: "no box" })).toBe(false);
+    expect(isActivity({ at, kind: "spent", phase: "verify", head, reason: "unknown" })).toBe(false);
+    expect(isActivity(spent)).toBe(true);
+  });
+
+  it("keeps the newest refused setup until a run starts", () => {
+    const refused: Event = { at, kind: "setup-refused", phase: "review", why: "the reviewer is not set up" };
+    const started: Event = { at: "2026-11-23T09:05:00Z", kind: "started", phase: "review", mode: "none", head };
+    const since = "2026-11-23T08:00:00Z";
+    expect(EMPTY.refused).toBe("none");
+    expect(summarize({ events: [refused], since }).refused).toEqual({
+      phase: "review",
+      why: "the reviewer is not set up",
+    });
+    expect(summarize({ events: [refused, started], since }).refused).toBe("none");
+  });
+
+  it("sums a spent line with no spend as nothing, and reads it as it read an interrupted run", () => {
+    const started: Event = { at, kind: "started", phase: "verify", mode: "none", head };
+    const failed: Event = { at, kind: "spent", phase: "verify", head, reason: "unknown" };
+    const since = "2026-11-23T08:00:00Z";
+    const before = summarize({ events: [started], since });
+    const after = summarize({ events: [started, failed], since });
+    expect(after.spent).toEqual(before.spent);
+    expect(after.interrupted).toEqual(before.interrupted);
+    expect(after.lastAt).toBe(before.lastAt);
   });
 });

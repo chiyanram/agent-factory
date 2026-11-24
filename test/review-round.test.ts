@@ -1004,7 +1004,42 @@ describe("reviewStep", () => {
       reason: expect.stringContaining("pass failed"),
       spend: { usd: expect.closeTo(0.8, 9), tokens: 40 },
       split: { finders: { baseline: { usd: 0.1, tokens: 10 } }, verify: { usd: 0.7, tokens: 30 } },
+      end: "unknown",
     });
+  });
+
+  it("names a failed round's end by its first failed model run, and none when no model run failed", async () => {
+    const found = model([findAnswer([FINDING])], []);
+    let calls = 0;
+    const stopped: Model = async (run) => {
+      calls += 1;
+      return calls === 1
+        ? found(run)
+        : { kind: "failed", reason: "stopped at its limit", answer: undefined, end: "timed_out" };
+    };
+    const step = reviewStep({
+      env: env(),
+      forge: forge(fresh()),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: stopped,
+      sessions: none,
+    });
+    expect(step.kind === "available" ? await step.run(input(12)) : step).toMatchObject({ end: "timed_out" });
+    const m = model([findAnswer([FINDING]), verdicts([{ id: "F1", bucket: "act_on", why: "x" }])], []);
+    const moved = reviewStep({
+      env: env(),
+      forge: forge(fresh(), { moveTo: "f".repeat(40) }),
+      factory: "ram",
+      project: "ledger",
+      plugins,
+      model: m,
+      sessions: none,
+    });
+    const ran = moved.kind === "available" ? await moved.run(input(12)) : moved;
+    expect(ran).toMatchObject({ kind: "failed" });
+    expect(ran).not.toHaveProperty("end");
   });
 });
 

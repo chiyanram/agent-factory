@@ -44,6 +44,7 @@ import { DEFAULT_MODEL, runsField, type RunNamed } from "../agent/ran.js";
 import { knownFor, type Known } from "../onboard/known.js";
 import { knowledgeLines, runPrompt, type RunMode } from "./prompt.js";
 import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js";
+import type { EndReason } from "../end-reason.js";
 import { NO_TRACE, openTrace, type TraceKept, type TraceSink } from "../dispatch/trace.js";
 import { writerRun, type Ended } from "./run.js";
 import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
@@ -103,6 +104,7 @@ export type WriterOut = {
   readonly output?: string;
   readonly trace?: string;
   readonly runs?: readonly RunNamed[];
+  readonly reason?: EndReason;
 };
 
 function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
@@ -133,7 +135,7 @@ function spentOn(result: Result<WriterOut>, ended: Result<Ended> | FailedSpent):
   if (ended.kind === "failed") {
     return ended;
   }
-  const failed = spentFailure(result.reason, ended.value.spend);
+  const failed = spentFailure(result.reason, ended.value.spend, ended.value.reason);
   return ended.value.trace === undefined ? failed : { ...failed, traces: [ended.value.trace] };
 }
 
@@ -145,6 +147,7 @@ export function outOf(ended: Ended, next: Next): WriterOut {
     ...spendField(ended.spend),
     ...deferredOf(ended.outcome),
     ...traceField(ended.trace),
+    reason: ended.reason,
   };
   switch (next.kind) {
     case "ready-check":
@@ -330,6 +333,7 @@ async function finished(
         ...spendField(ended.spend),
         ...whyField(whyOf(outcome, ended.said)),
         ...traceField(ended.trace),
+        reason: ended.reason,
       },
     };
   }
@@ -462,7 +466,7 @@ async function inClone(
     ...knowledgeOf(known),
   });
   if (clone.kind === "failed") {
-    return clone;
+    return beforeBox(clone);
   }
   const prompt = runPrompt({
     card: work.card,
@@ -565,9 +569,9 @@ function notKept(why: string | undefined, reason: string): string {
   return whyText(`${why ?? "blocked"}; its output was not kept: ${reason}`);
 }
 
-async function handOver(setup: WriterSetup, input: Input, reason: string): Promise<Result<WriterOut>> {
+async function handOver(setup: WriterSetup, input: Input, reason: string): Promise<Result<WriterOut> | FailedSpent> {
   if (input.change.kind !== "open") {
-    return { kind: "failed", reason: `${reason}; and there is no open change to say so on` };
+    return beforeBox({ kind: "failed", reason: `${reason}; and there is no open change to say so on` });
   }
   const outcome: Outcome = { kind: "blocked", reason, by: "host" };
   const head = input.change.line.head;
@@ -587,8 +591,8 @@ async function handOver(setup: WriterSetup, input: Input, reason: string): Promi
     },
   });
   return next.kind === "ok"
-    ? { kind: "ok", value: { head, outcome: "blocked", patch: "", evidence: [], hung: false } }
-    : next;
+    ? { kind: "ok", value: { head, outcome: "blocked", patch: "", evidence: [], hung: false, reason: "setup_refused" } }
+    : beforeBox(next);
 }
 
 type Drafted = { readonly kind: "run"; readonly work: Draft } | { readonly kind: "hand-over"; readonly reason: string };
@@ -754,7 +758,11 @@ async function runOne(setup: WriterSetup, input: Input): Promise<Result<WriterOu
     return handOver(setup, input, plan.reason);
   }
   const p = await prepare(setup, input);
-  return p.kind === "ok" ? inClone(setup, input, p.value, plan.work) : p;
+  return p.kind === "ok" ? inClone(setup, input, p.value, plan.work) : beforeBox(p);
+}
+
+function beforeBox(failed: { readonly kind: "failed"; readonly reason: string }): FailedSpent {
+  return { kind: "failed", reason: failed.reason, end: "setup_refused" };
 }
 
 async function runIn(setup: WriterSetup, input: Input): Promise<Result<WriterOut> | FailedSpent> {

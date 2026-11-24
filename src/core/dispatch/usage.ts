@@ -59,7 +59,7 @@ const SPENDING: ReadonlySet<string> = new Set(["writer-ended", "review-ended", "
 type Spending = Extract<Event, { kind: "writer-ended" | "review-ended" | "spent" | "design-ended" | "parked" }>;
 
 function spending(e: Event): e is Spending {
-  return SPENDING.has(e.kind);
+  return SPENDING.has(e.kind) && !(e.kind === "spent" && e.spend === undefined);
 }
 
 const KIND_OF_MODE: Readonly<Record<WriterMode, RunKind>> = {

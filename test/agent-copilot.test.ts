@@ -202,6 +202,12 @@ describe("readCopilotAnswer (#690)", () => {
     expect(ok('{"findings":[],"extra":1}')).toMatchObject({ kind: "failed", reason: expect.stringContaining("extra") });
   });
 
+  it("names how a failed run ended: a non-zero exit, an answer that is not JSON, one off its schema", () => {
+    expect(readCopilotAnswer({ code: 1, stdout: "", stderr: "Error" }, SCHEMA)).toMatchObject({ end: "launch_failed" });
+    expect(ok("Here are the findings: none")).toMatchObject({ end: "output_invalid" });
+    expect(ok('{"findings":[1]}')).toMatchObject({ end: "output_invalid" });
+  });
+
   it("keeps stderr in the trace of a run that failed", () => {
     const failed = readCopilotAnswer({ code: 1, stdout: "partial", stderr: "line one\nline two" }, SCHEMA);
     expect(failed.kind === "failed" && failed.stream).toBe("partial\nline one\nline two");
@@ -325,6 +331,7 @@ describe("copilotModel (#690)", () => {
     expect(result).toMatchObject({
       kind: "failed",
       reason: "stopped at its 1-minute limit (FACTORY_FINDER_MINUTES)",
+      end: "timed_out",
     });
     expect(await gone(Number(readFile(pidFile)))).toBe(true);
     expect(existsSync(readFile(join(dir, "home")).trim())).toBe(false);

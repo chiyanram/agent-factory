@@ -4,6 +4,7 @@
 
 import type { Acted, FoundByRule } from "../review/acted-on.js";
 import type { Named, RunNamed } from "../agent/ran.js";
+import type { EndReason } from "../end-reason.js";
 import type { DesignFinding, Kept } from "../design/findings.js";
 import type { Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
@@ -39,7 +40,10 @@ export type DesignRan<T> = {
   readonly spend?: Spend;
   readonly trace?: string;
   readonly runs?: readonly RunNamed[];
-} & (({ readonly kind: "done" } & T) | { readonly kind: "failed"; readonly why: string; readonly final?: true });
+} & (
+  | ({ readonly kind: "done" } & T)
+  | { readonly kind: "failed"; readonly why: string; readonly final?: true; readonly end?: EndReason }
+);
 export type ReadyFacts = { readonly criteria: readonly string[]; readonly oneWayDoor: readonly string[] };
 export type Steps = {
   readonly writer: Step<
@@ -59,6 +63,7 @@ export type Steps = {
       readonly output?: string;
       readonly trace?: string;
       readonly runs?: readonly RunNamed[];
+      readonly reason?: EndReason;
     },
     FailedSpent,
     WriterExtras

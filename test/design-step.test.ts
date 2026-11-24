@@ -165,12 +165,18 @@ describe("the design review's runs (#236)", () => {
     const trace = out.kind === "ok" ? out.value.trace : undefined;
     expect(trace).toMatch(/^design-review-.*\.jsonl$/);
     expect(readFileSync(join(home, "runs", "ledger", "PROJ-1", trace ?? ""), "utf8")).toBe(stream);
-    const failing: Model = async () => ({ kind: "failed", reason: "error_max_budget_usd", answer: {}, stream });
+    const failing: Model = async () => ({
+      kind: "failed",
+      reason: "error_max_budget_usd",
+      answer: {},
+      stream,
+      end: "launch_failed",
+    });
     const failed = designSteps({ kind: "ok", value: setup(failing) });
     if (failed.designReview.kind !== "available") throw new Error("unavailable");
     expect(await failed.designReview.run(input())).toMatchObject({
       kind: "ok",
-      value: { kind: "failed", trace: expect.stringMatching(/^design-review-/) },
+      value: { kind: "failed", trace: expect.stringMatching(/^design-review-/), end: "launch_failed" },
     });
   });
 
@@ -194,7 +200,7 @@ describe("the design review's runs (#236)", () => {
     if (failed.designReview.kind !== "available") throw new Error("unavailable");
     expect(await failed.designReview.run(input())).toMatchObject({
       kind: "ok",
-      value: { kind: "failed", runs: [{ cli: "claude", asked: "opus" }] },
+      value: { kind: "failed", runs: [{ cli: "claude", asked: "opus" }], end: "unknown" },
     });
   });
 
@@ -369,7 +375,7 @@ describe("the design review's runs (#236)", () => {
     expect(seen).toEqual([]);
     expect(await steps.designReview.run(input())).toMatchObject({
       kind: "ok",
-      value: { kind: "failed", spend: { usd: 0.25 }, why: expect.stringContaining("findings") },
+      value: { kind: "failed", spend: { usd: 0.25 }, why: expect.stringContaining("findings"), end: "output_invalid" },
     });
   });
 

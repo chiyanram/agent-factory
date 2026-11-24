@@ -40,6 +40,7 @@ import { settingName } from "../settings/machine.js";
 import type { BoxToken } from "../token/index.js";
 import { timed, type FolderRunner } from "./folder.js";
 import { MODEL_RUN_MARK } from "./mark.js";
+import type { EndReason } from "../end-reason.js";
 
 const COPILOT_TOOLS: readonly (readonly [string, string])[] = [
   ["Read", "view"],
@@ -114,7 +115,13 @@ export type CopilotAnswer = {
 
 export type CopilotResult =
   | { readonly kind: "ok"; readonly value: CopilotAnswer & { readonly seconds?: number } }
-  | { readonly kind: "failed"; readonly reason: string; readonly stream?: string; readonly seconds?: number };
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+      readonly stream?: string;
+      readonly seconds?: number;
+      readonly end?: EndReason;
+    };
 
 export type CopilotModel = (run: ModelRun) => Promise<CopilotResult>;
 
@@ -152,17 +159,24 @@ function checkedAnswer(value: unknown, schema: string, stream: string): CopilotR
         kind: "failed",
         reason: `copilot's answer does not match its schema: ${problems.slice(0, 3).join("; ")}`,
         stream,
+        end: "output_invalid",
       };
 }
 
 export function readCopilotAnswer(exit: Exit, schema: string): CopilotResult {
   const stream = exit.stderr === "" ? exit.stdout : `${exit.stdout}\n${exit.stderr}`;
   if (exit.code !== 0) {
-    return { kind: "failed", reason: `copilot exited ${exit.code}: ${firstLine(exit.stderr) || "no output"}`, stream };
+    const reason = `copilot exited ${exit.code}: ${firstLine(exit.stderr) || "no output"}`;
+    return { kind: "failed", reason, stream, end: "launch_failed" };
   }
   const read = jsonIn(exit.stdout);
   return read === "none"
-    ? { kind: "failed", reason: `copilot's answer is not one JSON value: ${firstLine(exit.stdout)}`, stream }
+    ? {
+        kind: "failed",
+        reason: `copilot's answer is not one JSON value: ${firstLine(exit.stdout)}`,
+        stream,
+        end: "output_invalid",
+      }
     : checkedAnswer(read.value, schema, stream);
 }
 
@@ -216,8 +230,15 @@ function ended(
   if (read.kind === "ok") {
     return { kind: "ok", value: { ...read.value, stream, seconds } };
   }
-  const reason = ran.late ? `stopped at its ${run.limit.minutes}-minute limit (${run.limit.setting})` : read.reason;
-  return { kind: "failed", reason, stream, seconds };
+  return ran.late
+    ? {
+        kind: "failed",
+        reason: `stopped at its ${run.limit.minutes}-minute limit (${run.limit.setting})`,
+        stream,
+        seconds,
+        end: "timed_out",
+      }
+    : { ...read, stream, seconds };
 }
 
 async function inHome(setup: CopilotSetup, run: ModelRun, login: BoxToken): Promise<CopilotResult> {

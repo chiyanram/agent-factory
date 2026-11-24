@@ -9,9 +9,11 @@
 //   - when a design review's verify pass ends, what it kept goes to the front doors: a note on the ticket's PR
 //     when one is open, a ping, and the pass's log
 //   - no run at all while the project is at its day cap or its window share (caps.ts), with one notice for it
-// A run's step is a seam (steps.ts). A step that is not built yet says so, and the pass records nothing for it, so
-// the ticket is decided the same way next time. A "started" record is written before a run and an "ended" one after
-// it; a pass that dies in between leaves the first alone, and the next pass hands that ticket to a person. The start
+// A run's step is a seam (steps.ts). A step that is not built yet says so, and the pass records one "setup-refused"
+// line per cause for it (refused.ts), which the table reads past, so the ticket is decided the same way next time. A
+// "started" record is written before a run and an "ended" one after it, each end with its reason; a run that fails
+// writes a "spent" line, which ends nothing. A pass that dies in between leaves the start alone, and the next pass
+// hands that ticket to a person. The start
 // is recorded before the claim is taken, so a pass that dies between them leaves a run for a person, never a claim
 // with no record, which would look like someone else's.
 //
@@ -74,6 +76,7 @@ import {
   record,
   summarize,
   type Event,
+  type Phase,
   type Retried,
   type RunFolder,
   type Summary,
@@ -90,7 +93,9 @@ import { designView, dropRepeats, roundsBefore, type DesignView, type EarlierRou
 import { nextStep, whoseTurn } from "./next-step.js";
 import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/findings.js";
 import { needsDesignReview } from "../lane.js";
-import { NO_SPEND, type FailedSpent, type RoundSpend, type Spend } from "./spend.js";
+import type { FailedSpent, RoundSpend, Spend } from "./spend.js";
+import { refusedLine } from "./refused.js";
+import type { EndReason } from "../end-reason.js";
 import type { Acted, FoundByRule } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
@@ -765,7 +770,7 @@ async function answeredFirst(setup: TickSetup, state: TicketState, task: Task): 
 async function runWriter(setup: TickSetup, state: TicketState, task: Task): Promise<Logged | Unavailable> {
   const step = setup.steps.writer;
   if (step.kind === "unavailable") {
-    return step;
+    return refused(setup, state, "writer", step);
   }
   const kept = await answeredFirst(setup, state, task);
   return kept.kind === "ok" ? startWriter(setup, state, task, step) : kept;
@@ -838,6 +843,7 @@ function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Even
     ...(parkedTask === undefined ? {} : { task: parkedTask }),
     ...spentAndTrace(value.spend, value.trace),
     ...runsField(value.runs),
+    reason: "usage_limit",
   };
 }
 
@@ -936,7 +942,7 @@ async function readyStarted(setup: TickSetup, state: TicketState, head: string):
 async function runReady(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
   const step = setup.steps.ready;
   if (step.kind === "unavailable") {
-    return step;
+    return refused(setup, state, "ready", step);
   }
   const facts = await readyStarted(setup, state, head);
   if (facts.kind === "failed") {
@@ -951,7 +957,7 @@ async function runReady(setup: TickSetup, state: TicketState, head: string): Pro
   });
   return ran.kind === "ok"
     ? record({ where: where(setup, state), event: readyEnded(setup, state, head, ran.value) })
-    : ran;
+    : failedSpent(setup, state, head, ran, "ready");
 }
 
 function readyEnded(
@@ -971,13 +977,17 @@ function readyEnded(
     ...(value.lane === undefined ? {} : { lane: value.lane }),
     ...programsField(setup),
     ...failedAt(setup, "ready", forWriter, state.runs.readyFailures),
+    reason: "done",
   };
 }
 
 async function runVerify(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
   const step = setup.steps.verify;
-  const started = step.kind === "available" ? await startCheck(setup, state, "verify", head) : step;
-  if (started.kind !== "ok" || step.kind === "unavailable") {
+  if (step.kind === "unavailable") {
+    return refused(setup, state, "verify", step);
+  }
+  const started = await startCheck(setup, state, "verify", head);
+  if (started.kind !== "ok") {
     return started;
   }
   const ran = await step.run({ ticket: state.ticket, change: state.change, head });
@@ -990,9 +1000,10 @@ async function runVerify(setup: TickSetup, state: TicketState, head: string): Pr
           head,
           passed: ran.value.passed,
           ...failedAt(setup, "verify", !ran.value.passed, state.runs.verifyFailures),
+          reason: "done",
         },
       })
-    : ran;
+    : failedSpent(setup, state, head, ran, "verify");
 }
 
 function dollarCapped(caps: Caps): boolean {
@@ -1036,7 +1047,7 @@ async function heldRound(setup: TickSetup, state: TicketState): Promise<Done | U
 async function runReview(setup: TickSetup, state: TicketState, head: string): Promise<Done | Unavailable> {
   const step = setup.steps.review;
   if (step.kind === "unavailable") {
-    return step;
+    return refused(setup, state, "review", step);
   }
   const held = await heldRound(setup, state);
   if (held !== "go") {
@@ -1082,6 +1093,7 @@ function reviewEnded(
       ...tracesIn(value),
       ...runsField(value.runs),
       ...failedAt(setup, "review", value.actOn > 0, state.runs.reviewFailures),
+      reason: "done",
     },
   });
 }
@@ -1119,28 +1131,39 @@ async function failedSpent(
   state: TicketState,
   head: string,
   ran: FailedSpent,
-  phase: "writer" | "review",
+  phase: "writer" | "review" | "ready" | "verify",
 ): Promise<Done> {
-  const spend = ran.spend ?? NO_SPEND;
-  if (spend.usd > 0 || spend.tokens > 0) {
-    const kept = await record({
-      where: where(setup, state),
-      event: {
-        at: at(setup),
-        kind: "spent",
-        phase,
-        head,
-        spend,
-        ...splitIn(ran),
-        ...tracesIn(ran),
-        ...runsField(ran.runs),
-      },
-    });
-    if (kept.kind === "failed") {
-      setup.log(`${state.ticket}: the failed ${phase} run's spend was not recorded: ${kept.reason}`);
-    }
+  const kept = await record({
+    where: where(setup, state),
+    event: {
+      at: at(setup),
+      kind: "spent",
+      phase,
+      head,
+      ...measuredOf(ran.spend),
+      ...splitIn(ran),
+      ...tracesIn(ran),
+      ...runsField(ran.runs),
+      reason: ran.end ?? "unknown",
+    },
+  });
+  if (kept.kind === "failed") {
+    setup.log(`${state.ticket}: the failed ${phase} run's end was not recorded: ${kept.reason}`);
   }
   return { kind: "failed", reason: ran.reason };
+}
+
+function measuredOf(spend: Spend | undefined): { readonly spend?: Spend } {
+  return spend !== undefined && (spend.usd > 0 || spend.tokens > 0) ? { spend } : {};
+}
+
+async function refused(setup: TickSetup, state: TicketState, phase: Phase, step: Unavailable): Promise<Unavailable> {
+  const line = step.held === true ? undefined : refusedLine(state.runs, phase, step.reason, at(setup));
+  const kept = line === undefined ? { kind: "ok" as const } : await record({ where: where(setup, state), event: line });
+  if (kept.kind === "failed") {
+    setup.log(`${state.ticket}: the refused ${phase} setup was not recorded: ${kept.reason}`);
+  }
+  return step;
 }
 
 type DesignAction = Extract<Action, { kind: "design" }>;
@@ -1202,6 +1225,13 @@ function readField(read: SpecRead | "none"): Partial<SpecRead> {
   return read === "none" ? {} : { lane: read.lane, planned: read.planned };
 }
 
+function failedDesign(v: {
+  readonly why: string;
+  readonly end?: EndReason;
+}): Pick<DesignEnded, "outcome" | "why" | "findings" | "kept" | "reason"> {
+  return { outcome: "failed", why: v.why, findings: [], kept: [], reason: v.end ?? "unknown" };
+}
+
 function finalField(final: true | undefined): { readonly final?: true } {
   return final === true ? { final: true } : {};
 }
@@ -1221,7 +1251,7 @@ function designEnded(
     ...readField(read),
   } as const;
   if (ran.kind === "failed") {
-    return { ...base, outcome: "failed", why: ran.reason, findings: [], kept: [] };
+    return { ...base, outcome: "failed", why: ran.reason, findings: [], kept: [], reason: "unknown" };
   }
   const v = ran.value;
   const extras = {
@@ -1231,8 +1261,8 @@ function designEnded(
     ...runsField(v.runs),
   };
   return v.kind === "failed"
-    ? { ...base, outcome: "failed", why: v.why, findings: [], kept: [], ...extras, ...finalField(v.final) }
-    : { ...base, outcome: "done", why: "", ...answerOf(v), ...extras };
+    ? { ...base, ...failedDesign(v), ...extras, ...finalField(v.final) }
+    : { ...base, outcome: "done", why: "", ...answerOf(v), ...extras, reason: "done" };
 }
 
 async function runDesignStep(
@@ -1261,7 +1291,7 @@ const DESIGN_PHASE = { review: "design-review", verify: "design-verify" } as con
 async function runDesign(setup: TickSetup, state: TicketState, a: DesignAction): Promise<Done | Unavailable> {
   const step = a.step === "review" ? setup.steps.designReview : setup.steps.designVerify;
   if (step.kind === "unavailable") {
-    return step;
+    return refused(setup, state, DESIGN_PHASE[a.step], step);
   }
   const started = await record({
     where: where(setup, state),
