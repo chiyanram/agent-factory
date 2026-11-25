@@ -12,7 +12,6 @@ import {
   quarantineOf,
   readQuarantine,
 } from "../src/core/process/quarantine.js";
-import { readProcess } from "../src/core/process/read.js";
 import { tempDir } from "./temp.js";
 
 const Q = { check: "e2e", owner: "ram", added: "2026-11-10", expires: "2026-11-20", ticket: "#512" };
@@ -90,16 +89,6 @@ describe("where a quarantine lives: the project's own settings, never the rules 
     expect(await readQuarantine({ home, project: "ledger", now: NOW })).toEqual({ kind: "ok", value: [Q] });
     project({ quarantine: { checks: [Q], maxDays: 3 } });
     expect((await readQuarantine({ home, project: "ledger", now: NOW })).kind).toBe("failed");
-  });
-
-  it("a process plugin's quarantine.json is not read", async () => {
-    const dir = join(home, "team");
-    const process = join(dir, "skills", "process", "process");
-    mkdirSync(process, { recursive: true });
-    writeFileSync(join(process, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
-    writeFileSync(join(process, "quarantine.json"), JSON.stringify({ quarantine: [Q] }));
-    const read = await readProcess([{ label: "team", dir }]);
-    expect(read.kind === "ok" ? Object.keys(read.value) : read.reason).not.toContain("quarantine");
   });
 });
 

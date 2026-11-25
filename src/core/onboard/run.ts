@@ -28,7 +28,6 @@ import type { Result } from "../forge/api.js";
 import type { Forge } from "../forge/types.js";
 import { hostGit } from "../git.js";
 import { readCard, type Card } from "../process/cards.js";
-import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
 import { dataFence } from "../review/fence.js";
 import type { Model, ModelResult, RunLimit } from "../review/model.js";
@@ -48,7 +47,6 @@ export type OnboardSetup = {
   readonly modelName: string;
   readonly maxUsd: string;
   readonly limit: RunLimit;
-  readonly plugins: readonly PluginDir[];
   readonly runsDir: string;
   readonly now: () => number;
 };
@@ -258,7 +256,7 @@ async function writtenFrom(
 }
 
 export async function onboard(setup: OnboardSetup): Promise<Result<Onboarded>> {
-  const card = await readCard(setup.plugins, "onboarder");
+  const card = await readCard("onboarder");
   if (card.kind === "failed") {
     return card;
   }

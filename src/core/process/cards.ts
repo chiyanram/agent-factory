@@ -1,8 +1,7 @@
-// cards — one role card per role, read from the project's process plugin, or the engine's built-in card when no
-// plugin holds one (docs/explanation/architecture.md section 5 "The process plugin"):
+// cards — one role card per role, the engine's own (docs/adr/0026-the-engine-owns-its-process.md). No plugin replaces
+// a card: a card names the skills it needs, and a plugin gives skills only.
 //
-//   <plugin>/skills/<skill>/process/roles/<role>.md     the process plugin's card (read.ts finds the process folder)
-//   prompts/roles/<role>.md                             the engine's built-in card
+//   prompts/roles/<role>.md     the engine's card
 //
 // A card is frontmatter, then the body the model reads. The engine enforces the frontmatter where it has the control:
 //   role          the card names the role it is read for
@@ -19,8 +18,6 @@
 //                 run returns is read with that schema (report.ts, design/findings.ts, review/verdicts.ts)
 // Every other field (steps, input, rules) is the card's own text: the engine reads no meaning into it. next is dropped:
 // the lanes hold the flow; a card that still has it is read for one release, then refused (#424). Every run record carries the card's hash, so a person can tell which card a run used.
-// A plugin's card is also checked against the rules pack's own card schema, when the pack ships one (pack-schema.ts,
-// #484): the pack owns its format, and the engine reads this version and the one before.
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -32,16 +29,7 @@ import { REPORT_FIELDS } from "../report.js";
 import { VERIFY_SCHEMA } from "../review/verdicts.js";
 import { ANSWER_SCHEMA } from "../onboard/answer.js";
 import { LESSON_SCHEMA } from "../retro/lesson.js";
-import {
-  allowedGuardrails,
-  GUARDRAIL_FLOOR,
-  GUARDRAILS,
-  isGuardrail,
-  testFilesOnly,
-  type GuardrailId,
-} from "./guardrails.js";
-import { frontmatterOf, packProblem, readPackSchemas, unknownToEngine } from "./pack-schema.js";
-import { findProcess, type PluginDir } from "./read.js";
+import { allowedGuardrails, GUARDRAIL_FLOOR, isGuardrail, testFilesOnly, type GuardrailId } from "./guardrails.js";
 
 const BUILT_IN = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "prompts", "roles");
 
@@ -296,36 +284,7 @@ async function textAt(path: string): Promise<string | undefined> {
   return readFile(path, "utf8").catch(() => undefined);
 }
 
-async function pluginCard(plugins: readonly PluginDir[], role: Role): Promise<Result<Card> | "none"> {
-  const found = await findProcess(plugins);
-  if (found.kind !== "ok") {
-    return found.kind === "none" ? "none" : found;
-  }
-  const path = join(found.value.dir, "roles", `${role}.md`);
-  const text = await textAt(path);
-  return text === undefined ? "none" : packCard(found.value.dir, role, text, `${found.value.plugin.label} (${path})`);
-}
-
-export const ENGINE_KNOWS = {
-  roles: [...Object.keys(ROLE_TOOLS), "coordinator", "finder"],
-  guardrails: Object.keys(GUARDRAILS),
-};
-
-async function packCard(processDir: string, role: Role, text: string, from: string): Promise<Result<Card>> {
-  const schemas = await readPackSchemas(processDir);
-  if (schemas.kind === "failed") {
-    return schemas;
-  }
-  const unknown = unknownToEngine(schemas.value, ENGINE_KNOWS);
-  const problem = unknown[0] ?? packProblem(schemas.value, "card", frontmatterOf(text), from);
-  return problem === "" ? cardOf(role, text, from) : failed(problem);
-}
-
-export async function readCard(plugins: readonly PluginDir[], role: Role, builtIn = BUILT_IN): Promise<Result<Card>> {
-  const found = await pluginCard(plugins, role);
-  if (found !== "none") {
-    return found;
-  }
+export async function readCard(role: Role, builtIn = BUILT_IN): Promise<Result<Card>> {
   const path = join(builtIn, `${role}.md`);
   const text = await textAt(path);
   return text === undefined ? failed(`cannot read the built-in ${role} card at ${path}`) : cardOf(role, text, path);

@@ -83,7 +83,6 @@ function setup(m: Model): DesignSetup {
     modelName: "opus",
     maxUsd: "2",
     limits: LIMITS,
-    plugins: [],
     runsDir: join(p.root, "design-runs"),
   };
 }
@@ -111,7 +110,7 @@ function promptSeen(seen: readonly Seen[], i: number): string {
 
 describe("designSetup's time limits (P7)", () => {
   it("gives the design-reviewer design.minutes and its verify pass review.verifyMinutes, and refuses one not valid", () => {
-    const given = { forge, home: "/h", project: "ledger", plugins: [] };
+    const given = { forge, home: "/h", project: "ledger" };
     const env = { FACTORY_REPO: "/r", FACTORY_HOME: "/h", FACTORY_DESIGN_MINUTES: "30" };
     expect(designSetup({ ...given, env })).toMatchObject({
       kind: "ok",
@@ -379,19 +378,15 @@ describe("the design review's runs (#236)", () => {
     });
   });
 
-  it("a team card's tools are the run's only tools, and its must_not_see leaves the design and code out (#232)", async () => {
-    const roles = join(p.root, "team", "skills", "process", "process", "roles");
-    mkdirSync(roles, { recursive: true });
-    writeFileSync(join(roles, "..", "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
+  it("the card's tools are the run's only tools, and its must_not_see leaves the design and code out (#232)", async () => {
+    const cards = join(p.root, "cards");
+    mkdirSync(cards, { recursive: true });
     writeFileSync(
-      join(roles, "design-reviewer.md"),
+      join(cards, "design-reviewer.md"),
       "---\nrole: design-reviewer\ntools: [Read]\nmust_not_see: the design; the code\n---\n\nRead the spec only.\n",
     );
     const seen: Seen[] = [];
-    const s = {
-      ...setup(model(seen, [{ findings: [] }])),
-      plugins: [{ label: "team@acme", dir: join(p.root, "team") }],
-    };
+    const s = { ...setup(model(seen, [{ findings: [] }])), cards };
     const step = designSteps({ kind: "ok", value: s }).designReview;
     if (step.kind !== "available") throw new Error("unavailable");
     done(await step.run(input()));

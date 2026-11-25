@@ -57,7 +57,7 @@ import type { RunLimits } from "./settings.js";
 import type { RoundPart } from "../dispatch/spend.js";
 import { deviationNotes } from "./deviations.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
-import { readProcess, referencesDir, type PluginDir, type Process } from "../process/read.js";
+import { ENGINE_PROCESS, referencesDir, type PluginDir, type Process } from "../process/read.js";
 import { attempt } from "./safe.js";
 import { plainName, type SpecStore } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
@@ -218,14 +218,10 @@ const NO_REFERENCES =
 async function reviewProcess(
   plugins: readonly PluginDir[],
 ): Promise<Result<Process & { readonly references: string }>> {
-  const own = await readProcess(plugins);
-  if (own.kind === "failed") {
-    return own;
-  }
-  const references = await referencesDir([own.value.dir, ...plugins.map((p) => p.dir)]);
+  const references = await referencesDir(plugins.map((p) => p.dir));
   return references === ""
     ? { kind: "failed", reason: NO_REFERENCES }
-    : { kind: "ok", value: { ...own.value, references } };
+    : { kind: "ok", value: { ...ENGINE_PROCESS, references } };
 }
 
 async function packFor(ctx: Ctx): Promise<Result<Pack>> {
@@ -598,8 +594,7 @@ async function lensInputs(ctx: Ctx): Promise<Result<{ readonly setup: LensSetup;
   if (setup.kind === "failed") {
     return setup;
   }
-  const own = await readProcess(ctx.setup.plugins);
-  return own.kind === "ok" ? { kind: "ok", value: { setup: setup.value, own: own.value } } : own;
+  return { kind: "ok", value: { setup: setup.value, own: ENGINE_PROCESS } };
 }
 
 async function touchedFiles(ctx: Ctx, pack: Pack): Promise<Result<readonly Touched[]>> {

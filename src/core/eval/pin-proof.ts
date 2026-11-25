@@ -22,7 +22,6 @@ import type { Result } from "../forge/api.js";
 import { changedFiles, fetchPlugin, type Fetched } from "../process/fetch.js";
 import { ENGINE_MARKET, SHA256, storeDir, treeHash, type PackPin, type Pin, type Proven } from "../process/pins.js";
 import { refText, type PluginRef } from "../process/plugins.js";
-import { baselineAt } from "../process/read.js";
 import { BASELINE, type Pointer } from "../review/rules.js";
 import { attempt } from "../review/safe.js";
 import { field } from "./bar.js";
@@ -269,22 +268,6 @@ export async function baseOf(input: BaseInput): Promise<Base> {
   return engine === undefined ? NO_BASE : enginePin(input, engine);
 }
 
-async function baselineIn(dir: string, files: readonly string[]): Promise<readonly Pointer[]> {
-  const skills = [
-    ...new Set(files.map((l) => /^skills\/([^/]+)\/process\//.exec(l.slice(l.indexOf(" ", 2) + 1))?.[1] ?? "")),
-  ];
-  const read = await Promise.all(
-    skills.filter((s) => s !== "").map((s) => baselineAt(join(dir, "skills", s, "process"))),
-  );
-  return read.flatMap((r) => (r.kind === "ok" ? r.value : []));
-}
-
-export async function reviewBaseline(base: Base, after: Fetched): Promise<readonly Pointer[]> {
-  const all = [...BASELINE, ...(await baselineIn(base.dir, base.files)), ...(await baselineIn(after.dir, after.files))];
-  const key = (p: Pointer): string => `${p.domain}/${p.reference}`;
-  return [...new Map(all.map((p) => [key(p), p])).values()];
-}
-
 export type Gate = {
   readonly changed: readonly string[];
   readonly baseline: readonly Pointer[];
@@ -334,7 +317,7 @@ type GateInput = {
 export async function gateMove(input: GateInput): Promise<Gate> {
   const { base, after, ref, reason } = input;
   const changed = changedFiles(base.files, after.files);
-  const baseline = await reviewBaseline(base, after);
+  const baseline = BASELINE;
   const sized = sizeOf(changed, baseline);
   const found = await findProof(input.places, ref, after.sha256);
   const needsProof = reviewUnproven(sized, found);

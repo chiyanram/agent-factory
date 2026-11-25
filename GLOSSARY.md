@@ -88,8 +88,9 @@ pings (`notify`); the contract also names `context.read` and `box`, which nothin
 (ADR-0022), nor is a front door (ADR-0023). Each has a dry mode. In code: `src/core/plugin/`, `plugins/`.
 _Avoid_: plugin (for a connector)
 
-**Plugin**: a normal Claude Code plugin a project installs, `name@marketplace`, for rules or process. Listed in the
-project's settings, pinned, and a locked key.
+**Plugin**: a normal Claude Code plugin a project installs, `name@marketplace`. It gives skills only: the engine names
+a skill and never a file inside it, and no plugin replaces the engine's lanes or role cards. Listed in the project's
+settings, pinned, and a locked key.
 _Avoid_: pack
 
 **Front door**: a place a human talks to the factory: the terminal, a Discord thread per ticket, a web app later, a
@@ -165,8 +166,8 @@ _Avoid_: perspective, reviewer type
 
 ## Roles and plugins
 
-**Role card**: one markdown file per role. Its frontmatter (tools, inputs, hand-off, hard guardrails) is enforced by
-the engine, and its body is what the model reads.
+**Role card**: one markdown file per role, the engine's own. Its frontmatter (tools, inputs, hand-off, hard guardrails)
+is enforced by the engine, and its body is what the model reads.
 
 **Roles**: coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro, onboarder.
 
@@ -205,10 +206,6 @@ to the project home.
 
 **Factory bot**: the code-only bot (no AI) behind the Discord front door, with its own OS user and token.
 
-**Process plugin**: a plugin that holds the lanes file and the role cards. The rulebook's crq is the first. The engine
-ships no plugin: with none, it uses its built-in lanes, review baseline and role cards.
-_Avoid_: pack, process pack
-
 **Project home**: outside the product repo: the settings file `~/.factory/projects/<project>.json` and the folder
 `~/.factory/projects/<project>/` with the brief and glossary.
 
@@ -229,3 +226,4 @@ _Avoid_: pack, process pack
 | pack (for rules or process) | plugin ("context pack" in `review/pack.ts` is the review's input, a different thing) |
 | plugin (for an engine part) | connector |
 | fresh worker | run |
+| process plugin | plugin: a plugin gives skills only, and the engine owns its lanes and role cards (ADR-0026) |

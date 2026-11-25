@@ -49,5 +49,5 @@ Bring in a new check, role, lens or outside skill manual first and climb one run
 [CONSTITUTION.md](../CONSTITUTION.md) says, because a step made automatic before anyone used it by hand cannot be
 judged.
 
-Land a step the rules pack must follow in the engine first, then in the pack as a new format version (P18), then move
-the pin, because an engine that cannot run a pack's step refuses the pack and blocks the pin.
+Land a step in the engine first. When the step needs a new skill, land the skill in the rules pack, then move the pin,
+because the pinned pack must hold each skill the engine names (P18).

@@ -11,7 +11,6 @@ import { limitOf } from "../agent/limits.js";
 import type { Model } from "../review/model.js";
 import { paths } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
-import type { PluginDir } from "../process/read.js";
 import { REVIEW_MODELS } from "../review/pinned.js";
 import type { DesignSetup } from "./step.js";
 
@@ -20,7 +19,6 @@ export function designSetup(input: {
   readonly forge: DesignSetup["forge"];
   readonly home: string;
   readonly project: string;
-  readonly plugins: readonly PluginDir[];
   readonly model?: Model;
 }): Result<DesignSetup> {
   const p = paths(input.env);
@@ -44,7 +42,6 @@ export function designSetup(input: {
       modelName: settingOf(input.env, "review.logicModel") ?? REVIEW_MODELS.logic,
       maxUsd: p.value.maxUsd,
       limits: { review: review.value, verify: p.value.limits.verify },
-      plugins: input.plugins,
       runsDir: join(input.home, "design-runs"),
     },
   };

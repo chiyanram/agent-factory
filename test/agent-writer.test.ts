@@ -35,7 +35,7 @@ const TODAY_DENIES = [
 const WRITER_ROLES: readonly Role[] = ["implementer", "test-first", "cleanup"];
 
 async function card(role: Role) {
-  const read = await readCard([], role);
+  const read = await readCard(role);
   if (read.kind !== "ok") throw new Error(read.reason);
   return read.value;
 }

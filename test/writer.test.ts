@@ -26,7 +26,7 @@ import { runFolder } from "../src/core/writer/clone.js";
 import { fencedOnly, INJECTED, ORDER } from "./fenced.js";
 import { FLOOR, KNOWLEDGE } from "../src/core/writer/prompt.js";
 import type { Role } from "../src/core/process/cards.js";
-import { readProcess, type PluginDir } from "../src/core/process/read.js";
+import type { PluginDir } from "../src/core/process/read.js";
 import { designSteps, FLOOR as DESIGN_FLOOR } from "../src/core/design/step.js";
 import type { ModelRun } from "../src/core/review/model.js";
 import { NO_DESIGN } from "../src/core/spec.js";
@@ -266,6 +266,15 @@ function pusher(pushes: { lease: string; branch: string }[]): Pusher {
     });
     return { kind: "ok" };
   };
+}
+
+function cardsDir(cards: Partial<Record<Role, string>>): string {
+  const dir = join(p.root, "cards");
+  mkdirSync(dir, { recursive: true });
+  for (const [role, text] of Object.entries(cards)) {
+    writeFileSync(join(dir, `${role}.md`), text);
+  }
+  return dir;
 }
 
 function setup(box: Box, told: Told, pushes: { lease: string; branch: string }[]): WriterSetup {
@@ -1571,51 +1580,43 @@ describe("the writer step: the cleanup run (#236)", () => {
     expect(told.log.find((l) => l.startsWith("body 12"))).not.toContain("deferred");
   });
 
-  it("a process plugin's cleanup card that asks for a tool the role does not get stops the run for a person", async () => {
-    const process = join(rulebook, "skills", "crq", "process");
-    mkdirSync(join(process, "roles"), { recursive: true });
-    writeFileSync(join(process, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
-    writeFileSync(
-      join(process, "roles", "cleanup.md"),
-      "---\nrole: cleanup\ntools: [Read, Write, WebFetch]\n---\n\nTidy.\n",
-    );
+  it("a cleanup card that asks for a tool the role does not get stops the run for a person", async () => {
+    const cards = cardsDir({ cleanup: "---\nrole: cleanup\ntools: [Read, Write, WebFetch]\n---\n\nTidy.\n" });
     const fake = fakeBox({});
     const told = forge();
-    const out = await run(setup(fake.box, told, []), { ...CLEANUP, head: p.head2 }, openLine());
+    const out = await run({ ...setup(fake.box, told, []), cards }, { ...CLEANUP, head: p.head2 }, openLine());
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
     expect(told.log.find((l) => l.startsWith("note 12"))).toContain("the cleanup run has no role card");
   });
 });
 
-describe("the writer step: role cards from the process plugin (#232)", () => {
-  function implementerCard(text: string): void {
-    const roles = join(rulebook, "skills", "crq", "process", "roles");
-    mkdirSync(roles, { recursive: true });
-    writeFileSync(join(roles, "..", "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
-    writeFileSync(join(roles, "implementer.md"), text);
-  }
-
-  it("starts the run from the plugin's card: its body leads the prompt, its tools are the run's only tools, and its hash is recorded", async () => {
-    implementerCard("---\nrole: implementer\ntools: [Read, Edit]\n---\n\nBuild it the team's way.\n");
+describe("the writer step: the role card decides the run (#232)", () => {
+  it("starts the run from the card: its body leads the prompt, its tools are the run's only tools, and its hash is recorded", async () => {
+    const cards = cardsDir({ implementer: "---\nrole: implementer\ntools: [Read, Edit]\n---\n\nBuild it this way.\n" });
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
-    const out = await run(setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), FIX);
+    const out = await run(
+      { ...setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), cards },
+      FIX,
+    );
     expect(valueOf(out).card).toMatch(/^[0-9a-f]{64}$/);
     const ran = command(fake);
     expect(ran.argv.slice(ran.argv.indexOf("--tools"), ran.argv.indexOf("--tools") + 2)).toEqual([
       "--tools",
       "Read,Edit,Write,TodoWrite,Skill,Task",
     ]);
-    expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^Build it the team's way\.\n\n/) });
+    expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringMatching(/^Build it this way\.\n\n/) });
     expect(ran.stdin).toMatchObject({ kind: "text", text: expect.stringContaining(FLOOR) });
   });
 
   it("a card whose must_not_see leaves out the run's task stops the run for a person, and starts no box", async () => {
-    implementerCard("---\nrole: implementer\ntools: [Read]\nmust_not_see: the act_on list\n---\n\nBuild.\n");
+    const cards = cardsDir({
+      implementer: "---\nrole: implementer\ntools: [Read]\nmust_not_see: the act_on list\n---\n\nBuild.\n",
+    });
     const kept = await keepActOn({ recordsDir: recordsDirOf(p.clone), change: 12, head: p.head2, sorted: [FINDING] });
     expect(kept.kind).toBe("ok");
     const fake = fakeBox({});
     const told = forge();
-    const out = await run(setup(fake.box, told, []), { kind: "act-on", head: p.head2 }, openLine());
+    const out = await run({ ...setup(fake.box, told, []), cards }, { kind: "act-on", head: p.head2 }, openLine());
     expect(out).toMatchObject({ kind: "ok", value: { outcome: "blocked" } });
     expect(told.log.find((l) => l.startsWith("note 12"))).toContain("leaves out the act_on list");
     expect(fake.calls.filter((c) => c.op === "start")).toEqual([]);
@@ -1628,17 +1629,15 @@ describe("the writer step: role cards from the process plugin (#232)", () => {
   });
 
   it("blocks a run that edits outside its card's Edit(…) scope, and names the path (#424)", async () => {
-    const dir = join(p.root, "scoped", "skills", "crq", "process");
-    mkdirSync(join(dir, "roles"), { recursive: true });
-    writeFileSync(join(dir, "lanes.json"), JSON.stringify({ lanes: [{ lane: "tiny", approval: false }] }));
-    writeFileSync(
-      join(dir, "roles", "test-first.md"),
-      "---\nrole: test-first\ntools: [Read, Edit(src/test/**), Bash]\nhand_off: {status: done, evidence}\n---\n\n# Test-first\n",
-    );
+    const cards = cardsDir({
+      "test-first":
+        "---\nrole: test-first\ntools: [Read, Edit(src/test/**), Bash]\nhand_off: {status: done, evidence}\n---\n\n# Test-first\n",
+    });
     const fake = fakeBox({ runs: [{ kind: "exited", code: 0, stdout: "", stderr: "" }] });
-    const s = setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []);
-    const scoped = { ...s, settings: { ...s.settings, plugins: [{ label: "scoped", dir: join(p.root, "scoped") }] } };
-    const out = await run(scoped, { kind: "test-first" });
+    const out = await run(
+      { ...setup(writer(fake, { commit: true, report: DONE, exit: 0 }, []), forge(), []), cards },
+      { kind: "test-first" },
+    );
     expect(out).toMatchObject({
       kind: "ok",
       value: {
@@ -1689,7 +1688,7 @@ describe("test-first edits only the project's test files (#688)", () => {
 
 type Flow = Exclude<Role, "onboarder" | "retro">;
 
-describe("a full run on each process: no plugin, the rulebook plugin, a team plugin (#232)", () => {
+describe("a full run runs the engine's cards with no plugin, the rulebook plugin or a team plugin (#232)", () => {
   const FIXTURES = join(import.meta.dirname, "..", "tests", "fixtures", "process");
   const BUILT_IN = join(import.meta.dirname, "..", "prompts", "roles");
   const ROLES: readonly Role[] = ["design-reviewer", "verify-pass", "implementer", "cleanup"];
@@ -1739,7 +1738,7 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
 
   const LIMIT = { minutes: 20, setting: "FACTORY_DESIGN_MINUTES" };
 
-  async function designRuns(plugins: readonly PluginDir[]) {
+  async function designRuns() {
     const seen: ModelRun[] = [];
     const outputs = [{ findings: [DESIGN_FINDING] }, { verdicts: [{ id: "D1", bucket: "act_on", why: "it holds" }] }];
     const design = designSteps({
@@ -1760,7 +1759,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
         modelName: "opus",
         maxUsd: "2",
         limits: { review: LIMIT, verify: LIMIT },
-        plugins,
         runsDir: join(p.root, "design-runs"),
       },
     });
@@ -1791,9 +1789,7 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
   const stdinOf = (c: Command) => (c.stdin.kind === "text" ? c.stdin.text : "");
 
   async function fullRun(plugins: readonly PluginDir[], cards: Readonly<Record<Flow, string>>) {
-    const process = await readProcess(plugins);
-    if (process.kind !== "ok") throw new Error(process.reason);
-    const design = await designRuns(plugins);
+    const design = await designRuns();
     const writing = await writerRuns(plugins);
     expect(design.card).toBe(sha(cards["design-reviewer"]));
     expect(writing.fixed).toMatchObject({ outcome: "done", card: sha(cards.implementer) });
@@ -1803,7 +1799,7 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     expect(prompts.map((t, i) => t.startsWith(`${bodies[i]}\n\n`))).toEqual([true, true, true, true]);
     expect(prompts.slice(0, 2).every((t) => t.includes(DESIGN_FLOOR))).toBe(true);
     expect(prompts.slice(2).every((t) => t.includes(FLOOR))).toBe(true);
-    return { lanes: process.value.lanes, design: design.seen, fix: writing.fix, clean: writing.clean };
+    return { design: design.seen, fix: writing.fix, clean: writing.clean };
   }
 
   const cardsIn = (dir: string): Readonly<Record<Flow, string>> => {
@@ -1820,12 +1816,6 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
 
   it("with no plugin, the engine runs alone on its built-in process and cards", async () => {
     const ran = await fullRun([], cardsIn(BUILT_IN));
-    expect(ran.lanes.map((l) => [l.name, l.approval])).toEqual([
-      ["tiny", false],
-      ["bug", true],
-      ["feature", true],
-      ["one-way door", true],
-    ]);
     expect(ran.design.map((r) => r.tools)).toEqual([
       ["Read", "Grep", "Glob"],
       ["Read", "Grep", "Glob"],
@@ -1834,23 +1824,23 @@ describe("a full run on each process: no plugin, the rulebook plugin, a team plu
     expect(ran.fix.argv).not.toContain("--plugin-dir");
   });
 
-  it("with the rulebook plugin, every run starts from the rulebook's card, and the plugin is handed to the writer", async () => {
+  it("with the rulebook plugin, every run still starts from the engine's card, and the plugin is handed to the writer", async () => {
     const lanes = JSON.parse(readFileSync(join(FIXTURES, "rulebook-lanes.json"), "utf8")) as unknown;
-    const roles = processPlugin("rulebook-crq", lanes, join(FIXTURES, "rulebook-roles"));
-    const ran = await fullRun([{ label: "rulebook@chiyanram", dir: join(p.root, "rulebook-crq") }], cardsIn(roles));
-    expect(ran.lanes.map((l) => l.name)).toEqual(["tiny", "bug", "feature", "one-way door"]);
+    processPlugin("rulebook-crq", lanes, teamCards());
+    const ran = await fullRun([{ label: "rulebook@chiyanram", dir: join(p.root, "rulebook-crq") }], cardsIn(BUILT_IN));
     expect(ran.fix.argv).toContain("--plugin-dir");
     expect(toolsAt(ran.fix.argv)).toBe("Read,Grep,Glob,Edit,Write,Bash,TodoWrite,Skill,Task");
   });
 
-  it("with a team plugin, its lanes and cards decide: its narrower tools are the runs' only tools, and the floor still holds", async () => {
+  it("a team plugin's process folder is not read: its narrower cards change no run", async () => {
     const lanes = { lanes: ["tiny", "bug", "feature", "one-way door"].map((lane) => ({ lane, approval: true })) };
-    const roles = processPlugin("team", lanes, teamCards());
-    const ran = await fullRun([{ label: "team@acme", dir: join(p.root, "team") }], cardsIn(roles));
-    expect(ran.lanes.every((l) => l.approval)).toBe(true);
-    expect(ran.design.map((r) => r.tools)).toEqual([["Read", "Grep"], ["Read"]]);
-    expect(toolsAt(ran.fix.argv)).toBe("Read,Edit,Write,Bash,TodoWrite,Skill,Task");
-    expect(toolsAt(ran.clean.argv)).toBe("Read,Edit,Write,TodoWrite,Skill,Task");
+    processPlugin("team", lanes, teamCards());
+    const ran = await fullRun([{ label: "team@acme", dir: join(p.root, "team") }], cardsIn(BUILT_IN));
+    expect(ran.design.map((r) => r.tools)).toEqual([
+      ["Read", "Grep", "Glob"],
+      ["Read", "Grep", "Glob"],
+    ]);
+    expect(toolsAt(ran.fix.argv)).toBe("Read,Grep,Glob,Edit,Write,Bash,TodoWrite,Skill,Task");
   });
 });
 

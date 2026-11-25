@@ -2,7 +2,7 @@
 // `copilot -p` in the run's folder, which holds only the pack and the code copy:
 //   -s                          only the final answer on stdout: the CLI has no structured-output flag, so the prompt
 //                               asks for one JSON value and the adapter checks it against the run's schema
-//                               (process/pack-schema.ts validate)
+//                               (process/json-schema.ts validate)
 //   --no-auto-update            the bundled version runs, and never updates itself (ADR-0012 S7)
 //   --disable-builtin-mcps      no MCP servers
 //   --no-ask-user               no question tool; in -p a tool no rule allows is denied, so the run never waits
@@ -34,7 +34,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Exit } from "../forge/api.js";
-import { unknownKeywords, validate, type Schema } from "../process/pack-schema.js";
+import { unknownKeywords, validate, type Schema } from "../process/json-schema.js";
 import type { ModelRun } from "../review/model.js";
 import { settingName } from "../settings/machine.js";
 import type { BoxToken } from "../token/index.js";

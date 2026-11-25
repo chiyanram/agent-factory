@@ -50,13 +50,6 @@ export function storeDir(home: string, ref: PluginRef, sha256: string): string {
   return join(home, "plugins", ref.marketplace, ref.name, sha256);
 }
 
-export function pinnedDirs(home: string, refs: readonly PluginRef[], pins: Pins): readonly PluginDir[] {
-  return refs.flatMap((r) => {
-    const pin = pins[refText(r)];
-    return pin === undefined ? [] : [{ label: refText(r), dir: storeDir(home, r, pin.sha256) }];
-  });
-}
-
 export async function treeHash(
   dir: string,
 ): Promise<Result<{ readonly sha256: string; readonly files: readonly string[] }>> {

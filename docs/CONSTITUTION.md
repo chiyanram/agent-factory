@@ -46,7 +46,7 @@ when it departs from one.
 | [P15](#p15-proof-not-claims) | Proof, not claims; review converges | non-negotiable (two clauses) |
 | [P16](#p16-one-home-and-one-way) | One home and one way | guidance |
 | [P17](#p17-one-port-per-outside-tool) | Every outside tool plugs in through one port | guidance |
-| [P18](#p18-one-versioned-contract-with-the-rules-pack) | One versioned contract with the rules pack | non-negotiable |
+| [P18](#p18-one-contract-with-the-rules-pack-by-skill-name) | One contract with the rules pack, by skill name | non-negotiable |
 | [P19](#p19-people-work-from-where-they-are) | People work from where they already are | guidance |
 | [P20](#p20-the-codebase-gets-better-over-time) | The codebase gets better over time | guidance |
 | [P21](#p21-brakes-scale-with-risk) | Brakes scale with risk | non-negotiable (the floor) |
@@ -178,8 +178,7 @@ toolbox skill or a checklist a person runs) and climbs these rungs; a person dec
    people later found.
 4. **Automatic and visible**: in the lanes that pay for it.
 
-A step the engine runs lands in the engine first, then in the rules pack as a new format version (P18), then the pin
-moves.
+A step the engine runs lands in the engine first. A skill it needs lands in the rules pack, then the pin moves (P18).
 **Why:** a new check that went straight into the automatic flow (skills #375, the breaker) had never been used by
 hand, and the engine could not run it, so the pin stalled.
 **How it's checked:** by review: the PR that adds a step or moves it up names its rung and the person's yes.
@@ -255,15 +254,17 @@ is guidance.
 breaks the others.
 **How it's checked:** review only.
 
-## P18. One versioned contract with the rules pack
+## P18. One contract with the rules pack, by skill name
 
-> One versioned contract between the engine and its rules pack: the rules pack publishes the format of its cards,
-> lanes and findings; the engine's CI checks the pinned rules pack against it, and the engine reads this version and
-> the one before.
+> One contract between the engine and its rules pack: the engine names skills and never a file inside one, and the
+> pinned rules pack holds each skill the engine names. The engine owns its lanes, role cards and schemas
+> ([ADR-0026](adr/0026-the-engine-owns-its-process.md)).
 
 **Kind:** non-negotiable.
-**Why:** the two repos change on their own schedules; a pack the engine cannot read must fail in CI, not in a run.
-**How it's checked:** CI validates each card of the pinned rules pack against the pack's own schema (`test/pack-schema.test.ts`).
+**Why:** the two repos change on their own schedules; a pack that drops a skill the engine names must fail in CI, not
+in a run.
+**How it's checked:** CI checks that the pinned rules pack holds `skills/<name>/SKILL.md` for each skill the engine
+names (`test/rules-pack.test.ts`).
 
 ## P19. People work from where they are
 

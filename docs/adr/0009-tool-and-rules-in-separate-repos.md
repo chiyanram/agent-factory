@@ -4,7 +4,7 @@
 
 Status: accepted 2026-10-26 (operator, step-0 decision D2)
 
-Amended by [ADR-0010](0010-one-forge-seam-two-adapters.md).
+Amended by [ADR-0010](0010-one-forge-seam-two-adapters.md) and [ADR-0026](0026-the-engine-owns-its-process.md).
 
 ## Context
 

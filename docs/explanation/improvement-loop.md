@@ -28,7 +28,7 @@ that changes a rule is started and accepted by a human.
 | set | what it measures | state |
 |---|---|---|
 | the automated review's golden set (`evals/reviewer/`, ADR-0015) | each case is a real commit, a change and the findings a good review must report; `agent-factory eval reviewer` runs the real review round and a judge matches its Act on findings | 29 cases approved, 2 drafts; baseline recorded (#216) |
-| role scenarios | three scenarios per role card, in the process plugin | in chiyanram/skills; not wired to the pin |
+| role scenarios | three scenarios per role card | in chiyanram/skills; they move into this repo with the role cards |
 | past tickets end to end | about 10 real tickets, replayed | once there is run history |
 
 An eval pass costs money: `agent-factory eval reviewer` has a $100 cap and only a human starts it.

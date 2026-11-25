@@ -116,8 +116,9 @@ there.
   parts are connectors, `GLOSSARY.md`). A `plugins` that holds a map, the map's old name, is
   refused with a message to rename the key to `connectors`.
 - `plugins`: the Claude Code plugins the project installs, each `name@marketplace`, in order, each name once
-  ([docs/DESIGN.md](../DESIGN.md) section 5 "Plugins"). It is a locked key, so a user layer cannot drop or swap the
-  process plugin. None listed means the engine runs alone, on its built-in process. Each listed plugin is pinned by
+  ([docs/DESIGN.md](../DESIGN.md) section 5 "Plugins"). It is a locked key, so a user layer cannot drop or swap a
+  plugin. A plugin gives skills only: the lanes, the review baseline and the role cards are the engine's own
+  ([ADR-0026](../adr/0026-the-engine-owns-its-process.md)). Each listed plugin is pinned by
   commit and hash with `agent-factory plugin update <project> <name@marketplace> [<commit>]`:
   - clone the marketplace once to `$FACTORY_HOME/marketplaces/<marketplace>` (for `rulebook@chiyanram`:
     `git clone https://github.com/chiyanram/skills`); the command fetches its `HEAD` through hostGit, or takes the
@@ -125,18 +126,13 @@ there.
   - it copies the plugin's folder (its `source` in `.claude-plugin/marketplace.json`, which must be a folder inside the
     marketplace) to `$FACTORY_HOME/plugins/<marketplace>/<name>/<sha256>/`, never into the product repo;
   - it shows the pin before and after and each file added (`+`), removed (`-`) or changed (`~`), then runs `config
-    check` and reads the process of the project's plugins with the new version in (a lanes file that drops the approval
-    floor fails it). Only when both pass does it write the pin to `$FACTORY_HOME/projects/<project>.plugins.json`. It
+    check`. Only when it passes does it write the pin to `$FACTORY_HOME/projects/<project>.plugins.json`. It
     does not run the eval set; `agent-factory eval reviewer` does, and spends money.
   - A listed plugin with no pin, or whose stored folder no longer has the pin's hash, is refused.
   Each `dispatch` pass checks every pin, then copies each plugin into the implementer's clone as `.factory/plugins/<n>`
   (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
   each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
-  pass. The one plugin that holds a process (`skills/<skill>/process/lanes.json`) gives the lanes the orchestrator,
-  the implementer and the review decide approval by, the review's baseline (`review.json`, else the built-in baseline) and
-  the folder its references are read from (`skills/<domain>/references/`); with no process plugin, the built-in lanes
-  and baseline hold, and the references come from the first plugin. A lanes file that drops the approval for a lane
-  above tiny stops the pass, and so does a second plugin that holds a process; `config check` names both (#426).
+  pass. The review reads its references from the first plugin that holds a `skills/<skill>/references/` folder.
   **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
   only to the next ticket; the records show the change. The review cannot run with no plugin yet (#674).
 - `quarantine.checks` (locked, the project file only) and `quarantine.maxDays` (cap, default 14): the CI jobs a person
@@ -171,8 +167,7 @@ onboarder:
 1. `agent-factory onboard <project>` reads the product repo at its default branch through `FACTORY_REPO`, read-only.
    The engine lists the build, test and run commands from the repo's own files, with no program run: the Makefile's
    targets first (the front door), else `package.json`'s scripts; a Gradle or Maven wrapper alone is named as
-   inferred. A fresh model run, from the onboarder role card (the process plugin's `process/roles/onboarder.md`, else
-   `prompts/roles/onboarder.md`), with Read, Grep and Glob only, gives the stack, the modules, the gotchas at
+   inferred. A fresh model run, from the onboarder role card (`prompts/roles/onboarder.md`), with Read, Grep and Glob only, gives the stack, the modules, the gotchas at
    `file:line` and the domain terms. The engine writes `brief.md` and `glossary.md` in `<project>/staged/`: first
    "Project rules", each MUST of the root `AGENTS.md` and `CLAUDE.md`, which the engine reads itself (a list item
    under a MUST heading, or a statement with MUST, MUST NOT, SHALL or NEVER in capitals), one line each, cited to its
