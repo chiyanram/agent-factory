@@ -220,7 +220,8 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
 | preference | the lowest layer wins | the models, `claimLabel`, `quietMinutes`, `questions`, `poll.minutes`, `window.hours`, `egress.upstreamProxy`, `egress.caCerts`, `gitHostProject` and `clone` (the project file only) |
 
 - A lower layer that loosens a safety key (any class but preference) stops the read, and so the run, with the key, the
-  layer, its `file:line` and the team value. A team `locked` mode holds on any class.
+  layer, its `file:line`, and the higher value with where it comes from (a layer's `file:line`, or the engine). A team
+  `locked` mode holds on any class.
 - `approval.floor` is the engine's: no lane above tiny starts without a human approval, and no layer can change it.
 - An unknown key is a warning with "did you mean" for one release, then an error.
 - With no team pin and no user file, every value is the project file's own.
@@ -230,6 +231,16 @@ Every key has a class, fixed in code (`src/core/settings/keys.ts`):
   `team update <project>
   [<commit>]` shows what the team's new commit (default: its clone's `HEAD`) changes, checks it, then moves the pin.
   Fetch the team's clone yourself first; nothing here uses the network.
+- `agent-factory config set <project> <key> <value>` changes one key of the project file, so a person never edits the
+  JSON by hand. The value is read as JSON, else as text (`30` is a number, `claude-sonnet-5-5` a string); a value that
+  starts with `-` comes after `--`. The command checks the new file as `config check` does and refuses it on an error
+  the current file does not have; an error the file already had stays a warning. It changes only that key's text,
+  inserts an absent key with its parents, writes the other half of a new policy point at its resolved value, and
+  refuses when the file changed while it checked. It prints the key's `config show` line, and warns when a lower
+  layer (`user.json` or a `FACTORY_*` variable) wins over the value written. It writes only the project file: never
+  the team file (`team update` moves its pin) or `user.json`. The coordinator's settings deny it. **Today:** an install
+  keeps its old coordinator settings, without that deny, until `agent-factory setup coordinator` runs again; run it
+  after an upgrade.
 - The machine layer is the lowest: a variable may make a team's cap lower, never higher. `dispatch`, `review` and
   `start` resolve the project's layers once before the run, print each warning, and refuse to start on an error, so a
   team's `caps.usdPerRun` is the most each model run of the project may spend (#254). `poll` and the loop commands

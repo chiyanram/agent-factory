@@ -199,6 +199,8 @@ export const HELP_COMMANDS = `  poll                         one line of facts p
   plugin list                  the registered plugins
   config show <project>        every settings key: its value, layer, file:line and class (--json: as JSON)
   config check <project>       check the resolved layers, and show each Claude Code plugin the factory needs: exit 0 or 1
+  config set <project> <key> <value>
+                               change one key of the project file, checked first, every other byte kept
   team update <project> [<commit>]
                                show what the team's new commit changes, check it, then move the project's pin
 ${USAGE_HELP}${TRACE_HELP}${RETRO_HELP}${BOARD_HELP}${HANDOFF_HELP}${WAITING_HELP}${DOOR_HELP}${ONBOARD_HELP}${REQUEST_HELP}  box build <project>          build the box image on this host (the base, then <home>/projects/<project>/box.Dockerfile

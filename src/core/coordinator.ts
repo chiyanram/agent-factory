@@ -21,7 +21,7 @@
 //           (S18); editing any .claude/ (the user's settings and each project's), the package, the START,
 //           approval and waiver records, the project home, the team and user settings layers, the local rubric folders, the
 //           secrets, the run records, the pending writes and the write log, and the plugin list;
-//           `agent-factory plugin`, `agent-factory project` and `agent-factory init`; reading the secret paths,
+//           `agent-factory plugin`, `agent-factory project`, `agent-factory init` and `agent-factory config set`; reading the secret paths,
 //           the coordinator seat's own token among them
 //
 // A SessionStart hook (`agent-factory coordinator-brief`) re-injects the role, the wall and the handoff note after a
@@ -116,6 +116,7 @@ const DENY_BASH = [
   "agent-factory plugin",
   "agent-factory project",
   "agent-factory init",
+  "agent-factory config set",
 ];
 
 const SECRET_HOME = [

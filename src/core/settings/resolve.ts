@@ -36,7 +36,14 @@ export type Resolved = {
   readonly mode: TeamMode;
 };
 
-export type Problem = { readonly level: "error" | "warning"; readonly text: string };
+export type Problem = {
+  readonly level: "error" | "warning";
+  readonly key: string;
+  readonly rule: string;
+  readonly text: string;
+};
+
+type Flaw = { readonly rule: string; readonly text: string };
 
 export type Resolution = {
   readonly values: readonly Resolved[];
@@ -228,13 +235,14 @@ function checkedHere(key: Key, layer: LayerName): boolean {
   return layer === "machine" ? false : layer !== "project" || !readerChecks;
 }
 
-function teamValueOf(entries: readonly Entry[]): string {
-  const team = entries.find((e) => e.source.layer === "team");
-  return team === undefined ? "the team sets none" : `the team value is ${show(team.value)}`;
+function higherOf(state: State | undefined): string {
+  return state === undefined
+    ? "no higher layer sets it"
+    : `${show(state.value)} comes from ${state.sources.map(where).join(", ")}`;
 }
 
-function refusal(key: Key, entry: Entry, why: string, entries: readonly Entry[]): string {
-  return `${key.id}: the ${entry.source.layer} layer (${where(entry.source)}) ${why}; a ${key.class} key only gets stricter in a lower layer, and ${teamValueOf(entries)}`;
+function refusal(key: Key, entry: Entry, why: string, state: State | undefined): string {
+  return `${key.id}: the ${entry.source.layer} layer (${where(entry.source)}) ${why}; a ${key.class} key only gets stricter in a lower layer, and ${higherOf(state)}`;
 }
 
 function lockedByTeam(entry: Entry, mode: TeamMode, state: State | undefined): boolean {
@@ -247,37 +255,43 @@ function initial(key: Key): State | undefined {
     : { value: key.fixed, sources: [{ layer: "engine", file: "the engine", line: 0 }] };
 }
 
-type Fold = { readonly state: State | undefined; readonly problems: readonly string[] };
+type Fold = { readonly state: State | undefined; readonly problems: readonly Flaw[] };
 
-function refusedEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): string {
+function refusedEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): Flaw | undefined {
   const bad = checked(key, entry);
   if (bad !== "") {
-    return bad;
+    return { rule: `value@${entry.source.layer}`, text: bad };
   }
-  return lockedByTeam(entry, mode, fold.state) ? refusal(key, entry, "sets a key the team locked", entries) : "";
+  return lockedByTeam(entry, mode, fold.state)
+    ? { rule: `locked@${entry.source.layer}`, text: refusal(key, entry, "sets a key the team locked", fold.state) }
+    : undefined;
 }
 
 function foldEntry(key: Key, mode: TeamMode, entries: readonly Entry[], fold: Fold, entry: Entry): Fold {
   const refused = refusedEntry(key, mode, entries, fold, entry);
-  if (refused !== "") {
+  if (refused !== undefined) {
     return { state: fold.state, problems: [...fold.problems, refused] };
   }
   if (fold.state === undefined) {
     return { state: { value: entry.value, sources: [entry.source] }, problems: fold.problems };
   }
   const next = step(key, fold.state, entry, mode);
-  const problems = next.problem === "" ? fold.problems : [...fold.problems, refusal(key, entry, next.problem, entries)];
+  const flaw = { rule: `class@${entry.source.layer}`, text: refusal(key, entry, next.problem, fold.state) };
+  const problems = next.problem === "" ? fold.problems : [...fold.problems, flaw];
   return { state: next.state, problems };
 }
 
-function resolveKey(key: Key, context: Context): { readonly resolved: Resolved; readonly problems: string[] } {
+function resolveKey(key: Key, context: Context): { readonly resolved: Resolved; readonly problems: Problem[] } {
   const mode = context.modes.get(key.id) ?? "default";
   const entries = entriesOf(key, context);
   const start: Fold = { state: initial(key), problems: [] };
   const fold = entries.reduce((f, e) => foldEntry(key, mode, entries, f, e), start);
   const state = fold.state ?? { value: key.fallback, sources: [{ layer: "default", file: "the default", line: 0 }] };
   const set = fold.state !== undefined;
-  return { resolved: { key, value: state.value, set, sources: state.sources, mode }, problems: [...fold.problems] };
+  return {
+    resolved: { key, value: state.value, set, sources: state.sources, mode },
+    problems: fold.problems.map((f) => ({ level: "error", key: key.id, rule: f.rule, text: f.text })),
+  };
 }
 
 function setAt(target: Record<string, unknown>, path: readonly string[], value: unknown): void {
@@ -321,9 +335,7 @@ export function resolve(input: Input): Resolution {
   const context: Context = { layers: input.layers, modes: input.modes, env: input.env };
   const each = KEYS.map((k) => resolveKey(k, context));
   const values = each.map((f) => f.resolved);
-  const errors = [...each.flatMap((f) => f.problems), ...atWork(values)].map(
-    (text): Problem => ({ level: "error", text }),
-  );
+  const errors = [...each.flatMap((f) => f.problems), ...atWork(values)];
   const unknown = input.layers.flatMap(unknownKeys);
   const project = input.layers.find((l) => l.name === "project");
   const shadows = KEYS.flatMap((k) => overridden(k, context));
@@ -346,12 +358,14 @@ function shadowed(id: string, env: string, entries: readonly Entry[]): readonly 
     : [
         {
           level: "warning",
+          key: id,
+          rule: "machine-wins",
           text: `${id}: the variable ${env} (${show(machine.value)}) wins over ${where(file.source)} (${show(file.value)}); unset it to use the project file`,
         },
       ];
 }
 
-function atWork(values: readonly Resolved[]): readonly string[] {
+function atWork(values: readonly Resolved[]): readonly Problem[] {
   const on = (id: string, value: unknown): Resolved | undefined =>
     values.find((r) => r.key.id === id && r.value === value);
   const [work, commits, issue] = [on("work", true), on("repoCommits", true), on("specStore", "issue")];
@@ -363,14 +377,24 @@ function atWork(values: readonly Resolved[]): readonly string[] {
     ...(commits === undefined
       ? []
       : [
-          `repoCommits: ${commits.sources.map(where).join(", ")} opts in to commits to the product repo, and ${marked}, where nothing is ever committed (P9)`,
+          atWorkError(
+            "repoCommits",
+            `repoCommits: ${commits.sources.map(where).join(", ")} opts in to commits to the product repo, and ${marked}, where nothing is ever committed (P9)`,
+          ),
         ]),
     ...(issue === undefined
       ? []
       : [
-          `specStore: ${issue.sources.map(where).join(", ")} keeps the specs in the git host issues, and ${marked}, where the spec stays local; set "specStore": "local"`,
+          atWorkError(
+            "specStore",
+            `specStore: ${issue.sources.map(where).join(", ")} keeps the specs in the git host issues, and ${marked}, where the spec stays local; set "specStore": "local"`,
+          ),
         ]),
   ];
+}
+
+function atWorkError(key: string, text: string): Problem {
+  return { level: "error", key, rule: "at-work", text };
 }
 
 const ALL_PATHS = KEYS.map((k) => k.path);
@@ -422,6 +446,8 @@ function unknownAt(layer: FileLayer, path: readonly string[]): Problem {
   const place = where({ layer: layer.name, file: layer.file, line: layer.lines.get(pathKey(path)) ?? 0 });
   return {
     level: "warning",
+    key: name,
+    rule: `unknown@${layer.name}`,
     text: `${place}: unknown key ${name}${didYouMean(name)} (a warning for one release, then an error)`,
   };
 }
@@ -444,7 +470,16 @@ function partOf(layer: FileLayer, value: unknown, path: readonly string[]): read
     return walk(layer, value, path);
   }
   const place = where({ layer: layer.name, file: layer.file, line: layer.lines.get(pathKey(path)) ?? 0 });
-  return layer.name === "project" ? [] : [{ level: "error", text: `${place}: ${path.join(".")} must be an object` }];
+  return layer.name === "project"
+    ? []
+    : [
+        {
+          level: "error",
+          key: path.join("."),
+          rule: `object@${layer.name}`,
+          text: `${place}: ${path.join(".")} must be an object`,
+        },
+      ];
 }
 
 function unknownKeys(layer: FileLayer): readonly Problem[] {

@@ -28,8 +28,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function error(text: string): Problem {
-  return { level: "error", text };
+function error(key: string, rule: string, text: string): Problem {
+  return { level: "error", key, rule, text };
 }
 
 function failed(text: string): Read {
@@ -130,7 +130,7 @@ type Modes = { readonly modes: Map<string, TeamMode>; readonly problems: readonl
 function modeEntry(file: string, [id, mode]: readonly [string, unknown]): Modes {
   const read = modeOf(id, mode);
   return read.kind === "bad"
-    ? { modes: new Map(), problems: [error(`${file}: "${TEAM_META}" ${read.why}`)] }
+    ? { modes: new Map(), problems: [error(id, "team-mode", `${file}: "${TEAM_META}" ${read.why}`)] }
     : { modes: new Map([[id, read.mode]]), problems: [] };
 }
 
@@ -140,7 +140,10 @@ export function modesOf(team: FileLayer | undefined): Modes {
   }
   const raw = prop(team.value, TEAM_META);
   if (!isObject(raw)) {
-    return { modes: new Map(), problems: [error(`${team.file}: "${TEAM_META}" must map keys to modes`)] };
+    return {
+      modes: new Map(),
+      problems: [error(TEAM_META, "team-modes", `${team.file}: "${TEAM_META}" must map keys to modes`)],
+    };
   }
   const each = Object.entries(raw).map((e) => modeEntry(team.file, e));
   return {
@@ -154,7 +157,15 @@ function halves(layer: FileLayer): readonly Problem[] {
   return POLICY_POINTS.flatMap((point) => {
     const rule: unknown = isObject(policy) ? policy[point] : undefined;
     const both = !isObject(rule) || (Object.hasOwn(rule, "mode") && Object.hasOwn(rule, "cap"));
-    return both ? [] : [error(`${layer.file}: policy.${point} must set both "mode" and "cap"`)];
+    return both
+      ? []
+      : [
+          error(
+            `policy.${point}`,
+            `both-halves@${layer.name}`,
+            `${layer.file}: policy.${point} must set both "mode" and "cap"`,
+          ),
+        ];
   });
 }
 
@@ -182,7 +193,9 @@ function layerOf(read: Read): readonly FileLayer[] {
 }
 
 function problemOf(read: Read, file: string): readonly Problem[] {
-  return read.kind === "failed" ? [error(read.text.startsWith('"') ? `${file}: ${read.text}` : read.text)] : [];
+  return read.kind === "failed"
+    ? [error(file, "read", read.text.startsWith('"') ? `${file}: ${read.text}` : read.text)]
+    : [];
 }
 
 export async function layered(input: {

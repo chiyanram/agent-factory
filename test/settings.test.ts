@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "../src/app.js";
+import { saveFile } from "../src/settings-cli.js";
 import { pluginConfigOf, readPluginConfig } from "../src/core/plugin/config.js";
 import { pluginListOf } from "../src/core/process/plugins.js";
 import { MODES } from "../src/core/plugin/policy.js";
@@ -362,7 +363,7 @@ function errors(r: ReturnType<typeof resolve>): readonly string[] {
 }
 
 describe("resolve: each class (#229)", () => {
-  it("cap: the lowest wins; a higher value in a lower layer is refused, naming key, layer, file and team value", () => {
+  it("cap: the lowest wins; a higher value in a lower layer is refused, naming key, layer, file and the higher value's file", () => {
     const team = layer("team", { ready: { timeoutMinutes: 20 } });
     const ok = resolved([team, layer("project", { ready: { timeoutMinutes: 10 } })]);
     expect(valueOf(ok, "ready.timeoutMinutes")).toMatchObject({ value: 10, sources: [{ layer: "project" }] });
@@ -370,7 +371,7 @@ describe("resolve: each class (#229)", () => {
     const loose = resolved([team, layer("project", {}), layer("user", { ready: { timeoutMinutes: 60 } })]);
     expect(valueOf(loose, "ready.timeoutMinutes")?.value).toBe(20);
     expect(errors(loose)).toEqual([
-      "ready.timeoutMinutes: the user layer (/user.json:3) 60 is higher than 20; a cap key only gets stricter in a lower layer, and the team value is 20",
+      "ready.timeoutMinutes: the user layer (/user.json:3) 60 is higher than 20; a cap key only gets stricter in a lower layer, and 20 comes from /team.json:3",
     ]);
   });
 
@@ -483,7 +484,12 @@ describe("resolve: each class (#229)", () => {
   it("an unknown key is a warning with did you mean; a machine key is a key a file holds (#254)", () => {
     const r = resolved([layer("user", { egress: { alow: ["a.example.com"] }, caps: { usdPerRun: 2 } })]);
     expect(r.problems).toEqual([
-      { level: "warning", text: expect.stringContaining("unknown key egress.alow; did you mean egress.allow?") },
+      {
+        level: "warning",
+        key: "egress.alow",
+        rule: "unknown@user",
+        text: expect.stringContaining("unknown key egress.alow; did you mean egress.allow?"),
+      },
     ]);
     expect(didYouMean("zzzzzzzz")).toBe("");
   });
@@ -645,7 +651,7 @@ describe("every module reads the resolved settings (#254)", () => {
     expect(errors(lower)).toEqual([]);
     const looser = withEnv([team], { FACTORY_MAX_USD: "5" });
     expect(errors(looser)).toEqual([
-      "caps.usdPerRun: the machine layer (env FACTORY_MAX_USD) 5 is higher than 1; a cap key only gets stricter in a lower layer, and the team value is 1",
+      "caps.usdPerRun: the machine layer (env FACTORY_MAX_USD) 5 is higher than 1; a cap key only gets stricter in a lower layer, and 1 comes from /team.json:3",
     ]);
     expect(errors(withEnv([team], { FACTORY_MAX_USD: "" }))[0]).toContain("cannot be compared");
   });
@@ -716,8 +722,114 @@ describe("every module reads the resolved settings (#254)", () => {
       const r = await cli(argv, { FACTORY_MAX_USD: "5" });
       expect(r.code).toBe(1);
       expect(r.err).toContain("the settings layers refuse to start: caps.usdPerRun: the machine layer");
-      expect(r.err).toContain("the team value is 1");
+      expect(r.err).toContain("and 1 comes from ");
     }
+  });
+
+  it("config set refuses a project it cannot find, an unknown key and the team pin, and writes nothing", async () => {
+    expect((await cli(["config", "set", "ledger", "gate", "local"])).err).toContain("no project file");
+    expect((await cli(["config", "set", "../x", "gate", "local"])).err).toContain("is not a plain project name");
+    const path = writeProject(BASE);
+    const unknown = await cli(["config", "set", "ledger", "gat", "local"]);
+    expect(unknown).toMatchObject({ code: 1 });
+    expect(unknown.err).toContain("gat is not a settings key; did you mean gate?");
+    expect((await cli(["config", "set", "ledger", "team", "acme@x"])).err).toContain("agent-factory team update");
+    expect((await cli(["config", "set", "ledger", "gate"])).code).toBe(64);
+    expect(readFileSync(path, "utf8")).toBe(text(BASE));
+  });
+
+  it("config set writes one key as JSON or as text, keeps every other byte, and prints config show's line", async () => {
+    const path = writeProject(BASE);
+    const r = await cli(["config", "set", "ledger", "ready.timeoutMinutes", "45"]);
+    expect(r).toMatchObject({ code: 0, err: "" });
+    expect(r.out).toMatch(/^ready\.timeoutMinutes\s+45\s+project\s+\S+ledger\.json:8\s+cap$/m);
+    expect(readFileSync(path, "utf8")).toBe(text(BASE).replace('"timeoutMinutes": 30', '"timeoutMinutes": 45'));
+    await cli(["config", "set", "ledger", "ready.programs", '["make"]']);
+    await cli(["config", "set", "ledger", "eval.judgeModel", "claude-sonnet-5-5"]);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({
+      ready: { programs: ["make"], timeoutMinutes: 45 },
+      eval: { judgeModel: "claude-sonnet-5-5" },
+    });
+    expect((await cli(["config", "set", "ledger", "ready.timeoutMinutes", "45"])).out).toContain("unchanged");
+    expect((await cli(["config", "check", "ledger"])).code).toBe(0);
+  });
+
+  it("config set refuses a value the project file's readers refuse, and an error the file had stays a warning", async () => {
+    const path = writeProject(BASE);
+    const bad = await cli(["config", "set", "ledger", "gate", "banana"]);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain('"gate" must be one of "forge-ci", "local", got "banana"');
+    expect(readFileSync(path, "utf8")).toBe(text(BASE));
+    writeProject({ ...BASE, gate: "local" });
+    const ok = await cli(["config", "set", "ledger", "ready.timeoutMinutes", "45"]);
+    expect(ok.code).toBe(0);
+    expect(ok.err).toContain("warning: ");
+    expect(ok.err).toContain('"verify" must be');
+  });
+
+  it("config set keeps an old error a warning when an insert above it moves its line", async () => {
+    const commit = commitTeam({ ready: { timeoutMinutes: 20 } });
+    const path = writeProject({
+      policy: { "tracker.comment": { mode: "deny", cap: 1 } },
+      ready: { programs: ["make"], timeoutMinutes: 60 },
+      team: `acme@${commit}`,
+    });
+    const lineOf = (body: string): number => body.split("\n").findIndex((l) => l.includes('"timeoutMinutes"')) + 1;
+    const was = lineOf(readFileSync(path, "utf8"));
+    const r = await cli(["config", "set", "ledger", "policy.notify.mode", "deny"]);
+    const now = lineOf(readFileSync(path, "utf8"));
+    expect(now).toBeGreaterThan(was);
+    expect(r.code).toBe(0);
+    expect(r.err).toContain(`warning: `);
+    expect(r.err).toContain(`ledger.json:${now}) 60 is higher than 20`);
+  });
+
+  it("config set refuses a value looser than a higher layer, naming where the higher value comes from", async () => {
+    const commit = commitTeam({ ready: { timeoutMinutes: 20 } });
+    const path = writeProject({ ...BASE, ready: { programs: ["make"] }, team: `acme@${commit}` });
+    const before = readFileSync(path, "utf8");
+    const team = await cli(["config", "set", "ledger", "ready.timeoutMinutes", "60"]);
+    expect(team.code).toBe(1);
+    expect(team.err).toMatch(
+      /the project layer \(\S+ledger\.json:\d+\) 60 is higher than 20; .* 20 comes from \S+team\.json@\S+:3/,
+    );
+    const engine = await cli(["config", "set", "ledger", "approval.floor", "bug"]);
+    expect(engine.code).toBe(1);
+    expect(engine.err).toContain('"tiny" comes from the engine');
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("config set writes the other half of a new policy point at its resolved value", async () => {
+    const path = writeProject(BASE);
+    const r = await cli(["config", "set", "ledger", "policy.tracker.comment.mode", "deny"]);
+    expect(r).toMatchObject({ code: 0, err: "" });
+    expect(r.out).toMatch(/^policy\.tracker\.comment\.cap\s/m);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({
+      policy: { "tracker.comment": { mode: "deny", cap: expect.any(Number) } },
+    });
+  });
+
+  it("config set warns when a lower layer wins, and refuses a write that makes a lower layer's value an error", async () => {
+    writeProject(BASE);
+    writeUser({ eval: { judgeModel: "claude-opus-5-5" } });
+    const user = await cli(["config", "set", "ledger", "eval.judgeModel", "claude-sonnet-5-5"]);
+    expect(user.code).toBe(0);
+    expect(user.err).toMatch(/warning: eval\.judgeModel: \S+user\.json:\d+ wins over the project file/);
+    rmSync(join(home, "user.json"));
+    const variable = await cli(["config", "set", "ledger", "window.hours", "6"], { FACTORY_WINDOW_HOURS: "4" });
+    expect(variable.err).toContain("warning: window.hours: env FACTORY_WINDOW_HOURS wins over the project file");
+    writeUser({ ready: { timeoutMinutes: 25 } });
+    const lower = await cli(["config", "set", "ledger", "ready.timeoutMinutes", "20"]);
+    expect(lower.code).toBe(1);
+    expect(lower.err).toMatch(/the user layer \(\S+user\.json:3\) 25 is higher than 20/);
+  });
+
+  it("saveFile refuses a file that changed since it was checked, and leaves no temporary file", async () => {
+    const path = writeProject(BASE);
+    expect(await saveFile(path, "{}\n", "{}\n")).toMatchObject({ kind: "failed" });
+    expect(readFileSync(path, "utf8")).toBe(text(BASE));
+    expect(await saveFile(join(home, "nothere", "x.json"), "", "{}")).toMatchObject({ kind: "failed" });
+    expect(execFileSync("ls", [join(home, "projects")], { encoding: "utf8" })).toBe("ledger.json\n");
   });
 
   it("a run prints the unknown-key warnings", async () => {
