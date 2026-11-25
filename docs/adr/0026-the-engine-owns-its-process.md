@@ -1,6 +1,6 @@
 # 0026 · The engine owns its process; a plugin gives skills only
 
-Status: proposed (#853 Q6, Q11, Q14). Amends ADR-0009 and P18.
+Status: accepted 2026-11-25 (operator, #853 Q6, Q11, Q14; #919). Amends ADR-0009 and P18.
 
 ## Context
 
