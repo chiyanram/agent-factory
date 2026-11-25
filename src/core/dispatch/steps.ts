@@ -31,7 +31,6 @@ export type RunInput = { readonly ticket: string; readonly change: ChangeView; r
 export type DesignInput = {
   readonly ticket: string;
   readonly spec: string;
-  readonly design: string;
   readonly earlier?: readonly EarlierRound[];
 };
 export type DesignRan<T> = {

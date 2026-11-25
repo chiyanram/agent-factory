@@ -43,7 +43,7 @@ export const COMMANDS = [
   },
   {
     name: "approve",
-    description: "See a ticket's spec and design with their hashes, then Confirm to approve exactly those",
+    description: "See a ticket's spec and its hash, then Confirm to approve exactly that hash",
     type: 1,
     options: [{ type: 3, name: "ticket", description: "the ticket", required: true }],
   },

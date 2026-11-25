@@ -281,6 +281,17 @@ describe("buildPack: the approved spec (#224)", () => {
     expect(six).not.toContain("DESIGN-EDITED-ON-THE-BRANCH");
   });
 
+  it("section 6 shows the ## Design text the approval binds first, then the file it links, marked as not bound", async () => {
+    const both = specText("SECTION-TEXT: one total per order; see docs/design/order.md");
+    writeSpec(home(), both);
+    const six = section(await pack({ spec: spec(both) }), 6);
+    const text = six.indexOf("SECTION-TEXT: one total per order");
+    const linked = six.indexOf("DESIGN-BODY");
+    expect(text).toBeGreaterThan(-1);
+    expect(linked).toBeGreaterThan(text);
+    expect(six.slice(text, linked)).toContain("the approval does not bind them");
+  });
+
   it("section 6 says so when the spec's design is none, whatever Design: line the description holds", async () => {
     const none = specText("none");
     writeSpec(home(), none);

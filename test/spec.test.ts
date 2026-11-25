@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   checkSpec,
+  designProblems,
   MAX_BODY,
   normalise,
   postableSpec,
@@ -356,5 +357,34 @@ describe("postableSpec (#542)", () => {
     expect(postableSpec(`${BODY}${"x".repeat(MAX_BODY)}`)).toEqual([
       expect.stringContaining(`a git host keeps at most ${MAX_BODY}`),
     ]);
+  });
+});
+
+describe("designProblems: the lanes that need a design hold its text in ## Design", () => {
+  it("passes design text in feature and one-way door, with a link beside it as context", () => {
+    for (const lane of ["feature", "one-way door"] as const) {
+      expect(designProblems({ lane, design: "A reservation check in RenewalService; see docs/design.md" })).toEqual([]);
+    }
+  });
+
+  it("refuses none in feature and one-way door, and lets the tiny and bug lanes say none", () => {
+    expect(designProblems({ lane: "feature", design: "none" })).toEqual([
+      expect.stringContaining("the feature lane needs a design"),
+    ]);
+    expect(designProblems({ lane: "one-way door", design: "None" })).toHaveLength(1);
+    expect(designProblems({ lane: "bug", design: "none" })).toEqual([]);
+    expect(designProblems({ lane: "tiny", design: "none" })).toEqual([]);
+  });
+
+  it("refuses a design that is only links, since the hash binds the section's text and not what a link points to", () => {
+    for (const design of [
+      "docs/design/renewals.md",
+      "- https://example.com/design\n- [the design](https://example.com/d)",
+      "`docs/x.md`, https://example.com/y",
+    ]) {
+      expect(designProblems({ lane: "feature", design })).toEqual([
+        expect.stringContaining("the hash binds that text"),
+      ]);
+    }
   });
 });

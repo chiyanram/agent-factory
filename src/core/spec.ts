@@ -13,12 +13,15 @@
 // is read line by line outside code fences and HTML comments, with each section once. A spec with no acceptance
 // criteria, or only placeholders ("TBD", "<…>", "..."), is refused: the writer would have no contract.
 //
-// An approval binds the design file's hash as it binds the spec's. A ticket with no design file, and every issue-backed
-// spec, has the design hash "none". The PR body holds the spec inside a fence longer than any it holds, so no git host
-// runs a quick action, pings or closes from it.
+// The design is the spec's own ## Design section, so the spec's hash binds it and an approval binds one hash.
+// In the feature and one-way-door lanes the section must hold design text: "none", or links alone, is refused before
+// approval (designProblems), since the hash binds the section's text and never what a link points to. A design.md left
+// beside a local spec is no longer read: spec and approve name it (beforeApproval) so nobody approves around it. The PR
+// body holds the spec inside a fence longer than any it holds, so no git host runs a quick action, pings or closes from
+// it.
 
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LANES, type Lane } from "./lane-order.js";
 import { cleanField } from "./post.js";
@@ -79,7 +82,7 @@ export function template(ticket: string): string {
     "",
     "## Design",
     "",
-    "none",
+    "<the design: its shape, parts, contracts and data; none only in the tiny and bug lanes>",
     "",
     "## Lane",
     "",
@@ -253,7 +256,7 @@ function templateProblems(f: Fields, duplicates: readonly string[]): readonly st
     ...(f.criteria.length > 0
       ? []
       : ["missing an '## Acceptance criteria' section with at least one real numbered criterion"]),
-    ...(real(f.design) ? [] : ["missing a '## Design' section: a link, or 'none'"]),
+    ...(real(f.design) ? [] : ["missing a '## Design' section: the design, or 'none' in the tiny and bug lanes"]),
     ...((LANES as readonly string[]).includes(f.lane)
       ? []
       : [`missing a '## Lane' section: one of ${LANES.join(", ")}`]),
@@ -401,36 +404,49 @@ export function prBlock(request: { readonly spec: Spec; readonly approver: Appro
 
 export const NO_DESIGN = "none";
 
-export type DesignHash = { readonly kind: "design"; readonly hash: string } | Refused;
+const DESIGN_LANES: ReadonlySet<Lane> = new Set(["feature", "one-way door"]);
 
-export function designPath(at: { readonly root: string } & Ticket): SpecPath {
-  const spec = specPath(at);
-  return spec.kind === "path" ? { kind: "path", path: join(dirname(spec.path), "design.md") } : spec;
+function withoutLinks(design: string): string {
+  return design
+    .replace(/\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/https?:\/\/\S*/g, " ")
+    .replace(/[A-Za-z0-9._/-]*\.md\b/g, " ");
 }
 
-function hashOfDesign(text: string, where: string): DesignHash {
-  const hidden = hiddenProblems(normalise(text));
-  return hidden.length > 0
-    ? { kind: "refused", reason: `${where} holds ${hidden.join("; ")}` }
-    : { kind: "design", hash: specHash(text) };
-}
-
-async function localDesign(at: { readonly root: string } & Ticket): Promise<DesignHash> {
-  const path = designPath(at);
-  if (path.kind === "refused") {
-    return path;
+export function designProblems(spec: Pick<Spec, "lane" | "design">): readonly string[] {
+  if (!DESIGN_LANES.has(spec.lane)) {
+    return [];
   }
+  if (spec.design.trim().toLowerCase() === NO_DESIGN) {
+    return [`the ${spec.lane} lane needs a design: write it in the '## Design' section, not 'none'`];
+  }
+  return /\p{L}/u.test(withoutLinks(spec.design))
+    ? []
+    : [
+        `the ${spec.lane} lane needs the design's text in the '## Design' section: the hash binds that text, never what a link points to`,
+      ];
+}
+
+async function leftoverDesign(request: { readonly store: SpecStore } & Ticket): Promise<readonly string[]> {
+  if (request.store.kind !== "local") {
+    return [];
+  }
+  const spec = specPath({ root: request.store.root, project: request.project, ticket: request.ticket });
+  if (spec.kind === "refused") {
+    return [spec.reason];
+  }
+  const path = join(dirname(spec.path), "design.md");
   try {
-    return hashOfDesign(await readFile(path.path, "utf8"), path.path);
+    await access(path);
+    return [`${path} is not read any more: move its text into the spec's '## Design' section and delete the file`];
   } catch (error: unknown) {
-    return missingFile(error)
-      ? { kind: "design", hash: NO_DESIGN }
-      : { kind: "refused", reason: `cannot read ${path.path}: ${String(error)}` };
+    return missingFile(error) ? [] : [`cannot read ${path}: ${String(error)}`];
   }
 }
 
-export function designHash(request: { readonly store: SpecStore } & Ticket): Promise<DesignHash> {
-  return request.store.kind === "local"
-    ? localDesign({ root: request.store.root, project: request.project, ticket: request.ticket })
-    : Promise.resolve({ kind: "design", hash: NO_DESIGN });
+export async function beforeApproval(
+  request: { readonly store: SpecStore } & Ticket,
+  spec: Pick<Spec, "lane" | "design">,
+): Promise<readonly string[]> {
+  return [...(await leftoverDesign(request)), ...designProblems(spec)];
 }

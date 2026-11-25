@@ -114,7 +114,7 @@ describe("turnPing: what the person reads", () => {
   });
 
   it("says a design note is the design review's, and a green gate's head", () => {
-    const note: Action = { kind: "design-note", spec: "s", design: "d", why: "no further design review (round cap)" };
+    const note: Action = { kind: "design-note", spec: "s", why: "no further design review (round cap)" };
     expect(turnPing({ state: state(), action: note, change: "none" })).toMatchObject({
       why: "design review: no further design review (round cap)",
     });

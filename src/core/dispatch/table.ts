@@ -158,10 +158,10 @@ export type Action =
   | { readonly kind: "ready"; readonly head: string }
   | { readonly kind: "review"; readonly head: string }
   | { readonly kind: "verify"; readonly head: string }
-  | { readonly kind: "design"; readonly step: DesignStep; readonly spec: string; readonly design: string }
+  | { readonly kind: "design"; readonly step: DesignStep; readonly spec: string }
   | { readonly kind: "held"; readonly why: string; readonly ping: boolean }
   | { readonly kind: "blockers-unread"; readonly why: string }
-  | { readonly kind: "design-note"; readonly spec: string; readonly design: string; readonly why: string }
+  | { readonly kind: "design-note"; readonly spec: string; readonly why: string }
   | { readonly kind: "needs-human"; readonly why: string; readonly run?: RunFolder }
   | { readonly kind: "release"; readonly wait: WaitKind; readonly why: string }
   | { readonly kind: "ping"; readonly head: string }
@@ -215,7 +215,10 @@ type HeldMap = { readonly [V in Held as V["kind"]]: V };
 export type Waiting = { readonly wait: WaitKind; readonly why: string };
 
 const HELD: { readonly [K in keyof HeldMap]: (view: HeldMap[K]) => Waiting } = {
-  stale: () => ({ wait: "approval-stale", why: "the spec or its design changed after its approval" }),
+  stale: () => ({
+    wait: "approval-stale",
+    why: "the spec changed after its approval, or its approval bound a design file",
+  }),
   missing: () => ({ wait: "no-start", why: "the ticket has no START and no approval" }),
   unapproved: (v) => ({
     wait: "start-only",
@@ -241,8 +244,8 @@ type DesignMap = { readonly [V in DesignView as V["kind"]]: V };
 const DESIGN: { readonly [K in keyof DesignMap]: (d: DesignMap[K]) => Action | "next" } = {
   off: () => "next",
   done: () => "next",
-  run: (d) => ({ kind: "design", step: d.step, spec: d.spec, design: d.design }),
-  note: (d) => ({ kind: "design-note", spec: d.spec, design: d.design, why: d.why }),
+  run: (d) => ({ kind: "design", step: d.step, spec: d.spec }),
+  note: (d) => ({ kind: "design-note", spec: d.spec, why: d.why }),
   held: (d) => ({ kind: "wait", wait: d.wait, why: d.why }),
   later: (d) => ({
     kind: "wait",

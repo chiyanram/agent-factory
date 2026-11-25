@@ -8,7 +8,6 @@
 
 import { parseArgs } from "node:util";
 import { realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join } from "node:path";
 import { homedir, userInfo } from "node:os";
@@ -17,9 +16,8 @@ import { openProject, openProjectForge } from "./core/forge/index.js";
 import { checkedSetup } from "./core/origin.js";
 import type { Forge } from "./core/forge/types.js";
 import {
+  beforeApproval,
   checkSpec,
-  designHash,
-  designPath,
   plainName,
   readSpec,
   template,
@@ -30,7 +28,7 @@ import {
 import { plannedCheck, raisedWhy } from "./core/lane.js";
 import { brokenCites, specCites } from "./core/spec-cites.js";
 import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
-import { approvalState } from "./core/approval.js";
+import { approvalState, staleWhy } from "./core/approval.js";
 import { readWaiver } from "./core/waiver.js";
 import { approveAtTerminal, startAtTerminal, waiveAtTerminal } from "./core/door/terminal.js";
 import type { Result } from "./core/forge/api.js";
@@ -146,11 +144,10 @@ export const HELP_COMMANDS = `  poll                         one line of facts p
                                first, exit 3, when factory/<ticket> is already on the git host; --yes is the answer.
                                It starts the orchestrator loop in the background when none runs (--no-loop: not).
                                A human runs it; the coordinator's settings deny it
-  approve <project> <ticket> <hash> [<design hash>] [--no-loop]
-                               record the human's approval of the spec and the design with exactly those hashes (all 64
-                               characters, as spec printed them; no design hash is none), and start the orchestrator
-                               loop in the background when none runs (--no-loop: not). A human runs it; the
-                               coordinator's settings deny it
+  approve <project> <ticket> <hash> [--no-loop]
+                               record the human's approval of the spec, its ## Design included, with exactly the hash
+                               spec printed (all 64 characters), and start the orchestrator loop in the background
+                               when none runs (--no-loop: not). A human runs it; the coordinator's settings deny it
   waive <project> <ticket> <head>
                                record the human's waiver of the test checks at that head (the full commit id the
                                hits were listed at): the ready check clears them, and flags a cleared file again only
@@ -475,17 +472,12 @@ async function specFound(
     io.err(`agent-factory spec: ${read.where} is not ready:\n${checked.problems.map((p) => `  - ${p}\n`).join("")}`);
     return 2;
   }
-  const design = await designHash(at);
-  if (design.kind === "refused") {
-    io.err(`agent-factory spec: ${design.reason}\n`);
-    return 1;
-  }
   const before = await beforeDesignReview(io, at, checked.spec, read.text);
   if (before.length > 0) {
     io.err(`agent-factory spec: ${read.where} is not ready:\n${before.map((p) => `  - ${p}\n`).join("")}`);
     return 2;
   }
-  io.out(`spec ${at.project}/${at.ticket} ${checked.spec.hash} ${read.where}\ndesign ${design.hash}\n`);
+  io.out(`spec ${at.project}/${at.ticket} ${checked.spec.hash} ${read.where}\n`);
   return 0;
 }
 
@@ -493,7 +485,7 @@ async function beforeDesignReview(io: Io, at: SpecWhere, read: Spec, text: strin
   const raise = await plannedCheck({ home: at.home, project: at.project, spec: read });
   const raised =
     raise.kind === "failed" ? [raise.reason] : raise.value.kind === "raised" ? [raisedWhy(raise.value)] : [];
-  return [...raised, ...(await citesChecked(io, [text, await designTextOf(at)]))];
+  return [...(await beforeApproval(at, read)), ...raised, ...(await citesChecked(io, [text]))];
 }
 
 async function citesChecked(io: Io, texts: readonly string[]): Promise<readonly string[]> {
@@ -512,14 +504,6 @@ function noClone(clone: string): string {
   return clone === ""
     ? "no clone set (FACTORY_REPO)"
     : `FACTORY_REPO must be an absolute path, got ${JSON.stringify(clone)}`;
-}
-
-async function designTextOf(at: SpecWhere): Promise<string> {
-  if (at.store.kind !== "local") {
-    return "";
-  }
-  const path = designPath({ root: at.store.root, project: at.project, ticket: at.ticket });
-  return path.kind === "path" ? readFile(path.path, "utf8").catch(() => "") : "";
 }
 
 async function branchOnHost(io: Io, home: string, project: string, ticket: string): Promise<Result<boolean>> {
@@ -618,19 +602,27 @@ function startOutcome(io: Io, result: Awaited<ReturnType<typeof startAtTerminal>
   }
 }
 
-type ApproveArgs = TicketArgs & { readonly hash: string; readonly design: string };
+type ApproveArgs = TicketArgs & { readonly hash: string };
 
-function approveArgs(positionals: readonly string[]): ApproveArgs | "bad" {
-  const [project, ticket, hash, design] = [...positionals, "none"];
-  const given = positionals.length >= 3 && positionals.length <= 4;
-  return given ? { project, ticket: String(ticket), hash: String(hash), design: String(design) } : "bad";
+function approveArgs(positionals: readonly string[]): ApproveArgs | "bad" | "two" {
+  const [project, ticket, hash] = positionals;
+  if (positionals.length === 4) {
+    return "two";
+  }
+  return positionals.length === 3 ? { project: String(project), ticket: String(ticket), hash: String(hash) } : "bad";
 }
 
 async function approveCommand({ positionals, noLoop, io }: Args): Promise<number> {
   const args = approveArgs(positionals);
+  if (args === "two") {
+    io.err(
+      "agent-factory approve: refused: give the one hash agent-factory spec printed; the design is the spec's ## Design section, so the spec's hash binds it\n",
+    );
+    return 64;
+  }
   if (args === "bad") {
     io.err(
-      "usage: agent-factory approve <project> <ticket> <the full spec hash> [<the design hash>] [--no-loop], as agent-factory spec printed them\n",
+      "usage: agent-factory approve <project> <ticket> <the full hash> [--no-loop], as agent-factory spec printed it\n",
     );
     return 64;
   }
@@ -651,7 +643,6 @@ async function approveResolved(args: ApproveArgs, noLoop: boolean, io: Io): Prom
   const result = await approveAtTerminal(io.env, {
     where: at.where,
     seenHash: args.hash,
-    seenDesign: args.design,
     at: new Date().toISOString(),
   });
   if (result.kind === "refused") {
@@ -659,7 +650,7 @@ async function approveResolved(args: ApproveArgs, noLoop: boolean, io: Io): Prom
     return 1;
   }
   const r = result.record;
-  io.out(`approved ${project}/${ticket} spec ${r.spec_hash} design ${r.design_hash} by ${r.by} at ${r.at}\n`);
+  io.out(`approved ${project}/${ticket}, the hash ${r.spec_hash}, by ${r.by} at ${r.at}\n`);
   return noLoop ? 0 : withLoop("approve", io, project);
 }
 
@@ -710,13 +701,11 @@ async function approvalResolved(io: Io, project: string, ticket: string): Promis
   switch (state.kind) {
     case "approved":
       io.out(
-        `approved ${project}/${ticket} spec ${state.record.spec_hash} design ${state.record.design_hash} by ${state.record.by} at ${state.record.at}\n`,
+        `approved ${project}/${ticket}, the hash ${state.record.spec_hash}, by ${state.record.by} at ${state.record.at}\n`,
       );
       return 0;
     case "stale":
-      io.out(
-        `stale ${project}/${ticket}: approved ${state.part} ${state.approvedHash}, now ${state.currentHash}; approve again\n`,
-      );
+      io.out(`${staleWhy(`${project}/${ticket}`, state)}\n`);
       return 3;
     case "missing":
       io.out(`missing ${project}/${ticket}: not approved\n`);

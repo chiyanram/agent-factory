@@ -7,9 +7,9 @@ What a ticket carries into a build, where it lives, and what is decided next. Th
 ## What a ticket carries
 
 ```text
- spec ──▶ design (bug, feature, one-way door) ──▶ design review ──▶ human approval ──▶ build
- intent · lane · ACs     decisions, types,          design-reviewer      binds the spec hash
- design link · planned   file placement              + verify pass        and the design hash
+ spec with ## Design (feature, one-way door) ──▶ design review ──▶ human approval ──▶ build
+ intent · lane · ACs     decisions, types,          design-reviewer      binds the one hash,
+ design · planned        file placement              + verify pass        the spec's
  files                                                                    any edit = stale
                         every run also reads: brief.md · glossary.md (the project home)
 ```

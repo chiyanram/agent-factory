@@ -668,22 +668,16 @@ describe("the design review before the approval, and no cleanup run after the im
   );
 
   it("a design review due runs the design-reviewer, then the verify pass, before the approval rule waits", () => {
-    expect(decide(state({ ...before, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } }))).toEqual(
-      {
-        kind: "design",
-        step: "review",
-        spec: SPEC_H,
-        design: "none",
-      },
-    );
-    expect(decide(state({ ...before, design: { kind: "run", step: "verify", spec: SPEC_H, design: "none" } }))).toEqual(
-      {
-        kind: "design",
-        step: "verify",
-        spec: SPEC_H,
-        design: "none",
-      },
-    );
+    expect(decide(state({ ...before, design: { kind: "run", step: "review", spec: SPEC_H } }))).toEqual({
+      kind: "design",
+      step: "review",
+      spec: SPEC_H,
+    });
+    expect(decide(state({ ...before, design: { kind: "run", step: "verify", spec: SPEC_H } }))).toEqual({
+      kind: "design",
+      step: "verify",
+      spec: SPEC_H,
+    });
     expect(decide(state({ ...before, design: { kind: "done" } }))).toEqual({
       kind: "wait",
       wait: "start-only",
@@ -714,15 +708,16 @@ describe("the design review before the approval, and no cleanup run after the im
     const caps = { ...NO_CAPS, ticket: { usd: 1, tokens: "none" } } as const;
     const runs = { ...EMPTY, spent: { usd: 2, tokens: 10 } };
     expect(
-      decide(state({ ...before, runs, caps, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } })),
+      decide(state({ ...before, runs, caps, design: { kind: "run", step: "review", spec: SPEC_H } })),
     ).toMatchObject({ kind: "needs-human" });
   });
 
   it("a design run that never ended is a failed try, never a person's to check", () => {
     const runs = { ...EMPTY, interrupted: { kind: "interrupted", phase: "design-review", at: APPROVED_AT } } as const;
-    expect(
-      decide(state({ ...before, runs, design: { kind: "run", step: "review", spec: SPEC_H, design: "none" } })),
-    ).toMatchObject({ kind: "design", step: "review" });
+    expect(decide(state({ ...before, runs, design: { kind: "run", step: "review", spec: SPEC_H } }))).toMatchObject({
+      kind: "design",
+      step: "review",
+    });
   });
 
   it("the implementer's done run goes straight to the ready check, then the review; no cleanup task is chosen", () => {
@@ -771,7 +766,7 @@ describe("the design review before the approval, and no cleanup run after the im
   });
 
   it("the orchestrator loop carries a design run and its backoff, and stops when the review waits on a person (#305)", () => {
-    const run = { kind: "run", step: "review", spec: SPEC_H, design: "none" } as const;
+    const run = { kind: "run", step: "review", spec: SPEC_H } as const;
     expect(inFlight(state({ ...before, design: run }))).toBe(true);
     expect(
       inFlight(state({ ...before, design: { kind: "later", step: "review", at: "2026-11-07T10:00:20.000Z" } })),
@@ -1070,7 +1065,7 @@ describe("can it get stuck? (#485)", () => {
   ];
   const designs: readonly TicketState["design"][] = [
     { kind: "off" },
-    { kind: "run", step: "review", spec: "a".repeat(64), design: "none" },
+    { kind: "run", step: "review", spec: "a".repeat(64) },
     { kind: "later", step: "verify", at: "2026-11-07T11:00:00Z" },
     {
       kind: "stopped",
@@ -1081,7 +1076,6 @@ describe("can it get stuck? (#485)", () => {
     {
       kind: "note",
       spec: "a".repeat(64),
-      design: "none",
       why: "no further design review (round cap): the person decides",
     },
     {

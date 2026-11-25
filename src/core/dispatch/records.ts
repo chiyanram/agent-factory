@@ -25,8 +25,8 @@
 // value of the wrong shape there is dropped, not failed, since no count, cap or decision reads it (agent/ran.ts).
 //
 // A design review runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
-// a "started" line and a "design-ended" line that names the spec and design hashes it read, the role card's hash, its
-// findings or what the verify pass kept, and its spend, whether it finished or failed. design.ts reads them per hashes.
+// a "started" line and a "design-ended" line that names the spec hash it read (an old line also a design hash), the
+// card's hash, its findings or what the verify pass kept, and its spend, whether it finished or failed (design.ts).
 //
 // Old lines stay readable: each field added after the first lines is optional, and a line that lacks it reads as the
 // old behaviour. Before a ticket has a "turn" line, seedTurn reads the turn from its older lines. The "turn" and
@@ -211,7 +211,7 @@ export type Event =
       readonly kind: "design-ended";
       readonly step: DesignStep;
       readonly spec: string;
-      readonly design: string;
+      readonly design?: string;
       readonly outcome: "done" | "failed";
       readonly why: string;
       readonly findings: readonly DesignFinding[];
@@ -229,7 +229,7 @@ export type Event =
       readonly at: string;
       readonly kind: "design-noted";
       readonly spec: string;
-      readonly design: string;
+      readonly design?: string;
       readonly why: string;
     }
   | { readonly at: string; readonly kind: "pinged"; readonly head: string }
@@ -619,9 +619,9 @@ type DesignParts = Pick<Extract<Event, { kind: "design-ended" }>, "step" | "spec
 
 function designTexts(raw: unknown): Pick<DesignParts, "spec" | "design" | "why"> | Bad {
   const spec = str(raw, "spec");
-  const design = str(raw, "design");
+  const design = optionalText(raw, "design");
   const why = str(raw, "why");
-  return spec === BAD || design === BAD || why === BAD ? BAD : { spec, design, why };
+  return spec === BAD || design === "bad" || why === BAD ? BAD : { spec, ...design, why };
 }
 
 function designParts(raw: unknown): DesignParts | Bad {
@@ -907,7 +907,7 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good), ...runsIn(raw) };
 }
 
-function optionalText(raw: unknown, name: "asked" | "chosen"): { readonly [k: string]: string } | "bad" {
+function optionalText(raw: unknown, name: "asked" | "chosen" | "design"): { readonly [k: string]: string } | "bad" {
   const v = prop(raw, name);
   if (v === undefined) {
     return {};

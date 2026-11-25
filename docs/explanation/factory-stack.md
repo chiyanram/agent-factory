@@ -22,7 +22,7 @@ eval baseline live in our files, not in an agent product.
 | component | agent-factory | state |
 |---|---|---|
 | Governance | the [ADR-0012](../adr/0012-safety-design-for-unattended-runs.md) guardrails, the plugin policy points, settings in layers | in place |
-| Human in the loop | START, approval bound to the spec and design hashes, `confirm` on a policy point | in place |
+| Human in the loop | START, approval bound to the spec's one hash, its design included, `confirm` on a policy point | in place |
 | Orchestration | the dispatch loop and the lanes | in place |
 | Engineering intelligence | `usage`, `trace`, `board`, the timeline line, `retro` | in place |
 | AI observability and evals | run traces; the automated review's eval set and [ADR-0021](../adr/0021-keep-a-change-only-by-experiment.md) | in place |

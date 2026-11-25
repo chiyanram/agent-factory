@@ -103,7 +103,9 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
 3. **Write the contract.** Write the spec where the project's `specStore` keeps it (`agent-factory config show
    <project>`). `local`, the default and the rule at work: `$FACTORY_HOME/specs/<project>/<ticket>/spec.md`. `issue`,
    on a personal project: the body of the git host issue whose number is the ticket (#381); an edit to it makes its
-   approval stale. To change a spec in either store, read its text first with
+   approval stale. The design goes in the spec's own `## Design` section, so the spec's one hash binds it: write the
+   design's text there, never a `design.md` beside the spec; a link may sit beside the text as context, but the hash
+   never binds what a link points to. To change a spec in either store, read its text first with
    `agent-factory spec <project> <ticket> --show`, which prints it as stored whether or not it passes the checks
    (#542); never fetch it with a shell or write it from memory. With `issue`, write the new body to
    `$FACTORY_HOME/specs/<project>/<issue number>/spec.md` (`agent-factory spec --template <issue number>` prints an
@@ -120,7 +122,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    ticket under factory, waiting on the gate. Done when a stranger with no chat could build the change from the spec alone
    and `agent-factory spec <project> <ticket>` exits 0: run it at the end of this step, before any design review. It
    stops (exit 2) a spec whose `## Planned files` need a heavier lane than its own, a `## Blocked by` line that is not
-   one ticket, and a cite that does not hold in the project's clone (#489).
+   one ticket, and a cite that does not hold in the project's clone; in the feature and one-way-door lanes also
+   a `## Design` that is `none` or only links, and in every lane a `design.md` left beside the spec.
 4. **Design review and approval.** You do not start a design review: in a lane with one (bug, feature and one-way door
    by default), the orchestrator runs it once the spec is ready, and its kept findings go to the PR and the log, and
    the person is pinged once the ticket waits on them. Its findings feed **one grill round**: ask every CONFLICT and OPEN at once and write the answers into the
@@ -128,8 +131,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    implementer must report (#489). Your edit is reviewed again only for an Act on CONFLICT (at most 2 rounds) or for a
    lane or Planned files no round has read (at most 2 more); past that the person is told once and decides (the
    reference). A raised lane holds the review: raise it in the spec. When the
-   person is ready, run `agent-factory spec <project> <ticket>`, show them the spec and design hashes, and ask them to
-   run `agent-factory approve <project> <ticket> <spec hash> [<design hash>]` in their own terminal. An approval given
+   person is ready, run `agent-factory spec <project> <ticket>`, show them the spec and the hash, and ask them to run
+   `agent-factory approve <project> <ticket> <hash>` in their own terminal. An approval given
    before the review's findings does not let the build begin. A tiny ticket needs only the person's
    `agent-factory start <project> <ticket>`.
 5. **Watch the queue.** The orchestrator runs every step from there (see the reference). You answer the person's

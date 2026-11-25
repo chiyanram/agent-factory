@@ -40,7 +40,7 @@ const SPEC = [
   "",
   "## Design",
   "",
-  "none",
+  "One check in the service; no new module.",
   "",
   "## Lane",
   "",

@@ -56,11 +56,11 @@ prints its hash.
 
 ```bash
 agent-factory start <project> <ticket>
-agent-factory approve <project> <ticket> <spec hash> [<design hash>]    # bug, feature, one-way door
+agent-factory approve <project> <ticket> <hash>    # bug, feature, one-way door
 ```
 
 `start` opens the ticket and starts the orchestrator loop. In the tiny lane that is all; above it, the design review
-runs, and the build waits for your `approve` with the hashes `spec` printed. Only you run these; the coordinator's
+runs, and the build waits for your `approve` with the hash `spec` printed. Only you run these; the coordinator's
 settings deny them.
 
 ## 6. Merge
