@@ -23,7 +23,7 @@ import { goAhead, type GoAhead } from "../start.js";
 import type { LaneProps } from "../lane.js";
 import type { BoxToken } from "../token/rules.js";
 import type { Task } from "../dispatch/records.js";
-import { BRANCH_PREFIX, type RunInput, type Steps } from "../dispatch/steps.js";
+import { BRANCH_PREFIX, type RunInput, type Steps, type WriterRan } from "../dispatch/steps.js";
 import { fastForwardOnly, finishFirst, finishRun, seatOnEvery, type Next, type Pusher } from "../finish.js";
 import type { Done, Result } from "../forge/api.js";
 import type { Forge, ForgeName } from "../forge/types.js";
@@ -44,7 +44,7 @@ import { DEFAULT_MODEL, runsField, type RunNamed } from "../agent/ran.js";
 import { knownFor, type Known } from "../onboard/known.js";
 import { knowledgeLines, runPrompt, type RunMode } from "./prompt.js";
 import { spentFailure, type FailedSpent, type Spend } from "../dispatch/spend.js";
-import type { EndReason } from "../end-reason.js";
+import type { BlockedReason, EndReason } from "../end-reason.js";
 import { NO_TRACE, openTrace, type TraceKept, type TraceSink } from "../dispatch/trace.js";
 import { writerRun, type Ended } from "./run.js";
 import { keepOutput, whyOf, whyText, withSaid } from "./why.js";
@@ -92,8 +92,6 @@ export type WriterSetup = {
 type Input = RunInput & { readonly task: Task; readonly folder: string };
 export type WriterOut = {
   readonly head: string;
-  readonly outcome: "done" | "asked" | "blocked" | "parked";
-  readonly parked?: { readonly until: string; readonly said: string };
   readonly patch: string;
   readonly evidence: readonly Evidence[];
   readonly hung: boolean;
@@ -105,8 +103,7 @@ export type WriterOut = {
   readonly output?: string;
   readonly trace?: string;
   readonly runs?: readonly RunNamed[];
-  readonly reason?: EndReason;
-};
+} & WriterRan;
 
 function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
   return outcome.kind === "done" && outcome.deferred !== undefined ? { deferred: outcome.deferred } : {};
@@ -148,17 +145,35 @@ export function outOf(ended: Ended, next: Next): WriterOut {
     ...spendField(ended.spend),
     ...deferredOf(ended.outcome),
     ...traceField(ended.trace),
-    reason: ended.reason,
   };
   switch (next.kind) {
     case "ready-check":
-      return { ...base, outcome: "done", evidence: next.evidence };
+      return { ...base, outcome: "done", reason: "done", evidence: next.evidence };
     case "wait-for-answer":
-      return { ...base, outcome: "asked", evidence: [], ...whyField(whyOf(ended.outcome, ended.said)) };
+      return { ...base, ...ASKED, evidence: [], ...whyField(whyOf(ended.outcome, ended.said)) };
     case "needs-human":
-      return { ...base, outcome: "blocked", evidence: [], ...whyField(nextWhy(ended, next)) };
+      return { ...base, ...blockedEnd(ended.reason), evidence: [], ...whyField(nextWhy(ended, next)) };
     case "parked":
-      return { ...base, head: next.head, outcome: "parked", evidence: [], ...parkedField(ended.outcome) };
+      return { ...base, head: next.head, ...ranOf(ended.outcome, ended.reason), evidence: [] };
+  }
+}
+
+const ASKED = { outcome: "asked", reason: "asked" } as const;
+
+function blockedEnd(reason: EndReason): { readonly outcome: "blocked"; readonly reason: BlockedReason } {
+  return { outcome: "blocked", reason: reason === "usage_limit" ? "unknown" : reason };
+}
+
+function ranOf(outcome: Outcome, reason: EndReason): WriterRan {
+  switch (outcome.kind) {
+    case "done":
+      return { outcome: "done", reason: "done" };
+    case "asked":
+      return ASKED;
+    case "blocked":
+      return blockedEnd(reason);
+    case "parked":
+      return { outcome: "parked", reason: "usage_limit", ...parkedField(outcome) };
   }
 }
 
@@ -326,15 +341,13 @@ async function finished(
       kind: "ok",
       value: {
         head: ended.tip,
-        outcome: outcome.kind,
-        ...parkedField(outcome),
+        ...ranOf(outcome, ended.reason),
         patch: "",
         evidence: [],
         hung: ended.ending.kind === "hung",
         ...spendField(ended.spend),
         ...whyField(whyOf(outcome, ended.said)),
         ...traceField(ended.trace),
-        reason: ended.reason,
       },
     };
   }

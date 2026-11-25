@@ -42,7 +42,7 @@ import { issuesFrom, specStoreOf } from "../spec-store.js";
 import { brokenCites } from "../spec-cites.js";
 import { checkCites } from "../cite-check.js";
 import { DESIGN_SCHEMA, keep, readDesignFindings, type DesignFinding, type Kept } from "./findings.js";
-import type { EndReason } from "../end-reason.js";
+import type { FailedReason } from "../end-reason.js";
 
 export type DesignSetup = {
   readonly home: string;
@@ -298,7 +298,7 @@ function spent(ran: ModelResult): Spend | undefined {
 function failedRun(ran: Extract<ModelResult, { kind: "failed" }>): {
   readonly kind: "failed";
   readonly why: string;
-  readonly end: EndReason;
+  readonly end: FailedReason;
 } {
   return { kind: "failed", why: `the model run failed: ${ran.reason}`, end: ran.end ?? "unknown" };
 }

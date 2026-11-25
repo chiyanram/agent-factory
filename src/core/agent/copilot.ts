@@ -40,7 +40,7 @@ import { settingName } from "../settings/machine.js";
 import type { BoxToken } from "../token/index.js";
 import { timed, type FolderRunner } from "./folder.js";
 import { MODEL_RUN_MARK } from "./mark.js";
-import type { EndReason } from "../end-reason.js";
+import type { FailedReason } from "../end-reason.js";
 
 const COPILOT_TOOLS: readonly (readonly [string, string])[] = [
   ["Read", "view"],
@@ -120,7 +120,7 @@ export type CopilotResult =
       readonly reason: string;
       readonly stream?: string;
       readonly seconds?: number;
-      readonly end?: EndReason;
+      readonly end?: FailedReason;
     };
 
 export type CopilotModel = (run: ModelRun) => Promise<CopilotResult>;

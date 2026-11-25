@@ -95,7 +95,7 @@ import { keptLine, toVerify, type DesignFinding, type Kept } from "../design/fin
 import { needsDesignReview } from "../lane.js";
 import type { FailedSpent, RoundSpend, Spend } from "./spend.js";
 import { refusedLine } from "./refused.js";
-import type { EndReason } from "../end-reason.js";
+import type { FailedReason } from "../end-reason.js";
 import type { Acted, FoundByRule } from "../review/acted-on.js";
 import { heldWords, overCaps, projectStop, type Caps, type Stop } from "./caps.js";
 import { openAt } from "./hours.js";
@@ -823,13 +823,11 @@ async function startWriter(
   if (ran.kind !== "ok") {
     return failedSpent(setup, state, headOf(state), ran, "writer");
   }
-  const { outcome, parked: _parked, ...rest } = ran.value;
-  return outcome === "parked"
-    ? writerParked(setup, state, task, ran.value)
-    : writerEnded(setup, state, mode, { ...rest, outcome });
+  const value = ran.value;
+  return value.outcome === "parked" ? writerParked(setup, state, task, value) : writerEnded(setup, state, mode, value);
 }
 
-function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Event, { kind: "parked" }> {
+function parkedEvent(when: string, task: Task, value: ParkedValue): Extract<Event, { kind: "parked" }> {
   const { until, said } = value.parked ?? { until: "unknown", said: value.why ?? "" };
   const parkedTask = parkedTaskOf(task);
   return {
@@ -846,7 +844,7 @@ function parkedEvent(when: string, task: Task, value: WriterValue): Extract<Even
   };
 }
 
-async function writerParked(setup: TickSetup, state: TicketState, task: Task, value: WriterValue): Promise<Logged> {
+async function writerParked(setup: TickSetup, state: TicketState, task: Task, value: ParkedValue): Promise<Logged> {
   const event = parkedEvent(at(setup), task, value);
   const kept = await record({ where: where(setup, state), event });
   if (kept.kind === "failed") {
@@ -879,7 +877,8 @@ type WriterValue = Extract<
   { kind: "ok" }
 >["value"];
 
-type EndedValue = Omit<WriterValue, "outcome" | "parked"> & { readonly outcome: "done" | "asked" | "blocked" };
+type EndedValue = Exclude<WriterValue, { readonly outcome: "parked" }>;
+type ParkedValue = Extract<WriterValue, { readonly outcome: "parked" }>;
 
 async function writerEnded(
   setup: TickSetup,
@@ -1226,8 +1225,8 @@ function readField(read: SpecRead | "none"): Partial<SpecRead> {
 
 function failedDesign(v: {
   readonly why: string;
-  readonly end?: EndReason;
-}): Pick<DesignEnded, "outcome" | "why" | "findings" | "kept" | "reason"> {
+  readonly end?: FailedReason;
+}): Pick<Extract<DesignEnded, { outcome: "failed" }>, "outcome" | "why" | "findings" | "kept" | "reason"> {
   return { outcome: "failed", why: v.why, findings: [], kept: [], reason: v.end ?? "unknown" };
 }
 

@@ -24,13 +24,15 @@
 // "parked", "design-ended") names each run's CLI, asked model, and the version and model the CLI reported (runs). A
 // value of the wrong shape there is dropped, not failed, since no count, cap or decision reads it (agent/ran.ts).
 //
-// Every line that ends a run (writer-ended, design-ended, review-ended, ready-ended, verify-ended, parked, spent) may
-// name how it ended, a reason from end-reason.ts's closed list; outcome, passed and actOn still decide, so the reason
-// never changes what the table does. closedReason reads it, and maps a line written without one from its old fields
-// only, never from its why. A failed writer, review, ready or verify run always writes its "spent" line, with no spend
-// when none was measured; such a line spends nothing and is no activity. A step that cannot run writes a
-// "setup-refused" line once per cause (refused.ts); it ends no run and is no activity. Older code refuses both of
-// those lines, and reads past a reason. **Today:** no command prints a reason; only the tests read closedReason.
+// Every line that ends a run (writer-ended, design-ended, review-ended, ready-ended, verify-ended, parked, spent)
+// names how it ended, a reason from end-reason.ts's closed list that its outcome takes; outcome, passed and actOn still
+// decide, so the reason never changes what the table does. A line written without one reads with the reason its old
+// fields give, never its why, and a pair its outcome refuses fails the read. A failed writer, review, ready or verify
+// run always writes its "spent" line, with no spend when none was measured; such a line spends nothing and is no
+// activity. A step that cannot run writes a "setup-refused" line once per cause (refused.ts). It is no ended line,
+// because no run started: the table reads past it, and the pass tries the step again. It is no activity either. Older
+// code refuses both of those lines, and reads past a reason. **Today:** no command prints a reason; only the tests
+// read closedReason.
 //
 // A design review runs before the human's approval: a design-reviewer run, then a verify pass, each recorded by
 // a "started" line and a "design-ended" line that names the spec hash it read (an old line also a design hash), the
@@ -62,7 +64,15 @@ import { BUCKETS } from "../finding.js";
 import type { Rescue } from "./timeline.js";
 import type { Lane as TurnLane } from "./next-step.js";
 import { prop, codeOf } from "../field.js";
-import { isEndReason, type EndReason } from "../end-reason.js";
+import {
+  agrees,
+  DESIGN_REASONS,
+  isEndReason,
+  WRITER_REASONS,
+  type DesignEnd,
+  type EndReason,
+  type WriterEnd,
+} from "../end-reason.js";
 import { asksOf, runsField, runsOf, type Asks, type RunNamed } from "../agent/ran.js";
 import type { HeldLock } from "../lock.js";
 
@@ -138,12 +148,11 @@ export type Event =
       readonly cli?: string;
       readonly asks?: Asks;
     }
-  | {
+  | ({
       readonly at: string;
       readonly kind: "writer-ended";
       readonly mode: WriterMode;
       readonly head: string;
-      readonly outcome: "done" | "asked" | "blocked";
       readonly patch: string;
       readonly evidence: readonly Evidence[];
       readonly hung: boolean;
@@ -156,8 +165,7 @@ export type Event =
       readonly output?: string;
       readonly trace?: string;
       readonly runs?: readonly RunNamed[];
-      readonly reason?: EndReason;
-    }
+    } & WriterEnd)
   | {
       readonly at: string;
       readonly kind: "ready-ended";
@@ -168,7 +176,7 @@ export type Event =
       readonly nextTry?: NextTry;
       readonly lane?: Lane;
       readonly programs?: readonly string[];
-      readonly reason?: EndReason;
+      readonly reason: "done";
     }
   | {
       readonly at: string;
@@ -176,7 +184,7 @@ export type Event =
       readonly head: string;
       readonly passed: boolean;
       readonly nextTry?: NextTry;
-      readonly reason?: EndReason;
+      readonly reason: "done";
     }
   | {
       readonly at: string;
@@ -193,7 +201,7 @@ export type Event =
       readonly found?: FoundByRule;
       readonly traces?: readonly string[];
       readonly runs?: readonly RunNamed[];
-      readonly reason?: EndReason;
+      readonly reason: "done";
     }
   | {
       readonly at: string;
@@ -205,7 +213,7 @@ export type Event =
       readonly split?: RoundSpend;
       readonly traces?: readonly string[];
       readonly runs?: readonly RunNamed[];
-      readonly reason?: EndReason;
+      readonly reason: EndReason;
     }
   | {
       readonly at: string;
@@ -219,15 +227,14 @@ export type Event =
       readonly copilot?: CopilotRuns;
       readonly trace?: string;
       readonly runs?: readonly RunNamed[];
-      readonly reason?: EndReason;
+      readonly reason: "usage_limit";
     }
-  | {
+  | ({
       readonly at: string;
       readonly kind: "design-ended";
       readonly step: DesignStep;
       readonly spec: string;
       readonly design?: string;
-      readonly outcome: "done" | "failed";
       readonly why: string;
       readonly findings: readonly DesignFinding[];
       readonly kept: readonly Kept[];
@@ -239,8 +246,7 @@ export type Event =
       readonly planned?: readonly string[];
       readonly trace?: string;
       readonly runs?: readonly RunNamed[];
-      readonly reason?: EndReason;
-    }
+    } & DesignEnd)
   | { readonly at: string; readonly kind: "setup-refused"; readonly phase: Phase; readonly why: string }
   | {
       readonly at: string;
@@ -354,17 +360,42 @@ function runsIn(raw: unknown): { readonly runs?: readonly RunNamed[] } {
   return runsField(runsOf(prop(raw, "runs")));
 }
 
-function reasonField(raw: unknown): { readonly reason?: EndReason } | Bad {
+function reasonOr(raw: unknown, old: EndReason): EndReason | Bad {
   const reason = prop(raw, "reason");
   if (reason === undefined) {
-    return {};
+    return old;
   }
-  return isEndReason(reason) ? { reason } : BAD;
+  return isEndReason(reason) ? reason : BAD;
 }
 
-function ended(event: Event | Bad, raw: unknown): Event | Bad {
-  const reason = reasonField(raw);
-  return event === BAD || reason === BAD ? BAD : { ...event, ...reason };
+function onlyReason<R extends EndReason>(raw: unknown, only: R): { readonly reason: R } | Bad {
+  return reasonOr(raw, only) === only ? { reason: only } : BAD;
+}
+
+function writerEndOf(raw: unknown): WriterEnd | Bad {
+  const outcome = oneOf(raw, "outcome", OUTCOMES);
+  if (outcome === BAD) {
+    return BAD;
+  }
+  const reason = reasonOr(raw, outcome === "blocked" ? "unknown" : outcome);
+  if (reason === BAD) {
+    return BAD;
+  }
+  const end = { outcome, reason };
+  return agrees(WRITER_REASONS, end) ? end : BAD;
+}
+
+function designEndOf(raw: unknown): DesignEnd | Bad {
+  const outcome = oneOf(raw, "outcome", ["done", "failed"] as const);
+  if (outcome === BAD) {
+    return BAD;
+  }
+  const reason = reasonOr(raw, outcome === "done" ? "done" : "unknown");
+  if (reason === BAD) {
+    return BAD;
+  }
+  const end = { outcome, reason };
+  return agrees(DESIGN_REASONS, end) ? end : BAD;
 }
 
 function pluginsOf(raw: unknown): { readonly plugins?: readonly PluginHash[] } {
@@ -473,17 +504,21 @@ function splitField(line: unknown): { readonly split?: RoundSpend } | Bad {
   return verify === BAD || finders === BAD ? BAD : { split: { finders, verify } };
 }
 
+function spentEnd(raw: unknown): { readonly spend?: Spend; readonly reason: EndReason } | Bad {
+  const spend = measuredField(raw);
+  const reason = reasonOr(raw, "unknown");
+  return spend === BAD || reason === BAD ? BAD : { ...spend, reason };
+}
+
 function spentOf(raw: unknown, at: string): Event | Bad {
   const phase = oneOf(raw, "phase", PHASES);
   const head = str(raw, "head");
-  const spend = measuredField(raw);
+  const end = spentEnd(raw);
   if (phase === BAD || head === BAD) {
     return BAD;
   }
   const extras = spentExtras(raw);
-  return spend === BAD || extras === BAD
-    ? BAD
-    : { at, kind: "spent", phase, head, ...spend, ...extras, ...runsIn(raw) };
+  return end === BAD || extras === BAD ? BAD : { at, kind: "spent", phase, head, ...end, ...extras, ...runsIn(raw) };
 }
 
 function measuredField(raw: unknown): { readonly spend?: Spend } | Bad {
@@ -649,20 +684,23 @@ export function spentAndTrace(
 function parkedOf(raw: unknown, at: string): Event | Bad {
   const parts = parkedParts(raw);
   const extras = parkedExtras(raw);
-  return parts === BAD || extras === BAD ? BAD : { at, kind: "parked", ...parts, ...extras, ...runsIn(raw) };
+  const reason = onlyReason(raw, "usage_limit");
+  return parts === BAD || extras === BAD || reason === BAD
+    ? BAD
+    : { at, kind: "parked", ...parts, ...extras, ...runsIn(raw), ...reason };
 }
 
 function writerEndedOf(raw: unknown, at: string): Event | Bad {
   const mode = oneOf(raw, "mode", MODES);
-  const outcome = oneOf(raw, "outcome", OUTCOMES);
+  const end = writerEndOf(raw);
   const parts = writerParts(raw);
   const extras = writerExtras(raw);
-  return mode === BAD || outcome === BAD || parts === BAD || extras === BAD
+  return mode === BAD || end === BAD || parts === BAD || extras === BAD
     ? BAD
-    : { at, kind: "writer-ended", mode, outcome, ...parts, ...extras, ...runsIn(raw) };
+    : { at, kind: "writer-ended", mode, ...end, ...parts, ...extras, ...runsIn(raw) };
 }
 
-type DesignParts = Pick<Extract<Event, { kind: "design-ended" }>, "step" | "spec" | "design" | "outcome" | "why">;
+type DesignParts = Pick<Extract<Event, { kind: "design-ended" }>, "step" | "spec" | "design" | "why"> & DesignEnd;
 
 function designTexts(raw: unknown): Pick<DesignParts, "spec" | "design" | "why"> | Bad {
   const spec = str(raw, "spec");
@@ -673,9 +711,9 @@ function designTexts(raw: unknown): Pick<DesignParts, "spec" | "design" | "why">
 
 function designParts(raw: unknown): DesignParts | Bad {
   const which = oneOf(raw, "step", ["review", "verify"] as const);
-  const outcome = oneOf(raw, "outcome", ["done", "failed"] as const);
+  const end = designEndOf(raw);
   const texts = designTexts(raw);
-  return which === BAD || outcome === BAD || texts === BAD ? BAD : { step: which, outcome, ...texts };
+  return which === BAD || end === BAD || texts === BAD ? BAD : { step: which, ...end, ...texts };
 }
 
 function designEndedOf(raw: unknown, at: string): Event | Bad {
@@ -777,24 +815,31 @@ function readyExtras(raw: unknown):
     : { ...next, ...lane, ...human, ...programs };
 }
 
+function readyEnd(raw: unknown): { readonly why: string; readonly reason: "done" } | Bad {
+  const why = whyOf(raw);
+  const reason = onlyReason(raw, "done");
+  return why === BAD || reason === BAD ? BAD : { why, ...reason };
+}
+
 function readyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
-  const why = whyOf(raw);
+  const end = readyEnd(raw);
   const extras = readyExtras(raw);
-  if (head === BAD || why === BAD || extras === BAD) {
+  if (head === BAD || end === BAD || extras === BAD) {
     return BAD;
   }
-  return typeof passed === "boolean" ? { at, kind: "ready-ended", head, passed, why, ...extras } : BAD;
+  return typeof passed === "boolean" ? { at, kind: "ready-ended", head, passed, ...end, ...extras } : BAD;
 }
 
 function verifyEndedOf(raw: unknown, at: string): Event | Bad {
   const head = str(raw, "head");
   const passed = prop(raw, "passed");
   const next = nextTryField(raw);
-  return head === BAD || next === BAD || typeof passed !== "boolean"
+  const reason = onlyReason(raw, "done");
+  return head === BAD || next === BAD || reason === BAD || typeof passed !== "boolean"
     ? BAD
-    : { at, kind: "verify-ended", head, passed, ...next };
+    : { at, kind: "verify-ended", head, passed, ...next, ...reason };
 }
 
 function actedField(raw: unknown): { readonly acted?: Acted } | Bad {
@@ -949,9 +994,18 @@ function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     tracesField(raw),
   ];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));
-  return head === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
+  const reason = onlyReason(raw, "done");
+  return head === BAD || reason === BAD || good.length < extras.length || !Number.isSafeInteger(actOn)
     ? BAD
-    : { at, kind: "review-ended", head, actOn: Number(actOn), ...Object.assign({}, ...good), ...runsIn(raw) };
+    : {
+        at,
+        kind: "review-ended",
+        head,
+        actOn: Number(actOn),
+        ...Object.assign({}, ...good),
+        ...runsIn(raw),
+        ...reason,
+      };
 }
 
 function optionalText(raw: unknown, name: "asked" | "chosen" | "design"): { readonly [k: string]: string } | "bad" {
@@ -985,13 +1039,13 @@ function answeredOf(raw: unknown, at: string): Event | Bad {
 
 const PARSE: Readonly<Record<Kind, Parse>> = {
   started: startedOf,
-  "writer-ended": (raw, at) => ended(writerEndedOf(raw, at), raw),
-  "ready-ended": (raw, at) => ended(readyEndedOf(raw, at), raw),
-  "review-ended": (raw, at) => ended(reviewEndedOf(raw, at), raw),
-  "verify-ended": (raw, at) => ended(verifyEndedOf(raw, at), raw),
-  spent: (raw, at) => ended(spentOf(raw, at), raw),
-  parked: (raw, at) => ended(parkedOf(raw, at), raw),
-  "design-ended": (raw, at) => ended(designEndedOf(raw, at), raw),
+  "writer-ended": writerEndedOf,
+  "ready-ended": readyEndedOf,
+  "review-ended": reviewEndedOf,
+  "verify-ended": verifyEndedOf,
+  spent: spentOf,
+  parked: parkedOf,
+  "design-ended": designEndedOf,
   "setup-refused": setupRefusedOf,
   "design-noted": designNotedOf,
   pinged: (raw, at) => {
@@ -1446,34 +1500,8 @@ export function isActivity(e: Event): boolean {
   return !NO_ACTIVITY.has(e.kind) && !(e.kind === "spent" && e.spend === undefined);
 }
 
-type RunEnded = Extract<
-  Event,
-  { kind: "writer-ended" | "design-ended" | "review-ended" | "ready-ended" | "verify-ended" | "parked" | "spent" }
->;
-
-const OLD_REASON: { readonly [K in RunEnded["kind"]]: (e: Extract<RunEnded, { kind: K }>) => EndReason } = {
-  "writer-ended": (e) => (e.outcome === "blocked" ? "unknown" : e.outcome),
-  "design-ended": (e) => (e.outcome === "done" ? "done" : "unknown"),
-  "review-ended": () => "done",
-  "ready-ended": () => "done",
-  "verify-ended": () => "done",
-  parked: () => "usage_limit",
-  spent: () => "unknown",
-};
-
-function oldReason<K extends RunEnded["kind"]>(kind: K, e: Extract<RunEnded, { kind: K }>): EndReason {
-  return OLD_REASON[kind](e);
-}
-
-function endsRun(e: Event): e is RunEnded {
-  return Object.hasOwn(OLD_REASON, e.kind);
-}
-
 export function closedReason(e: Event): EndReason | undefined {
-  if (!endsRun(e)) {
-    return undefined;
-  }
-  return e.reason ?? oldReason(e.kind, e);
+  return "reason" in e ? e.reason : undefined;
 }
 
 export function summarize(input: { readonly events: readonly Event[]; readonly since: string }): Summary {

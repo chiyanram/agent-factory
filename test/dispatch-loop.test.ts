@@ -115,6 +115,9 @@ function forge(now: () => Changes | "down"): Forge {
   };
 }
 
+const DONE = { outcome: "done", reason: "done" } as const;
+const ASKED = { outcome: "asked", reason: "asked" } as const;
+
 function writer(outcome: "done" | "asked", runs: string[]): Steps {
   return {
     ...STEPS_TODAY,
@@ -122,7 +125,11 @@ function writer(outcome: "done" | "asked", runs: string[]): Steps {
       kind: "available",
       folder: noRunFolder,
       run: async (input) => (
-        runs.push(input.ticket), { kind: "ok", value: { head: H, outcome, patch: "p1", evidence: [], hung: false } }
+        runs.push(input.ticket),
+        {
+          kind: "ok",
+          value: { head: H, ...(outcome === "done" ? DONE : ASKED), patch: "p1", evidence: [], hung: false },
+        }
       ),
     },
   };
@@ -366,13 +373,20 @@ async function doneAtHead(): Promise<void> {
       mode: "cleanup",
       head: H,
       outcome: "done",
+      reason: "done",
       patch: "p",
       evidence: [],
       hung: false,
     },
   });
-  await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
-  await record({ where, event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 } });
+  await record({
+    where,
+    event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+  });
+  await record({
+    where,
+    event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
+  });
 }
 
 function ledgerSteps(runs: string[], ready: () => boolean = () => true): Steps {
@@ -383,7 +397,7 @@ function ledgerSteps(runs: string[], ready: () => boolean = () => true): Steps {
       folder: noRunFolder,
       run: async (input) => (
         runs.push(`writer ${input.task.kind}`),
-        { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+        { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false } }
       ),
     },
     ready: {
@@ -434,6 +448,7 @@ describe("the orchestrator loop never sleeps after a step it ran itself (#445)",
           value: {
             head: H,
             outcome: "parked",
+            reason: "usage_limit",
             parked: { until: "2026-11-07T15:00:00Z", said: "You've hit your limit" },
             patch: "",
             evidence: [],
@@ -687,7 +702,7 @@ describe("the orchestrator loop and the git host's rate limit (#62)", () => {
 function spent(at: string, usd: number, tokens: number): ReturnType<typeof record> {
   return record({
     where: { home, project: "ledger", ticket: "PROJ-9" },
-    event: { at, kind: "review-ended", head: H, actOn: 0, spend: { usd, tokens } },
+    event: { at, kind: "review-ended", reason: "done", head: H, actOn: 0, spend: { usd, tokens } },
   });
 }
 

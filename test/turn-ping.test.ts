@@ -142,6 +142,7 @@ describe("the turn in the summary", () => {
     mode: "fix",
     head: H,
     outcome: "asked",
+    reason: "asked",
     patch: "",
     evidence: [],
     hung: false,

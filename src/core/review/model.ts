@@ -5,7 +5,7 @@
 // tell (end-reason.ts).
 
 import type { RoundPart } from "../dispatch/spend.js";
-import type { EndReason } from "../end-reason.js";
+import type { FailedReason } from "../end-reason.js";
 
 export type RunLimit = {
   readonly minutes: number;
@@ -39,7 +39,7 @@ export type ModelResult =
       readonly reason: string;
       readonly answer: unknown;
       readonly stream?: string;
-      readonly end?: EndReason;
+      readonly end?: FailedReason;
     };
 
 export type Model = (run: ModelRun) => Promise<ModelResult>;

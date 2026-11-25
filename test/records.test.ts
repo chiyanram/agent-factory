@@ -11,6 +11,8 @@ import {
   tornPath,
   type Event,
 } from "../src/core/dispatch/records.js";
+import { END_REASONS, type EndReason } from "../src/core/end-reason.js";
+import { prop } from "../src/core/field.js";
 import { takeLock, type HeldLock } from "../src/core/lock.js";
 import { tempDir } from "./temp.js";
 
@@ -81,14 +83,24 @@ describe("what a run record names: the CLI, its version and the model", () => {
       mode: "fix",
       head,
       outcome: "done",
+      reason: "done",
       patch: "",
       evidence: [],
       hung: false,
       runs: [{ cli: "claude", asked: "default", version: "9.9.9", model: "m" }],
     },
-    { at, kind: "review-ended", head, actOn: 0, runs },
-    { at, kind: "spent", phase: "review", head, spend: { usd: 0.1, tokens: 1 }, runs },
-    { at, kind: "parked", phase: "writer", head, until: "unknown", said: "", runs: [{ cli: "claude", asked: "x" }] },
+    { at, kind: "review-ended", head, actOn: 0, runs, reason: "done" },
+    { at, kind: "spent", phase: "review", head, spend: { usd: 0.1, tokens: 1 }, runs, reason: "unknown" },
+    {
+      at,
+      kind: "parked",
+      phase: "writer",
+      head,
+      until: "unknown",
+      said: "",
+      runs: [{ cli: "claude", asked: "x" }],
+      reason: "usage_limit",
+    },
     {
       at,
       kind: "design-ended",
@@ -96,6 +108,7 @@ describe("what a run record names: the CLI, its version and the model", () => {
       spec: "s",
       design: "d",
       outcome: "done",
+      reason: "done",
       why: "",
       findings: [],
       kept: [],
@@ -123,7 +136,7 @@ describe("what a run record names: the CLI, its version and the model", () => {
 
   it("drops a cli, asks or runs of the wrong shape, and keeps the rest of the line", async () => {
     const started = { at, kind: "started", phase: "writer", mode: "fix", head };
-    const ended = { at, kind: "review-ended", head, actOn: 0 };
+    const ended = { at, kind: "review-ended", reason: "done", head, actOn: 0 };
     written([
       { ...started, cli: 3, asks: { writer: 3 } },
       { ...ended, runs: [{ cli: "claude" }] },
@@ -213,15 +226,32 @@ describe("the closed reason on every line that ends a run", () => {
     expect(await readRecords(where())).toMatchObject({ kind: "failed" });
   });
 
-  it("maps a line written without a reason from its old fields only, never from its why", () => {
-    expect(closedReason({ ...writer, outcome: "done" })).toBe("done");
-    expect(closedReason({ ...writer, outcome: "asked" })).toBe("asked");
-    expect(closedReason({ ...writer, why: "the run was stopped after 3600s" })).toBe("unknown");
-    expect(closedReason({ ...design, outcome: "done" })).toBe("done");
-    expect(closedReason(design)).toBe("unknown");
-    expect([review, ready, verify].map(closedReason)).toEqual(["done", "done", "done"]);
-    expect(closedReason(parked)).toBe("usage_limit");
-    expect(closedReason(spent)).toBe("unknown");
+  it("reads a line written without a reason with its reason from its old fields only, never from its why", async () => {
+    written([
+      { ...writer, outcome: "done" },
+      { ...writer, outcome: "asked" },
+      { ...writer, why: "the run was stopped after 3600s" },
+      { ...design, outcome: "done" },
+      design,
+      review,
+      ready,
+      verify,
+      parked,
+      spent,
+    ]);
+    const read = await readRecords(where());
+    expect(read.kind === "ok" ? read.value.map(closedReason) : read).toEqual([
+      "done",
+      "asked",
+      "unknown",
+      "done",
+      "unknown",
+      "done",
+      "done",
+      "done",
+      "usage_limit",
+      "unknown",
+    ]);
   });
 
   it("gives a line's own reason first, and none for a line that ends no run", () => {
@@ -230,10 +260,53 @@ describe("the closed reason on every line that ends a run", () => {
     expect(closedReason({ at, kind: "setup-refused", phase: "writer", why: "no box" })).toBeUndefined();
   });
 
+  const FAILED = [
+    "setup_refused",
+    "launch_failed",
+    "timed_out",
+    "stalled",
+    "output_invalid",
+    "oom_killed",
+    "stopped",
+    "unknown",
+  ] as const;
+  const AGREES: readonly { readonly line: object; readonly reasons: readonly EndReason[] }[] = [
+    { line: { ...writer, outcome: "done" }, reasons: ["done"] },
+    { line: { ...writer, outcome: "asked" }, reasons: ["asked"] },
+    { line: { ...writer, outcome: "blocked" }, reasons: ["done", "asked", "blocked", ...FAILED] },
+    { line: { ...design, outcome: "done" }, reasons: ["done"] },
+    { line: { ...design, outcome: "failed" }, reasons: FAILED },
+    { line: ready, reasons: ["done"] },
+    { line: verify, reasons: ["done"] },
+    { line: review, reasons: ["done"] },
+    { line: parked, reasons: ["usage_limit"] },
+    { line: spent, reasons: END_REASONS },
+  ];
+  const pairs = AGREES.flatMap(({ line, reasons }) =>
+    END_REASONS.map((reason) => ({
+      name: `${JSON.stringify({ kind: prop(line, "kind"), outcome: prop(line, "outcome") })} with ${reason}`,
+      line: { ...line, reason },
+      agrees: reasons.includes(reason),
+    })),
+  );
+
+  it.each(pairs.filter((p) => !p.agrees))("fails the read of $name, a reason its outcome refuses", async ({ line }) => {
+    written([review, line]);
+    expect(await readRecords(where())).toEqual({
+      kind: "failed",
+      reason: `${file()} line 2 is not a record; fix or remove it`,
+    });
+  });
+
+  it.each(pairs.filter((p) => p.agrees))("reads $name, a reason its outcome takes", async ({ line }) => {
+    written([line]);
+    expect(await readRecords(where())).toEqual({ kind: "ok", value: [line] });
+  });
+
   it("counts neither a setup-refused line nor a spent line with no spend as activity", () => {
     expect(isActivity({ at, kind: "setup-refused", phase: "writer", why: "no box" })).toBe(false);
     expect(isActivity({ at, kind: "spent", phase: "verify", head, reason: "unknown" })).toBe(false);
-    expect(isActivity(spent)).toBe(true);
+    expect(isActivity({ ...spent, reason: "unknown" })).toBe(true);
   });
 
   it("keeps the newest refused setup until a run starts", () => {

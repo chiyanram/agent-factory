@@ -135,6 +135,7 @@ describe("a ticket's traces are listed and read (#487)", () => {
         mode: "fix",
         head: "h",
         outcome: "blocked",
+        reason: "blocked",
         patch: "",
         evidence: [],
         hung: false,
@@ -167,7 +168,15 @@ describe("a ticket's traces are listed and read (#487)", () => {
     for (const f of [finder, design, writer]) writeFileSync(join(dir(), f), "{}\n");
     const spend = { usd: 0.1, tokens: 1 };
     const events = [
-      { at: "2026-11-13T07:00:00Z", kind: "review-ended", head: "h", actOn: 2, spend, traces: [finder] },
+      {
+        at: "2026-11-13T07:00:00Z",
+        kind: "review-ended",
+        head: "h",
+        actOn: 2,
+        spend,
+        traces: [finder],
+        reason: "done",
+      },
       {
         at: "2026-11-13T07:01:00Z",
         kind: "design-ended",
@@ -175,12 +184,21 @@ describe("a ticket's traces are listed and read (#487)", () => {
         spec: "s",
         design: "d",
         outcome: "done",
+        reason: "done",
         why: "",
         findings: [],
         kept: [],
         trace: design,
       },
-      { at: "2026-11-13T07:02:00Z", kind: "spent", phase: "writer", head: "h", spend, traces: [writer] },
+      {
+        at: "2026-11-13T07:02:00Z",
+        kind: "spent",
+        phase: "writer",
+        head: "h",
+        spend,
+        traces: [writer],
+        reason: "unknown",
+      },
     ] as const;
     for (const event of events) expect((await record({ where: where(), event })).kind).toBe("ok");
     const listed = await listTraces(where());

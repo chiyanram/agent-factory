@@ -136,6 +136,11 @@ Each line that ends a run names how it ended in `reason`, one value from a close
 - The lines are `writer-ended`, `design-ended`, `review-ended`, `ready-ended`, `verify-ended`, `parked` and `spent`.
   `outcome`, `passed`, `actOn`, `hung` and `why` still decide what the table does; `reason` only records. An
   implementer run that finished and whose push a guard then refused stays `outcome: "blocked"` with `reason: "done"`.
+- Each outcome takes only some reasons, and a line with any other pair fails the read with its line number. An
+  implementer's `done` and `asked` take only their own word, and its `blocked` takes any reason but `usage_limit`. A
+  design run's `done` takes `done`, and its `failed` takes any reason but `done`, `asked`, `blocked` and
+  `usage_limit`. A review, ready or verify line takes `done`, `parked` takes `usage_limit`, and `spent` takes any
+  reason.
 - An implementer, review, ready or verify run that fails always writes its `spent` line, with its `reason`, and with
   `spend` only when the run was measured. The line ends nothing, so the ticket still reads as a run that never ended
   and goes to a person.
@@ -144,7 +149,7 @@ Each line that ends a run names how it ended in `reason`, one value from a close
   hours writes none. The pass tries the step again as before.
 - Neither a `setup-refused` line nor a `spent` line with no `spend` counts as activity or as spending, so `board`,
   `usage` and the merge timeline print what they printed before.
-- A line written without `reason` reads through a mapping from its old fields, never from its `why`: an implementer's
+- Every line the code writes carries `reason`. A line written without one reads through a mapping from its old fields, never from its `why`: an implementer's
   `done` and `asked` keep their word and its `blocked` is `unknown`; a design run's `done` is `done` and its `failed` is
   `unknown`; a review, ready or verify line is `done`; `parked` is `usage_limit`; `spent` is `unknown`. A `reason`
   not on the list fails the read with its line number.

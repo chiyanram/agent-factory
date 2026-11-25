@@ -31,6 +31,7 @@ describe("the run record keeps a writer run's stale cites (#235)", () => {
         mode: "fix",
         head: "h",
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,

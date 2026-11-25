@@ -193,7 +193,14 @@ describe("acted on, in the run records and usage", () => {
     const acted = { since: "1".repeat(40), rows };
     await record({
       where,
-      event: { at: "2026-11-09T10:00:00Z", kind: "review-ended", head: "2".repeat(40), actOn: 0, acted },
+      event: {
+        at: "2026-11-09T10:00:00Z",
+        kind: "review-ended",
+        reason: "done",
+        head: "2".repeat(40),
+        actOn: 0,
+        acted,
+      },
     });
     expect(await readRecords(where)).toMatchObject({ kind: "ok", value: [{ kind: "review-ended", acted }] });
     const spends = await readSpends({ home: dir });
@@ -229,7 +236,14 @@ describe("acted on, in the run records and usage", () => {
       const kept = { CR1: { act_on: 2, noted: 1 }, logic: { consider: 1 } };
       await record({
         where,
-        event: { at: "2026-11-09T10:00:00Z", kind: "review-ended", head: "2".repeat(40), actOn: 2, found: kept },
+        event: {
+          at: "2026-11-09T10:00:00Z",
+          kind: "review-ended",
+          reason: "done",
+          head: "2".repeat(40),
+          actOn: 2,
+          found: kept,
+        },
       });
       expect(await readRecords(where)).toMatchObject({ kind: "ok", value: [{ kind: "review-ended", found: kept }] });
       const line = { at: "2026-11-09T11:00:00Z", kind: "review-ended", head: "3".repeat(40), actOn: 0, found };
