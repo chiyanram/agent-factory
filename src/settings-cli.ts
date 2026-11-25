@@ -9,6 +9,10 @@
 //                  Claude Code plugin the factory knows read back: its state, a warning when it is not on; and a
 //                  warning for each pin with no eval proof (core/eval/pin-proof.ts), which never fails the check
 //   team update    the resolved values at the team's new commit against the pinned one, a check, then the pin moved
+//   config set     one key written, refused on an error whose key and rule the current file does not have
+//
+// Both writers save through a temporary file and a rename, refused when the file no longer holds the text that was
+// checked, so an edit made in between is never lost without a word.
 
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { KNOWN_PLUGINS, pluginState, stateLine } from "./core/agent/claude-plugins.js";
@@ -74,17 +78,19 @@ async function resolved(io: SettingsIo, loaded: Loaded, team?: Read): Promise<La
 }
 
 function readerErrors(path: string, effective: object, env: NodeJS.ProcessEnv): readonly Problem[] {
-  const ready = readyFieldsOf(path, effective, env);
-  const connectors = pluginConfigOf(path, effective);
-  const plugins = pluginListOf(path, effective);
-  return [ready, connectors, plugins].flatMap((r) =>
-    r.kind === "failed" ? [{ level: "error" as const, text: r.reason }] : [],
+  const readers = [
+    { key: "ready", rule: "readyFieldsOf", read: readyFieldsOf(path, effective, env) },
+    { key: "policy", rule: "pluginConfigOf", read: pluginConfigOf(path, effective) },
+    { key: "plugins", rule: "pluginListOf", read: pluginListOf(path, effective) },
+  ];
+  return readers.flatMap(({ key, rule, read }) =>
+    read.kind === "failed" ? [{ level: "error" as const, key, rule, text: read.reason }] : [],
   );
 }
 
 async function pinsProblems(home: string, project: string): Promise<readonly Problem[]> {
   const pins = await readPins(home, project);
-  return pins.kind === "failed" ? [{ level: "error", text: pins.reason }] : [];
+  return pins.kind === "failed" ? [{ level: "error", key: "plugins", rule: "readPins", text: pins.reason }] : [];
 }
 
 async function proofProblems(
@@ -104,12 +110,14 @@ async function proofProblems(
       return pin === undefined ? "" : pinProof([home, ENGINE_ROOT], ref, pin);
     }),
   );
-  return found.filter((why) => why !== "").map((text) => ({ level: "warning", text }));
+  return found
+    .filter((why) => why !== "")
+    .map((text) => ({ level: "warning", key: "plugins", rule: "pinProof", text }));
 }
 
 async function cloneProblems(env: NodeJS.ProcessEnv): Promise<readonly Problem[]> {
   const why = await originProblem(env);
-  return why === "" ? [] : [{ level: "error", text: why }];
+  return why === "" ? [] : [{ level: "error", key: "clone", rule: "originProblem", text: why }];
 }
 
 async function pluginLines(
@@ -121,12 +129,14 @@ async function pluginLines(
   const lines = await Promise.all(
     KNOWN_PLUGINS.map(async (id) => {
       const state = await pluginState(id, { env, folders });
-      return { on: state.kind === "on", text: stateLine(id, state) };
+      return { id, on: state.kind === "on", text: stateLine(id, state) };
     }),
   );
   return {
     on: lines.filter((l) => l.on).map((l) => l.text),
-    problems: lines.filter((l) => !l.on).map((l) => ({ level: "warning" as const, text: l.text })),
+    problems: lines
+      .filter((l) => !l.on)
+      .map((l) => ({ level: "warning" as const, key: l.id, rule: "pluginState", text: l.text })),
   };
 }
 
@@ -225,7 +235,7 @@ export async function candidateProblems(
 ): Promise<readonly Problem[]> {
   const loaded = parsedProject(path, text);
   if (loaded.kind === "failed") {
-    return [{ level: "error", text: loaded.reason }];
+    return [{ level: "error", key: path, rule: "parsedProject", text: loaded.reason }];
   }
   return allProblems(path, await layered({ home: io.home, env: io.env, project: loaded.value }), io.env);
 }
@@ -286,8 +296,6 @@ export function changes(before: readonly Resolved[], after: readonly Resolved[])
 
 const PIN_FIELD = /("team"\s*:\s*")[^"]*(")/;
 
-// saveFile : the new text over a settings file, through a temporary file and a rename. It is refused when the file no
-// longer holds the text that was checked, so an edit made in between is never lost without a word.
 export async function saveFile(path: string, checked: string, next: string): Promise<Result<string>> {
   const temp = `${path}.${process.pid}.tmp`;
   try {
@@ -368,9 +376,6 @@ async function update(io: SettingsIo, project: string, given: string | undefined
   return updateTo(io, plan.value);
 }
 
-// ---- config set
-
-// valueOf : the value as JSON, else the text itself, so `30` is a number and `claude-sonnet-5-5` a string
 function valueOf(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -404,7 +409,6 @@ async function setTarget(io: SettingsIo, project: string, id: string, text: stri
 
 type Planned = { readonly edits: readonly Change[]; readonly next: string };
 
-// plannedSet : the project file's new text, with the key and, for half a policy point, its other half
 async function plannedSet(io: SettingsIo, t: Target): Promise<Result<Planned>> {
   const before = await resolved(io, t.loaded);
   const resolvedOf = (id: string): unknown => before.values.find((r) => r.key.id === id)?.value;
@@ -414,28 +418,33 @@ async function plannedSet(io: SettingsIo, t: Target): Promise<Result<Planned>> {
   return next.kind === "ok" ? { kind: "ok", value: { edits, next: next.value } } : next;
 }
 
-// checkedSet : the plan, refused on an error the new text has that the current text does not; an error the current
-// text already has is printed as a warning
+function identity(p: Problem): string {
+  return JSON.stringify([p.key, p.rule]);
+}
+
 async function checkedSet(io: SettingsIo, t: Target): Promise<Result<Planned>> {
   const plan = await plannedSet(io, t);
   if (plan.kind === "failed") {
     return plan;
   }
   const was = await candidateProblems(io, t.loaded.path, t.loaded.text);
-  const known = new Set(was.filter((p) => p.level === "error").map((p) => p.text));
+  const known = new Set(was.filter((p) => p.level === "error").map(identity));
   const now = await candidateProblems(io, t.loaded.path, plan.value.next);
-  const fresh = now.filter((p) => p.level === "error" && !known.has(p.text));
-  const rest = now.filter((p) => !fresh.includes(p)).map((p) => ({ level: "warning" as const, text: p.text }));
+  const fresh = now.filter((p) => p.level === "error" && !known.has(identity(p)));
+  const rest = now
+    .filter((p) => !fresh.includes(p))
+    .map((p) => ({ level: "warning" as const, key: p.key, rule: p.rule, text: p.text }));
   printProblems(io, [...fresh, ...rest]);
   return fresh.length === 0 ? plan : { kind: "failed", reason: `refused; ${t.loaded.path} is unchanged` };
 }
 
-// shadowedWarnings : a key whose resolved value the project file no longer sets, because another layer wins
 function shadowedWarnings(values: readonly Resolved[]): readonly Problem[] {
   return values
     .filter((r) => !r.sources.some((s) => s.layer === "project"))
     .map((r) => ({
       level: "warning" as const,
+      key: r.key.id,
+      rule: "lower-wins",
       text: `${r.key.id}: ${r.sources.map(where).join(", ")} wins over the project file; the value in use is ${valueText(r)}`,
     }));
 }
@@ -462,7 +471,6 @@ async function setKey(io: SettingsIo, project: string, id: string, text: string)
   return saved.kind === "failed" ? fail(saved.reason) : printSet(io, project, plan.value.edits);
 }
 
-// printSet : config show's line for each key written, and a warning for one that another layer wins over
 async function printSet(io: SettingsIo, project: string, edits: readonly Change[]): Promise<number> {
   const loaded = await loadProject(io.home, project);
   if (loaded.kind === "failed") {
@@ -489,13 +497,11 @@ function isThree(list: readonly string[]): list is readonly [string, string, str
   return list.length === 3;
 }
 
-// setArgs : config set's three arguments, when the positionals are exactly them
 function setArgs(positionals: readonly string[]): readonly [string, string, string] | undefined {
   const args = positionals.slice(1);
   return positionals[0] === "set" && isThree(args) ? args : undefined;
 }
 
-// configCommand : config show <project> [--json] | config check <project> | config set <project> <key> <value>
 export function configCommand(positionals: readonly string[], io: SettingsIo): Promise<number> {
   const set = setArgs(positionals);
   if (set !== undefined) {

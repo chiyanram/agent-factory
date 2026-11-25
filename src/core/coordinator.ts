@@ -116,7 +116,6 @@ const DENY_BASH = [
   "agent-factory plugin",
   "agent-factory project",
   "agent-factory init",
-  // config set writes the project file, for the same reason
   "agent-factory config set",
 ];
 

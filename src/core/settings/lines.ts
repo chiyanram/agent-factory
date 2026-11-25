@@ -4,12 +4,10 @@
 
 type Cursor = { i: number; line: number };
 
-// where a key is: the line its name starts on, and its value as text[start, end)
 export type Place = { readonly line: number; readonly start: number; readonly end: number };
 
 type Found = Map<string, Place>;
 
-// the path of a key as one string: its parts joined by NUL, which no key holds
 export function pathKey(path: readonly string[]): string {
   return path.join("\u0000");
 }
@@ -37,7 +35,6 @@ function skipScalar(text: string, at: Cursor): void {
   }
 }
 
-// readValue : the value at the cursor, from its first character; returns where it starts
 function readValue(text: string, at: Cursor, path: readonly string[], found: Found): number {
   skipBlank(text, at);
   const start = at.i;
@@ -61,7 +58,7 @@ function readObject(text: string, at: Cursor, path: readonly string[], found: Fo
     const line = at.line;
     const key = readString(text, at);
     skipBlank(text, at);
-    at.i += 1; // the colon
+    at.i += 1;
     const start = readValue(text, at, [...path, key], found);
     found.set(pathKey([...path, key]), { line, start, end: at.i });
     skipBlank(text, at);
@@ -83,7 +80,6 @@ function readArray(text: string, at: Cursor, path: readonly string[], found: Fou
   at.i += 1;
 }
 
-// keyPlaces : the place of every key path in a JSON text that JSON.parse accepted; the whole value is at path []
 export function keyPlaces(text: string): ReadonlyMap<string, Place> {
   const found: Found = new Map();
   const at = { i: 0, line: 1 };
@@ -94,7 +90,6 @@ export function keyPlaces(text: string): ReadonlyMap<string, Place> {
   return found;
 }
 
-// keyLines : the line (from 1) of every key path in a JSON text that JSON.parse accepted
 export function keyLines(text: string): ReadonlyMap<string, number> {
   return new Map([...keyPlaces(text)].map(([path, place]) => [path, place.line]));
 }

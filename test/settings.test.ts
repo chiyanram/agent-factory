@@ -484,7 +484,12 @@ describe("resolve: each class (#229)", () => {
   it("an unknown key is a warning with did you mean; a machine key is a key a file holds (#254)", () => {
     const r = resolved([layer("user", { egress: { alow: ["a.example.com"] }, caps: { usdPerRun: 2 } })]);
     expect(r.problems).toEqual([
-      { level: "warning", text: expect.stringContaining("unknown key egress.alow; did you mean egress.allow?") },
+      {
+        level: "warning",
+        key: "egress.alow",
+        rule: "unknown@user",
+        text: expect.stringContaining("unknown key egress.alow; did you mean egress.allow?"),
+      },
     ]);
     expect(didYouMean("zzzzzzzz")).toBe("");
   });
@@ -753,13 +758,30 @@ describe("every module reads the resolved settings (#254)", () => {
     const path = writeProject(BASE);
     const bad = await cli(["config", "set", "ledger", "gate", "banana"]);
     expect(bad.code).toBe(1);
-    expect(bad.err).toContain('"gate" must be "forge-ci" or "local", got "banana"');
+    expect(bad.err).toContain('"gate" must be one of "forge-ci", "local", got "banana"');
     expect(readFileSync(path, "utf8")).toBe(text(BASE));
     writeProject({ ...BASE, gate: "local" });
     const ok = await cli(["config", "set", "ledger", "ready.timeoutMinutes", "45"]);
     expect(ok.code).toBe(0);
     expect(ok.err).toContain("warning: ");
     expect(ok.err).toContain('"verify" must be');
+  });
+
+  it("config set keeps an old error a warning when an insert above it moves its line", async () => {
+    const commit = commitTeam({ ready: { timeoutMinutes: 20 } });
+    const path = writeProject({
+      policy: { "tracker.comment": { mode: "deny", cap: 1 } },
+      ready: { programs: ["make"], timeoutMinutes: 60 },
+      team: `acme@${commit}`,
+    });
+    const lineOf = (body: string): number => body.split("\n").findIndex((l) => l.includes('"timeoutMinutes"')) + 1;
+    const was = lineOf(readFileSync(path, "utf8"));
+    const r = await cli(["config", "set", "ledger", "policy.notify.mode", "deny"]);
+    const now = lineOf(readFileSync(path, "utf8"));
+    expect(now).toBeGreaterThan(was);
+    expect(r.code).toBe(0);
+    expect(r.err).toContain(`warning: `);
+    expect(r.err).toContain(`ledger.json:${now}) 60 is higher than 20`);
   });
 
   it("config set refuses a value looser than a higher layer, naming where the higher value comes from", async () => {
