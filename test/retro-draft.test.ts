@@ -14,23 +14,6 @@ import { tempDir } from "./temp.js";
 import { fakeToken } from "./planted.js";
 
 const ROOT = join(import.meta.dirname, "..");
-const LANES = readFileSync(join(ROOT, "tests", "fixtures", "process", "rulebook-lanes.json"), "utf8");
-const CARD = [
-  "---",
-  "role: retro",
-  "steps: [retro]",
-  "input: the timeline record; the run records and transcripts",
-  "must_not_see: none",
-  "hand_off: .factory/retro.md {actions: one JSON list [{type: rule | script | check | playbook, owner, due: YYYY-MM-DD, ticket}]}",
-  "tools: [Read, Grep, Glob]",
-  "enforced_guardrails: read-only tools; runs only when a human starts it",
-  "rules: [RT1, RT6]",
-  "---",
-  "",
-  "# Retro",
-  "",
-  "Turn the failures into lessons.",
-].join("\n");
 
 const FAILURE: Failure = {
   kind: "rule",
@@ -54,10 +37,7 @@ let plugin = "";
 beforeEach(() => {
   home = tempDir("factory-retro-draft-");
   plugin = join(home, "plugins", "rulebook");
-  const process = join(plugin, "skills", "crq", "process");
-  mkdirSync(join(process, "roles"), { recursive: true });
-  writeFileSync(join(process, "lanes.json"), LANES);
-  writeFileSync(join(process, "roles", "retro.md"), CARD);
+  mkdirSync(join(plugin, "skills", "crq"), { recursive: true });
   writeFileSync(join(plugin, "skills", "crq", "rules.md"), "old\n");
   symlinkSync("/etc/passwd", join(plugin, "skills", "crq", "outside"));
   const runs = join(home, "runs", "loans");
@@ -169,10 +149,10 @@ describe("retro --draft", () => {
     expect(none.runs).toHaveLength(0);
   });
 
-  it("refuses with no rules pack, since there is no retro card to run", async () => {
+  it("refuses when no plugin holds the crq skill, which the retro card reads", async () => {
     const s = stub([LESSON]);
     const made = await draftRetro({ ...setup(s.model), plugins: [] }, [FAILURE]);
-    expect(made).toMatchObject({ kind: "failed", reason: expect.stringContaining("no retro card") });
+    expect(made).toMatchObject({ kind: "failed", reason: expect.stringContaining("holds the crq skill") });
     expect(s.runs).toHaveLength(0);
   });
 });

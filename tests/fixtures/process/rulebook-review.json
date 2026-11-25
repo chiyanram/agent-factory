@@ -1,8 +1,0 @@
-{
-  "baseline": [
-    { "skill": "crq", "reference": "review-process" },
-    { "skill": "crq", "reference": "code-review" },
-    { "skill": "crq", "reference": "verify-done" },
-    { "skill": "code", "reference": "smells" }
-  ]
-}

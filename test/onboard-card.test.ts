@@ -6,7 +6,7 @@ import { tempDir } from "./temp.js";
 
 describe("the onboarder's role card (#235)", () => {
   it("the engine runs alone: its built-in card passes the check", async () => {
-    expect(await readCard([], "onboarder")).toMatchObject({ kind: "ok", value: { role: "onboarder" } });
+    expect(await readCard("onboarder")).toMatchObject({ kind: "ok", value: { role: "onboarder" } });
   });
 
   it("refuses a card that asks for Bash or Edit: the onboarder is read-only (#688)", () => {

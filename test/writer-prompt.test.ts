@@ -6,7 +6,7 @@ import { evidenceRules, FLOOR, FOREGROUND, PROJECT_INSTRUCTIONS, runPrompt } fro
 
 describe("the writer's words", () => {
   it("points the test-first and fix runs at the person's answers in .factory/task.md (#486)", async () => {
-    const card = await readCard([], "implementer");
+    const card = await readCard("implementer");
     if (card.kind !== "ok") throw new Error(card.reason);
     for (const mode of ["test-first", "fix"] as const) {
       const text = runPrompt({
@@ -21,7 +21,7 @@ describe("the writer's words", () => {
   });
 
   it("builds the prompt from the role card: its body, the run's task, the floor, the project's instructions and tools, then the report's schema (#232)", async () => {
-    const card = await readCard([], "implementer");
+    const card = await readCard("implementer");
     if (card.kind !== "ok") throw new Error(card.reason);
     const text = runPrompt({
       card: card.value,
@@ -40,7 +40,7 @@ describe("the writer's words", () => {
   });
 
   it("names the exact programs an evidence row may start with, and that its result is the command's output, in every mode (#444)", async () => {
-    const card = await readCard([], "implementer");
+    const card = await readCard("implementer");
     if (card.kind !== "ok") throw new Error(card.reason);
     const names = { ticket: "PROJ-1", branch: "b", head: "h", base: "main" };
     for (const mode of ["fix", "test-first", "rework", "cleanup"] as const) {
@@ -68,7 +68,7 @@ describe("the writer's words", () => {
   });
 
   it("tells the writer of every mode the floor and to keep its subagents and commands in the foreground (#192, #232)", async () => {
-    const card = await readCard([], "implementer");
+    const card = await readCard("implementer");
     if (card.kind !== "ok") throw new Error(card.reason);
     const modes = ["fix", "test-first", "rework", "ci", "merge", "cleanup"] as const;
     const names = { ticket: "PROJ-1", branch: "b", head: "h", base: "main" };
@@ -77,7 +77,7 @@ describe("the writer's words", () => {
   });
 
   it("tells the CI run to find the root cause first, and to stop as blocked when it finds none in the code", async () => {
-    const card = await readCard([], "implementer");
+    const card = await readCard("implementer");
     if (card.kind !== "ok") throw new Error(card.reason);
     const text = runPrompt({
       card: card.value,

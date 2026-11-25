@@ -3,8 +3,8 @@
 // expected-to-fail (it.fails) with the ticket that fixes it, never skipped: once the code meets it, the build fails until
 // the mark is removed.
 //
-// P6, P13, P15, P18 and P21 have their own named tests beside the code they hold (P6 below too; P13 in notes.test.ts
-// with #486; P15 in floor.test.ts, finding.test.ts and cite-check.test.ts; P18 in pack-schema.test.ts; P21 in
+// P6, P13, P15, P18 and P21 have their own named tests beside the code they hold (P6 below too; P13 in notes.test.ts;
+// P15 in floor.test.ts, finding.test.ts and cite-check.test.ts; P18 in rules-pack.test.ts; P21 in
 // lane.test.ts).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";

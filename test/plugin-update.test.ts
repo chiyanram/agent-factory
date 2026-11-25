@@ -86,27 +86,18 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     expect((await update()).out).toContain("already pinned");
   });
 
-  it("an update that fails the check keeps the pin; one past the gate and the check moves it", async () => {
+  it("a pinned plugin's process folder no longer gates a move: a lanes file that drops the floor still pins", async () => {
     const first = setUpMarket(home);
     await update(...WHY);
     const loose = LANES.replaceAll('"approval": true', '"approval": false');
     expect(loose).not.toBe(LANES);
-    commitMarket(home, { [LANES_PATH]: loose });
-    const refused = await update(...WHY);
-    expect(refused.code).toBe(1);
-    expect(refused.out).toContain("~ skills/crq/process/lanes.json");
-    expect(refused.err).toContain("the approval floor");
-    expect(refused.err).toContain(`the pin stays at ${first.slice(0, 12)}`);
-    expect(pinOf().commit).toBe(first);
-
-    const third = commitMarket(home, { [LANES_PATH]: LANES, "plugins/rulebook/README.md": "x" });
+    const second = commitMarket(home, { [LANES_PATH]: loose });
     const moved = await update(...WHY);
     expect(moved).toMatchObject({ code: 0, err: "" });
-    expect(moved.out).toContain("+ README.md");
-    expect(moved.out).toContain(`pinned rulebook@chiyanram at ${third.slice(0, 12)}`);
+    expect(moved.out).toContain("~ skills/crq/process/lanes.json");
+    expect(moved.out).toContain(`pinned rulebook@chiyanram at ${second.slice(0, 12)}`);
     const back = await update(first, ...WHY);
     expect(back.out).toContain(`-> ${first.slice(0, 12)}`);
-    expect(back.out).toContain("- README.md");
   });
 
   it("moves a change to what the implementer can read only on a reason, and keeps it as unproven", async () => {

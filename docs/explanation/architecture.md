@@ -143,19 +143,19 @@ human START ──▶ coordinator: research, ask, spec (+ design)           the 
 
 **Plugins.** A project lists its plugins in its settings by `name@marketplace`.
 - **The list is pinned and locked.** Each plugin is pinned by version and hash. The list is a locked settings key, so
-  a user layer cannot drop or swap the process plugin.
+  a user layer cannot drop or swap a plugin.
 - **Updating is deliberate.** An update shows the change, runs `config check`, and then moves the pin. **Today:** it
   runs no eval set ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)).
 - **One ticket, one set of versions.** Run records carry the hash of the spec, the design, each plugin and each rubric
   used, so an update applies to the next ticket only.
-- **Order.** One process plugin per project: a second plugin with a process is a `config check` error, and a run stops
-  on it (#426). Decided: other plugins add rules only, and their rule IDs carry the plugin's name
-  ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)). **Today:** their rule IDs carry no plugin
-  name.
+- **A plugin gives skills only** ([ADR-0026](../adr/0026-the-engine-owns-its-process.md)). The engine names a skill
+  and never a file inside it, so a change to a skill's files cannot stop a run. Decided: plugins add rules only, and
+  their rule IDs carry the plugin's name ([Plugins and role cards](plugins-and-roles.md#what-is-decided-next)).
+  **Today:** their rule IDs carry no plugin name.
 
-**The process plugin** holds the lanes, as data, and one role card per role. The rulebook's crq is the first such plugin.
-The engine ships no plugin: with none, it uses its built-in lanes, review baseline and role cards (`prompts/roles/`).
-- **The approval floor:** a lanes file can make a lane stricter, never drop the approval for any lane above tiny.
+**The engine owns its process**: the lanes, the review baseline and one role card per role (`prompts/roles/`). No
+plugin replaces them.
+- **The approval floor:** no lane above tiny runs without an approval.
 - **The roles:** coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro and
   onboarder. **Today:** the engine starts no cleanup run; a person runs cleanup by hand.
 - **A role card's frontmatter**: the engine enforces `role`, `tools` (with an `Edit(…)` path scope), `must_not_see`,

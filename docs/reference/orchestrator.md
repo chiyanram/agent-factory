@@ -76,7 +76,7 @@ the caps and `usage`.
 Every implementer prompt also says to run subagents and commands in the foreground and wait for them (#192, `FOREGROUND`
 in `src/core/writer/prompt.ts`), so nothing is left in the background when the run ends.
 Every build run starts from its role card (#232): test-first, the implementer (fix, rework, CI and merge runs) or
-cleanup, from the process plugin's `process/roles/`, else the engine's `prompts/roles/`. The prompt is the card's
+cleanup, from the engine's `prompts/roles/`. The prompt is the card's
 body, then the run's task in the engine's words, then the engine's floor (`FLOOR` in `src/core/writer/prompt.ts`),
 which no card can drop. The engine enforces the card's frontmatter (`src/core/process/cards.ts`): its `tools` are
 the run's only tools (`claude --tools`, with the task list, skills and subagents, which add no reach); its

@@ -12,18 +12,8 @@ import { evalCaps } from "./core/eval/harness.js";
 import { baseOf, ENGINE_ROOT, gateMove, sizeLines, type Gate } from "./core/eval/pin-proof.js";
 import { estimateLines, planSlice } from "./core/eval/slice.js";
 import { fetchListed, folderCounts, listedRef, type Fetched } from "./core/process/fetch.js";
-import {
-  enginePackPin,
-  listedPlugins,
-  pinnedDirs,
-  readPins,
-  writePins,
-  type PackPin,
-  type Pin,
-  type Pins,
-} from "./core/process/pins.js";
+import { enginePackPin, readPins, writePins, type PackPin, type Pin, type Pins } from "./core/process/pins.js";
 import { refText, type PluginRef } from "./core/process/plugins.js";
-import { readProcess } from "./core/process/read.js";
 import { checkProblems } from "./settings-cli.js";
 
 export type PinIo = {
@@ -57,16 +47,11 @@ function showChange(io: PinIo, ref: PluginRef, before: Pin | undefined, after: F
   );
 }
 
-async function checked(io: PinIo, project: string, pins: Pins): Promise<readonly string[]> {
+async function checked(io: PinIo, project: string): Promise<readonly string[]> {
   const problems = await checkProblems(io, project);
-  const refs = await listedPlugins({ home: io.home, project, env: io.env });
-  const proc = await readProcess(pinnedDirs(io.home, refs.kind === "ok" ? refs.value : [], pins));
-  return [
-    ...(problems.kind === "ok"
-      ? problems.value.filter((p) => p.level === "error").map((p) => p.text)
-      : [problems.reason]),
-    ...(proc.kind === "failed" ? [proc.reason] : []),
-  ];
+  return problems.kind === "ok"
+    ? problems.value.filter((p) => p.level === "error").map((p) => p.text)
+    : [problems.reason];
 }
 
 type Move = {
@@ -118,7 +103,7 @@ async function checkedMove(io: PinIo, m: Move): Promise<number> {
 
 async function checkedPin(io: PinIo, m: Move, pin: Pin): Promise<number> {
   const next: Pins = { ...m.pins, [refText(m.ref)]: pin };
-  const errors = await checked(io, m.project, next);
+  const errors = await checked(io, m.project);
   if (errors.length > 0) {
     io.err(errors.map((e) => `error: ${e}\n`).join(""));
     return fail(io, `the check failed; the pin stays at ${pinLine(m.before)}`);

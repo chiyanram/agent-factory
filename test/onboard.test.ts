@@ -162,7 +162,6 @@ function setup(m: Model): OnboardSetup {
     modelName: "opus",
     maxUsd: "2",
     limit: LIMIT,
-    plugins: [],
     runsDir: join(r.home, "onboard-runs"),
     now: () => Date.parse("2026-11-09T10:00:00Z"),
   };
@@ -360,17 +359,15 @@ describe("agent-factory onboard (#235)", () => {
 });
 
 describe("onboardSetup (#235, after #232 and #213)", () => {
-  it("hands the run the project's plugins, and the pinned logic model unless a layer sets another id", () => {
-    const plugins = [{ label: "rulebook@acme", dir: "/plugins/rulebook" }];
+  it("hands the run the pinned logic model unless a layer sets another id", () => {
     const input = {
       forge: { defaultBranch: async () => ({ kind: "ok" as const, value: "main" }) },
       home: "/h",
       project: "ledger",
       now: () => 0,
-      plugins,
     };
     const set = onboardSetup({ ...input, env: { FACTORY_REPO: "/r", FACTORY_HOME: "/h" } });
-    expect(set).toMatchObject({ kind: "ok", value: { plugins, modelName: REVIEW_MODELS.logic } });
+    expect(set).toMatchObject({ kind: "ok", value: { modelName: REVIEW_MODELS.logic } });
     const other = onboardSetup({ ...input, env: { FACTORY_REPO: "/r", FACTORY_LOGIC_MODEL: "claude-opus-5-1" } });
     expect(other).toMatchObject({ kind: "ok", value: { modelName: "claude-opus-5-1" } });
   });
@@ -381,7 +378,6 @@ describe("onboardSetup (#235, after #232 and #213)", () => {
       home: "/h",
       project: "ledger",
       now: () => 0,
-      plugins: [],
     };
     const env = { FACTORY_REPO: "/r", FACTORY_HOME: "/h" };
     expect(onboardSetup({ ...input, env })).toMatchObject({

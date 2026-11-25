@@ -14,8 +14,8 @@ coordinator's view of it is in [the orchestrator reference](../reference/orchest
                                             fails, or Act on, or red gate: a rework run, at most 3 rounds, then a human
 ```
 
-\* By default only the bug lane starts with a failing test (ADR-0007). A process plugin's lanes file sets it per lane
-with `test_first`; the engine reads that property, never the lane's name (#417).
+\* By default only the bug lane starts with a failing test (ADR-0007). The engine's lanes set it per lane
+with `testFirst`; the engine reads that property, never the lane's name (#417).
 
 | step | what it does | checked by code |
 |---|---|---|

@@ -1,14 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_LANES } from "../src/core/lane.js";
-import { BUILT_IN, oneHolder, readProcess, type Holder } from "../src/core/process/read.js";
-import { BASELINE } from "../src/core/review/rules.js";
+import { referencesDir, skillDir } from "../src/core/process/read.js";
 import { tempDir } from "./temp.js";
-
-const FIXTURES = join(import.meta.dirname, "..", "tests", "fixtures", "process");
-const RULEBOOK_LANES = join(FIXTURES, "rulebook-lanes.json");
-const RULEBOOK_REVIEW = join(FIXTURES, "rulebook-review.json");
 
 let root = "";
 beforeEach(() => {
@@ -16,149 +10,43 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-function plugin(name: string, files: Readonly<Record<string, string>>): string {
+function plugin(name: string, files: readonly string[]): { readonly label: string; readonly dir: string } {
   const dir = join(root, name);
-  mkdirSync(dir, { recursive: true });
-  for (const [path, text] of Object.entries(files)) {
+  for (const path of files) {
     mkdirSync(join(dir, path, ".."), { recursive: true });
-    writeFileSync(join(dir, path), text);
+    writeFileSync(join(dir, path), "x\n");
   }
-  return dir;
+  mkdirSync(dir, { recursive: true });
+  return { label: `${name}@acme`, dir };
 }
 
-function rulebook(): string {
-  const dir = plugin("rulebook", {});
-  mkdirSync(join(dir, "skills", "crq", "process"), { recursive: true });
-  copyFileSync(RULEBOOK_LANES, join(dir, "skills", "crq", "process", "lanes.json"));
-  copyFileSync(RULEBOOK_REVIEW, join(dir, "skills", "crq", "process", "review.json"));
-  return dir;
-}
-
-function lanesText(lane: string, field: string, value: unknown): string {
-  const raw: unknown = JSON.parse(readFileSync(RULEBOOK_LANES, "utf8"));
-  const lanes: unknown = Reflect.get(Object(raw), "lanes");
-  const list: readonly unknown[] = Array.isArray(lanes) ? lanes : [];
-  for (const l of list) {
-    if (Reflect.get(Object(l), "lane") === lane) {
-      Reflect.set(Object(l), field, value);
-    }
-  }
-  return JSON.stringify({ lanes: list });
-}
-
-describe("readProcess: the lanes and the review baseline from the process plugin (#232)", () => {
-  it("is the built-in process with no plugin, and with plugins that hold no process", async () => {
-    expect(await readProcess([])).toEqual({ kind: "ok", value: BUILT_IN });
-    const rules = plugin("rules", { "skills/java/references/x.md": "# x\n" });
-    expect(await readProcess([{ label: "rules@acme", dir: rules }])).toEqual({ kind: "ok", value: BUILT_IN });
-    expect(BUILT_IN.lanes.map((l) => l.name)).toEqual(["tiny", "bug", "feature", "one-way door"]);
-    expect(BUILT_IN.baseline).toBe(BASELINE);
+describe("skillDir: a plugin's skill, found by its name (ADR-0026)", () => {
+  it("takes the first plugin in the project's order that holds the skill, and passes over one that does not", async () => {
+    const other = plugin("other", ["skills/code/SKILL.md"]);
+    const rulebook = plugin("rulebook", ["skills/crq/SKILL.md"]);
+    const team = plugin("team", ["skills/crq/SKILL.md"]);
+    expect(await skillDir([other, rulebook, team], "crq")).toBe(join(rulebook.dir, "skills", "crq"));
   });
 
-  it("reads the rulebook's lanes, mapping its lane to the engine's name, and its baseline", async () => {
-    const read = await readProcess([{ label: "rulebook@chiyanram", dir: rulebook() }]);
-    expect(read).toMatchObject({ kind: "ok", value: { from: expect.stringContaining("rulebook@chiyanram") } });
-    const value = read.kind === "ok" ? read.value : BUILT_IN;
-    expect(value.lanes).toEqual(DEFAULT_LANES);
-    expect(value.baseline).toEqual([
-      { domain: "crq", reference: "review-process" },
-      { domain: "crq", reference: "code-review" },
-      { domain: "crq", reference: "verify-done" },
-      { domain: "code", reference: "smells" },
-    ]);
+  it("finds a skill whether or not it still has a process folder, and is empty when no plugin holds it", async () => {
+    const rulebook = plugin("rulebook", ["skills/crq/process/lanes.json"]);
+    expect(await skillDir([rulebook], "crq")).toBe(join(rulebook.dir, "skills", "crq"));
+    expect(await skillDir([rulebook], "retro")).toBe("");
+    expect(await skillDir([], "crq")).toBe("");
   });
 
-  it("maps a lanes file's test_first to the lane's testFirst (#417)", async () => {
-    const lanes = JSON.stringify({
-      lanes: [
-        { lane: "tiny", approval: false, lenses: "1" },
-        { lane: "bug", approval: true, lenses: "~3", test_first: false },
-        { lane: "feature", approval: true, lenses: "~3", test_first: true },
-      ],
-    });
-    const team = plugin("team", { "skills/flow/process/lanes.json": lanes });
-    const read = await readProcess([{ label: "team@local", dir: team }]);
-    const value = read.kind === "ok" ? read.value : BUILT_IN;
-    expect(value.lanes.map((l) => [l.name, l.testFirst])).toEqual([
-      ["tiny", false],
-      ["bug", false],
-      ["feature", true],
-    ]);
+  it("takes only a plain name, so a name can never climb out of the plugin", async () => {
+    const rulebook = plugin("rulebook", ["skills/crq/SKILL.md"]);
+    expect(await skillDir([rulebook], "../rulebook/skills/crq")).toBe("");
+    expect(await skillDir([rulebook], "")).toBe("");
   });
+});
 
-  it("takes the one plugin in the list that holds a process, and keeps the built-in baseline without review.json", async () => {
-    const rules = plugin("rules", { "skills/java/references/x.md": "# x\n" });
-    const team = plugin("team", { "skills/flow/process/lanes.json": readFileSync(RULEBOOK_LANES, "utf8") });
-    const read = await readProcess([
-      { label: "rules@acme", dir: rules },
-      { label: "team@acme", dir: team },
-    ]);
-    expect(read).toMatchObject({ kind: "ok", value: { from: expect.stringContaining("team@acme") } });
-    expect(read.kind === "ok" ? read.value.baseline : []).toBe(BASELINE);
-  });
-
-  it("refuses a second plugin that holds a process, naming both, never taking the first (#426)", async () => {
-    const rules = plugin("rules", { "skills/java/references/x.md": "# x\n" });
-    const team = plugin("team", { "skills/flow/process/lanes.json": readFileSync(RULEBOOK_LANES, "utf8") });
-    const read = await readProcess([
-      { label: "team@acme", dir: team },
-      { label: "rules@acme", dir: rules },
-      { label: "rulebook@chiyanram", dir: rulebook() },
-    ]);
-    expect(read).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("team@acme and rulebook@chiyanram each hold a process"),
-    });
-    expect(read.kind === "failed" ? read.reason : "").not.toContain("rules@acme");
-  });
-
-  it("oneHolder: none, the one, or refused for two or more", () => {
-    const holder = (label: string): Holder => ({ plugin: { label, dir: `/p/${label}` }, dir: `/p/${label}/process` });
-    expect(oneHolder([])).toEqual({ kind: "none" });
-    expect(oneHolder([holder("a@m")])).toEqual({ kind: "ok", value: holder("a@m") });
-    expect(oneHolder([holder("a@m"), holder("b@m"), holder("c@m")])).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("a@m and b@m and c@m each hold a process (/p/a@m/process, /p/b@m/process"),
-    });
-  });
-
-  it("refuses a lanes file that drops the approval floor, or names a lane the engine has not, never skipping it", async () => {
-    const open = lanesText("feature", "approval", false);
-    const team = plugin("team", { "skills/flow/process/lanes.json": open });
-    expect(await readProcess([{ label: "team@acme", dir: team }])).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("approval floor); feature would run"),
-    });
-    const renamed = lanesText("tiny", "lane", "small");
-    const small = plugin("small", { "skills/flow/process/lanes.json": renamed });
-    expect(await readProcess([{ label: "small@acme", dir: small }])).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("the lanes must be a list of"),
-    });
-    const broken = plugin("broken", { "skills/flow/process/lanes.json": "{" });
-    expect(await readProcess([{ label: "broken@acme", dir: broken }])).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("is not JSON"),
-    });
-  });
-
-  it("refuses a review file whose baseline is empty or names a path, not a plain name", async () => {
-    const lanes = readFileSync(RULEBOOK_LANES, "utf8");
-    const bad = [
-      { baseline: [] },
-      { baseline: [{ skill: "../crq", reference: "code-review" }] },
-      { baseline: [{ skill: "crq" }] },
-      [],
-    ];
-    for (const [i, review] of bad.entries()) {
-      const dir = plugin(`p${i}`, {
-        "skills/flow/process/lanes.json": lanes,
-        "skills/flow/process/review.json": JSON.stringify(review),
-      });
-      expect(await readProcess([{ label: "p@acme", dir }])).toMatchObject({
-        kind: "failed",
-        reason: expect.stringContaining('"baseline" must list {"skill", "reference"}'),
-      });
-    }
+describe("referencesDir: the plugin that still holds review references", () => {
+  it("takes the first folder with a skills/<skill>/references folder, and is empty with none", async () => {
+    const bare = plugin("bare", ["skills/deslop/SKILL.md"]);
+    const rulebook = plugin("rulebook", ["skills/crq/references/code-review.md"]);
+    expect(await referencesDir(["", bare.dir, rulebook.dir])).toBe(rulebook.dir);
+    expect(await referencesDir([bare.dir])).toBe("");
   });
 });

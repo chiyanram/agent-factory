@@ -17,10 +17,9 @@ import type { Result } from "./core/forge/api.js";
 import { hostGit } from "./core/git.js";
 import { originProblem } from "./core/origin.js";
 import { pluginConfigOf } from "./core/plugin/config.js";
-import { pinnedDirs, readPins } from "./core/process/pins.js";
+import { readPins } from "./core/process/pins.js";
 import { pluginListOf, refText } from "./core/process/plugins.js";
 import { ENGINE_ROOT, pinProof } from "./core/eval/pin-proof.js";
-import { findProcess } from "./core/process/read.js";
 import { projectPath, readyFieldsOf } from "./core/project.js";
 import { layered, readTeamAt, teamDir, type Layered, type Pin, type Read } from "./core/settings/layers.js";
 import { runEnv, settingOf } from "./core/settings/machine.js";
@@ -80,19 +79,9 @@ function readerErrors(path: string, effective: object, env: NodeJS.ProcessEnv): 
   );
 }
 
-async function processProblems(
-  home: string,
-  project: string,
-  path: string,
-  effective: object,
-): Promise<readonly Problem[]> {
-  const refs = pluginListOf(path, effective);
+async function pinsProblems(home: string, project: string): Promise<readonly Problem[]> {
   const pins = await readPins(home, project);
-  if (pins.kind === "failed") {
-    return [{ level: "error", text: pins.reason }];
-  }
-  const found = await findProcess(pinnedDirs(home, refs.kind === "ok" ? refs.value : [], pins.value));
-  return found.kind === "failed" ? [{ level: "error", text: found.reason }] : [];
+  return pins.kind === "failed" ? [{ level: "error", text: pins.reason }] : [];
 }
 
 async function proofProblems(
@@ -248,7 +237,7 @@ async function check(io: SettingsIo, project: string): Promise<number> {
   const plugins = await pluginLines(runEnv(io.env, layers), io.home);
   const problems = [
     ...allProblems(loaded.value.path, layers, io.env),
-    ...(await processProblems(io.home, project, loaded.value.path, layers.effective)),
+    ...(await pinsProblems(io.home, project)),
     ...(await proofProblems(io.home, project, loaded.value.path, layers.effective)),
     ...(await cloneProblems(runEnv(io.env, layers))),
     ...plugins.problems,

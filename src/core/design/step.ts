@@ -34,7 +34,6 @@ import { keepTrace } from "../dispatch/trace.js";
 import { namedIn, runsField, type RunNamed } from "../agent/ran.js";
 import { openAgentCli } from "../agent/index.js";
 import { inputsOf, readCard, type Card, type Part, type Role } from "../process/cards.js";
-import type { PluginDir } from "../process/read.js";
 import { copyCode } from "../review/code.js";
 import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { readVerdicts, VERIFY_SCHEMA } from "../review/verdicts.js";
@@ -54,8 +53,8 @@ export type DesignSetup = {
   readonly modelName: string;
   readonly maxUsd: string;
   readonly limits: { readonly review: RunLimit; readonly verify: RunLimit };
-  readonly plugins: readonly PluginDir[];
   readonly runsDir: string;
+  readonly cards?: string;
 };
 
 type Ran<T> = Result<DesignRan<T>>;
@@ -314,7 +313,7 @@ function answered<T>(card: Card, traced: Traced, read: (output: unknown) => Resu
 }
 
 async function cardFor(setup: DesignSetup, role: Role): Promise<Result<Card>> {
-  return readCard(setup.plugins, role);
+  return readCard(role, setup.cards);
 }
 
 async function citesHold(setup: DesignSetup, input: DesignInput, card: Card): Promise<Ran<never> | "hold"> {

@@ -2,7 +2,7 @@
 // (#144 phase 3), so they stay in the glossary's words. A finding names file:line, the old word and the word to use.
 //
 // Only the words that have one meaning here are checked: forge, box, dispatcher, writer, reviewer (not
-// design-reviewer), MR, merge request, seat and worker. issue, session, runner, plugin and pack also have a meaning
+// design-reviewer), MR, merge request, seat, worker and process plugin. issue, session, runner, plugin and pack also have a meaning
 // that is right (a GitHub issue, a Claude Code session, the machine, a Claude Code plugin, the context pack), so a
 // person reads those. Skipped, because they name an identifier, a path or a quote that phase 4 renames: fenced code
 // blocks, `inline code`, link targets, link text that is a path, and bare URLs.
@@ -24,6 +24,7 @@ export const OLD: readonly { readonly word: RegExp; readonly use: string }[] = [
   { word: /\bmerge requests?\b/i, use: "PR" },
   { word: /\bseats?\b/i, use: "the role's name" },
   { word: /\bworkers?\b/i, use: "run" },
+  { word: /\bprocess plugins?\b/i, use: "plugin (a plugin gives skills only)" },
 ];
 
 function mdIn(root: string, dir: string): readonly string[] {

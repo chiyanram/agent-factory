@@ -85,6 +85,7 @@ export type WriterSetup = {
   readonly agent: ClaudeWriter;
   readonly lanes?: readonly LaneProps[];
   readonly specs?: SpecStore;
+  readonly cards?: string;
 };
 
 type Input = RunInput & { readonly task: Task; readonly folder: string };
@@ -732,7 +733,7 @@ function planOn<K extends keyof TaskMap>(
 
 async function carded(setup: WriterSetup, draft: Draft): Promise<Planned> {
   const role = ROLE_OF[draft.mode];
-  const card = await readCard(setup.settings.plugins, role);
+  const card = await readCard(role, setup.cards);
   if (card.kind === "failed") {
     return { kind: "hand-over", reason: `the ${role} run has no role card: ${card.reason}` };
   }

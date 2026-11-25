@@ -1,8 +1,8 @@
 // draft — `agent-factory retro <project> --draft` (#488 AC-2 drafts, AC-3; design Q9 A, Q11 A): one model run of the
-// rules pack's retro card over every repeated failure, then the lesson drafts, written by the engine. A person starts it;
+// engine's retro card over every repeated failure, then the lesson drafts, written by the engine. A person starts it;
 // nothing in the pass, the loop or the coordinator does (the coordinator's settings deny it).
 //   stage   a fresh folder under <home>/retro-runs/: failures.json (the listing, by code), records/<ticket>.jsonl,
-//           traces/<ticket>/ and pack/ (the process plugin's skill, the pinned rules pack); no symlink is copied
+//           traces/<ticket>/ and pack/ (the pinned rules pack's crq skill, found by name); no symlink is copied
 //   run     the retro card's tools (Read, Grep, Glob at most), the stage as its folder, a $10 cap, the claude env with
 //           no git host token or FACTORY_* (review/settings.ts claudeEnv), and no skip-permissions flag (model.ts)
 //   drafts  <home>/retro/<project>/<date>/<n>/lesson.md, rules.patch and case/: written by code from the run's JSON.
@@ -15,13 +15,14 @@ import { dirname, join } from "node:path";
 import { keepTraceIn, prunedIn } from "../dispatch/trace.js";
 import type { Result } from "../forge/api.js";
 import { readCard } from "../process/cards.js";
-import { findProcess, type PluginDir } from "../process/read.js";
+import { skillDir, type PluginDir } from "../process/read.js";
 import type { Model, ModelResult, RunLimit } from "../review/model.js";
 import { lessonsOf, LESSON_SCHEMA, type Lesson } from "./lesson.js";
 import type { Failure } from "./repeated.js";
 import { codeOf } from "../field.js";
 
 export const RETRO_USD = "10";
+export const RETRO_SKILL = "crq";
 
 export type DraftSetup = {
   readonly home: string;
@@ -156,12 +157,12 @@ async function draftsOf(setup: DraftSetup, ran: ModelResult, failures: readonly 
   };
 }
 
-async function ranOn(setup: DraftSetup, failures: readonly Failure[], skillDir: string): Promise<Result<Drafted>> {
-  const card = await readCard(setup.plugins, "retro");
+async function ranOn(setup: DraftSetup, failures: readonly Failure[], skill: string): Promise<Result<Drafted>> {
+  const card = await readCard("retro");
   if (card.kind === "failed") {
     return card;
   }
-  const stage = await stageRetro(setup, { failures, skillDir });
+  const stage = await stageRetro(setup, { failures, skillDir: skill });
   try {
     const ran = await setup.model({
       folder: stage,
@@ -183,12 +184,8 @@ export async function draftRetro(setup: DraftSetup, failures: readonly Failure[]
   if (failures.length === 0) {
     return { kind: "ok", value: { dirs: [], usd: 0, trace: "" } };
   }
-  const found = await findProcess(setup.plugins);
-  if (found.kind === "none") {
-    return {
-      kind: "failed",
-      reason: "no rules pack holds a process for this project, so there is no retro card to run",
-    };
-  }
-  return found.kind === "ok" ? ranOn(setup, failures, dirname(found.value.dir)) : found;
+  const skill = await skillDir(setup.plugins, RETRO_SKILL);
+  return skill === ""
+    ? { kind: "failed", reason: `no plugin of this project holds the ${RETRO_SKILL} skill, which the retro card reads` }
+    : ranOn(setup, failures, skill);
 }

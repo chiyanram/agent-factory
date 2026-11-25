@@ -50,8 +50,8 @@ jobs:
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 5000 --json number > "$RUNNER_TEMP/open-tickets.json"
           echo "FACTORY_OPEN_TICKETS=$RUNNER_TEMP/open-tickets.json" >> "$GITHUB_ENV"
       - run: make lint
-      # the rules pack at the commit .github/rules-pack.json pins: test/pack-schema.test.ts reads every process and role
-      # card of it through the engine, and fails in CI when this checkout is missing (#484)
+      # the rules pack at the commit .github/rules-pack.json pins: test/rules-pack.test.ts checks that it holds each skill
+      # the engine names (P18), and fails in CI when this checkout is missing
       - name: Fetch the pinned rules pack
         run: |
           repo=$(node -p "require('./.github/rules-pack.json').repo")
@@ -117,7 +117,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
-      # the same pinned rules pack as the Linux job: test/pack-schema.test.ts fails in CI without it (#484)
+      # the same pinned rules pack as the Linux job: test/rules-pack.test.ts fails in CI without it
       - name: Fetch the pinned rules pack
         run: |
           repo=$(node -p "require('./.github/rules-pack.json').repo")

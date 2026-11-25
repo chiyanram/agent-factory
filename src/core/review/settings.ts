@@ -11,9 +11,10 @@
 //   FACTORY_HOME                  the run folders go in <home>/review-runs; the spec and its approval are read from
 //                                 <home>/specs and <home>/approvals (default ~/.factory)
 //
-// The plugins come from the project's pinned list (process/use.ts, #232): the process plugin's folder holds the review
-// references (skills/<domain>/references/). The model runs go through the agent seam (src/core/agent/), which gives
-// the CLI only the environment it needs: no forge token, no FACTORY_* (ADR-0012 S2).
+// The plugins come from the project's pinned list (process/use.ts): the first plugin that holds a
+// skills/<domain>/references/ folder gives the review its references (process/read.ts referencesDir). The model runs
+// go through the agent seam (src/core/agent/), which gives the CLI only the environment it needs: no forge token, no
+// FACTORY_* (ADR-0012 S2).
 
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";

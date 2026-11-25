@@ -18,7 +18,7 @@
 - **Evals:**
   - the automated review's golden set (ADR-0015);
   - about 10 past tickets end to end, once there is run history;
-  - three scenarios per role card, in the process plugin.
+  - three scenarios per role card.
 
   A model, prompt, card or plugin change ships only if its evals do not get worse. **Today:** only the review prompts
   are gated, against the baseline in `evals/reviewer/baseline.json`.

@@ -12,15 +12,14 @@
 // makes any approval stale, and a human approves the raised spec.
 //
 // The engine acts on a lane's properties, never on its name (section 3), with one exception: the approval floor goes
-// by the lane's name, so only tiny may skip the approval, wherever it is listed (#483). Two are read from the project's process: its
-// process plugin's lanes, or the default lanes below (process/read.ts, #232): approval, and how many lenses the
-// automated review runs (#237; review/lenses.ts pickLenses). A lanes file writes the lens count as a person reads it,
-// "1", "~3" or "all, on the strongest model"; a lane that leaves it out keeps the default lane's count. Each lane also
-// says whether its spec and design get a design review before the human's approval (designReview, #236): a
-// design-reviewer run, then a verify pass. The approval floor: every lane above tiny needs a human's approval, and no settings
-// layer or process plugin can turn that off. In the settings the floor is "approval.floor", a locked key fixed to tiny
-// (#229; settings/keys.ts). lanesOf is the one door a lanes value from a process plugin comes through; it refuses any
-// value that drops the floor.
+// by the lane's name, so only tiny may skip the approval, wherever it is listed. Two come from the engine's own lanes,
+// the default lanes below (process/read.ts, ADR-0026): approval, and how many lenses the automated review runs
+// (review/lenses.ts pickLenses). A lanes value writes the lens count as a person reads it, "1", "~3" or "all, on the
+// strongest model"; a lane that leaves it out keeps the default lane's count. Each lane also says whether its spec and
+// design get a design review before the human's approval (designReview): a design-reviewer run, then a verify pass.
+// The approval floor: every lane above tiny needs a human's approval, and no settings layer or plugin can turn that
+// off. In the settings the floor is "approval.floor", a locked key fixed to tiny (settings/keys.ts). lanesOf refuses
+// any lanes value that drops the floor.
 //
 // The one-way-door paths are a project setting, the deny-list key "lanes.oneWayDoor" (#229; settings/keys.ts): every
 // settings layer may add to it, and none may remove from it. oneWayDoorPathsOf reads it, resolved through the layers.

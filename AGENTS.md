@@ -22,8 +22,8 @@ CI runs both on every pull request and on push to `main`. `make lint` skips the 
 only closed tickets unless `FACTORY_OPEN_TICKETS` names a list of the open ones; CI writes that list.
 
 `make test` skips the rules-pack check unless `FACTORY_RULES_PACK` names a checkout of the commit pinned in
-`.github/rules-pack.json`; CI sets it. Before you change how a role card or a process is read, fetch that commit and
-set the variable as `.github/workflows/ci.yml` does, because a local run is otherwise green where CI fails.
+`.github/rules-pack.json`; CI sets it. Before you change which skill the engine names, fetch that commit and set the
+variable as `.github/workflows/ci.yml` does, because a local run is otherwise green where CI fails.
 
 ## MUSTs
 
@@ -84,8 +84,8 @@ Agents optimise whatever you measure, so these rules guard the measures (`npx re
 The module headers say what each folder under `src/core/` does. What they do not say:
 
 - `plugins/*/lib/` is built from `dist/`: never edit it by hand.
-- `prompts/roles/` holds the built-in role cards; a card in the project's rules pack wins over them
-  (`src/core/process/cards.ts`).
+- `prompts/roles/` holds the role cards. They are the engine's own, and no plugin replaces them
+  ([ADR-0026](docs/adr/0026-the-engine-owns-its-process.md)).
 - `src/core/ready/` runs branch code on a fresh runner, never on the host.
 - `test/` holds one vitest file per module; `tests/fixtures/` holds planted input for the lint checks.
 - `evals/reviewer/` is the automated review's golden set; changing a review input needs an eval pass

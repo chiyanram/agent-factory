@@ -70,7 +70,7 @@ import { writerSetup } from "./core/writer/setup.js";
 import { hostPush } from "./core/push.js";
 import { writerStep } from "./core/writer/step.js";
 import { hashesOf, runPlugins, type PluginHash } from "./core/process/use.js";
-import { readProcess, type PluginDir, type Process } from "./core/process/read.js";
+import { ENGINE_PROCESS, type PluginDir, type Process } from "./core/process/read.js";
 import type { LaneProps } from "./core/lane.js";
 import { readQuarantine, type Quarantined } from "./core/process/quarantine.js";
 import { readyPrograms, readyStep, verifyStep, type BoxPlan } from "./core/ready/steps.js";
@@ -309,18 +309,12 @@ function onboardCli({ positionals, io }: Args): Promise<number> {
         if (opened.kind === "failed") {
           return opened;
         }
-        const used = await runPlugins({ home: home.path, project: name, env: resolved.env });
-        if (used.kind === "failed") {
-          return used;
-        }
-        io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
         return onboardSetup({
           env: resolved.env,
           forge: opened.value.forge,
           home: home.path,
           project: name,
           now: Date.now,
-          plugins: used.value.plugins,
         });
       },
     });
@@ -808,14 +802,11 @@ function egressCli(argv: readonly string[], io: Io): Promise<number> {
 async function processAndQuarantine(
   home: string,
   project: string,
-  plugins: Parameters<typeof readProcess>[0],
 ): Promise<Result<Process & { readonly quarantine: readonly Quarantined[] }>> {
-  const own = await readProcess(plugins);
-  if (own.kind === "failed") {
-    return own;
-  }
   const quarantine = await readQuarantine({ home, project, now: Date.now() });
-  return quarantine.kind === "ok" ? { kind: "ok", value: { ...own.value, quarantine: quarantine.value } } : quarantine;
+  return quarantine.kind === "ok"
+    ? { kind: "ok", value: { ...ENGINE_PROCESS, quarantine: quarantine.value } }
+    : quarantine;
 }
 
 async function stepsFor(io: Io, opened: Project, home: string, project: string): Promise<Result<Planned>> {
@@ -830,7 +821,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     return used;
   }
   io.err(used.value.warnings.map((w) => `warning: ${w}\n`).join(""));
-  const own = await processAndQuarantine(home, project, used.value.plugins);
+  const own = await processAndQuarantine(home, project);
   if (own.kind === "failed") {
     return own;
   }
@@ -860,7 +851,7 @@ async function stepsFor(io: Io, opened: Project, home: string, project: string):
     }),
     review: await reviewStepFor(io.env, forge, project, used.value.plugins),
     verify: verifyStep(plan, forge),
-    ...designSteps(designSetup({ env: io.env, forge, home, project, plugins: used.value.plugins })),
+    ...designSteps(designSetup({ env: io.env, forge, home, project })),
   };
   return {
     kind: "ok",

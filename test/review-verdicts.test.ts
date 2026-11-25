@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CATEGORIES } from "../src/core/eval/golden.js";
+import { CATEGORIES, readGolden } from "../src/core/eval/golden.js";
 import { FIND_SCHEMA, readFindings } from "../src/core/review/verdicts.js";
 
 const RAW = {
@@ -70,5 +70,48 @@ describe("readFindings: the design's finding contract (#237)", () => {
     expect(item.required).toEqual(expect.arrayContaining(["axis", "kind", "category", "grade", "evidence"]));
     expect(item.required).not.toContain("lens");
     expect(item.properties.grade.enum).toEqual(["cited", "walked", "ran"]);
+  });
+});
+
+describe("findings in the finding format the finder writes (#484)", () => {
+  const finding = {
+    id: "F9",
+    file: "src/a.ts",
+    line: "40-44",
+    rule: null,
+    severity: "warning",
+    grade: "walked",
+    finding: "f",
+    fix: "x",
+    axis: "standards",
+    kind: "logic",
+    category: "observability",
+    evidence: "e",
+  };
+
+  it("reads a line range as its first line, a null rule as none, and the pack's newer categories", () => {
+    expect(readFindings({ findings: [finding] }, "logic")).toMatchObject({
+      kind: "ok",
+      value: [{ line: 40, rule: "", category: "observability" }],
+    });
+  });
+
+  it("reads a style finding as a nit, as the pack's format says; it never raises a severity", () => {
+    expect(readFindings({ findings: [{ ...finding, category: "style", severity: "blocker" }] }, "rule")).toMatchObject({
+      kind: "ok",
+      value: [{ category: "style", severity: "nit" }],
+    });
+  });
+
+  it("names an unknown category, never reads it as another", () => {
+    expect(readFindings({ findings: [{ ...finding, category: "vibes" }] }, "logic")).toEqual({
+      kind: "failed",
+      reason: `the find pass gave a finding that is not well formed: the category "vibes" is not one of ${CATEGORIES.join(", ")}`,
+    });
+    const golden = JSON.stringify([{ file: "a", line: 1, issue: "i", severity: "nit", category: "vibes" }]);
+    expect(readGolden(golden)).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('category "vibes" is not one of'),
+    });
   });
 });
