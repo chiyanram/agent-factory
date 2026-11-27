@@ -42,6 +42,7 @@ import { issuesFrom, specStoreOf } from "../spec-store.js";
 import { brokenCites } from "../spec-cites.js";
 import { checkCites } from "../cite-check.js";
 import { DESIGN_SCHEMA, keep, readDesignFindings, type DesignFinding, type Kept } from "./findings.js";
+import type { FailedReason } from "../end-reason.js";
 
 export type DesignSetup = {
   readonly home: string;
@@ -294,6 +295,14 @@ function spent(ran: ModelResult): Spend | undefined {
   return ran.answer === undefined ? undefined : spendOf(ran.answer);
 }
 
+function failedRun(ran: Extract<ModelResult, { kind: "failed" }>): {
+  readonly kind: "failed";
+  readonly why: string;
+  readonly end: FailedReason;
+} {
+  return { kind: "failed", why: `the model run failed: ${ran.reason}`, end: ran.end ?? "unknown" };
+}
+
 function answered<T>(card: Card, traced: Traced, read: (output: unknown) => Result<T>): DesignRan<T> {
   const { ran } = traced;
   const spend = spent(ran);
@@ -304,12 +313,12 @@ function answered<T>(card: Card, traced: Traced, read: (output: unknown) => Resu
     ...runsField(traced.runs),
   };
   if (ran.kind === "failed") {
-    return { ...base, kind: "failed", why: `the model run failed: ${ran.reason}` };
+    return { ...base, ...failedRun(ran) };
   }
   const value = read(ran.value.output);
   return value.kind === "ok"
     ? { ...base, kind: "done", ...value.value }
-    : { ...base, kind: "failed", why: value.reason };
+    : { ...base, kind: "failed", why: value.reason, end: "output_invalid" };
 }
 
 async function cardFor(setup: DesignSetup, role: Role): Promise<Result<Card>> {

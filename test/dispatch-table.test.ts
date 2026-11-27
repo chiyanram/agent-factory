@@ -744,6 +744,7 @@ describe("the design review before the approval, and no cleanup run after the im
       mode,
       head: H,
       outcome: "done",
+      reason: "done",
       patch,
       evidence: [row],
       hung: false,
@@ -912,6 +913,7 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
     mode,
     head: H,
     outcome: "done",
+    reason: "done",
     patch,
     evidence,
     hung: false,
@@ -919,6 +921,7 @@ describe("a rework at the same head after a failed ready check (#444)", () => {
   const readyEnded = (minute: number, passed: boolean, programs?: readonly string[]): Event => ({
     at: t(minute),
     kind: "ready-ended",
+    reason: "done",
     head: H,
     passed,
     why: passed ? "" : 'row 1 (AC-1): "grep" is not a program a ready check may run (./gradlew)',

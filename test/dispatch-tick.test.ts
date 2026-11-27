@@ -188,8 +188,8 @@ describe("records", () => {
 
   it("appends one line per event, and counts only what came after the approval", async () => {
     const events: Event[] = [
-      { at: "2026-11-06T09:00:00Z", kind: "ready-ended", head: H, passed: false, why: "" },
-      { at: "2026-11-07T09:00:00Z", kind: "ready-ended", head: H, passed: false, why: "" },
+      { at: "2026-11-06T09:00:00Z", kind: "ready-ended", reason: "done", head: H, passed: false, why: "" },
+      { at: "2026-11-07T09:00:00Z", kind: "ready-ended", reason: "done", head: H, passed: false, why: "" },
       { at: "2026-11-07T09:10:00Z", kind: "started", phase: "writer", mode: "ci", head: H },
       {
         at: "2026-11-07T09:20:00Z",
@@ -197,6 +197,7 @@ describe("records", () => {
         mode: "ci",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,
@@ -220,6 +221,7 @@ describe("records", () => {
     const parked: Event = {
       at: "2026-11-07T09:20:00Z",
       kind: "parked",
+      reason: "usage_limit",
       phase: "writer",
       head: H,
       until: "2026-11-07T14:00:00Z",
@@ -250,6 +252,7 @@ describe("records", () => {
     const park = (at: string, until: string): Event => ({
       at,
       kind: "parked",
+      reason: "usage_limit",
       phase: "writer",
       head: H,
       until,
@@ -267,6 +270,7 @@ describe("records", () => {
       mode: "fix",
       head: H,
       outcome: "done",
+      reason: "done",
       patch: "p",
       evidence: [],
       hung: false,
@@ -384,13 +388,13 @@ describe("records: evidence", () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     writeFileSync(
       file,
-      `${JSON.stringify({ at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p" })}\n${JSON.stringify({ at: "2026-11-07T09:01:00Z", kind: "ready-ended", head: H, passed: true })}\n`,
+      `${JSON.stringify({ at: "2026-11-07T09:00:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", reason: "done", patch: "p" })}\n${JSON.stringify({ at: "2026-11-07T09:01:00Z", kind: "ready-ended", reason: "done", head: H, passed: true })}\n`,
     );
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(read).toMatchObject({ kind: "ok", value: [{ evidence: [] }, { why: "" }] });
     writeFileSync(
       file,
-      `${JSON.stringify({ at: "2026-11-07T09:02:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", patch: "p", evidence: [{ criterion: "AC1" }] })}\n${JSON.stringify({ at: "2026-11-07T09:03:00Z", kind: "pinged", head: H })}\n`,
+      `${JSON.stringify({ at: "2026-11-07T09:02:00Z", kind: "writer-ended", mode: "fix", head: H, outcome: "done", reason: "done", patch: "p", evidence: [{ criterion: "AC1" }] })}\n${JSON.stringify({ at: "2026-11-07T09:03:00Z", kind: "pinged", head: H })}\n`,
       { flag: "a" },
     );
     expect(await readRecords({ home, project: "ledger", ticket: "PROJ-1" })).toMatchObject({ kind: "failed" });
@@ -398,16 +402,30 @@ describe("records: evidence", () => {
 });
 
 describe("tick", () => {
-  it("today the writer's step is not built: the pass says so and records nothing, so the next pass decides the same", async () => {
+  it("today the writer's step is not built: the pass says so and records the refusal once, so the next pass decides the same", async () => {
     await approved();
-    const log: string[] = [];
-    expect(await tick(setup({ team, open: [], merged: [] }, log))).toMatchObject({ kind: "ok" });
-    expect(log).toEqual([
+    const passed = async () => {
+      const log: string[] = [];
+      expect(await tick(setup({ team, open: [], merged: [] }, log))).toMatchObject({ kind: "ok" });
+      return log;
+    };
+    const decided = [
       "log PROJ-1: writer (fix): approved; no run yet",
       "log PROJ-1: unavailable: the writer's box is not built yet (#113)",
-    ]);
+    ];
+    expect(await passed()).toEqual(decided);
+    expect(await passed()).toEqual(decided);
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
-    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual(["begun", "approved", "turn"]);
+    expect(read.kind === "ok" ? read.value.map((e) => e.kind) : read).toEqual([
+      "begun",
+      "approved",
+      "turn",
+      "setup-refused",
+    ]);
+    expect(read.kind === "ok" ? read.value.at(-1) : read).toMatchObject({
+      phase: "writer",
+      why: "the writer's box is not built yet (#113)",
+    });
   });
 
   it("an available writer: claims the change, records the start and the end with its spend; one run per pass", async () => {
@@ -427,6 +445,7 @@ describe("tick", () => {
             value: {
               head: H,
               outcome: "done",
+              reason: "done",
               patch: "p1",
               evidence: [],
               hung: false,
@@ -471,6 +490,7 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "asked",
+        reason: "asked",
         patch: "",
         evidence: [],
         hung: false,
@@ -494,7 +514,7 @@ describe("tick", () => {
         folder: noRunFolder,
         run: async (input) => (
           tasks.push(input.task),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+          { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false } }
         ),
       },
     };
@@ -545,7 +565,7 @@ describe("tick", () => {
         folder: noRunFolder,
         run: async (input) => (
           runs.push(input.ticket),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+          { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false } }
         ),
       },
     };
@@ -836,7 +856,7 @@ describe("tick", () => {
         folder: noRunFolder,
         run: async () => ({
           kind: "ok",
-          value: { head: H, outcome: "blocked", patch: "", evidence: [], hung: false, why, output },
+          value: { head: H, outcome: "blocked", reason: "blocked", patch: "", evidence: [], hung: false, why, output },
         }),
       },
     };
@@ -873,7 +893,7 @@ describe("tick", () => {
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
     writeFileSync(join(home, "runs", "ledger", "OLD-1.jsonl"), `${JSON.stringify(line)}\n`);
     const read = await readRecords({ home, project: "ledger", ticket: "OLD-1" });
-    expect(read).toEqual({ kind: "ok", value: [line] });
+    expect(read).toEqual({ kind: "ok", value: [{ ...line, reason: "unknown" }] });
     writeFileSync(
       join(home, "runs", "ledger", "OLD-2.jsonl"),
       `${JSON.stringify({ ...line, why: 7 })}\n${JSON.stringify(line)}\n`,
@@ -912,7 +932,15 @@ describe("tick", () => {
   it("a writer run's started line names its CLI and asked model, and its end line the run", async () => {
     await approved();
     const runs = [{ cli: "claude", asked: "default", version: "9.9.9", model: "claude-model-id" }];
-    const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, runs };
+    const value = {
+      head: H,
+      outcome: "blocked" as const,
+      reason: "stalled" as const,
+      patch: "",
+      evidence: [],
+      hung: false,
+      runs,
+    };
     const steps: Steps = {
       ...STEPS_TODAY,
       writer: {
@@ -940,7 +968,16 @@ describe("tick", () => {
     await approved();
     const runs = [{ cli: "claude", asked: "default", version: "9.9.9" }];
     const parked = { until: "unknown", said: "limit" };
-    const value = { head: H, outcome: "parked" as const, parked, patch: "", evidence: [], hung: false, runs };
+    const value = {
+      head: H,
+      outcome: "parked" as const,
+      reason: "usage_limit" as const,
+      parked,
+      patch: "",
+      evidence: [],
+      hung: false,
+      runs,
+    };
     const steps: Steps = {
       ...STEPS_TODAY,
       writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "ok", value }) },
@@ -959,19 +996,37 @@ describe("tick", () => {
       writer: {
         kind: "available",
         folder: noRunFolder,
-        run: async () => ({ kind: "failed", reason: "the push failed", spend: { usd: 0.3, tokens: 9 }, runs }),
+        run: async () => ({
+          kind: "failed",
+          reason: "the push failed",
+          spend: { usd: 0.3, tokens: 9 },
+          runs,
+          end: "done",
+        }),
       },
     };
     await tick(setup({ team, open: [], merged: [] }, [], { steps }));
     const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     const events = read.kind === "ok" ? read.value : [];
-    expect(events.find((e) => e.kind === "spent")).toMatchObject({ runs });
+    expect(events.find((e) => e.kind === "spent")).toMatchObject({
+      runs,
+      spend: { usd: 0.3, tokens: 9 },
+      reason: "done",
+    });
   });
 
   it("a writer run's end names its trace, and the record reads it back (#487)", async () => {
     await approved();
     const trace = "writer-2026-11-07T09-00-00-000Z.jsonl";
-    const value = { head: H, outcome: "blocked" as const, patch: "", evidence: [], hung: false, trace };
+    const value = {
+      head: H,
+      outcome: "blocked" as const,
+      patch: "",
+      evidence: [],
+      hung: false,
+      trace,
+      reason: "stalled" as const,
+    };
     const steps: Steps = {
       ...STEPS_TODAY,
       writer: { kind: "available", folder: noRunFolder, run: async () => ({ kind: "ok", value }) },
@@ -985,7 +1040,7 @@ describe("tick", () => {
         { kind: "approved" },
         { kind: "turn", to: "factory" },
         { kind: "started" },
-        { kind: "writer-ended", trace },
+        { kind: "writer-ended", trace, outcome: "blocked", hung: false, reason: "stalled" },
       ],
     });
   });
@@ -1051,6 +1106,11 @@ describe("tick", () => {
     const first: string[] = [];
     await tick(setup(changes, first, { steps }));
     expect(first).toContain("log PROJ-1: failed: the box died");
+    const read = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
+    expect(read.kind === "ok" ? read.value.slice(-2) : read).toEqual([
+      expect.objectContaining({ kind: "started", phase: "writer" }),
+      { at: expect.any(String), kind: "spent", phase: "writer", head: H, reason: "unknown" },
+    ]);
     const second: string[] = [];
     await tick(setup(changes, second, { steps }));
     expect(second).toContain("label +needs-human #12");
@@ -1058,6 +1118,109 @@ describe("tick", () => {
       /^note #12 \[coordinator\] blocked: the writer run started at .* never ended/,
     );
   });
+
+  it("a failed run that measured nothing writes its spent line with no spend, so it is neither spending nor activity", async () => {
+    await approved();
+    const where = { home, project: "ledger", ticket: "PROJ-1" };
+    const done = {
+      mode: "fix",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
+    await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+    });
+    const steps: Steps = {
+      ...STEPS_TODAY,
+      review: { kind: "available", run: async () => ({ kind: "failed", reason: "no pack", spend: NO_SPEND }) },
+    };
+    await tick(setup({ team, open: [open()], merged: [] }, [], { steps }));
+    const read = await readRecords(where);
+    expect(read.kind === "ok" ? read.value.at(-1) : read).toEqual({
+      at: expect.any(String),
+      kind: "spent",
+      phase: "review",
+      head: H,
+      reason: "unknown",
+    });
+  });
+
+  const failing = {
+    kind: "available",
+    run: async () => ({ kind: "failed" as const, reason: "the box died" }),
+  } as const;
+  const readyPassed: Event = {
+    at: "2026-11-07T09:05:00Z",
+    kind: "ready-ended",
+    reason: "done",
+    head: H,
+    passed: true,
+    why: "",
+  };
+  const reviewed: Event = { at: "2026-11-07T09:06:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 };
+  const failedRuns = [
+    { phase: "ready", steps: { ...STEPS_TODAY, ready: failing }, before: [], over: {}, line: {}, reason: "unknown" },
+    {
+      phase: "verify",
+      steps: { ...STEPS_TODAY, verify: failing },
+      before: [readyPassed, reviewed],
+      over: { gate: "local" },
+      line: { pipeline: { kind: "none" } },
+      reason: "unknown",
+    },
+    {
+      phase: "review",
+      steps: {
+        ...STEPS_TODAY,
+        review: { kind: "available", run: async () => ({ kind: "failed", reason: "stopped", end: "timed_out" }) },
+      },
+      before: [readyPassed],
+      over: {},
+      line: {},
+      reason: "timed_out",
+    },
+  ] as const satisfies readonly {
+    readonly phase: "ready" | "verify" | "review";
+    readonly steps: Steps;
+    readonly before: readonly Event[];
+    readonly over: Partial<TickSetup>;
+    readonly line: Partial<OpenChange>;
+    readonly reason: string;
+  }[];
+
+  it.each(failedRuns)(
+    "a $phase run that fails writes one spent line with its reason, and the ticket still reads as interrupted",
+    async (c) => {
+      await approved();
+      const where = { home, project: "ledger", ticket: "PROJ-1" };
+      const done = {
+        mode: "fix",
+        head: H,
+        outcome: "done",
+        reason: "done",
+        patch: "p",
+        evidence: [],
+        hung: false,
+      } as const;
+      for (const event of [{ at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } as const, ...c.before]) {
+        await record({ where, event });
+      }
+      await tick(setup({ team, open: [open(c.line)], merged: [] }, [], { steps: c.steps, ...c.over }));
+      const read = await readRecords(where);
+      const events = read.kind === "ok" ? read.value : [];
+      expect(events.slice(-2)).toEqual([
+        expect.objectContaining({ kind: "started", phase: c.phase }),
+        { at: expect.any(String), kind: "spent", phase: c.phase, head: H, reason: c.reason },
+      ]);
+      expect(summarize({ events, since: "2026-11-07T08:00:00Z" }).interrupted).toMatchObject({ phase: c.phase });
+    },
+  );
 
   it("two failures in a row skip the step until each nextTry (#228)", async () => {
     await approved();
@@ -1071,6 +1234,7 @@ describe("tick", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p1",
         evidence: [],
         hung: false,
@@ -1090,7 +1254,10 @@ describe("tick", () => {
         run: async (input) => {
           wrote.push(input.task.kind);
           head = H2;
-          return { kind: "ok", value: { head: H2, outcome: "done", patch: "p2", evidence: [], hung: false } };
+          return {
+            kind: "ok",
+            value: { head: H2, outcome: "done", reason: "done", patch: "p2", evidence: [], hung: false },
+          };
         },
       },
     };
@@ -1129,17 +1296,26 @@ describe("tick", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "",
         evidence: grep,
         hung: false,
       },
-      { at: "2026-11-07T09:01:00Z", kind: "ready-ended", head: H, passed: false, why: "row 1: grep is not allowed" },
+      {
+        at: "2026-11-07T09:01:00Z",
+        kind: "ready-ended",
+        reason: "done",
+        head: H,
+        passed: false,
+        why: "row 1: grep is not allowed",
+      },
       {
         at: "2026-11-07T09:05:00Z",
         kind: "writer-ended",
         mode: "rework",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "",
         evidence: gate,
         hung: false,
@@ -1191,6 +1367,7 @@ describe("tick", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p1",
         evidence: [],
         hung: false,
@@ -1257,6 +1434,7 @@ describe("tick", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,
@@ -1264,11 +1442,11 @@ describe("tick", () => {
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-3" },
-      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-3" },
-      event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+      event: { at: "2026-11-07T09:10:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
     });
     const changes = {
       team,
@@ -1332,7 +1510,14 @@ describe("tick", () => {
     const where = { home, project: "ledger", ticket: "PROJ-9" };
     await record({
       where,
-      event: { at: "2026-11-07T08:00:00Z", kind: "review-ended", head: H, actOn: 1, found: { CR1: { act_on: 1 } } },
+      event: {
+        at: "2026-11-07T08:00:00Z",
+        kind: "review-ended",
+        reason: "done",
+        head: H,
+        actOn: 1,
+        found: { CR1: { act_on: 1 } },
+      },
     });
     await record({
       where,
@@ -1365,12 +1550,13 @@ describe("tick", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,
       },
-      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
-      { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+      { at: "2026-11-07T09:10:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
     ];
     for (const event of events) {
       await record({ where, event });
@@ -1403,9 +1589,20 @@ describe("tick", () => {
   it("a review round records its Act on count, what it spent (#131) and each lens's unique findings (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = {
+      mode: "cleanup",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
     await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
-    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+    });
     const steps: Steps = {
       ...STEPS_TODAY,
       review: {
@@ -1435,13 +1632,22 @@ describe("tick", () => {
       citesNotFound: 1,
       found: { CR1: { act_on: 1 }, logic: { noted: 2 } },
       traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
+      reason: "done",
     });
   });
 
   it("names the CLI and asked model on a model run's started line, and each run on its end line", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = {
+      mode: "cleanup",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
     await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
     const runs = [
       { part: "errors", cli: "claude", asked: "find-id", version: "9.9.9", model: "find-id" },
@@ -1477,9 +1683,20 @@ describe("tick", () => {
   it("names the runs of a failed review round on its spent line", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = {
+      mode: "cleanup",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
     await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
-    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+    });
     const runs = [{ part: "errors", cli: "claude", asked: "find-id" }];
     const steps: Steps = {
       ...STEPS_TODAY,
@@ -1500,7 +1717,7 @@ describe("tick", () => {
     const path = join(home, "runs", "ledger", "PROJ-1.jsonl");
     const ping = `${JSON.stringify({ at: "2026-11-07T09:30:00Z", kind: "pinged", head: H })}\n`;
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });
-    const base = { at: "2026-11-07T09:00:00Z", kind: "review-ended", head: H, actOn: 0 };
+    const base = { at: "2026-11-07T09:00:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 };
     writeFileSync(path, `${JSON.stringify(base)}\n${JSON.stringify({ ...base, spend: { usd: 0.1, tokens: 7 } })}\n`);
     const read = await readRecords(where);
     expect(read.kind === "ok" ? read.value : []).toEqual([base, { ...base, spend: { usd: 0.1, tokens: 7 } }]);
@@ -1539,6 +1756,7 @@ describe("tick", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence,
         hung: false,
@@ -1563,14 +1781,15 @@ describe("tick", () => {
       kind: "ready-ended",
       passed: false,
       why: "row 1 (AC1): make test exited 2",
+      reason: "done",
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-1" },
-      event: { at: "2026-11-07T09:10:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
+      event: { at: "2026-11-07T09:10:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
     });
     await record({
       where: { home, project: "ledger", ticket: "PROJ-1" },
-      event: { at: "2026-11-07T09:20:00Z", kind: "review-ended", head: H, actOn: 0 },
+      event: { at: "2026-11-07T09:20:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
     });
     const verified: string[] = [];
     const local: Steps = {
@@ -1585,6 +1804,7 @@ describe("tick", () => {
     expect(verified).toEqual([H]);
     const after = await readRecords({ home, project: "ledger", ticket: "PROJ-1" });
     expect(after.kind === "ok" ? after.value.slice(-2).map((e) => e.kind) : []).toEqual(["started", "verify-ended"]);
+    expect(after.kind === "ok" ? after.value.at(-1) : undefined).toMatchObject({ passed: true, reason: "done" });
   });
 
   it("a dry run decides every ticket and acts on none", async () => {
@@ -1647,6 +1867,7 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "",
         evidence: [],
         hung: false,
@@ -1689,6 +1910,10 @@ describe("tick", () => {
     const asked = [
       { author: { name: "ram" }, body: question.kind === "ok" ? question.text : "", at: "2026-11-07T09:01:00Z" },
     ];
+    const ENDS = {
+      asked: { outcome: "asked", reason: "asked" },
+      blocked: { outcome: "blocked", reason: "blocked" },
+    } as const;
     for (const [outcome, after, why] of [
       ["asked", open({ labels: [], comments: asked }), "an open question waits for a person"],
       [
@@ -1705,7 +1930,7 @@ describe("tick", () => {
           folder: noRunFolder,
           run: async () => ({
             kind: "ok",
-            value: { head: H, outcome, patch: "p1", evidence: [], hung: false, why: "no key" },
+            value: { head: H, ...ENDS[outcome], patch: "p1", evidence: [], hung: false, why: "no key" },
           }),
         },
       };
@@ -1732,12 +1957,13 @@ describe("tick", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,
       },
-      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
-      { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+      { at: "2026-11-07T09:10:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
     ] as const) {
       await record({ where: { home, project: "ledger", ticket: "PROJ-3" }, event });
     }
@@ -1749,7 +1975,7 @@ describe("tick", () => {
         folder: noRunFolder,
         run: async () => (
           log.push("writer runs"),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+          { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false } }
         ),
       },
     };
@@ -1907,6 +2133,7 @@ describe("START and approval (#227)", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "",
         evidence: [],
         hung: false,
@@ -1966,7 +2193,7 @@ describe("START and approval (#227)", () => {
         folder: noRunFolder,
         run: async (input) => (
           runs.push(input.task.kind),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+          { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false } }
         ),
       },
     };
@@ -2085,6 +2312,7 @@ describe("the lane set by code, raise only (#230)", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p1",
         evidence: [{ criterion: "AC-1", command: "make test", result: "ok" }],
         hung: false,
@@ -2124,14 +2352,14 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
       folder: noRunFolder,
       run: async (input) => (
         runs.push(input.ticket),
-        { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } }
+        { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false } }
       ),
     },
   });
   const spent = (at: string, usd: number, tokens: number, project = "ledger") =>
     record({
       where: { home, project, ticket: "PROJ-9" },
-      event: { at, kind: "review-ended", head: H, actOn: 0, spend: { usd, tokens } },
+      event: { at, kind: "review-ended", reason: "done", head: H, actOn: 0, spend: { usd, tokens } },
     });
   const changes = () => ({ team, open: [open({ labels: [] })], merged: [] });
 
@@ -2145,6 +2373,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
         mode: "test-first",
         head: H,
         outcome: "blocked",
+        reason: "blocked",
         patch: "p",
         evidence: [],
         hung: false,
@@ -2172,12 +2401,23 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
   it("a review round that fails records what it spent, and that spend counts toward the ticket's cap", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = {
+      mode: "cleanup",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
     await record({
       where,
       event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
     });
-    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+    });
     const steps: Steps = {
       ...STEPS_TODAY,
       review: {
@@ -2205,6 +2445,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
         head: H,
         spend: { usd: 1.5, tokens: 200 },
         split: { finders: { errors: { usd: 0.5, tokens: 80 } }, verify: { usd: 1, tokens: 120 } },
+        reason: "unknown",
       },
     ]);
     const summary = summarize({ events, since: "2026-11-07T08:00:00Z" });
@@ -2225,12 +2466,23 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
   it("holds a review round whose worst case could pass the ticket's dollar cap, with no start line (#237)", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "cleanup", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = {
+      mode: "cleanup",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
     await record({
       where,
       event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done, spend: { usd: 1, tokens: 100 } },
     });
-    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
+    await record({
+      where,
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+    });
     const rounds: string[] = [];
     const review = (worst: number | "unbounded"): Steps => ({
       ...STEPS_TODAY,
@@ -2259,6 +2511,7 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
     expect(rounds).toEqual([]);
     const read = await readRecords(where);
     expect((read.kind === "ok" ? read.value : []).map((e) => e.kind)).not.toContain("started");
+    expect((read.kind === "ok" ? read.value : []).map((e) => e.kind)).not.toContain("setup-refused");
     await tick(setup({ team, open: [open()], merged: [] }, [], { steps: review("unbounded"), caps: caps({ ticket }) }));
     expect(rounds).toEqual(["PROJ-1"]);
   });
@@ -2266,12 +2519,30 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
   it("once a person takes the failed round back, the ticket at its cap goes to needs-human, not to another run", async () => {
     await approved();
     const where = { home, project: "ledger", ticket: "PROJ-1" };
-    const done = { mode: "fix", head: H, outcome: "done", patch: "p", evidence: [], hung: false } as const;
+    const done = {
+      mode: "fix",
+      head: H,
+      outcome: "done",
+      reason: "done",
+      patch: "p",
+      evidence: [],
+      hung: false,
+    } as const;
     await record({ where, event: { at: "2026-11-07T09:00:00Z", kind: "writer-ended", ...done } });
-    await record({ where, event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" } });
     await record({
       where,
-      event: { at: "2026-11-07T09:10:00Z", kind: "spent", phase: "review", head: H, spend: { usd: 3, tokens: 9 } },
+      event: { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+    });
+    await record({
+      where,
+      event: {
+        at: "2026-11-07T09:10:00Z",
+        kind: "spent",
+        reason: "unknown",
+        phase: "review",
+        head: H,
+        spend: { usd: 3, tokens: 9 },
+      },
     });
     const log: string[] = [];
     const steps: Steps = {
@@ -2346,7 +2617,15 @@ describe("caps per ticket, per project-day and the window share (#131)", () => {
           runs.push(input.ticket),
           {
             kind: "ok",
-            value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false, spend: { usd: 2, tokens: 5 } },
+            value: {
+              head: H,
+              outcome: "done",
+              reason: "done",
+              patch: "p1",
+              evidence: [],
+              hung: false,
+              spend: { usd: 2, tokens: 5 },
+            },
           }
         ),
       },
@@ -2555,6 +2834,30 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(events.find((e) => e.kind === "design-ended")).toMatchObject({ runs });
   });
 
+  it("a failed design run's line names how the model run ended, else unknown", async () => {
+    spec("feature");
+    await started();
+    const base = designSteps([]);
+    const failedWith = (end?: "timed_out"): Steps => ({
+      ...base,
+      designReview: {
+        kind: "available",
+        run: async () => ({
+          kind: "ok",
+          value: { kind: "failed", card: CARD, why: "the model run failed", ...(end === undefined ? {} : { end }) },
+        }),
+      },
+    });
+    await pass(failedWith("timed_out"), "2026-11-07T09:00:00Z");
+    await pass(failedWith(), "2026-11-07T09:01:00Z");
+    const read = await readRecords(where());
+    const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
+    expect(ends.map((e) => [e.outcome, e.reason])).toEqual([
+      ["failed", "timed_out"],
+      ["failed", "unknown"],
+    ]);
+  });
+
   it("a feature-lane ticket: coordinator's spec → design review → verify pass → posted → waits for the approval → build", async () => {
     const text = spec("feature");
     await started();
@@ -2572,9 +2875,9 @@ describe("the design review and the cleanup run (#236)", () => {
     expect(pings).toEqual([]);
     const read = await readRecords(where());
     const ends = read.kind === "ok" ? read.value.filter((e) => e.kind === "design-ended") : [];
-    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd, e.trace])).toEqual([
-      ["review", "done", CARD, 0.4, "design-review-2026-11-07T09-00-00-000Z.jsonl"],
-      ["verify", "done", CARD, 0.2, undefined],
+    expect(ends.map((e) => [e.step, e.outcome, e.card, e.spend?.usd, e.trace, e.reason])).toEqual([
+      ["review", "done", CARD, 0.4, "design-review-2026-11-07T09-00-00-000Z.jsonl", "done"],
+      ["verify", "done", CARD, 0.2, undefined, "done"],
     ]);
     const third = await pass(steps, "2026-11-07T09:02:00Z", pings);
     expect(third).toEqual(["log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only"]);
@@ -2827,6 +3130,7 @@ describe("the design review and the cleanup run (#236)", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p1",
         evidence: [row],
         hung: false,
@@ -2841,7 +3145,7 @@ describe("the design review and the cleanup run (#236)", () => {
         folder: noRunFolder,
         run: async (input) => (
           tasks.push(input.task),
-          { kind: "ok", value: { head: H, outcome: "done", patch: "c1", evidence: [row], hung: false } }
+          { kind: "ok", value: { head: H, outcome: "done", reason: "done", patch: "c1", evidence: [row], hung: false } }
         ),
       },
       ready: {
@@ -2877,12 +3181,13 @@ describe("one ping per person's turn (#672)", () => {
         mode: "fix",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,
       },
-      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
-      { at: "2026-11-07T09:10:00Z", kind: "review-ended", head: H, actOn: 0 },
+      { at: "2026-11-07T09:05:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
+      { at: "2026-11-07T09:10:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
     ] as const) {
       await record({ where, event });
     }
@@ -2993,13 +3298,17 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
                 value: {
                   head: H,
                   outcome: "parked",
+                  reason: "usage_limit",
                   parked: { until: UNTIL, said: SAID },
                   patch: "",
                   evidence: [],
                   hung: false,
                 },
               }
-            : { kind: "ok", value: { head: H, outcome: "done", patch: "p1", evidence: [], hung: false } };
+            : {
+                kind: "ok",
+                value: { head: H, outcome: "done", reason: "done", patch: "p1", evidence: [], hung: false },
+              };
         },
       },
     };
@@ -3018,6 +3327,7 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
       until: UNTIL,
       said: SAID,
       task: { kind: "fix" },
+      reason: "usage_limit",
     });
     expect(log).toContain(`log PROJ-1: writer parked: the provider's usage limit lasts until ${UNTIL}: ${SAID}`);
     await pass("2026-11-07T11:00:00Z");
@@ -3047,6 +3357,7 @@ describe("a provider's usage limit parks the ticket until its reset (#707)", () 
       event: {
         at: "2026-11-07T09:10:00Z",
         kind: "parked",
+        reason: "usage_limit",
         phase: "writer",
         head: H,
         until: "unknown",

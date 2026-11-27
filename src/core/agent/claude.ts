@@ -74,7 +74,8 @@ export function readAnswer(input: {
   const stream = input.stdout;
   const ok = input.code === 0 && prop(answer, "is_error") === false && output !== undefined;
   if (!ok) {
-    return { kind: "failed", reason: failure(answer, input.stderr), answer, stream };
+    const end = answer === undefined ? "launch_failed" : "output_invalid";
+    return { kind: "failed", reason: failure(answer, input.stderr), answer, stream, end };
   }
   const spent = spendOf(answer);
   return { kind: "ok", value: { output, answer, costUsd: spent.usd, tokens: spent.tokens, stream } };
@@ -86,6 +87,7 @@ function stopped(run: ModelRun, stdout: string): ModelResult {
     reason: `stopped at its ${run.limit.minutes}-minute limit (${run.limit.setting})`,
     answer: lastResult(stdout),
     stream: stdout,
+    end: "timed_out",
   };
 }
 

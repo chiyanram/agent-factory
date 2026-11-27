@@ -3,12 +3,17 @@ import type { Event } from "../src/core/dispatch/records.js";
 import { tallyOf, ticketLines, touchesOf } from "../src/core/dispatch/touches.js";
 import { UTC } from "../src/core/zone.js";
 
+const PAIRS = {
+  done: { outcome: "done", reason: "done" },
+  asked: { outcome: "asked", reason: "asked" },
+  blocked: { outcome: "blocked", reason: "blocked" },
+} as const;
 const writer = (at: string, mode: "fix" | "rework", outcome: "done" | "asked" | "blocked"): Event => ({
   at,
   kind: "writer-ended",
   mode,
   head: "h",
-  outcome,
+  ...PAIRS[outcome],
   patch: "",
   evidence: [],
   hung: false,
@@ -26,6 +31,7 @@ const designVerify = (at: string): Event => ({
   spec: "s",
   design: "d",
   outcome: "done",
+  reason: "done",
   why: "",
   findings: [],
   kept: [],

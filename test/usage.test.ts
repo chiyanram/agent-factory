@@ -319,6 +319,25 @@ describe("agent-factory usage", () => {
     expect((await readSpends({ home, project: "atlas" })).runs).toHaveLength(1);
   });
 
+  it("reads the same spends whether or not a ledger holds reasons, a failed run's unmeasured spent line and a refused setup", async () => {
+    const head = "1".repeat(40);
+    const old = [
+      { at: "2026-11-09T09:00:00Z", kind: "started", phase: "writer", mode: "fix", head },
+      writerEnded("2026-11-09T09:30:00Z", { usd: 2, tokens: 10 }),
+      { at: "2026-11-09T10:00:00Z", kind: "spent", phase: "review", head, spend: { usd: 1, tokens: 5 } },
+    ];
+    write("ledger", "PROJ-1", old);
+    const before = await readSpends({ home });
+    write("ledger", "PROJ-1", [
+      ...old.map((e) => (e.kind === "started" ? e : Object.assign({}, e, { reason: "done" }))),
+      { at: "2026-11-09T10:10:00Z", kind: "spent", phase: "verify", head, reason: "unknown" },
+      { at: "2026-11-09T10:20:00Z", kind: "setup-refused", phase: "review", why: "the reviewer is not set up" },
+    ]);
+    const after = await readSpends({ home });
+    expect(after.problems).toEqual([]);
+    expect(after.runs).toEqual(before.runs);
+  });
+
   it("prints the table, names a ticket whose records cannot be read, and exits 1 for it", async () => {
     write("ledger", "PROJ-1", [writerEnded("2026-11-09T09:30:00Z", { usd: 2, tokens: 10 })]);
     mkdirSync(join(home, "runs", "ledger"), { recursive: true });

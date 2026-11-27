@@ -219,7 +219,10 @@ describe("agent-factory onboard (#235)", () => {
     expect(seen[0]?.run.prompt).toMatch(/^# Onboarder/);
     expect(seen[0]?.run.prompt).toContain(FLOOR);
     const read = await readRecords({ home: r.home, project: "ledger", ticket: "onboarder" });
-    expect(read).toMatchObject({ kind: "ok", value: [{ kind: "spent", phase: "onboard", spend: { usd: 0.75 } }] });
+    expect(read).toMatchObject({
+      kind: "ok",
+      value: [{ kind: "spent", phase: "onboard", spend: { usd: 0.75 }, reason: "done" }],
+    });
   });
 
   it("a repo with CONTEXT.md gets a link, not a copy, and a term CONTEXT.md lacks gets an entry", async () => {

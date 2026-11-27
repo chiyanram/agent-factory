@@ -27,6 +27,7 @@ const EVENTS: readonly Event[] = [
     mode: "fix",
     head: H,
     outcome: "done",
+    reason: "done",
     patch: "p",
     evidence: [],
     hung: false,
@@ -35,6 +36,7 @@ const EVENTS: readonly Event[] = [
   {
     at: "2026-11-13T09:30:00Z",
     kind: "review-ended",
+    reason: "done",
     head: H,
     actOn: 2,
     spend: { usd: 0.4, tokens: 300 },
@@ -46,24 +48,33 @@ const EVENTS: readonly Event[] = [
     mode: "rework",
     head: H,
     outcome: "done",
+    reason: "done",
     patch: "p",
     evidence: [],
     hung: false,
   },
-  { at: "2026-11-13T10:05:00Z", kind: "review-ended", head: H, actOn: 0, spend: { usd: 0, tokens: 0 } },
+  { at: "2026-11-13T10:05:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0, spend: { usd: 0, tokens: 0 } },
   { at: "2026-11-13T10:10:00Z", kind: "blocked", why: "the writer asked for a person" },
   { at: "2026-11-13T10:20:00Z", kind: "blocked", why: "the claim went quiet" },
   { at: "2026-11-13T11:10:00Z", kind: "begun", by: "mo", via: "terminal" },
   {
     at: "2026-11-13T11:30:00Z",
     kind: "review-ended",
+    reason: "done",
     head: H,
     actOn: 0,
     spend: { usd: 0.6, tokens: 500 },
     found: { CR1: { dismissed: 1 } },
     acted: { since: H, rows: [row("CR1", true), row("CR1", false), row("logic", true), row(undefined, false)] },
   },
-  { at: "2026-11-13T11:40:00Z", kind: "spent", phase: "review", head: H, spend: { usd: 0.1, tokens: 50 } },
+  {
+    at: "2026-11-13T11:40:00Z",
+    kind: "spent",
+    reason: "unknown",
+    phase: "review",
+    head: H,
+    spend: { usd: 0.1, tokens: 50 },
+  },
   { at: "2026-11-13T11:50:00Z", kind: "blocked", why: "the ready check failed twice" },
   { at: "2026-11-13T12:00:00Z", kind: "merged", number: 9, sha: "a".repeat(40), by: "mo" },
 ];
@@ -90,6 +101,19 @@ describe("a merge's timeline (#488 AC-1)", () => {
       "automated review": { usd: 1.1, tokens: 850 },
     });
     expect(line.unmeasured).toBe(1);
+  });
+
+  it("is the same line for records that also hold reasons, a refused setup and an unmeasured failed run", () => {
+    const merged = { number: 9, at: "2026-11-13T12:00:00Z" };
+    const withNew: readonly Event[] = [
+      ...EVENTS.slice(0, -1).map((e) =>
+        e.kind === "writer-ended" || e.kind === "review-ended" ? Object.assign({}, e, { reason: "done" as const }) : e,
+      ),
+      { at: "2026-11-13T11:45:00Z", kind: "setup-refused", phase: "verify", why: "the local verifier is not set up" },
+      { at: "2026-11-13T11:46:00Z", kind: "spent", phase: "verify", head: H, reason: "unknown" },
+      ...EVENTS.slice(-1),
+    ];
+    expect(timelineOf(withNew, merged)).toEqual(timelineOf(EVENTS, merged));
   });
 
   it("names each rescue: the hand-over a person took back, its wait and why", () => {

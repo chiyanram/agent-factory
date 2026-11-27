@@ -15,7 +15,8 @@
 //     is refused, and nothing is staged
 //
 // Nothing here writes to the product repo, pushes or posts. What the model run spent is recorded in the project's run
-// records (records.ts "spent", as onboarder), finished or failed, so usage and the day cap count it.
+// records (records.ts "spent", as onboarder), finished or failed, so usage and the day cap count it, with how the run
+// ended: done, invalid output for an answer off its schema, or the model run's own end.
 //
 // A spend that cannot be written fails the command after the files are staged.
 
@@ -36,6 +37,7 @@ import { written, type Written } from "./brief.js";
 import { stage, type Hashes } from "./home.js";
 import { commandsOf, type Commands } from "./listing.js";
 import { projectMusts, RULE_FILES, type Must } from "./musts.js";
+import type { EndReason } from "../end-reason.js";
 
 export type OnboardSetup = {
   readonly home: string;
@@ -158,7 +160,7 @@ function rulesText(musts: readonly Must[]): string {
   ].join("\n");
 }
 
-type Ran = { readonly answer: Result<Answer>; readonly spend: Spend; readonly trace?: string };
+type Ran = { readonly answer: Result<Answer>; readonly spend: Spend; readonly trace?: string; readonly end: EndReason };
 
 async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<Ran> {
   const ran: ModelResult = await setup.model({
@@ -173,12 +175,15 @@ async function asked(setup: OnboardSetup, card: Card, folder: string): Promise<R
   });
   const trace = await traced(setup, ran.kind === "ok" ? ran.value.stream : ran.stream);
   if (ran.kind === "failed") {
-    return { answer: failed(`the onboarder's run failed: ${ran.reason}`), spend: spendOf(ran.answer), ...trace };
+    const end = ran.end ?? "unknown";
+    return { answer: failed(`the onboarder's run failed: ${ran.reason}`), spend: spendOf(ran.answer), ...trace, end };
   }
+  const answer = readAnswer(ran.value.output);
   return {
-    answer: readAnswer(ran.value.output),
+    answer,
     spend: { usd: ran.value.costUsd, tokens: ran.value.tokens },
     ...trace,
+    end: answer.kind === "ok" ? "done" : "output_invalid",
   };
 }
 
@@ -226,7 +231,7 @@ async function spent(setup: OnboardSetup, base: Base, ran: Ran): Promise<Result<
   const traces = ran.trace === undefined ? {} : { traces: [ran.trace] };
   const done = await record({
     where: { home: setup.home, project: setup.project, ticket: ONBOARDER_RECORD },
-    event: { at, kind: "spent", phase: "onboard", head: base.sha, spend: ran.spend, ...traces },
+    event: { at, kind: "spent", phase: "onboard", head: base.sha, spend: ran.spend, ...traces, reason: ran.end },
   });
   return done.kind === "ok" ? { kind: "ok", value: undefined } : done;
 }

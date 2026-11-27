@@ -160,6 +160,7 @@ describe("the board writes nothing (#487 AC-5)", () => {
         mode: "cleanup",
         head: H,
         outcome: "done",
+        reason: "done",
         patch: "p",
         evidence: [],
         hung: false,
@@ -167,9 +168,12 @@ describe("the board writes nothing (#487 AC-5)", () => {
     });
     await record({
       where: at,
-      event: { at: "2026-11-13T11:10:00Z", kind: "ready-ended", head: H, passed: true, why: "" },
+      event: { at: "2026-11-13T11:10:00Z", kind: "ready-ended", reason: "done", head: H, passed: true, why: "" },
     });
-    await record({ where: at, event: { at: "2026-11-13T11:20:00Z", kind: "review-ended", head: H, actOn: 0 } });
+    await record({
+      where: at,
+      event: { at: "2026-11-13T11:20:00Z", kind: "review-ended", reason: "done", head: H, actOn: 0 },
+    });
     const open = {
       number: 14,
       branch: "factory/PROJ-2",

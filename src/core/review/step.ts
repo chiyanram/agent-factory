@@ -8,6 +8,7 @@
 //   moved                     a person pushed during the review: a failure, so the run's start is left and a person looks
 // Each pass's stream is kept as its trace beside the ticket's records (dispatch/trace.ts, #487), and the round's line
 // names them. A trace that cannot be kept loses the trace, never the pass.
+// A round that fails names how: the first of its model runs that failed, by that run's end, else unknown.
 // Each model run is also named, by its part (a finder's lens or verify), the model it asked for and what its CLI's
 // init event reported (agent/ran.ts).
 
@@ -17,6 +18,7 @@ import type { Forge } from "../forge/types.js";
 import type { Steps } from "../dispatch/steps.js";
 import type { Sessions } from "./live.js";
 import type { Model, ModelResult } from "./model.js";
+import type { EndReason } from "../end-reason.js";
 import type { Acted, FoundByRule } from "./acted-on.js";
 import { lensSetupOf, roundLenses } from "./finders.js";
 import { reviewRound, VERIFY_PASSES, type Outcome } from "./round.js";
@@ -71,7 +73,13 @@ function actOnOf(outcome: Outcome): ActOn {
   return mapAs(outcome.kind, outcome);
 }
 
-type Meter = { spend: Spend; split: RoundSpend; readonly cli: string; readonly runs: RunNamed[] };
+type Meter = {
+  spend: Spend;
+  split: RoundSpend;
+  readonly cli: string;
+  readonly runs: RunNamed[];
+  end: EndReason | "none";
+};
 
 function partName(part: RoundPart | undefined): { readonly part?: string } {
   if (part === undefined) {
@@ -88,8 +96,16 @@ function metered(model: Model, meter: Meter): Model {
     meter.split = run.part === undefined ? meter.split : addRoundSpend(meter.split, run.part, spent);
     const stream = ran.kind === "ok" ? ran.value.stream : ran.stream;
     meter.runs.push({ ...partName(run.part), cli: meter.cli, asked: run.model, ...namedIn(stream) });
+    meter.end = firstEnd(meter.end, ran);
     return ran;
   };
+}
+
+function firstEnd(before: EndReason | "none", ran: ModelResult): EndReason | "none" {
+  if (before !== "none" || ran.kind === "ok") {
+    return before;
+  }
+  return ran.end ?? "unknown";
 }
 
 type Traced = { readonly where: Where; readonly names: string[]; last: number };
@@ -166,12 +182,14 @@ export function reviewStep(input: {
         return { kind: "failed", reason: "no open change to review" };
       }
       const setup = reviewSetup({ ...input, number: run.change.line.number, paths: p.value });
-      const meter: Meter = { spend: NO_SPEND, split: NO_ROUND_SPEND, cli, runs: [] };
+      const meter: Meter = { spend: NO_SPEND, split: NO_ROUND_SPEND, cli, runs: [], end: "none" };
       const into: Traced = { where: { home, project: input.project, ticket: run.ticket }, names: [], last: 0 };
       const round = await reviewRound({ ...setup, model: traced(metered(setup.model, meter), into) });
       const mapped = round.kind === "ok" ? actOnOf(round.value) : round;
       const spent = { spend: meter.spend, ...splitOf(meter), ...tracesOf(into), ...runsField(meter.runs) };
-      return mapped.kind === "ok" ? { kind: "ok", value: { ...mapped.value, ...spent } } : { ...mapped, ...spent };
+      return mapped.kind === "ok"
+        ? { kind: "ok", value: { ...mapped.value, ...spent } }
+        : { ...mapped, ...spent, ...(meter.end === "none" ? {} : { end: meter.end }) };
     },
   };
 }

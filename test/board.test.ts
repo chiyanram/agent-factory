@@ -140,6 +140,23 @@ describe("the board (#487 AC-5)", () => {
     ]);
   });
 
+  it("prints the same for a ticket whose records also hold reasons, a refused setup and an unmeasured failed run", () => {
+    const noted: readonly Event[] = [
+      ...(events.get("PROJ-1") ?? []),
+      { at: "2026-11-13T11:00:00Z", kind: "setup-refused", phase: "review", why: "the reviewer is not set up" },
+      { at: "2026-11-13T11:10:00Z", kind: "spent", phase: "verify", head: H, reason: "unknown" },
+    ];
+    const withNew = boardOf({
+      decided: tickets,
+      events: new Map([...events, ["PROJ-1", noted]]),
+      now: NOW,
+      describe: describeAction,
+    });
+    const zone = { name: "Asia/Tokyo" };
+    expect(boardText({ lines: withNew, zone, mark: "#" })).toEqual(boardText({ lines, zone, mark: "#" }));
+    expect(boardJson(withNew)).toEqual(boardJson(lines));
+  });
+
   it("shows each ticket in the reader's zone, and the same fields as JSON in UTC", () => {
     const text = boardText({ lines, zone: { name: "Asia/Tokyo" }, mark: "#" });
     expect(text.slice(6, 9)).toEqual([

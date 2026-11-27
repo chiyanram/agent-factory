@@ -4,6 +4,7 @@
 
 import type { Acted, FoundByRule } from "../review/acted-on.js";
 import type { Named, RunNamed } from "../agent/ran.js";
+import type { FailedReason, WriterEnd } from "../end-reason.js";
 import type { DesignFinding, Kept } from "../design/findings.js";
 import type { Result } from "../forge/api.js";
 import type { Evidence } from "../report.js";
@@ -38,15 +39,23 @@ export type DesignRan<T> = {
   readonly spend?: Spend;
   readonly trace?: string;
   readonly runs?: readonly RunNamed[];
-} & (({ readonly kind: "done" } & T) | { readonly kind: "failed"; readonly why: string; readonly final?: true });
+} & (
+  | ({ readonly kind: "done" } & T)
+  | { readonly kind: "failed"; readonly why: string; readonly final?: true; readonly end?: FailedReason }
+);
 export type ReadyFacts = { readonly criteria: readonly string[]; readonly oneWayDoor: readonly string[] };
+export type WriterRan =
+  | WriterEnd
+  | {
+      readonly outcome: "parked";
+      readonly reason: "usage_limit";
+      readonly parked?: { readonly until: string; readonly said: string };
+    };
 export type Steps = {
   readonly writer: Step<
     RunInput & { readonly task: Task; readonly folder: string },
     {
       readonly head: string;
-      readonly outcome: "done" | "asked" | "blocked" | "parked";
-      readonly parked?: { readonly until: string; readonly said: string };
       readonly patch: string;
       readonly evidence: readonly Evidence[];
       readonly hung: boolean;
@@ -60,7 +69,7 @@ export type Steps = {
       readonly output?: string;
       readonly trace?: string;
       readonly runs?: readonly RunNamed[];
-    },
+    } & WriterRan,
     FailedSpent,
     WriterExtras
   >;
