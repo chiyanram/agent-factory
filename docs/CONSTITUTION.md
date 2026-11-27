@@ -291,8 +291,8 @@ it from review.
 
 **Kind:** non-negotiable (the floor).
 **Why:** risk is in the change, not its author; a lanes file that could drop an approval would undo every other brake.
-**How it's checked:** every lanes file (one lane, all lanes, missing lanes, `approval: false` on each, unknown names, any
-order) leaves bug, feature and one-way door needing approval, and a lane can only be raised (`test/lane.test.ts`).
+**How it's checked:** whatever lanes are passed (one lane, all lanes, none, `approval: false` on each, any order), bug,
+feature and one-way door need approval, and a lane can only be raised (`test/lane.test.ts`).
 
 ## How changes are made
 

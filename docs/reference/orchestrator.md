@@ -321,14 +321,16 @@ or the waiver fails the step, so the check is never passed and a person looks. *
 so swapping one for another trivial one it does not know, or moving assertions to another file, fools it or fails it;
 and Spock `where:` rows are not counted.
 
-The ready check then reads the lane the real diff needs, the same way (#230; `src/core/ready/lane.ts`): only docs,
-comments or the values of config keys that stay may be tiny; any other change, a moved file among them, needs at least
-bug; a path under the project's `lanes.oneWayDoor` needs the one-way door. The lane is only ever raised: a diff that
+The ready check then reads the lane the real diff needs, the same way (`src/core/ready/lane.ts`), from the lane
+conditions in the engine's lanes (`src/core/lane.ts`): only docs, comments or the values of config keys that stay may
+be tiny; any other change, a moved file among them, needs at least bug; a path under the project's `lanes.oneWayDoor`
+needs the one-way door. Each file gets the heaviest lane its conditions ask for, and the change the heaviest of its
+files. The lane is only ever raised: a diff that
 needs a heavier lane than the one a human approved, or STARTed in the tiny lane, goes to `needs-human`, and the way on
 is a raised `## Lane` in the spec and a human's approval of it. The same check runs before the build, on the spec's
 `## Planned files`: a planned file under a one-way-door path holds the ticket until the spec is raised and approved.
-Every lane above tiny needs an approval (the approval floor); a lanes value from a plugin or a settings layer that
-drops it is refused (`lanesOf`). **Today:** a config file's change counts as values when its changed lines keep the
+Every lane above tiny needs an approval (the approval floor), and the engine reads that by the lane's name, so no
+lanes value can drop it (`needsApproval`). **Today:** a config file's change counts as values when its changed lines keep the
 same keys, so a dependency's major bump in `package.json` still reads as tiny; the automated review's LN2 check is
 what catches it (#674). Each acceptance criterion must also have an evidence row: the n-th criterion is `AC-n`, and a row
 names it when its `criterion` starts with that id; a criterion with no row fails the check and counts towards its 3

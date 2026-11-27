@@ -1,19 +1,15 @@
 // lane — the lane the change's real diff needs, read in the ready check (#230; lane.ts; rulebook crq LN2). Like the
 // floor guard, it reads the diff from the merge base with the default branch to the head, on the host and through
-// hostGit only, and runs no branch code. Each file the diff touches needs a lane, and the change needs the heaviest:
-//
-//   one-way door   the file, or the path it moved from, is under one of the project's one-way-door paths
-//   tiny           a doc (Markdown, reStructuredText, AsciiDoc, plain text, README, LICENSE and the like); a change
-//                  that only touches comments; or, in a config file (JSON, YAML, TOML, INI, properties), one that only
-//                  changes the values of keys that stay
-//   bug            anything else: a code change, a file moved or its mode changed with no line changed, a new key
+// hostGit only, and runs no branch code. Each file the diff touches gets the heaviest lane its lane conditions ask for,
+// or bug when none asks, and the change gets the heaviest; the conditions are the engine's lanes (lane.ts), and here
+// is what each one tests. A file's diff is read only when a condition needs its lines.
 //
 // When unsure it reads the heavier lane (crq: unsure between two lanes, take the heavier). Nothing here throws, and a
 // diff it cannot read fails the step, so no lane is ever read from a diff no one read.
 
 import type { Result } from "../forge/api.js";
 import { hostGit, type GitResult } from "../git.js";
-import { heavier, matches } from "../lane.js";
+import { askingLanes, heavier, matches, NO_CONDITION, type LaneCondition } from "../lane.js";
 import type { Lane } from "../spec.js";
 import { changesOf, mergeBase, type Change, type FloorInput } from "./floor.js";
 
@@ -86,13 +82,53 @@ export function valuesOnly(diff: string): boolean {
   return lines.every((l) => keyOf(l.slice(1).trim()) !== "") && sameKeys(removed, added);
 }
 
-export function contentLane(paths: readonly string[], diff: string): Lane {
+export type FileRead = { readonly lane: Lane; readonly why: string };
+
+const BY_PATH: Partial<Record<LaneCondition, (paths: readonly string[], oneWayDoor: readonly string[]) => boolean>> = {
+  "one-way-door-path": (paths, oneWayDoor) => paths.some((p) => matches(p, oneWayDoor)),
+  doc: (paths) => paths.every(isDoc),
+};
+
+function byLines(condition: LaneCondition, paths: readonly string[], diff: string): boolean {
   const lines = changedLines(diff);
   if (lines.length === 0) {
-    return "bug";
+    return false;
   }
-  const config = paths.every((p) => CONFIG.test(p)) && valuesOnly(diff);
-  return config || commentsOnly(lines) ? "tiny" : "bug";
+  return condition === "comments-only" ? commentsOnly(lines) : paths.every((p) => CONFIG.test(p)) && valuesOnly(diff);
+}
+
+function holds(
+  condition: LaneCondition,
+  paths: readonly string[],
+  oneWayDoor: readonly string[],
+  diff: string | undefined,
+): boolean | "needs-diff" {
+  const byPath = BY_PATH[condition];
+  if (byPath !== undefined) {
+    return byPath(paths, oneWayDoor);
+  }
+  return diff === undefined ? "needs-diff" : byLines(condition, paths, diff);
+}
+
+export function fileRead(
+  paths: readonly string[],
+  oneWayDoor: readonly string[],
+  diff: string | undefined,
+): FileRead | "needs-diff" {
+  for (const asking of askingLanes()) {
+    for (const condition of asking.asks.conditions) {
+      const held = holds(condition, paths, oneWayDoor, diff);
+      if (held !== false) {
+        return held === "needs-diff" ? held : { lane: asking.lane, why: asking.asks.why };
+      }
+    }
+  }
+  return NO_CONDITION;
+}
+
+export function contentLane(paths: readonly string[], diff: string): Lane {
+  const read = fileRead(paths, [], diff);
+  return read === "needs-diff" ? NO_CONDITION.lane : read.lane;
 }
 
 async function fileDiff(input: FloorInput, base: string, paths: readonly string[]): Promise<Result<string>> {
@@ -100,28 +136,23 @@ async function fileDiff(input: FloorInput, base: string, paths: readonly string[
   return out(await git(input, [...args, "--", ...paths]), `read the diff of ${paths.at(-1) ?? ""}`);
 }
 
-const WHY: Readonly<Record<Lane, string>> = {
-  tiny: "changes only docs, comments or config values",
-  bug: "changes code",
-  feature: "changes code",
-  "one-way door": "is under a one-way-door path",
-};
-
 async function fileLane(
   input: FloorInput,
   base: string,
   change: Change,
   oneWayDoor: readonly string[],
-): Promise<Result<Lane>> {
+): Promise<Result<FileRead>> {
   const paths = pathsOf(change);
-  if (paths.some((p) => matches(p, oneWayDoor))) {
-    return { kind: "ok", value: "one-way door" };
-  }
-  if (paths.every(isDoc)) {
-    return { kind: "ok", value: "tiny" };
+  const read = fileRead(paths, oneWayDoor, undefined);
+  if (read !== "needs-diff") {
+    return { kind: "ok", value: read };
   }
   const diff = await fileDiff(input, base, paths);
-  return diff.kind === "ok" ? { kind: "ok", value: contentLane(paths, diff.value) } : diff;
+  if (diff.kind === "failed") {
+    return diff;
+  }
+  const full = fileRead(paths, oneWayDoor, diff.value);
+  return { kind: "ok", value: full === "needs-diff" ? NO_CONDITION : full };
 }
 
 async function changes(input: FloorInput, base: string): Promise<Result<readonly Change[]>> {
@@ -132,12 +163,12 @@ async function changes(input: FloorInput, base: string): Promise<Result<readonly
   return listed.kind === "ok" ? { kind: "ok", value: changesOf(listed.value) } : listed;
 }
 
-type FileLane = { readonly path: string; readonly lane: Lane };
+type FileLane = FileRead & { readonly path: string };
 
 function heaviest(files: readonly FileLane[]): DiffLane {
   const lane = files.reduce<Lane>((a, f) => heavier(a, f.lane), "tiny");
   const first = files.find((f) => f.lane === lane);
-  return first === undefined ? { lane, why: "the diff is empty" } : { lane, why: `${first.path} ${WHY[lane]}` };
+  return first === undefined ? { lane, why: "the diff is empty" } : { lane, why: `${first.path} ${first.why}` };
 }
 
 async function lanesOfChanges(
@@ -155,7 +186,7 @@ async function lanesOfChanges(
     if (lane.kind === "failed") {
       return lane;
     }
-    files.push({ path: change.path, lane: lane.value });
+    files.push({ path: change.path, ...lane.value });
   }
   return { kind: "ok", value: files };
 }

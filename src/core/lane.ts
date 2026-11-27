@@ -4,22 +4,28 @@
 //
 //   before the build   the spec's "## Planned files": a file under the project's one-way-door paths needs the
 //                      one-way door (plannedRaise, here)
-//   the ready check    the real diff: only docs, comments or config values may stay tiny; any code change needs at
-//                      least bug; a one-way-door path needs the one-way door (ready/lane.ts)
+//   the ready check    the real diff, file by file (ready/lane.ts)
+//
+// Both read the lane conditions in the engine's own lanes below (ADR-0026): each lane lists the conditions that ask for
+// it and the why a person is told. Each changed file gets the heaviest lane its conditions ask for, or bug when none
+// asks (NO_CONDITION), and the change gets the heaviest lane of its files:
+//
+//   one-way door   one-way-door-path   the file, or the path it moved from, is under a one-way-door path
+//   tiny           doc                 a doc (Markdown, reStructuredText, AsciiDoc, plain text, README, LICENSE ...)
+//                  comments-only       every changed line is a comment
+//                  config-values       a config file (JSON, YAML, TOML, INI, properties) whose changed lines only change
+//                                      the values of keys that stay
 //
 // A raise that lands above the lane a human approved or STARTed stops: the ticket waits before the build, and goes to
 // needs-human after the ready check. The way on is the same either way: the coordinator raises the spec's lane, which
 // makes any approval stale, and a human approves the raised spec.
 //
 // The engine acts on a lane's properties, never on its name (section 3), with one exception: the approval floor goes
-// by the lane's name, so only tiny may skip the approval, wherever it is listed. Two come from the engine's own lanes,
-// the default lanes below (process/read.ts, ADR-0026): approval, and how many lenses the automated review runs
-// (review/lenses.ts pickLenses). A lanes value writes the lens count as a person reads it, "1", "~3" or "all, on the
-// strongest model"; a lane that leaves it out keeps the default lane's count. Each lane also says whether its spec and
-// design get a design review before the human's approval (designReview): a design-reviewer run, then a verify pass.
-// The approval floor: every lane above tiny needs a human's approval, and no settings layer or plugin can turn that
-// off. In the settings the floor is "approval.floor", a locked key fixed to tiny (settings/keys.ts). lanesOf refuses
-// any lanes value that drops the floor.
+// by the lane's name, so only tiny may skip the approval, whatever lanes a caller passes (needsApproval). The lanes
+// also say how many lenses the automated review runs (review/lenses.ts pickLenses), whether the spec and design get a
+// design review before the human's approval (designReview: a design-reviewer run, then a verify pass), and whether the
+// build starts with a failing test (testFirst). In the settings the floor is "approval.floor", a locked key fixed to
+// tiny (settings/keys.ts).
 //
 // The one-way-door paths are a project setting, the deny-list key "lanes.oneWayDoor" (#229; settings/keys.ts): every
 // settings layer may add to it, and none may remove from it. oneWayDoorPathsOf reads it, resolved through the layers.
@@ -28,12 +34,16 @@ import type { Result } from "./forge/api.js";
 import { globRegex } from "./ci-files.js";
 import { readProjectRaw } from "./project.js";
 import { above, type Lane } from "./lane-order.js";
-import { LANES, type Spec } from "./spec.js";
+import type { Spec } from "./spec.js";
 import { prop } from "./field.js";
 
 export { above, heavier, raisedWhy } from "./lane-order.js";
 
 export type LensCount = number | "all";
+
+export type LaneCondition = "one-way-door-path" | "doc" | "comments-only" | "config-values";
+
+export type LaneAsks = { readonly conditions: readonly LaneCondition[]; readonly why: string };
 
 export type LaneProps = {
   readonly name: Lane;
@@ -41,43 +51,41 @@ export type LaneProps = {
   readonly lenses: LensCount;
   readonly designReview?: boolean;
   readonly testFirst?: boolean;
+  readonly asks?: LaneAsks;
 };
 
-const DEFAULT_COUNTS: Readonly<Record<Lane, LensCount>> = { tiny: 1, bug: 3, feature: 3, "one-way door": "all" };
-
 export const DEFAULT_LANES: readonly LaneProps[] = [
-  { name: "tiny", approval: false, lenses: DEFAULT_COUNTS.tiny, designReview: false, testFirst: false },
-  { name: "bug", approval: true, lenses: DEFAULT_COUNTS.bug, designReview: true, testFirst: true },
-  { name: "feature", approval: true, lenses: DEFAULT_COUNTS.feature, designReview: true, testFirst: false },
+  {
+    name: "tiny",
+    approval: false,
+    lenses: 1,
+    designReview: false,
+    testFirst: false,
+    asks: {
+      conditions: ["doc", "comments-only", "config-values"],
+      why: "changes only docs, comments or config values",
+    },
+  },
+  { name: "bug", approval: true, lenses: 3, designReview: true, testFirst: true },
+  { name: "feature", approval: true, lenses: 3, designReview: true, testFirst: false },
   {
     name: "one-way door",
     approval: true,
-    lenses: DEFAULT_COUNTS["one-way door"],
+    lenses: "all",
     designReview: true,
     testFirst: false,
+    asks: { conditions: ["one-way-door-path"], why: "is under a one-way-door path" },
   },
 ];
 
-function countText(value: string): LensCount | "bad" {
-  if (/^\s*all\b/i.test(value)) {
-    return "all";
-  }
-  const n = Number(/^\s*~?\s*(\d+)\b/.exec(value)?.[1] ?? 0);
-  return n >= 1 ? n : "bad";
-}
+export const NO_CONDITION: { readonly lane: Lane; readonly why: string } = { lane: "bug", why: "changes code" };
 
-function wholeCount(value: number): LensCount | "bad" {
-  return Number.isSafeInteger(value) && value >= 1 ? value : "bad";
-}
+export type Asking = { readonly lane: Lane; readonly asks: LaneAsks };
 
-function lensCountOf(value: unknown, lane: Lane): LensCount | "bad" {
-  if (value === undefined) {
-    return DEFAULT_COUNTS[lane];
-  }
-  if (typeof value === "number") {
-    return wholeCount(value);
-  }
-  return typeof value === "string" ? countText(value) : "bad";
+export function askingLanes(lanes: readonly LaneProps[] = DEFAULT_LANES): readonly Asking[] {
+  return lanes
+    .flatMap((l) => (l.asks === undefined ? [] : [{ lane: l.name, asks: l.asks }]))
+    .toSorted((a, b) => Number(above(b.lane, a.lane)) - Number(above(a.lane, b.lane)));
 }
 
 function defaultDesignReview(lane: Lane): boolean {
@@ -88,63 +96,14 @@ function defaultTestFirst(lane: Lane): boolean {
   return DEFAULT_LANES.find((l) => l.name === lane)?.testFirst ?? false;
 }
 
-function flagOf(value: unknown, key: "designReview" | "testFirst", fallback: boolean): boolean | "bad" {
-  const given = prop(value, key);
-  if (given === undefined) {
-    return fallback;
-  }
-  return typeof given === "boolean" ? given : "bad";
-}
-
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
 }
 
-function propsOf(value: unknown): LaneProps | "bad" {
-  const name = prop(value, "name");
-  const approval = prop(value, "approval");
-  const lane = LANES.find((l) => l === name);
-  return lane === undefined || typeof approval !== "boolean" ? "bad" : laneOf(value, lane, approval);
-}
-
-function laneOf(value: unknown, lane: Lane, approval: boolean): LaneProps | "bad" {
-  const lenses = lensCountOf(prop(value, "lenses"), lane);
-  const designReview = flagOf(value, "designReview", defaultDesignReview(lane));
-  const testFirst = flagOf(value, "testFirst", defaultTestFirst(lane));
-  return lenses === "bad" || designReview === "bad" || testFirst === "bad"
-    ? "bad"
-    : { name: lane, approval, lenses, designReview, testFirst };
-}
-
-function namedLanes(value: unknown): readonly LaneProps[] | "bad" {
-  const lanes = Array.isArray(value) ? value.map(propsOf) : [];
-  const named = lanes.flatMap((l) => (l === "bad" ? [] : [l]));
-  return named.length === lanes.length && named.length > 0 ? named : "bad";
-}
-
 const FLOOR: Lane = "tiny";
 
-function floorBreaks(lanes: readonly LaneProps[]): readonly string[] {
-  return lanes.flatMap((l) => (l.approval || l.name === FLOOR ? [] : [l.name]));
-}
-
-export function lanesOf(value: unknown, from: string): Result<readonly LaneProps[]> {
-  const named = namedLanes(value);
-  if (named === "bad") {
-    return failed(
-      `${from}: the lanes must be a list of {"name", "approval", "lenses"} (and an optional "designReview" and "testFirst"), with a name one of ${LANES.join(", ")} and lenses a count or "all"`,
-    );
-  }
-  const breaks = floorBreaks(named);
-  return breaks.length === 0
-    ? { kind: "ok", value: named }
-    : failed(
-        `${from}: every lane above ${FLOOR} needs a human's approval (the approval floor); ${breaks.join(", ")} would run without one`,
-      );
-}
-
 export function needsApproval(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
-  return lanes.find((l) => l.name === lane)?.approval ?? true;
+  return lane !== FLOOR || (lanes.find((l) => l.name === lane)?.approval ?? true);
 }
 
 export function needsDesignReview(lane: Lane, lanes: readonly LaneProps[] = DEFAULT_LANES): boolean {
@@ -163,11 +122,16 @@ export type Raise =
   | { readonly kind: "kept" }
   | { readonly kind: "raised"; readonly from: Lane; readonly to: Lane; readonly why: string };
 
-export function plannedRaise(spec: Spec, oneWayDoor: readonly string[]): Raise {
+function pathRaise(spec: Spec, oneWayDoor: readonly string[], asking: Asking): Raise {
   const door = spec.planned.find((path) => matches(path, oneWayDoor));
-  return door !== undefined && above("one-way door", spec.lane)
-    ? { kind: "raised", from: spec.lane, to: "one-way door", why: `${door} is under a one-way-door path` }
+  return door !== undefined && above(asking.lane, spec.lane)
+    ? { kind: "raised", from: spec.lane, to: asking.lane, why: `${door} ${asking.asks.why}` }
     : { kind: "kept" };
+}
+
+export function plannedRaise(spec: Spec, oneWayDoor: readonly string[]): Raise {
+  const byPath = askingLanes().find((a) => a.asks.conditions.includes("one-way-door-path"));
+  return byPath === undefined ? { kind: "kept" } : pathRaise(spec, oneWayDoor, byPath);
 }
 
 const ONE_WAY_DOOR_KEY = "lanes.oneWayDoor";

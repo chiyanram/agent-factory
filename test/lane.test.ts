@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   DEFAULT_LANES,
   heavier,
-  lanesOf,
+  type LaneProps,
   needsApproval,
   needsTestFirst,
   oneWayDoorPathsOf,
@@ -12,7 +12,7 @@ import {
 } from "../src/core/lane.js";
 import { checkSpec, type Spec } from "../src/core/spec.js";
 import { TEST_FILES } from "../src/core/ready/floor.js";
-import { commentsOnly, contentLane, diffLane, valuesOnly } from "../src/core/ready/lane.js";
+import { commentsOnly, contentLane, diffLane, fileRead, valuesOnly } from "../src/core/ready/lane.js";
 import { project, type Project } from "./review-repo.js";
 import { tempDir } from "./temp.js";
 
@@ -50,7 +50,6 @@ function spec(text = SPEC): Spec {
 
 describe("the approval floor (#230)", () => {
   it("the default lanes need an approval in every lane above tiny", () => {
-    expect(lanesOf(DEFAULT_LANES, "the engine")).toEqual({ kind: "ok", value: DEFAULT_LANES });
     expect(DEFAULT_LANES.map((l) => [l.name, needsApproval(l.name)])).toEqual([
       ["tiny", false],
       ["bug", true],
@@ -66,84 +65,17 @@ describe("the approval floor (#230)", () => {
     expect(needsApproval("bug", [{ name: "tiny", approval: false, lenses: 1 }])).toBe(true);
   });
 
-  it("refuses a plugin or settings value that drops the approval above the lightest lane", () => {
-    const loose = DEFAULT_LANES.map((l) => (l.name === "bug" ? { ...l, approval: false } : l));
-    expect(lanesOf(loose, "plugin crq@1.2.0")).toEqual({
-      kind: "failed",
-      reason:
-        "plugin crq@1.2.0: every lane above tiny needs a human's approval (the approval floor); bug would run without one",
-    });
-    const none = DEFAULT_LANES.map((l) => ({ name: l.name, approval: false }));
-    expect(lanesOf(none, "user settings")).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("bug, feature, one-way door would run without one"),
-    });
-  });
-
-  it("goes by the lane's name, not its place: whatever lanes file, bug, feature and one-way door need an approval (#483)", () => {
+  it("goes by the lane's name, not its place: whatever lanes are passed, bug, feature and one-way door need an approval (#483)", () => {
     const HEAVY = ["bug", "feature", "one-way door"] as const;
-    const shapes: readonly (readonly { name: string; approval: boolean; lenses: number }[])[] = [
+    const shapes: readonly (readonly LaneProps[])[] = [
       [{ name: "bug", approval: false, lenses: 1 }],
       [{ name: "one-way door", approval: false, lenses: 1 }],
-      [
-        { name: "feature", approval: false, lenses: 1 },
-        { name: "tiny", approval: false, lenses: 1 },
-      ],
-      DEFAULT_LANES.toReversed().map((l) => ({ name: l.name, approval: false, lenses: 1 })),
-      DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.name !== "bug", lenses: 1 })),
-      [
-        { name: "tiny", approval: false, lenses: 1 },
-        { name: "chore", approval: false, lenses: 1 },
-      ],
+      DEFAULT_LANES.toReversed().map((l) => ({ name: l.name, approval: false, lenses: l.lenses })),
+      DEFAULT_LANES.map((l) => ({ name: l.name, approval: l.name !== "bug", lenses: l.lenses })),
+      [],
     ];
-    for (const shape of shapes) {
-      const read = lanesOf(shape, "plugin");
-      expect(read.kind).toBe("failed");
-    }
-    for (const kept of [[{ name: "tiny", approval: false, lenses: 1 }], DEFAULT_LANES.toReversed()]) {
-      const read = lanesOf(kept, "plugin");
-      expect(read.kind).toBe("ok");
-      const lanes = read.kind === "ok" ? read.value : [];
+    for (const lanes of shapes) {
       expect(HEAVY.map((l) => needsApproval(l, lanes))).toEqual([true, true, true]);
-    }
-  });
-
-  it("lets tiny skip the approval, or be raised to need one, wherever it is listed", () => {
-    const tinyLast = [
-      { name: "bug", approval: true, lenses: 3 },
-      { name: "tiny", approval: false, lenses: 1 },
-    ];
-    expect(lanesOf(tinyLast, "plugin").kind).toBe("ok");
-    const raised = lanesOf([{ name: "tiny", approval: true, lenses: 1 }], "plugin");
-    expect(raised.kind === "ok" && needsApproval("tiny", raised.value)).toBe(true);
-  });
-
-  it("refuses a value that is not a list of lanes, rather than read it as none", () => {
-    for (const value of [undefined, [], {}, [{ name: "tiny" }], [{ name: "chore", approval: true }]]) {
-      expect(lanesOf(value, "team settings")).toMatchObject({ kind: "failed" });
-    }
-  });
-});
-
-describe("the lens count of a lane (#237)", () => {
-  it("reads it as a lanes file writes it, and keeps the default lane's count when it is left out", () => {
-    const lanes = (lenses: readonly unknown[]) =>
-      lanesOf(
-        DEFAULT_LANES.map((l, i) =>
-          lenses[i] === undefined ? { name: l.name, approval: l.approval } : { ...l, lenses: lenses[i] },
-        ),
-        "plugin",
-      );
-    expect(lanes(["1", "~3", 2, "all, on the strongest model"])).toEqual({
-      kind: "ok",
-      value: DEFAULT_LANES.map((l, i) => ({ ...l, lenses: [1, 3, 2, "all"][i] })),
-    });
-    expect(lanes([])).toEqual({ kind: "ok", value: DEFAULT_LANES });
-  });
-
-  it("refuses a count that is not one, rather than run no lens", () => {
-    for (const bad of ["none", "0", 0, -1, 1.5, true]) {
-      expect(lanesOf([{ name: "tiny", approval: false, lenses: bad }], "plugin")).toMatchObject({ kind: "failed" });
     }
   });
 });
@@ -154,29 +86,16 @@ describe("test-first, a lane's property (#417)", () => {
   });
 
   it("reads it from the lanes, keeps the default lane's when left out, and lets a process turn it off for bug", () => {
-    const read = lanesOf(
-      [
-        { name: "tiny", approval: false, lenses: 1 },
-        { name: "bug", approval: true, lenses: 3, testFirst: false },
-        { name: "feature", approval: true, lenses: 3, testFirst: true },
-      ],
-      "plugin",
-    );
-    const lanes = read.kind === "ok" ? read.value : DEFAULT_LANES;
-    expect(read.kind).toBe("ok");
+    const lanes: readonly LaneProps[] = [
+      { name: "tiny", approval: false, lenses: 1 },
+      { name: "bug", approval: true, lenses: 3, testFirst: false },
+      { name: "feature", approval: true, lenses: 3, testFirst: true },
+    ];
     expect([needsTestFirst("tiny", lanes), needsTestFirst("bug", lanes), needsTestFirst("feature", lanes)]).toEqual([
       false,
       false,
       true,
     ]);
-  });
-
-  it("refuses a value that is not true or false, rather than guess", () => {
-    for (const bad of ["yes", 1, null]) {
-      expect(lanesOf([{ name: "tiny", approval: false, lenses: 1, testFirst: bad }], "plugin")).toMatchObject({
-        kind: "failed",
-      });
-    }
   });
 });
 
@@ -256,6 +175,13 @@ describe("the lane a file's lines need", () => {
 
   it("reads a file moved or changed in mode with no line changed as code", () => {
     expect(contentLane(["src/a.ts", "src/b.ts"], "")).toBe("bug");
+  });
+
+  it("gives a file the heaviest lane its conditions ask for: a doc under a one-way-door path is the one-way door", () => {
+    expect(fileRead(["db/migrations/README.md"], ["db/migrations/**"], undefined)).toEqual({
+      lane: "one-way door",
+      why: "is under a one-way-door path",
+    });
   });
 });
 

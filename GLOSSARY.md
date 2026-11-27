@@ -108,6 +108,11 @@ START asks first.
 engine checks it from the planned files and the real diff, and can only raise it.
 _Avoid_: size, type, category
 
+**Lane condition**: a test on a changed file that asks for a lane, such as "only docs" for tiny or "under a one-way-door
+path" for the one-way door. Each changed file gets the heaviest lane its conditions ask for, or bug when none asks,
+and the change gets the heaviest lane of its files.
+_Avoid_: condition (alone, which reads as an AC), rule, trigger
+
 **Spec**: the approved contract, one file with `## Intent`, `## Lane`, `## Acceptance criteria` (numbered), `## Design`
 (a link or `none`), what is out of scope, and optionally `## Planned files`, which the lane is checked against.
 _Avoid_: requirements, story (for this file)
