@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DESIGN_SCHEMA, keep, readDesignFindings, type DesignFinding } from "../src/core/design/findings.js";
 import { readVerdicts, settle, VERIFY_SCHEMA, type FindingCore } from "../src/core/finding.js";
-import { FIND_SCHEMA } from "../src/core/review/verdicts.js";
+import { FIND_SCHEMA, readFindings } from "../src/core/review/verdicts.js";
 
 const CORE: FindingCore = {
   id: "F1",
@@ -101,5 +101,26 @@ describe("the verify pass sets the final severity and grade, lower only (ADR-001
     const item = JSON.parse(VERIFY_SCHEMA).properties.verdicts.items;
     expect(item.required).toEqual(["id", "bucket", "why"]);
     expect(Object.keys(item.properties)).toEqual(["id", "bucket", "why", "severity", "grade"]);
+  });
+});
+
+describe("a finding may quote the line it cites (#847 R-11, #918)", () => {
+  const review = { ...CORE, axis: "standards", kind: "logic", category: "concurrency", evidence: "walked it" };
+  const design = { ...CORE, decision: "one table", verdict: "conflict" };
+
+  it("keeps the quote, trimmed, on a review finding and on a design-review finding", () => {
+    const quote = "  const lock = take(file);  ";
+    const found = readFindings({ findings: [{ ...review, quote }] }, "correctness");
+    const designed = readDesignFindings({ findings: [{ ...design, quote }] });
+    expect(found.kind === "ok" && found.value[0]?.quote).toBe("const lock = take(file);");
+    expect(designed.kind === "ok" && designed.value[0]?.quote).toBe("const lock = take(file);");
+  });
+
+  it("keeps a finding with no quote, or a quote that is not text, and gives it no quote", () => {
+    for (const raw of [review, { ...review, quote: 42 }]) {
+      const found = readFindings({ findings: [raw] }, "correctness");
+      expect(found.kind).toBe("ok");
+      expect(found.kind === "ok" && "quote" in (found.value[0] ?? {})).toBe(false);
+    }
   });
 });

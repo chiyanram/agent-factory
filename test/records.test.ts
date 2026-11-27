@@ -106,6 +106,12 @@ describe("what a run record names: the CLI, its version and the model", () => {
     expect(await readRecords(where())).toEqual({ kind: "ok", value: lines });
   });
 
+  it("reads back the approach and the open list on a writer-ended line (#918)", async () => {
+    const ended = { ...lines[2], approach: "one table, not two", open: ["the retry is untested"] };
+    expect(await record({ where: where(), event: ended })).toEqual({ kind: "ok" });
+    expect(await readRecords(where())).toEqual({ kind: "ok", value: [ended] });
+  });
+
   it("reads a line without them as before", async () => {
     const started = { at, kind: "started", phase: "ready", mode: "none", head };
     written([started]);

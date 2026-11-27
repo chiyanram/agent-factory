@@ -53,6 +53,8 @@ export type Steps = {
       readonly spend?: Spend;
       readonly card?: string;
       readonly deferred?: readonly string[];
+      readonly approach?: string;
+      readonly open?: readonly string[];
       readonly stale?: readonly string[];
       readonly why?: string;
       readonly output?: string;

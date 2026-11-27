@@ -99,6 +99,8 @@ export type WriterOut = {
   readonly spend?: Spend;
   readonly card?: string;
   readonly deferred?: readonly string[];
+  readonly approach?: string;
+  readonly open?: readonly string[];
   readonly stale?: readonly string[];
   readonly why?: string;
   readonly output?: string;
@@ -106,8 +108,18 @@ export type WriterOut = {
   readonly runs?: readonly RunNamed[];
 };
 
-function deferredOf(outcome: Outcome): { readonly deferred?: readonly string[] } {
-  return outcome.kind === "done" && outcome.deferred !== undefined ? { deferred: outcome.deferred } : {};
+type Notes = Pick<WriterOut, "deferred" | "approach" | "open">;
+
+function notesOf(outcome: Outcome): Notes {
+  if (outcome.kind !== "done") {
+    return {};
+  }
+  const { deferred, approach, open } = outcome;
+  return {
+    ...(deferred === undefined ? {} : { deferred }),
+    ...(approach === undefined ? {} : { approach }),
+    ...(open === undefined ? {} : { open }),
+  };
 }
 
 function whyField(why: string): { readonly why?: string } {
@@ -144,7 +156,7 @@ export function outOf(ended: Ended, next: Next): WriterOut {
     patch: ended.patch,
     hung: ended.ending.kind === "hung",
     ...spendField(ended.spend),
-    ...deferredOf(ended.outcome),
+    ...notesOf(ended.outcome),
     ...traceField(ended.trace),
   };
   switch (next.kind) {
