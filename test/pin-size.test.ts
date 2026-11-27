@@ -16,7 +16,7 @@ describe("sizeOf: the eval a pin move needs", () => {
     expect(sizeOf([], BASELINE).size).toBe("none");
   });
 
-  it("review: any file of a baseline skill, review.json, and the finder and verify-pass cards", () => {
+  it("review: every file of a baseline skill, review.json, and the finder and verify-pass cards", () => {
     const files = [
       "~ skills/crq/SKILL.md",
       "+ skills/code/references/errors.md",

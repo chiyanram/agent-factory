@@ -476,10 +476,7 @@ async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promi
     env: ctx.setup.env,
     prune: "rules",
   });
-  if (copied.kind === "failed") {
-    return copied;
-  }
-  const skills = await copySkills(ctx.skills.present, folder);
+  const skills = copied.kind === "ok" ? await copySkills(ctx.skills.present, folder) : copied;
   return skills.kind === "failed"
     ? skills
     : attempt(() => writeFile(join(folder, "pack.md"), text), `cannot write the pack into ${folder}`);

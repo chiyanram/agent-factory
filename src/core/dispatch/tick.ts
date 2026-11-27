@@ -1089,23 +1089,20 @@ async function runReview(setup: TickSetup, state: TicketState, head: string): Pr
     : failedSpent(setup, state, head, ran, "review");
 }
 
-function reviewEnded(
-  setup: TickSetup,
-  state: TicketState,
-  head: string,
-  value: {
-    readonly actOn: number;
-    readonly spend: Spend;
-    readonly split?: RoundSpend;
-    readonly acted?: Acted;
-    readonly lenses?: Readonly<Record<string, number>>;
-    readonly citesNotFound?: number;
-    readonly found?: FoundByRule;
-    readonly skillsMissing?: readonly string[];
-    readonly traces?: readonly string[];
-    readonly runs?: readonly RunNamed[];
-  },
-): Promise<Done> {
+type ReviewValue = {
+  readonly actOn: number;
+  readonly spend: Spend;
+  readonly split?: RoundSpend;
+  readonly acted?: Acted;
+  readonly lenses?: Readonly<Record<string, number>>;
+  readonly citesNotFound?: number;
+  readonly found?: FoundByRule;
+  readonly skillsMissing?: readonly string[];
+  readonly traces?: readonly string[];
+  readonly runs?: readonly RunNamed[];
+};
+
+function reviewEnded(setup: TickSetup, state: TicketState, head: string, value: ReviewValue): Promise<Done> {
   return record({
     where: where(setup, state),
     event: {
@@ -1135,15 +1132,7 @@ function ratings(value: { readonly acted?: Acted; readonly lenses?: Readonly<Rec
   };
 }
 
-function counts(value: {
-  readonly citesNotFound?: number;
-  readonly found?: FoundByRule;
-  readonly skillsMissing?: readonly string[];
-}): {
-  readonly citesNotFound?: number;
-  readonly found?: FoundByRule;
-  readonly skillsMissing?: readonly string[];
-} {
+function counts(value: ReviewValue): Pick<ReviewValue, "citesNotFound" | "found" | "skillsMissing"> {
   return {
     ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
     ...(value.found === undefined ? {} : { found: value.found }),
