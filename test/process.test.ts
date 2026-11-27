@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { referencesDir, skillDir } from "../src/core/process/read.js";
+import { skillDir } from "../src/core/process/read.js";
 import { tempDir } from "./temp.js";
 
 let root = "";
@@ -39,14 +39,5 @@ describe("skillDir: a plugin's skill, found by its name (ADR-0026)", () => {
     const rulebook = plugin("rulebook", ["skills/crq/SKILL.md"]);
     expect(await skillDir([rulebook], "../rulebook/skills/crq")).toBe("");
     expect(await skillDir([rulebook], "")).toBe("");
-  });
-});
-
-describe("referencesDir: the plugin that still holds review references", () => {
-  it("takes the first folder with a skills/<skill>/references folder, and is empty with none", async () => {
-    const bare = plugin("bare", ["skills/deslop/SKILL.md"]);
-    const rulebook = plugin("rulebook", ["skills/crq/references/code-review.md"]);
-    expect(await referencesDir(["", bare.dir, rulebook.dir])).toBe(rulebook.dir);
-    expect(await referencesDir([bare.dir])).toBe("");
   });
 });

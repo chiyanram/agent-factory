@@ -57,7 +57,8 @@ import type { RunLimits } from "./settings.js";
 import type { RoundPart } from "../dispatch/spend.js";
 import { deviationNotes } from "./deviations.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
-import { ENGINE_PROCESS, referencesDir, type PluginDir, type Process } from "../process/read.js";
+import { ENGINE_PROCESS, type PluginDir, type Process } from "../process/read.js";
+import { baselineSkills, copySkills, type Skills } from "./skills.js";
 import { attempt } from "./safe.js";
 import { plainName, type SpecStore } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
@@ -118,6 +119,7 @@ export type Outcome =
       readonly lenses: Readonly<Record<string, number>>;
       readonly citesNotFound: number;
       readonly found: FoundByRule;
+      readonly skillsMissing: readonly string[];
     }
   | { readonly kind: "reused"; readonly round: number; readonly head: string; readonly actOn: number }
   | { readonly kind: "already"; readonly head: string; readonly actOn: number }
@@ -129,13 +131,14 @@ type Ctx = {
   readonly change: Change;
   readonly past: History;
   readonly deviations: readonly string[];
+  readonly skills: Skills;
 };
 
 function failed(reason: string): { readonly kind: "failed"; readonly reason: string } {
   return { kind: "failed", reason };
 }
 
-async function load(setup: ReviewSetup): Promise<Result<Ctx>> {
+async function load(setup: ReviewSetup): Promise<Result<Omit<Ctx, "skills">>> {
   const change = await setup.forge.change({ number: setup.number });
   if (change.kind === "failed") {
     return change;
@@ -212,16 +215,13 @@ async function approvalFor(where: {
     : { kind: "ok", value: { kind: "none" } };
 }
 
-const NO_REFERENCES =
-  'the review needs a plugin that holds its review references: list one in the project\'s "plugins" and pin it';
-
-async function reviewProcess(
-  plugins: readonly PluginDir[],
-): Promise<Result<Process & { readonly references: string }>> {
-  const references = await referencesDir(plugins.map((p) => p.dir));
-  return references === ""
-    ? { kind: "failed", reason: NO_REFERENCES }
-    : { kind: "ok", value: { ...ENGINE_PROCESS, references } };
+async function reviewSkills(plugins: readonly PluginDir[]): Promise<Result<Skills>> {
+  const skills = await baselineSkills(plugins, ENGINE_PROCESS.baseline);
+  return skills.present.length === 0
+    ? failed(
+        `the review baseline has no skill left: no listed plugin has skills/<name>/SKILL.md for ${skills.missing.join(", ")}; list one in the project's "plugins" and pin it`,
+      )
+    : { kind: "ok", value: skills };
 }
 
 async function packFor(ctx: Ctx): Promise<Result<Pack>> {
@@ -230,11 +230,7 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
     return branch;
   }
   const s = ctx.setup;
-  const own = await reviewProcess(s.plugins);
-  if (own.kind === "failed") {
-    return own;
-  }
-  const spec = await specFor(ctx, own.value.lanes);
+  const spec = await specFor(ctx, ENGINE_PROCESS.lanes);
   if (spec.kind === "failed") {
     return spec;
   }
@@ -244,8 +240,8 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
     env: s.env,
     change: ctx.change,
     defaultBranch: branch.value,
-    rulebook: own.value.references,
-    baseline: own.value.baseline,
+    plugins: s.plugins,
+    baseline: ctx.skills.present.map((k) => k.name),
     previous: last.kind === "round" ? { kind: "head", sha: last.head } : { kind: "none" },
     spec: spec.value,
     deviations: ctx.deviations,
@@ -480,8 +476,12 @@ async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promi
     env: ctx.setup.env,
     prune: "rules",
   });
-  return copied.kind === "failed"
-    ? copied
+  if (copied.kind === "failed") {
+    return copied;
+  }
+  const skills = await copySkills(ctx.skills.present, folder);
+  return skills.kind === "failed"
+    ? skills
     : attempt(() => writeFile(join(folder, "pack.md"), text), `cannot write the pack into ${folder}`);
 }
 
@@ -519,10 +519,8 @@ async function findLens(ctx: Ctx, lens: Lens, rubric: string, shared: Shared): P
   }
 }
 
-async function rubrics(ctx: Ctx, plan: Plan, pack: Pack, references: string): Promise<Result<readonly string[]>> {
-  const read = await Promise.all(
-    plan.lenses.map((lens) => rubricText(lens, { ...ctx.setup, references, master: pack.master })),
-  );
+async function rubrics(ctx: Ctx, plan: Plan, pack: Pack): Promise<Result<readonly string[]>> {
+  const read = await Promise.all(plan.lenses.map((lens) => rubricText(lens, { ...ctx.setup, master: pack.master })));
   const bad = read.find((r) => r.kind === "failed");
   return bad?.kind === "failed" ? bad : { kind: "ok", value: read.map((r) => (r.kind === "ok" ? r.value : "")) };
 }
@@ -546,15 +544,8 @@ async function findAll(
 type Inputs = { readonly text: string; readonly rubrics: readonly string[] };
 
 async function inputs(ctx: Ctx, pack: Pack, plan: Plan): Promise<Result<Inputs>> {
-  const own = await reviewProcess(ctx.setup.plugins);
-  if (own.kind === "failed") {
-    return own;
-  }
   const text = await readFile(pack.path, "utf8").catch(() => undefined);
-  const read =
-    text === undefined
-      ? failed(`cannot read the pack ${pack.path}`)
-      : await rubrics(ctx, plan, pack, own.value.references);
+  const read = text === undefined ? failed(`cannot read the pack ${pack.path}`) : await rubrics(ctx, plan, pack);
   return read.kind === "ok" ? { kind: "ok", value: { text: text ?? "", rubrics: read.value } } : read;
 }
 
@@ -766,6 +757,10 @@ async function actedOf(ctx: Ctx, head: string, sorted: readonly Sorted[]): Promi
     : "none";
 }
 
+function missingLines(skills: Skills): readonly string[] {
+  return skills.missing.length === 0 ? [] : [`Skills missing · ${skills.missing.join(", ")}`];
+}
+
 function lensesLine(lenses: Readonly<Record<string, number>>): string {
   return Object.entries(lenses)
     .map(([lens, n]) => `${lens} ${n}`)
@@ -801,7 +796,7 @@ async function post(
   const summary = await note(
     ctx,
     `round ${round} · head ${pack.head} · patch-id ${pack.patchId} · ${countsLine(c)}`,
-    summaryItems(result.sorted, box.value, pack.criteria),
+    [...summaryItems(result.sorted, box.value, pack.criteria), ...missingLines(ctx.skills)],
     [
       { label: "Spent at this head", value: spent },
       { label: "Unique findings per lens", value: lensesLine(result.lenses) },
@@ -821,6 +816,7 @@ async function post(
           lenses: result.lenses,
           citesNotFound: result.citesNotFound,
           found: foundOf(result.sorted),
+          skillsMissing: ctx.skills.missing,
         },
       }
     : summary;
@@ -853,7 +849,7 @@ async function decideRound(ctx: Ctx, pack: Pack): Promise<Result<Outcome>> {
   return review(ctx, pack);
 }
 
-function alreadyReviewed(ctx: Ctx): Outcome | "no" {
+function alreadyReviewed(ctx: Pick<Ctx, "past" | "change">): Outcome | "no" {
   const last = ctx.past.last;
   if (last.kind !== "round" || last.head !== ctx.change.sha) {
     return "no";
@@ -887,6 +883,11 @@ async function heldRound(setup: ReviewSetup): Promise<Result<Outcome>> {
   if (done !== "no") {
     return { kind: "ok", value: done };
   }
-  const pack = await packFor(ctx.value);
-  return pack.kind === "ok" ? decideRound(ctx.value, pack.value) : pack;
+  const skills = await reviewSkills(setup.plugins);
+  if (skills.kind === "failed") {
+    return skills;
+  }
+  const withSkills = { ...ctx.value, skills: skills.value };
+  const pack = await packFor(withSkills);
+  return pack.kind === "ok" ? decideRound(withSkills, pack.value) : pack;
 }

@@ -1617,6 +1617,7 @@ describe("tick", () => {
             lenses: { errors: 1, api: 0 },
             citesNotFound: 1,
             found: { CR1: { act_on: 1 }, logic: { noted: 2 } },
+            skillsMissing: ["code"],
             traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
           },
         }),
@@ -1632,6 +1633,7 @@ describe("tick", () => {
       lenses: { errors: 1, api: 0 },
       citesNotFound: 1,
       found: { CR1: { act_on: 1 }, logic: { noted: 2 } },
+      skillsMissing: ["code"],
       traces: ["finder-errors-2026-11-07T09-06-00-000Z.jsonl", "verify-2026-11-07T09-07-00-000Z.jsonl"],
       reason: "done",
     });
@@ -1734,6 +1736,12 @@ describe("tick", () => {
     expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, citesNotFound: 2 }] });
     writeFileSync(path, `${JSON.stringify({ ...base, citesNotFound: -1 })}\n${ping}`);
     expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    writeFileSync(path, `${JSON.stringify({ ...base, skillsMissing: ["code"] })}\n`);
+    expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, skillsMissing: ["code"] }] });
+    for (const bad of [[], [""], [1], "code"]) {
+      writeFileSync(path, `${JSON.stringify({ ...base, skillsMissing: bad })}\n${ping}`);
+      expect(await readRecords(where)).toMatchObject({ kind: "failed" });
+    }
     writeFileSync(path, `${JSON.stringify({ ...base, split: SPLIT })}\n`);
     expect(await readRecords(where)).toEqual({ kind: "ok", value: [{ ...base, split: SPLIT }] });
     for (const bad of [

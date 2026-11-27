@@ -31,7 +31,8 @@ function input(over: Partial<PackInput> = {}): PackInput {
     env: p.env,
     change: changeAt(p.head2),
     defaultBranch: "main",
-    rulebook: RULEBOOK,
+    plugins: [{ label: "rulebook", dir: RULEBOOK }],
+    baseline: ["crq", "code"],
     previous: { kind: "none" },
     dir: join(p.root, "packs"),
     mark: "!",
@@ -107,9 +108,9 @@ describe("buildPack", () => {
     expect(rules).not.toContain("OTHER-RULES");
   });
 
-  it("holds the smells and the lens, the design, and flags the rule files and the design it edits", async () => {
+  it("names the baseline skills and the lens, holds the design, and flags the rule files and the design it edits", async () => {
     const text = await pack();
-    expect(section(text, 4)).toContain("SMELLS-BASELINE");
+    expect(section(text, 4)).toContain("./skills/code/SKILL.md");
     expect(section(text, 4)).toMatch(/input, state/);
     expect(section(text, 6)).toContain("DESIGN-BODY");
     const seven = section(text, 7);
@@ -163,7 +164,7 @@ describe("buildPack", () => {
     expect(existsSync(join(p.root, "packs")) ? readdirSync(join(p.root, "packs")) : []).toEqual([]);
   });
 
-  it("refuses a change that targets another branch, a tip that is not the head, and a folder that is no rulebook", async () => {
+  it("refuses a change that targets another branch, a tip that is not the head, and a pointer no plugin resolves", async () => {
     expect(await buildPack(input({ change: changeAt(p.head2, { targetBranch: "evil" }) }))).toMatchObject({
       kind: "failed",
       reason: expect.stringContaining("not the default branch"),
@@ -172,9 +173,9 @@ describe("buildPack", () => {
       kind: "failed",
       reason: expect.stringContaining("head"),
     });
-    expect(await buildPack(input({ rulebook: "/nonexistent" }))).toMatchObject({
+    expect(await buildPack(input({ plugins: [] }))).toMatchObject({
       kind: "failed",
-      reason: expect.stringContaining("rulebook"),
+      reason: expect.stringContaining("unresolved rule pointer"),
     });
     expect(await buildPack(input({ change: changeAt(p.head2, { sourceBranch: "--upload-pack=x" }) }))).toMatchObject({
       kind: "failed",
@@ -357,56 +358,53 @@ describe("buildPack: the approved spec (#224)", () => {
   });
 });
 
-describe("buildPack: the baseline review checks (#226)", () => {
-  const CHECKS = ["REVIEW-PROCESS-CHECKS", "CODE-REVIEW-CHECKS", "VERIFY-DONE-CHECKS", "SMELLS-BASELINE"];
+describe("buildPack: the baseline review skills, by name (#920)", () => {
+  const TEXT = [
+    "CRQ-SKILL",
+    "CODE-SKILL",
+    "REVIEW-PROCESS-CHECKS",
+    "CODE-REVIEW-CHECKS",
+    "VERIFY-DONE-CHECKS",
+    "SMELLS-BASELINE",
+  ];
 
-  it("holds the baseline review checks in section 4, fenced as data, for a change with no AGENTS.md pointer", async () => {
+  it("AC-2 names each baseline skill in section 4 with its SKILL.md to read first, and holds no skill text", async () => {
     addToMain("AGENTS.md", "# Root\n\nROOT-RULES\n");
     addToMain("svc/AGENTS.md", "# svc\n\nSVC-RULES\n");
     const text = await pack();
-    expect(section(text, 3)).not.toContain("rulebook");
     const four = section(text, 4);
-    for (const title of ["crq/review-process", "crq/code-review", "crq/verify-done", "code/smells"]) {
-      expect(four).toContain(`### rulebook ${title}\n\n\`\`\`\`markdown\n`);
+    for (const name of ["crq", "code"]) {
+      expect(four).toContain(`\`${name}\` skill: read \`./skills/${name}/SKILL.md\` first`);
     }
-    for (const check of CHECKS) {
-      expect(four).toContain(check);
-    }
+    expect(TEXT.filter((t) => text.includes(t))).toEqual([]);
   });
 
-  it("sends a baseline reference an AGENTS.md pointer also names once, in section 4", async () => {
+  it("AC-2 names only the skills it is given", async () => {
+    const four = section(await pack({ baseline: ["code"] }), 4);
+    expect(four).toContain("./skills/code/SKILL.md");
+    expect(four).not.toContain("./skills/crq/");
+  });
+
+  it("D4 holds a reference an AGENTS.md pointer names in section 3, once, though its skill is in the baseline", async () => {
     const before = readFileSync(join(p.clone, "AGENTS.md"), "utf8");
     addToMain(
       "AGENTS.md",
-      `${before}- Review: use the \`crq\` skill (rulebook plugin) and read its \`code-review\` reference.\n`,
+      `${before}- Review: use the \`crq\` skill (rulebook plugin) and read its \`code-review\` reference.\n- Again: use the \`crq\` skill (rulebook plugin) and read its \`code-review\` reference.\n`,
     );
     const text = await pack();
-    expect(section(text, 3)).not.toContain("CODE-REVIEW-CHECKS");
-    expect(section(text, 3)).toContain("LLM-TESTS-RULES");
+    expect(section(text, 3)).toContain("### rulebook crq/code-review\n");
     expect(text.split("CODE-REVIEW-CHECKS").length - 1).toBe(1);
-    expect(section(text, 4)).toContain("CODE-REVIEW-CHECKS");
   });
 
-  it("fails with the reason when a baseline review check is missing from the rulebook, and leaves no pack", async () => {
-    const rulebook = join(p.root, "rulebook");
-    cpSync(RULEBOOK, rulebook, { recursive: true });
-    rmSync(join(rulebook, "skills", "crq", "references", "verify-done.md"));
-    expect(await buildPack(input({ rulebook }))).toMatchObject({
-      kind: "failed",
-      reason: expect.stringMatching(
-        /baseline review check crq\/verify-done .*skills\/crq\/references\/verify-done\.md/,
-      ),
+  it("AC-7 resolves a pointer through the first listed plugin that holds its skill", async () => {
+    const empty = join(p.root, "empty-plugin");
+    cpSync(join(RULEBOOK, "skills", "code"), join(empty, "skills", "code"), { recursive: true });
+    const text = await pack({
+      plugins: [
+        { label: "empty", dir: empty },
+        { label: "rulebook", dir: RULEBOOK },
+      ],
     });
-    expect(existsSync(join(p.root, "packs")) ? readdirSync(join(p.root, "packs")) : []).toEqual([]);
-  });
-
-  it("holds the process's baseline in place of the built-in one when one is given (#232)", async () => {
-    const four = section(await pack({ baseline: [{ domain: "code", reference: "errors" }] }), 4);
-    expect(four).toContain("### rulebook code/errors\n");
-    expect(four).not.toContain("crq/review-process");
-    expect(await buildPack(input({ baseline: [{ domain: "code", reference: "nothere" }] }))).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("baseline review check code/nothere"),
-    });
+    expect(section(text, 3)).toContain("LLM-TESTS-RULES");
   });
 });

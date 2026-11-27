@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tempDir } from "./temp.js";
 import { checkLenses, lensListOf } from "../src/core/review/lens-list.js";
 import {
   BASELINE,
@@ -81,10 +84,39 @@ describe("the lenses a round picks from (#237)", () => {
 
   it("refuses a rubric from a plugin that is not enabled, naming the lens", async () => {
     const lens: Lens = { ...api, rubric: { kind: "skill", plugin: "other", skill: "code" } };
-    const read = await rubricText(lens, { references: "", plugins: [], repo: "", env: {}, master: "" });
+    const read = await rubricText(lens, { plugins: [], repo: "", env: {}, master: "" });
     expect(read).toEqual({
       kind: "failed",
       reason: "the rubric of the lens api: no enabled plugin is named other",
     });
+  });
+
+  it("AC-7 reads the built-in test-integrity rubric from the first listed plugin that holds crq", async () => {
+    const root = tempDir("factory-finders-");
+    try {
+      const put = (plugin: string, text: string): string => {
+        const dir = join(root, plugin, "skills", "crq", "references");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "test-integrity.md"), text);
+        return join(root, plugin);
+      };
+      mkdirSync(join(root, "bare", "skills", "code"), { recursive: true });
+      const plugins = [
+        { label: "bare", dir: join(root, "bare") },
+        { label: "team", dir: put("team", "TEAM-INTEGRITY") },
+        { label: "rulebook", dir: put("rulebook", "RULEBOOK-INTEGRITY") },
+      ];
+      const at = { repo: "", env: {}, master: "" };
+      expect(await rubricText(BUILT_IN_TEST_INTEGRITY, { ...at, plugins })).toEqual({
+        kind: "ok",
+        value: "TEAM-INTEGRITY",
+      });
+      expect(await rubricText(BUILT_IN_TEST_INTEGRITY, { ...at, plugins: plugins.slice(0, 1) })).toEqual({
+        kind: "failed",
+        reason: "the rubric of the lens test-integrity: no listed plugin has the crq skill",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

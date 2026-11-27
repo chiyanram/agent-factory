@@ -1101,6 +1101,7 @@ function reviewEnded(
     readonly lenses?: Readonly<Record<string, number>>;
     readonly citesNotFound?: number;
     readonly found?: FoundByRule;
+    readonly skillsMissing?: readonly string[];
     readonly traces?: readonly string[];
     readonly runs?: readonly RunNamed[];
   },
@@ -1134,13 +1135,19 @@ function ratings(value: { readonly acted?: Acted; readonly lenses?: Readonly<Rec
   };
 }
 
-function counts(value: { readonly citesNotFound?: number; readonly found?: FoundByRule }): {
+function counts(value: {
   readonly citesNotFound?: number;
   readonly found?: FoundByRule;
+  readonly skillsMissing?: readonly string[];
+}): {
+  readonly citesNotFound?: number;
+  readonly found?: FoundByRule;
+  readonly skillsMissing?: readonly string[];
 } {
   return {
     ...(value.citesNotFound === undefined ? {} : { citesNotFound: value.citesNotFound }),
     ...(value.found === undefined ? {} : { found: value.found }),
+    ...(value.skillsMissing === undefined ? {} : { skillsMissing: value.skillsMissing }),
   };
 }
 

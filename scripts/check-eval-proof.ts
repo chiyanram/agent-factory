@@ -191,10 +191,7 @@ function list(value: unknown): readonly unknown[] {
 
 function needOf(value: unknown): PinSize.Sized {
   const changed = list(field(value, "changed")).map(String);
-  const baseline = list(field(value, "baseline")).map((p) => ({
-    domain: String(field(p, "domain")),
-    reference: String(field(p, "reference")),
-  }));
+  const baseline = list(field(value, "baseline")).map(String);
   return pinSize.sizeOf(changed, baseline);
 }
 

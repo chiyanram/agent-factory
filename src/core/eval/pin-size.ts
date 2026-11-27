@@ -3,21 +3,21 @@
 //
 //   none      only files no run reads: README*, CHANGELOG*, LICENSE* at the plugin's root, and docs/, evals/, tests/,
 //             .github/; config check alone proves the move
-//   review    a skill reference the review baseline points to, the review.json that points to them, or the finder
-//             and verify-pass cards; a targeted review pass proves it (slice.ts)
+//   review    any file of a skill the review baseline names, since the review reads a copy of the whole skill
+//             (review/skills.ts), the review.json, or the finder and verify-pass cards; a targeted review pass proves it
+//             (slice.ts)
 //   writer    the implementer card; the implementer eval proves it
-//   both      review and writer paths, or any other path
+//   both      review and writer paths, a path that is both (the implementer card inside a baseline skill), or any
+//             other path
 //
 // Some files a run reads are tested by no eval: the test-first, cleanup, design-reviewer, onboarder and retro cards,
 // and the files no eval can test, the plugin's manifest (.claude-plugin/plugin.json) and the process files config
-// check reads (lanes, schema, glossary). They add no size; the move names each and goes ahead only with a reason the
+// check reads (lanes, schema, glossary), when they sit outside a baseline skill. They add no size; the move names each and goes ahead only with a reason the
 // person types, which the pin keeps (pin-proof.ts). **Today:** no eval covers those five cards; the M5 evals add them
 // (#852).
 //
 // A changed path comes as changedFiles (fetch.ts) writes it: "+ ", "- " or "~ " and the path. A leaf with no runtime
 // import, so scripts/check-eval-proof.ts loads it on Node's type stripping. Pure.
-
-import type { Pointer } from "../review/rules.js";
 
 export type Size = "none" | "review" | "writer" | "both";
 export const SIZES: readonly Size[] = ["none", "review", "writer", "both"];
@@ -42,24 +42,37 @@ const UNTESTED = [
   /^skills\/[^/]+\/process\/(?:lanes[^/]*\.json|glossary\.md|schema\/.+)$/,
 ];
 
-export function referencePath(p: Pointer): string {
-  return `skills/${p.domain}/references/${p.reference}.md`;
-}
-
 type Kind = Exclude<keyof Sized, "size">;
 
-type Rule = readonly [Kind, (path: string, card: string, references: ReadonlySet<string>) => boolean];
+function readByReview(path: string, card: string, baseline: readonly string[]): boolean {
+  return (
+    baseline.some((name) => path.startsWith(`skills/${name}/`)) || REVIEW_JSON.test(path) || REVIEW_CARDS.has(card)
+  );
+}
 
-const RULES: readonly Rule[] = [
-  ["none", (path) => NONE.some((r) => r.test(path))],
-  ["review", (path, card, refs) => refs.has(path) || REVIEW_JSON.test(path) || REVIEW_CARDS.has(card)],
-  ["writer", (_path, card) => WRITER_CARDS.has(card)],
-  ["uncovered", (path, card) => UNCOVERED_CARDS.has(card) || UNTESTED.some((r) => r.test(path))],
-];
+function readKinds(path: string, card: string, baseline: readonly string[]): readonly Kind[] {
+  const review: readonly Kind[] = readByReview(path, card, baseline) ? ["review"] : [];
+  return WRITER_CARDS.has(card) ? [...review, "writer"] : review;
+}
 
-function kindOf(path: string, references: ReadonlySet<string>): Kind {
-  const card = CARD.exec(path)?.[1] ?? "";
-  return RULES.find(([, applies]) => applies(path, card, references))?.[0] ?? "other";
+function untested(path: string, card: string): boolean {
+  return UNCOVERED_CARDS.has(card) || UNTESTED.some((r) => r.test(path));
+}
+
+function cardOf(path: string): string {
+  return CARD.exec(path)?.[1] ?? "";
+}
+
+function kindsOf(path: string, baseline: readonly string[]): readonly Kind[] {
+  if (NONE.some((r) => r.test(path))) {
+    return ["none"];
+  }
+  const card = cardOf(path);
+  const read = readKinds(path, card, baseline);
+  if (read.length > 0) {
+    return read;
+  }
+  return untested(path, card) ? ["uncovered"] : ["other"];
 }
 
 const SIZE_OF: Readonly<Record<string, Size>> = {
@@ -76,10 +89,9 @@ export function changedPath(line: string): string {
   return /^[+~-] /.test(line) ? line.slice(2) : line;
 }
 
-export function sizeOf(changed: readonly string[], baseline: readonly Pointer[]): Sized {
-  const references = new Set(baseline.map(referencePath));
+export function sizeOf(changed: readonly string[], baseline: readonly string[]): Sized {
   const paths = [...new Set(changed.map(changedPath))].toSorted();
-  const of = (k: Kind): readonly string[] => paths.filter((p) => kindOf(p, references) === k);
+  const of = (k: Kind): readonly string[] => paths.filter((p) => kindsOf(p, baseline).includes(k));
   const sized = { review: of("review"), writer: of("writer"), other: of("other"), uncovered: of("uncovered") };
   return {
     size: sizeFrom(sized.review.length > 0, sized.writer.length > 0, sized.other.length > 0),

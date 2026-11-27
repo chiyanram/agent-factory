@@ -29,7 +29,7 @@ const MARKET = {
 
 const PLUGIN = {
   "plugins/rulebook/.claude-plugin/plugin.json": '{"name": "rulebook"}',
-  "plugins/rulebook/skills/crq/process/lanes.json": LANES,
+  "plugins/rulebook/skills/flow/process/lanes.json": LANES,
 };
 
 function git(dir: string, args: readonly string[]): string {

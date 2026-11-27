@@ -11,7 +11,7 @@ const ROOT = join(import.meta.dirname, "..");
 const PACK = process.env.FACTORY_RULES_PACK ?? "";
 const IN_CI = (process.env.CI ?? "") !== "";
 const PIN: unknown = JSON.parse(readFileSync(join(ROOT, ".github", "rules-pack.json"), "utf8"));
-const NAMED = [...new Set([...BASELINE.map((p) => p.domain), RETRO_SKILL])].toSorted();
+const NAMED = [...new Set([...BASELINE, RETRO_SKILL])].toSorted();
 
 describe("P18: the pinned rules pack holds each skill the engine names", () => {
   it("pins the rules pack by a full commit", () => {

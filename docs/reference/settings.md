@@ -39,7 +39,7 @@ variable needs exporting.
 | `FACTORY_WRITER_STALL_MINUTES` | the longest an implementer run may print nothing before it is stopped and blocked, from 1 to 5: it can only lower the stall time (#228) | `5` |
 | `FACTORY_FINDER_MINUTES`, `FACTORY_VERIFY_MINUTES`, `FACTORY_DESIGN_MINUTES`, `FACTORY_ONBOARD_MINUTES`, `FACTORY_RETRO_MINUTES`, `FACTORY_JUDGE_MINUTES` | the longest one read-only run may take, from 1 to 60 (`review.finderMinutes`, `review.verifyMinutes`, `design.minutes`, `onboard.minutes`, `retro.minutes`, `eval.judgeMinutes`, each a cap): each finder run of the review and of the eval; each verify pass of the review, of the design review and of the eval; the design-reviewer; the onboarder; the retro draft; the eval judge. A run past its limit is stopped with everything it started, and fails with the reason, such as "stopped at its 20-minute limit (FACTORY_FINDER_MINUTES)"; what it streamed is kept as its trace ([ADR-0022](../adr/0022-agent-cli-adapter-in-core.md)) | `20` |
 | `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL` | the automated review's models: full model ids, never an alias such as `sonnet`, which is refused (ADR-0015 E9) | `claude-sonnet-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` |
-| `FACTORY_RULEBOOK` | `agent-factory eval reviewer` only: the rulebook plugin folder, an absolute path, that holds `skills/<domain>/references/`. A run reads the project's `plugins` and warns when this is set. With no `plugins`, the implementer runs with no plugin, and the review stops: it needs a plugin that holds its references | — |
+| `FACTORY_RULEBOOK` | `agent-factory eval reviewer` only: the rulebook plugin folder, an absolute path, that holds `skills/crq/SKILL.md` and `skills/code/SKILL.md`. A run reads the project's `plugins` and warns when this is set. With no `plugins`, the implementer runs with no plugin, and the review stops: it needs a plugin that holds a baseline skill | — |
 | `FACTORY_JUDGE_MODEL` | the eval judge's model (`eval.judgeModel`): a full model id, never an alias | `claude-sonnet-5-5` |
 | `FACTORY_JUDGE_MAX_USD` | the most one judge run of the eval may spend, in US dollars (`eval.judgeUsdPerRun`) | `0.50` |
 | `FACTORY_EGRESS_IMAGE` | the egress proxy's Squid image, pinned by digest (`name@sha256:<64 hex>`); a tag alone is refused (ADR-0012 S7) | a pinned `ubuntu/squid` 6.6 on Ubuntu 24.04 |
@@ -132,7 +132,10 @@ there.
   Each `dispatch` pass checks every pin, then copies each plugin into the implementer's clone as `.factory/plugins/<n>`
   (read-only, in the list's order) and loads it with `claude --plugin-dir`. Every run record's `started` line lists
   each plugin and its hash. A plugin listed but not pinned, or whose stored folder no longer has its hash, stops the
-  pass. The review reads its references from the first plugin that holds a `skills/<skill>/references/` folder.
+  pass. The review takes each baseline skill (`crq`, `code`) from the first plugin that holds its
+  `skills/<name>/SKILL.md`, and copies the whole skill into each run folder; it never loads a plugin with
+  `--plugin-dir`. A baseline skill no plugin holds is named on the run record and in the round's summary, and the
+  round goes on; with neither, the review refuses.
   **Today:** a pin moved while a ticket is in flight applies to that ticket's next run, not
   only to the next ticket; the records show the change. The review cannot run with no plugin yet (#674).
 - `quarantine.checks` (locked, the project file only) and `quarantine.maxDays` (cap, default 14): the CI jobs a person

@@ -27,8 +27,10 @@ swappable part, are in [Connectors](../reference/connectors.md).
 - **A plugin is a normal Claude Code plugin, and it gives skills only.** The engine names a skill and never a file
   inside it (`skillDir` in `src/core/process/read.ts`), in the order the project lists its plugins. The rulebook
   (`rulebook@chiyanram`, from [chiyanram/skills](https://github.com/chiyanram/skills)) is one plugin, not a dependency.
-  `retro --draft` reads the `crq` skill. **Today:** the review still fences the rulebook's `references/` files by
-  name; the review that loads whole skills by name is #920.
+  `retro --draft` reads the `crq` skill. The review copies its baseline skills, `crq` and `code`, whole into each
+  run folder and tells the run to read `skills/<name>/SKILL.md` first, so a read-only run loads no plugin and runs no
+  plugin hook. **Today:** a rulebook pointer in a project's AGENTS.md, and the built-in test-integrity lens, still
+  name a reference file inside a skill.
 - **A plugin that is not pinned**, or whose stored copy no longer has its hash, stops the pass.
 
 ## What a role card controls

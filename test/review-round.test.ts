@@ -1,7 +1,7 @@
 import { FLOOR } from "../src/core/review/never.js";
 import { readActOn } from "../src/core/review/act-on.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { Done } from "../src/core/forge/api.js";
 import type { Change, Forge } from "../src/core/forge/types.js";
@@ -300,34 +300,49 @@ describe("reviewRound", () => {
     expect(log.threads).toEqual([]);
   });
 
-  it("reads its references from the project's plugins; with none, it stops with the reason and posts nothing (#232)", async () => {
-    const log = fresh();
-    const out = await reviewRound(setup(forge(log), model([], []), { plugins: [] }));
-    expect(out).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("needs a plugin that holds its review"),
-    });
-    expect(log.posts).toEqual([]);
-    const other = { label: "team@acme", dir: join(p.root, "none") };
-    await reviewRound(
-      setup(forge(log), model([findAnswer([])], []), { plugins: [{ label: "rulebook", dir: RULEBOOK }, other] }),
-    );
-    expect(log.posts.at(-1)).toContain("No findings");
-  });
-
-  it("AC-20 should refuse a review setup before the round when no pinned plugin holds review references", async () => {
+  it("AC-6 refuses before any model run when no listed plugin holds a baseline skill, naming each, and posts nothing", async () => {
     const empty = { label: "team@acme", dir: join(p.root, "empty-plugin") };
     mkdirSync(join(empty.dir, "skills", "flow"), { recursive: true });
+    for (const plugins of [[], [empty]]) {
+      const log = fresh();
+      const seen: Seen[] = [];
+      expect(await reviewRound(setup(forge(log), model([], seen), { plugins }))).toMatchObject({
+        kind: "failed",
+        reason: expect.stringMatching(/the review baseline has no skill left.*SKILL\.md for crq, code/),
+      });
+      expect({ posts: log.posts, runs: seen.length }).toEqual({ posts: [], runs: 0 });
+    }
     const log = fresh();
-    expect(await reviewRound(setup(forge(log), model([], []), { plugins: [empty] }))).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("needs a plugin that holds its review references"),
-    });
-    expect(log.posts).toEqual([]);
     await reviewRound(
       setup(forge(log), model([findAnswer([])], []), { plugins: [empty, { label: "rulebook", dir: RULEBOOK }] }),
     );
     expect(log.posts.at(-1)).toContain("No findings");
+  });
+
+  it("AC-1 gives each finder and verify run a copy of skills/crq and skills/code from the plugin", async () => {
+    const seen: Seen[] = [];
+    await reviewRound(setup(forge(fresh()), model([findAnswer([FINDING]), verdicts([])], seen)));
+    expect(seen.length).toBeGreaterThan(1);
+    for (const s of seen) {
+      expect(s.files).toEqual(
+        expect.arrayContaining(["skills/crq/SKILL.md", "skills/code/SKILL.md", "skills/code/references/smells.md"]),
+      );
+    }
+  });
+
+  it("AC-5 runs with a baseline skill missing, records it on the outcome and the summary, and copies only the rest", async () => {
+    const partial = join(p.root, "partial-rulebook");
+    cpSync(RULEBOOK, partial, { recursive: true });
+    rmSync(join(partial, "skills", "code", "SKILL.md"));
+    const log = fresh();
+    const seen: Seen[] = [];
+    const out = await reviewRound(
+      setup(forge(log), model([findAnswer([])], seen), { plugins: [{ label: "rulebook", dir: partial }] }),
+    );
+    expect(out).toMatchObject({ kind: "ok", value: { kind: "posted", skillsMissing: ["code"] } });
+    expect(log.posts.at(-1)).toContain("Skills missing · code");
+    expect(seen[0]?.files).toContain("skills/crq/SKILL.md");
+    expect(seen[0]?.files.some((f) => f.startsWith("skills/code/"))).toBe(false);
   });
 
   it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {

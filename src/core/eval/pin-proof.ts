@@ -22,7 +22,7 @@ import type { Result } from "../forge/api.js";
 import { changedFiles, fetchPlugin, type Fetched } from "../process/fetch.js";
 import { ENGINE_MARKET, SHA256, storeDir, treeHash, type PackPin, type Pin, type Proven } from "../process/pins.js";
 import { refText, type PluginRef } from "../process/plugins.js";
-import { BASELINE, type Pointer } from "../review/rules.js";
+import { BASELINE } from "../review/rules.js";
 import { attempt } from "../review/safe.js";
 import { field } from "./bar.js";
 import { covers, sizeOf, SIZES, type Size, type Sized } from "./pin-size.js";
@@ -48,7 +48,7 @@ export type Proof = {
   readonly sha256: string;
   readonly base: { readonly commit: string; readonly sha256: string } | null;
   readonly changed: readonly string[];
-  readonly baseline: readonly Pointer[];
+  readonly baseline: readonly string[];
   readonly size: Size;
   readonly uncovered: readonly string[];
   readonly reason: string;
@@ -61,17 +61,6 @@ export function proofPath(dir: string, ref: PluginRef, sha256: string): string {
 
 function strings(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((v) => typeof v === "string") ? value : undefined;
-}
-
-function pointerOf(value: unknown): Pointer | undefined {
-  const [domain, reference] = [field(value, "domain"), field(value, "reference")];
-  return typeof domain === "string" && typeof reference === "string" ? { domain, reference } : undefined;
-}
-
-function pointers(value: unknown): readonly Pointer[] | undefined {
-  const read = Array.isArray(value) ? value.map(pointerOf) : [undefined];
-  const good = read.filter((p) => p !== undefined);
-  return good.length === read.length ? good : undefined;
 }
 
 function str(value: unknown, name: string): string | undefined {
@@ -116,7 +105,7 @@ function head(value: unknown): Head | undefined {
 
 function lists(value: unknown): Pick<Proof, "changed" | "uncovered" | "baseline" | "base"> | undefined {
   const [changed, uncovered] = [strings(field(value, "changed")), strings(field(value, "uncovered"))];
-  const [baseline, base] = [pointers(field(value, "baseline")), baseField(value)];
+  const [baseline, base] = [strings(field(value, "baseline")), baseField(value)];
   return changed === undefined || uncovered === undefined || baseline === undefined || base === undefined
     ? undefined
     : { changed, uncovered, baseline, base };
@@ -270,7 +259,7 @@ export async function baseOf(input: BaseInput): Promise<Base> {
 
 export type Gate = {
   readonly changed: readonly string[];
-  readonly baseline: readonly Pointer[];
+  readonly baseline: readonly string[];
   readonly sized: Sized;
   readonly problems: readonly string[];
   readonly needsProof: boolean;
