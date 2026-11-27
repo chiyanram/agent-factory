@@ -3,7 +3,8 @@
 // Both share the core below and add their own part; `source` tells the two apart, and the engine sets it, never the
 // model. The verify pass answers each finding with a bucket and a why, and it may lower the finding's severity or grade,
 // never raise them (settle; rulebook crq RV7): a run does not grade its own proof. Model output is data: every field is
-// checked.
+// checked. A finding may carry `quote`, the cited line's exact text, so code can find the line again; a quote that is no
+// text is dropped, never the finding. **Today:** neither schema asks for it, and nothing reads it yet (#870).
 
 import type { Result } from "./forge/api.js";
 import { prop } from "./field.js";
@@ -25,6 +26,7 @@ export type FindingCore = {
   readonly finding: string;
   readonly fix: string;
   readonly lineEnd?: number;
+  readonly quote?: string;
 };
 
 export const CORE_REQUIRED = ["id", "file", "line", "rule", "severity", "grade", "finding", "fix"] as const;
@@ -64,6 +66,11 @@ function firstLine(line: unknown): unknown {
   return text === undefined ? line : Number(text);
 }
 
+function quoteOf(raw: unknown, clean: (text: string) => string): Pick<FindingCore, "quote"> {
+  const quote = textOf(prop(raw, "quote"), clean)?.trim();
+  return quote === undefined || quote === "" ? {} : { quote };
+}
+
 function ruleOf(raw: unknown): unknown {
   const rule = prop(raw, "rule");
   return rule === null ? "" : rule;
@@ -94,7 +101,7 @@ export function coreOf(raw: unknown, id: string, clean: (text: string) => string
   const end = lineEndOf(raw);
   return texts === undefined || line === undefined || weight === undefined
     ? undefined
-    : { id, ...texts, line, ...(end === undefined ? {} : { lineEnd: end }), ...weight };
+    : { id, ...texts, line, ...(end === undefined ? {} : { lineEnd: end }), ...weight, ...quoteOf(raw, clean) };
 }
 
 export type Verdict = {

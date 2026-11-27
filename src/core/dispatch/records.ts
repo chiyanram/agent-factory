@@ -142,6 +142,8 @@ export type Event =
       readonly copilot?: CopilotRuns;
       readonly card?: string;
       readonly deferred?: readonly string[];
+      readonly approach?: string;
+      readonly open?: readonly string[];
       readonly stale?: readonly string[];
       readonly why?: string;
       readonly output?: string;
@@ -477,12 +479,30 @@ function cardField(raw: unknown): { readonly card?: string } | Bad {
   return typeof card === "string" && /^[0-9a-f]{64}$/.test(card) ? { card } : BAD;
 }
 
-function deferredField(raw: unknown): { readonly deferred?: readonly string[] } | Bad {
-  const deferred = prop(raw, "deferred");
-  if (deferred === undefined) {
-    return {};
-  }
-  return Array.isArray(deferred) && deferred.every((d) => typeof d === "string") ? { deferred } : BAD;
+function textsOf(raw: unknown, name: string): readonly string[] | undefined | Bad {
+  const texts = prop(raw, name);
+  return texts === undefined || (Array.isArray(texts) && texts.every((d) => typeof d === "string")) ? texts : BAD;
+}
+
+type Left = { readonly deferred?: readonly string[]; readonly approach?: string; readonly open?: readonly string[] };
+
+function leftFields(raw: unknown): Left | Bad {
+  const deferred = textsOf(raw, "deferred");
+  const approach = textOf(raw, "approach");
+  const opened = textsOf(raw, "open");
+  return deferred === BAD || approach === BAD || opened === BAD ? BAD : leftOf(deferred, approach, opened);
+}
+
+function leftOf(
+  deferred: readonly string[] | undefined,
+  approach: string | undefined,
+  opened: readonly string[] | undefined,
+): Left {
+  return {
+    ...(deferred === undefined ? {} : { deferred }),
+    ...(approach === undefined ? {} : { approach }),
+    ...(opened === undefined ? {} : { open: opened }),
+  };
 }
 
 function staleField(raw: unknown): { readonly stale?: readonly string[] } | Bad {
@@ -529,12 +549,12 @@ function writerExtras(
 ):
   | Pick<
       Extract<Event, { kind: "writer-ended" }>,
-      "spend" | "copilot" | "card" | "deferred" | "stale" | "why" | "output" | "trace"
+      "spend" | "copilot" | "card" | "deferred" | "approach" | "open" | "stale" | "why" | "output" | "trace"
     >
   | Bad {
   const spend = spendField(raw);
   const card = cardField(raw);
-  const deferred = deferredField(raw);
+  const deferred = leftFields(raw);
   const notes = notesFields(raw);
   if (spend === BAD || card === BAD) {
     return BAD;

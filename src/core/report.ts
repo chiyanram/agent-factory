@@ -8,6 +8,10 @@
 //              with 2 to 4 short choices and the index of the recommended one; a plain "…" is refused.
 //   deviations [{what, why, file, line}], at most ten, done only: each change of a type, signature or file placement
 //              from the approved design, posted by the host as a [writer] DEVIATION: note (ADR-0018, #430)
+//   approach   "…", at most 2000 characters, done only: why the run built it this way
+//   open       ["…"], at most ten, done only: what it did not fix, and what was unclear. Both are optional, an empty
+//              one is none, and both are kept on the run record for the next run. **Today:** no run reads
+//              them yet (#810).
 //   blocker    "…"                                          required when blocked
 //
 // Anything else is blocked, with the reason: a missing, unreadable or malformed report, an unknown status, a field the
@@ -33,6 +37,7 @@ const MAX_EVIDENCE = 50;
 const MAX_QUESTIONS = MOST_QUESTIONS;
 const MAX_DEFERRED = 20;
 const MAX_DEVIATIONS = 10;
+const MAX_OPEN = 10;
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 4;
 const MAX_CHOICE = 200;
@@ -56,6 +61,8 @@ export type Outcome =
       readonly evidence: readonly Evidence[];
       readonly deferred?: readonly string[];
       readonly deviations?: readonly Deviation[];
+      readonly approach?: string;
+      readonly open?: readonly string[];
     }
   | { readonly kind: "asked"; readonly questions: readonly Question[] }
   | { readonly kind: "blocked"; readonly reason: string; readonly by: "writer" | "host" }
@@ -105,6 +112,7 @@ export type ReportFile =
 export const REPORT_INSTRUCTIONS = `When you stop, write ${REPORT_PATH} in the worktree and exit. Never commit it. It is JSON with one "status":
 - "done": add "evidence", a list of {"criterion", "command", "result"}, one row per acceptance criterion: the command you ran and what it showed. Start each "criterion" with the criterion's id, AC-1 for the first, AC-2 for the second, and so on: a criterion with no row fails the ready check.
   When the code leaves the approved design (a changed type, signature or file placement), add "deviations", a list of {"what", "why", "file", "line"}, at most ten; never edit the design. A change to what an acceptance criterion observes is no deviation: stop with "asked".
+  Add "approach", why you built it this way, in a few lines, and "open", a list of at most ten: what you did not fix, and what was unclear. The next run on this change reads both.
 - "asked": add "questions": every question the spec does not answer, all at once in one list, one to twenty. Each is {"question", "choices", "recommended"}: "choices" is a list of 2 to 4 short answers, and "recommended" is the index of the one you recommend, 0 for the first. Never guess an answer.
 - "blocked": add "blocker", what stops you. Commit the work you have first.
 No other field. A missing or malformed report counts as blocked.`;
@@ -229,7 +237,7 @@ function malformed(problem: string): Outcome {
 }
 
 const FIELDS: ReadonlyMap<string, readonly string[]> = new Map([
-  ["done", ["evidence", "deferred", "deviations"]],
+  ["done", ["evidence", "deferred", "deviations", "approach", "open"]],
   ["asked", ["questions"]],
   ["blocked", ["blocker"]],
 ]);
@@ -289,18 +297,42 @@ function deviationsOf(value: unknown): Check<{ readonly deviations?: readonly De
   return list.kind === "ok" ? ok({ deviations: list.value }) : list;
 }
 
+function approachOf(value: unknown): Check<{ readonly approach?: string }> {
+  if (value === undefined || (typeof value === "string" && cleanField(value) === "")) {
+    return ok({});
+  }
+  const approach = text(value, "approach");
+  return approach.kind === "ok" ? ok({ approach: approach.value }) : approach;
+}
+
+function openOf(value: unknown): Check<{ readonly open?: readonly string[] }> {
+  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+    return ok({});
+  }
+  const list = listOf(value, "open", MAX_OPEN, (o, i) => text(o, `open ${i + 1}`));
+  return list.kind === "ok" ? ok({ open: list.value }) : list;
+}
+
+type DoneNotes = Omit<Extract<Outcome, { kind: "done" }>, "kind" | "evidence">;
+
+function notesOf(body: Field): Check<DoneNotes> {
+  const read = all<DoneNotes>([
+    deferredOf(body.deferred),
+    deviationsOf(body.deviations),
+    approachOf(body.approach),
+    openOf(body.open),
+  ]);
+  return read.kind === "ok" ? ok(Object.assign({}, ...read.value)) : bad(read.problem);
+}
+
 function doneOf(body: Field): Outcome {
   const evidence = listOf(body.evidence, "evidence", MAX_EVIDENCE, evidenceRow);
-  const deferred = deferredOf(body.deferred);
-  const deviations = deviationsOf(body.deviations);
-  if (deferred.kind === "bad") {
-    return malformed(deferred.problem);
-  }
-  if (deviations.kind === "bad") {
-    return malformed(deviations.problem);
+  const notes = notesOf(body);
+  if (notes.kind === "bad") {
+    return malformed(notes.problem);
   }
   return evidence.kind === "ok"
-    ? { kind: "done", evidence: evidence.value, ...deferred.value, ...deviations.value }
+    ? { kind: "done", evidence: evidence.value, ...notes.value }
     : malformed(evidence.problem);
 }
 

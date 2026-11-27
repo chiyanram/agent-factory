@@ -304,3 +304,39 @@ describe("parseReport: a cleanup run's deferred list (#236)", () => {
     });
   });
 });
+
+describe("parseReport: the last run's approach and open (#846 P-5, #918)", () => {
+  const row = { criterion: "AC-1 x", command: "make test", result: "1 passed" };
+  const done = (extra: object): string => JSON.stringify({ status: "done", evidence: [row], ...extra });
+
+  it("keeps the approach and the open list of a done report", () => {
+    expect(parseReport(done({ approach: " one table, not two ", open: ["the retry is untested"] }))).toEqual({
+      kind: "done",
+      evidence: [row],
+      approach: "one table, not two",
+      open: ["the retry is untested"],
+    });
+  });
+
+  it("a done report without them, or with an empty one, is done with neither", () => {
+    for (const extra of [{}, { approach: " ", open: [] }]) {
+      expect(parseReport(done(extra))).toEqual({ kind: "done", evidence: [row] });
+    }
+  });
+
+  it("an approach over the cap, eleven open items or an open item that is no text is malformed", () => {
+    const eleven = Array.from({ length: 11 }, (_, i) => `item ${i + 1}`);
+    for (const extra of [{ approach: "x".repeat(2001) }, { open: eleven }, { open: [3] }]) {
+      expect(parseReport(done(extra))).toMatchObject({ kind: "blocked", by: "host" });
+    }
+  });
+
+  it("an asked or a blocked report that carries them is malformed", () => {
+    const asked = { status: "asked", questions: [{ question: "A or B?", choices: ["A", "B"], recommended: 0 }] };
+    const blocked = { status: "blocked", blocker: "no key" };
+    for (const body of [asked, blocked]) {
+      expect(parseReport(JSON.stringify({ ...body, approach: "why" }))).toMatchObject({ kind: "blocked", by: "host" });
+      expect(parseReport(JSON.stringify({ ...body, open: ["what"] }))).toMatchObject({ kind: "blocked", by: "host" });
+    }
+  });
+});
