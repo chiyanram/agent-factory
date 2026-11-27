@@ -468,6 +468,7 @@ const STEPS: Steps = {
   answered: (s) => s,
   begun: (s) => s,
   approved: (s) => s,
+  "review-again": (s) => s,
   merged: (s) => s,
   timeline: (s) => s,
 };

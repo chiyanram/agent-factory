@@ -232,6 +232,14 @@ describe("the closed reason on every line that ends a run", () => {
     expect(await readRecords(where())).toMatchObject({ kind: "failed" });
   });
 
+  it("reads a review-again line with who said it, and fails one whose door is not a front door", async () => {
+    const word = { at, kind: "review-again", by: "ram", via: "discord", spec: "a".repeat(64) } as const;
+    written([word]);
+    expect(await readRecords(where())).toEqual({ kind: "ok", value: [word] });
+    written([{ ...word, via: "model" }]);
+    expect(await readRecords(where())).toMatchObject({ kind: "failed" });
+  });
+
   it("reads a line written without a reason with its reason from its old fields only, never from its why", async () => {
     written([
       { ...writer, outcome: "done" },

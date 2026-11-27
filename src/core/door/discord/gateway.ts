@@ -47,6 +47,12 @@ export const COMMANDS = [
     type: 1,
     options: [{ type: 3, name: "ticket", description: "the ticket", required: true }],
   },
+  {
+    name: "review-again",
+    description: "At the design-review round cap: see the spec's hash, then Confirm for one more review round",
+    type: 1,
+    options: [{ type: 3, name: "ticket", description: "the ticket", required: true }],
+  },
   { name: "board", description: "The project's board, read only", type: 1 },
 ] as const;
 

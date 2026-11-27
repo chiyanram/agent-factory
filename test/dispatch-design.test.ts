@@ -58,8 +58,13 @@ function designEnd(at: string): Extract<Event, { kind: "design-ended" }> {
 }
 
 const FEATURE = { lane: "feature", planned: ["src/a.ts"] } as const;
-const view = (events: readonly Event[], approvedAt = "", read: SpecRead = FEATURE, raised: Waiting | "none" = "none") =>
-  designView({ events, spec: S, read, raised, approvedAt, now: NOW });
+const view = (
+  events: readonly Event[],
+  approvedAt = "",
+  read: SpecRead = FEATURE,
+  raised: Waiting | "none" = "none",
+  again = "",
+) => designView({ events, spec: S, read, raised, approvedAt, again, now: NOW });
 
 describe("designView (#236)", () => {
   it("runs the design-reviewer first, then the verify pass, then is done", () => {
@@ -221,6 +226,49 @@ describe("the design review converges (#489)", () => {
     expect(view(two)).toEqual({ kind: "note", spec: S, why: ROUND_CAP });
     const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, why: ROUND_CAP };
     expect(view([...two, told])).toEqual({ kind: "done" });
+  });
+
+  it("names review-again in the cap note, so the person learns how to ask for one more round", () => {
+    expect(ROUND_CAP).toContain("agent-factory review-again");
+  });
+
+  describe("the person's word review once more at the cap", () => {
+    const two = [round("2026-11-07T08:02:00Z", OLDER, actOn), round("2026-11-07T09:02:00Z", OLD, actOn)];
+    const once = (events: readonly Event[], again: string, approvedAt = "") =>
+      view(events, approvedAt, FEATURE, "none", again);
+    const run = { kind: "run", step: "review", spec: S };
+    const NEXT = "e".repeat(64);
+    const atNext = (events: readonly Event[], again: string) =>
+      designView({ events, spec: NEXT, read: FEATURE, raised: "none", approvedAt: "", again, now: NOW });
+
+    it("runs one more design review at the hash the word names, even after the cap note", () => {
+      expect(once(two, S)).toEqual(run);
+      const told: Event = { at: "2026-11-07T09:10:00Z", kind: "design-noted", spec: S, why: ROUND_CAP };
+      expect(once([...two, told], S)).toEqual(run);
+    });
+
+    it("gives exactly one round: after it, an edit whose round kept an Act on CONFLICT is at the cap again", () => {
+      const three = [...two, ended("2026-11-07T09:25:00Z", "review", "done"), round("2026-11-07T09:30:00Z", S, actOn)];
+      expect(once(three, S)).toEqual({ kind: "done" });
+      expect(atNext(three, S)).toEqual({ kind: "note", spec: NEXT, why: ROUND_CAP });
+      expect(atNext(three, NEXT)).toEqual({ kind: "run", step: "review", spec: NEXT });
+    });
+
+    it("does nothing when it names another hash", () => {
+      expect(once(two, OLD)).toEqual({ kind: "note", spec: S, why: ROUND_CAP });
+    });
+
+    it("does nothing before the cap or when the last round kept no Act on CONFLICT", () => {
+      const one = [round("2026-11-07T09:02:00Z", OLD, actOn)];
+      expect(once(one, S)).toEqual(view(one));
+      const calm = [round("2026-11-07T08:02:00Z", OLDER, actOn), round("2026-11-07T09:02:00Z", OLD, consider)];
+      expect(once(calm, S)).toEqual({ kind: "done" });
+    });
+
+    it("an approval given before the extra round's verify pass ended is early: the person approves again", () => {
+      const three = [...two, ended("2026-11-07T09:25:00Z", "review", "done"), round("2026-11-07T09:30:00Z", S, actOn)];
+      expect(once(three, S, "2026-11-07T09:20:00Z")).toEqual({ kind: "early", at: "2026-11-07T09:30:00Z" });
+    });
   });
 
   it("reviews again after the cap when the lane rose or the Planned files changed since the last round", () => {

@@ -207,6 +207,13 @@ export type Event =
   | { readonly at: string; readonly kind: "approved"; readonly by: string; readonly via: Via; readonly spec: string }
   | {
       readonly at: string;
+      readonly kind: "review-again";
+      readonly by: string;
+      readonly via: Via;
+      readonly spec: string;
+    }
+  | {
+      readonly at: string;
       readonly kind: "merged";
       readonly number: number;
       readonly sha: string;

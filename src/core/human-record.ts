@@ -1,5 +1,5 @@
-// human-record — the files that hold a human's word: a START (start.ts) and an approval (approval.ts) (#227; ADR-0012
-// S1). Each is one small JSON file under the factory home, written whole through a temp file and a rename, so a reader
+// human-record — the files that hold a human's word: a START (start.ts), an approval (approval.ts), a waiver
+// (waiver.ts) and a review once more (review-again.ts) (#227; ADR-0012 S1). Each is one small JSON file under the factory home, written whole through a temp file and a rename, so a reader
 // never sees half of one. Every front door writes the same records; `via` names the door.
 //
 // The coordinator never writes these files: its settings deny `agent-factory start`, `agent-factory approve` and any

@@ -81,6 +81,7 @@ In the project's channel, or a thread of it:
 |---|---|
 | `/start ticket:<id>` | START the ticket. When `factory/<id>` is already on the git host, it asks first: press **Confirm** to START anyway |
 | `/approve ticket:<id>` | answers only to you with the lane, the spec's and the design's full hashes, and both texts as files. Read them, then press **Confirm** within 10 minutes. It approves exactly those hashes: an edit to either in between is refused, and you run `/approve` again |
+| `/review-again ticket:<id>` | at the design-review round cap: answers only to you with the spec's full hash and its text as a file. **Confirm** within 10 minutes runs one more design-review round at exactly that hash |
 | `/board` | the project's board, read only, only to you |
 
 Only the person who ran `/approve` can press its Confirm, and each Confirm works once. A spec or design that holds

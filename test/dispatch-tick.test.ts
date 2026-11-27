@@ -10,6 +10,7 @@ import { approve } from "../src/core/approval.js";
 import { readRecords, record, summarize, tornPath, type Event } from "../src/core/dispatch/records.js";
 import type { Evidence } from "../src/core/report.js";
 import { waive } from "../src/core/waiver.js";
+import { reviewAgain } from "../src/core/review-again.js";
 import { DEFAULT_LANES } from "../src/core/lane.js";
 import { NO_CAPS, type Caps } from "../src/core/dispatch/caps.js";
 import { ticketCapped } from "../src/core/dispatch/ticket-cap.js";
@@ -3038,6 +3039,37 @@ describe("the design review and the cleanup run (#236)", () => {
       "log PROJ-1: wait: the feature lane needs a human's approval; the ticket has a START only",
     ]);
     expect(pings).toHaveLength(1);
+  });
+
+  it("at the round cap the person's review-again runs one more review and is recorded once with who said it", async () => {
+    const text = spec("feature");
+    await started();
+    const seen: string[] = [];
+    const steps = designSteps(seen);
+    for (const [i, edit] of ["409", "423"].entries()) {
+      writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), text.replace("409", edit));
+      await pass(steps, `2026-11-07T09:0${2 * i}:00Z`);
+      await pass(steps, `2026-11-07T09:0${2 * i + 1}:00Z`);
+    }
+    const third = text.replace("409", "429");
+    writeFileSync(join(home, "specs", "ledger", "PROJ-1", "spec.md"), third);
+    await pass(steps, "2026-11-07T09:10:00Z");
+    const word = {
+      where: where(),
+      seenHash: specHash(third),
+      by: "ram",
+      via: "discord",
+      at: "2026-11-07T09:11:00Z",
+    } as const;
+    expect(await reviewAgain(word)).toMatchObject({ kind: "review-again" });
+    await pass(steps, "2026-11-07T09:12:00Z");
+    await pass(steps, "2026-11-07T09:13:00Z");
+    expect(seen.filter((s) => s.startsWith("review"))).toHaveLength(3);
+    const read = await readRecords(where());
+    const lines = read.kind === "ok" ? read.value.filter((e) => e.kind === "review-again") : [];
+    expect(lines).toEqual([
+      { at: "2026-11-07T09:11:00Z", kind: "review-again", by: "ram", via: "discord", spec: specHash(third) },
+    ]);
   });
 
   it("holds the design review while the Planned files need a heavier lane: told once, then it waits", async () => {

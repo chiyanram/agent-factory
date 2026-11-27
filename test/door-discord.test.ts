@@ -51,7 +51,7 @@ let after: string[] = [];
 
 const specDir = (): string => join(home, "specs", "ledger", "PROJ-1");
 const records = (): readonly string[] =>
-  ["starts", "approvals"].filter((dir) => existsSync(join(home, dir, "ledger", "PROJ-1.json")));
+  ["starts", "approvals", "review-again"].filter((dir) => existsSync(join(home, dir, "ledger", "PROJ-1.json")));
 
 beforeEach(() => {
   home = tempDir("factory-door-discord-");
@@ -268,7 +268,7 @@ describe("/approve binds the hash the person was shown (#731)", () => {
     now += CONFIRM_MS + 1000;
     const late = await door.handle(click(confirmOf(shown)));
     refused(late);
-    expect(late.text).toContain("run /approve again");
+    expect(late.text).toContain("run /approve, /review-again or /start again");
     refused(await door.handle(click(`confirm:${"f".repeat(32)}`)));
     refused(await door.handle(click("something-else")));
     expect(records()).toEqual([]);
@@ -287,6 +287,33 @@ describe("/approve binds the hash the person was shown (#731)", () => {
     const reply = await discordDoor(deps()).handle(command("approve", "PROJ-1"));
     refused(reply);
     expect(reply.confirm).toBeUndefined();
+  });
+});
+
+describe("/review-again binds the hash the person was shown", () => {
+  it("shows the hash, then records the person's word with via discord on their own Confirm, and approves nothing", async () => {
+    const door = discordDoor(deps());
+    const shown = await door.handle(command("review-again", "PROJ-1"));
+    expect(shown.text).toContain(`the hash ${specHash(SPEC)}`);
+    expect(shown.files.map((f) => f.name)).toEqual(["PROJ-1-spec.md"]);
+    expect(records()).toEqual([]);
+    refused(await door.handle(click(confirmOf(shown), { user: ALICE })));
+    expect(records()).toEqual([]);
+    const done = await door.handle(click(confirmOf(shown)));
+    expect(done.text).toContain("review once more: ledger/PROJ-1");
+    const record: unknown = JSON.parse(readFileSync(join(home, "review-again", "ledger", "PROJ-1.json"), "utf8"));
+    expect(record).toEqual(expect.objectContaining({ by: "Ram", via: "discord", spec_hash: specHash(SPEC) }));
+    expect(records()).toEqual(["review-again"]);
+  });
+
+  it("refuses a Confirm after the spec was edited", async () => {
+    const door = discordDoor(deps());
+    const shown = await door.handle(command("review-again", "PROJ-1"));
+    writeFileSync(join(specDir(), "spec.md"), SPEC.replace("409 Conflict", "423 Locked"));
+    const reply = await door.handle(click(confirmOf(shown)));
+    refused(reply);
+    expect(reply.text).toContain("spec's hash is now");
+    expect(records()).toEqual([]);
   });
 });
 
@@ -353,7 +380,7 @@ describe("an approve sent as chat never reaches the door (#731)", () => {
 });
 
 describe("the gateway answers each interaction ephemerally (#731)", () => {
-  it("registers /start, /approve and /board for the guild on READY", async () => {
+  it("registers /start, /approve, /review-again and /board for the guild on READY", async () => {
     const fake = new FakeDiscord();
     const gateway = gatewayOf(fake, discordDoor(deps()).handle, () => undefined);
     await connected(fake);
@@ -362,7 +389,7 @@ describe("the gateway answers each interaction ephemerally (#731)", () => {
     const put = fake.calls.find((c) => c.method === "PUT");
     expect(put).toMatchObject({
       path: `/applications/${APP}/guilds/${GUILD}/commands`,
-      json: [{ name: "start" }, { name: "approve" }, { name: "board" }],
+      json: [{ name: "start" }, { name: "approve" }, { name: "review-again" }, { name: "board" }],
     });
     await gateway.stop();
   });

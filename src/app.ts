@@ -30,7 +30,7 @@ import { brokenCites, specCites } from "./core/spec-cites.js";
 import { issuesFrom, openOnce, specStoreOf } from "./core/spec-store.js";
 import { approvalState, staleWhy } from "./core/approval.js";
 import { readWaiver } from "./core/waiver.js";
-import { approveAtTerminal, startAtTerminal, waiveAtTerminal } from "./core/door/terminal.js";
+import { approveAtTerminal, reviewAgainAtTerminal, startAtTerminal, waiveAtTerminal } from "./core/door/terminal.js";
 import type { Result } from "./core/forge/api.js";
 import { buildBox, chooseBox, hostDocker, srtBox, vmBox, type BoxChoice, type Built } from "./core/box/index.js";
 import { npmPacker } from "./core/box/pack.js";
@@ -152,6 +152,10 @@ export const HELP_COMMANDS = `  poll                         one line of facts p
                                record the human's waiver of the test checks at that head (the full commit id the
                                hits were listed at): the ready check clears them, and flags a cleared file again only
                                if a later head changes it. A human runs it; the coordinator's settings deny it
+  review-again <project> <ticket> <hash>
+                               record the human's word "review once more" at the design-review round cap, with
+                               exactly the hash spec printed: one more design-review round runs at that hash. A
+                               human runs it; the coordinator's settings deny it
   approval <project> <ticket>  whether work may start: approved (0), stale (3), missing (4), refused (1)
   review <project> <number>    one review round on a claimed change: pack, find, verify, threads, status box, summary;
                                the contract is the approved spec of the ticket its factory/<ticket> branch names;
@@ -648,6 +652,35 @@ async function approveResolved(args: ApproveArgs, noLoop: boolean, io: Io): Prom
   const r = result.record;
   io.out(`approved ${project}/${ticket}, the hash ${r.spec_hash}, by ${r.by} at ${r.at}\n`);
   return noLoop ? 0 : withLoop("approve", io, project);
+}
+
+async function reviewAgainCommand({ positionals, io }: Args): Promise<number> {
+  const args = approveArgs(positionals);
+  if (args === "bad" || args === "two") {
+    io.err("usage: agent-factory review-again <project> <ticket> <the full hash>, as agent-factory spec printed it\n");
+    return 64;
+  }
+  if (!plainName(args.project)) {
+    io.err(`agent-factory review-again: refused: ${JSON.stringify(args.project)} is not a plain project name\n`);
+    return 1;
+  }
+  return resolvedRun("review-again", args.project, io, (resolved) => reviewAgainResolved(args, resolved));
+}
+
+async function reviewAgainResolved(args: ApproveArgs, io: Io): Promise<number> {
+  const { project, ticket } = args;
+  const at = specsAt(io, project, ticket);
+  const result =
+    at.kind === "refused"
+      ? at
+      : await reviewAgainAtTerminal(io.env, { where: at.where, seenHash: args.hash, at: new Date().toISOString() });
+  if (result.kind === "refused") {
+    io.err(`agent-factory review-again: refused: ${result.reason}\n`);
+    return 1;
+  }
+  const r = result.record;
+  io.out(`review once more: ${project}/${ticket}, the hash ${r.spec_hash}, by ${r.by} at ${r.at}\n`);
+  return 0;
 }
 
 async function waiveCommand({ positionals, io }: Args): Promise<number> {
@@ -1771,6 +1804,7 @@ const COMMANDS: readonly Command[] = [
   { name: "start", run: startCommand },
   { name: "approve", run: approveCommand },
   { name: "waive", run: waiveCommand },
+  { name: "review-again", run: reviewAgainCommand },
   { name: "approval", run: approvalCommand },
   { name: "app-token", run: appTokenCommand },
   { name: "dispatch", run: dispatchCommand },

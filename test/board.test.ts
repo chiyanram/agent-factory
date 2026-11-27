@@ -63,7 +63,7 @@ function decided(ticket: string, over: Partial<TicketState>, approved: ApprovalR
     design: { kind: "off" },
     ...over,
   };
-  return { state, approved, shared: true, action: decide(state) };
+  return { state, approved, again: "none", shared: true, action: decide(state) };
 }
 
 const begun = (at: string, by: string): Event => ({ at, kind: "begun", by, via: "terminal" });

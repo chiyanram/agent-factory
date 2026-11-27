@@ -132,7 +132,8 @@ model) starts, one task on one ticket each. How the orchestrator decides and wha
    spec. A Consider item never blocks the approval: one the person leaves goes into the design as a default the
    implementer must report (#489). Your edit is reviewed again only for an Act on CONFLICT (at most 2 rounds) or for a
    lane or Planned files no round has read (at most 2 more); past that the person is told once and decides (the
-   reference). A raised lane holds the review: raise it in the spec. When the
+   reference). At the cap the person may say "review once more" for one more round: they run
+   `agent-factory review-again <project> <ticket> <hash>` or `/review-again` themselves; you never run it. A raised lane holds the review: raise it in the spec. When the
    person is ready, run `agent-factory spec <project> <ticket>`, show them the spec and the hash, and ask them to run
    `agent-factory approve <project> <ticket> <hash>` in their own terminal. An approval given
    before the review's findings does not let the build begin. A tiny ticket needs only the person's

@@ -11,15 +11,16 @@
 //   ask     `agent-factory confirm` (the prompt shows the exact text of a kept write; the yes sends it); a command in
 //           neither list asks too, as the default mode does, and under --discord dontAsk refuses each one
 //           (coordinator-discord.ts)
-//   deny    `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
-//           STARTs a ticket (#227, P6, P8) and never waives its own test check hit (#231); a human runs them at a
-//           front door. `agent-factory eval`: an eval pass is an extra task that spends on model runs (up to $100,
+//   deny    `agent-factory approve`, `agent-factory start`, `agent-factory waive` and `agent-factory review-again`: the
+//           AI never approves, never STARTs a ticket (P6, P8), never waives its own test check hit and never asks
+//           for a design review past the round cap; a human runs them at a front door. `agent-factory eval`: an
+//           eval pass is an extra task that spends on model runs (up to $100,
 //           ADR-0015 E11), and only a human starts one (#215). `agent-factory onboard`: the onboarder's run and a
 //           human's acceptance of the brief it stages (#235). Raw git host and network clients, git push, a second
 //           interpreter or shell (a Read deny does not stop a program that opens files itself), sudo, tmux (its
 //           server keeps the env it started with, the seat token among it) and the App token's wrapper; WebFetch and WebSearch, so outside context comes only through `agent-factory fetch`
 //           (S18); editing any .claude/ (the user's settings and each project's), the package, the START,
-//           approval and waiver records, the project home, the team and user settings layers, the local rubric folders, the
+//           approval, waiver and review-again records, the project home, the team and user settings layers, the local rubric folders, the
 //           secrets, the run records, the pending writes and the write log, and the plugin list;
 //           `agent-factory plugin`, `agent-factory project`, `agent-factory init` and `agent-factory config set`; reading the secret paths,
 //           the coordinator seat's own token among them
@@ -69,6 +70,7 @@ export const HUMAN_ONLY = [
   "agent-factory approve",
   "agent-factory start",
   "agent-factory waive",
+  "agent-factory review-again",
   "agent-factory door",
   "agent-factory eval",
   "agent-factory onboard",
@@ -204,6 +206,7 @@ export function editDenies(p: CoordinatorPlaces): readonly string[] {
     `Edit(${home}/approvals/**)`,
     `Edit(${home}/starts/**)`,
     `Edit(${home}/waivers/**)`,
+    `Edit(${home}/review-again/**)`,
     `Edit(${home}/user.json)`,
     `Edit(${home}/teams/**)`,
     `Edit(${home}/projects/**)`,
