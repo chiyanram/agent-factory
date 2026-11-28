@@ -1,17 +1,18 @@
-// door/discord/door — the Discord door's three commands (ADR-0023 D4; #548 S-3), for the person its own check named
+// door/discord/door — the Discord door's four commands (ADR-0023 D4; #548 S-3), for the person its own check named
 // (who.ts). The word is written only through the seam (write.ts), so the record says via discord and a model run is
 // refused there too.
 //
 // /start writes START, and asks for a Confirm first when factory/<ticket> is on the git host, as the terminal does.
 // /approve shows the lane, the full hash and the spec's text, its ## Design included (shown.ts), and binds the hash to a
 // one-use nonce held in memory for ten minutes; a Confirm by the same person approves exactly that hash, so `approve`
-// refuses a spec edited in between. /board is read only. Waive and merge stay off Discord. A restart drops every pending Confirm.
+// refuses a spec edited in between. /review-again, at the design-review round cap, shows and binds the hash the same
+// way, and its Confirm writes the person's word "review once more" (review-again.ts). /board is read only. Waive and merge stay off Discord. A restart drops every pending Confirm.
 
 import type { Result } from "../../forge/api.js";
 import type { Where } from "../../approval.js";
 import type { Start } from "../../start.js";
 import { plainName } from "../../spec.js";
-import { approveAs, startAs } from "../write.js";
+import { approveAs, reviewAgainAs, startAs } from "../write.js";
 import type { DoorConfig } from "./files.js";
 import { shown, type Shown } from "./shown.js";
 import type { Attached } from "./transport.js";
@@ -46,12 +47,14 @@ export type ProjectDoor = {
 type Pending =
   | { readonly kind: "start"; readonly project: string; readonly ticket: string; readonly user: string }
   | {
-      readonly kind: "approve";
+      readonly kind: Bound;
       readonly project: string;
       readonly ticket: string;
       readonly user: string;
       readonly spec: string;
     };
+
+type Bound = "approve" | "review-again";
 
 type Held = Pending & { readonly until: number };
 
@@ -77,6 +80,19 @@ function approveText(project: string, ticket: string, seen: Shown): string {
     "The spec is attached, its ## Design included. Confirm within 10 minutes approves exactly this hash; an edit to the spec before then makes Confirm refuse.",
   ].join("\n");
 }
+
+function againText(project: string, ticket: string, seen: Shown): string {
+  return [
+    `Review ${project}/${ticket} once more, lane ${seen.lane}: ${seen.title}`,
+    `the hash ${seen.spec}`,
+    "The spec is attached. Confirm within 10 minutes runs one more design-review round at exactly this hash, past the round cap; an edit to the spec before then makes Confirm refuse.",
+  ].join("\n");
+}
+
+const SHOWN_TEXT: Readonly<Record<Bound, (project: string, ticket: string, seen: Shown) => string>> = {
+  approve: approveText,
+  "review-again": againText,
+};
 
 function whatOf(i: Interaction): string {
   return i.type === 3 ? "Confirm" : `/${JSON.stringify(i.command)} ${JSON.stringify(i.ticket)}`;
@@ -133,31 +149,38 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
       : refused(`cannot tell whether factory/${ticket} is on the git host: ${there.reason}`);
   };
 
-  const approveCommand = async (at: At, ticket: string): Promise<Said> => {
-    const where = at.door.specs(ticket);
-    const seen = where.kind === "ok" ? await shown(where.value, deps.scrub) : { kind: "refused", reason: where.reason };
-    if ("kind" in seen) {
-      return refused(seen.reason);
-    }
-    const { project, user } = at;
-    const confirm = hold({ kind: "approve", project, ticket, user, spec: seen.spec });
-    const files: Attached[] = [{ name: `${ticket}-spec.md`, text: seen.specText }];
-    return { text: approveText(project, ticket, seen), files, confirm };
-  };
+  const boundCommand =
+    (kind: Bound) =>
+    async (at: At, ticket: string): Promise<Said> => {
+      const where = at.door.specs(ticket);
+      const seen =
+        where.kind === "ok" ? await shown(where.value, deps.scrub) : { kind: "refused", reason: where.reason };
+      if ("kind" in seen) {
+        return refused(seen.reason);
+      }
+      const { project, user } = at;
+      const confirm = hold({ kind, project, ticket, user, spec: seen.spec });
+      const files: Attached[] = [{ name: `${ticket}-spec.md`, text: seen.specText }];
+      return { text: SHOWN_TEXT[kind](project, ticket, seen), files, confirm };
+    };
 
-  const approved = async (at: At, p: Extract<Pending, { kind: "approve" }>): Promise<Said> => {
+  const bound = async (at: At, p: Extract<Pending, { kind: Bound }>): Promise<Said> => {
     const where = at.door.specs(p.ticket);
-    const request = (w: Where) => ({ where: w, seenHash: p.spec, at: stamp() });
+    if (where.kind !== "ok") {
+      return refused(where.reason);
+    }
+    const request = { where: where.value, seenHash: p.spec, at: stamp() };
     const result =
-      where.kind === "ok"
-        ? await approveAs(at.person, request(where.value), deps.env)
-        : { kind: "refused" as const, reason: where.reason };
+      p.kind === "approve"
+        ? await approveAs(at.person, request, deps.env)
+        : await reviewAgainAs(at.person, request, deps.env);
     if (result.kind === "refused") {
       return refused(result.reason);
     }
     await at.door.after();
     const r = result.record;
-    return said(`approved ${p.project}/${p.ticket}, the hash ${r.spec_hash}, by ${r.by} at ${r.at}`);
+    const done = p.kind === "approve" ? "approved" : "review once more:";
+    return said(`${done} ${p.project}/${p.ticket}, the hash ${r.spec_hash}, by ${r.by} at ${r.at}`);
   };
 
   const confirmed = (at: At, customId: string): Promise<Said> => {
@@ -165,13 +188,15 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
     const nonce = nonceOf(customId);
     const pending = held.get(nonce);
     if (pending === undefined) {
-      return Promise.resolve(refused("this Confirm is unknown or past its 10 minutes; run /approve again, or /start"));
+      return Promise.resolve(
+        refused("this Confirm is unknown or past its 10 minutes; run /approve, /review-again or /start again"),
+      );
     }
     if (pending.user !== at.user || pending.project !== at.project) {
       return Promise.resolve(refused(`only the person who ran /${pending.kind} can confirm it`));
     }
     held.delete(nonce);
-    return pending.kind === "approve" ? approved(at, pending) : started(at, pending.ticket, true, true);
+    return pending.kind === "start" ? started(at, pending.ticket, true, true) : bound(at, pending);
   };
 
   const board = async (at: At): Promise<Said> => {
@@ -181,7 +206,8 @@ export function discordDoor(deps: DoorDeps): DiscordDoor {
 
   const TICKET_COMMANDS: Readonly<Record<string, (at: At, ticket: string) => Promise<Said>>> = {
     start: startCommand,
-    approve: approveCommand,
+    approve: boundCommand("approve"),
+    "review-again": boundCommand("review-again"),
   };
 
   const commanded = (at: At, command: string, ticket: string): Promise<Said> => {

@@ -26,8 +26,9 @@ The wall (`src/core/coordinator.ts`):
 - **Asks you first:** `agent-factory confirm`, whose prompt shows the exact text of a kept write; your yes sends it.
   So does every command the wall neither allows nor denies, such as `usage`, `trace`, `config`, `team` and `box`, as
   Claude Code's default mode asks. Under `--discord` the session runs in `dontAsk`, so each of these is refused.
-- **Denied:** `agent-factory approve`, `agent-factory start` and `agent-factory waive`: the AI never approves, never
-  STARTs a ticket and never waives its own test check hit, so you run them yourself in your own terminal (#227, #231).
+- **Denied:** `agent-factory approve`, `agent-factory start`, `agent-factory waive` and `agent-factory review-again`:
+  the AI never approves, never STARTs a ticket, never waives its own test check hit and never asks for a design review
+  past the round cap, so you run them yourself in your own terminal.
   Run them from a plain terminal, not as `!agent-factory …` inside Claude Code: the door seam refuses a person's word
   where `CLAUDECODE` is set ([ADR-0023](../adr/0023-front-doors-are-engine-commands.md)). `agent-factory door`: a front
   door writes a person's word, so the AI never runs one.

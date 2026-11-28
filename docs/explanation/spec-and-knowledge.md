@@ -23,7 +23,8 @@ What a ticket carries into a build, where it lives, and what is decided next. Th
   start the build. It converges (P15, #489): its findings feed one grill round, and the edit is reviewed again only
   when the round kept an Act on CONFLICT. The re-review and its verify pass read `earlier.json`, every earlier round
   and the text the last one read, and the engine drops a repeat of a finding an earlier round settled. After 2 rounds
-  the person is told "no further design review (round cap)" and decides. An edit that raises the lane, or that changes the
+  the person is told "no further design review (round cap)" and decides; their word "review once more"
+  (`agent-factory review-again`) runs one more round at that hash. An edit that raises the lane, or that changes the
   Planned files to a pair no round read, starts a new review past the cap, of at most 2 more rounds. A spec whose
   Planned files need a heavier lane holds the review until the lane is raised. A `file:line@commit` cite that does not
   hold stops the review at once.

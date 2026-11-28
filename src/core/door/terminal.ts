@@ -9,14 +9,17 @@ import type { Approve } from "../approval.js";
 import type { Accept } from "../onboard/home.js";
 import type { Start } from "../start.js";
 import type { Waive } from "../waiver.js";
+import type { ReviewAgain } from "../review-again.js";
 import { vouch, type Door, type Person } from "./person.js";
 import {
   acceptAs,
   approveAs,
+  reviewAgainAs,
   startAs,
   waiveAs,
   type AcceptAs,
   type ApproveAs,
+  type ReviewAgainAs,
   type StartAs,
   type WaiveAs,
 } from "./write.js";
@@ -58,4 +61,8 @@ export function waiveAtTerminal(env: NodeJS.ProcessEnv, request: WaiveAs): Promi
 
 export function acceptAtTerminal(env: NodeJS.ProcessEnv, request: AcceptAs): Promise<Accept> {
   return asTerminal(env, (person) => acceptAs(person, request, env));
+}
+
+export function reviewAgainAtTerminal(env: NodeJS.ProcessEnv, request: ReviewAgainAs): Promise<ReviewAgain> {
+  return asTerminal(env, (person) => reviewAgainAs(person, request, env));
 }

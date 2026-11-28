@@ -94,7 +94,7 @@ settings, pinned, and a locked key.
 _Avoid_: pack
 
 **Front door**: a place a human talks to the factory: the terminal, a Discord thread per ticket, a web app later, a
-spec PR, or Jira's status (later). Every front door writes the same START, approval and answer records. A door is an
+spec PR, or Jira's status (later). Every front door writes the same START, approval, review-once-more and answer records. A door is an
 engine command on one door seam, `src/core/door/`, never a plugin (ADR-0023).
 _Avoid_: interface, channel
 

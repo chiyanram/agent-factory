@@ -66,6 +66,7 @@ import { needsApproval, needsTestFirst, oneWayDoorPathsOf, plannedCheck, raisedW
 import { plainName, type Lane, type Spec, type SpecStore } from "../spec.js";
 import { readStart, type StartRecord } from "../start.js";
 import { readWaiver } from "../waiver.js";
+import { readReviewAgain, type ReviewAgainRecord } from "../review-again.js";
 import type { Evidence } from "../report.js";
 import {
   modeOf,
@@ -83,6 +84,8 @@ import {
   type Task,
   type Where,
 } from "./records.js";
+import type { Kind } from "./event.js";
+import type { Via } from "../human-record.js";
 import { takeLock, type HeldLock } from "../lock.js";
 import { writeLastPoll } from "./last-poll.js";
 import { shownAt, UTC } from "../zone.js";
@@ -315,6 +318,25 @@ async function waiverOf(setup: TickSetup, ticket: string): Promise<Result<Waiver
   };
 }
 
+async function againOf(setup: TickSetup, ticket: string): Promise<Result<ReviewAgainRecord | "none">> {
+  const stored = await readReviewAgain({ home: setup.home, project: setup.project, ticket });
+  if (stored.kind === "refused") {
+    return { kind: "failed", reason: `${ticket}: ${stored.reason}` };
+  }
+  return { kind: "ok", value: stored.kind === "record" ? stored.record : "none" };
+}
+
+type Words = { readonly waiver: WaiverView; readonly again: ReviewAgainRecord | "none" };
+
+async function wordsOf(setup: TickSetup, ticket: string): Promise<Result<Words>> {
+  const waiver = await waiverOf(setup, ticket);
+  const again = await againOf(setup, ticket);
+  if (waiver.kind === "failed") {
+    return waiver;
+  }
+  return again.kind === "failed" ? again : { kind: "ok", value: { waiver: waiver.value, again: again.value } };
+}
+
 function sharedBefore(events: readonly Event[], approved: ApprovalRecord | "none"): boolean {
   const keys = approved === "none" ? [] : [approvalKey(approved), legacyKey(approved)];
   return events.some((e) => e.kind === "shared" && keys.includes(e.approval));
@@ -330,18 +352,21 @@ async function designDue(setup: TickSetup, ticket: string, said: Said): Promise<
   return spec.kind === "spec" && needsDesignReview(spec.spec.lane, setup.lanes) ? spec : "off";
 }
 
-async function designOf(setup: TickSetup, ticket: string, said: Said, events: readonly Event[]): Promise<DesignView> {
+type DesignReads = { readonly events: readonly Event[]; readonly again: ReviewAgainRecord | "none" };
+
+async function designOf(setup: TickSetup, ticket: string, said: Said, reads: DesignReads): Promise<DesignView> {
   const spec = await designDue(setup, ticket, said);
   if (spec === "off" || spec.kind !== "spec") {
     return { kind: "off" };
   }
   const approvedAt = said.record === "none" ? "" : said.record.at;
   return designView({
-    events,
+    events: reads.events,
     spec: spec.spec.hash,
     read: { lane: spec.spec.lane, planned: spec.spec.planned },
     raised: await raisedOf(setup, spec.spec),
     approvedAt,
+    again: reads.again === "none" ? "" : reads.again.spec_hash,
     now: setup.now(),
   });
 }
@@ -439,6 +464,7 @@ function programsField(setup: TickSetup): { readonly programs?: readonly string[
 type Read = {
   readonly state: TicketState;
   readonly approved: ApprovalRecord | "none";
+  readonly again: ReviewAgainRecord | "none";
   readonly shared: boolean;
 };
 
@@ -458,13 +484,14 @@ async function stateOf(
   if (events.kind === "failed") {
     return events;
   }
-  const waiver = await waiverOf(setup, ticket);
-  if (waiver.kind === "failed") {
-    return waiver;
+  const words = await wordsOf(setup, ticket);
+  if (words.kind === "failed") {
+    return words;
   }
+  const { waiver, again } = words.value;
   const since = goAt(said.value.view) || "1970-01-01T00:00:00Z";
   const runs = summarize({ events: events.value, since });
-  const design = await designOf(setup, ticket, said.value, events.value);
+  const design = await designOf(setup, ticket, said.value, { events: events.value, again });
   const change = await quarantined(setup, ticket, changeOf(ticket, lines));
   const blockers = await blockersOf(setup, ticket, said.value, { runs, change });
   const approved = said.value.record;
@@ -475,7 +502,7 @@ async function stateOf(
         ticket,
         gate: setup.gate,
         approval: said.value.view,
-        waiver: waiver.value,
+        waiver,
         change,
         runs,
         now: setup.now(),
@@ -486,6 +513,7 @@ async function stateOf(
         ...programsField(setup),
       },
       approved,
+      again,
       shared: sharedBefore(events.value, approved),
     },
   };
@@ -1428,21 +1456,36 @@ async function share(setup: TickSetup, d: Read): Promise<void> {
   }
 }
 
-export function heardLines(
-  events: readonly Event[],
-  started: StartRecord | "none",
-  approved: ApprovalRecord | "none",
-): readonly Event[] {
-  const has = (kind: "begun" | "approved", time: string) => events.some((e) => e.kind === kind && e.at === time);
-  const begun: readonly Event[] =
-    started === "none" || has("begun", started.at)
-      ? []
-      : [{ at: started.at, kind: "begun", by: started.by, via: started.via }];
-  const ok: readonly Event[] =
-    approved === "none" || has("approved", approved.at)
-      ? []
-      : [{ at: approved.at, kind: "approved", by: approved.by, via: approved.via, spec: approved.spec_hash }];
-  return [...begun, ...ok];
+export type Heard = {
+  readonly started: StartRecord | "none";
+  readonly approved: ApprovalRecord | "none";
+  readonly again: ReviewAgainRecord | "none";
+};
+
+type Word = { readonly at: string; readonly by: string; readonly via: Via };
+
+function unheard<W extends Word>(events: readonly Event[], kind: Kind, word: W | "none", line: (w: W) => Event) {
+  return word === "none" || events.some((e) => e.kind === kind && e.at === word.at) ? [] : [line(word)];
+}
+
+export function heardLines(events: readonly Event[], said: Heard): readonly Event[] {
+  return [
+    ...unheard(events, "begun", said.started, (w) => ({ at: w.at, kind: "begun", by: w.by, via: w.via })),
+    ...unheard(events, "approved", said.approved, (w) => ({
+      at: w.at,
+      kind: "approved",
+      by: w.by,
+      via: w.via,
+      spec: w.spec_hash,
+    })),
+    ...unheard(events, "review-again", said.again, (w) => ({
+      at: w.at,
+      kind: "review-again",
+      by: w.by,
+      via: w.via,
+      spec: w.spec_hash,
+    })),
+  ];
 }
 
 async function heard(setup: TickSetup, d: Read): Promise<void> {
@@ -1452,7 +1495,7 @@ async function heard(setup: TickSetup, d: Read): Promise<void> {
   if (events.kind === "failed" || started.kind === "failed") {
     return;
   }
-  for (const event of heardLines(events.value, started.value, d.approved)) {
+  for (const event of heardLines(events.value, { started: started.value, approved: d.approved, again: d.again })) {
     const kept = await record({ where: place, event });
     if (kept.kind === "failed") {
       setup.log(`${d.state.ticket}: the ${event.kind} line was not written: ${kept.reason}`);

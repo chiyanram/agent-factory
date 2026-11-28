@@ -98,6 +98,12 @@ const PARSE: Readonly<Record<Kind, Parse>> = {
     const spec = str(raw, "spec");
     return by === BAD || spec === BAD || !isVia(via) ? BAD : { at, kind: "approved", by, via, spec };
   },
+  "review-again": (raw, at) => {
+    const by = str(raw, "by");
+    const via = prop(raw, "via");
+    const spec = str(raw, "spec");
+    return by === BAD || spec === BAD || !isVia(via) ? BAD : { at, kind: "review-again", by, via, spec };
+  },
 };
 
 export function parseLine(line: string): unknown {

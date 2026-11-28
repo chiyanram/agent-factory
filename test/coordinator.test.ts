@@ -248,6 +248,15 @@ describe("the coordinator's wall (#106; ADR-0012 S2): the canary", () => {
     }
   });
 
+  it("denies review-again and any edit of its records: the AI never asks for a design review past the round cap", () => {
+    const hash = "a".repeat(64);
+    for (const command of [`agent-factory review-again ledger PROJ-1 ${hash}`, "agent-factory review-again"]) {
+      expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });
+    }
+    expect(claudeSettings(PLACES).permissions.deny).toContain("Edit(//home/ram/.factory/review-again/**)");
+    expect(copilotArgs(PLACES)).toContain("shell(agent-factory review-again)");
+  });
+
   it("denies waive and any edit of the waivers: the AI never clears its own test check hit (#231)", () => {
     for (const command of [`agent-factory waive ledger PROJ-1 ${"a".repeat(40)}`, "agent-factory waive"]) {
       expect({ command, v: verdict("Bash", command) }).toEqual({ command, v: "deny" });

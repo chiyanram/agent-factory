@@ -165,6 +165,22 @@ describe("agent-factory spec", () => {
   });
 });
 
+describe("agent-factory review-again", () => {
+  it("records the person's word at the current hash (0), refuses another hash (1), prints its usage (64)", async () => {
+    writeSpec(SPEC);
+    const hash = specHash(SPEC);
+    const said = await cli(["review-again", "ledger", "PROJ-1", hash]);
+    expect(said).toMatchObject({
+      code: 0,
+      out: expect.stringMatching(new RegExp(`^review once more: ledger/PROJ-1, the hash ${hash}, by `)),
+    });
+    const record = JSON.parse(readFileSync(join(home, "review-again", "ledger", "PROJ-1.json"), "utf8")) as unknown;
+    expect(record).toMatchObject({ spec_hash: hash, via: "terminal" });
+    expect((await cli(["review-again", "ledger", "PROJ-1", specHash("other")])).code).toBe(1);
+    expect((await cli(["review-again", "ledger", "PROJ-1"])).code).toBe(64);
+  });
+});
+
 describe("agent-factory approve and approval", () => {
   it("approve records, approval says approved (0), an edit makes it stale (3)", async () => {
     writeSpec(SPEC);

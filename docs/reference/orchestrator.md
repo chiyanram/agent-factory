@@ -282,7 +282,10 @@ Planned files to a pair no earlier round read (a new review past those rounds, a
 already read is none). The re-review and its verify pass read `earlier.json`: every earlier round's hashes,
 lane, Planned files, findings, kept and dismissed items, and the spec and design text the last round read. The engine
 drops a repeat of a finding an earlier round dismissed or the person answered. After 2 rounds the person is told once,
-in the record (`design-noted`) and a ping, "no further design review (round cap)", and decides. A spec whose Planned
+in the record (`design-noted`) and a ping, "no further design review (round cap)", and decides. Their word "review
+once more" (`agent-factory review-again <project> <ticket> <hash>`, or `/review-again` at the Discord door) runs one
+more round at that hash, and the record keeps a `review-again` line with who said it and the door; the next edit is
+at the cap again. A spec whose Planned
 files need a heavier lane runs no design review: the person is told once to raise the lane, and the ticket waits. After the implementer's
 done run, the ready check runs that run's evidence rows, and the host posts the implementer's own PR body,
 `.factory/pr.md`, cleaned after each implementer run that ended done. The orchestrator starts no cleanup run: a

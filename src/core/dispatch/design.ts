@@ -17,7 +17,9 @@
 // OPEN at once and writes the answers into the spec. The edit is a new hash, but a re-review runs only when the last
 // round kept an Act on CONFLICT, and it gets every earlier round's findings and decisions, so it reviews only what
 // changed. Consider items never block. At most MAX_DESIGN_ROUNDS rounds; after that the person decides, with no
-// further review, and is told so once ("no further design review (round cap)"). An edit that raises the lane or changes
+// further review, and is told so once ("no further design review (round cap)"). The person's word "review once more"
+// (review-again.ts) at the spec's hash runs exactly one more round at that hash; the next edit is a new hash, so the cap
+// holds again until they say it again. A word at another hash, or one given before the cap, changes nothing. An edit that raises the lane or changes
 // the Planned files to a pair no earlier round read is a new review, not a further round: it runs past MAX_DESIGN_ROUNDS,
 // at most MAX_MOVED_REVIEWS times, since the earlier rounds never saw it; an edit back to a pair already read is not.
 // The engine drops each finding an earlier round settled, so a repeat never reaches the person, whatever the model did.
@@ -35,7 +37,8 @@ import type { Waiting } from "./table.js";
 export const MAX_DESIGN_FAILURES = 3;
 export const MAX_DESIGN_ROUNDS = 2;
 export const MAX_MOVED_REVIEWS = 2;
-export const ROUND_CAP = "no further design review (round cap): the person decides on the findings they have";
+export const ROUND_CAP =
+  "no further design review (round cap): the person decides on the findings they have, or runs `agent-factory review-again` at this hash for one more round";
 
 export type DesignView =
   | { readonly kind: "off" }
@@ -192,6 +195,7 @@ export type ViewInput = {
   readonly read: SpecRead;
   readonly raised: Waiting | "none";
   readonly approvedAt: string;
+  readonly again: string;
   readonly now: number;
 };
 
@@ -231,7 +235,8 @@ function reviewDue(input: ViewInput, h: Hashes, failures: readonly string[]): De
   if (limit === "none") {
     return afterRound(input.approvedAt, last.at);
   }
-  return earlier.length < limit ? next("review", failures, h, input.now) : capped(input, h, last);
+  const due = earlier.length < limit || input.again === h.spec;
+  return due ? next("review", failures, h, input.now) : capped(input, h, last);
 }
 
 function roundLimit(earlier: readonly Ended[], last: Ended, read: SpecRead): number | "none" {

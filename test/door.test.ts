@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { specHash } from "../src/core/spec.js";
 import { isVouched, vouch, type Person } from "../src/core/door/person.js";
 import { terminalDoor } from "../src/core/door/terminal.js";
-import { acceptAs, approveAs, MODEL_RUN_MARKERS, startAs, waiveAs } from "../src/core/door/write.js";
+import { acceptAs, approveAs, MODEL_RUN_MARKERS, reviewAgainAs, startAs, waiveAs } from "../src/core/door/write.js";
 import { tempDir } from "./temp.js";
 
 const SPEC = [
@@ -57,10 +57,11 @@ async function writeAll(person: Person, env: NodeJS.ProcessEnv) {
     await startAs(person, startOf(), env),
     await approveAs(person, approveOf(), env),
     await waiveAs(person, waiveOf(), env),
+    await reviewAgainAs(person, approveOf(), env),
   ];
 }
 
-const RECORDS = ["starts", "approvals", "waivers"];
+const RECORDS = ["starts", "approvals", "waivers", "review-again"];
 const written = (): readonly string[] => RECORDS.filter((dir) => existsSync(join(home, dir)));
 
 describe("vouch: the person a door verified (#713)", () => {
@@ -89,10 +90,15 @@ describe("vouch: the person a door verified (#713)", () => {
 });
 
 describe("the write API fills by and via from the person (#713)", () => {
-  it("startAs, approveAs and waiveAs write the person's by and via, as the records have them today", async () => {
+  it("startAs, approveAs, waiveAs and reviewAgainAs write the person's by and via", async () => {
     const person = vouched("terminal", "ram");
     const results = await writeAll(person, PLAIN);
-    expect(results.map((r) => ("reason" in r ? r.reason : r.kind))).toEqual(["started", "approved", "waived"]);
+    expect(results.map((r) => ("reason" in r ? r.reason : r.kind))).toEqual([
+      "started",
+      "approved",
+      "waived",
+      "review-again",
+    ]);
     const read = (dir: string) => JSON.parse(readFileSync(join(home, dir, "ledger", "PROJ-1.json"), "utf8")) as unknown;
     for (const dir of RECORDS) {
       expect(read(dir)).toMatchObject({ by: "ram", via: "terminal", at: AT });
@@ -126,7 +132,7 @@ describe("a door cannot claim a person it did not verify (#713)", () => {
 });
 
 describe("a model run cannot write a person's word (#713)", () => {
-  it.each(MODEL_RUN_MARKERS)("refuses all three writes when %s is set, and writes no record", async (marker) => {
+  it.each(MODEL_RUN_MARKERS)("refuses every write when %s is set, and writes no record", async (marker) => {
     const person = vouched("terminal", "ram");
     for (const result of await writeAll(person, { ...PLAIN, [marker]: "1" })) {
       expect(result).toMatchObject({ kind: "refused", reason: expect.stringContaining(marker) });
@@ -227,8 +233,13 @@ describe("only the door seam makes a person or writes a person's word (#713)", (
     expect(users.filter((path) => !path.startsWith(join("src", "core", "door")))).toEqual([]);
   });
 
-  it("only door/write.ts takes start, approve or waive, so every front door goes through the seam", () => {
-    const users = takes(/(?:^|\/)(?:start|approval|waiver)\.js$/, ["start", "approve", "waive"]);
+  it("only door/write.ts takes start, approve, waive or reviewAgain, so every front door goes through the seam", () => {
+    const users = takes(/(?:^|\/)(?:start|approval|waiver|review-again)\.js$/, [
+      "start",
+      "approve",
+      "waive",
+      "reviewAgain",
+    ]);
     expect(users).toEqual([join("src", "core", "door", "write.ts")]);
   });
 
