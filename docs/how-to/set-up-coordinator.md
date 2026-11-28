@@ -39,7 +39,7 @@ The wall (`src/core/coordinator.ts`):
   `sh -c`, `bash -c`, `npx` and others), `sudo`, the App token's wrapper, `security`, `chmod`, `chown`,
   `agent-factory plugin`, `agent-factory project` and `agent-factory init`, which write settings. `WebFetch` and
   `WebSearch`: outside context comes only through `agent-factory fetch` (ADR-0012 S18). Editing any `.claude/`, the package, `$FACTORY_HOME/approvals`,
-  `starts`, `waivers`,
+  `starts`, `waivers`, `review-again`,
   `projects`, `runs`, `secrets`, `coordinator`, `pending`, `writes`, `plugins.json` and `plugins`. Reading the
   secret paths: `~/.ssh`, `~/.gnupg`, the gh and glab logins, `~/.git-credentials`, `~/.netrc`, the cloud logins,
   `~/.docker/config.json`, `~/.npmrc`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`, the Keychain and the
