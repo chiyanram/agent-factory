@@ -85,7 +85,7 @@ function againText(project: string, ticket: string, seen: Shown): string {
   return [
     `Review ${project}/${ticket} once more, lane ${seen.lane}: ${seen.title}`,
     `the hash ${seen.spec}`,
-    "The spec is attached. Confirm within 10 minutes runs one more design-review round at exactly this hash, past the round cap; an edit to the spec before then makes Confirm refuse.",
+    "The spec is attached. Confirm within 10 minutes records your word at exactly this hash: when the design review is at its round cap, one more round runs at this hash; otherwise the word changes nothing. An edit to the spec before then makes Confirm refuse.",
   ].join("\n");
 }
 
