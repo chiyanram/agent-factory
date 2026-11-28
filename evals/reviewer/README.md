@@ -71,6 +71,9 @@ repository's checkout (default `.`): its golden set, and the history every `base
   pass prints its worst case (every run at its cap); a worst case over $100 is no reason to refuse, since the cap is
   kept while the pass runs: a round or judge run that might not fit under the cap never starts, the pass stops, and
   the result is partial. Under the cap is proof; stopped at the cap is partial, never proof.
+- **Streams.** Each review run's whole stream, scrubbed, is kept in `$FACTORY_HOME/eval-<id>-streams/<case>/`, one
+  file a run (`run<N>-<seq>-<part>.jsonl`), and the pass names the folder when it starts. The clones go when the pass
+  ends; the streams stay, so a person can count which files each finder and verify run read.
 - **Settings.** `FACTORY_CLAUDE` (the agent CLI), `FACTORY_FIND_MODEL`, `FACTORY_RULE_MODEL`, `FACTORY_LOGIC_MODEL`,
   `FACTORY_REVIEW_FIND` and `FACTORY_REVIEW_VERIFY` as for `agent-factory review`; `FACTORY_JUDGE_MODEL` (default
   `claude-sonnet-5-5`) and `FACTORY_EVAL_JUDGE` (the judge's instructions). Every model is a full id: a pass refuses

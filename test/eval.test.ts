@@ -408,9 +408,17 @@ process.stdout.write(JSON.stringify({ type: "system", subtype: "task_summary" })
     const argv = readFileSync(calls, "utf8").trim().split("\n").map(words);
     expect(argv.every((a) => a.includes("--max-budget-usd") && a.includes("--restricted"))).toBe(true);
     expect(argv.some((a) => a[a.indexOf("--max-budget-usd") + 1] === "0.50")).toBe(true);
-    expect(readdirSync(join(env.HOME ?? "", ".factory")).filter((n) => n.startsWith("eval-"))).toEqual([]);
+    const left = evalFolders(join(String(env.HOME), ".factory"));
+    expect(left.names).toEqual([expect.stringMatching(/^eval-.+-streams$/)]);
+    expect(readdirSync(left.first, { recursive: true }).length).toBeGreaterThan(0);
+    expect(err).toContain(`each review run's stream is kept in ${left.first}`);
   });
 });
+
+function evalFolders(home: string): { readonly names: readonly string[]; readonly first: string } {
+  const names = readdirSync(home).filter((n) => n.startsWith("eval-"));
+  return { names, first: join(home, names[0] ?? "") };
+}
 
 describe("eval reviewer, the parts", () => {
   const act = (id: string, line: number, file = "src/a.ts"): ActOn => ({
