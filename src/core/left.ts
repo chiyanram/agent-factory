@@ -11,7 +11,7 @@ import type { Forge } from "./forge/types.js";
 import { hostGit } from "./git.js";
 import type { Post } from "./post.js";
 import type { PushRequest } from "./push.js";
-import type { PushTarget } from "./writer/step.js";
+import type { PushTarget } from "./writer/types.js";
 
 export type Left = { readonly head: string; readonly commits: readonly string[]; readonly files: readonly string[] };
 

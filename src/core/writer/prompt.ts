@@ -5,11 +5,20 @@
 // model stops: a subagent or command left in the background is lost, or holds the process open.
 
 import type { Known } from "../onboard/known.js";
-import type { Card } from "../process/cards.js";
+import type { Card, Role } from "../process/cards.js";
 import { programsLine } from "../ready/command.js";
 import { REPORT_INSTRUCTIONS } from "../report.js";
 
 export type RunMode = "test-first" | "fix" | "rework" | "ci" | "merge" | "cleanup";
+
+export const ROLE_OF: Readonly<Record<RunMode, Role>> = {
+  "test-first": "test-first",
+  fix: "implementer",
+  rework: "implementer",
+  ci: "implementer",
+  merge: "implementer",
+  cleanup: "cleanup",
+};
 
 export const FOREGROUND =
   "Run every subagent and command in the foreground and wait for it to finish. This run ends when you stop, so anything left in the background is lost.";

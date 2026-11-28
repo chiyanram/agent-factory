@@ -12,7 +12,7 @@ import type { BoxPlan } from "../ready/steps.js";
 import { writerSettings } from "./settings.js";
 import { openAgentCli } from "../agent/index.js";
 import type { LaneProps } from "../lane.js";
-import type { PushTarget, WriterSetup } from "./step.js";
+import type { PushTarget, WriterSetup } from "./types.js";
 import type { PluginDir } from "../process/read.js";
 import { settingOf } from "../settings/machine.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
