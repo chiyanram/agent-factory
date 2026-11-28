@@ -24,6 +24,9 @@ function spec(approved: string = specText()): PackInput["spec"] {
   };
 }
 
+const skill = (name: string) => ({ name, dir: join(RULEBOOK, "skills", name) });
+const SKILLS = [skill("crq"), skill("code")];
+
 function input(over: Partial<PackInput> = {}): PackInput {
   return {
     spec: spec(),
@@ -32,7 +35,7 @@ function input(over: Partial<PackInput> = {}): PackInput {
     change: changeAt(p.head2),
     defaultBranch: "main",
     plugins: [{ label: "rulebook", dir: RULEBOOK }],
-    baseline: ["crq", "code"],
+    baseline: SKILLS,
     previous: { kind: "none" },
     dir: join(p.root, "packs"),
     mark: "!",
@@ -108,9 +111,9 @@ describe("buildPack", () => {
     expect(rules).not.toContain("OTHER-RULES");
   });
 
-  it("names the baseline skills and the lens, holds the design, and flags the rule files and the design it edits", async () => {
+  it("holds the baseline skills and the lens, the design, and flags the rule files and the design it edits", async () => {
     const text = await pack();
-    expect(section(text, 4)).toContain("./skills/code/SKILL.md");
+    expect(section(text, 4)).toContain("CODE-SKILL");
     expect(section(text, 4)).toMatch(/input, state/);
     expect(section(text, 6)).toContain("DESIGN-BODY");
     const seven = section(text, 7);
@@ -359,29 +362,27 @@ describe("buildPack: the approved spec (#224)", () => {
 });
 
 describe("buildPack: the baseline review skills, by name (#920)", () => {
-  const TEXT = [
-    "CRQ-SKILL",
-    "CODE-SKILL",
-    "REVIEW-PROCESS-CHECKS",
-    "CODE-REVIEW-CHECKS",
-    "VERIFY-DONE-CHECKS",
-    "SMELLS-BASELINE",
-  ];
+  const LINKED = ["REVIEW-PROCESS-CHECKS", "CODE-REVIEW-CHECKS", "VERIFY-DONE-CHECKS", "SMELLS-BASELINE"];
 
-  it("AC-2 names each baseline skill in section 4 with its SKILL.md to read first, and holds no skill text", async () => {
+  it("AC-2 holds each baseline skill's SKILL.md in section 4, fenced, names its copy, and holds no linked file", async () => {
     addToMain("AGENTS.md", "# Root\n\nROOT-RULES\n");
     addToMain("svc/AGENTS.md", "# svc\n\nSVC-RULES\n");
     const text = await pack();
     const four = section(text, 4);
-    for (const name of ["crq", "code"]) {
-      expect(four).toContain(`\`${name}\` skill: read \`./skills/${name}/SKILL.md\` first`);
+    for (const [name, mark] of [
+      ["crq", "CRQ-SKILL"],
+      ["code", "CODE-SKILL"],
+    ]) {
+      expect(four).toMatch(new RegExp(`### skill ${name}\\n\\n\`\`\`\`?markdown\\n[^]*${mark}`));
+      expect(four).toContain(`The whole \`${name}\` skill is in \`./skills/${name}/\``);
     }
-    expect(TEXT.filter((t) => text.includes(t))).toEqual([]);
+    expect(LINKED.filter((t) => text.includes(t))).toEqual([]);
   });
 
-  it("AC-2 names only the skills it is given", async () => {
-    const four = section(await pack({ baseline: ["code"] }), 4);
-    expect(four).toContain("./skills/code/SKILL.md");
+  it("AC-2 holds only the skills it is given", async () => {
+    const four = section(await pack({ baseline: [skill("code")] }), 4);
+    expect(four).toContain("CODE-SKILL");
+    expect(four).not.toContain("CRQ-SKILL");
     expect(four).not.toContain("./skills/crq/");
   });
 

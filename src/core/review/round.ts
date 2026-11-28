@@ -241,7 +241,7 @@ async function packFor(ctx: Ctx): Promise<Result<Pack>> {
     change: ctx.change,
     defaultBranch: branch.value,
     plugins: s.plugins,
-    baseline: ctx.skills.present.map((k) => k.name),
+    baseline: ctx.skills.present,
     previous: last.kind === "round" ? { kind: "head", sha: last.head } : { kind: "none" },
     spec: spec.value,
     deviations: ctx.deviations,

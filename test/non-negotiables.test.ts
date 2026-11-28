@@ -439,7 +439,7 @@ describe("P5: the judge never comes from the change", () => {
       change: changeAt(p.head2),
       defaultBranch: "main",
       plugins: [{ label: "rulebook", dir: RULEBOOK }],
-      baseline: ["crq", "code"],
+      baseline: ["crq", "code"].map((name) => ({ name, dir: join(RULEBOOK, "skills", name) })),
       previous: { kind: "none" },
       dir: join(p.root, "packs"),
       mark: "!",

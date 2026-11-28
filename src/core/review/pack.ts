@@ -11,10 +11,11 @@
 // names the spec's hash, not its text (#164, #224). The spec counts only while its hash is the one the approval records;
 // a spec edited after approval, or never approved, is named in section 5 for the reviewer to report, and no spec in the
 // store fails the pack, so a review never runs with an empty contract.
-// Section 4 always names the baseline review skills (rules.ts BASELINE) the plugins hold, whatever the AGENTS.md files
-// say, and tells the run to read each from the copy in its own folder (skills.ts), never their text: a change inside a
-// skill cannot fail the pack. A rulebook pointer in an AGENTS.md finds its skill by name (process/read.ts skillDir) in
-// the first plugin that holds the skill, and a pointer no plugin resolves fails the pack.
+// Section 4 always holds the SKILL.md of each baseline review skill (rules.ts BASELINE) the plugins hold, whatever the
+// AGENTS.md files say, and names the copy of the whole skill in the run's own folder (skills.ts) for the files it
+// links. SKILL.md is the one file a skill always has, so the engine names no other file inside it, and a run reads
+// the pack but does not open a file the pack only names. A rulebook pointer in an AGENTS.md finds its skill by name
+// (process/read.ts skillDir) in the first plugin that holds the skill, and a pointer no plugin resolves fails the pack.
 // **Today:** a pointer still names a reference file inside its skill, not the skill alone.
 // Every block sits in a fence longer than any backtick run inside it (fence.ts). One pack per head: a second call reuses
 // it. A step that fails leaves no pack behind, so a broken pack is never reused. A change with a control character in a
@@ -29,6 +30,7 @@ import { plainBranch } from "../branch.js";
 import { checkSpec, readSpec, type Lane, type Spec, type SpecRead, type SpecStore } from "../spec.js";
 import { fence } from "./fence.js";
 import { skillDir, type PluginDir } from "../process/read.js";
+import type { Skill } from "./skills.js";
 import { agentsChain, readRules, type Pointer } from "./rules.js";
 
 export type Previous = { readonly kind: "none" } | { readonly kind: "head"; readonly sha: string };
@@ -50,7 +52,7 @@ export type PackInput = {
   readonly change: Change;
   readonly defaultBranch: string;
   readonly plugins: readonly PluginDir[];
-  readonly baseline: readonly string[];
+  readonly baseline: readonly Skill[];
   readonly previous: Previous;
   readonly spec: SpecSource;
   readonly deviations?: readonly string[];
@@ -472,12 +474,18 @@ async function editsSection(p: Parts): Promise<Result<string>> {
 
 type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly baseline: string };
 
-function baselineSection(baseline: readonly string[]): string {
-  const each = baseline.map(
-    (name) =>
-      `- the \`${name}\` skill: read \`./skills/${name}/SKILL.md\` first, then each file it links that applies to this change`,
-  );
-  return `\nThe baseline review checks are these skills, copied into your folder:\n\n${each.join("\n")}\n`;
+async function baselineSection(baseline: readonly Skill[]): Promise<Result<string>> {
+  const blocks: string[] = [];
+  for (const s of baseline) {
+    const path = join(s.dir, "SKILL.md");
+    const text = await readFile(path, "utf8").catch(() => undefined);
+    if (text === undefined) {
+      return { kind: "failed", reason: `cannot read the baseline skill ${path}` };
+    }
+    const where = `The whole \`${s.name}\` skill is in \`./skills/${s.name}/\`: its links resolve there. Open each linked file that applies to this change.`;
+    blocks.push(`${fence({ title: `skill ${s.name}`, text, info: "markdown" })}\n${where}\n`);
+  }
+  return { kind: "ok", value: `\nThe baseline review checks are these skills:\n${blocks.join("")}` };
 }
 
 async function sections(p: Parts): Promise<Result<Sections>> {
@@ -489,10 +497,13 @@ async function sections(p: Parts): Promise<Result<Sections>> {
   if (rules.kind === "failed") {
     return rules;
   }
-  const baseline = baselineSection(p.input.baseline);
+  const baseline = await baselineSection(p.input.baseline);
+  if (baseline.kind === "failed") {
+    return baseline;
+  }
   const edits = await editsSection(p);
   return edits.kind === "ok"
-    ? { kind: "ok", value: { change: change.value, rules: rules.value, edits: edits.value, baseline } }
+    ? { kind: "ok", value: { change: change.value, rules: rules.value, edits: edits.value, baseline: baseline.value } }
     : edits;
 }
 
