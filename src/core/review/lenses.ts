@@ -26,7 +26,13 @@ export const BASELINE_LENS = "baseline";
 export const TEST_INTEGRITY = "test-integrity";
 
 export type Rubric =
-  | { readonly kind: "skill"; readonly plugin: string; readonly skill: string; readonly reference?: string }
+  | {
+      readonly kind: "skill";
+      readonly plugin: string;
+      readonly skill: string;
+      readonly reference?: string;
+      readonly focus?: string;
+    }
   | { readonly kind: "file"; readonly path: string }
   | { readonly kind: "baseline" };
 

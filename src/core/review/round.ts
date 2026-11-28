@@ -41,7 +41,16 @@ import { keepActOn } from "./act-on.js";
 import { actedSince, foundOf, keepTracked, type Acted, type FoundByRule } from "./acted-on.js";
 import { copyCode } from "./code.js";
 import { history, protectedLine, type History } from "./history.js";
-import { BASELINE, lensPack, lensSetupOf, roundLenses, rubricText, touchedOf, type LensSetup } from "./finders.js";
+import {
+  BASELINE,
+  lensPack,
+  lensSetupOf,
+  roundLenses,
+  rubricText,
+  touchedOf,
+  type LensRubric,
+  type LensSetup,
+} from "./finders.js";
 import {
   mergeFindings,
   pickLenses,
@@ -58,7 +67,7 @@ import type { RoundPart } from "../dispatch/spend.js";
 import { deviationNotes } from "./deviations.js";
 import { buildPack, type Approval, type Pack, type SpecSource } from "./pack.js";
 import { ENGINE_PROCESS, type PluginDir, type Process } from "../process/read.js";
-import { baselineSkills, copySkills, type Skills } from "./skills.js";
+import { copySkills, findSkills, type Skill, type Skills } from "./skills.js";
 import { attempt } from "./safe.js";
 import { plainName, type SpecStore } from "../spec.js";
 import { issuesFrom, specStoreOf } from "../spec-store.js";
@@ -216,7 +225,7 @@ async function approvalFor(where: {
 }
 
 async function reviewSkills(plugins: readonly PluginDir[]): Promise<Result<Skills>> {
-  const skills = await baselineSkills(plugins, ENGINE_PROCESS.baseline);
+  const skills = await findSkills(plugins, ENGINE_PROCESS.baseline);
   return skills.present.length === 0
     ? failed(
         `the review baseline has no skill left: no listed plugin has skills/<name>/SKILL.md for ${skills.missing.join(", ")}; list one in the project's "plugins" and pin it`,
@@ -468,7 +477,13 @@ async function runFolder(ctx: Ctx): Promise<Result<string>> {
   }, `cannot make a run folder in ${dir}`);
 }
 
-async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promise<Result<void>> {
+async function placed(
+  ctx: Ctx,
+  folder: string,
+  pack: Pack,
+  text: string,
+  lens: readonly Skill[] = [],
+): Promise<Result<void>> {
   const copied = await copyCode({
     repo: ctx.setup.repo,
     sha: pack.head,
@@ -476,7 +491,8 @@ async function placed(ctx: Ctx, folder: string, pack: Pack, text: string): Promi
     env: ctx.setup.env,
     prune: "rules",
   });
-  const skills = copied.kind === "ok" ? await copySkills(ctx.skills.present, folder) : copied;
+  const all = [...ctx.skills.present, ...pack.skills, ...lens];
+  const skills = copied.kind === "ok" ? await copySkills(all, folder) : copied;
   return skills.kind === "failed"
     ? skills
     : attempt(() => writeFile(join(folder, "pack.md"), text), `cannot write the pack into ${folder}`);
@@ -503,42 +519,46 @@ async function findIn(ctx: Ctx, folder: string, lens: Lens, model: string): Prom
 
 type Shared = { readonly pack: Pack; readonly text: string; readonly model: string };
 
-async function findLens(ctx: Ctx, lens: Lens, rubric: string, shared: Shared): Promise<Result<Finder>> {
+async function findLens(ctx: Ctx, lens: Lens, rubric: LensRubric, shared: Shared): Promise<Result<Finder>> {
   const folder = await runFolder(ctx);
   if (folder.kind === "failed") {
     return folder;
   }
   try {
-    const ready = await placed(ctx, folder.value, shared.pack, lensPack(shared.text, lens, rubric));
+    const text = lensPack(shared.text, lens, rubric.text);
+    const ready = await placed(ctx, folder.value, shared.pack, text, rubric.skills);
     return ready.kind === "ok" ? await findIn(ctx, folder.value, lens, shared.model) : ready;
   } finally {
     await rm(folder.value, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-async function rubrics(ctx: Ctx, plan: Plan, pack: Pack): Promise<Result<readonly string[]>> {
-  const read = await Promise.all(plan.lenses.map((lens) => rubricText(lens, { ...ctx.setup, master: pack.master })));
+const NO_RUBRIC: LensRubric = { text: "", skills: [] };
+
+async function rubrics(ctx: Ctx, plan: Plan, pack: Pack): Promise<Result<readonly LensRubric[]>> {
+  const from = { ...ctx.setup, master: pack.master, baseline: ctx.skills.present.map((s) => s.name) };
+  const read = await Promise.all(plan.lenses.map((lens) => rubricText(lens, from)));
   const bad = read.find((r) => r.kind === "failed");
-  return bad?.kind === "failed" ? bad : { kind: "ok", value: read.map((r) => (r.kind === "ok" ? r.value : "")) };
+  return bad?.kind === "failed" ? bad : { kind: "ok", value: read.map((r) => (r.kind === "ok" ? r.value : NO_RUBRIC)) };
 }
 
 async function findAll(
   ctx: Ctx,
   plan: Plan,
-  read: readonly string[],
+  read: readonly LensRubric[],
   shared: Shared,
 ): Promise<Result<readonly Finder[]>> {
   const most = Math.max(1, ctx.setup.maxFinders);
   const ran: Result<Finder>[] = [];
   for (let at = 0; at < plan.lenses.length; at += most) {
     const batch = plan.lenses.slice(at, at + most);
-    ran.push(...(await Promise.all(batch.map((lens, i) => findLens(ctx, lens, read[at + i] ?? "", shared)))));
+    ran.push(...(await Promise.all(batch.map((lens, i) => findLens(ctx, lens, read[at + i] ?? NO_RUBRIC, shared)))));
   }
   const bad = ran.find((r) => r.kind === "failed");
   return bad?.kind === "failed" ? bad : { kind: "ok", value: ran.flatMap((r) => (r.kind === "ok" ? [r.value] : [])) };
 }
 
-type Inputs = { readonly text: string; readonly rubrics: readonly string[] };
+type Inputs = { readonly text: string; readonly rubrics: readonly LensRubric[] };
 
 async function inputs(ctx: Ctx, pack: Pack, plan: Plan): Promise<Result<Inputs>> {
   const text = await readFile(pack.path, "utf8").catch(() => undefined);

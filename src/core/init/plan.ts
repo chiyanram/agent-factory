@@ -98,7 +98,7 @@ function pluginsQuestion(): Question {
     id: "plugins",
     text: "Which plugins does the project install?",
     choices: [
-      { label: `${DEFAULT_PLUGIN}: the rulebook, the process and the review references`, value: [DEFAULT_PLUGIN] },
+      { label: `${DEFAULT_PLUGIN}: the rulebook: coding and review skills`, value: [DEFAULT_PLUGIN] },
       { label: "none: the engine's built-in process only (the automated review cannot run)", value: [] },
     ],
     recommended: 0,

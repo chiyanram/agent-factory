@@ -2,12 +2,12 @@
 // A leaf the settings keys import: it reads and checks the value, and nothing else.
 //
 //   {"review": {"lenses": [
-//     {"name": "security", "rubric": {"plugin": "rulebook", "skill": "crq", "reference": "security"}, "paths": ["src/auth/**"]},
+//     {"name": "security", "rubric": {"plugin": "rulebook", "skill": "code"}, "paths": ["src/auth/**"]},
 //     {"name": "api", "rubric": {"file": "docs/review/api.md"}, "lanes": ["feature", "one-way door"]}
 //   ]}}
 //
-// A rubric is a skill in an enabled plugin (its SKILL.md, or one of its references when "reference" is given), or a
-// file in the repo on the default branch. "paths" and "lanes" are optional; empty or left out matches every file and
+// A rubric is a skill in an enabled plugin, by name, or a file in the repo on the default branch. A "reference" still
+// parses, and the review drops it (finders.ts), since the engine names skills only. "paths" and "lanes" are optional; empty or left out matches every file and
 // every lane. A name is a plain word and given once.
 
 import { LANES } from "../spec.js";

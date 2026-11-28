@@ -6,7 +6,7 @@ must_not_see: the coordinator's conversation with the human
 hand_off: the JSON the run returns, no file; one entry per decision {id, decision, verdict: aligned | conflict | open, file, line, rule, severity, grade: cited | walked | ran, finding, fix}
 tools: [Read, Grep, Glob]
 enforced_guardrails: [read-only]
-rules: [SR1, SR2, SR3, SR4, SR9, SR10, SR11, SR12, SR13, SR14, SR15, SR17, SR18, SR19, SR20, SR23, LN1, LN3, PD4, PD5, PD9, PD11, RV1, RV2, RV4, RV6, RV7, RV8]
+skills: [planning]
 ---
 
 # Design-reviewer

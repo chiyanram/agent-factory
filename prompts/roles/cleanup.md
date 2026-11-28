@@ -6,7 +6,7 @@ must_not_see: review findings; earlier verdicts
 hand_off: commits, and .factory/report.json (urn:rulebook:crq:report:1, process/schema/report-v1.schema.json) with status done and the evidence rows, run again; deferred lists each cleanup that would change behaviour
 tools: [Read, Grep, Glob, Edit, Bash (on the runner)]
 enforced_guardrails: [no-push, no-web, no-credentials, judge-files-locked]
-rules: [DS13, DS5, DS7, DS8, DS9, VB6, DSN2]
+skills: [code]
 ---
 
 # Cleanup

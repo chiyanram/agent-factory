@@ -14,14 +14,15 @@
 // Section 4 always holds the SKILL.md of each baseline review skill (rules.ts BASELINE) the plugins hold, whatever the
 // AGENTS.md files say, and names the copy of the whole skill in the run's own folder (skills.ts) for the files it
 // links. SKILL.md is the one file a skill always has, so the engine names no other file inside it, and a run reads
-// the pack but does not open a file the pack only names. A rulebook pointer in an AGENTS.md finds its skill by name
-// (process/read.ts skillDir) in the first plugin that holds the skill, and a pointer no plugin resolves fails the pack.
-// **Today:** a pointer still names a reference file inside its skill, not the skill alone.
+// the pack but does not open a file the pack only names. A rulebook pointer in an AGENTS.md (rules.ts) names a skill:
+// section 3 holds that skill's SKILL.md the same way, found by name (skills.ts findSkills) in the first plugin that
+// holds it, and copied into the run folder (Pack.skills); a pointer to a baseline skill points at section 4, and a
+// pointer no plugin resolves fails the pack. A reference a pointer still names is dropped, and section 3 says so.
 // Every block sits in a fence longer than any backtick run inside it (fence.ts). One pack per head: a second call reuses
 // it. A step that fails leaves no pack behind, so a broken pack is never reused. A change with a control character in a
 // file name is refused, because that name could forge a line in the pack or the summary.
 
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 import type { Change } from "../forge/types.js";
@@ -29,9 +30,9 @@ import { hostGit } from "../git.js";
 import { plainBranch } from "../branch.js";
 import { checkSpec, readSpec, type Lane, type Spec, type SpecRead, type SpecStore } from "../spec.js";
 import { fence } from "./fence.js";
-import { skillDir, type PluginDir } from "../process/read.js";
-import type { Skill } from "./skills.js";
-import { agentsChain, readRules, type Pointer } from "./rules.js";
+import type { PluginDir } from "../process/read.js";
+import { findSkills, skillBlock, type Skill } from "./skills.js";
+import { agentsChain, mergePointers, readRules, type Pointer } from "./rules.js";
 
 export type Previous = { readonly kind: "none" } | { readonly kind: "head"; readonly sha: string };
 
@@ -69,6 +70,7 @@ export type Pack = {
   readonly criteria: readonly string[];
   readonly lane: Lane;
   readonly master: string;
+  readonly skills: readonly Skill[];
 };
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -189,7 +191,7 @@ type Collected = {
   readonly agents: readonly string[];
   readonly links: readonly string[];
   readonly pointers: readonly Pointer[];
-  readonly found: ReadonlyMap<string, string>;
+  readonly skills: readonly Skill[];
 };
 
 async function ruleText(git: Git, h: Heads, path: string): Promise<Result<string>> {
@@ -225,7 +227,7 @@ async function collectOne(
   return links.kind === "ok" ? { kind: "ok", value: { links: links.value, pointers: read.rules.pointers } } : links;
 }
 
-async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<Result<Omit<Collected, "found">>> {
+async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<Result<Omit<Collected, "skills">>> {
   const agents: string[] = [];
   const found: { links: string[]; pointers: Pointer[] } = { links: [], pointers: [] };
   for (const file of agentsChain(touched)) {
@@ -240,30 +242,25 @@ async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<
     found.links.push(...one.value.links);
     found.pointers.push(...one.value.pointers);
   }
-  return { kind: "ok", value: { agents, links: [...new Set(found.links)], pointers: found.pointers } };
-}
-
-function keyOf(p: Pointer): string {
-  return `${p.domain}/${p.reference}`;
+  return { kind: "ok", value: { agents, links: [...new Set(found.links)], pointers: mergePointers(found.pointers) } };
 }
 
 async function resolved(
   plugins: readonly PluginDir[],
   pointers: readonly Pointer[],
-): Promise<Result<ReadonlyMap<string, string>>> {
-  const found = new Map<string, string>();
-  for (const p of pointers) {
-    const dir = await skillDir(plugins, p.domain);
-    const path = dir === "" ? "" : join(dir, "references", `${p.reference}.md`);
-    if (path === "" || !(await exists(path))) {
-      return {
+  baseline: readonly Skill[],
+): Promise<Result<readonly Skill[]>> {
+  const inBaseline = new Set(baseline.map((s) => s.name));
+  const found = await findSkills(
+    plugins,
+    pointers.map((p) => p.skill).filter((name) => !inBaseline.has(name)),
+  );
+  return found.missing.length === 0
+    ? { kind: "ok", value: found.present }
+    : {
         kind: "failed",
-        reason: `unresolved rule pointer: no listed plugin has the ${p.domain} skill with a ${p.reference} reference`,
+        reason: `unresolved rule pointer: no listed plugin has skills/<name>/SKILL.md for ${found.missing.join(", ")}`,
       };
-    }
-    found.set(keyOf(p), path);
-  }
-  return { kind: "ok", value: found };
 }
 
 type Contract =
@@ -371,10 +368,37 @@ async function rulesSection(p: Parts): Promise<Result<string>> {
     const text = await ruleText(p.git, p.h, file);
     blocks.push(fence({ title: file, text: text.kind === "ok" ? text.value : "", info: "markdown" }));
   }
-  for (const [key, path] of p.rules.found) {
-    blocks.push(fence({ title: `rulebook ${key}`, text: await readFile(path, "utf8"), info: "markdown" }));
+  const skills = await skillBlocks(p.rules.skills);
+  if (skills.kind === "failed") {
+    return skills;
+  }
+  return { kind: "ok", value: [...blocks, skills.value, pointerNotes(p.rules.pointers, p.rules.skills)].join("") };
+}
+
+async function skillBlocks(skills: readonly Skill[]): Promise<Result<string>> {
+  const blocks: string[] = [];
+  for (const s of skills) {
+    const block = await skillBlock(s);
+    if (block.kind === "failed") {
+      return block;
+    }
+    blocks.push(block.value);
   }
   return { kind: "ok", value: blocks.join("") };
+}
+
+function pointerNotes(pointers: readonly Pointer[], pasted: readonly Skill[]): string {
+  const here = new Set(pasted.map((s) => s.name));
+  const notes = pointers.flatMap((p) => [
+    ...(here.has(p.skill)
+      ? []
+      : [`- The \`${p.skill}\` skill an AGENTS.md points at is a baseline skill: it is in section 4.`]),
+    ...p.dropped.map(
+      (r) =>
+        `- A pointer names the \`${r}\` reference of the \`${p.skill}\` skill. The engine names skills only, so it was dropped: find its rules through the skill's SKILL.md.`,
+    ),
+  ]);
+  return notes.length === 0 ? "" : `\n${notes.join("\n")}\n`;
 }
 
 function designs(design: string): { readonly files: readonly string[]; readonly urls: readonly string[] } {
@@ -475,17 +499,10 @@ async function editsSection(p: Parts): Promise<Result<string>> {
 type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly baseline: string };
 
 async function baselineSection(baseline: readonly Skill[]): Promise<Result<string>> {
-  const blocks: string[] = [];
-  for (const s of baseline) {
-    const path = join(s.dir, "SKILL.md");
-    const text = await readFile(path, "utf8").catch(() => undefined);
-    if (text === undefined) {
-      return { kind: "failed", reason: `cannot read the baseline skill ${path}` };
-    }
-    const where = `The whole \`${s.name}\` skill is in \`./skills/${s.name}/\`: its links resolve there. Open each linked file that applies to this change.`;
-    blocks.push(`${fence({ title: `skill ${s.name}`, text, info: "markdown" })}\n${where}\n`);
-  }
-  return { kind: "ok", value: `\nThe baseline review checks are these skills:\n${blocks.join("")}` };
+  const blocks = await skillBlocks(baseline);
+  return blocks.kind === "ok"
+    ? { kind: "ok", value: `\nThe baseline review checks are these skills:\n${blocks.value}` }
+    : blocks;
 }
 
 async function sections(p: Parts): Promise<Result<Sections>> {
@@ -582,8 +599,8 @@ async function resolvedRules(
   if (rules.kind === "failed") {
     return rules;
   }
-  const found = await resolved(input.plugins, rules.value.pointers);
-  return found.kind === "ok" ? { kind: "ok", value: { ...rules.value, found: found.value } } : found;
+  const skills = await resolved(input.plugins, rules.value.pointers, input.baseline);
+  return skills.kind === "ok" ? { kind: "ok", value: { ...rules.value, skills: skills.value } } : skills;
 }
 
 async function gather(input: PackInput, git: Git, h: Heads): Promise<Result<Parts>> {
@@ -648,6 +665,7 @@ export async function buildPack(input: PackInput): Promise<Result<Pack>> {
     criteria: criteriaOf(c),
     lane: laneOf(c),
     master: p.value.h.master,
+    skills: p.value.rules.skills,
   };
   if (await exists(path)) {
     return { kind: "ok", value: { ...pack, reused: true } };

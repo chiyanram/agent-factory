@@ -16,7 +16,7 @@
 //                 card can drop; a card that leaves out an input the run cannot do without is refused at the run
 //   hand_off      every field it names in {…} is a field of the engine's schema for the role (HAND_OFF), and what the
 //                 run returns is read with that schema (report.ts, design/findings.ts, review/verdicts.ts)
-// Every other field (steps, input, rules) is the card's own text: the engine reads no meaning into it. next is dropped:
+// Every other field (steps, input, skills) is the card's own text: the engine reads no meaning into it. next is dropped:
 // the lanes hold the flow; a card that still has it is read for one release, then refused (#424). Every run record carries the card's hash, so a person can tell which card a run used.
 
 import { createHash } from "node:crypto";

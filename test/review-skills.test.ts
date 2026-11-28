@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { baselineSkills, copySkills } from "../src/core/review/skills.js";
+import { findSkills, copySkills } from "../src/core/review/skills.js";
 import { tempDir } from "./temp.js";
 
 let root = "";
@@ -30,12 +30,12 @@ function tree(dir: string): readonly string[] {
     .toSorted();
 }
 
-describe("baselineSkills: each baseline skill, found by name (#920)", () => {
+describe("findSkills: each skill, found by name (#920)", () => {
   it("AC-4 takes the first listed plugin with skills/<name>/SKILL.md, and passes over a folder with none", async () => {
     const hollow = plugin("hollow", { "skills/crq/references/x.md": "x" });
     const team = plugin("team", { "skills/crq/SKILL.md": "TEAM" });
     const rulebook = plugin("rulebook", { "skills/crq/SKILL.md": "RB", "skills/code/SKILL.md": "RB" });
-    expect(await baselineSkills([hollow, team, rulebook], ["crq", "code"])).toEqual({
+    expect(await findSkills([hollow, team, rulebook], ["crq", "code"])).toEqual({
       present: [
         { name: "crq", dir: join(team.dir, "skills", "crq") },
         { name: "code", dir: join(rulebook.dir, "skills", "code") },
@@ -49,13 +49,13 @@ describe("baselineSkills: each baseline skill, found by name (#920)", () => {
     const linked = plugin("linked", { "skills/code/references/x.md": "x" });
     symlinkSync(join(real.dir, "skills", "crq"), join(linked.dir, "skills", "crq"));
     symlinkSync(join(real.dir, "skills", "code", "SKILL.md"), join(linked.dir, "skills", "code", "SKILL.md"));
-    expect(await baselineSkills([linked], ["crq", "code"])).toEqual({ present: [], missing: ["crq", "code"] });
+    expect(await findSkills([linked], ["crq", "code"])).toEqual({ present: [], missing: ["crq", "code"] });
   });
 
   it("AC-4 counts a name as missing when no plugin holds its SKILL.md", async () => {
     const hollow = plugin("hollow", { "skills/code/references/smells.md": "x", "skills/crq/SKILL.md": "x" });
-    expect(await baselineSkills([hollow], ["crq", "code"])).toMatchObject({ missing: ["code"] });
-    expect(await baselineSkills([], ["crq", "code"])).toEqual({ present: [], missing: ["crq", "code"] });
+    expect(await findSkills([hollow], ["crq", "code"])).toMatchObject({ missing: ["code"] });
+    expect(await findSkills([], ["crq", "code"])).toEqual({ present: [], missing: ["crq", "code"] });
   });
 });
 
@@ -68,7 +68,7 @@ describe("copySkills: the baseline skills in a run folder (#920)", () => {
       "skills/code/SKILL.md": "CODE",
     };
     const rulebook = plugin("rulebook", files);
-    const skills = await baselineSkills([rulebook], ["crq", "code"]);
+    const skills = await findSkills([rulebook], ["crq", "code"]);
     const run = join(root, "run");
     expect(await copySkills(skills.present, run)).toEqual({ kind: "ok", value: undefined });
     expect(tree(join(run, "skills"))).toEqual(
@@ -91,7 +91,7 @@ describe("copySkills: the baseline skills in a run folder (#920)", () => {
     });
     symlinkSync(join(rulebook.dir, "outside.md"), join(rulebook.dir, "skills", "crq", "link.md"));
     const run = join(root, "run");
-    await copySkills((await baselineSkills([rulebook], ["crq"])).present, run);
+    await copySkills((await findSkills([rulebook], ["crq"])).present, run);
     expect(tree(join(run, "skills"))).toEqual(["crq/SKILL.md"]);
     expect(existsSync(join(run, "skills", "crq", ".claude"))).toBe(false);
   });

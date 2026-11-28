@@ -6,7 +6,7 @@ must_not_see: the implementer's report or account; the coordinator's conversatio
 hand_off: the JSON the run returns, no file; one entry per finding {id, bucket: act_on | consider | noted | dismissed, why, severity: blocker | warning | nit, grade: cited | walked | ran}; severity and grade only when lowered
 tools: [Read, Grep, Glob]
 enforced_guardrails: [read-only]
-rules: [RV1, RV2, RV4, RV6, RV7, RV8]
+skills: [code]
 ---
 
 # Verify pass

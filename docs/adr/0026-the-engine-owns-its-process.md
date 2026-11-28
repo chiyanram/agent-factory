@@ -25,9 +25,6 @@ The rulebook plugin also ships hooks.
 | E4 | **A writer run loads plugins with `--plugin-dir`**, as before. |
 | E5 | **P18 becomes one contract by name.** The pinned rules pack holds each skill the engine names, and CI checks that (`test/rules-pack.test.ts`). |
 
-**Today:** the review still fences the rulebook's `references/` files by name, and no read-only run copies a skill
-folder yet (#920).
-
 ## Consequences
 
 - A change to a skill's files cannot stop a run. It can only change what a run reads, and the pin's eval proof
