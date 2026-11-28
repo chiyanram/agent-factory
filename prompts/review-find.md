@@ -30,5 +30,15 @@ Give two verdicts, kept apart:
 
 For each finding give: `id` (F1, F2, …), `axis` (standards or spec), `kind` (rule or logic), `file` (the path in the
 repo, without `code/`), `line` (a line at the head), `rule`,
-`severity` (blocker, warning or nit), `finding` (one or two sentences, concrete), `fix` (one sentence). An empty list
-is a valid answer. "I would have done it differently" is not a finding.
+`severity` (blocker, warning or nit), `grade`, `finding` (one or two sentences, concrete), `fix` (one sentence). An
+empty list is a valid answer. "I would have done it differently" is not a finding.
+
+`grade` is how far you proved the finding:
+
+- `cited`: you name the `file:line`, but you did not follow the code from it;
+- `walked`: you read the path through the code, from the changed line to the wrong result, and you say that path;
+- `ran`: you ran it, which you cannot do here.
+
+A `cited` finding never goes to Act on, because a finding that reads right convinces whether or not it is true. Walk
+the path before you report a finding you think must be fixed, and grade it `walked`. The verify pass can lower a grade
+or a severity, never raise it.
