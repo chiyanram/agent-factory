@@ -82,6 +82,7 @@ function inputOf(p: Parsed, s: EvalSettings, io: EvalIo, work: string): EvalInpu
     settings: s,
     now: new Date(),
     log: (line) => io.err(`${line}\n`),
+    streams: `${work}-streams`,
   };
 }
 

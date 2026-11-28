@@ -36,7 +36,7 @@ async function cli(argv: readonly string[]): Promise<Run> {
 }
 
 const update = (...more: string[]) => cli(["plugin", "update", "ledger", "rulebook@chiyanram", ...more]);
-const LANES_PATH = "plugins/rulebook/skills/crq/process/lanes.json";
+const LANES_PATH = "plugins/rulebook/skills/flow/process/lanes.json";
 const REVIEW_PATH = "plugins/rulebook/skills/crq/references/code-review.md";
 const WHY = ["--reason", "the manifest and lanes: no eval tests them"];
 
@@ -62,13 +62,13 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     const bare = await update();
     expect(bare.code).toBe(1);
     expect(bare.err).toContain(
-      "files no eval can prove yet (.claude-plugin/plugin.json, skills/crq/process/lanes.json)",
+      "files no eval can prove yet (.claude-plugin/plugin.json, skills/flow/process/lanes.json)",
     );
     expect(bare.err).toContain("the pin stays at not pinned");
     const r = await update(...WHY);
     expect(r).toMatchObject({ code: 0, err: "" });
     expect(r.out).toContain(`rulebook@chiyanram: not pinned -> ${first.slice(0, 12)} 1.1.0 sha256:`);
-    expect(r.out).toContain("+ 1 file in skills/crq\n");
+    expect(r.out).toContain("+ 1 file in skills/flow\n");
     expect(r.out).toContain("eval size: none\n");
     const pins = await readPins(home, "ledger");
     const sha256 = pins.kind === "ok" ? (pins.value["rulebook@chiyanram"]?.sha256 ?? "") : "";
@@ -94,7 +94,7 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     const second = commitMarket(home, { [LANES_PATH]: loose });
     const moved = await update(...WHY);
     expect(moved).toMatchObject({ code: 0, err: "" });
-    expect(moved.out).toContain("~ skills/crq/process/lanes.json");
+    expect(moved.out).toContain("~ skills/flow/process/lanes.json");
     expect(moved.out).toContain(`pinned rulebook@chiyanram at ${second.slice(0, 12)}`);
     const back = await update(first, ...WHY);
     expect(back.out).toContain(`-> ${first.slice(0, 12)}`);
@@ -105,11 +105,11 @@ describe("plugin update <project> <name@marketplace> (#232)", () => {
     await update(...WHY);
     const card = commitMarket(home, {
       [LANES_PATH]: LANES,
-      "plugins/rulebook/skills/crq/process/roles/implementer.md": "x",
+      "plugins/rulebook/skills/flow/process/roles/implementer.md": "x",
     });
     const bare = await update();
     expect(bare.code).toBe(1);
-    expect(bare.out).toContain("eval size: writer\n  writer: skills/crq/process/roles/implementer.md\n");
+    expect(bare.out).toContain("eval size: writer\n  writer: skills/flow/process/roles/implementer.md\n");
     expect(bare.err).toContain("there is no implementer eval yet (#824)");
     expect(bare.err).not.toContain("run the eval first");
     expect(pinOf().commit).toBe(first);

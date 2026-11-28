@@ -9,7 +9,7 @@ import { commitMarket, GIT_ENV, LANES, setUpMarket } from "./market.js";
 import { tempDir } from "./temp.js";
 
 const REF = { name: "rulebook", marketplace: "chiyanram" };
-const LANES_PATH = "plugins/rulebook/skills/crq/process/lanes.json";
+const LANES_PATH = "plugins/rulebook/skills/flow/process/lanes.json";
 const REVIEW_PATH = "plugins/rulebook/skills/crq/references/code-review.md";
 const WHY = ["--reason", "the manifest and lanes: no eval tests them"];
 
@@ -112,12 +112,12 @@ describe("agent-factory eval pin", () => {
     const [file = ""] = readdirSync(join(repo, "evals", "pins", "rulebook@chiyanram"));
     const proof = JSON.parse(readFileSync(join(repo, "evals", "pins", "rulebook@chiyanram", file), "utf8"));
     expect(proof).toMatchObject({ size: "none", review: null, base: null, reason: WHY[1] });
-    expect(proof.uncovered).toEqual([".claude-plugin/plugin.json", "skills/crq/process/lanes.json"]);
+    expect(proof.uncovered).toEqual([".claude-plugin/plugin.json", "skills/flow/process/lanes.json"]);
   });
 
   it("spends nothing on the writer's size: it needs a reason, and no eval can prove it yet", async () => {
     await pinFirst();
-    commitMarket(home, { [LANES_PATH]: LANES, "plugins/rulebook/skills/crq/process/roles/implementer.md": "x" });
+    commitMarket(home, { [LANES_PATH]: LANES, "plugins/rulebook/skills/flow/process/roles/implementer.md": "x" });
     const r = await evalPin([]);
     expect(r).toMatchObject({ code: 1, passes: [] });
     expect(r.err).toContain("there is no implementer eval yet (#824)");

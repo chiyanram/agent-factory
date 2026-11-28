@@ -17,4 +17,8 @@ exactly one bucket, with a one-line `why`:
 
 A finding on code the diff does not touch holds only when the changed line it names really breaks that code.
 
+You may give a `severity` or a `grade` (cited, walked, ran) lower than the finding's own, never higher: a raised one
+is refused, and the finding goes to `consider`. A finding graded `cited` goes to `consider` even when you put it in
+`act_on`, because only a walked path proves it.
+
 Give every finding id exactly one verdict.

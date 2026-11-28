@@ -217,7 +217,7 @@ describe("rulesPackProblems: the engine's own pin moves only with a proof", () =
       sha256: SHA,
       base: { commit: OLD_PACK, sha256: "b".repeat(64) },
       changed: [review],
-      baseline: [{ domain: "crq", reference: "code-review" }],
+      baseline: ["crq", "code"],
       size: "review",
       uncovered: [],
       reason: "",
@@ -248,9 +248,9 @@ describe("rulesPackProblems: the engine's own pin moves only with a proof", () =
     const why = (over: Record<string, unknown>, hash?: string) =>
       rulesPackProblems(moved(new Map([[PROOF, proof(over)]]), hash)).join("\n");
     expect(why({ size: "none" })).toContain("its size none does not cover the review its changed paths need");
-    const writer = { changed: ["~ skills/crq/process/roles/implementer.md"], size: "none" };
+    const writer = { changed: ["~ skills/flow/process/roles/implementer.md"], size: "none" };
     expect(why(writer)).toContain(
-      "no eval can prove yet (skills/crq/process/roles/implementer.md) and gives no reason",
+      "no eval can prove yet (skills/flow/process/roles/implementer.md) and gives no reason",
     );
     expect(why({ ...writer, reason: "by hand" })).toBe("");
     expect(why({ base: { commit: "1".repeat(40) } })).toContain(`not the old pin ${OLD_PACK}`);

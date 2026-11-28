@@ -2,19 +2,15 @@
 // the root AGENTS.md and every nested AGENTS.md on its path, the project files they link to, and each rulebook
 // reference they point at ("use the `<domain>` skill (rulebook plugin) and read its `<reference>` reference"). A
 // pointer or a link the pack cannot resolve stops it: a rule that named a missing skill was once skipped in silence
-// (docs/archive/research/46 G9). Fenced code blocks are examples, not rules. The rest is read as one line, so a pointer
+// (docs/archive/research/46 G9). The baseline every review is held to is the skills BASELINE names, by name alone
+// (docs/adr/0026-the-engine-owns-its-process.md). Fenced code blocks are examples, not rules. The rest is read as one line, so a pointer
 // that wraps still parses.
 
 import { prose } from "./fence.js";
 
 export type Pointer = { readonly domain: string; readonly reference: string };
 
-export const BASELINE: readonly Pointer[] = [
-  { domain: "crq", reference: "review-process" },
-  { domain: "crq", reference: "code-review" },
-  { domain: "crq", reference: "verify-done" },
-  { domain: "code", reference: "smells" },
-];
+export const BASELINE: readonly string[] = ["crq", "code"];
 
 export type FileRules = {
   readonly pointers: readonly Pointer[];

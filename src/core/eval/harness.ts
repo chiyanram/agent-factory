@@ -14,7 +14,7 @@
 //
 // The operator's approval of a case in cases.md stands for the approval of its spec, so the pass writes that approval
 // in its own home, never the real factory home. Its clones and run folders live in a private folder, never under a
-// world-writable /tmp.
+// world-writable /tmp. When the caller names a streams folder, each review run's stream is kept there (streams.ts).
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -32,6 +32,7 @@ import type { Aim } from "./bar.js";
 import { MAX_FINDERS, reviewSetup, runLimitsOf, type RunLimits } from "../review/settings.js";
 import { settingOf } from "../settings/machine.js";
 import { attempt } from "../review/safe.js";
+import { keepStreams } from "./streams.js";
 import {
   capped,
   CAP_USD,
@@ -79,6 +80,7 @@ export type EvalInput = {
   readonly runs?: number;
   readonly rulebookCommit?: string;
   readonly resultsDir?: string;
+  readonly streams?: string;
 };
 
 export type Written = { readonly path: string; readonly partial: boolean; readonly proof: boolean };
@@ -183,7 +185,12 @@ async function inputsOf(ctx: Ctx, setup: ReviewSetup): Promise<Result<Inputs>> {
   };
 }
 
-function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, description: string): ReviewSetup {
+function modelFor(ctx: Ctx, name: string, run: number): Model {
+  return ctx.streams === undefined || name === "" ? ctx.capped : keepStreams(ctx.capped, join(ctx.streams, name), run);
+}
+
+function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, c: Pick<Case, "name" | "pr">): ReviewSetup {
+  const description = c.pr;
   const change = evalChange({ number: run, head: cloned.head, branch: cloned.branch, label: LABEL, description });
   const setup = reviewSetup({
     env: ctx.env,
@@ -200,7 +207,7 @@ function setupFor(ctx: Ctx, cloned: Cloned, home: string, run: number, descripti
       limits: { finder: ctx.settings.limits.finder, verify: ctx.settings.limits.verify },
     },
     plugins: [{ label: "the eval's plugin", dir: ctx.rulebook }],
-    model: ctx.capped,
+    model: modelFor(ctx, c.name, run),
     sessions: async () => ({ kind: "ok", value: [] }),
   });
   return { ...setup, label: LABEL };
@@ -248,7 +255,7 @@ function roundOf(round: Result<Outcome>): { readonly outcome: string; readonly e
 
 async function oneRun(ctx: Ctx, c: Case, cloned: Cloned, home: string, run: number, judge: Judge): Promise<RunRecord> {
   const before = ctx.purse.spent();
-  const setup = setupFor(ctx, cloned, home, run, c.pr);
+  const setup = setupFor(ctx, cloned, home, run, c);
   const round = roundOf(await reviewRound(setup));
   const found = round.outcome === "posted" ? await actOn(setup, cloned.head) : [];
   const seeds = await matchRun(c.golden, found, judge);
@@ -374,6 +381,9 @@ export async function evalReviewer(input: EvalInput): Promise<Result<Written>> {
     return started;
   }
   const { ctx, list, skipped } = started.value;
+  if (ctx.streams !== undefined) {
+    ctx.log(`eval reviewer: each review run's stream is kept in ${ctx.streams}`);
+  }
   await mkdir(ctx.work, { recursive: true, mode: 0o700 });
   try {
     return await pass(ctx, list, skipped);
@@ -387,7 +397,7 @@ function resultsDirOf(ctx: Ctx): string {
 }
 
 async function pass(ctx: Ctx, list: readonly Case[], skipped: readonly Row[]): Promise<Result<Written>> {
-  const probe = setupFor(ctx, { repo: ctx.root, head: "", branch: "" }, ctx.work, 1, "");
+  const probe = setupFor(ctx, { repo: ctx.root, head: "", branch: "" }, ctx.work, 1, { name: "", pr: "" });
   const inputs = await inputsOf(ctx, probe);
   if (inputs.kind === "failed") {
     return inputs;

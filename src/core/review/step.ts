@@ -45,17 +45,21 @@ type ActOn = Result<{
   readonly lenses?: Readonly<Record<string, number>>;
   readonly citesNotFound?: number;
   readonly found?: FoundByRule;
+  readonly skillsMissing?: readonly string[];
 }>;
 type Mappers = { readonly [K in keyof OutcomeMap]: (o: OutcomeMap[K]) => ActOn };
 
 const MAP: Mappers = {
-  posted: (o) => ({
-    kind: "ok",
-    value:
-      o.acted === "none"
-        ? { actOn: o.counts.act_on, lenses: o.lenses, citesNotFound: o.citesNotFound, found: o.found }
-        : { actOn: o.counts.act_on, acted: o.acted, lenses: o.lenses, citesNotFound: o.citesNotFound, found: o.found },
-  }),
+  posted: (o) => {
+    const base = {
+      actOn: o.counts.act_on,
+      lenses: o.lenses,
+      citesNotFound: o.citesNotFound,
+      found: o.found,
+      ...(o.skillsMissing.length === 0 ? {} : { skillsMissing: o.skillsMissing }),
+    };
+    return { kind: "ok", value: o.acted === "none" ? base : { ...base, acted: o.acted } };
+  },
   reused: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   already: (o) => ({ kind: "ok", value: { actOn: o.actOn } }),
   "no-progress": () => ({ kind: "ok", value: { actOn: 1 } }),

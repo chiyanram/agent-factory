@@ -1,11 +1,8 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { changedPath, covers, referencePath, sizeOf, SIZES } from "../src/core/eval/pin-size.js";
+import { changedPath, covers, sizeOf, SIZES } from "../src/core/eval/pin-size.js";
 import { ROLE_TOOLS } from "../src/core/process/cards.js";
 import { BASELINE } from "../src/core/review/rules.js";
 
-const RULEBOOK = join(import.meta.dirname, "..", "tests", "fixtures", "pack", "rulebook");
 const card = (role: string) => `~ skills/crq/process/roles/${role}.md`;
 
 describe("sizeOf: the eval a pin move needs", () => {
@@ -19,32 +16,40 @@ describe("sizeOf: the eval a pin move needs", () => {
     expect(sizeOf([], BASELINE).size).toBe("none");
   });
 
-  it("review: a reference the review baseline points to, review.json, and the finder and verify-pass cards", () => {
-    const refs = BASELINE.map((p) => `~ ${referencePath(p)}`);
-    expect(sizeOf(refs, BASELINE)).toMatchObject({ size: "review", review: refs.map(changedPath).toSorted() });
+  it("review: every file of a baseline skill, review.json, and the finder and verify-pass cards", () => {
+    const files = [
+      "~ skills/crq/SKILL.md",
+      "+ skills/code/references/errors.md",
+      "- skills/code/references/smells.md",
+      "~ skills/crq/process/lanes.json",
+    ];
+    expect(sizeOf(files, BASELINE)).toMatchObject({ size: "review", review: files.map(changedPath).toSorted() });
     expect(sizeOf(["~ skills/crq/process/review.json", card("finder"), card("verify-pass")], []).size).toBe("review");
-    const extra = { domain: "testing", reference: "llm-tests" };
-    expect(sizeOf(["~ skills/testing/references/llm-tests.md"], [extra]).size).toBe("review");
+    expect(sizeOf(["~ skills/testing/references/llm-tests.md"], ["testing"]).size).toBe("review");
+    expect(sizeOf(["~ skills/crqx/SKILL.md"], BASELINE).size).toBe("both");
   });
 
-  it("writer: the implementer card", () => {
-    const s = sizeOf([card("implementer"), card("test-first")], BASELINE);
+  it("writer: the implementer card outside a baseline skill", () => {
+    const s = sizeOf([card("implementer"), card("test-first")], []);
     expect(s).toMatchObject({ size: "writer", review: [], other: [], writer: [changedPath(card("implementer"))] });
   });
 
-  it("both: review and writer paths together, or any path the map does not name, so it fails closed", () => {
-    expect(
-      sizeOf([`~ ${referencePath(BASELINE[0] ?? { domain: "", reference: "" })}`, card("implementer")], BASELINE).size,
-    ).toBe("both");
+  it("both: the implementer card inside a baseline skill, review and writer paths together, or any path the map does not name", () => {
+    expect(sizeOf([card("implementer")], BASELINE)).toMatchObject({
+      size: "both",
+      review: [changedPath(card("implementer"))],
+      writer: [changedPath(card("implementer"))],
+    });
+    expect(sizeOf(["~ skills/code/SKILL.md", card("implementer")], []).size).toBe("both");
     const unknown = sizeOf(["+ skills/code/references/smells.md", "~ skills/deslop/SKILL.md"], []);
     expect(unknown).toMatchObject({
       size: "both",
       other: ["skills/code/references/smells.md", "skills/deslop/SKILL.md"],
     });
-    expect(sizeOf([card("coordinator")], BASELINE).size).toBe("both");
+    expect(sizeOf([card("coordinator")], []).size).toBe("both");
   });
 
-  it("names the files no eval tests, and they add no size", () => {
+  it("names the files no eval tests, which add no size outside a baseline skill and the review size inside one", () => {
     const untested = [
       card("test-first"),
       card("cleanup"),
@@ -57,26 +62,27 @@ describe("sizeOf: the eval a pin move needs", () => {
       "~ skills/crq/process/glossary.md",
       "~ skills/crq/process/schema/card-v1.schema.json",
     ];
-    const s = sizeOf(untested, BASELINE);
+    const s = sizeOf(untested, []);
     expect(s).toMatchObject({ size: "none", other: [] });
     expect(s.uncovered).toHaveLength(untested.length);
-    expect(sizeOf([...untested, card("finder")], BASELINE)).toMatchObject({ size: "review" });
+    expect(sizeOf([...untested, card("finder")], [])).toMatchObject({ size: "review" });
+    const inCrq = sizeOf(untested, BASELINE);
+    expect(inCrq).toMatchObject({ size: "review", other: [] });
+    expect(inCrq.uncovered).toHaveLength(untested.length);
+    expect(inCrq.review).toEqual(
+      untested
+        .filter((p) => p.includes("skills/crq/"))
+        .map(changedPath)
+        .toSorted(),
+    );
   });
 
   it("puts every role the engine reads a card for in a named size, so a new role cannot slip past the map", () => {
     for (const role of [...Object.keys(ROLE_TOOLS), "finder"]) {
-      const s = sizeOf([card(role)], BASELINE);
+      const s = sizeOf([card(role)], []);
       expect({ role, sized: [s.review, s.writer, s.uncovered].flat() }).toEqual({
         role,
         sized: [changedPath(card(role))],
-      });
-    }
-  });
-
-  it("maps each baseline pointer to the file the review reads", () => {
-    for (const p of BASELINE) {
-      expect({ path: referencePath(p), there: existsSync(join(RULEBOOK, referencePath(p))) }).toMatchObject({
-        there: true,
       });
     }
   });

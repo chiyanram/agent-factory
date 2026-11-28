@@ -118,6 +118,16 @@ function citesField(raw: unknown): { readonly citesNotFound?: number } | Bad {
   return isCount(n) ? { citesNotFound: Number(n) } : BAD;
 }
 
+function skillsMissingField(raw: unknown): { readonly skillsMissing?: readonly string[] } | Bad {
+  const names = prop(raw, "skillsMissing");
+  if (names === undefined) {
+    return {};
+  }
+  return Array.isArray(names) && names.length > 0 && names.every((n) => typeof n === "string" && n !== "")
+    ? { skillsMissing: names }
+    : BAD;
+}
+
 const FOUND_BUCKETS: ReadonlySet<string> = new Set(BUCKETS);
 
 function isBucketCounts(value: unknown): boolean {
@@ -213,6 +223,7 @@ export function reviewEndedOf(raw: unknown, at: string): Event | Bad {
     lensesField(raw),
     citesField(raw),
     foundField(raw),
+    skillsMissingField(raw),
     tracesField(raw),
   ];
   const good = extras.flatMap((e) => (e === BAD ? [] : [e]));

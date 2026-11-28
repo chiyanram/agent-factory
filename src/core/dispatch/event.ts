@@ -139,6 +139,7 @@ export type Event =
       readonly lenses?: Readonly<Record<string, number>>;
       readonly citesNotFound?: number;
       readonly found?: FoundByRule;
+      readonly skillsMissing?: readonly string[];
       readonly traces?: readonly string[];
       readonly runs?: readonly RunNamed[];
       readonly reason: "done";

@@ -36,7 +36,7 @@ describe("fetching a plugin version (#232)", () => {
     const f = await fetched();
     expect(f).toMatchObject({ commit: first, version: "1.1.0" });
     expect(f.dir).toBe(join(home, "plugins", "chiyanram", "rulebook", f.sha256));
-    expect(f.files.map((l) => l.slice(67))).toEqual([".claude-plugin/plugin.json", "skills/crq/process/lanes.json"]);
+    expect(f.files.map((l) => l.slice(67))).toEqual([".claude-plugin/plugin.json", "skills/flow/process/lanes.json"]);
     expect(readFileSync(join(f.dir, ".claude-plugin", "plugin.json"), "utf8")).toContain("rulebook");
     expect(await treeHash(f.dir)).toMatchObject({ kind: "ok", value: { sha256: f.sha256 } });
     const second = commitMarket(home, { "plugins/rulebook/NEW.md": "x" });

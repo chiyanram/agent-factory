@@ -50,7 +50,7 @@ async function attributes(input: CopyInput): Promise<readonly string[] | "failed
     : "failed";
 }
 
-function ruleOrLink(name: string, s: Awaited<ReturnType<typeof lstat>>): boolean {
+export function ruleOrLink(name: string, s: Awaited<ReturnType<typeof lstat>>): boolean {
   const lower = name.toLowerCase();
   return s.isSymbolicLink() || RULE_FILES.has(lower) || (s.isDirectory() && RULE_DIRS.has(lower));
 }

@@ -5,7 +5,8 @@
 //   lensSetupOf   the project's lenses ("review.lenses"), one-way-door paths and test files, with the layers resolved;
 //                 no project file is no lenses, no one-way door and the built-in test files
 //   roundLenses   the lenses a round picks from: the project's, or with none the baseline lens alone, and always the
-//                 test-integrity lens, the crq test-integrity reference, unless the project names its own
+//                 test-integrity lens, the crq test-integrity reference in the first plugin that holds crq, unless the
+//                 project names its own
 //   touchedOf     the files the change touches, and whether each was there before
 //   rubricText    a lens's rubric: a skill's SKILL.md or reference in an enabled plugin, or a repo file at the default
 //                 branch's commit the rules came from; never from the change, so a change cannot rewrite its rubric
@@ -16,7 +17,7 @@ import { join } from "node:path";
 import type { Result } from "../forge/api.js";
 import { hostGit } from "../git.js";
 import { oneWayDoorPathsOf } from "../lane.js";
-import type { PluginDir } from "../process/read.js";
+import { skillDir, type PluginDir } from "../process/read.js";
 import { readProjectRaw } from "../project.js";
 import { TEST_FILES } from "../ready/floor.js";
 import { fence } from "./fence.js";
@@ -89,22 +90,29 @@ export function touchedOf(nameStatus: string): readonly Touched[] {
   return touched;
 }
 
-function pluginDir(plugin: string, references: string, plugins: readonly PluginDir[]): string | undefined {
-  if (plugin === "") {
-    return references;
+async function skillFolder(
+  rubric: Extract<Rubric, { readonly kind: "skill" }>,
+  plugins: readonly PluginDir[],
+): Promise<Result<string>> {
+  if (rubric.plugin === "") {
+    const dir = await skillDir(plugins, rubric.skill);
+    return dir === "" ? failed(`no listed plugin has the ${rubric.skill} skill`) : { kind: "ok", value: dir };
   }
-  return plugins.find((p) => p.label === plugin || p.label.startsWith(`${plugin}@`))?.dir;
+  const dir = plugins.find((p) => p.label === rubric.plugin || p.label.startsWith(`${rubric.plugin}@`))?.dir;
+  return dir === undefined
+    ? failed(`no enabled plugin is named ${rubric.plugin}`)
+    : { kind: "ok", value: join(dir, "skills", rubric.skill) };
 }
 
 async function skillText(
   rubric: Extract<Rubric, { readonly kind: "skill" }>,
-  from: { readonly references: string; readonly plugins: readonly PluginDir[] },
+  plugins: readonly PluginDir[],
 ): Promise<Result<string>> {
-  const dir = pluginDir(rubric.plugin, from.references, from.plugins);
-  if (dir === undefined) {
-    return failed(`no enabled plugin is named ${rubric.plugin}`);
+  const folder = await skillFolder(rubric, plugins);
+  if (folder.kind === "failed") {
+    return folder;
   }
-  const skill = join(dir, "skills", rubric.skill);
+  const skill = folder.value;
   const path =
     rubric.reference === undefined ? join(skill, "SKILL.md") : join(skill, "references", `${rubric.reference}.md`);
   const text = await readFile(path, "utf8").catch(() => undefined);
@@ -129,7 +137,6 @@ async function fileText(
 export async function rubricText(
   lens: Lens,
   from: {
-    readonly references: string;
     readonly plugins: readonly PluginDir[];
     readonly repo: string;
     readonly env: NodeJS.ProcessEnv;
@@ -142,7 +149,7 @@ export async function rubricText(
       ? { kind: "ok" as const, value: "" }
       : r.kind === "file"
         ? await fileText(r.path, from)
-        : await skillText(r, from);
+        : await skillText(r, from.plugins);
   return text.kind === "ok" ? text : failed(`the rubric of the lens ${lens.name}: ${text.reason}`);
 }
 

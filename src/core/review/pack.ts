@@ -11,8 +11,12 @@
 // names the spec's hash, not its text (#164, #224). The spec counts only while its hash is the one the approval records;
 // a spec edited after approval, or never approved, is named in section 5 for the reviewer to report, and no spec in the
 // store fails the pack, so a review never runs with an empty contract.
-// Section 4 always holds the baseline review checks (rules.ts BASELINE), whatever the AGENTS.md files say; a pointer
-// to one of them is not repeated in section 3, and a missing one fails the pack (#226).
+// Section 4 always holds the SKILL.md of each baseline review skill (rules.ts BASELINE) the plugins hold, whatever the
+// AGENTS.md files say, and names the copy of the whole skill in the run's own folder (skills.ts) for the files it
+// links. SKILL.md is the one file a skill always has, so the engine names no other file inside it, and a run reads
+// the pack but does not open a file the pack only names. A rulebook pointer in an AGENTS.md finds its skill by name
+// (process/read.ts skillDir) in the first plugin that holds the skill, and a pointer no plugin resolves fails the pack.
+// **Today:** a pointer still names a reference file inside its skill, not the skill alone.
 // Every block sits in a fence longer than any backtick run inside it (fence.ts). One pack per head: a second call reuses
 // it. A step that fails leaves no pack behind, so a broken pack is never reused. A change with a control character in a
 // file name is refused, because that name could forge a line in the pack or the summary.
@@ -25,7 +29,9 @@ import { hostGit } from "../git.js";
 import { plainBranch } from "../branch.js";
 import { checkSpec, readSpec, type Lane, type Spec, type SpecRead, type SpecStore } from "../spec.js";
 import { fence } from "./fence.js";
-import { agentsChain, BASELINE, readRules, type Pointer } from "./rules.js";
+import { skillDir, type PluginDir } from "../process/read.js";
+import type { Skill } from "./skills.js";
+import { agentsChain, readRules, type Pointer } from "./rules.js";
 
 export type Previous = { readonly kind: "none" } | { readonly kind: "head"; readonly sha: string };
 
@@ -45,8 +51,8 @@ export type PackInput = {
   readonly env: NodeJS.ProcessEnv;
   readonly change: Change;
   readonly defaultBranch: string;
-  readonly rulebook: string;
-  readonly baseline?: readonly Pointer[];
+  readonly plugins: readonly PluginDir[];
+  readonly baseline: readonly Skill[];
   readonly previous: Previous;
   readonly spec: SpecSource;
   readonly deviations?: readonly string[];
@@ -120,25 +126,6 @@ function shapeProblem(input: PackInput): string {
   return plain ? previousProblem(input.previous) : `${input.mark}${c.number}: a branch name that is not plain`;
 }
 
-async function missingBaseline(rulebook: string, baseline: readonly Pointer[]): Promise<string> {
-  for (const p of baseline) {
-    const path = referencePath(rulebook, p);
-    if (!(await exists(path))) {
-      return `the rulebook ${JSON.stringify(rulebook)} has no baseline review check ${p.domain}/${p.reference} (${path}); it must be the plugin folder`;
-    }
-  }
-  return "";
-}
-
-function baselineOf(input: PackInput): readonly Pointer[] {
-  return input.baseline ?? BASELINE;
-}
-
-async function precheck(input: PackInput): Promise<string> {
-  const missing = await missingBaseline(input.rulebook, baselineOf(input));
-  return missing === "" ? shapeProblem(input) : missing;
-}
-
 type Heads = { readonly head: string; readonly master: string; readonly base: string };
 
 async function trimmed(git: Git, args: readonly string[]): Promise<Result<string>> {
@@ -202,6 +189,7 @@ type Collected = {
   readonly agents: readonly string[];
   readonly links: readonly string[];
   readonly pointers: readonly Pointer[];
+  readonly found: ReadonlyMap<string, string>;
 };
 
 async function ruleText(git: Git, h: Heads, path: string): Promise<Result<string>> {
@@ -237,7 +225,7 @@ async function collectOne(
   return links.kind === "ok" ? { kind: "ok", value: { links: links.value, pointers: read.rules.pointers } } : links;
 }
 
-async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<Result<Collected>> {
+async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<Result<Omit<Collected, "found">>> {
   const agents: string[] = [];
   const found: { links: string[]; pointers: Pointer[] } = { links: [], pointers: [] };
   for (const file of agentsChain(touched)) {
@@ -255,17 +243,27 @@ async function collect(git: Git, h: Heads, touched: readonly string[]): Promise<
   return { kind: "ok", value: { agents, links: [...new Set(found.links)], pointers: found.pointers } };
 }
 
-function referencePath(rulebook: string, p: Pointer): string {
-  return join(rulebook, "skills", p.domain, "references", `${p.reference}.md`);
+function keyOf(p: Pointer): string {
+  return `${p.domain}/${p.reference}`;
 }
 
-async function unresolved(rulebook: string, pointers: readonly Pointer[]): Promise<string> {
+async function resolved(
+  plugins: readonly PluginDir[],
+  pointers: readonly Pointer[],
+): Promise<Result<ReadonlyMap<string, string>>> {
+  const found = new Map<string, string>();
   for (const p of pointers) {
-    if (!(await exists(referencePath(rulebook, p)))) {
-      return `unresolved rule pointer: the ${p.domain} skill has no ${p.reference} reference in ${rulebook}`;
+    const dir = await skillDir(plugins, p.domain);
+    const path = dir === "" ? "" : join(dir, "references", `${p.reference}.md`);
+    if (path === "" || !(await exists(path))) {
+      return {
+        kind: "failed",
+        reason: `unresolved rule pointer: no listed plugin has the ${p.domain} skill with a ${p.reference} reference`,
+      };
     }
+    found.set(keyOf(p), path);
   }
-  return "";
+  return { kind: "ok", value: found };
 }
 
 type Contract =
@@ -373,19 +371,8 @@ async function rulesSection(p: Parts): Promise<Result<string>> {
     const text = await ruleText(p.git, p.h, file);
     blocks.push(fence({ title: file, text: text.kind === "ok" ? text.value : "", info: "markdown" }));
   }
-  const seen = new Set<string>(baselineOf(p.input).map((b) => `${b.domain}/${b.reference}`));
-  for (const ptr of p.rules.pointers) {
-    const key = `${ptr.domain}/${ptr.reference}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      blocks.push(
-        fence({
-          title: `rulebook ${key}`,
-          text: await readFile(referencePath(p.input.rulebook, ptr), "utf8"),
-          info: "markdown",
-        }),
-      );
-    }
+  for (const [key, path] of p.rules.found) {
+    blocks.push(fence({ title: `rulebook ${key}`, text: await readFile(path, "utf8"), info: "markdown" }));
   }
   return { kind: "ok", value: blocks.join("") };
 }
@@ -487,20 +474,18 @@ async function editsSection(p: Parts): Promise<Result<string>> {
 
 type Sections = { readonly change: string; readonly rules: string; readonly edits: string; readonly baseline: string };
 
-async function baselineSection(rulebook: string, baseline: readonly Pointer[]): Promise<Result<string>> {
+async function baselineSection(baseline: readonly Skill[]): Promise<Result<string>> {
   const blocks: string[] = [];
-  for (const b of baseline) {
-    const path = referencePath(rulebook, b);
-    const text = await readFile(path, "utf8").then(
-      (value): Result<string> => ({ kind: "ok", value }),
-      (): Result<string> => ({ kind: "failed", reason: `cannot read the baseline review check ${path}` }),
-    );
-    if (text.kind === "failed") {
-      return text;
+  for (const s of baseline) {
+    const path = join(s.dir, "SKILL.md");
+    const text = await readFile(path, "utf8").catch(() => undefined);
+    if (text === undefined) {
+      return { kind: "failed", reason: `cannot read the baseline skill ${path}` };
     }
-    blocks.push(fence({ title: `rulebook ${b.domain}/${b.reference}`, text: text.value, info: "markdown" }));
+    const where = `The whole \`${s.name}\` skill is in \`./skills/${s.name}/\`: its links resolve there. Open each linked file that applies to this change.`;
+    blocks.push(`${fence({ title: `skill ${s.name}`, text, info: "markdown" })}\n${where}\n`);
   }
-  return { kind: "ok", value: blocks.join("") };
+  return { kind: "ok", value: `\nThe baseline review checks are these skills:\n${blocks.join("")}` };
 }
 
 async function sections(p: Parts): Promise<Result<Sections>> {
@@ -512,7 +497,7 @@ async function sections(p: Parts): Promise<Result<Sections>> {
   if (rules.kind === "failed") {
     return rules;
   }
-  const baseline = await baselineSection(p.input.rulebook, baselineOf(p.input));
+  const baseline = await baselineSection(p.input.baseline);
   if (baseline.kind === "failed") {
     return baseline;
   }
@@ -597,8 +582,8 @@ async function resolvedRules(
   if (rules.kind === "failed") {
     return rules;
   }
-  const missing = await unresolved(input.rulebook, rules.value.pointers);
-  return missing === "" ? rules : { kind: "failed", reason: missing };
+  const found = await resolved(input.plugins, rules.value.pointers);
+  return found.kind === "ok" ? { kind: "ok", value: { ...rules.value, found: found.value } } : found;
 }
 
 async function gather(input: PackInput, git: Git, h: Heads): Promise<Result<Parts>> {
@@ -624,7 +609,7 @@ async function gather(input: PackInput, git: Git, h: Heads): Promise<Result<Part
 }
 
 async function prepare(input: PackInput, git: Git): Promise<Result<Heads>> {
-  const refused = await precheck(input);
+  const refused = shapeProblem(input);
   if (refused !== "") {
     return { kind: "failed", reason: refused };
   }

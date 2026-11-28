@@ -39,7 +39,7 @@ function proof(over: Partial<Proof> = {}): Proof {
     sha256: SHA,
     base: null,
     changed: ["~ skills/crq/references/code-review.md"],
-    baseline: [{ domain: "crq", reference: "code-review" }],
+    baseline: ["crq", "code"],
     size: "review",
     uncovered: [],
     reason: "",
@@ -68,6 +68,7 @@ describe("the proof file", () => {
     expect(proofOf({ ...proof(), sha256: "abc" })).toBeUndefined();
     expect(proofOf({ ...proof(), changed: [1] })).toBeUndefined();
     expect(proofOf({ ...proof(), baseline: [{ domain: "crq" }] })).toBeUndefined();
+    expect(proofOf({ ...proof(), baseline: ["crq", 1] })).toBeUndefined();
     expect(proofOf("x")).toBeUndefined();
   });
 
@@ -155,7 +156,7 @@ describe("gateMove", () => {
   });
 
   it("takes the writer's size and a file no eval tests only with a reason, and records them unproven", async () => {
-    const card = fetched(SHA, [line("skills/crq/process/roles/implementer.md", "2")]);
+    const card = fetched(SHA, [line("skills/team/process/roles/implementer.md", "2")]);
     const writer = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: card, reason: "" });
     expect(writer.problems.join("\n")).toContain("there is no implementer eval yet (#824)");
     expect(writer.problems.join("\n")).toContain('move it with --reason "<why>"');
@@ -165,12 +166,25 @@ describe("gateMove", () => {
       needsProof: false,
       record: { size: "writer", proven: "", reason: "by hand" },
     });
-    const retro = fetched(SHA, [line("skills/crq/process/roles/retro.md", "3")]);
+    const retro = fetched(SHA, [line("skills/team/process/roles/retro.md", "3")]);
     const bare = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: retro, reason: " " });
     expect(bare.problems.join("\n")).toContain('move it with --reason "<why>"');
     expect(bare.problems.join("\n")).not.toContain("#824");
     const why = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: retro, reason: "wording" });
     expect(why.record).toEqual({ size: "none", proven: "", reason: "wording" });
+  });
+
+  it("D5 needs a review proof for a card inside a baseline skill, since the review reads its copy", async () => {
+    const inCrq = fetched(SHA, [line("skills/crq/process/roles/implementer.md", "2")]);
+    const g = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: inCrq, reason: "by hand" });
+    expect(g).toMatchObject({ needsProof: true, record: undefined, sized: { size: "both" } });
+    const lanes = fetched(SHA, [line("skills/crq/process/lanes.json", "4")]);
+    const bare = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: lanes, reason: "" });
+    expect(bare).toMatchObject({
+      needsProof: true,
+      sized: { size: "review", uncovered: ["skills/crq/process/lanes.json"] },
+    });
+    expect(bare.problems.join("\n")).toContain('move it with --reason "<why>"');
   });
 
   it("a move of both needs the review's proof and a reason, and stays unproven until a proof covers both", async () => {

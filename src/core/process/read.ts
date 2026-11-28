@@ -3,17 +3,15 @@
 // folder inside the skill, so a change to a skill's files cannot stop a run.
 //
 //   <plugin>/skills/<skill>/            a skill, found by skillDir in the order the project lists its plugins
-//   <plugin>/skills/<skill>/references/ **Today:** the review still fences the rulebook's references by file name
-//                                       (referencesDir), not whole skills by name
 
-import { readdir, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_LANES, type LaneProps } from "../lane.js";
-import { BASELINE, type Pointer } from "../review/rules.js";
+import { BASELINE } from "../review/rules.js";
 
 export type Process = {
   readonly lanes: readonly LaneProps[];
-  readonly baseline: readonly Pointer[];
+  readonly baseline: readonly string[];
 };
 
 export const ENGINE_PROCESS: Process = { lanes: DEFAULT_LANES, baseline: BASELINE };
@@ -27,17 +25,6 @@ async function isDir(path: string): Promise<boolean> {
     (st) => st.isDirectory(),
     () => false,
   );
-}
-
-export async function referencesDir(dirs: readonly string[]): Promise<string> {
-  const held = await Promise.all(dirs.map(holdsReferences));
-  return dirs[held.indexOf(true)] ?? "";
-}
-
-async function holdsReferences(dir: string): Promise<boolean> {
-  const skills = dir === "" ? [] : await readdir(join(dir, "skills")).catch((): string[] => []);
-  const held = await Promise.all(skills.map((s) => isDir(join(dir, "skills", s, "references"))));
-  return held.includes(true);
 }
 
 export async function skillDir(plugins: readonly PluginDir[], skill: string): Promise<string> {
