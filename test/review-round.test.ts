@@ -333,16 +333,27 @@ describe("reviewRound", () => {
   it("AC-5 runs with a baseline skill missing, records it on the outcome and the summary, and copies only the rest", async () => {
     const partial = join(p.root, "partial-rulebook");
     cpSync(RULEBOOK, partial, { recursive: true });
-    rmSync(join(partial, "skills", "code", "SKILL.md"));
+    rmSync(join(partial, "skills", "crq", "SKILL.md"));
     const log = fresh();
     const seen: Seen[] = [];
     const out = await reviewRound(
       setup(forge(log), model([findAnswer([])], seen), { plugins: [{ label: "rulebook", dir: partial }] }),
     );
-    expect(out).toMatchObject({ kind: "ok", value: { kind: "posted", skillsMissing: ["code"] } });
-    expect(log.posts.at(-1)).toContain("Skills missing · code");
-    expect(seen[0]?.files).toContain("skills/crq/SKILL.md");
-    expect(seen[0]?.files.some((f) => f.startsWith("skills/code/"))).toBe(false);
+    expect(out).toMatchObject({ kind: "ok", value: { kind: "posted", skillsMissing: ["crq"] } });
+    expect(log.posts.at(-1)).toContain("Skills missing · crq");
+    expect(seen[0]?.files).toContain("skills/code/SKILL.md");
+    expect(seen[0]?.files.some((f) => f.startsWith("skills/crq/"))).toBe(false);
+  });
+
+  it("AC-5 gives each finder and verify run a copy of each skill an AGENTS.md points at, file for file", async () => {
+    const seen: Seen[] = [];
+    await reviewRound(setup(forge(fresh()), model([findAnswer([FINDING]), verdicts([])], seen)));
+    expect(seen.length).toBeGreaterThan(1);
+    for (const s of seen) {
+      expect(s.files).toEqual(
+        expect.arrayContaining(["skills/testing/SKILL.md", "skills/testing/references/llm-tests.md"]),
+      );
+    }
   });
 
   it("sends the engine's floor ahead of every pass, even when the instructions file leaves the Never list out (#185)", async () => {
@@ -1315,6 +1326,35 @@ describe("one finder per lens (#237)", () => {
     expect(finders.every((r) => r.model === "sonnet")).toBe(true);
     expect(finders.find((r) => r.lens === "api")?.pack).toContain("API-RUBRIC");
     expect(finders.find((r) => r.lens === "errors")?.pack).not.toContain("API-RUBRIC");
+  });
+
+  it("AC-9 copies a project lens's skill into its finder's folder only, and pastes its SKILL.md in section 8", async () => {
+    const team = join(p.root, "team-plugin");
+    mkdirSync(join(team, "skills", "security", "references"), { recursive: true });
+    writeFileSync(join(team, "skills", "security", "SKILL.md"), "SECURITY-SKILL\n");
+    writeFileSync(join(team, "skills", "security", "references", "auth.md"), "AUTH-REFERENCE\n");
+    mkdirSync(join(home(), "projects"), { recursive: true });
+    writeFileSync(
+      join(home(), "projects", "ledger.json"),
+      JSON.stringify({ review: { lenses: [{ name: "sec", rubric: { plugin: "team", skill: "security" } }] } }),
+    );
+    const copied: [string, boolean][] = [];
+    const ran: Ran[] = [];
+    const base = byLens({}, ran);
+    const watch: Model = async (run) => {
+      copied.push([lensOf(run), existsSync(join(run.folder, "skills", "security", "references", "auth.md"))]);
+      return base(run);
+    };
+    const plugins = [
+      { label: "rulebook", dir: RULEBOOK },
+      { label: "team", dir: team },
+    ];
+    await reviewRound(setup(forge(fresh()), watch, { plugins }));
+    expect(copied.filter(([lens]) => lens === "sec").map(([, has]) => has)).toEqual([true]);
+    expect(copied.filter(([lens]) => lens !== "sec").every(([, has]) => !has)).toBe(true);
+    const sec = ran.find((r) => r.lens === "sec")?.pack ?? "";
+    expect(sec).toContain("SECURITY-SKILL");
+    expect(sec).not.toContain("AUTH-REFERENCE");
   });
 
   it("runs every lens on the strongest model for a one-way door, and one lens for a tiny change", async () => {

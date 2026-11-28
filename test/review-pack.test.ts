@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildPack, type PackInput } from "../src/core/review/pack.js";
 import { specHash } from "../src/core/spec.js";
@@ -87,6 +87,7 @@ describe("buildPack", () => {
       criteria: ["SPEC-AC1: total() returns the sum.", "SPEC-AC2: an empty order totals 0."],
       lane: "feature",
       master: p.git("rev-parse", "origin/main"),
+      skills: [skill("testing")],
     });
     const text = readFileSync(built.value.path, "utf8");
     expect(section(text, 1)).toContain(p.head2);
@@ -96,17 +97,11 @@ describe("buildPack", () => {
 
   it("holds the rules from main on the touched paths only: a wrapped pointer, an anchored link, a space and a non-ASCII path", async () => {
     const rules = section(await pack(), 3);
-    for (const rule of [
-      "ROOT-RULES",
-      "SVC-RULES",
-      "LAYERING-RULES",
-      "LLM-TESTS-RULES",
-      "ERRORS-RULES",
-      "SPACE-RULES",
-      "NAIVE-RULES",
-    ]) {
+    for (const rule of ["ROOT-RULES", "SVC-RULES", "LAYERING-RULES", "TESTING-SKILL", "SPACE-RULES", "NAIVE-RULES"]) {
       expect(rules).toContain(rule);
     }
+    expect(rules).not.toContain("LLM-TESTS-RULES");
+    expect(rules).not.toContain("ERRORS-RULES");
     expect(rules).not.toContain("IGNORE ALL RULES");
     expect(rules).not.toContain("OTHER-RULES");
   });
@@ -322,16 +317,13 @@ describe("buildPack: the approved spec (#224)", () => {
     expect(six).not.toContain("example.com/design.md (on main)");
   });
 
-  it("stops on a wrapped pointer to a missing reference, on a pointer it cannot read, and on a link to a missing file", async () => {
+  it("AC-3 AC-6 stops on a wrapped pointer to a missing skill, a rulebook line that names no skill, and a link to a missing file", async () => {
     for (const [line, why] of [
-      ["- More: use the `testing` skill (rulebook plugin) and read\n  its `no-such` reference.\n", "no-such"],
-      [
-        "- Both: use the `code` skill (rulebook plugin) and read its `errors` and `smells` references.\n",
-        "cannot read",
-      ],
+      ["- More: use the `no-such` skill\n  (rulebook plugin).\n", "no-such"],
+      ["- More: the rulebook (rulebook plugin) has the rest.\n", "names no skill"],
       ["- Gone: [old](docs/agents/gone.md)\n", "names no file"],
       [
-        "\n````markdown\nOpen a fence with:\n```\n````\n\n- More: use the `testing` skill (rulebook plugin) and read its `no-such` reference.\n",
+        "\n````markdown\nOpen a fence with:\n```\n````\n\n- More: use the `no-such` skill (rulebook plugin).\n",
         "no-such",
       ],
     ] as const) {
@@ -386,26 +378,45 @@ describe("buildPack: the baseline review skills, by name (#920)", () => {
     expect(four).not.toContain("./skills/crq/");
   });
 
-  it("D4 holds a reference an AGENTS.md pointer names in section 3, once, though its skill is in the baseline", async () => {
+  it("AC-4 AC-7 drops the reference an old pointer names, once, and points a baseline skill at section 4", async () => {
     const before = readFileSync(join(p.clone, "AGENTS.md"), "utf8");
     addToMain(
       "AGENTS.md",
       `${before}- Review: use the \`crq\` skill (rulebook plugin) and read its \`code-review\` reference.\n- Again: use the \`crq\` skill (rulebook plugin) and read its \`code-review\` reference.\n`,
     );
     const text = await pack();
-    expect(section(text, 3)).toContain("### rulebook crq/code-review\n");
-    expect(text.split("CODE-REVIEW-CHECKS").length - 1).toBe(1);
+    const three = section(text, 3);
+    expect(three.split("the `code-review` reference of the `crq` skill").length - 1).toBe(1);
+    expect(three).toContain("The `crq` skill an AGENTS.md points at is a baseline skill: it is in section 4.");
+    expect(text.split("CRQ-SKILL").length - 1).toBe(1);
+    expect(text).not.toContain("CODE-REVIEW-CHECKS");
   });
 
-  it("AC-7 resolves a pointer through the first listed plugin that holds its skill", async () => {
-    const empty = join(p.root, "empty-plugin");
-    cpSync(join(RULEBOOK, "skills", "code"), join(empty, "skills", "code"), { recursive: true });
+  it("AC-5 holds a pointed skill's SKILL.md in section 3, fenced, names its copy, and hands the round the skill", async () => {
+    const built = await buildPack(input());
+    expect(built).toMatchObject({ kind: "ok", value: { skills: [skill("testing")] } });
+    const three = section(await pack(), 3);
+    expect(three).toMatch(/### skill testing\n\n````?markdown\n[^]*TESTING-SKILL/);
+    expect(three).toContain("The whole `testing` skill is in `./skills/testing/`");
+    expect(three).not.toContain("LLM-TESTS-RULES");
+  });
+
+  it("AC-5 resolves a pointer through the first listed plugin that holds its skill's SKILL.md", async () => {
+    const hollow = join(p.root, "hollow-plugin");
+    const team = join(p.root, "team-plugin");
+    cpSync(join(RULEBOOK, "skills", "testing", "references"), join(hollow, "skills", "testing", "references"), {
+      recursive: true,
+    });
+    cpSync(join(RULEBOOK, "skills", "testing"), join(team, "skills", "testing"), { recursive: true });
+    writeFileSync(join(team, "skills", "testing", "SKILL.md"), "# testing\n\nTEAM-TESTING-SKILL\n");
     const text = await pack({
       plugins: [
-        { label: "empty", dir: empty },
+        { label: "hollow", dir: hollow },
+        { label: "team", dir: team },
         { label: "rulebook", dir: RULEBOOK },
       ],
     });
-    expect(section(text, 3)).toContain("LLM-TESTS-RULES");
+    expect(section(text, 3)).toContain("TEAM-TESTING-SKILL");
+    expect(section(text, 3)).not.toContain("TESTING-SKILL.");
   });
 });

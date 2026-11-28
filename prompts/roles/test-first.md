@@ -6,7 +6,7 @@ must_not_see: any fix, drafted or planned; the implementer's work
 hand_off: one commit with the failing test, and .factory/report.json (urn:rulebook:crq:report:1, process/schema/report-v1.schema.json) with status done and one evidence row, or status asked
 tools: [Read, Grep, Glob, Edit (test files only), Bash (on the runner)]
 enforced_guardrails: [no-push, no-web, no-credentials]
-rules: [VB1, VB6, VB7, AC12, GA5]
+skills: [testing, planning]
 ---
 
 # Test-first

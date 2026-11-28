@@ -159,7 +159,7 @@ plugin replaces them.
 - **The roles:** coordinator, design-reviewer, test-first, implementer, cleanup, finder, verify pass, retro and
   onboarder. **Today:** the engine starts no cleanup run; a person runs cleanup by hand.
 - **A role card's frontmatter**: the engine enforces `role`, `tools` (with an `Edit(…)` path scope), `must_not_see`,
-  `hand_off` and `enforced_guardrails` (IDs from a closed list); `input`, `steps` and `rules` are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
+  `hand_off` and `enforced_guardrails` (IDs from a closed list); `input`, `steps` and `skills` are text the model reads ([Plugins and role cards](plugins-and-roles.md#what-a-role-card-controls)).
 
 **Connectors** are the engine's swappable parts (ADR-0014). Each has a dry mode that shows what it would write and writes
 nothing. Each passes the shared test kit, `agent-factory plugin test`: the handshake, its fixtures, bad input and an unknown op,

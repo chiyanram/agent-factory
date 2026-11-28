@@ -27,10 +27,12 @@ swappable part, are in [Connectors](../reference/connectors.md).
 - **A plugin is a normal Claude Code plugin, and it gives skills only.** The engine names a skill and never a file
   inside it (`skillDir` in `src/core/process/read.ts`), in the order the project lists its plugins. The rulebook
   (`rulebook@chiyanram`, from [chiyanram/skills](https://github.com/chiyanram/skills)) is one plugin, not a dependency.
-  `retro --draft` reads the `crq` skill. The review copies its baseline skills, `crq` and `code`, whole into each
-  run folder and tells the run to read `skills/<name>/SKILL.md` first, so a read-only run loads no plugin and runs no
-  plugin hook. **Today:** a rulebook pointer in a project's AGENTS.md, and the built-in test-integrity lens, still
-  name a reference file inside a skill.
+  `retro --draft` reads the `crq` skill. The review reads skills by name only: its baseline skills, `crq` and `code`,
+  each skill a project's AGENTS.md points at ("use the `testing` skill (rulebook plugin)"), and a lens's skill. The
+  pack holds each skill's `SKILL.md`, and the whole skill is copied into each run folder for the files it links, so a
+  read-only run loads no plugin and runs no plugin hook. The built-in test-integrity lens is the `code` skill, held to
+  the edits to existing tests. A pointer or lens that still names a reference inside a skill keeps the skill and drops
+  the reference.
 - **A plugin that is not pinned**, or whose stored copy no longer has its hash, stops the pass.
 
 ## What a role card controls
@@ -45,7 +47,7 @@ A card is frontmatter, then a body the model reads (`src/core/process/cards.ts`)
 | `must_not_see` | enforces | those inputs are left out of the run, on top of the role's own floor, which no card can drop |
 | `hand_off` | enforces | every field it names must be a field of the engine's schema for the role; what the run returns is read with that schema |
 | `enforced_guardrails` | enforces | a `[list]` of IDs from the engine's closed list (`src/core/process/guardrails.ts`): `read-only`, `no-push`, `no-web`, `no-credentials`, `judge-files-locked`, `edit-scope`. Each ID names the code that enforces it: the agent CLI's adapter builds an implementer run's deny list from the IDs the run carries (`src/core/agent/claude-writer.ts`). The role's floor always applies; a card may add an ID its role can have, never drop one. An unknown ID, or one the role cannot have, refuses the card. **Today:** plain text, the old form, is still read and ignored for one release |
-| `input`, `steps`, `rules` | reads no meaning | text the model reads. `next` is dropped, because the lanes hold the flow. **Today:** a card that still has it is read for one release |
+| `input`, `steps`, `skills` | reads no meaning | text the model reads; `skills` names the rulebook skills the role reads. `next` is dropped, because the lanes hold the flow. **Today:** a card that still has it is read for one release |
 
 The engine starts a run from a card for seven roles: implementer, test-first, cleanup, design-reviewer, verify pass,
 onboarder and retro. Every run record carries the card's hash. A person starts the retro run, with

@@ -84,37 +84,65 @@ describe("the lenses a round picks from (#237)", () => {
 
   it("refuses a rubric from a plugin that is not enabled, naming the lens", async () => {
     const lens: Lens = { ...api, rubric: { kind: "skill", plugin: "other", skill: "code" } };
-    const read = await rubricText(lens, { plugins: [], repo: "", env: {}, master: "" });
+    const read = await rubricText(lens, { plugins: [], baseline: [], repo: "", env: {}, master: "" });
     expect(read).toEqual({
       kind: "failed",
       reason: "the rubric of the lens api: no enabled plugin is named other",
     });
   });
 
-  it("AC-7 reads the built-in test-integrity rubric from the first listed plugin that holds crq", async () => {
+  it("AC-8 the built-in test-integrity lens is the code skill in section 4, held to the edits to existing tests", async () => {
     const root = tempDir("factory-finders-");
     try {
-      const put = (plugin: string, text: string): string => {
-        const dir = join(root, plugin, "skills", "crq", "references");
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, "test-integrity.md"), text);
-        return join(root, plugin);
+      mkdirSync(join(root, "skills", "code"), { recursive: true });
+      writeFileSync(join(root, "skills", "code", "SKILL.md"), "CODE-SKILL\n");
+      const from = {
+        plugins: [{ label: "rulebook", dir: root }],
+        baseline: ["crq", "code"],
+        repo: "",
+        env: {},
+        master: "",
       };
-      mkdirSync(join(root, "bare", "skills", "code"), { recursive: true });
-      const plugins = [
-        { label: "bare", dir: join(root, "bare") },
-        { label: "team", dir: put("team", "TEAM-INTEGRITY") },
-        { label: "rulebook", dir: put("rulebook", "RULEBOOK-INTEGRITY") },
-      ];
-      const at = { repo: "", env: {}, master: "" };
-      expect(await rubricText(BUILT_IN_TEST_INTEGRITY, { ...at, plugins })).toEqual({
-        kind: "ok",
-        value: "TEAM-INTEGRITY",
-      });
-      expect(await rubricText(BUILT_IN_TEST_INTEGRITY, { ...at, plugins: plugins.slice(0, 1) })).toEqual({
+      const read = await rubricText(BUILT_IN_TEST_INTEGRITY, from);
+      expect(read).toMatchObject({ kind: "ok", value: { skills: [] } });
+      const text = read.kind === "ok" ? read.value.text : "";
+      expect(text).toContain("The rubric is the `code` skill in section 4.");
+      expect(text).toContain("the edits to existing tests");
+      expect(text).not.toContain("CODE-SKILL");
+      expect(await rubricText(BUILT_IN_TEST_INTEGRITY, { ...from, plugins: [] })).toEqual({
         kind: "failed",
-        reason: "the rubric of the lens test-integrity: no listed plugin has the crq skill",
+        reason: "the rubric of the lens test-integrity: no listed plugin has the code skill",
       });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("AC-9 a project lens's skill is pasted and handed to the round to copy, and a reference it names is dropped", async () => {
+    const root = tempDir("factory-finders-");
+    try {
+      const dir = join(root, "skills", "security");
+      mkdirSync(join(dir, "references"), { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), "SECURITY-SKILL\n");
+      writeFileSync(join(dir, "references", "auth.md"), "AUTH-REFERENCE\n");
+      const lens: Lens = {
+        ...api,
+        rubric: { kind: "skill", plugin: "rulebook", skill: "security", reference: "auth" },
+      };
+      const from = {
+        plugins: [{ label: "rulebook", dir: root }],
+        baseline: ["crq", "code"],
+        repo: "",
+        env: {},
+        master: "",
+      };
+      const read = await rubricText(lens, from);
+      expect(read).toMatchObject({ kind: "ok", value: { skills: [{ name: "security", dir }] } });
+      const text = read.kind === "ok" ? read.value.text : "";
+      expect(text).toContain("SECURITY-SKILL");
+      expect(text).toContain("The whole `security` skill is in `./skills/security/`");
+      expect(text).toContain("the `auth` reference of the `security` skill");
+      expect(text).not.toContain("AUTH-REFERENCE");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
