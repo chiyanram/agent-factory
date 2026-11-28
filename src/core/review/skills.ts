@@ -4,11 +4,12 @@
 // inside it.
 //
 //   baselineSkills  each name's folder in the first listed plugin that holds skills/<name>/SKILL.md; a name no plugin
-//                   holds is missing, and the round records it and goes on (round.ts)
+//                   holds is missing, and the round records it and goes on (round.ts). A symlinked folder or SKILL.md
+//                   does not count, since copySkills would drop it
 //   copySkills      the whole skills/<name>/ folder, less every symlink and rule file (code.ts ruleOrLink), since the
 //                   agent CLI loads a CLAUDE.md from any folder it reads
 
-import { cp, lstat, mkdir, stat } from "node:fs/promises";
+import { cp, lstat, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { Result } from "../forge/api.js";
 import type { PluginDir } from "../process/read.js";
@@ -21,11 +22,15 @@ export type Skills = { readonly present: readonly Skill[]; readonly missing: rea
 
 const NAME = /^[A-Za-z0-9_-]+$/;
 
-async function isFile(path: string): Promise<boolean> {
-  return stat(path).then(
-    (s) => s.isFile(),
+async function plain(path: string, kind: "file" | "dir"): Promise<boolean> {
+  return lstat(path).then(
+    (s) => (kind === "file" ? s.isFile() : s.isDirectory()),
     () => false,
   );
+}
+
+async function holds(dir: string): Promise<boolean> {
+  return (await plain(dir, "dir")) && plain(join(dir, "SKILL.md"), "file");
 }
 
 async function folderOf(plugins: readonly PluginDir[], name: string): Promise<string> {
@@ -33,7 +38,7 @@ async function folderOf(plugins: readonly PluginDir[], name: string): Promise<st
     return "";
   }
   const dirs = plugins.map((p) => join(p.dir, "skills", name));
-  const held = await Promise.all(dirs.map((d) => isFile(join(d, "SKILL.md"))));
+  const held = await Promise.all(dirs.map(holds));
   return dirs[held.indexOf(true)] ?? "";
 }
 

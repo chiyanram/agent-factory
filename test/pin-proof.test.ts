@@ -178,6 +178,13 @@ describe("gateMove", () => {
     const inCrq = fetched(SHA, [line("skills/crq/process/roles/implementer.md", "2")]);
     const g = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: inCrq, reason: "by hand" });
     expect(g).toMatchObject({ needsProof: true, record: undefined, sized: { size: "both" } });
+    const lanes = fetched(SHA, [line("skills/crq/process/lanes.json", "4")]);
+    const bare = await gateMove({ places: [home], ref: REF, base: base([], OTHER), after: lanes, reason: "" });
+    expect(bare).toMatchObject({
+      needsProof: true,
+      sized: { size: "review", uncovered: ["skills/crq/process/lanes.json"] },
+    });
+    expect(bare.problems.join("\n")).toContain('move it with --reason "<why>"');
   });
 
   it("a move of both needs the review's proof and a reason, and stays unproven until a proof covers both", async () => {

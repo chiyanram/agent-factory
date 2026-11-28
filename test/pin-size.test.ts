@@ -49,7 +49,7 @@ describe("sizeOf: the eval a pin move needs", () => {
     expect(sizeOf([card("coordinator")], []).size).toBe("both");
   });
 
-  it("names the files no eval tests outside a baseline skill, and they add no size", () => {
+  it("names the files no eval tests, which add no size outside a baseline skill and the review size inside one", () => {
     const untested = [
       card("test-first"),
       card("cleanup"),
@@ -66,7 +66,15 @@ describe("sizeOf: the eval a pin move needs", () => {
     expect(s).toMatchObject({ size: "none", other: [] });
     expect(s.uncovered).toHaveLength(untested.length);
     expect(sizeOf([...untested, card("finder")], [])).toMatchObject({ size: "review" });
-    expect(sizeOf(untested, BASELINE)).toMatchObject({ size: "review", uncovered: [".claude-plugin/plugin.json"] });
+    const inCrq = sizeOf(untested, BASELINE);
+    expect(inCrq).toMatchObject({ size: "review", other: [] });
+    expect(inCrq.uncovered).toHaveLength(untested.length);
+    expect(inCrq.review).toEqual(
+      untested
+        .filter((p) => p.includes("skills/crq/"))
+        .map(changedPath)
+        .toSorted(),
+    );
   });
 
   it("puts every role the engine reads a card for in a named size, so a new role cannot slip past the map", () => {

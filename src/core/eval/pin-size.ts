@@ -4,17 +4,19 @@
 //   none      only files no run reads: README*, CHANGELOG*, LICENSE* at the plugin's root, and docs/, evals/, tests/,
 //             .github/; config check alone proves the move
 //   review    any file of a skill the review baseline names, since the review reads a copy of the whole skill
-//             (review/skills.ts), the review.json, or the finder and verify-pass cards; a targeted review pass proves it
-//             (slice.ts)
+//             (review/skills.ts), the review.json, or the finder and verify-pass cards; a targeted review pass
+//             proves it (slice.ts)
 //   writer    the implementer card; the implementer eval proves it
 //   both      review and writer paths, a path that is both (the implementer card inside a baseline skill), or any
 //             other path
+// A file no eval tests that sits inside a baseline skill is review and uncovered at once: the review reads it, and the
+// move still needs the typed reason.
 //
 // Some files a run reads are tested by no eval: the test-first, cleanup, design-reviewer, onboarder and retro cards,
 // and the files no eval can test, the plugin's manifest (.claude-plugin/plugin.json) and the process files config
-// check reads (lanes, schema, glossary), when they sit outside a baseline skill. They add no size; the move names each and goes ahead only with a reason the
-// person types, which the pin keeps (pin-proof.ts). **Today:** no eval covers those five cards; the M5 evals add them
-// (#852).
+// check reads (lanes, schema, glossary). Outside a baseline skill they add no size; the move names each and goes
+// ahead only with a reason the person types, which the pin keeps (pin-proof.ts). **Today:** no eval covers those
+// five cards; the M5 evals add them (#852).
 //
 // A changed path comes as changedFiles (fetch.ts) writes it: "+ ", "- " or "~ " and the path. A leaf with no runtime
 // import, so scripts/check-eval-proof.ts loads it on Node's type stripping. Pure.
@@ -68,11 +70,9 @@ function kindsOf(path: string, baseline: readonly string[]): readonly Kind[] {
     return ["none"];
   }
   const card = cardOf(path);
-  const read = readKinds(path, card, baseline);
-  if (read.length > 0) {
-    return read;
-  }
-  return untested(path, card) ? ["uncovered"] : ["other"];
+  const uncovered: readonly Kind[] = untested(path, card) ? ["uncovered"] : [];
+  const kinds = [...readKinds(path, card, baseline), ...uncovered];
+  return kinds.length > 0 ? kinds : ["other"];
 }
 
 const SIZE_OF: Readonly<Record<string, Size>> = {

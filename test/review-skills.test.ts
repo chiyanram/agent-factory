@@ -44,6 +44,14 @@ describe("baselineSkills: each baseline skill, found by name (#920)", () => {
     });
   });
 
+  it("AC-4 counts a symlinked skill folder or SKILL.md as missing, since the copy drops links", async () => {
+    const real = plugin("real", { "skills/crq/SKILL.md": "CRQ", "skills/code/SKILL.md": "CODE" });
+    const linked = plugin("linked", { "skills/code/references/x.md": "x" });
+    symlinkSync(join(real.dir, "skills", "crq"), join(linked.dir, "skills", "crq"));
+    symlinkSync(join(real.dir, "skills", "code", "SKILL.md"), join(linked.dir, "skills", "code", "SKILL.md"));
+    expect(await baselineSkills([linked], ["crq", "code"])).toEqual({ present: [], missing: ["crq", "code"] });
+  });
+
   it("AC-4 counts a name as missing when no plugin holds its SKILL.md", async () => {
     const hollow = plugin("hollow", { "skills/code/references/smells.md": "x", "skills/crq/SKILL.md": "x" });
     expect(await baselineSkills([hollow], ["crq", "code"])).toMatchObject({ missing: ["code"] });
